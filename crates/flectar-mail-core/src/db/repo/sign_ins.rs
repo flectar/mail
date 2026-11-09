@@ -113,12 +113,40 @@ pub fn mark_fresh(conn: &Connection, account_id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Another device found the shared sign-in stale: read this device's
-/// again, which may work and go up in its place.
-pub fn recheck_record(conn: &Connection, record_id: &[u8; 16]) -> Result<()> {
+/// The share this device keeps under `record_id`, if it took that record
+/// on: shared it, or adopted what another device shared.
+pub fn share_of_record(conn: &Connection, record_id: &[u8; 16]) -> Result<Option<Share>> {
+    Ok(conn
+        .query_row(
+            &format!("SELECT {SHARE_COLUMNS} FROM sign_in_shares WHERE record_id = ?1"),
+            params![&record_id[..]],
+            share_row,
+        )
+        .optional()?)
+}
+
+/// Another device shared `sealed` under a record this device keeps: keep
+/// what the group has, so this device never sends back an older one.
+pub fn follow_record(conn: &Connection, record_id: &[u8; 16], sealed: &str) -> Result<()> {
     conn.execute(
-        "UPDATE sign_in_shares SET checked_at = 0 WHERE record_id = ?1",
-        params![&record_id[..]],
+        "UPDATE sign_in_shares SET sealed = ?2, stale = 0 WHERE record_id = ?1",
+        params![&record_id[..], sealed],
+    )?;
+    Ok(())
+}
+
+/// Another device found the shared sign-in stale: this device says so too,
+/// and reads its own again, which may work and go up in its place.
+pub fn follow_stale(
+    conn: &Connection,
+    record_id: &[u8; 16],
+    rejected: Option<&[u8]>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE sign_in_shares
+         SET sealed = NULL, stale = 1, fingerprint = ?2, checked_at = 0
+         WHERE record_id = ?1",
+        params![&record_id[..], rejected],
     )?;
     Ok(())
 }

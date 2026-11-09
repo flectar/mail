@@ -942,22 +942,41 @@ fn apply_sign_in(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outco
     let Some(account_id) = account_ids(conn)?.by_sync.get(record.account).copied() else {
         return Ok(Outcome::Waiting);
     };
+    let kept = repo::sign_ins::share_of_record(conn, id)?.is_some();
     match record.sealed {
-        Some(sealed) => repo::sign_ins::put_arrival(
-            conn,
-            &repo::sign_ins::Arrival {
-                account_id,
-                kind: record.kind.as_str().into(),
-                family: record.family.into(),
-                record_id: *id,
-                sealed,
-            },
-        )?,
-        // It stopped working on another device: one whose sign-in works
-        // shares that one instead.
-        None => repo::sign_ins::recheck_record(conn, id)?,
+        Some(sealed) => {
+            // Only a device of the kind it was made for takes it on.
+            if super::sign_ins::works_here(conn, account_id, record.kind, record.family)? {
+                repo::sign_ins::put_arrival(
+                    conn,
+                    &repo::sign_ins::Arrival {
+                        account_id,
+                        kind: record.kind.as_str().into(),
+                        family: record.family.into(),
+                        record_id: *id,
+                        sealed: sealed.clone(),
+                    },
+                )?;
+            }
+            if kept {
+                repo::sign_ins::follow_record(conn, id, &sealed)?;
+            }
+        }
+        // It stopped working on another device: this one says so too, and
+        // one whose sign-in works shares that one instead.
+        None if kept => {
+            repo::sign_ins::follow_stale(conn, id, record.rejected.as_deref())?;
+        }
+        None => {}
     }
-    Ok(Outcome::Applied)
+    // Only a record this device keeps a share of is its item. It never
+    // uploads or deletes the others: those of other kinds of device, and
+    // those it hasn't taken on yet.
+    Ok(if kept {
+        Outcome::Applied
+    } else {
+        Outcome::Ignored
+    })
 }
 
 fn apply_reminder(
@@ -1842,6 +1861,109 @@ mod tests {
             .map(|(id, _)| id)
             .collect();
         assert_eq!(kept, [[0x22; 16]]);
+    }
+
+    #[test]
+    fn sign_ins_for_another_kind_of_device_are_left_alone() {
+        let conn = testutil::conn();
+        account(&conn, "me@example.com", &"a".repeat(32));
+        let body = json!({
+            "account": "a".repeat(32),
+            "kind": "oauth",
+            "family": "elsewhere",
+            "sealed": {"epoch": 1, "data": "AAAA"},
+        });
+        let mut waiting = BTreeMap::new();
+        waiting.insert([5; 16], entry(SIGN_IN, body));
+        apply(
+            &conn,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(repo::sign_ins::arrivals(&conn).unwrap().is_empty());
+        // Nor does this device delete it for having no share of it.
+        let clock = Clock::new([1; 16], None);
+        assert_eq!(
+            super::super::store::track(&conn, &BTreeMap::new(), &clock).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_kept_sign_in_follows_what_the_group_has() {
+        use base64::Engine as _;
+        let conn = testutil::conn();
+        let account = account(&conn, "me@example.com", &"a".repeat(32));
+        let id = [6; 16];
+        let share = repo::sign_ins::Share {
+            account_id: account,
+            kind: "password".into(),
+            family: "any".into(),
+            record_id: Some(id),
+            sealed: Some(r#"{"epoch":1,"data":"AAAA"}"#.into()),
+            fingerprint: Some(vec![1; 32]),
+            ..Default::default()
+        };
+        repo::sign_ins::put_share(&conn, &share).unwrap();
+        let local = |conn: &Connection| -> BTreeMap<RecordId, Entry> {
+            let share = repo::sign_ins::share_of_record(conn, &id).unwrap().unwrap();
+            super::super::sign_ins::body(&share, &"a".repeat(32))
+                .map(|body| (id, entry(SIGN_IN, body)))
+                .into_iter()
+                .collect()
+        };
+        // In step with the server.
+        let ours = local(&conn)[&id].clone();
+        set_local_hash(&conn, &id, Some(body_hash(&ours))).unwrap();
+        mirror_row(&conn, &id, Some(&ours));
+        let clock = Clock::new([1; 16], None);
+        let take = |previous: &Entry, next: &Entry| {
+            let mut incoming = BTreeMap::new();
+            incoming.insert(
+                id,
+                Incoming {
+                    previous: Some(previous.clone()),
+                    next: Some(next.clone()),
+                },
+            );
+            let before = local(&conn);
+            apply(&conn, &incoming, &BTreeMap::new(), &before, &before).unwrap();
+            mirror_row(&conn, &id, Some(next));
+        };
+
+        // Another device found it stale: this one says so too, instead of
+        // sending its own back.
+        let rejected = base64::engine::general_purpose::STANDARD.encode([1u8; 32]);
+        let stale = entry(
+            SIGN_IN,
+            json!({
+                "account": "a".repeat(32), "kind": "password", "family": "any",
+                "stale": true, "rejected": rejected,
+            }),
+        );
+        take(&ours, &stale);
+        assert_eq!(
+            super::super::store::track(&conn, &local(&conn), &clock).unwrap(),
+            0
+        );
+
+        // One that works arrives: this device keeps it, and installs it.
+        let working = entry(
+            SIGN_IN,
+            json!({
+                "account": "a".repeat(32), "kind": "password", "family": "any",
+                "sealed": {"epoch": 1, "data": "BBBB"},
+            }),
+        );
+        take(&stale, &working);
+        assert_eq!(
+            super::super::store::track(&conn, &local(&conn), &clock).unwrap(),
+            0
+        );
+        assert_eq!(repo::sign_ins::arrivals(&conn).unwrap().len(), 1);
     }
 
     #[test]

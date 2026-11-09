@@ -96,6 +96,17 @@ fn family_of(kind: Kind) -> &'static str {
     }
 }
 
+/// Whether this device can use a share of `kind` for `family` of the account.
+pub(super) fn works_here(
+    conn: &rusqlite::Connection,
+    account_id: i64,
+    kind: Kind,
+    family: &str,
+) -> Result<bool> {
+    Ok(repo::accounts::get(conn, account_id)?
+        .is_some_and(|account| works_on(kind, family, account.provider, this_family())))
+}
+
 /// Whether a share for `family` works on a device of `here`.
 fn works_on(kind: Kind, family: &str, provider: Provider, here: &str) -> bool {
     match kind {
@@ -199,9 +210,15 @@ fn open(secrets: &Secrets, sealed: &str) -> Result<Vec<u8>> {
 }
 
 /// A keyed digest of `secret`: shows when it changes, and gives nothing away
-/// without the group's keys.
+/// without the group's keys. Keyed by the group's first keys, which every
+/// device keeps, so a secret keeps its fingerprint when the keys change.
 fn fingerprint(secrets: &Secrets, secret: &[u8]) -> Result<Vec<u8>> {
-    let (_, key) = newest_key(secrets)?;
+    let key = secrets
+        .roots
+        .keys()
+        .next()
+        .and_then(|epoch| key(secrets, *epoch))
+        .ok_or_else(|| CoreError::Other("Flectar Mail Sync has no keys yet".into()))?;
     Ok(flectar_mail_sync_crypto::hkdf_sha256(&key, &[FINGERPRINT_LABEL, secret]).to_vec())
 }
 
@@ -443,6 +460,25 @@ impl Core {
             return Ok(());
         }
         let digest = fingerprint(secrets, secret.as_bytes())?;
+        // The very sign-in that failed here never comes back.
+        let rejected = {
+            let (kind, family, digest) = (kind.as_str(), arrival.family.clone(), digest.clone());
+            self.db
+                .read(move |conn| {
+                    Ok(
+                        repo::sign_ins::share(conn, account_id, kind, &family)?.is_some_and(
+                            |share| {
+                                share.stale
+                                    && share.fingerprint.as_deref() == Some(digest.as_slice())
+                            },
+                        ),
+                    )
+                })
+                .await?
+        };
+        if rejected {
+            return Ok(());
+        }
         let needs_sign_in = account.sync_state == "needs_reauth";
         let current =
             credentials::load_async(self.credentials.clone(), account_id, kind.slot()).await;
