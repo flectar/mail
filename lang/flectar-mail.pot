@@ -384,8 +384,8 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:198 ui/app.slint:1132 ui/components/composer-fields.slint:89
-#: ui/app.slint:198 ui/app.slint:1132 ui/components/composer-fields.slint:89 ui/components/email-composer.slint:34
+#: ui/app.slint:198 ui/app.slint:1134 ui/components/composer-fields.slint:89
+#: ui/app.slint:198 ui/app.slint:1134 ui/components/composer-fields.slint:89 ui/components/email-composer.slint:34
 msgid "No connected account"
 msgstr ""
 
@@ -1908,75 +1908,75 @@ msgstr ""
 msgid "Loading message…"
 msgstr ""
 
-#: ui/app.slint:712 ui/components/workspace-navigation.slint:787
-#: ui/app.slint:712 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
-#: ui/app.slint:712 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
+#: ui/app.slint:714 ui/components/workspace-navigation.slint:787
+#: ui/app.slint:714 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
+#: ui/app.slint:714 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1343 ui/app.slint:1356
+#: ui/app.slint:1345 ui/app.slint:1358
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:2238
+#: ui/app.slint:2240
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2238 ui/views/files-view.slint:578
+#: ui/app.slint:2240 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:2242
+#: ui/app.slint:2244
 msgid "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2243
+#: ui/app.slint:2245
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2245
+#: ui/app.slint:2247
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2246
+#: ui/app.slint:2248
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2247 ui/components/calendar.slint:947
-#: ui/app.slint:2247 ui/components/calendar.slint:947
+#: ui/app.slint:2249 ui/components/calendar.slint:947
+#: ui/app.slint:2249 ui/components/calendar.slint:947
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:2248
+#: ui/app.slint:2250
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2248 ui/views/files-view.slint:660
-#: ui/app.slint:2248 ui/views/files-view.slint:660
+#: ui/app.slint:2250 ui/views/files-view.slint:660
+#: ui/app.slint:2250 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2433
+#: ui/app.slint:2435
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:2439
+#: ui/app.slint:2441
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:2452
+#: ui/app.slint:2454
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:2455
+#: ui/app.slint:2457
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:2460
+#: ui/app.slint:2462
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:2468 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2470 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 
@@ -2794,15 +2794,15 @@ msgstr ""
 msgid "Apply"
 msgstr ""
 
-#: ui/components/composer-actions.slint:451
+#: ui/components/composer-actions.slint:453
 msgid "Discard this draft?"
 msgstr ""
 
-#: ui/components/composer-actions.slint:462
+#: ui/components/composer-actions.slint:464
 msgid "The message and its attachments will be removed from this composer."
 msgstr ""
 
-#: ui/components/composer-actions.slint:473
+#: ui/components/composer-actions.slint:475
 msgid "Keep"
 msgstr ""
 
@@ -2845,37 +2845,37 @@ msgstr ""
 msgid "Account"
 msgstr ""
 
-#: ui/components/composer-fields.slint:359
+#: ui/components/composer-fields.slint:363
 msgid "To"
 msgstr ""
 
-#: ui/components/composer-fields.slint:360
+#: ui/components/composer-fields.slint:364
 msgid "name@example.com · separate with commas"
 msgstr ""
 
-#: ui/components/composer-fields.slint:386
-#: ui/components/composer-fields.slint:386
+#: ui/components/composer-fields.slint:390
+#: ui/components/composer-fields.slint:390
 msgid "Cc"
 msgstr ""
 
-#: ui/components/composer-fields.slint:387
+#: ui/components/composer-fields.slint:391
 msgid "Carbon copy"
 msgstr ""
 
-#: ui/components/composer-fields.slint:397
-#: ui/components/composer-fields.slint:397
+#: ui/components/composer-fields.slint:401
+#: ui/components/composer-fields.slint:401
 msgid "Bcc"
 msgstr ""
 
-#: ui/components/composer-fields.slint:398
+#: ui/components/composer-fields.slint:402
 msgid "Blind carbon copy"
 msgstr ""
 
-#: ui/components/composer-fields.slint:486
+#: ui/components/composer-fields.slint:490
 msgid "Subject"
 msgstr ""
 
-#: ui/components/composer-fields.slint:498
+#: ui/components/composer-fields.slint:502
 msgid "What is this email about?"
 msgstr ""
 
@@ -2920,19 +2920,19 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
-#: ui/components/email-composer.slint:260
+#: ui/components/email-composer.slint:264
 msgid "From"
 msgstr ""
 
-#: ui/components/email-composer.slint:261
+#: ui/components/email-composer.slint:265
 msgid "Verified sender identity"
 msgstr ""
 
-#: ui/components/email-composer.slint:274
+#: ui/components/email-composer.slint:278
 msgid "Signature"
 msgstr ""
 
-#: ui/components/email-composer.slint:368
+#: ui/components/email-composer.slint:372
 msgid "Write your message…"
 msgstr ""
 
