@@ -313,6 +313,25 @@ pub(super) fn save_open_messages() {
     });
 }
 
+/// The message colors changed, with the theme or the reader's choice: an
+/// original already drawn below a composer takes them on too.
+pub(super) fn message_colors_changed(app: &AppWindow) {
+    let colors = crate::message_appearance::EmailAppearance::from_app(app);
+    with_composers(|composers| {
+        let sessions = composers.sessions.borrow().clone();
+        for session in sessions {
+            let changed = session
+                .quote_renderer
+                .borrow_mut()
+                .as_mut()
+                .is_some_and(|renderer| renderer.set_appearance(colors));
+            if changed && let Some(host) = session.host() {
+                session.render_quote(&host);
+            }
+        }
+    });
+}
+
 /// The main window stops or resumes painting. Its own composer lets go of
 /// its pixels and fonts while hidden.
 pub(super) fn main_window_suspended(suspended: bool) {
