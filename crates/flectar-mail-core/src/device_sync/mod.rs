@@ -47,6 +47,21 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 const PULL_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// The longest wait between attempts to reconnect the live event stream.
 const MAX_EVENTS_BACKOFF: Duration = Duration::from_secs(5 * 60);
+/// The longest wait before trying a sync again after runs that failed.
+const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(15 * 60);
+
+/// How long to wait before syncing again after `failures` runs in a row
+/// failed: none after a run that worked, then a check's interval, doubled
+/// each time, up to a quarter of an hour. A server that is down, or turns
+/// this device away, isn't asked every half minute.
+fn retry_backoff(failures: u32) -> Duration {
+    if failures == 0 {
+        return Duration::ZERO;
+    }
+    CHECK_INTERVAL
+        .saturating_mul(2u32.saturating_pow(failures - 1))
+        .min(MAX_RETRY_BACKOFF)
+}
 /// How long what the group pays is shown before the server is asked again.
 /// Uploads the server refuses, and leaving that state, ask at once.
 const BILLING_REFRESH: Duration = Duration::from_secs(6 * 60 * 60);
@@ -538,6 +553,10 @@ impl Core {
         }
         self.try_resume_device_sync().await;
         let mut last_pull = tokio::time::Instant::now() - PULL_INTERVAL;
+        // Runs that failed in a row, and when to try again: a change here,
+        // or Sync now, tries at once.
+        let mut failures: u32 = 0;
+        let mut retry_at = tokio::time::Instant::now();
         loop {
             let woken = tokio::select! {
                 () = self.sync_service().wake.notified() => true,
@@ -549,6 +568,9 @@ impl Core {
                 }
                 continue;
             }
+            if !woken && tokio::time::Instant::now() < retry_at {
+                continue;
+            }
             let pull = woken || last_pull.elapsed() >= PULL_INTERVAL;
             match self.run_device_sync(pull).await {
                 Ok(true) => last_pull = tokio::time::Instant::now(),
@@ -557,6 +579,16 @@ impl Core {
                     tracing::info!(%error, "Flectar Mail Sync run failed");
                 }
             }
+            let failed = matches!(
+                lock(&self.sync_service().status).state,
+                DeviceSyncState::Error(_)
+            );
+            failures = if failed {
+                failures.saturating_add(1)
+            } else {
+                0
+            };
+            retry_at = tokio::time::Instant::now() + retry_backoff(failures);
             self.drive_scheduled_sends().await;
         }
     }
@@ -1852,6 +1884,17 @@ mod tests {
             renews: false,
             plans: Vec::new(),
         }
+    }
+
+    #[test]
+    fn failed_runs_wait_longer_each_time_up_to_a_quarter_of_an_hour() {
+        // A run that worked: the next check comes as usual.
+        assert_eq!(retry_backoff(0), Duration::ZERO);
+        assert_eq!(retry_backoff(1), CHECK_INTERVAL);
+        assert_eq!(retry_backoff(2), CHECK_INTERVAL * 2);
+        assert_eq!(retry_backoff(5), CHECK_INTERVAL * 16);
+        assert_eq!(retry_backoff(6), MAX_RETRY_BACKOFF);
+        assert_eq!(retry_backoff(u32::MAX), MAX_RETRY_BACKOFF);
     }
 
     #[test]
