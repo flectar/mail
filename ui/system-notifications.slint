@@ -15,5 +15,12 @@ export global SystemNotifications {
     in property <bool> sound-fixed;
     // The system shows a count of unread mail on the app icon.
     in property <bool> badge-supported;
+    // How the system checks for new mail while the app is in the background,
+    // where it decides when (iOS): "on"; "off" when Background App Refresh is
+    // off for the app; "low-power" while Low Power Mode pauses it. "" where
+    // the app follows the accounts itself.
+    in property <string> background-checks;
     callback open-settings();
+    // The app's page in the system settings, where Background App Refresh is.
+    callback open-app-settings();
 }
