@@ -1418,7 +1418,8 @@ impl Core {
     pub async fn device_sync_redeem_code(&self, code: String) -> Result<SyncCodeOutcome> {
         let service = self.sync_service();
         let client = service.require_client()?;
-        let billing = match client.redeem_code(&code).await {
+        // As typed or pasted, with spaces around it.
+        let billing = match client.redeem_code(code.trim()).await {
             Ok(billing) => billing,
             Err(SyncError::CodeUnknown) => return Ok(SyncCodeOutcome::Unknown),
             Err(SyncError::CodeUsed) => return Ok(SyncCodeOutcome::Used),
