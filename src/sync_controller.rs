@@ -508,9 +508,14 @@ impl Actions {
     /// the same pickers as attachments. The staged copy goes as soon as the
     /// picker is done with it.
     fn save_recovery_code(&self, text: String) {
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
         if self.controller.saving_recovery.replace(true) {
             return;
         }
+        let title = translated(&app, &UiMessage::plain("Save recovery code")).to_string();
+        let files = translated(&app, &UiMessage::plain("Text files")).to_string();
         let documents = Arc::clone(&self.documents);
         let temp_dir = self.temp_dir.clone();
         let core = self.core();
@@ -525,8 +530,8 @@ impl Actions {
                 None => DocumentDialog::default(),
             };
             let dialog = DocumentDialog {
-                title: "Save recovery code".into(),
-                filter: Some(("Text".into(), &["txt"])),
+                title,
+                filter: Some((files, &["txt"])),
                 ..dialog
             };
             documents

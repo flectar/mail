@@ -665,7 +665,7 @@ export component SyncSettingsPage inherits VerticalBox {
         title: @tr("Start syncing");
         description: !root.offered ? @tr("Sync this device's setup to your other devices.")
             : SyncUi.offer-trial-days > 0 ? @tr("Free for {n} day, then {}." | "Free for {n} days, then {}." % SyncUi.offer-trial-days, root.prices(SyncUi.offer-monthly, SyncUi.offer-yearly))
-            : @tr("{}.", root.prices(SyncUi.offer-monthly, SyncUi.offer-yearly));
+            : @tr("the price of sync, as a sentence" => "{}.", root.prices(SyncUi.offer-monthly, SyncUi.offer-yearly));
         note: @tr("You get a recovery code to keep somewhere safe. Your passwords and sign-ins sync too, so your other devices are ready at once.");
         icon: @image-url("icons/lucide/filled/cloud-sync.svg");
         icon-color: root.accent;
