@@ -7,7 +7,7 @@ use super::*;
 use flectar_mail_core::models::{Address, AttachmentMeta, SenderIdentity, Signature};
 use slint::SharedString;
 #[cfg(desktop)]
-use slint::winit_030::WinitWindowAccessor;
+use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use std::rc::Weak;
 
 thread_local! {
@@ -125,7 +125,7 @@ impl HostRef {
             suspended: match self {
                 HostRef::Main(app) => app.get_render_suspended(),
                 #[cfg(desktop)]
-                HostRef::Window(_) => false,
+                HostRef::Window(window) => window.get_render_suspended(),
             },
         }
     }
@@ -855,6 +855,10 @@ impl ComposeSession {
         self.host_id.set(self.host_id.get().wrapping_add(1));
         *self.host.borrow_mut() = window_host;
         self.connect();
+        #[cfg(desktop)]
+        if let HostRef::Window(handle) = &window {
+            self.watch_window(handle);
+        }
         self.clear_fields(&main);
         main.ui().set_open(false);
 
@@ -871,6 +875,53 @@ impl ComposeSession {
         self.editor.borrow_mut().reset();
         window.ui().set_open(true);
         self.apply_document(&window);
+    }
+
+    /// A message's own window returns the memory input leaves behind once
+    /// it goes still, as the main window does, and keeps no pixels while
+    /// it is minimized.
+    #[cfg(desktop)]
+    fn watch_window(self: &Rc<Self>, window: &ComposerWindow) {
+        let session = self.reference();
+        window.window().on_winit_window_event(move |native, event| {
+            use winit::event::WindowEvent;
+            if !matches!(event, WindowEvent::RedrawRequested) {
+                crate::memory::release_free_heap_when_idle();
+            }
+            if matches!(
+                event,
+                WindowEvent::Resized(_) | WindowEvent::Focused(_) | WindowEvent::Occluded(_)
+            ) && let Some(session) = session.upgrade()
+            {
+                let minimized = native
+                    .with_winit_window(|window| window.is_minimized())
+                    .flatten()
+                    .unwrap_or(false);
+                session.window_minimized(minimized);
+            }
+            EventResult::Propagate
+        });
+    }
+
+    /// The message's own window was minimized, or shown again.
+    #[cfg(desktop)]
+    fn window_minimized(&self, minimized: bool) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let HostRef::Window(window) = &host else {
+            return;
+        };
+        if window.get_render_suspended() == minimized {
+            return;
+        }
+        window.set_render_suspended(minimized);
+        if minimized {
+            host.ui().set_editor_tiles(ModelRc::default());
+            self.editor.borrow_mut().release();
+        } else if host.ui().get_open() {
+            self.apply_document(&host);
+        }
     }
 
     /// Clear the message and let its window go. A message being sent stays
@@ -902,6 +953,9 @@ impl ComposeSession {
                 }
             }
         }
+        // What the composer held is freed; return it once the app goes
+        // still, even when nothing is touched in the main window.
+        crate::memory::release_free_heap_when_idle();
         let Some(composers) = self.composers() else {
             return;
         };

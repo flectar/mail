@@ -679,6 +679,8 @@ export component ComposerWindow inherits Window {
     // The window's close button asks the composer, which protects a
     // message with content behind its discard confirmation.
     callback request-close();
+    // Minimized: the composer keeps no pixels until it is shown again.
+    in-out property <bool> render-suspended: false;
 
     title: ComposerUi.subject != "" ? ComposerUi.subject : ComposerText.mode-title(ComposerUi.mode);
     icon: AppIcon.window-image(AppIcon.variant);
