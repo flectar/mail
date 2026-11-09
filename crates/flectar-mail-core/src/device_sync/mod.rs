@@ -936,6 +936,10 @@ impl Core {
                 match client.events().await {
                     Ok(stream) => {
                         backoff = Duration::from_secs(5);
+                        // A payment made while the stream was down, such as
+                        // in the browser while a phone kept the app in the
+                        // background, sent its event to nobody.
+                        core.check_billing().await;
                         let mut stream = Box::pin(stream);
                         while let Some(event) = stream.next().await {
                             match event {
