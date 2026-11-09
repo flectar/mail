@@ -698,6 +698,9 @@ struct InboxState {
     mark_read_on_open: bool,
     /// Whether the mail list shows conversations or each message on its own.
     grouping: MailGrouping,
+    /// A scheduled send is being sent now, cancelled or moved. The mail
+    /// server may still be letting go of it, so another change waits.
+    changing_send: bool,
     warm_start_cache: WarmStartCacheWriter,
 }
 
@@ -1254,8 +1257,15 @@ impl InboxState {
             remote_images_override_id: None,
             mark_read_on_open: true,
             grouping: MailGrouping::Conversations,
+            changing_send: false,
             warm_start_cache,
         }
+    }
+
+    /// Starts a change to a scheduled send, or returns false while another
+    /// is still under way. Clear `changing_send` once it is done.
+    fn start_send_change(&mut self) -> bool {
+        !std::mem::replace(&mut self.changing_send, true)
     }
 
     /// Select `scope`, or the equivalent mailbox the sidebar shows for the
@@ -6281,6 +6291,122 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);
 
+    // Continue editing: the composer opens with a draft.
+    type OpenDraft = dyn Fn(&AppWindow, &CoreMailSource, &MailMessage);
+    let open_draft: Rc<OpenDraft> = {
+        let state_for_message_compose = Rc::clone(&state);
+        let runtime_for_message_compose = runtime.clone();
+        let files_for_message_compose = Rc::clone(&compose_files);
+        let session_for_message_compose = Rc::clone(&compose_session);
+        let document_for_message_compose = Rc::clone(&compose_document);
+        let editor_for_message_compose = Rc::clone(&compose_editor);
+        let contacts_for_message_compose = Rc::clone(&compose_contacts);
+        let intent_for_message_compose = Rc::clone(&compose_intent);
+        Rc::new(
+            move |app: &AppWindow, core: &CoreMailSource, row: &MailMessage| {
+                let draft = match runtime_for_message_compose.block_on(core.load_draft(row)) {
+                    Ok(draft) => draft,
+                    Err(error) => {
+                        app.set_render_status(UiMessage::detail("Could not open draft: {}", error));
+                        return;
+                    }
+                };
+                let Ok(account_id) = i32::try_from(draft.account_id) else {
+                    app.set_render_status(UiMessage::plain(
+                        "Could not open draft: invalid account identifier",
+                    ));
+                    return;
+                };
+                let account_label = state_for_message_compose
+                    .borrow()
+                    .connected_accounts
+                    .iter()
+                    .find(|account| account.id == draft.account_id)
+                    .map(|account| {
+                        let name = account
+                            .display_name
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|name| !name.is_empty());
+                        match name {
+                            Some(name) if name != account.email => {
+                                format!("{name}  <{}>", account.email)
+                            }
+                            _ => account.email.clone(),
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        translated(app, &UiMessage::plain("Connected account")).to_string()
+                    });
+
+                let draft_sender_email = draft
+                    .from
+                    .as_ref()
+                    .map(|address| address.email.clone())
+                    .unwrap_or_default();
+                clear_compose(
+                    app,
+                    &files_for_message_compose,
+                    &session_for_message_compose,
+                    &document_for_message_compose,
+                    &editor_for_message_compose,
+                    &contacts_for_message_compose,
+                );
+                app.set_compose_account_id(account_id);
+                app.set_compose_from_label(account_label.into());
+                app.set_compose_to(compose_addresses(&draft.to).into());
+                app.set_compose_cc(compose_addresses(&draft.cc).into());
+                app.set_compose_bcc(compose_addresses(&draft.bcc).into());
+                app.set_compose_subject(draft.subject.clone().into());
+
+                let loaded_files = draft
+                    .attachments
+                    .iter()
+                    .map(|attachment| {
+                        let path = PathBuf::from(&attachment.file_path);
+                        let size = std::fs::metadata(&path)
+                            .map(|metadata| metadata.len())
+                            .unwrap_or_default();
+                        ComposeFile {
+                            path,
+                            filename: attachment.filename.clone(),
+                            size,
+                            _import: None,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                *files_for_message_compose.borrow_mut() = loaded_files;
+                apply_compose_files(app, &files_for_message_compose.borrow());
+
+                {
+                    let mut document = document_for_message_compose.borrow_mut();
+                    let cursor = i32::try_from(draft.body_text.len()).unwrap_or(i32::MAX);
+                    let selection = document.load(&draft.body_text, cursor, cursor);
+                    editor_for_message_compose.borrow_mut().reset();
+                    apply_rich_compose(
+                        app,
+                        &document,
+                        selection,
+                        &mut editor_for_message_compose.borrow_mut(),
+                    );
+                }
+                *intent_for_message_compose.borrow_mut() = ComposeIntent {
+                    mode: draft.mode,
+                    in_reply_to_message_id: draft.in_reply_to_message_id,
+                    in_reply_to_header: draft.in_reply_to_header,
+                    draft_id: draft.draft_id,
+                };
+                app.set_compose_mode("draft".into());
+                app.global::<AccountMailPreferences>()
+                    .invoke_composer_reset();
+                app.global::<AccountMailPreferences>()
+                    .set_composer_sender_email(draft_sender_email.into());
+                app.global::<AccountMailPreferences>()
+                    .invoke_composer_account_changed(account_id);
+                app.set_compose_open(true);
+            },
+        )
+    };
     let app_weak = app.as_weak();
     let state_for_message_compose = Rc::clone(&state);
     let runtime_for_message_compose = runtime.clone();
@@ -6328,114 +6454,49 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 app.set_render_status(UiMessage::plain("Only drafts can be reopened for editing."));
                 return;
             }
+            if row.send_at.is_none() {
+                open_draft(&app, &core, &row);
+                return;
+            }
             // Editing a scheduled draft cancels its send first, as in Gmail.
-            if row.send_at.is_some()
-                && let Err(error) =
-                    runtime_for_message_compose.block_on(core.cancel_scheduled_row(&row))
-            {
-                app.set_render_status(UiMessage::detail("Could not cancel the send: {}", error));
+            // The mail server may be holding it, so the window keeps going
+            // while the server lets go, and the draft opens after.
+            if !state_for_message_compose.borrow_mut().start_send_change() {
                 return;
             }
-            let draft = match runtime_for_message_compose.block_on(core.load_draft(&row)) {
-                Ok(draft) => draft,
-                Err(error) => {
-                    app.set_render_status(UiMessage::detail("Could not open draft: {}", error));
+            let cancel: documents::DocumentFuture<bool> = {
+                let (core, row) = (core.clone(), row.clone());
+                Box::pin(async move { core.cancel_scheduled_row(&row).await })
+            };
+            let app_weak = app.as_weak();
+            let state = Rc::clone(&state_for_message_compose);
+            let open_draft = Rc::clone(&open_draft);
+            documents::run_request(&runtime_for_message_compose, cancel, move |cancelled| {
+                state.borrow_mut().changing_send = false;
+                let Some(app) = app_weak.upgrade() else {
                     return;
-                }
-            };
-            let Ok(account_id) = i32::try_from(draft.account_id) else {
-                app.set_render_status(UiMessage::plain(
-                    "Could not open draft: invalid account identifier",
-                ));
-                return;
-            };
-            let account_label = state_for_message_compose
-                .borrow()
-                .connected_accounts
-                .iter()
-                .find(|account| account.id == draft.account_id)
-                .map(|account| {
-                    let name = account
-                        .display_name
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|name| !name.is_empty());
-                    match name {
-                        Some(name) if name != account.email => {
-                            format!("{name}  <{}>", account.email)
+                };
+                match cancelled {
+                    Ok(true) => {
+                        app.set_render_status(UiMessage::plain(
+                            "Send cancelled. The message is a draft again.",
+                        ));
+                        // A message the user started meanwhile stays in the
+                        // composer.
+                        if !app.get_compose_open() {
+                            open_draft(&app, &core, &row);
                         }
-                        _ => account.email.clone(),
                     }
-                })
-                .unwrap_or_else(|| {
-                    translated(&app, &UiMessage::plain("Connected account")).to_string()
-                });
-
-            let draft_sender_email = draft
-                .from
-                .as_ref()
-                .map(|address| address.email.clone())
-                .unwrap_or_default();
-            clear_compose(
-                &app,
-                &files_for_message_compose,
-                &session_for_message_compose,
-                &document_for_message_compose,
-                &editor_for_message_compose,
-                &contacts_for_message_compose,
-            );
-            app.set_compose_account_id(account_id);
-            app.set_compose_from_label(account_label.into());
-            app.set_compose_to(compose_addresses(&draft.to).into());
-            app.set_compose_cc(compose_addresses(&draft.cc).into());
-            app.set_compose_bcc(compose_addresses(&draft.bcc).into());
-            app.set_compose_subject(draft.subject.clone().into());
-
-            let loaded_files = draft
-                .attachments
-                .iter()
-                .map(|attachment| {
-                    let path = PathBuf::from(&attachment.file_path);
-                    let size = std::fs::metadata(&path)
-                        .map(|metadata| metadata.len())
-                        .unwrap_or_default();
-                    ComposeFile {
-                        path,
-                        filename: attachment.filename.clone(),
-                        size,
-                        _import: None,
-                    }
-                })
-                .collect::<Vec<_>>();
-            *files_for_message_compose.borrow_mut() = loaded_files;
-            apply_compose_files(&app, &files_for_message_compose.borrow());
-
-            {
-                let mut document = document_for_message_compose.borrow_mut();
-                let cursor = i32::try_from(draft.body_text.len()).unwrap_or(i32::MAX);
-                let selection = document.load(&draft.body_text, cursor, cursor);
-                editor_for_message_compose.borrow_mut().reset();
-                apply_rich_compose(
-                    &app,
-                    &document,
-                    selection,
-                    &mut editor_for_message_compose.borrow_mut(),
-                );
-            }
-            *intent_for_message_compose.borrow_mut() = ComposeIntent {
-                mode: draft.mode,
-                in_reply_to_message_id: draft.in_reply_to_message_id,
-                in_reply_to_header: draft.in_reply_to_header,
-                draft_id: draft.draft_id,
-            };
-            app.set_compose_mode("draft".into());
-            app.global::<AccountMailPreferences>()
-                .invoke_composer_reset();
-            app.global::<AccountMailPreferences>()
-                .set_composer_sender_email(draft_sender_email.into());
-            app.global::<AccountMailPreferences>()
-                .invoke_composer_account_changed(account_id);
-            app.set_compose_open(true);
+                    // It went out, or is going out, meanwhile.
+                    Ok(false) => app.set_render_status(UiMessage::plain(
+                        "This message is no longer scheduled.",
+                    )),
+                    Err(error) => app.set_render_status(UiMessage::detail(
+                        "Could not cancel the send: {}",
+                        error,
+                    )),
+                }
+            });
             return;
         }
 

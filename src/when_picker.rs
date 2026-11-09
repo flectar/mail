@@ -356,44 +356,31 @@ pub(super) fn register(
     let now_state = state.clone();
     let now_runtime = runtime.clone();
     send_ui.on_send_now(move || {
-        let Some(app) = weak.upgrade() else {
-            return;
-        };
         let Some((core, row)) = open_row(&now_state) else {
             return;
         };
-        match now_runtime.block_on(core.send_scheduled_row_now(&row)) {
-            Ok(_) => {
-                app.set_render_status(UiMessage::plain("Sending message…"));
-                refresh(&app, &now_state, &now_runtime);
-            }
-            Err(error) => {
-                app.set_render_status(UiMessage::detail("Could not send the message: {}", error));
-            }
-        }
+        change_send(
+            &weak,
+            &now_state,
+            &now_runtime,
+            Box::pin(async move { core.send_scheduled_row_now(&row).await }),
+            |app, sent| {
+                app.set_render_status(match sent {
+                    Ok(true) => UiMessage::plain("Sending message…"),
+                    // Sent, or cancelled on another device, meanwhile.
+                    Ok(false) => UiMessage::plain("This message is no longer scheduled."),
+                    Err(error) => UiMessage::detail("Could not send the message: {}", error),
+                })
+            },
+        );
     });
 
+    // As in Gmail, the message opens as a draft to edit: Continue editing
+    // cancels the send first.
     let weak = app.as_weak();
-    let cancel_state = state.clone();
-    let cancel_runtime = runtime.clone();
     send_ui.on_cancel(move || {
-        let Some(app) = weak.upgrade() else {
-            return;
-        };
-        let Some((core, row)) = open_row(&cancel_state) else {
-            return;
-        };
-        match cancel_runtime.block_on(core.cancel_scheduled_row(&row)) {
-            // As in Gmail, the message opens as a draft to edit.
-            Ok(_) => {
-                app.set_render_status(UiMessage::plain(
-                    "Send cancelled. The message is a draft again.",
-                ));
-                app.invoke_compose_message_action("edit_draft".into());
-            }
-            Err(error) => {
-                app.set_render_status(UiMessage::detail("Could not cancel the send: {}", error));
-            }
+        if let Some(app) = weak.upgrade() {
+            app.invoke_compose_message_action("edit_draft".into());
         }
     });
 
@@ -455,6 +442,35 @@ pub(super) fn register(
                 );
             }
             Err(error) => ui.set_error(error.into()),
+        }
+    });
+}
+
+/// Send a scheduled message now, or move it, off the UI thread: the mail
+/// server may be holding it, and letting go can take a while. `done` reports
+/// the result, and the list shows the change. One change runs at a time.
+fn change_send<T: Send + 'static>(
+    app: &slint::Weak<AppWindow>,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    change: documents::DocumentFuture<T>,
+    done: impl FnOnce(&AppWindow, Result<T, String>) + 'static,
+) {
+    if !state.borrow_mut().start_send_change() {
+        return;
+    }
+    let app = app.clone();
+    let state = state.clone();
+    let list_runtime = runtime.clone();
+    documents::run_request(runtime, change, move |result| {
+        state.borrow_mut().changing_send = false;
+        let Some(app) = app.upgrade() else {
+            return;
+        };
+        let changed = result.is_ok();
+        done(&app, result);
+        if changed {
+            refresh(&app, &state, &list_runtime);
         }
     });
 }
@@ -573,21 +589,22 @@ fn picked_for(
             let Some((core, row)) = row_by_id(state, id) else {
                 return;
             };
-            match runtime.block_on(core.reschedule_row(&row, at.timestamp_millis())) {
-                Ok(()) => {
-                    app.set_render_status(UiMessage::detail(
-                        "Scheduled to send {}",
-                        when_label(at, Local::now()),
-                    ));
-                    refresh(app, state, runtime);
-                }
-                Err(error) => {
-                    app.set_render_status(UiMessage::detail(
-                        "Could not schedule the message: {}",
-                        error,
-                    ));
-                }
-            }
+            change_send(
+                &app.as_weak(),
+                state,
+                runtime,
+                Box::pin(async move { core.reschedule_row(&row, at.timestamp_millis()).await }),
+                move |app, moved| {
+                    app.set_render_status(match moved {
+                        Ok(()) => {
+                            UiMessage::detail("Scheduled to send {}", when_label(at, Local::now()))
+                        }
+                        Err(error) => {
+                            UiMessage::detail("Could not schedule the message: {}", error)
+                        }
+                    })
+                },
+            );
         }
     }
 }
