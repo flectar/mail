@@ -964,21 +964,24 @@ impl ComposeSession {
         let Some(renderer) = slot.as_mut() else {
             return;
         };
+        // The quote shows at the editor's width. Content laid out wider, even
+        // zoomed out, is scaled down to it whole rather than squeezed
+        // sideways, so the part in view reaches further down it.
+        let fit = width / renderer.layout_width.max(width);
         renderer.set_visible_region(
-            (ui.get_editor_scroll_y() - ui.get_quote_top()).max(0.0),
-            viewport,
+            ((ui.get_editor_scroll_y() - ui.get_quote_top()) / fit).max(0.0),
+            viewport / fit,
         );
         match renderer.render_cpu_if_needed(width as u32, viewport as u32, scale) {
             Ok(Some(rendered)) => {
                 // Tiles come normalized to the laid-out width.
-                let unit = width * (renderer.layout_width / width).max(1.0);
                 let tiles = rendered
                     .tiles
                     .into_iter()
                     .map(|tile| ComposeEditorTile {
                         image: tile.image,
-                        y: tile.y * unit,
-                        height: tile.height * unit,
+                        y: tile.y * width,
+                        height: tile.height * width,
                     })
                     .collect::<Vec<_>>();
                 let retained = ui.get_quote_tiles();
@@ -995,7 +998,7 @@ impl ComposeSession {
                 } else {
                     ui.set_quote_tiles(ModelRc::new(VecModel::from(tiles)));
                 }
-                ui.set_quote_height(unit * rendered.height as f32 / rendered.width.max(1) as f32);
+                ui.set_quote_height(width * rendered.height as f32 / rendered.width.max(1) as f32);
             }
             Ok(None) => {}
             Err(error) => ui.set_notice(
@@ -2661,5 +2664,34 @@ mod tests {
         assert!(ui.get_quote_tiles().row_count() > 0);
         assert!(!ui.get_notice_is_error());
         assert!(!session.quote_unavailable.get());
+    }
+
+    #[test]
+    fn an_original_wider_than_the_composer_scales_down_whole() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.invoke_open_compose("".into());
+        let session = composers.in_app().unwrap();
+        let host = session.host().unwrap();
+        let ui = host.ui();
+        ui.set_editor_width(300.0);
+        ui.set_editor_viewport_height(400.0);
+        // Wider than auto-fit zooms out to, at its least, for this width.
+        let wide = "<table style=\"width:900px\"><tr><td>Wide</td></tr></table>";
+        let forward = ComposeQuote::forward(&["Forwarded".to_owned()], "Wide", Some(wide));
+        session.set_quote(&ui, Some(forward));
+        session.layout_changed();
+        let tiles = ui.get_quote_tiles();
+        assert!(tiles.row_count() > 0);
+        for tile in tiles.iter() {
+            let size = tile.image.size();
+            let shown = tile.height / 300.0;
+            let drawn = size.height as f32 / size.width as f32;
+            assert!((shown - drawn).abs() < 0.02, "shown {shown}, drawn {drawn}");
+        }
     }
 }
