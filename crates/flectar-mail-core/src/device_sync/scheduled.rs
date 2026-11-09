@@ -614,6 +614,16 @@ pub(crate) fn drive(
                 Some((state, error))
                     if matches!(state.as_str(), "done" | "failed" | "cancelled") =>
                 {
+                    // Another device's send that failed here may still go
+                    // out from the device that scheduled it: this one leaves
+                    // it to the others, rather than failing it everywhere.
+                    if state == "failed" && !origin {
+                        leave_to_others(conn, &send, me, error.as_deref(), now)?;
+                        retire(conn, action, now)?;
+                        driven.upload = true;
+                        driven.thread(thread_of_action(conn, action)?);
+                        continue;
+                    }
                     let result = match state.as_str() {
                         "done" => SENT,
                         "failed" => FAILED,
@@ -785,8 +795,13 @@ pub(crate) fn drive(
                     driven.nudge(send.account_id);
                     driven.thread(thread_of_action(conn, action)?);
                 }
-                // A send that still waits, say to retry, keeps its claim.
-                if until != HELD && until - now < RENEW_LEFT_MS {
+                // A send that still waits, say to retry, keeps its claim
+                // while it gets anywhere. One that keeps failing lets it run
+                // out when another device may do better.
+                if until != HELD
+                    && until - now < RENEW_LEFT_MS
+                    && !((!origin || helpers) && struggling(conn, action)?)
+                {
                     synced_sends::set_claim(
                         conn,
                         &send.sync_id,
@@ -804,7 +819,7 @@ pub(crate) fn drive(
                 }
                 hold(conn, action)?;
             }
-            _ => {
+            lapsed => {
                 if send.may_send_until.is_some() {
                     synced_sends::set_may_send_until(conn, &send.sync_id, None)?;
                 }
@@ -814,7 +829,10 @@ pub(crate) fn drive(
                 } else {
                     HELPER_LEAD_MS
                 };
-                if now >= send.send_at - lead && (origin || helpers) {
+                if now >= send.send_at - lead
+                    && (origin || helpers)
+                    && takes_turn(conn, &send, me, (origin, helpers), lapsed, action, now)?
+                {
                     let until = send.send_at.max(now) + CLAIM_MS;
                     synced_sends::set_claim(conn, &send.sync_id, Some(me), Some(until), now)?;
                     driven.upload = true;
@@ -826,6 +844,109 @@ pub(crate) fn drive(
         driven.upload = true;
     }
     Ok(driven)
+}
+
+/// Whether this device claims a send that no device holds a claim on. A
+/// device whose claim ran out with nothing sent gives the others a claim's
+/// time first, where they may send it. The device that scheduled it leaves
+/// it to them while its account waits for the user to sign in again, and
+/// takes it once signed in. Another device claims only what it can send
+/// itself; if it can't after all, its claim runs out for the others.
+fn takes_turn(
+    conn: &Connection,
+    send: &SyncedSend,
+    me: &str,
+    (origin, helpers): (bool, bool),
+    lapsed: Option<(String, i64)>,
+    action: i64,
+    now: i64,
+) -> Result<bool> {
+    if origin && !helpers {
+        return Ok(true);
+    }
+    let gave_up = lapsed.is_some_and(|(device, until)| device == me && now < until + CLAIM_MS)
+        && struggling(conn, action)?;
+    if gave_up {
+        return Ok(false);
+    }
+    if origin {
+        return signed_in(conn, send.account_id);
+    }
+    Ok(send.failed_here.is_none() && may_send_from(conn, send.account_id, action)?)
+}
+
+/// Whether this device's send has failed an attempt, and still waits.
+fn struggling(conn: &Connection, action: i64) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT last_error IS NOT NULL FROM pending_actions
+             WHERE id = ?1 AND state IN ('pending', 'inflight')",
+            params![action],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
+/// Whether the account can send here, not waiting for the user to sign in
+/// again.
+fn signed_in(conn: &Connection, account_id: i64) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT sync_state <> 'needs_reauth' FROM accounts WHERE id = ?1",
+            params![account_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
+/// Whether the address the send's draft is from may send on this device.
+/// Addresses added by hand stay on the device that added them. A message
+/// not here yet, in a file, is checked when it goes out.
+fn may_send_from(conn: &Connection, account_id: i64, action: i64) -> Result<bool> {
+    let from: Option<String> = conn
+        .query_row(
+            "SELECT m.from_addr FROM pending_actions pa JOIN messages m ON m.id = pa.message_id
+             WHERE pa.id = ?1",
+            params![action],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(match from {
+        Some(from) => repo::sender_identities::get_verified(conn, account_id, &from)?.is_some(),
+        None => true,
+    })
+}
+
+/// Another device's send that this device could not send: it lets go of
+/// it, and never claims it again.
+fn leave_to_others(
+    conn: &Connection,
+    send: &SyncedSend,
+    me: &str,
+    error: Option<&str>,
+    now: i64,
+) -> Result<()> {
+    synced_sends::set_failed_here(conn, &send.sync_id, error.unwrap_or_default())?;
+    synced_sends::set_action(conn, &send.sync_id, None)?;
+    synced_sends::set_may_send_until(conn, &send.sync_id, None)?;
+    if send.claimed_by.as_deref() == Some(me) {
+        synced_sends::set_claim(conn, &send.sync_id, None, None, now)?;
+    }
+    Ok(())
+}
+
+/// A failed send of this device's that another device's record took over
+/// leaves this device's Scheduled list.
+fn retire(conn: &Connection, action: i64, now: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions SET state = 'cancelled', finished_at = ?2
+         WHERE id = ?1 AND state = 'failed'",
+        params![action, now],
+    )?;
+    Ok(())
 }
 
 /// Whether a shared message is in a file that is not here yet.
@@ -1044,6 +1165,9 @@ mod tests {
         testutil::seed_account(&conn);
         conn.execute_batch(
             "UPDATE accounts SET mail_protocol = 'jmap', sync_id = '0123456789abcdef0123456789abcdef';
+             INSERT INTO sender_identities (account_id, email, is_primary, is_provider_default,
+                                            verification_status)
+               VALUES (1, 'me@test.dev', 1, 1, 'accepted');
              INSERT INTO threads (id, account_id, subject_norm, last_message_at) VALUES (5, 1, 'plans', 1);",
         )
         .unwrap();
@@ -1265,6 +1389,109 @@ mod tests {
         let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
         assert_eq!(send.claimed_by.as_deref(), Some(HELPER));
         assert_eq!(send.claim_until, Some(later + CLAIM_MS));
+    }
+
+    /// Another device's send, claimed and released here.
+    fn sending_for_the_origin(conn: &Connection) -> (String, i64) {
+        let sync_id = scheduled_elsewhere(conn, Some("E1"));
+        drive(conn, HELPER, AT - 10 * 60_000, Reach::Usable).unwrap();
+        server_has(conn, &sync_id, None);
+        assert!(drive(conn, HELPER, AT, Reach::Usable).unwrap().upload);
+        server_has(conn, &sync_id, Some((HELPER, AT + CLAIM_MS)));
+        drive(conn, HELPER, AT + 1, Reach::Usable).unwrap();
+        let send = synced_sends::get(conn, &sync_id).unwrap().unwrap();
+        (sync_id, send.action_id.unwrap())
+    }
+
+    #[test]
+    fn a_device_that_cannot_send_another_devices_send_leaves_it_to_the_others() {
+        let conn = setup("E1");
+        let (sync_id, action) = sending_for_the_origin(&conn);
+        conn.execute(
+            "UPDATE pending_actions SET state = 'failed',
+                    last_error = 'not an authorized sender identity'
+             WHERE id = ?1",
+            params![action],
+        )
+        .unwrap();
+        assert!(drive(&conn, HELPER, AT + 2, Reach::Usable).unwrap().upload);
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.state, SCHEDULED, "still the other devices' to send");
+        assert_eq!(send.claimed_by, None);
+        assert!(send.failed_here.is_some());
+        assert_eq!(action_state(&conn, action), "cancelled");
+
+        // Free to claim again, this device leaves it alone.
+        server_has(&conn, &sync_id, None);
+        drive(&conn, HELPER, AT + 3, Reach::Usable).unwrap();
+        let later = AT + 3 * CLAIM_MS;
+        assert!(!drive(&conn, HELPER, later, Reach::Usable).unwrap().upload);
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.claimed_by, None);
+        assert_eq!(not_before(&conn, send.action_id.unwrap()), HELD);
+    }
+
+    #[test]
+    fn a_claim_that_gets_nowhere_runs_out_for_another_device() {
+        let conn = setup("E1");
+        let (sync_id, action) = sending_for_the_origin(&conn);
+        // Every try fails, for a reason of this device's.
+        conn.execute(
+            "UPDATE pending_actions SET attempts = 3, last_error = 'connection refused'
+             WHERE id = ?1",
+            params![action],
+        )
+        .unwrap();
+        let near_end = AT + CLAIM_MS - 1_000;
+        drive(&conn, HELPER, near_end, Reach::Usable).unwrap();
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.claim_until, Some(AT + CLAIM_MS), "not renewed");
+
+        // Run out, it gives the others a claim's time first.
+        let lapsed = AT + CLAIM_MS + 1;
+        assert!(!drive(&conn, HELPER, lapsed, Reach::Usable).unwrap().upload);
+        assert_eq!(not_before(&conn, action), HELD);
+        let turn = AT + 2 * CLAIM_MS + 1;
+        assert!(drive(&conn, HELPER, turn, Reach::Usable).unwrap().upload);
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.claimed_by.as_deref(), Some(HELPER));
+    }
+
+    #[test]
+    fn a_device_claims_only_what_it_can_send_itself() {
+        let conn = setup("E1");
+        let sync_id = scheduled_elsewhere(&conn, Some("E1"));
+        drive(&conn, HELPER, AT - 10 * 60_000, Reach::Usable).unwrap();
+        server_has(&conn, &sync_id, None);
+
+        // The draft is from an address added by hand on another device.
+        conn.execute(
+            "UPDATE messages SET from_addr = 'alias@test.dev' WHERE id = 9",
+            [],
+        )
+        .unwrap();
+        assert!(!drive(&conn, HELPER, AT, Reach::Usable).unwrap().upload);
+        conn.execute(
+            "UPDATE messages SET from_addr = 'me@test.dev' WHERE id = 9",
+            [],
+        )
+        .unwrap();
+        assert!(drive(&conn, HELPER, AT, Reach::Usable).unwrap().upload);
+    }
+
+    #[test]
+    fn signed_out_the_device_that_scheduled_it_leaves_it_to_the_others() {
+        let conn = setup("E1");
+        let (sync_id, _) = scheduled_here(&conn);
+        drive(&conn, ORIGIN, AT - 10 * 60_000, Reach::Usable).unwrap();
+        server_has(&conn, &sync_id, None);
+        conn.execute("UPDATE accounts SET sync_state = 'needs_reauth'", [])
+            .unwrap();
+        assert!(!drive(&conn, ORIGIN, AT, Reach::Usable).unwrap().upload);
+        // Signed in again, it sends it.
+        conn.execute("UPDATE accounts SET sync_state = 'idle'", [])
+            .unwrap();
+        assert!(drive(&conn, ORIGIN, AT, Reach::Usable).unwrap().upload);
     }
 
     #[test]

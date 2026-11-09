@@ -31,6 +31,9 @@ pub struct SyncedSend {
     pub may_send_until: Option<i64>,
     /// Another device's IMAP or POP3 message as a draft here.
     pub shadow_id: Option<i64>,
+    /// Why this device could not send another device's send: it leaves it
+    /// to the others.
+    pub failed_here: Option<String>,
 }
 
 /// What another device says about a shared send.
@@ -53,7 +56,8 @@ pub const CANCELLED: &str = "cancelled";
 pub const FAILED: &str = "failed";
 
 const COLUMNS: &str = "sync_id, account_id, message_id, send_at, origin, draft_ref, state, error,
-                       claimed_by, claim_until, action_id, may_send_until, shadow_id";
+                       claimed_by, claim_until, action_id, may_send_until, shadow_id,
+                       failed_here";
 
 fn from_row(row: &Row) -> rusqlite::Result<SyncedSend> {
     Ok(SyncedSend {
@@ -70,6 +74,7 @@ fn from_row(row: &Row) -> rusqlite::Result<SyncedSend> {
         action_id: row.get(10)?,
         may_send_until: row.get(11)?,
         shadow_id: row.get(12)?,
+        failed_here: row.get(13)?,
     })
 }
 
@@ -372,6 +377,14 @@ pub fn set_action(conn: &Connection, sync_id: &str, action_id: Option<i64>) -> R
     conn.execute(
         "UPDATE synced_sends SET action_id = ?2 WHERE sync_id = ?1",
         params![sync_id, action_id],
+    )?;
+    Ok(())
+}
+
+pub fn set_failed_here(conn: &Connection, sync_id: &str, error: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE synced_sends SET failed_here = ?2 WHERE sync_id = ?1",
+        params![sync_id, error],
     )?;
     Ok(())
 }
