@@ -26,6 +26,9 @@ struct Window {
 
 thread_local! {
     static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+    /// Clicks that came before the mail store opened, such as the one that
+    /// started the app: [`core_ready`] answers them.
+    static WAITING: RefCell<Vec<Response>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Give the dispatcher the window, and handle clicks and buttons on
@@ -232,30 +235,60 @@ fn respond(app: &AppWindow, runtime: &tokio::runtime::Handle, response: Response
     let Some(state) = WINDOW.with(|window| window.borrow().as_ref()?.state.upgrade()) else {
         return;
     };
-    match response.act {
-        Act::Open => {
-            crate::window_controller::activate(app, response.activation_token);
-            reveal(app, &state, response.route);
-        }
-        act => {
-            let Some(core) = state.borrow().core.as_ref().map(|core| core.file_core()) else {
-                return;
-            };
-            let Some(message_id) = response.route.message_id else {
-                return;
-            };
-            let kind = match act {
-                Act::MarkRead => ActionKind::MarkRead,
-                Act::Archive => ActionKind::Archive,
-                Act::Delete | Act::Open => ActionKind::Trash,
-            };
-            runtime.spawn(async move {
-                if let Err(error) = super::act(&core, kind, message_id).await {
-                    tracing::warn!(%error, "notifications: the action failed");
-                }
-            });
-        }
+    let Response {
+        route,
+        act,
+        activation_token,
+    } = response;
+    if act == Act::Open {
+        crate::window_controller::activate(app, activation_token);
     }
+    let Some(core) = state.borrow().core.as_ref().map(|core| core.file_core()) else {
+        // The rest needs the mail store, which a click that started the app
+        // comes before.
+        WAITING.with(|waiting| {
+            waiting.borrow_mut().push(Response {
+                route,
+                act,
+                activation_token: None,
+            });
+        });
+        return;
+    };
+    let kind = match act {
+        Act::Open => {
+            reveal(app, &state, route);
+            return;
+        }
+        Act::MarkRead => ActionKind::MarkRead,
+        Act::Archive => ActionKind::Archive,
+        Act::Delete => ActionKind::Trash,
+    };
+    let Some(message_id) = route.message_id else {
+        return;
+    };
+    runtime.spawn(async move {
+        if let Err(error) = super::act(&core, kind, message_id).await {
+            tracing::warn!(%error, "notifications: the action failed");
+        }
+    });
+}
+
+/// The mail store opened: answer the clicks that came before it. They run
+/// once the caller is done with the window's state.
+pub(crate) fn core_ready() {
+    let _ = slint::invoke_from_event_loop(|| {
+        let Some((app, runtime)) = WINDOW.with(|window| {
+            let window = window.borrow();
+            let window = window.as_ref()?;
+            Some((window.app.upgrade()?, window.runtime.clone()))
+        }) else {
+            return;
+        };
+        for response in WAITING.with(RefCell::take) {
+            respond(&app, &runtime, response);
+        }
+    });
 }
 
 /// Show the conversation a notification is about, in the list that has
