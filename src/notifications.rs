@@ -374,7 +374,8 @@ const RETRY_AFTER: Duration = Duration::from_secs(60);
 /// Mail changes come in bursts during a sync; withdrawals wait for it to
 /// settle.
 const WITHDRAW_SETTLE: Duration = Duration::from_secs(2);
-/// How often old notification records are forgotten.
+/// How often week-old notifications are taken back and old records
+/// forgotten.
 const PRUNE_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 /// How long taking notifications back may hold up the app's exit.
 const EXIT_WITHDRAW_LIMIT: Duration = Duration::from_secs(2);
@@ -403,9 +404,11 @@ pub(crate) fn spawn_dispatcher(
         }
         let mut pruned_at = None;
         let mut enabled = notifications_enabled(&core).await;
-        withdraw(&core, host.as_deref(), Withdraw::Stale).await;
         loop {
             if pruned_at.is_none_or(|at: tokio::time::Instant| at.elapsed() >= PRUNE_EVERY) {
+                // Taking back what is stale includes the week-old, which the
+                // pruning would otherwise leave on screen for good.
+                withdraw(&core, host.as_deref(), Withdraw::Stale).await;
                 if let Err(error) = core.prune_notifications().await {
                     tracing::warn!(%error, "notifications: could not forget old records");
                 }

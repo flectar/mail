@@ -234,9 +234,10 @@ pub fn recover_delivering(conn: &Connection, retry_at: i64) -> Result<usize> {
 /// How long a notification waits for its thread's AI route before another look.
 pub const ROUTE_WAIT_MS: i64 = 60_000;
 
-/// How long settled rows are kept. A shown notification is tracked this long
-/// so it can still be withdrawn; Windows and Android drop their own after
-/// three days.
+/// How long a notification stays up, and settled rows are kept. Windows and
+/// Android drop their own notifications after three days; macOS and the Linux
+/// desktops keep them, so one shown this long ago is taken back (see
+/// [`stale`]), and its row forgotten this long after that (see [`prune`]).
 pub const KEEP_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 /// How long after an account's summary was last raised new mail still joins
@@ -550,19 +551,24 @@ pub fn next_due_at(conn: &Connection, now: i64) -> Result<Option<i64>> {
 
 /// Shown notifications whose mail is no longer new (see [`STILL_NEW`]):
 /// read, moved out of the Inbox, snoozed or deleted, or its account removed.
-pub fn stale(conn: &Connection) -> Result<Withdrawal> {
+/// So is one shown [`KEEP_MS`] ago, before its row is forgotten.
+pub fn stale(conn: &Connection, now: i64) -> Result<Withdrawal> {
     let mut stmt = conn.prepare(&format!(
         "SELECT o.id, o.account_id, o.notified_message_id, o.in_summary
          FROM notification_outbox o
          WHERE o.state = 'delivered'
-           AND NOT EXISTS (
-             SELECT 1 FROM messages m JOIN accounts a ON a.id = m.account_id
-             WHERE m.id = o.message_id AND {})
+           AND (COALESCE(o.delivered_at, o.created_at) < ?2
+                OR NOT EXISTS (
+                  SELECT 1 FROM messages m JOIN accounts a ON a.id = m.account_id
+                  WHERE m.id = o.message_id AND {}))
          ORDER BY o.id",
         still_new_condition(1)
     ))?;
     let rows = stmt
-        .query_map(params![roles::INBOX], shown_row)?
+        .query_map(
+            params![roles::INBOX, now.saturating_sub(KEEP_MS)],
+            shown_row,
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     withdrawal(conn, rows)
 }
@@ -630,13 +636,13 @@ pub fn mark_withdrawn(conn: &Connection, ids: &[i64], withdrawn_at: i64) -> Resu
     Ok(changed)
 }
 
-/// Forget settled rows older than [`KEEP_MS`].
+/// Forget rows settled more than [`KEEP_MS`] ago. A shown notification's row
+/// stays until the notification is taken back, which [`stale`] sees to.
 pub fn prune(conn: &Connection, now: i64) -> Result<usize> {
     Ok(conn.execute(
         "DELETE FROM notification_outbox
          WHERE (state = 'suppressed' AND COALESCE(suppressed_at, created_at) < ?1)
-            OR (state = 'withdrawn' AND COALESCE(withdrawn_at, created_at) < ?1)
-            OR (state = 'delivered' AND COALESCE(delivered_at, created_at) < ?1)",
+            OR (state = 'withdrawn' AND COALESCE(withdrawn_at, created_at) < ?1)",
         params![now.saturating_sub(KEEP_MS)],
     )?)
 }
@@ -999,7 +1005,7 @@ mod tests {
         c.execute("DELETE FROM messages WHERE id = ?1", params![deleted])
             .unwrap();
 
-        let withdrawal = stale(&c).unwrap();
+        let withdrawal = stale(&c, 40).unwrap();
         assert_eq!(
             withdrawal.ids,
             vec![read_id, moved_id, snoozed_id, deleted_id]
@@ -1014,7 +1020,7 @@ mod tests {
         assert!(withdrawal.summaries.is_empty());
 
         assert_eq!(mark_withdrawn(&c, &withdrawal.ids, 40).unwrap(), 4);
-        assert!(stale(&c).unwrap().is_empty());
+        assert!(stale(&c, 40).unwrap().is_empty());
         let everything = shown(&c).unwrap();
         assert_eq!(
             everything.messages,
@@ -1040,7 +1046,7 @@ mod tests {
              INSERT INTO message_folders (message_id, folder_id) VALUES ({message_id}, 1);"
         ))
         .unwrap();
-        assert!(stale(&c).unwrap().is_empty());
+        assert!(stale(&c, 40).unwrap().is_empty());
 
         // Archived elsewhere: the Inbox label goes.
         c.execute(
@@ -1048,7 +1054,7 @@ mod tests {
             params![message_id],
         )
         .unwrap();
-        assert_eq!(stale(&c).unwrap().messages.len(), 1);
+        assert_eq!(stale(&c, 40).unwrap().messages.len(), 1);
     }
 
     #[test]
@@ -1064,7 +1070,7 @@ mod tests {
             params![first],
         )
         .unwrap();
-        let partly = stale(&c).unwrap();
+        let partly = stale(&c, 40).unwrap();
         assert_eq!(partly.ids, vec![first_id]);
         assert!(partly.messages.is_empty());
         assert!(partly.summaries.is_empty());
@@ -1075,7 +1081,7 @@ mod tests {
             params![second],
         )
         .unwrap();
-        assert_eq!(stale(&c).unwrap().summaries, vec![1]);
+        assert_eq!(stale(&c, 40).unwrap().summaries, vec![1]);
     }
 
     #[test]
@@ -1090,10 +1096,38 @@ mod tests {
         mark_suppressed(&c, quiet_id, 10, "notifications are off").unwrap();
 
         assert_eq!(prune(&c, KEEP_MS).unwrap(), 0);
-        assert_eq!(prune(&c, KEEP_MS + 31).unwrap(), 2);
-        assert!(get(&c, shown_id).unwrap().is_none());
+        // A shown notification's row stays until it is taken back.
+        assert_eq!(prune(&c, KEEP_MS + 31).unwrap(), 1);
         assert!(get(&c, quiet_id).unwrap().is_none());
+        assert!(get(&c, shown_id).unwrap().is_some());
+
+        mark_withdrawn(&c, &[shown_id], KEEP_MS + 31).unwrap();
+        assert_eq!(prune(&c, 2 * KEEP_MS + 31).unwrap(), 0);
+        assert_eq!(prune(&c, 2 * KEEP_MS + 32).unwrap(), 1);
+        assert!(get(&c, shown_id).unwrap().is_none());
         assert!(get(&c, pending_id).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_notification_is_taken_back_after_a_week() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let (alone_id, alone) = delivered(&c, "a@test.dev", false);
+        let (first_id, _) = delivered(&c, "b@test.dev", true);
+        let (second_id, _) = delivered(&c, "c@test.dev", true);
+        // Shown at 30, and the mail is still new.
+        assert!(stale(&c, 30 + KEEP_MS).unwrap().is_empty());
+
+        let expired = stale(&c, 31 + KEEP_MS).unwrap();
+        assert_eq!(expired.ids, vec![alone_id, first_id, second_id]);
+        assert_eq!(
+            expired.messages,
+            vec![ShownNotification {
+                account_id: 1,
+                message_id: alone
+            }]
+        );
+        assert_eq!(expired.summaries, vec![1]);
     }
 
     #[test]

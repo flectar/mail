@@ -8952,10 +8952,13 @@ impl Core {
 
     /// Shown notifications whose mail is no longer new: read, moved out of the
     /// Inbox, snoozed or deleted, here or on another device, or whose account
-    /// was removed. The host takes them back and then calls
-    /// [`Self::notifications_withdrawn`].
+    /// was removed; and those shown a week ago. The host takes them back and
+    /// then calls [`Self::notifications_withdrawn`].
     pub async fn stale_notifications(&self) -> Result<Withdrawal> {
-        self.db.read(|conn| repo::notifications::stale(conn)).await
+        let now = now_ms();
+        self.db
+            .read(move |conn| repo::notifications::stale(conn, now))
+            .await
     }
 
     /// Every shown notification, to take back when notifications are turned
@@ -8973,7 +8976,8 @@ impl Core {
             .await
     }
 
-    /// Forget notification records settled more than a week ago.
+    /// Forget notification records settled more than a week ago. Shown
+    /// notifications stay until [`Self::stale_notifications`] takes them back.
     pub async fn prune_notifications(&self) -> Result<usize> {
         let now = now_ms();
         self.db
