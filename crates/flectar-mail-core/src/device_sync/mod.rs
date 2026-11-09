@@ -1202,8 +1202,10 @@ impl Core {
     async fn sync_failed<T: Default>(&self, error: SyncError) -> Result<T> {
         match error {
             // The group goes on without this device, and keeps its
-            // scheduled mail.
-            SyncError::Removed | SyncError::LoginRefused => {
+            // scheduled mail. A login the server refused for another
+            // reason, such as a changed server address, is an error: the
+            // keys stay, and a later sync tries again.
+            SyncError::Removed => {
                 self.drop_sync_state_locked(DeviceSyncState::Removed, scheduled::Departure::Kept)
                     .await?;
             }
