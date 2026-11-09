@@ -422,6 +422,11 @@ pub(super) fn put(
         synced_sends::set_may_send_until(conn, sync_id, None)?;
         hold(conn, action)?;
     }
+    // A send going out here finishes as it is: the next drive reports it,
+    // and a send that went out stays sent.
+    if under_way(conn, action)? {
+        return Ok(thread);
+    }
     // Another version of the draft: a device that sends the server's draft
     // waits for that version to arrive, and one that keeps another device's
     // message as a draft takes on the new one.
@@ -603,6 +608,23 @@ pub(crate) fn drive(
     let mut driven = Driven::default();
     for mut send in synced_sends::all(conn)? {
         if send.state != SCHEDULED {
+            // Another device ended the schedule while this one was sending
+            // it: it went out, or it didn't.
+            if let Some(action) = send.action_id
+                && let Some((state, _)) = action_state(conn, action)?
+                && state != "inflight"
+            {
+                if state == "done" {
+                    synced_sends::set_state(conn, &send.sync_id, SENT, None, now)?;
+                    synced_sends::set_shadow(conn, &send.sync_id, None)?;
+                    driven.upload = true;
+                } else {
+                    repo::actions::try_cancel(conn, action)?;
+                    synced_sends::drop_shadow(conn, &send.sync_id)?;
+                }
+                synced_sends::set_action(conn, &send.sync_id, None)?;
+                driven.thread(thread_of_action(conn, action)?);
+            }
             continue;
         }
         let origin = send.origin == me;
@@ -727,13 +749,14 @@ pub(crate) fn drive(
             continue;
         };
         // Another device's draft changed here since: wait for the version
-        // the device that scheduled it uploaded.
+        // the device that scheduled it uploaded, unless it is going out.
         if !origin
             && local_draft
                 .as_ref()
                 .and_then(|draft| draft.version.as_deref())
                 != send.draft_ref.as_deref()
             && sends_as_is(conn, action)?
+            && !under_way(conn, action)?
         {
             repo::actions::try_cancel(conn, action)?;
             synced_sends::set_action(conn, &send.sync_id, None)?;
@@ -873,6 +896,11 @@ fn takes_turn(
         return signed_in(conn, send.account_id);
     }
     Ok(send.failed_here.is_none() && may_send_from(conn, send.account_id, action)?)
+}
+
+/// Whether this device's send is going out right now.
+fn under_way(conn: &Connection, action: i64) -> Result<bool> {
+    Ok(action_state(conn, action)?.is_some_and(|(state, _)| state == "inflight"))
 }
 
 /// Whether this device's send has failed an attempt, and still waits.
@@ -1401,6 +1429,35 @@ mod tests {
         drive(conn, HELPER, AT + 1, Reach::Usable).unwrap();
         let send = synced_sends::get(conn, &sync_id).unwrap().unwrap();
         (sync_id, send.action_id.unwrap())
+    }
+
+    #[test]
+    fn a_send_going_out_here_finishes_whatever_another_device_says() {
+        let conn = setup("E1");
+        let (sync_id, action) = sending_for_the_origin(&conn);
+        conn.execute(
+            "UPDATE pending_actions SET state = 'inflight' WHERE id = ?1",
+            params![action],
+        )
+        .unwrap();
+        // Cancelled on the device that scheduled it, meanwhile.
+        let cancelled = Shared {
+            state: CANCELLED,
+            ..shared(Some("E1"), Some((HELPER, AT + CLAIM_MS)))
+        };
+        put(&conn, &sync_id, &cancelled, AT + 2).unwrap();
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.action_id, Some(action), "still this device's send");
+
+        // It went out: every device hears so.
+        conn.execute(
+            "UPDATE pending_actions SET state = 'done' WHERE id = ?1",
+            params![action],
+        )
+        .unwrap();
+        assert!(drive(&conn, HELPER, AT + 3, Reach::Usable).unwrap().upload);
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.state, SENT);
     }
 
     #[test]
