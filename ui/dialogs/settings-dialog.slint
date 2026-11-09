@@ -2577,6 +2577,7 @@ export component SettingsDialog inherits Rectangle {
                         content-width: self.visible-width;
 
                         SyncSettingsPage {
+                            shown: root.settings_tab == "Sync";
                             x: root.compact ? 16px : max(24px, (sync-scroll.visible-width - 920px) / 2);
                             width: root.compact ? sync-scroll.visible-width - 32px : min(920px, sync-scroll.visible-width - 48px);
                             compact: root.compact;

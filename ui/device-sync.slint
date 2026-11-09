@@ -563,6 +563,9 @@ component Notice inherits Rectangle {
 // The settings page. Placed in the settings dialog's content area.
 export component SyncSettingsPage inherits VerticalBox {
     in property <bool> compact;
+    // The Sync tab is the one shown: only then does the page ask the server
+    // what sync costs or where it stands.
+    in property <bool> shown: true;
     in property <color> surface;
     in property <color> card-border-color;
     in property <color> heading;
@@ -592,7 +595,16 @@ export component SyncSettingsPage inherits VerticalBox {
             : @tr("{} a year", yearly);
     }
 
-    init => { SyncUi.opened(); }
+    init => {
+        if root.shown {
+            SyncUi.opened();
+        }
+    }
+    changed shown => {
+        if root.shown {
+            SyncUi.opened();
+        }
+    }
 
     function open-join(method: string) {
         SyncUi.join-method = method;
