@@ -256,8 +256,7 @@ fn serve(install: &Install, jobs: &mpsc::Receiver<Job>) {
     while let Ok(job) = jobs.recv() {
         match job {
             Job::Show(alerts, answer) => {
-                let shown = alerts.iter().map(|alert| toasts.show(alert)).collect();
-                let _ = answer.send(shown);
+                let _ = answer.send(toasts.show(&alerts));
             }
             Job::Withdraw(ids, answer) => {
                 for id in ids {
@@ -309,32 +308,37 @@ impl Toasts {
         }
     }
 
-    fn show(&self, alert: &Alert) -> Result<(), Failure> {
+    /// Show a batch's toasts, reading the setting once for all of them.
+    fn show(&self, alerts: &[Alert]) -> Vec<Result<(), Failure>> {
         // Microsoft asks apps to read the setting rather than wait for a
         // failure: Show doesn't fail while notifications are off.
-        match self.availability() {
-            Availability::Allowed => {}
-            Availability::Denied => {
-                return Err(Failure::Unavailable(
-                    "notifications are turned off in Windows settings".into(),
-                ));
-            }
+        let refused = match self.availability() {
+            Availability::Allowed => None,
+            Availability::Denied => Some("notifications are turned off in Windows settings"),
             Availability::NotAsked | Availability::Unavailable | Availability::Refused => {
-                return Err(Failure::Unavailable(
-                    "Windows shows no notifications for this app".into(),
-                ));
+                Some("Windows shows no notifications for this app")
             }
+        };
+        if let Some(reason) = refused {
+            return vec![Err(Failure::Unavailable(reason.into())); alerts.len()];
         }
-        let shown = (|| -> windows::core::Result<()> {
-            let document = XmlDocument::new()?;
-            document.LoadXml(&HSTRING::from(toast_xml(alert)))?;
-            let toast = ToastNotification::CreateToastNotification(&document)?;
-            let (tag, group) = tag_and_group(alert.id);
-            toast.SetTag(&HSTRING::from(tag))?;
-            toast.SetGroup(&HSTRING::from(group))?;
-            self.notifier()?.Show(&toast)
-        })();
-        shown.map_err(|error| Failure::Retry(error.message()))
+        let notifier = self.notifier();
+        alerts
+            .iter()
+            .map(|alert| {
+                let shown = (|| -> windows::core::Result<()> {
+                    let notifier = notifier.as_ref().map_err(Clone::clone)?;
+                    let document = XmlDocument::new()?;
+                    document.LoadXml(&HSTRING::from(toast_xml(alert)))?;
+                    let toast = ToastNotification::CreateToastNotification(&document)?;
+                    let (tag, group) = tag_and_group(alert.id);
+                    toast.SetTag(&HSTRING::from(tag))?;
+                    toast.SetGroup(&HSTRING::from(group))?;
+                    notifier.Show(&toast)
+                })();
+                shown.map_err(|error| Failure::Retry(error.message()))
+            })
+            .collect()
     }
 
     fn withdraw(&self, id: AlertId) {
