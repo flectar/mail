@@ -217,9 +217,16 @@ impl SyncController {
             self.offer_loaded.set(false);
             ui.invoke_opened();
         }
-        if off && ui.get_dialog() == "invite" {
-            self.end_attempt(&ui);
-            ui.set_dialog("".into());
+        if off {
+            match ui.get_dialog().as_str() {
+                "invite" => {
+                    self.end_attempt(&ui);
+                    ui.set_dialog("".into());
+                }
+                // A code is for a group: with none, nothing to redeem.
+                "redeem" => ui.set_dialog("".into()),
+                _ => {}
+            }
         }
     }
 
