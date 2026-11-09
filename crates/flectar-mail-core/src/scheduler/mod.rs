@@ -70,16 +70,28 @@ pub fn spawn(
                     bus.emit(CoreEvent::MailUpdated { thread_ids: shown });
                 }
             }
-            let _ = db
-                .write(move |conn| repo::snoozes::drop_expired(conn, now))
-                .await;
+            // Written only when there is something to drop: the writer
+            // stays closed while the user is elsewhere in the app.
+            if db
+                .read(move |conn| repo::snoozes::any_expired(conn, now))
+                .await
+                .unwrap_or(false)
+            {
+                let _ = db
+                    .write(move |conn| repo::snoozes::drop_expired(conn, now))
+                    .await;
+            }
 
             // 1b. Reply reminders: a conversation nobody replied to in time
             // comes back to the top of the inbox, and a reply ends its
             // reminder. Only reminders whose time has passed are looked at,
             // twice a minute.
+            let check_reminders = now - reminders_checked_at >= REMINDER_CHECK_MS;
+            if check_reminders {
+                reminders_checked_at = now;
+            }
             let reminders_due =
-                now - reminders_checked_at >= REMINDER_CHECK_MS
+                check_reminders
                     && db
                         .read(move |conn| {
                             Ok(repo::reply_reminders::next_remind_at(conn)?
@@ -88,9 +100,6 @@ pub fn spawn(
                         })
                         .await
                         .unwrap_or(false);
-            if reminders_due {
-                reminders_checked_at = now;
-            }
             if reminders_due
                 && let Ok(checked) = db
                     .write(move |conn| {

@@ -89,6 +89,15 @@ pub fn mark_woken(conn: &Connection, thread_id: i64, at: i64) -> Result<()> {
     Ok(())
 }
 
+/// Whether a shared snooze's time has passed, so there is one to drop.
+pub fn any_expired(conn: &Connection, now_ms: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM synced_snoozes WHERE wake_at <= ?1)",
+        params![now_ms],
+        |row| row.get(0),
+    )?)
+}
+
 /// Forget shared snoozes whose time has passed while their conversation
 /// never arrived here.
 pub fn drop_expired(conn: &Connection, now_ms: i64) -> Result<usize> {
@@ -268,5 +277,17 @@ mod tests {
 
         clear(&c, t1).unwrap();
         assert_eq!(next_wake_at(&c).unwrap(), Some(6_000));
+    }
+
+    #[test]
+    fn only_a_shared_snooze_whose_time_passed_is_dropped() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let (thread, _) = testutil::seed_message(&c, "a@b.c", "one", false);
+        set(&c, thread, 1, 5_000, None).unwrap();
+        assert!(!any_expired(&c, 4_999).unwrap());
+        assert!(any_expired(&c, 5_000).unwrap());
+        assert_eq!(drop_expired(&c, 5_000).unwrap(), 1);
+        assert!(!any_expired(&c, 5_000).unwrap());
     }
 }
