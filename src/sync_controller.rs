@@ -798,30 +798,10 @@ fn plan_prices(plans: &[SyncPlan]) -> PlanPrices {
     prices
 }
 
-/// A price such as "€4" or "€4.50", from the amount in the currency's
-/// smallest unit and its ISO 4217 code. Like the app's other numbers, it
-/// uses a decimal point.
+/// A price such as "€4" or "4,50 €", in the UI language, from the amount in
+/// the currency's smallest unit and its ISO 4217 code.
 fn price(amount: u64, currency: &str) -> String {
-    // Currencies without a smaller unit, as Stripe counts them.
-    const ZERO_DECIMAL: [&str; 16] = [
-        "bif", "clp", "djf", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf", "ugx", "vnd", "vuv",
-        "xaf", "xof", "xpf",
-    ];
-    let currency = currency.to_ascii_lowercase();
-    let number = if ZERO_DECIMAL.contains(&currency.as_str()) {
-        amount.to_string()
-    } else if amount.is_multiple_of(100) {
-        (amount / 100).to_string()
-    } else {
-        format!("{}.{:02}", amount / 100, amount % 100)
-    };
-    match currency.as_str() {
-        "eur" => format!("€{number}"),
-        "usd" => format!("${number}"),
-        "gbp" => format!("£{number}"),
-        "jpy" => format!("¥{number}"),
-        _ => format!("{} {number}", currency.to_ascii_uppercase()),
-    }
+    crate::number_format::money(amount, currency)
 }
 
 /// Show the code a new pairing returned, if the dialog still waits for it.
@@ -1265,7 +1245,7 @@ mod tests {
         assert_eq!(price(450, "EUR"), "€4.50");
         assert_eq!(price(4805, "usd"), "$48.05");
         assert_eq!(price(500, "jpy"), "¥500");
-        assert_eq!(price(400, "chf"), "CHF 4");
+        assert_eq!(price(400, "chf"), "CHF\u{a0}4");
         let plan = |interval: &str, amount| SyncPlan {
             id: interval.into(),
             amount,
