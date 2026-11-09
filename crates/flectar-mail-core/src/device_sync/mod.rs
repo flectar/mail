@@ -1390,6 +1390,9 @@ impl Core {
     /// Start a group with this device. Returns the 24 recovery words to show
     /// the user once.
     pub async fn device_sync_turn_on(&self, server_url: Option<String>) -> Result<String> {
+        // The keys go into the credential store: a store that can't hold
+        // them must fail here, before the server knows of this device.
+        credentials::check_available_async(self.credentials.clone()).await?;
         let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
         let http = self.sync_service().http.clone();
         // Starting over doesn't bring another free trial.
@@ -1416,6 +1419,9 @@ impl Core {
             // A mistyped word, caught before asking the server.
             return Err(sync_error(SyncError::UnknownRecoveryCode));
         }
+        // The keys go into the credential store: a store that can't hold
+        // them must fail here, before the server knows of this device.
+        credentials::check_available_async(self.credentials.clone()).await?;
         let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
         let client = SyncClient::recover(self.sync_service().http.clone(), &server_url, &words)
             .await
@@ -1537,6 +1543,9 @@ impl Core {
     /// Join with the QR code an existing device shows. Returns the pairing,
     /// which emits [`PairingEvent::Waiting`] and then how it ended.
     pub async fn device_sync_join_scanned(&self, qr_code: String) -> Result<u64> {
+        // The keys go into the credential store: a store that can't hold
+        // them must fail here, before the server knows of this device.
+        credentials::check_available_async(self.credentials.clone()).await?;
         let joining =
             Joining::scanned(self.sync_service().http.clone(), &qr_code).map_err(sync_error)?;
         Ok(self.finish_join(joining))
@@ -1549,6 +1558,9 @@ impl Core {
         server_url: Option<String>,
         code: String,
     ) -> Result<u64> {
+        // The keys go into the credential store: a store that can't hold
+        // them must fail here, before the server knows of this device.
+        credentials::check_available_async(self.credentials.clone()).await?;
         let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
         let joining = Joining::with_code(self.sync_service().http.clone(), &server_url, &code)
             .await
@@ -1562,6 +1574,9 @@ impl Core {
         &self,
         server_url: Option<String>,
     ) -> Result<PairingCode> {
+        // The keys go into the credential store: a store that can't hold
+        // them must fail here, before the server knows of this device.
+        credentials::check_available_async(self.credentials.clone()).await?;
         let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
         let (joining, qr) = Joining::show_qr_code(self.sync_service().http.clone(), &server_url)
             .await
