@@ -494,19 +494,23 @@ pub(crate) fn withdraw_before_exit(
     let (Some(core), Some(host)) = (core, host) else {
         return;
     };
+    // The time limits are set inside the runtime, whose timer they need: the
+    // window's loop has ended outside it.
     if host.withdraw_at_exit() {
-        let _ = runtime.block_on(tokio::time::timeout(
-            EXIT_WITHDRAW_LIMIT,
-            withdraw(&core, Some(host.as_ref()), Withdraw::All),
-        ));
+        let _ = runtime.block_on(async {
+            tokio::time::timeout(
+                EXIT_WITHDRAW_LIMIT,
+                withdraw(&core, Some(host.as_ref()), Withdraw::All),
+            )
+            .await
+        });
     }
     // Nothing keeps a desktop badge current once the app is gone; a phone's
     // stays, as its own background checks update it.
     if cfg!(desktop) && host.controls().badge {
-        let _ = runtime.block_on(tokio::time::timeout(
-            EXIT_WITHDRAW_LIMIT,
-            host.set_badge(None),
-        ));
+        let _ = runtime.block_on(async {
+            tokio::time::timeout(EXIT_WITHDRAW_LIMIT, host.set_badge(None)).await
+        });
     }
 }
 
@@ -1031,6 +1035,63 @@ mod tests {
             self.badges.lock().unwrap().push(badge);
             Box::pin(std::future::ready(()))
         }
+    }
+
+    /// A desktop's notification service that takes everything back as the
+    /// app leaves.
+    #[derive(Default)]
+    struct LeavingHost {
+        badges: Mutex<Vec<Option<Badge>>>,
+    }
+
+    impl NotificationHost for LeavingHost {
+        fn show(&self, alerts: Vec<Alert>) -> HostFuture<Vec<Result<(), Failure>>> {
+            Box::pin(std::future::ready(vec![Ok(()); alerts.len()]))
+        }
+
+        fn withdraw(&self, _ids: Vec<AlertId>) -> HostFuture<()> {
+            Box::pin(std::future::ready(()))
+        }
+
+        fn availability(&self) -> HostFuture<Availability> {
+            Box::pin(std::future::ready(Availability::Allowed))
+        }
+
+        fn withdraw_at_exit(&self) -> bool {
+            true
+        }
+
+        fn controls(&self) -> Controls {
+            Controls {
+                badge: true,
+                ..Controls::default()
+            }
+        }
+
+        fn set_badge(&self, badge: Option<Badge>) -> HostFuture<()> {
+            self.badges.lock().unwrap().push(badge);
+            Box::pin(std::future::ready(()))
+        }
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn leaving_takes_everything_back_from_outside_the_runtime() {
+        // As main.rs calls it, once the window's loop has ended.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let core = runtime
+            .block_on(Core::start(flectar_mail_core::config::Paths::for_tests(
+                profile.path(),
+            )))
+            .unwrap();
+        let host = Arc::new(LeavingHost::default());
+        let shared: Arc<dyn NotificationHost> = host.clone();
+        withdraw_before_exit(runtime.handle(), Some(Arc::new(core)), Some(shared));
+        assert_eq!(host.badges.lock().unwrap().as_slice(), [None]);
     }
 
     /// A window showing these accounts' Inbox, or none at all.
