@@ -50,6 +50,9 @@ pub(super) struct ComposeSession {
     quote: RefCell<Option<ComposeQuote>>,
     /// Draws the original read-only while it is shown, as the reader does.
     quote_renderer: RefCell<Option<GpuEmailRenderer>>,
+    /// The original could not be drawn, even as text; it is not tried again
+    /// until it changes.
+    quote_unavailable: Cell<bool>,
     send_action: Cell<Option<i64>>,
     picking: Cell<bool>,
     /// The signature block this composer inserted, while the user has not
@@ -487,6 +490,7 @@ impl Composers {
             intent: RefCell::default(),
             quote: RefCell::default(),
             quote_renderer: RefCell::default(),
+            quote_unavailable: Cell::new(false),
             send_action: Cell::new(None),
             picking: Cell::new(false),
             signature: RefCell::default(),
@@ -888,6 +892,9 @@ impl ComposeSession {
             }
             return;
         };
+        if self.quote_unavailable.get() {
+            return;
+        }
         let Some(composers) = self.composers() else {
             return;
         };
@@ -916,12 +923,25 @@ impl ComposeSession {
                 crate::compose_editor::FONT_SIZE_LOGICAL,
                 quote.html
             );
-            match renderer.prepare_email_html(&html, false) {
+            // An original the renderer can't lay out shows as its text, as
+            // the reader shows such a message; what is sent stays the same.
+            let prepared = renderer.prepare_email_html(&html, false).or_else(|error| {
+                tracing::warn!(%error, "quoted message shown as text");
+                let mut text = format!(
+                    "<body style=\"margin:8px 0;font-size:{}px\"><div style=\"white-space:pre-wrap\">",
+                    crate::compose_editor::FONT_SIZE_LOGICAL
+                );
+                crate::email_document::append_escaped(&mut text, &quote.plain);
+                text.push_str("</div></body>");
+                renderer.prepare_email_html(&text, false)
+            });
+            match prepared {
                 Ok(prepared) => {
                     renderer.set_auto_fit(true);
                     renderer.set_email(prepared);
                 }
                 Err(error) => {
+                    self.quote_unavailable.set(true);
                     ui.set_notice(
                         UiMessage::detail("Could not show the quoted message: {}", error),
                         true,
@@ -1383,6 +1403,7 @@ impl ComposeSession {
         ui.set_quote_tiles(ModelRc::default());
         ui.set_quote_height(0.0);
         *self.quote_renderer.borrow_mut() = None;
+        self.quote_unavailable.set(false);
         *self.quote.borrow_mut() = quote;
     }
 
@@ -2605,5 +2626,30 @@ mod tests {
         session.remove_quote();
         assert_eq!(ui.get_quote(), "");
         assert!(session.quote.borrow().is_none());
+    }
+
+    #[test]
+    fn an_original_the_renderer_cannot_lay_out_shows_as_text() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.invoke_open_compose("".into());
+        let session = composers.in_app().unwrap();
+        let host = session.host().unwrap();
+        let ui = host.ui();
+        ui.set_editor_width(600.0);
+        ui.set_editor_viewport_height(400.0);
+        // An image at a relative address, which the renderer cannot resolve.
+        let quote =
+            ComposeQuote::reply("Maya wrote:", "Hello", Some("<p>Hello</p><img src=\"x\">"));
+        session.set_quote(&ui, Some(quote));
+        ui.set_quote_expanded(true);
+        session.layout_changed();
+        assert!(ui.get_quote_tiles().row_count() > 0);
+        assert!(!ui.get_notice_is_error());
+        assert!(!session.quote_unavailable.get());
     }
 }
