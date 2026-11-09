@@ -97,9 +97,17 @@ fn picked(
     let (hour, minute) = date_format::current()
         .parse_time(time.trim())
         .ok_or("invalid")?;
+    let naive = date.and_hms_opt(hour, minute, 0).ok_or("invalid")?;
+    // A time the clocks skip as they go forward is that time after the
+    // change, as calendars take it.
     let at = Local
-        .from_local_datetime(&date.and_hms_opt(hour, minute, 0).ok_or("invalid")?)
+        .from_local_datetime(&naive)
         .earliest()
+        .or_else(|| {
+            Local
+                .from_local_datetime(&(naive + chrono::Duration::hours(1)))
+                .earliest()
+        })
         .ok_or("invalid")?;
     if at <= now + chrono::Duration::minutes(1) {
         return Err("past");
@@ -219,6 +227,16 @@ pub(super) fn ask(
     );
 }
 
+/// Whether the preset at `index` is a time the clock passed while the
+/// picker was open, as "Later today" can.
+fn passed(picker: &RefCell<Picker>, index: i32, now: chrono::DateTime<Local>) -> bool {
+    usize::try_from(index)
+        .ok()
+        .and_then(|index| picker.borrow().presets.get(index).copied())
+        .flatten()
+        .is_some_and(|at| at <= now)
+}
+
 /// The picker's answer to its open question: the preset at `index`, or
 /// "Don't remind me" as `None`. The question is answered only once.
 fn chosen(
@@ -239,7 +257,16 @@ pub(super) fn attach(window: &ComposerWindow) -> PickerState {
     let picker = PickerState::default();
     let ui = window.global::<WhenUi>();
     let choose_picker = Rc::clone(&picker);
+    let weak = window.as_weak();
     ui.on_choose(move |index| {
+        if passed(&choose_picker, index, Local::now()) {
+            if let Some(window) = weak.upgrade() {
+                let ui = window.global::<WhenUi>();
+                ui.set_error("past".into());
+                ui.set_open(true);
+            }
+            return;
+        }
         if let Some((Picking::Composer(asking), at)) = chosen(&choose_picker, index) {
             composer::answered(asking, at);
         }
@@ -411,6 +438,13 @@ pub(super) fn register(
         let Some(app) = weak.upgrade() else {
             return;
         };
+        // Asked again, saying the time has passed.
+        if passed(&choose_picker, index, Local::now()) {
+            let ui = app.global::<WhenUi>();
+            ui.set_error("past".into());
+            ui.set_open(true);
+            return;
+        }
         let Some((picking, at)) = chosen(&choose_picker, index) else {
             return;
         };
@@ -684,6 +718,23 @@ mod tests {
         assert_eq!(presets[0].1, local(2026, 11, 5, 8));
         assert_eq!(presets[1].1, local(2026, 11, 7, 8));
         assert_eq!(presets[2].1, local(2026, 11, 11, 8));
+    }
+
+    #[test]
+    fn a_preset_the_clock_passed_is_asked_again() {
+        let now = local(2026, 11, 9, 18);
+        let picker = RefCell::new(Picker {
+            picking: Picking::Nothing,
+            presets: vec![
+                Some(local(2026, 11, 9, 18)),
+                Some(local(2026, 11, 10, 8)),
+                None,
+            ],
+        });
+        assert!(passed(&picker, 0, now));
+        assert!(!passed(&picker, 1, now));
+        assert!(!passed(&picker, 2, now), "\"Don't remind me\" has no time");
+        assert!(!passed(&picker, 7, now));
     }
 
     #[test]

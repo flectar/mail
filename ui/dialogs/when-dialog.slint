@@ -298,6 +298,7 @@ export component WhenDialog inherits Rectangle {
                             text <=> WhenUi.date;
                             placeholder-text: "YYYY-MM-DD";
                             input-label: @tr("Date");
+                            accepted => { root.pick(); }
                         }
                         LineEdit {
                             width: 110px;
@@ -305,6 +306,7 @@ export component WhenDialog inherits Rectangle {
                             text <=> WhenUi.time;
                             placeholder-text: WhenUi.time-placeholder;
                             input-label: @tr("Time");
+                            accepted => { root.pick(); }
                         }
                     }
                     Button {
