@@ -33,10 +33,18 @@ pub(super) struct PreparedMessageCompose {
     /// What the editor starts with.
     pub body: String,
     /// A message edited as new keeps its formatting when this is its own.
-    pub body_html: Option<String>,
+    pub saved: Option<SavedBody>,
     /// The original a reply or forward carries below the editor.
     pub quote: Option<ComposeQuote>,
     pub intent: ComposeIntent,
+}
+
+/// A message as it was sent: its HTML, and the plain text that has to say
+/// the same for the HTML's formatting to be kept.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SavedBody {
+    pub html: String,
+    pub text: String,
 }
 
 /// Prepares a reply or forward, or a message edited as new. `translate`
@@ -82,7 +90,10 @@ pub(super) fn prepare_message_compose(
             cc: join_addresses(&source.cc),
             subject: source.subject.clone(),
             body: original_body.trim_end().to_owned(),
-            body_html: source.html_body.clone(),
+            saved: source.html_body.clone().map(|html| SavedBody {
+                html,
+                text: source.text_body.clone(),
+            }),
             quote: None,
             intent: ComposeIntent::default(),
         });
@@ -116,7 +127,7 @@ pub(super) fn prepare_message_compose(
             cc: String::new(),
             subject: prefixed_subject(&source.subject, "Fwd"),
             body: String::new(),
-            body_html: None,
+            saved: None,
             quote: Some(quote),
             intent: ComposeIntent {
                 mode: "forward".to_owned(),
@@ -163,7 +174,7 @@ pub(super) fn prepare_message_compose(
         cc,
         subject: prefixed_subject(&source.subject, "Re"),
         body: String::new(),
-        body_html: None,
+        saved: None,
         quote: Some(quote),
         intent: ComposeIntent {
             mode: action.to_owned(),
@@ -743,6 +754,17 @@ mod tests {
         let prepared = prepare_message_compose(&sent, "edit_as_new", "", english).unwrap();
         assert_eq!(prepared.sender_email, "work@example.net");
         assert_eq!(prepared.body, "First line\nSecond line");
+        assert!(prepared.saved.is_none(), "no HTML to keep");
+
+        // Its HTML comes with the plain text it was sent with, which the
+        // HTML has to match for its formatting to be kept.
+        sent.html_body = Some("<div>First line</div><div>Second line</div>".to_owned());
+        let prepared =
+            prepare_message_compose(&sent, "edit_as_new", "Rendered body", english).unwrap();
+        let saved = prepared.saved.unwrap();
+        assert_eq!(saved.html, "<div>First line</div><div>Second line</div>");
+        assert_eq!(saved.text, sent.text_body);
+        assert_eq!(prepared.body, "Rendered body");
     }
 
     #[test]

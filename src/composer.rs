@@ -654,18 +654,30 @@ impl Composers {
         ui.set_cc(prepared.cc.into());
         ui.set_bcc("".into());
         ui.set_subject(prepared.subject.into());
-        {
+        let quote = {
             let mut document = session.document.borrow_mut();
-            // A message edited as new keeps the formatting it was sent with.
-            let reopened = prepared
-                .body_html
-                .as_deref()
-                .and_then(|html| document.load_html(html, &prepared.body));
-            if reopened.is_none() {
+            // A message edited as new keeps the formatting, and the original
+            // a reply quoted, that it was sent with.
+            let saved = prepared.saved.as_ref();
+            let split = saved.and_then(|saved| {
+                ComposeQuote::split_saved(&saved.html, &saved.text, |own| {
+                    if own.trim().is_empty() {
+                        document.load("", 0, 0);
+                        return Some(0);
+                    }
+                    document.load_html_start(own, &saved.text)
+                })
+            });
+            if split.is_none()
+                && saved
+                    .and_then(|saved| document.load_html(&saved.html, &saved.text))
+                    .is_none()
+            {
                 document.load(&prepared.body, 0, 0);
             }
-        }
-        session.set_quote(&ui, prepared.quote);
+            split
+        };
+        session.set_quote(&ui, prepared.quote.or(quote));
         *session.intent.borrow_mut() = prepared.intent;
         session.show(action, Some(prepared.sender_email));
         // A forward, and a message edited as new, carry the original's files.
