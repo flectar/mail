@@ -1,7 +1,7 @@
 //! Raw FFI surface for the OpenHarmony APIs this backend uses.
 //!
 //! Every structure and signature below mirrors the OHOS NDK headers shipped in
-//! `$OHOS_SDK/native/sysroot/usr/include` (SDK 26.0.0.18):
+//! `$OHOS_SDK/native/sysroot/usr/include` (SDK 26.0.0, API 26):
 //!
 //! - `ace/xcomponent/native_interface_xcomponent.h` (XComponent surface + touch)
 //! - `native_window/external_window.h` (`OHNativeWindow*` buffer queue)

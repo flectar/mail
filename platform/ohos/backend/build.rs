@@ -12,13 +12,20 @@ fn main() {
     if let Ok(sdk_native) = std::env::var("OHOS_SDK_NATIVE") {
         candidates.push(format!("{sdk_native}/sysroot/usr/lib/aarch64-linux-ohos"));
     }
+    // The full SDK ships its native component next to `ets`/`toolchains`.
+    // Prefer it over a versioned Cellar path so upgrading the SDK package does
+    // not require editing this build script.
+    if let Ok(sdk_root) = std::env::var("OHOS_SDK_ROOT") {
+        candidates.push(format!(
+            "{sdk_root}/native/sysroot/usr/lib/aarch64-linux-ohos"
+        ));
+    }
     if let Ok(home) = std::env::var("HOME") {
         candidates.push(format!(
             "{home}/.harmonybrew/opt/ohos-sdk-native/sysroot/usr/lib/aarch64-linux-ohos"
         ));
-        // The versioned Cellar path as a fallback for hosts without `opt` links.
         candidates.push(format!(
-            "{home}/.harmonybrew/Cellar/ohos-sdk-native/26.0.0.18/sysroot/usr/lib/aarch64-linux-ohos"
+            "{home}/.harmonybrew/opt/ohos-sdk/native/sysroot/usr/lib/aarch64-linux-ohos"
         ));
     }
 
@@ -29,4 +36,5 @@ fn main() {
     }
 
     println!("cargo:rerun-if-env-changed=OHOS_SDK_NATIVE");
+    println!("cargo:rerun-if-env-changed=OHOS_SDK_ROOT");
 }
