@@ -1149,15 +1149,33 @@ impl ComposeSession {
     }
 
     /// A message's own window returns the memory input leaves behind once
-    /// it goes still, as the main window does, and keeps no pixels while
-    /// it is minimized.
+    /// it goes still, as the main window does, keeps no pixels while it is
+    /// minimized, and quits the app for Control+Q as the main window does.
     #[cfg(desktop)]
     fn watch_window(self: &Rc<Self>, window: &ComposerWindow) {
         let session = self.reference();
+        #[cfg(linux_desktop)]
+        let modifiers = std::cell::Cell::new(winit::keyboard::ModifiersState::empty());
         window.window().on_winit_window_event(move |native, event| {
             use winit::event::WindowEvent;
             if !matches!(event, WindowEvent::RedrawRequested) {
                 crate::memory::release_free_heap_when_idle();
+            }
+            #[cfg(linux_desktop)]
+            match event {
+                WindowEvent::ModifiersChanged(state) => modifiers.set(state.state()),
+                WindowEvent::KeyboardInput { event, .. } => {
+                    let app = session
+                        .upgrade()
+                        .and_then(|session| session.composers())
+                        .and_then(|composers| composers.app.upgrade());
+                    if let Some(app) = app
+                        && crate::window_chrome::quit_key(&app, event, modifiers.get())
+                    {
+                        return EventResult::PreventDefault;
+                    }
+                }
+                _ => {}
             }
             if matches!(
                 event,
