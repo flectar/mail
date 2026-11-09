@@ -163,7 +163,12 @@ export component EmailComposer inherits Rectangle {
     }
     changed editor-width => { root.editor-layout-changed(); }
     changed editor-viewport-height => { root.editor-layout-changed(); }
-    changed editor-scroll-y => { editor-scroll-layout-timer.restart(); }
+    // `restart` alone only re-arms a timer that has run before, so without
+    // `start` nothing drew the text scrolled into view.
+    changed editor-scroll-y => {
+        editor-scroll-layout-timer.start();
+        editor-scroll-layout-timer.restart();
+    }
     changed editor-preedit-text => {
         if (root.editor-preedit-text != "") {
             root.ime-edit-pending = true;
