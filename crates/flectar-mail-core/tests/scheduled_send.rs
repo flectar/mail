@@ -171,6 +171,49 @@ async fn inbox(core: &Core) -> Vec<ThreadSummary> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_send_takes_its_reply_reminder() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = Paths::for_tests(tmp.path());
+    paths.ensure().unwrap();
+    let db = Db::open(&paths.db_file()).unwrap();
+    let account_id = seed(&db, dead_port()).await;
+    let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+    let reminders = || {
+        let db = db.clone();
+        async move {
+            db.read(|conn| repo::reply_reminders::all(conn))
+                .await
+                .unwrap()
+                .len()
+        }
+    };
+
+    let draft_id = draft(&core, account_id).await;
+    core.queue_send(QueueSendArgs {
+        draft_id,
+        send_at: Some(now_ms() + 3_600_000),
+        remind_at: Some(now_ms() + 3 * 24 * 3_600_000),
+    })
+    .await
+    .expect("schedule");
+    assert_eq!(reminders().await, 1);
+    assert!(core.cancel_scheduled_send(draft_id).await.unwrap());
+    assert_eq!(reminders().await, 0, "nothing waits for a reply to it");
+
+    // Scheduled again with one, then deleted: it goes too.
+    core.queue_send(QueueSendArgs {
+        draft_id,
+        send_at: Some(now_ms() + 3_600_000),
+        remind_at: Some(now_ms() + 3 * 24 * 3_600_000),
+    })
+    .await
+    .expect("schedule");
+    assert_eq!(reminders().await, 1);
+    core.delete_draft(draft_id).await.unwrap();
+    assert_eq!(reminders().await, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_reply_reminder_goes_with_the_send_and_brings_the_conversation_back() {
     let tmp = tempfile::tempdir().unwrap();
     let paths = Paths::for_tests(tmp.path());

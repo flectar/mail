@@ -4641,17 +4641,49 @@ impl Core {
     }
 
     pub async fn cancel_send(&self, action_id: i64) -> Result<bool> {
-        if self
+        let draft_id: Option<i64> = self
+            .db
+            .read(move |conn| {
+                Ok(conn
+                    .query_row(
+                        "SELECT message_id FROM pending_actions WHERE id = ?1",
+                        [action_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .flatten())
+            })
+            .await?;
+        let cancelled = if self
             .db
             .read(move |conn| repo::actions::is_held_on_server(conn, action_id))
             .await?
         {
             self.unhold_send(action_id).await?;
-            return Ok(true);
+            true
+        } else {
+            self.db
+                .write(move |conn| repo::actions::try_cancel(conn, action_id))
+                .await?
+        };
+        if cancelled && let Some(draft_id) = draft_id {
+            self.forget_reply_reminder(draft_id).await;
         }
-        self.db
-            .write(move |conn| repo::actions::try_cancel(conn, action_id))
+        Ok(cancelled)
+    }
+
+    /// A send that won't go out takes its reply reminder with it, on every
+    /// device.
+    async fn forget_reply_reminder(&self, draft_id: i64) {
+        match self
+            .db
+            .write(move |conn| repo::reply_reminders::forget_draft(conn, draft_id))
             .await
+        {
+            Ok(true) => self.device_sync_now(),
+            Ok(false) => {}
+            Err(error) => tracing::warn!(%error, "could not forget a reply reminder"),
+        }
     }
 
     /// Cancel a send its account's JMAP server holds: the server confirms it
@@ -4847,6 +4879,7 @@ impl Core {
             .await?
         {
             self.unhold_send(action).await?;
+            self.forget_reply_reminder(draft_id).await;
             return Ok(true);
         }
         let (cancelled, thread, shared) = self
@@ -4888,6 +4921,9 @@ impl Core {
         }
         if shared {
             self.device_sync_now();
+        }
+        if cancelled {
+            self.forget_reply_reminder(draft_id).await;
         }
         Ok(cancelled)
     }
@@ -5520,6 +5556,7 @@ impl Core {
         {
             self.unhold_send(action).await?;
         }
+        self.forget_reply_reminder(draft_id).await;
         let (thread_id, nudge_account, staged_paths) = self
             .db
             .write(move |conn| {
