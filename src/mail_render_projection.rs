@@ -160,7 +160,7 @@ pub(super) fn apply_email(
     app.set_selected_to(email.to.clone().into());
     app.set_selected_label(email.label.clone().into());
     app.set_selected_is_draft(
-        email.folder == "Drafts" || email.folder == "Scheduled" || email.label == "DRAFT",
+        email.folder == "Drafts" || email.send_at.is_some() || email.label == "DRAFT",
     );
     // In the Scheduled view: when the draft goes out, or why it did not.
     let send_later = app.global::<SendLaterUi>();

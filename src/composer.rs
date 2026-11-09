@@ -728,7 +728,7 @@ impl Composers {
     }
 
     fn open_draft(self: &Rc<Self>, app: &AppWindow, core: &CoreMailSource, row: &MailMessage) {
-        if row.folder != "Drafts" && row.folder != "Scheduled" && row.label != "DRAFT" {
+        if row.folder != "Drafts" && row.send_at.is_none() && row.label != "DRAFT" {
             app.set_render_status(UiMessage::plain("Only drafts can be reopened for editing."));
             return;
         }
