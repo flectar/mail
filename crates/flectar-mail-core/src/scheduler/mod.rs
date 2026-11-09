@@ -18,8 +18,10 @@ const TICK_SECS: u64 = 5;
 /// How often reply reminders are checked.
 const REMINDER_CHECK_MS: i64 = 30_000;
 /// A reply reminder whose message never arrived on this device is
-/// forgotten this long after its time.
-const REMINDER_STALE_MS: i64 = 30 * 24 * 60 * 60_000;
+/// forgotten this long after its time: long enough that a device that never
+/// gets the message, such as one without a POP3 account's Sent copy,
+/// doesn't end the reminder for the device that sent it.
+const REMINDER_STALE_MS: i64 = 365 * 24 * 60 * 60_000;
 
 pub fn spawn(
     db: Db,

@@ -183,6 +183,35 @@ pub fn delete(conn: &Connection, sync_id: &str) -> Result<Option<i64>> {
     Ok(thread.flatten())
 }
 
+/// Forget the reminder of the message a draft would send: its send was
+/// cancelled or undone, or the draft deleted. Returns whether one went.
+pub fn forget_draft(conn: &Connection, draft_id: i64) -> Result<bool> {
+    let named: Option<(i64, Option<String>)> = conn
+        .query_row(
+            "SELECT account_id, message_id FROM messages WHERE id = ?1 AND is_draft = 1",
+            params![draft_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((account_id, Some(message_id))) = named else {
+        return Ok(false);
+    };
+    let sync_id: Option<String> = conn
+        .query_row(
+            "SELECT sync_id FROM reply_reminders WHERE account_id = ?1 AND message_id = ?2",
+            params![account_id, message_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match sync_id {
+        Some(sync_id) => {
+            delete(conn, &sync_id)?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
 /// Forget the reminders of a conversation, here and on the user's other
 /// devices: the user dismissed them, or the conversation went away.
 /// `due_only` keeps the reminders still waiting for their time, as when the
@@ -244,6 +273,11 @@ pub fn check(conn: &Connection, now_ms: i64) -> Result<Checked> {
             )
             .optional()?;
         let Some((thread_id, sent_at)) = sent else {
+            // Its mail went from here, deleted with its conversation: it
+            // waits no more, and nothing checks it again.
+            if reminder.due_at.is_some() {
+                settle(conn, &reminder.sync_id)?;
+            }
             continue;
         };
         if replied(conn, thread_id, sent_at)? {
@@ -366,6 +400,38 @@ mod tests {
             |row| row.get(0),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn a_due_reminder_whose_mail_went_stops_waiting() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        sent(&conn);
+        set(&conn, 1, "offer@test.dev", 5000).unwrap();
+        check(&conn, 5000).unwrap();
+        assert!(any_due(&conn).unwrap());
+        conn.execute("DELETE FROM messages WHERE thread_id = 7", [])
+            .unwrap();
+        check(&conn, 6000).unwrap();
+        assert!(!any_due(&conn).unwrap(), "nothing checks it every tick");
+    }
+
+    #[test]
+    fn a_draft_whose_send_ends_takes_its_reminder() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        sent(&conn);
+        conn.execute(
+            "INSERT INTO messages (id, thread_id, account_id, folder_id, message_id, subject,
+             from_addr, date, is_read, is_draft, is_outgoing)
+             VALUES (40, 7, 1, 2, 'later@test.dev', 'Later', 'me@test.dev', 2000, 1, 1, 1)",
+            [],
+        )
+        .unwrap();
+        set(&conn, 1, "later@test.dev", 5000).unwrap();
+        assert!(forget_draft(&conn, 40).unwrap());
+        assert!(all(&conn).unwrap().is_empty());
+        assert!(!forget_draft(&conn, 40).unwrap());
     }
 
     #[test]
