@@ -635,10 +635,19 @@ fn make_sidebar_rows(
                 .iter()
                 .position(|row| row.mailbox.is_account)
                 .map_or(0, |found| found + 1);
-            let snoozed = after(&rows, ":Starred").unwrap_or(header);
-            rows.insert(snoozed, row(SidebarRowKind::Snoozed, "snoozed"));
-            let scheduled = after(&rows, ":Sent").unwrap_or(snoozed + 1);
-            rows.insert(scheduled, row(SidebarRowKind::Scheduled, "scheduled"));
+            // They are the account's rows: a collapsed account hides them.
+            let open = rows
+                .iter()
+                .find(|row| row.mailbox.is_account)
+                .is_none_or(|account| {
+                    !collapsed.contains(&format!("account:{}", account.mailbox.account_id))
+                });
+            if open {
+                let snoozed = after(&rows, ":Starred").unwrap_or(header);
+                rows.insert(snoozed, row(SidebarRowKind::Snoozed, "snoozed"));
+                let scheduled = after(&rows, ":Sent").unwrap_or(snoozed + 1);
+                rows.insert(scheduled, row(SidebarRowKind::Scheduled, "scheduled"));
+            }
             rows.extend(shared);
             rows.extend(local);
             rows
@@ -930,6 +939,32 @@ mod tests {
             make_filtered_sidebar_rows(mailboxes.clone(), Vec::new(), "folder", &HashSet::new());
         assert_eq!(filtered[0].kind, Kind::Account);
         assert_eq!(filtered[0].mailbox.count, "");
+    }
+
+    #[test]
+    fn a_collapsed_single_account_hides_its_snoozed_and_scheduled_too() {
+        let mailboxes = accounts(1, 7);
+        let account = mailboxes
+            .iter()
+            .find(|mailbox| mailbox.is_account)
+            .unwrap()
+            .account_id;
+        let shown = |collapsed: HashSet<String>| {
+            make_sidebar_rows(
+                SidebarLayout::SingleAccount,
+                accounts(1, 7),
+                vec![],
+                vec![],
+                &HashSet::new(),
+                &collapsed,
+                None,
+            )
+            .iter()
+            .filter(|row| matches!(row.kind, Kind::Snoozed | Kind::Scheduled))
+            .count()
+        };
+        assert_eq!(shown(HashSet::new()), 2);
+        assert_eq!(shown(HashSet::from([format!("account:{account}")])), 0);
     }
 
     #[test]
