@@ -47,6 +47,21 @@ use serde_json::{Value, json};
 
 /// How long a share goes without reading the credential store again.
 const RECHECK_MS: i64 = 24 * 60 * 60 * 1000;
+/// How long a new sign-in waits after the credential store couldn't be read,
+/// such as a locked keyring, so it isn't asked on every check.
+const READ_RETRY_MS: i64 = 5 * 60 * 1000;
+
+/// Whether to read a share's sign-in from the credential store now: a day
+/// after the last look, or a new sign-in here at once, unless the store
+/// couldn't be read for it a moment ago.
+fn due(share: &Share, now: i64) -> bool {
+    let wait = if share.fresh {
+        READ_RETRY_MS
+    } else {
+        RECHECK_MS
+    };
+    now - share.checked_at >= wait
+}
 
 /// A working sign-in the group has goes round again from a device where it
 /// works once it is this old: each device refreshes its own, and Microsoft
@@ -381,7 +396,7 @@ impl Core {
                     family: family.into(),
                     ..Share::default()
                 });
-            if !share.fresh && now - share.checked_at < RECHECK_MS {
+            if !due(&share, now) {
                 continue;
             }
             // A sign-in this device cannot use itself stays here.
@@ -409,14 +424,30 @@ impl Core {
             // Nothing stored here, such as for an account waiting for its
             // sign-in, shares nothing; nor does a sign-in only this device
             // can use.
-            let stored = credentials::load_async(
+            let stored = match credentials::load_async(
                 self.credentials.clone(),
                 candidate.id,
                 candidate.kind.slot(),
             )
             .await
-            .ok()
-            .filter(|secret| travels(candidate.kind, secret));
+            {
+                Ok(secret) => Some(secret).filter(|secret| travels(candidate.kind, secret)),
+                Err(error) if credentials::is_missing(&error) => None,
+                // Not readable now: a new sign-in stays new, for the next try.
+                Err(error) => {
+                    tracing::debug!(%error, "could not read a sign-in to share");
+                    share.checked_at = now;
+                    let saved = share.clone();
+                    if let Err(error) = self
+                        .db
+                        .write(move |conn| repo::sign_ins::put_share(conn, &saved))
+                        .await
+                    {
+                        tracing::warn!(%error, "could not keep a sign-in share");
+                    }
+                    continue;
+                }
+            };
             if let Some(secret) = stored {
                 let Ok(digest) = fingerprint(secrets, secret.as_bytes()) else {
                     return;
@@ -659,6 +690,26 @@ mod tests {
     use super::*;
     use flectar_mail_sync_client::DeviceIdentity;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn a_new_sign_in_is_read_at_once_and_again_soon_after_a_failed_read() {
+        let now = 10 * RECHECK_MS;
+        // Signed in anew here: read at the next run.
+        let mut share = Share {
+            fresh: true,
+            checked_at: 0,
+            ..Share::default()
+        };
+        assert!(due(&share, now));
+        // The store couldn't be read: it stays new, for a few minutes on.
+        share.checked_at = now;
+        assert!(!due(&share, now + 1));
+        assert!(due(&share, now + READ_RETRY_MS));
+        // Shared: looked at again the next day.
+        share.fresh = false;
+        assert!(!due(&share, now + READ_RETRY_MS));
+        assert!(due(&share, now + RECHECK_MS));
+    }
 
     fn secrets(epochs: &[(u64, u8)]) -> Secrets {
         let mut roots = BTreeMap::new();
