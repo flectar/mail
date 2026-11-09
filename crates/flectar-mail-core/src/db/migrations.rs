@@ -58,6 +58,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/039_jmap_delayed_send.sql")),
     Migration::Plain(include_str!("migrations/040_sign_in_sync.sql")),
     Migration::Plain(include_str!("migrations/041_synced_send_turns.sql")),
+    Migration::Plain(include_str!("migrations/042_send_indexes.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

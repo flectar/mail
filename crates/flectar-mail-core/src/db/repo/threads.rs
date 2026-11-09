@@ -395,13 +395,15 @@ fn build_filter(
         View::Starred if messages => where_clauses.push("m.is_starred = 1".into()),
         View::Starred => where_clauses.push("t.starred_count > 0".into()),
         View::Snoozed => where_clauses.push("s.thread_id IS NOT NULL".into()),
+        // From the few scheduled sends, rather than every conversation.
         View::Scheduled if messages => where_clauses.push(format!(
-            "m.is_draft = 1 AND EXISTS (SELECT 1 FROM pending_actions pa
-               WHERE pa.message_id = m.id AND {SCHEDULED_SEND})"
+            "m.is_draft = 1 AND m.id IN (SELECT pa.message_id FROM pending_actions pa
+               WHERE {SCHEDULED_SEND})"
         )),
         View::Scheduled => where_clauses.push(format!(
-            "EXISTS (SELECT 1 FROM messages m JOIN pending_actions pa ON pa.message_id = m.id
-               WHERE m.thread_id = t.id AND m.is_draft = 1 AND {SCHEDULED_SEND})"
+            "t.id IN (SELECT m.thread_id FROM pending_actions pa
+               JOIN messages m ON m.id = pa.message_id
+               WHERE m.is_draft = 1 AND {SCHEDULED_SEND})"
         )),
         View::Sent => {
             let c = role_exists(roles::SENT, &mut bind);
