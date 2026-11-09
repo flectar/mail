@@ -59,6 +59,7 @@ pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::err
         external_urls: crate::ExternalUrlOpener::default()
             .with_authorization(move |url| authorize.authorize(url)),
         notifications: None,
+        privacy_consent: crate::PrivacyConsent::default(),
         paths: flectar_mail_core::config::Paths::new(
             root.join("Library/Application Support/Flectar"),
             root.join("Library/Caches/Flectar"),
