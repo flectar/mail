@@ -51,6 +51,7 @@ export component EmailComposer inherits Rectangle {
     in property <bool> can-pop-out: false;
     // "reply" or "forward" when the original goes below the editor.
     in property <string> quote: "";
+    in property <string> quote-text: "";
     in-out property <bool> quote-expanded: false;
     in property <[ComposeEditorTile]> quote-tiles: [];
     in property <float> quote-height: 0;
@@ -594,6 +595,17 @@ export component EmailComposer inherits Rectangle {
                     image-rendering: smooth;
                     visible: root.quote-expanded;
                     accessible-role: none;
+                }
+
+                // The drawn original reads out as its text, as the reader's
+                // message does.
+                if root.quote != "" && root.quote-expanded : Rectangle {
+                    x: 18px;
+                    y: root.quote-top;
+                    width: root.editor-width;
+                    height: root.quote-height * 1px;
+                    accessible-role: text;
+                    accessible-label: root.quote-text;
                 }
 
                 Rectangle {

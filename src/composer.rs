@@ -409,6 +409,7 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_code_active(from.get_code_active());
     to.set_active_link_url(from.get_active_link_url());
     to.set_quote(from.get_quote());
+    to.set_quote_text(from.get_quote_text());
     to.set_quote_expanded(from.get_quote_expanded());
     to.set_quote_height(from.get_quote_height());
 }
@@ -1066,6 +1067,7 @@ impl ComposeSession {
         ui.set_subject("".into());
         ui.set_body("".into());
         ui.set_quote("".into());
+        ui.set_quote_text("".into());
         ui.set_quote_expanded(false);
         ui.set_quote_tiles(ModelRc::default());
         ui.set_quote_height(0.0);
@@ -1441,6 +1443,11 @@ impl ComposeSession {
             Some(_) => "reply".into(),
             None => "".into(),
         });
+        ui.set_quote_text(
+            quote
+                .as_ref()
+                .map_or_else(SharedString::new, |quote| quote.plain.as_str().into()),
+        );
         // A reply's original stays out of the way; a forward is what the
         // message is about, so it starts open.
         ui.set_quote_expanded(quote.as_ref().is_some_and(|quote| quote.forward));

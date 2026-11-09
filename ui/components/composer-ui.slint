@@ -42,6 +42,8 @@ export global ComposerUi {
     // "reply" or "forward" while the message carries the original below the
     // editor; empty otherwise.
     in property <string> quote: "";
+    // The original as text, for screen readers.
+    in property <string> quote-text: "";
     in-out property <bool> quote-expanded: false;
     // The original, drawn read-only by the reader's renderer.
     in property <[ComposeEditorTile]> quote-tiles: [];
@@ -113,6 +115,7 @@ export component BoundComposer inherits EmailComposer {
     active-link-url: ComposerUi.active-link-url;
     can-pop-out: ComposerUi.can-pop-out;
     quote: ComposerUi.quote;
+    quote-text: ComposerUi.quote-text;
     quote-expanded <=> ComposerUi.quote-expanded;
     quote-tiles: ComposerUi.quote-tiles;
     quote-height: ComposerUi.quote-height;
