@@ -166,6 +166,10 @@ export component EmailComposer inherits Rectangle {
             // The typing proxy starts where the visible caret is.
             body-input.set-selection-offsets(root.selection-start, root.selection-end);
             root.editor-layout-changed();
+            // The recipients' row takes focus only while it is empty.
+            if root.to != "" {
+                body-input.focus();
+            }
         }
     }
     changed editor-width => { root.editor-layout-changed(); }
@@ -460,11 +464,16 @@ export component EmailComposer inherits Rectangle {
                         root.input-caret-x = position.x;
                         root.input-caret-y = position.y;
                         root.caret-visible = true;
-                        root.selection-changed(
-                            self.text,
-                            self.anchor-position-byte-offset,
-                            self.cursor-position_byte_offset,
-                        );
+                        // Only a focused proxy moves the caret for the user.
+                        // Unfocused it follows the document, and a new window's
+                        // would report the start as where the user is typing.
+                        if (self.has-focus) {
+                            root.selection-changed(
+                                self.text,
+                                self.anchor-position-byte-offset,
+                                self.cursor-position_byte_offset,
+                            );
+                        }
                         root.reveal-editor-caret();
                     }
                 }

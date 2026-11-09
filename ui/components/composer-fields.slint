@@ -345,7 +345,11 @@ export component ComposerRecipients inherits Rectangle {
 
     changed open => {
         if root.open {
-            to-row.focus();
+            // A message that already has recipients, such as a reply, a
+            // draft or one moved into its own window, goes on in its body.
+            if root.to == "" {
+                to-row.focus();
+            }
         } else {
             contact-popup.close();
         }
