@@ -12,8 +12,8 @@ use flectar_mail_core::{
     events::CoreEvent,
     models::{
         AccountSettings, Address, AuthKind, ConnectionSecurity, DraftAttachmentIn,
-        MailConnectionSettings, MailProtocol, PortableAccountConfig, Provider, QueueSendArgs,
-        SaveDraftArgs, now_ms, roles,
+        MailConnectionSettings, MailProfile, MailProtocol, PortableAccountConfig, Provider,
+        QueueSendArgs, SaveDraftArgs, now_ms, roles,
     },
 };
 use std::collections::HashMap;
@@ -445,6 +445,71 @@ fn runtime() -> tokio::runtime::Runtime {
         .enable_all()
         .build()
         .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_profile_takes_an_account_that_arrives_with_it() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let laptop = start_core(laptop_dir.path()).await;
+    let phone = start_core(phone_dir.path()).await;
+    laptop
+        .import_account_configs(vec![imap_account("work@example.com")])
+        .await
+        .unwrap();
+    let work = laptop.list_accounts().await.unwrap()[0].id;
+    let mut settings = laptop.get_settings().await.unwrap();
+    settings.mail_profiles = vec![MailProfile {
+        id: "work".into(),
+        name: "Work".into(),
+        color: "#3366ff".into(),
+        account_ids: vec![work],
+    }];
+    laptop.set_settings(settings).await.unwrap();
+    laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+    join_with_code(&laptop, &phone, &server.url).await;
+    assert!(phone.device_sync_run().await.unwrap());
+    let profile = |core: &Core| {
+        let core = core.clone();
+        async move {
+            core.get_settings().await.unwrap().mail_profiles[0]
+                .account_ids
+                .len()
+        }
+    };
+    assert_eq!(profile(&phone).await, 1);
+
+    // A new account goes into the profile on the laptop: the phone takes
+    // both in one run.
+    laptop
+        .import_account_configs(vec![imap_account("team@example.com")])
+        .await
+        .unwrap();
+    let team = laptop
+        .list_accounts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|account| account.email == "team@example.com")
+        .unwrap()
+        .id;
+    let mut settings = laptop.get_settings().await.unwrap();
+    settings.mail_profiles[0].account_ids.push(team);
+    laptop.set_settings(settings).await.unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+    phone.device_sync_run().await.unwrap();
+    assert_eq!(profile(&phone).await, 2);
+    // And never sends its older profile back.
+    phone.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    assert_eq!(profile(&laptop).await, 2);
 }
 
 #[test]

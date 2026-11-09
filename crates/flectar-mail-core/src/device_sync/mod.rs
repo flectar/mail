@@ -1002,7 +1002,7 @@ impl Core {
         });
         let clock: Arc<Clock> = Arc::clone(client.clock());
 
-        let (mut run, local_before, queued, adopting) = {
+        let (mut run, local_before, mirror_before, queued, adopting) = {
             let names = names.clone();
             let device_body = device_body.clone();
             let clock = Arc::clone(&clock);
@@ -1021,7 +1021,7 @@ impl Core {
                     };
                     let run = store::RunStore::load(&tx, &row, clock)?;
                     tx.commit()?;
-                    Ok((run, local, queued, row.adopting))
+                    Ok((run, local, mirror, queued, row.adopting))
                 })
                 .await?
         };
@@ -1045,8 +1045,14 @@ impl Core {
             self.db
                 .write(move |conn| {
                     let tx = conn.transaction()?;
-                    let local_now =
-                        collections::snapshot(&tx, &names, &run.mirror, (device_id, device_body))?;
+                    // Against the same mirror as at the start: what the run
+                    // pulled must not look like an edit made here meanwhile.
+                    let local_now = collections::snapshot(
+                        &tx,
+                        &names,
+                        &mirror_before,
+                        (device_id, device_body),
+                    )?;
                     run.save(&tx, &clock, now_ms())?;
                     let hashes = store::load_local_hashes(&tx)?;
                     let waiting: BTreeMap<RecordId, Entry> = run
