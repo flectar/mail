@@ -230,6 +230,8 @@ struct Fixture {
     ctx: SyncCtx,
     config: AccountConfig,
     server: Shared,
+    /// What the account's worker keeps between sessions.
+    catch_up: Mutex<Option<HashSet<String>>>,
 }
 
 async fn fixture(maildrop: Vec<Stored>) -> Fixture {
@@ -294,12 +296,35 @@ async fn fixture(maildrop: Vec<Stored>) -> Fixture {
         ctx,
         config,
         server,
+        catch_up: Mutex::new(None),
     }
 }
 
 impl Fixture {
     async fn sync(&self) -> std::result::Result<Synced, Failure> {
-        sync(&self.ctx, &self.config).await
+        let mut catch_up = self.catch_up.lock().unwrap().take();
+        let synced = sync(&self.ctx, &self.config, &mut catch_up).await;
+        *self.catch_up.lock().unwrap() = catch_up;
+        synced
+    }
+
+    /// Start the account's worker again, as a new launch of the app does.
+    fn restart(&self) {
+        *self.catch_up.lock().unwrap() = None;
+    }
+
+    async fn queued_notifications(&self) -> i64 {
+        self.ctx
+            .db
+            .read(|conn| {
+                Ok(
+                    conn.query_row("SELECT COUNT(*) FROM notification_outbox", [], |row| {
+                        row.get::<_, i64>(0)
+                    })?,
+                )
+            })
+            .await
+            .unwrap()
     }
 
     fn last_session(&self) -> Vec<String> {
@@ -652,21 +677,7 @@ async fn only_mail_after_the_first_download_notifies() {
     let fixture = fixture(vec![recent("a", "Backlog")]).await;
     let mut events = fixture.ctx.bus.subscribe();
     fixture.sync().await.unwrap();
-    let outbox = |fixture: &Fixture| {
-        let db = fixture.ctx.db.clone();
-        async move {
-            db.read(|conn| {
-                Ok(
-                    conn.query_row("SELECT COUNT(*) FROM notification_outbox", [], |row| {
-                        row.get::<_, i64>(0)
-                    })?,
-                )
-            })
-            .await
-            .unwrap()
-        }
-    };
-    assert_eq!(outbox(&fixture).await, 0);
+    assert_eq!(fixture.queued_notifications().await, 0);
 
     fixture
         .server
@@ -675,12 +686,38 @@ async fn only_mail_after_the_first_download_notifies() {
         .maildrop
         .push(recent("b", "Fresh"));
     fixture.sync().await.unwrap();
-    assert_eq!(outbox(&fixture).await, 1);
+    assert_eq!(fixture.queued_notifications().await, 1);
     let mut new_mail = false;
     while let Ok(event) = events.try_recv() {
         new_mail |= matches!(event, CoreEvent::MailNew { .. });
     }
     assert!(new_mail);
+}
+
+#[tokio::test]
+async fn mail_that_came_while_the_app_was_closed_stays_silent() {
+    let fixture = fixture(vec![recent("a", "Backlog")]).await;
+    fixture.sync().await.unwrap();
+
+    fixture.restart();
+    fixture
+        .server
+        .lock()
+        .unwrap()
+        .maildrop
+        .push(recent("b", "While closed"));
+    fixture.sync().await.unwrap();
+    assert_eq!(fixture.inbox().await.len(), 2);
+    assert_eq!(fixture.queued_notifications().await, 0);
+
+    fixture
+        .server
+        .lock()
+        .unwrap()
+        .maildrop
+        .push(recent("c", "Fresh"));
+    fixture.sync().await.unwrap();
+    assert_eq!(fixture.queued_notifications().await, 1);
 }
 
 #[tokio::test]

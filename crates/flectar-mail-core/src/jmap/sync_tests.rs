@@ -447,14 +447,100 @@ async fn server(
     (mock.connected, mock.task)
 }
 
+/// Sync as a worker that started after all this mail arrived, so none of it
+/// notifies.
 async fn run_sync(
     ctx: &SyncCtx,
     config: &AccountConfig,
     connected: &ConnectedClient,
 ) -> Result<()> {
-    tokio::time::timeout(Duration::from_secs(10), sync_emails(ctx, config, connected))
+    run_live_sync(ctx, config, connected, i64::MAX).await
+}
+
+async fn run_live_sync(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    connected: &ConnectedClient,
+    live_since: i64,
+) -> Result<()> {
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        sync_emails(ctx, config, connected, live_since),
+    )
+    .await
+    .expect("sync timed out")
+}
+
+#[tokio::test]
+async fn live_inbox_arrivals_queue_notifications() {
+    let (_dir, ctx, config) = fixture().await;
+    ctx.db
+        .write(|conn| {
+            conn.execute(
+                "INSERT INTO jmap_sync_state(account_id,email_state) VALUES(1,'state-0')",
+                [],
+            )?;
+            Ok(())
+        })
         .await
-        .expect("sync timed out")
+        .unwrap();
+    let now = chrono::Utc::now();
+    let mut read = received(email("read", "conversation-read"), now);
+    read["keywords"] = json!({"$seen": true});
+    let mut robot = received(email("robot", "conversation-robot"), now);
+    robot["from"] = json!([{"name": "Alerts", "email": "notifications@mail.example"}]);
+    let emails = vec![
+        received(email("person", "conversation-person"), now),
+        read,
+        robot,
+        received(
+            email("caught-up", "conversation-caught-up"),
+            now - chrono::Duration::minutes(10),
+        ),
+    ];
+    let changes = json!({
+        "created": ["person", "read", "robot", "caught-up"], "updated": [], "destroyed": []
+    });
+    let (connected, task) = server(emails, Some(changes), None).await;
+    let mut events = ctx.bus.subscribe();
+    run_live_sync(&ctx, &config, &connected, now.timestamp_millis() - 60_000)
+        .await
+        .unwrap();
+    task.abort();
+
+    // Only mail that arrived after the worker started, unread, is new; mail
+    // from a robot notifies without a sound.
+    let queued = ctx
+        .db
+        .read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT m.jmap_id, o.audible FROM notification_outbox o
+                 JOIN messages m ON m.id = o.message_id ORDER BY o.id",
+            )?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        queued,
+        vec![("person".to_owned(), true), ("robot".to_owned(), false)]
+    );
+    let mut woken = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if let CoreEvent::MailNew { thread_ids, .. } = event {
+            woken.extend(thread_ids);
+        }
+    }
+    assert_eq!(
+        woken.len(),
+        2,
+        "every queued notification wakes the dispatcher"
+    );
 }
 
 #[tokio::test]

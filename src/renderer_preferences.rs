@@ -209,12 +209,15 @@ pub(crate) fn restart_cpu(error: &dyn std::error::Error) -> Result<(), Box<dyn s
     let mut command = std::process::Command::new(std::env::current_exe()?);
     // The fallback reopens the window rather than the tray: GPU failures
     // surface while the window is being created or shown, and a hidden
-    // restart could leave the user with neither.
+    // restart could leave the user with neither. So it drops what starts the
+    // app hidden: a sign-in launch's argument, and a notification click's,
+    // whose click went to this process.
     command
         .args(
             std::env::args_os()
                 .skip(1)
-                .filter(|argument| argument != crate::autostart::BACKGROUND_ARGUMENT),
+                .filter(|argument| argument != crate::autostart::BACKGROUND_ARGUMENT)
+                .filter(|argument| !crate::notifications::click_argument(argument)),
         )
         .env(GPU_FALLBACK, "1");
     // This process took the launcher's token out of the environment.

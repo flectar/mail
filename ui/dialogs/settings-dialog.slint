@@ -3,6 +3,7 @@ import { RendererSettings } from "../renderer-settings.slint";
 import { WindowChrome } from "../window-chrome.slint";
 import { AppIcon } from "../app-icon.slint";
 import { DefaultEmailApp } from "../default-email-app.slint";
+import { SystemNotifications } from "../system-notifications.slint";
 import { AppIconPicker } from "../components/app-icon-picker.slint";
 import { MessageColors } from "../message-colors.slint";
 import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
@@ -504,6 +505,9 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> close_to_tray: false;
     in-out property <bool> launch_at_login: false;
     in property <bool> launch_at_login_available: false;
+    // False where closing to the background shows no tray icon (the Flatpak):
+    // opening the app again brings its window back.
+    in property <bool> tray_supported: true;
     in-out property <string> account_email: "";
     in-out property <string> account_username: "";
     in-out property <string> account_password: "";
@@ -690,6 +694,19 @@ export component SettingsDialog inherits Rectangle {
         : root.sync_interval_minutes <= 5 ? 1 : 2;
     private property <int> notification-index: !root.notifications_enabled ? 0
         : root.notification_scope == "all" ? 2 : 1;
+    // On here but kept from showing by the system: turned off in its settings,
+    // refused for this copy of the app (macOS, as for a copy in a temporary
+    // folder), or no notification service running.
+    private property <bool> notifications-blocked: root.notifications_enabled
+        && (SystemNotifications.availability == "denied" || SystemNotifications.availability == "refused"
+            || SystemNotifications.availability == "unavailable");
+    private property <string> notifications-blocked-text: SystemNotifications.availability == "denied"
+        ? @tr("Notifications from Flectar Mail are turned off in your system settings.")
+        : SystemNotifications.availability == "refused"
+        ? @tr("macOS doesn't allow notifications from Flectar Mail where it is now. Move it to the Applications folder, then open it again.")
+        : @tr("This system has no notification service running, so notifications can't be shown.");
+    private property <bool> notifications-settings-offered: SystemNotifications.availability == "denied"
+        && SystemNotifications.settings-openable;
     private property <int> language-index: root.language_mode == "en" ? 1
         : root.language_mode == "es" ? 2
         : root.language_mode == "tr" ? 3
@@ -713,6 +730,8 @@ export component SettingsDialog inherits Rectangle {
     }
 
     pure function settings-section-visible(section: string) -> bool {
+        // No notifications on this platform: nothing to set.
+        if section == "Notifications" && SystemNotifications.availability == "" { return false; }
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
             ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads")
@@ -1344,9 +1363,9 @@ export component SettingsDialog inherits Rectangle {
                                     spacing: 16px;
                                     VerticalBox {
                                         spacing: 5px;
-                                        tray-title := Text { height: max(20px, self.preferred-height); text: @tr("Keep running in system tray"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
+                                        tray-title := Text { height: max(20px, self.preferred-height); text: root.tray_supported ? @tr("Keep running in system tray") : @tr("Keep running in the background"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
                                         tray-description := Text { height: max(17px, self.preferred-height); text: @tr("Closing the window hides Flectar Mail while mail continues syncing."); color: root.faint-text; font-size: TypeScale.secondary; wrap: word-wrap; }
-                                        tray-note := Text { height: max(16px, self.preferred-height); text: @tr("Disabled by default; Quit from the tray menu stops the app."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
+                                        tray-note := Text { height: max(16px, self.preferred-height); text: root.tray_supported ? @tr("Disabled by default; Quit from the tray menu stops the app.") : @tr("Disabled by default; open Flectar Mail again to bring its window back."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
                                     }
                                     Rectangle { horizontal-stretch: 1; }
                                     Switch {
@@ -1373,7 +1392,7 @@ export component SettingsDialog inherits Rectangle {
                                     VerticalBox {
                                         spacing: 5px;
                                         login-title := Text { height: max(20px, self.preferred-height); text: @tr("Start automatically"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
-                                        login-description := Text { height: max(17px, self.preferred-height); text: root.close_to_tray ? @tr("Starts Flectar Mail in the system tray when you sign in.") : @tr("Opens Flectar Mail when you sign in."); color: root.faint-text; font-size: TypeScale.secondary; wrap: word-wrap; }
+                                        login-description := Text { height: max(17px, self.preferred-height); text: !root.close_to_tray ? @tr("Opens Flectar Mail when you sign in.") : root.tray_supported ? @tr("Starts Flectar Mail in the system tray when you sign in.") : @tr("Starts Flectar Mail in the background when you sign in."); color: root.faint-text; font-size: TypeScale.secondary; wrap: word-wrap; }
                                         login-note := Text { height: max(16px, self.preferred-height); text: @tr("Disabled by default; also listed in your system's startup apps."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
                                     }
                                     Rectangle { horizontal-stretch: 1; }
@@ -1449,7 +1468,10 @@ export component SettingsDialog inherits Rectangle {
 
 
                             Rectangle {
-                                height: max(root.compact ? 360px : 246px, self.preferred-height);
+                                // Without notifications on this platform, their row and its separator go.
+                                height: max(SystemNotifications.availability == ""
+                                    ? (root.compact ? 231px : 179px)
+                                    : (root.compact ? 360px : 246px), self.preferred-height);
                                 background: root.surface;
                                 border-radius: 8px;
                                 border-width: 1px;
@@ -1472,7 +1494,7 @@ export component SettingsDialog inherits Rectangle {
                                         selected(index, value) => { root.select-sync-interval(index); }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }
-                                    SettingsSelectRow {
+                                    if SystemNotifications.availability != "" : SettingsSelectRow {
                                         compact: root.compact;
                                         title: @tr("Desktop notifications");
                                         description: @tr("Choose which incoming messages can alert you.");
@@ -1482,7 +1504,7 @@ export component SettingsDialog inherits Rectangle {
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-notification-mode(index); }
                                     }
-                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    if SystemNotifications.availability != "" : Rectangle { height: 1px; background: root.border-subtle; }
                                     HorizontalBox {
                                         height: max(36px, sync-state.preferred-height + 16px);
                                         spacing: 12px;
@@ -2427,12 +2449,54 @@ export component SettingsDialog inherits Rectangle {
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-notification-mode(index); }
                                     }
+                                    // The system has the last word: say so while it shows nothing.
+                                    // Laid out like the row above, so the texts and the right edge line up.
+                                    if root.notifications-blocked && !root.compact : HorizontalBox {
+                                        padding-top: 0px;
+                                        spacing: 20px;
+                                        VerticalBox {
+                                            padding-top: 0px;
+                                            padding-bottom: 0px;
+                                            horizontal-stretch: 1;
+                                            blocked-text := Text {
+                                                text: root.notifications-blocked-text;
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                vertical-alignment: center;
+                                                wrap: word-wrap;
+                                            }
+                                        }
+                                        if root.notifications-settings-offered : Button {
+                                            width: max(132px, self.content-width);
+                                            height: 32px;
+                                            text: @tr("Open system settings");
+                                            clicked => { SystemNotifications.open-settings(); }
+                                        }
+                                    }
+                                    if root.notifications-blocked && root.compact : VerticalBox {
+                                        padding: 8px;
+                                        spacing: 7px;
+                                        Text {
+                                            text: root.notifications-blocked-text;
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            wrap: word-wrap;
+                                        }
+                                        if root.notifications-settings-offered : Button {
+                                            height: 36px;
+                                            text: @tr("Open system settings");
+                                            clicked => { SystemNotifications.open-settings(); }
+                                        }
+                                    }
                                     Rectangle { height: 1px; background: root.border-subtle; }
                                     SettingsSwitchRow {
                                         compact: root.compact;
                                         title: @tr("Notification sounds");
-                                        description: @tr("Play a sound for new mail and sent messages.");
+                                        description: SystemNotifications.sound-fixed
+                                            ? @tr("Your desktop decides whether notifications play a sound.")
+                                            : @tr("Play a sound with new mail notifications.");
                                         checked: root.notification_sound_enabled;
+                                        enabled: !SystemNotifications.sound-fixed;
                                         title-color: root.heading;
                                         description-color: root.faint-text;
                                         toggled(checked) => {
@@ -2486,6 +2550,9 @@ export component SettingsDialog inherits Rectangle {
                                 ShortcutRow { title: @tr("Previous tab"); keys: [Shortcuts.previous-tab]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Go to tab 1–8"); keys: [Shortcuts.first-tab, Shortcuts.eighth-tab]; separator: "–"; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Go to last tab"); keys: [Shortcuts.last-tab]; title-color: root.body-text; separator-color: root.faint-text; }
+                            }
+                            if WindowChrome.platform == "linux" : ShortcutSection { vertical-stretch: 0; title: @tr("General"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading;
+                                ShortcutRow { title: @tr("Quit Flectar Mail"); keys: [Shortcuts.quit]; title-color: root.body-text; separator-color: root.faint-text; }
                             }
                         }
                     }

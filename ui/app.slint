@@ -8,6 +8,7 @@ export { RendererSettings } from "renderer-settings.slint";
 export { WindowChrome } from "window-chrome.slint";
 export { AppIcon, AppIconVariant } from "app-icon.slint";
 export { DefaultEmailApp } from "default-email-app.slint";
+export { SystemNotifications } from "system-notifications.slint";
 import { AppIcon } from "app-icon.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
@@ -76,6 +77,18 @@ export global I18n {
     pure callback new-contact-entry() -> string;
     pure callback no-connected-account() -> string;
     pure callback interaction-count(int) -> string;
+    // Words of new-mail notifications (src/notifications.rs).
+    pure callback notification-new-message() -> string;
+    pure callback notification-no-subject() -> string;
+    pure callback notification-new-messages(int) -> string;
+    pure callback notification-more-senders(string, int) -> string;
+    pure callback notification-open() -> string;
+    pure callback notification-mark-read() -> string;
+    pure callback notification-archive() -> string;
+    pure callback notification-delete() -> string;
+    // The line a desktop shows for the app while it runs with its window
+    // closed (GNOME's Background Apps).
+    pure callback background-status() -> string;
     pure callback last-contacted(string) -> string;
     pure callback loading-local-data() -> string;
     pure callback local-data-ready() -> string;
@@ -183,6 +196,20 @@ export global I18n {
     interaction-count(count) => {
         return @tr("{n} interaction" | "{n} interactions" % count);
     }
+    notification-new-message() => { return @tr("New message"); }
+    notification-no-subject() => { return @tr("(No subject)"); }
+    notification-new-messages(count) => {
+        return @tr("{n} new message" | "{n} new messages" % count);
+    }
+    notification-more-senders(senders, count) => {
+        return @tr("the first senders of new mail, then how many others"
+            => "{0} and {n} more" | "{0} and {n} more" % count, senders);
+    }
+    notification-open() => { return @tr("Open"); }
+    notification-mark-read() => { return @tr("Mark as read"); }
+    notification-archive() => { return @tr("Archive"); }
+    notification-delete() => { return @tr("Delete"); }
+    background-status() => { return @tr("Checking for new mail"); }
     last-contacted(date) => { return @tr("Last contacted {}", date); }
     loading-local-data() => { return @tr("Loading local data…"); }
     local-data-ready() => { return @tr("Local data ready."); }
@@ -324,6 +351,8 @@ export global I18n {
         if (key == "Saving close behavior…") { return @tr("Saving close behavior…"); }
         if (key == "Closing the window will now keep Flectar Mail in the tray.") { return @tr("Closing the window will now keep Flectar Mail in the tray."); }
         if (key == "Closing the window will now quit Flectar Mail.") { return @tr("Closing the window will now quit Flectar Mail."); }
+        if (key == "Closing the window will now keep Flectar Mail running in the background.") { return @tr("Closing the window will now keep Flectar Mail running in the background."); }
+        if (key == "Your desktop did not allow Flectar Mail to run in the background.") { return @tr("Your desktop did not allow Flectar Mail to run in the background."); }
         if (key == "Could not save close behavior: {}") { return @tr("Could not save close behavior: {}", argument); }
         if (key == "Flectar Mail will start when you sign in.") { return @tr("Flectar Mail will start when you sign in."); }
         if (key == "Flectar Mail is now your default email app.") { return @tr("Flectar Mail is now your default email app."); }
@@ -1049,6 +1078,8 @@ export component AppWindow inherits Window {
     in-out property <bool> close_to_tray: false;
     in-out property <bool> launch_at_login: false;
     in property <bool> launch_at_login_available: false;
+    // False where closing to the background shows no tray icon (the Flatpak).
+    in property <bool> tray_supported: true;
     in-out property <bool> account_setup_in_progress: false;
     in-out property <bool> account_form_open: false;
     in-out property <bool> oauth_in_progress: false;
@@ -2001,6 +2032,7 @@ export component AppWindow inherits Window {
             close_to_tray <=> root.close_to_tray;
             launch_at_login <=> root.launch_at_login;
             launch_at_login_available: root.launch_at_login_available;
+            tray_supported: root.tray_supported;
             remote-images-enabled <=> root.remote-images-enabled;
             account_email <=> root.account_email;
             account_username <=> root.account_username;

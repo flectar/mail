@@ -44,8 +44,9 @@ const PICKER_TIMEOUT: Duration = Duration::from_secs(600);
 /// Several documents can be gigabytes of mail to copy.
 const SEVERAL_TIMEOUT: Duration = Duration::from_secs(3600);
 
-/// Arguments of one `notify` call. The host publisher translates/formats the
-/// raw sender and subject; this bridge only marshals them to ArkTS.
+/// Arguments of one `notify` call: the notification's title and text, already
+/// translated, and the ids the page derives the notification id from. This
+/// bridge only marshals them to ArkTS.
 struct NotifyRequest {
     sender: String,
     subject: String,
@@ -345,17 +346,28 @@ pub(super) async fn pick_save(
     Ok((!path.is_empty()).then_some(path))
 }
 
+/// Above any thread id: the page numbers an account's summary from here, so
+/// summaries replace each other per account and never a conversation's.
+const SUMMARY_IDS: i64 = 1 << 30;
+
 /// Publish a new-mail notification through the ArkTS NotificationKit hook.
 /// Fails while the page hasn't installed the hook, so core tries again later.
-pub(super) fn notify(notification: &flectar_mail::NewMailNotification) -> Result<(), String> {
+/// The page keys a notification by its conversation, else by its message id.
+pub(super) fn notify(alert: &flectar_mail::Alert) -> Result<(), String> {
+    let (thread_id, message_id) = match alert.id {
+        flectar_mail::AlertId::Message { message_id, .. } => {
+            (alert.open.thread_id.unwrap_or(0), message_id)
+        }
+        flectar_mail::AlertId::Summary { account_id } => (0, SUMMARY_IDS + account_id),
+    };
     call_closure(
         &NOTIFY,
         "notify",
         NotifyRequest {
-            sender: notification.sender.clone(),
-            subject: notification.subject.clone(),
-            thread_id: notification.thread_id,
-            message_id: notification.message_id,
+            sender: alert.title.clone(),
+            subject: alert.body.clone(),
+            thread_id,
+            message_id,
         },
     )
 }

@@ -147,6 +147,16 @@ pub(crate) fn register(app: &AppWindow, runtime: &tokio::runtime::Handle) {
     register_desktop_events(app);
 }
 
+/// Control+Q alone, the key `Shortcuts.quit` lists.
+#[cfg(linux_desktop)]
+pub(crate) fn is_quit(
+    key: &winit::keyboard::Key,
+    modifiers: winit::keyboard::ModifiersState,
+) -> bool {
+    matches!(key, winit::keyboard::Key::Character(text) if text.eq_ignore_ascii_case("q"))
+        && modifiers == winit::keyboard::ModifiersState::CONTROL
+}
+
 #[cfg(desktop)]
 fn register_desktop_events(app: &AppWindow) {
     let chrome = app.global::<WindowChrome>();
@@ -175,6 +185,21 @@ fn register_desktop_events(app: &AppWindow) {
         }
         match event {
             winit::event::WindowEvent::ModifiersChanged(state) => modifiers.set(state.state()),
+            // Control+Q quits from anywhere, as GNOME and KDE have it, except
+            // over writing that the composer or calendar editor hasn't saved.
+            // It is the only way out of a Flatpak running in the background
+            // where the desktop lists no background apps.
+            #[cfg(linux_desktop)]
+            winit::event::WindowEvent::KeyboardInput { event, .. }
+                if event.state.is_pressed()
+                    && !event.repeat
+                    && is_quit(&event.logical_key, modifiers.get())
+                    && !app.get_compose_open()
+                    && !app.get_calendar_editor_open() =>
+            {
+                crate::window_controller::quit(&app);
+                return EventResult::PreventDefault;
+            }
             // Tab shortcuts work wherever focus is, as in a browser, except in
             // the composer and the calendar editor, which keep their keys.
             winit::event::WindowEvent::KeyboardInput { event, .. }
@@ -194,6 +219,7 @@ fn register_desktop_events(app: &AppWindow) {
                 chrome.set_active(*focused);
                 if *focused {
                     crate::default_email_app::window_focused(&app);
+                    crate::notifications::ui::refresh_availability();
                 }
                 #[cfg(linux_desktop)]
                 if *focused && chrome.get_integrated() {
@@ -379,4 +405,23 @@ pub(crate) fn before_show() {
 /// back-navigation policies apply unchanged.
 fn close(window: &slint::Window) {
     window.dispatch_event(slint::platform::WindowEvent::CloseRequested);
+}
+
+#[cfg(all(test, linux_desktop))]
+mod tests {
+    use super::is_quit;
+    use super::winit::keyboard::{Key, ModifiersState, NamedKey};
+
+    #[test]
+    fn only_control_q_quits() {
+        let control = ModifiersState::CONTROL;
+        let q = Key::Character("q".into());
+        assert!(is_quit(&q, control));
+        assert!(is_quit(&Key::Character("Q".into()), control));
+        assert!(!is_quit(&q, ModifiersState::empty()));
+        assert!(!is_quit(&q, control | ModifiersState::SHIFT));
+        assert!(!is_quit(&q, control | ModifiersState::ALT));
+        assert!(!is_quit(&Key::Character("w".into()), control));
+        assert!(!is_quit(&Key::Named(NamedKey::Escape), control));
+    }
 }

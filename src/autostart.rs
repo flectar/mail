@@ -10,6 +10,10 @@
 //! Entries launch the application with [`BACKGROUND_ARGUMENT`]. Startup keeps
 //! the window hidden for that launch only when close-to-tray is enabled and a
 //! tray is available; otherwise it opens the window as usual.
+//!
+//! In the Flatpak the same Background portal also decides whether the app may
+//! keep running with its window closed, which is how it closes to the
+//! background there: it has no tray icon.
 
 use std::{io, path::PathBuf};
 
@@ -486,11 +490,12 @@ mod startup_task {
 #[cfg(target_os = "windows")]
 mod registry {
     use super::{Applied, BACKGROUND_ARGUMENT, Entry};
+    use crate::platform::windows_install::command_executable;
     use std::{
         ffi::{OsStr, OsString},
         io,
         os::windows::ffi::{OsStrExt, OsStringExt},
-        path::{Path, PathBuf},
+        path::Path,
         ptr::null_mut,
     };
     use windows_sys::Win32::{
@@ -560,14 +565,6 @@ mod registry {
         command.push("\" ");
         command.push(BACKGROUND_ARGUMENT);
         command
-    }
-
-    fn command_executable(command: &str) -> Option<PathBuf> {
-        let executable = match command.strip_prefix('"') {
-            Some(quoted) => quoted.split_once('"')?.0,
-            None => command.split_whitespace().next()?,
-        };
-        (!executable.is_empty()).then(|| PathBuf::from(executable))
     }
 
     fn get_value(subkey: &str, kind: u32) -> io::Result<Option<Vec<u8>>> {
@@ -749,17 +746,42 @@ mod login_item {
 #[cfg(all(linux_desktop, feature = "flatpak"))]
 use portal as imp;
 
+/// Whether the desktop lets the Flatpak keep running with its window closed.
+/// Called on the blocking pool; the sign-in entry stays as it is.
+#[cfg(all(linux_desktop, feature = "flatpak"))]
+pub(crate) fn allow_background() -> io::Result<bool> {
+    portal::allow_background()
+}
+
+/// Tell the desktop what the Flatpak does while its window is closed. GNOME
+/// shows it under the app in Background Apps.
+#[cfg(all(linux_desktop, feature = "flatpak"))]
+pub(crate) async fn set_background_status(message: String) {
+    portal::set_status(message).await;
+}
+
 /// The Background portal writes the host's autostart entry on the sandbox's
 /// behalf. It offers no way to read that entry back, so the last granted
 /// request is recorded in the data directory.
 #[cfg(all(linux_desktop, feature = "flatpak"))]
 mod portal {
     use super::{Applied, BACKGROUND_ARGUMENT, Entry};
-    use ashpd::desktop::background::Background;
+    use ashpd::desktop::{
+        ResponseError,
+        background::{Background, BackgroundProxy},
+    };
     use std::{
         io,
         path::{Path, PathBuf},
+        sync::{Mutex, PoisonError},
     };
+
+    const SIGN_IN_REASON: &str = "Start Flectar Mail when you sign in";
+    const BACKGROUND_REASON: &str = "Check for new mail while the window is closed";
+
+    /// Every request also rewrites the sign-in entry from the record, so one
+    /// must not run between another's reading and writing it.
+    static REQUESTS: Mutex<()> = Mutex::new(());
 
     fn record() -> io::Result<PathBuf> {
         let paths = flectar_mail_core::config::Paths::default_dirs()
@@ -778,23 +800,43 @@ mod portal {
         }))
     }
 
-    /// Called on the blocking pool, outside any async task.
-    fn request(auto_start: bool) -> io::Result<bool> {
+    /// Ask to run in the background, starting at sign-in or not; `None` when
+    /// the desktop refuses. Called on the blocking pool, outside any async
+    /// task.
+    fn request(reason: &str, auto_start: bool) -> io::Result<Option<Background>> {
         let request = Background::request()
-            .reason("Start Flectar Mail when you sign in")
+            .reason(reason)
             .auto_start(auto_start)
             .command(["flectar-mail", BACKGROUND_ARGUMENT])
             .dbus_activatable(false);
-        let response = tokio::runtime::Handle::current().block_on(async {
-            request.send().await?.response()
-        });
-        response
-            .map(|background| background.auto_start())
-            .map_err(|error| io::Error::other(error.to_string()))
+        let response =
+            tokio::runtime::Handle::current().block_on(async { request.send().await?.response() });
+        match response {
+            Ok(background) => Ok(Some(background)),
+            // The user, or a permission they set earlier, said no.
+            Err(ashpd::Error::Response(ResponseError::Cancelled)) => Ok(None),
+            Err(error) => Err(io::Error::other(error.to_string())),
+        }
+    }
+
+    pub(super) fn allow_background() -> io::Result<bool> {
+        let _requests = REQUESTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let auto_start = read()?.is_some();
+        Ok(request(BACKGROUND_REASON, auto_start)?
+            .is_some_and(|background| background.run_in_background()))
+    }
+
+    /// Portals before version 2 have no status; the desktop then lists the
+    /// app by its name alone.
+    pub(super) async fn set_status(message: String) {
+        if let Ok(proxy) = BackgroundProxy::new().await {
+            let _ = proxy.set_status(&message).await;
+        }
     }
 
     pub(super) fn write(_executable: &Path) -> io::Result<Applied> {
-        if !request(true)? {
+        let _requests = REQUESTS.lock().unwrap_or_else(PoisonError::into_inner);
+        if !request(SIGN_IN_REASON, true)?.is_some_and(|background| background.auto_start()) {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "the desktop did not allow starting at sign-in",
@@ -809,7 +851,14 @@ mod portal {
     }
 
     pub(super) fn remove() -> io::Result<()> {
-        request(false)?;
+        let _requests = REQUESTS.lock().unwrap_or_else(PoisonError::into_inner);
+        // A refused request leaves the entry in place.
+        if request(SIGN_IN_REASON, false)?.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the desktop did not allow changing the sign-in entry",
+            ));
+        }
         match std::fs::remove_file(record()?) {
             Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
             _ => Ok(()),

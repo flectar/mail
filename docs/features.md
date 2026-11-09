@@ -4,6 +4,7 @@ A closer look at what the [README](../README.md) summarizes.
 
 - [Conversation threads](#conversation-threads)
 - [Tabs](#tabs)
+- [New-mail notifications](#new-mail-notifications)
 - [Profiles and account colors](#profiles-and-account-colors)
 - [Appearance](#appearance)
 - [Frameless window](#frameless-window)
@@ -71,6 +72,34 @@ Settings → General.
   <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-tabs-light.png">
   <img src="../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail with tabs for several conversations, the calendar, contacts, and files">
 </picture>
+
+## New-mail notifications
+
+Flectar Mail lets you know when new mail reaches your Inbox while it's running:
+one notification per message, with its sender and subject. When more than three
+messages reach one account at once, a single notification sums them up. Choose
+which mail notifies with **Desktop notifications** in Settings → Notifications:
+**Important mail**, the default, leaves out newsletters and other automated
+mail, **All new mail** includes it, and **Off** turns notifications off. Mail
+that came in while Flectar Mail wasn't running waits quietly in the Inbox, and
+mail that reaches the inbox you're looking at simply appears in the list.
+
+Click a notification to open its conversation, or use its buttons to mark the
+message as read or move it to the archive, or to the trash for accounts without
+an archive, without opening the window. A notification goes away by itself once
+its message is read, leaves the Inbox, is snoozed, or is deleted, here or on
+another device. Only mail from people plays a sound, once per batch; turn it off
+with **Notification sounds** in Settings → Notifications. To keep getting
+notifications with the window closed, turn on **Keep running in system tray** in
+Settings → General, or **Keep running in the background** in the Flatpak.
+
+macOS asks for permission the first time Flectar Mail has a notification to
+show. If notifications are turned off for Flectar Mail in the system's settings,
+Settings → Notifications says so, and on Windows and macOS its **Open system
+settings** button goes straight there. On Linux, the desktop's notification
+server shows them, or the notification portal in the Flatpak, where the desktop
+also decides whether they play a sound. Android and iOS don't show
+notifications yet.
 
 ## Profiles and account colors
 
