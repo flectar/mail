@@ -139,7 +139,16 @@ fn travels(kind: Kind, secret: &str) -> bool {
 /// Whether a failed check means the provider rejected the sign-in itself,
 /// rather than that it could not be reached.
 fn is_rejection(error: &CoreError) -> bool {
-    matches!(error, CoreError::NeedsReauth | CoreError::Auth(_))
+    match error {
+        CoreError::NeedsReauth => true,
+        // An OAuth error the token service answered with (RFC 6749 §5.2),
+        // such as invalid_client: not a page a network in between served,
+        // nor a sign-in that isn't stored here.
+        CoreError::Auth(message) => {
+            message.starts_with("token refresh failed:") && message.contains("\"error\"")
+        }
+        _ => false,
+    }
 }
 
 /// Whether this device's working sign-in, with fingerprint `digest`, should
@@ -722,7 +731,14 @@ mod tests {
     fn only_a_provider_rejection_makes_a_sign_in_stale() {
         assert!(is_rejection(&CoreError::NeedsReauth));
         assert!(is_rejection(&CoreError::Auth(
-            "token refresh failed: invalid_client".into()
+            r#"token refresh failed: {"error":"invalid_client"}"#.into()
+        )));
+        // A captive portal's or a proxy's page is not the provider.
+        assert!(!is_rejection(&CoreError::Auth(
+            "token refresh failed: <html><title>Sign in to the network</title>".into()
+        )));
+        assert!(!is_rejection(&CoreError::Auth(
+            "no stored credential".into()
         )));
         assert!(!is_rejection(&CoreError::Offline));
         assert!(!is_rejection(&CoreError::Network(
