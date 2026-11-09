@@ -29,9 +29,13 @@ pub(crate) const SCHEDULED: &str = "scheduled";
 pub(crate) const REMINDER: &str = "reminder";
 pub(crate) const SIGN_IN: &str = "signin";
 
-/// The largest template body that syncs, well under the server's record
-/// limit: one record too large would stop every upload.
+/// The largest template body that syncs.
 const MAX_TEMPLATE_BYTES: usize = 192 * 1024;
+
+/// The largest record body that syncs, with room for the rest of the record
+/// under the server's 256 KiB limit: one record too large would stop every
+/// upload.
+const MAX_BODY_BYTES: usize = 250 * 1024;
 
 /// The schema this version writes and reads for `collection`, or `None` for
 /// a collection it does not know. A version that adds fields keeps the
@@ -434,8 +438,32 @@ pub(crate) fn snapshot(
             keep_unknown_fields(record, mirrored);
         }
     }
+    // An item too large to sync stays as the server has it, so it is neither
+    // uploaded nor, for being left out, deleted on the other devices. One
+    // the server never had stays on this device.
+    let too_large: Vec<RecordId> = records
+        .iter()
+        .filter(|(_, record)| !fits(record))
+        .map(|(id, _)| *id)
+        .collect();
+    for id in too_large {
+        tracing::debug!("an item is too large to sync");
+        match mirror.get(&id).and_then(|mirrored| mirrored.entry.clone()) {
+            Some(mirrored) => records.insert(id, mirrored),
+            None => records.remove(&id),
+        };
+    }
     records.insert(device.0, entry(DEVICE, device.1));
     Ok(records)
+}
+
+/// Whether a record is small enough to sync.
+fn fits(record: &Entry) -> bool {
+    let limit = match record.collection.as_str() {
+        TEMPLATE => MAX_TEMPLATE_BYTES,
+        _ => MAX_BODY_BYTES,
+    };
+    record.body.to_string().len() <= limit
 }
 
 /// Templates as record bodies, by sync id. How often each is used stays on
@@ -456,16 +484,7 @@ fn template_bodies(conn: &Connection) -> Result<Vec<(String, Value)>> {
             }),
         ))
     })?;
-    let mut bodies = Vec::new();
-    for row in rows {
-        let (sync_id, body) = row?;
-        if body.to_string().len() > MAX_TEMPLATE_BYTES {
-            tracing::debug!("a template is too large to sync");
-            continue;
-        }
-        bodies.push((sync_id, body));
-    }
-    Ok(bodies)
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 /// A profile's accounts by sync id: the ones this device has, plus the
@@ -1639,6 +1658,50 @@ mod tests {
             |row| row.get(0),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn a_template_too_large_to_sync_is_not_deleted_elsewhere() {
+        let conn = testutil::conn();
+        let sync_id = "ab".repeat(16);
+        template(&conn, "Thanks", Some("ty"), &sync_id);
+        let id = sync_id_bytes(&sync_id).unwrap();
+        let synced = own_record(&conn, id, None);
+        mirror_row(&conn, &id, Some(&synced));
+        let clock = Clock::new([1; 16], None);
+        super::super::store::set_local_hash(&conn, &id, Some(body_hash(&synced))).unwrap();
+
+        // Edited here past what a record holds, it stays as the other
+        // devices have it.
+        conn.execute(
+            "UPDATE snippets SET body_text = ?1 WHERE sync_id = ?2",
+            params!["x".repeat(MAX_TEMPLATE_BYTES), sync_id],
+        )
+        .unwrap();
+        let local = own_record(&conn, id, Some(&synced));
+        assert_eq!(local, synced);
+        let records = BTreeMap::from([(id, local)]);
+        assert_eq!(
+            super::super::store::track(&conn, &records, &clock).unwrap(),
+            0
+        );
+
+        // One the server never had stays here.
+        let other = "cd".repeat(16);
+        template(&conn, "Huge", None, &other);
+        conn.execute(
+            "UPDATE snippets SET body_text = ?1 WHERE sync_id = ?2",
+            params!["x".repeat(MAX_TEMPLATE_BYTES), other],
+        )
+        .unwrap();
+        let records = snapshot(
+            &conn,
+            &Names::default(),
+            &BTreeMap::new(),
+            ([1; 16], json!({})),
+        )
+        .unwrap();
+        assert!(!records.contains_key(&sync_id_bytes(&other).unwrap()));
     }
 
     #[test]
