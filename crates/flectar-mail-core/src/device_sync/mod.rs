@@ -1055,7 +1055,7 @@ impl Core {
                         &tx,
                         &names,
                         &mirror_before,
-                        (device_id, device_body),
+                        (device_id, device_body.clone()),
                     )?;
                     run.save(&tx, &clock, now_ms())?;
                     let hashes = store::load_local_hashes(&tx)?;
@@ -1074,6 +1074,9 @@ impl Core {
                         &local_before,
                         &local_now,
                     )?;
+                    let after =
+                        collections::snapshot(&tx, &names, &run.mirror, (device_id, device_body))?;
+                    collections::settle(&tx, &applied.settled, &after)?;
                     if adopting {
                         tx.execute("UPDATE device_sync SET adopting = 0 WHERE id = 1", [])?;
                     }

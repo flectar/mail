@@ -483,6 +483,8 @@ pub(crate) struct Applied {
     /// Conversations whose state changed here, such as one another device
     /// snoozed: the mail lists show them again.
     pub threads_changed: Vec<i64>,
+    /// Records taken on or left alone: see [`settle`].
+    pub settled: Vec<RecordId>,
 }
 
 fn readable(entry: &Entry) -> bool {
@@ -553,6 +555,9 @@ pub(crate) fn apply(
             // Not this device's item: it never uploads or deletes it.
             Outcome::Ignored => set_local_hash(conn, &id, None)?,
             Outcome::Waiting => {}
+        }
+        if outcome != Outcome::Waiting {
+            applied.settled.push(id);
         }
     }
 
@@ -721,6 +726,16 @@ fn apply_account(
         // The same mailbox added on two devices before they synced: they
         // become one account, under one id every device agrees on.
         if let Some(existing) = repo::accounts::find_by_mailbox(conn, config.email.trim())? {
+            // The same mailbox over another protocol: this device keeps its
+            // own account, and the other device its own.
+            if (
+                existing.provider,
+                existing.auth_kind,
+                existing.mail_protocol,
+            ) != (config.provider, config.auth_kind, config.mail_protocol)
+            {
+                return Ok(Outcome::Ignored);
+            }
             let own: Option<String> = conn.query_row(
                 "SELECT sync_id FROM accounts WHERE id = ?1",
                 params![existing.id],
@@ -1097,6 +1112,23 @@ fn merged_account_settings(current: &AccountSettings, synced: &AccountSettings) 
         security: current.security.clone(),
         ..synced.clone()
     }
+}
+
+/// After a run's records are applied: each record taken on or left alone
+/// keeps the hash of the item as this device now has it, from `local`, a
+/// snapshot taken after applying. An item this device keeps its own way,
+/// such as an account it uses over another protocol, is then not sent back
+/// over the other device's, and one it can't show yet isn't deleted for
+/// missing.
+pub(crate) fn settle(
+    conn: &Connection,
+    settled: &[RecordId],
+    local: &BTreeMap<RecordId, Entry>,
+) -> Result<()> {
+    for id in settled {
+        set_local_hash(conn, id, local.get(id).map(body_hash))?;
+    }
+    Ok(())
 }
 
 fn apply_delete(

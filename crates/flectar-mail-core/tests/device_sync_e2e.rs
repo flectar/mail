@@ -512,6 +512,73 @@ async fn a_profile_takes_an_account_that_arrives_with_it() {
     assert_eq!(profile(&laptop).await, 2);
 }
 
+async fn high_seq(core: &Core) -> i64 {
+    core.db
+        .read(|conn| {
+            Ok(conn.query_row(
+                "SELECT COALESCE(MAX(seq), 0) FROM device_sync_mirror",
+                [],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_same_mailbox_over_two_protocols_settles() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let laptop = start_core(laptop_dir.path()).await;
+    let phone = start_core(phone_dir.path()).await;
+    laptop
+        .import_account_configs(vec![imap_account("me@example.com")])
+        .await
+        .unwrap();
+    phone
+        .import_account_configs(vec![jmap_account("me@example.com")])
+        .await
+        .unwrap();
+    laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+    join_with_code(&laptop, &phone, &server.url).await;
+    for _ in 0..3 {
+        phone.device_sync_run().await.unwrap();
+        laptop.device_sync_run().await.unwrap();
+    }
+    let settled = high_seq(&laptop).await;
+    for _ in 0..3 {
+        phone.device_sync_run().await.unwrap();
+        laptop.device_sync_run().await.unwrap();
+    }
+    assert_eq!(
+        high_seq(&laptop).await,
+        settled,
+        "nothing goes back and forth"
+    );
+    // Each device keeps its own.
+    let protocols = |accounts: Vec<flectar_mail_core::models::Account>| {
+        accounts
+            .into_iter()
+            .map(|account| account.mail_protocol)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        protocols(laptop.list_accounts().await.unwrap()),
+        vec![MailProtocol::Imap]
+    );
+    assert_eq!(
+        protocols(phone.list_accounts().await.unwrap()),
+        vec![MailProtocol::Jmap]
+    );
+}
+
 #[test]
 fn a_locked_keyring_at_startup_keeps_sync_on() {
     let credentials = Arc::new(MemoryCredentials::default());
