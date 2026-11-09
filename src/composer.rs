@@ -6,6 +6,8 @@
 use super::*;
 use flectar_mail_core::models::{Address, AttachmentMeta, SenderIdentity, Signature};
 use slint::SharedString;
+#[cfg(desktop)]
+use slint::winit_030::WinitWindowAccessor;
 use std::rc::Weak;
 
 thread_local! {
@@ -351,6 +353,17 @@ impl Composers {
             .cloned()
     }
 
+    /// The open composer editing the saved draft `draft_id`.
+    fn holding_draft(&self, draft_id: i64) -> Option<Rc<ComposeSession>> {
+        self.sessions
+            .borrow()
+            .iter()
+            .find(|session| {
+                !session.disposed.get() && session.intent.borrow().draft_id == Some(draft_id)
+            })
+            .cloned()
+    }
+
     /// Whether any account can send a message.
     pub(super) fn can_send(&self) -> bool {
         !self.state.borrow().connected_accounts.is_empty()
@@ -546,6 +559,12 @@ impl Composers {
                 return;
             }
         };
+        // A draft already open in a composer comes forward instead of opening
+        // twice, where each copy's saves would overwrite the other's.
+        if let Some(open) = draft.draft_id.and_then(|id| self.holding_draft(id)) {
+            open.bring_forward();
+            return;
+        }
         let Ok(account_id) = i32::try_from(draft.account_id) else {
             app.set_render_status(UiMessage::plain(
                 "Could not open draft: invalid account identifier",
@@ -697,6 +716,26 @@ impl ComposeSession {
 
     fn is_in_app(&self) -> bool {
         matches!(*self.host.borrow(), Host::Main(_))
+    }
+
+    /// Put this message in front: its own window raised and focused. The
+    /// main window's composer is a dialog, already in front of the mail.
+    fn bring_forward(&self) {
+        #[cfg(desktop)]
+        if let Some(HostRef::Window(window)) = self.host() {
+            let native = window.window();
+            if native.is_minimized() {
+                native.set_minimized(false);
+            }
+            let weak = window.as_weak();
+            let _ = slint::spawn_local(async move {
+                if let Some(window) = weak.upgrade()
+                    && let Ok(native) = window.window().winit_window().await
+                {
+                    native.focus_window();
+                }
+            });
+        }
     }
 
     /// How a window's callbacks reach this session while it is shown there.
