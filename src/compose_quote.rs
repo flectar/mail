@@ -149,11 +149,54 @@ fn quote_start(html: &str) -> Option<usize> {
                 .any(|class| class == QUOTE_CLASS)
         }) && tag.contains("class=")
         {
-            return Some(start);
+            // Another client may have added text below the quote, which
+            // would turn read-only with it, so such a draft isn't split.
+            return block_end(html, start)
+                .filter(|&end| ends_the_message(&html[end..]))
+                .map(|_| start);
         }
         search = start + 4;
     }
     None
+}
+
+/// Just past the `</div>` that closes the `<div>` opening at `start`.
+fn block_end(html: &str, start: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut at = start;
+    loop {
+        let open = html[at..].find("<div").map(|found| at + found);
+        let close = html[at..].find("</div>").map(|found| at + found);
+        match (open, close) {
+            (Some(open), Some(close)) if open < close => {
+                depth += 1;
+                at = open + "<div".len();
+            }
+            (_, Some(close)) => {
+                depth = depth.checked_sub(1)?;
+                at = close + "</div>".len();
+                if depth == 0 {
+                    return Some(at);
+                }
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// Whether `rest` holds nothing but the document's closing tags.
+fn ends_the_message(rest: &str) -> bool {
+    let mut rest = rest.trim_start();
+    while !rest.is_empty() {
+        let Some(tag) = ["</body>", "</html>"].into_iter().find(|tag| {
+            rest.get(..tag.len())
+                .is_some_and(|start| start.eq_ignore_ascii_case(tag))
+        }) else {
+            return false;
+        };
+        rest = rest[tag.len()..].trim_start();
+    }
+    true
 }
 
 fn append_original(block: &mut String, text: &str, html: Option<&str>) {
@@ -311,6 +354,14 @@ mod tests {
             "<div style=\"x\" class=\"flectar-quote\">",
         );
         assert!(ComposeQuote::split_saved(&served, &text, |_| Some("Thanks!".len())).is_some());
+        let wrapped = format!("<html><body>{html}\r\n</body>\n</html>\n");
+        assert!(ComposeQuote::split_saved(&wrapped, &text, |_| Some("Thanks!".len())).is_some());
+        // Text another client added below the quote keeps the draft whole,
+        // so none of it turns read-only.
+        let continued = format!("{html}<div>Added on the phone</div>");
+        assert!(ComposeQuote::split_saved(&continued, &text, |_| Some(0)).is_none());
+        let unclosed = html.trim_end_matches("</div>");
+        assert!(ComposeQuote::split_saved(unclosed, &text, |_| Some(0)).is_none());
         // Without the marker, or once the user's part can't be read back,
         // the draft reopens as before.
         assert!(ComposeQuote::split_saved("<div>Thanks!</div>", &text, |_| Some(0)).is_none());

@@ -1809,6 +1809,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/css-inline/css-inline-0.23.1.crate",
+        "sha256": "c357d136b76b660cf6024f37871b9c39f4f31e63cc7e548c81579cae22bbd45b",
+        "dest": "cargo/vendor/css-inline-0.23.1"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"c357d136b76b660cf6024f37871b9c39f4f31e63cc7e548c81579cae22bbd45b\", \"files\": {}}",
+        "dest": "cargo/vendor/css-inline-0.23.1",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/cssparser/cssparser-0.37.0.crate",
         "sha256": "8c9cdaae01d5ed7882b04d795e7f752f46ff52d2fa3b50a20d28c464510bba98",
         "dest": "cargo/vendor/cssparser-0.37.0"

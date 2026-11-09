@@ -1656,7 +1656,7 @@ msgstr ""
 msgid "{} wrote:"
 msgstr ""
 
-#: ui/app.slint:591 ui/components/email-composer.slint:555
+#: ui/app.slint:591 ui/components/email-composer.slint:557
 msgid "Forwarded message"
 msgstr ""
 
@@ -2930,44 +2930,52 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
-#: ui/components/email-composer.slint:283
+#: ui/components/email-composer.slint:285
 msgid "From"
 msgstr ""
 
-#: ui/components/email-composer.slint:284
+#: ui/components/email-composer.slint:286
 msgid "Verified sender identity"
 msgstr ""
 
-#: ui/components/email-composer.slint:297
+#: ui/components/email-composer.slint:299
 msgid "Signature"
 msgstr ""
 
-#: ui/components/email-composer.slint:393
+#: ui/components/email-composer.slint:395
 msgid "Write your message…"
 msgstr ""
 
-#: ui/components/email-composer.slint:555
+#: ui/components/email-composer.slint:557
 msgid "Quoted text"
 msgstr ""
 
-#: ui/components/email-composer.slint:561
+#: ui/components/email-composer.slint:563
 msgid "Hide the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:561
+#: ui/components/email-composer.slint:563
 msgid "Show the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:572
+#: ui/components/email-composer.slint:574
 msgid "Edit the quoted message as text"
 msgstr ""
 
-#: ui/components/email-composer.slint:583
+#: ui/components/email-composer.slint:585
 msgid "Remove the forwarded message"
 msgstr ""
 
-#: ui/components/email-composer.slint:583
+#: ui/components/email-composer.slint:585
 msgid "Remove the quoted message"
+msgstr ""
+
+#: ui/components/email-composer.slint:616
+msgid "Add the forwarded message back"
+msgstr ""
+
+#: ui/components/email-composer.slint:616
+msgid "Add the quoted text back"
 msgstr ""
 
 #: ui/components/email-link-context-area.slint:25

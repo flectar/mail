@@ -42,6 +42,9 @@ export global ComposerUi {
     // "reply" or "forward" while the message carries the original below the
     // editor; empty otherwise.
     in property <string> quote: "";
+    // "reply" or "forward" while the user has left that original out and
+    // can still put it back.
+    in property <string> quote-left-out: "";
     // The original as text, for screen readers.
     in property <string> quote-text: "";
     in-out property <bool> quote-expanded: false;
@@ -80,6 +83,7 @@ export global ComposerUi {
     callback delete-template(int) -> bool;
     callback edit-quote();
     callback remove-quote();
+    callback restore-quote();
 }
 
 // The composer bound to its window's ComposerUi and the application theme.
@@ -115,6 +119,7 @@ export component BoundComposer inherits EmailComposer {
     active-link-url: ComposerUi.active-link-url;
     can-pop-out: ComposerUi.can-pop-out;
     quote: ComposerUi.quote;
+    quote-left-out: ComposerUi.quote-left-out;
     quote-text: ComposerUi.quote-text;
     quote-expanded <=> ComposerUi.quote-expanded;
     quote-tiles: ComposerUi.quote-tiles;
@@ -167,6 +172,7 @@ export component BoundComposer inherits EmailComposer {
     delete-template(id) => ComposerUi.delete-template(id);
     edit-quote => { ComposerUi.edit-quote(); }
     remove-quote => { ComposerUi.remove-quote(); }
+    restore-quote => { ComposerUi.restore-quote(); }
 
     function publish-layout() {
         ComposerUi.editor-width = root.editor-width;
