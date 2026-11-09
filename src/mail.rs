@@ -3447,6 +3447,7 @@ mod tests {
                 // The Inbox row counts its view, which leaves out snoozes.
                 folders: vec![(1, 9), (2, 3), (3, 2)],
                 labels: vec![(20, 2)],
+                ..Default::default()
             },
             MailboxBadgeCounts {
                 account_id: 2,

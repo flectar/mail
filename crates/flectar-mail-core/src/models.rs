@@ -1603,6 +1603,9 @@ pub struct MailboxBadgeCounts {
     /// Unread per label id, ascending: manual labels count their members,
     /// categories the inbox mail routed to them.
     pub labels: Vec<(i64, i64)>,
+    /// Unread inbox mail per custom split id, ascending. Splits have no
+    /// sidebar row; notifications and the app icon count them.
+    pub splits: Vec<(i64, i64)>,
 }
 
 /// One deterministic action attached to an AI-matched automation. `value` is
@@ -1981,12 +1984,11 @@ pub struct Settings {
     /// contact-aware search suggestions.
     #[serde(default = "default_true")]
     pub suggest_learned_contacts: bool,
-    /// Show the unread count on the app icon (macOS Dock badge).
+    /// Show on the app icon how many unread messages in the Inboxes the
+    /// new-mail notifications cover (see `notification_scope`): the Dock,
+    /// the taskbar, a Linux dock or a phone's home screen.
     #[serde(default = "default_true")]
-    pub dock_badge_enabled: bool,
-    /// Which count the badge shows: "inbox" (all unread) | "important".
-    #[serde(default = "default_badge_source")]
-    pub dock_badge_source: String,
+    pub unread_badge_enabled: bool,
     /// Which incoming mail raises a desktop notification: "important" (mail that
     /// lands in the Important tab, the default and historical behavior), "all"
     /// (every incoming inbox message), or "tabs" (only the tabs named in
@@ -2091,9 +2093,6 @@ fn default_tier_instant() -> String {
 }
 fn default_tier_cheap() -> String {
     "cheap".into()
-}
-fn default_badge_source() -> String {
-    "inbox".into()
 }
 fn default_notification_scope() -> String {
     "important".into()
@@ -2200,8 +2199,7 @@ impl Default for Settings {
             collect_outgoing_contacts: true,
             collect_incoming_contacts: false,
             suggest_learned_contacts: true,
-            dock_badge_enabled: true,
-            dock_badge_source: default_badge_source(),
+            unread_badge_enabled: true,
             notification_scope: default_notification_scope(),
             notification_tabs: Vec::new(),
             signature_list: Vec::new(),
