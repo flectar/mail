@@ -602,8 +602,28 @@ pub(crate) fn apply(
     });
 
     for (id, previous, next) in work {
-        // Edited here during the run: keep the edit.
+        // Edited here while the run talked to the server: the edit and the
+        // other device's change merge, and the next run uploads the result.
         if local_before.get(&id) != local_now.get(&id) {
+            if let (Some(next), Some(local)) = (next, local_now.get(&id))
+                && readable(next)
+                && local.collection == next.collection
+            {
+                let base = local_before
+                    .get(&id)
+                    .filter(|before| before.collection == next.collection)
+                    .map(|before| &before.body);
+                let mut body = super::merge::merge(base, &local.body, &next.body, false);
+                if next.collection == SCHEDULED {
+                    super::scheduled::settle(base, &local.body, &next.body, &mut body);
+                }
+                let merged = Entry {
+                    collection: next.collection.clone(),
+                    schema: next.schema,
+                    body,
+                };
+                apply_put(conn, &mut settings, &id, &merged, &mut applied)?;
+            }
             continue;
         }
         let outcome = match (previous, next) {
@@ -1702,6 +1722,49 @@ mod tests {
         )
         .unwrap();
         assert!(!records.contains_key(&sync_id_bytes(&other).unwrap()));
+    }
+
+    #[test]
+    fn an_edit_made_during_a_run_keeps_the_other_devices_change() {
+        let conn = testutil::conn();
+        let sync_id = "ab".repeat(16);
+        template(&conn, "Thanks", Some("ty"), &sync_id);
+        let id = sync_id_bytes(&sync_id).unwrap();
+        let synced = own_record(&conn, id, None);
+        let local_before = BTreeMap::from([(id, synced.clone())]);
+        // While the run talks to the server, the subject changes here...
+        conn.execute(
+            "UPDATE snippets SET subject = 'Hi' WHERE sync_id = ?1",
+            params![sync_id],
+        )
+        .unwrap();
+        let local_now = BTreeMap::from([(id, own_record(&conn, id, None))]);
+        // ...and the run brings the name another device gave it.
+        let mut renamed = synced.clone();
+        renamed.body["name"] = json!("Thank you");
+        let incoming = BTreeMap::from([(
+            id,
+            Incoming {
+                previous: Some(synced),
+                next: Some(renamed),
+            },
+        )]);
+        apply(
+            &conn,
+            &incoming,
+            &BTreeMap::new(),
+            &local_before,
+            &local_now,
+        )
+        .unwrap();
+        let (name, subject): (String, String) = conn
+            .query_row(
+                "SELECT name, subject FROM snippets WHERE sync_id = ?1",
+                params![sync_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((name.as_str(), subject.as_str()), ("Thank you", "Hi"));
     }
 
     #[test]
