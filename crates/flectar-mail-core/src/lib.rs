@@ -5775,9 +5775,10 @@ impl Core {
         let scheduled = args.send_at.is_some();
         let shared = share_as.is_some();
         let remind_at = args.remind_at;
-        let (action_id, account_id, thread_id) = self
+        let (action_id, account_id, thread_id, unshared) = self
             .db
             .write(move |conn| {
+                let mut unshared = false;
                 let row = repo::messages::get_row(conn, draft_id)?
                     .ok_or_else(|| CoreError::NotFound("draft".into()))?;
                 // "Remind me if no reply" names the message by the
@@ -5795,7 +5796,7 @@ impl Core {
                         schedule_shared_send(&tx, &row, &policy, dispatch_at, me, uploads_drafts)?;
                     remind(&tx)?;
                     tx.commit()?;
-                    return Ok((action, row.account_id, row.thread_id));
+                    return Ok((action, row.account_id, row.thread_id, false));
                 }
                 let tx = conn.transaction()?;
                 remind(&tx)?;
@@ -5837,6 +5838,22 @@ impl Core {
                     if state == "inflight" {
                         return Err(CoreError::Other("this message is being sent".into()));
                     }
+                    // Shared with the other devices before, it is this
+                    // device's own send now: they forget it, or it would
+                    // still go out at the old time.
+                    if let Some(send) = repo::synced_sends::by_action(conn, action_id)?
+                        .filter(|send| send.state == repo::synced_sends::SCHEDULED)
+                    {
+                        repo::synced_sends::set_state(
+                            conn,
+                            &send.sync_id,
+                            repo::synced_sends::CANCELLED,
+                            None,
+                            now_ms(),
+                        )?;
+                        repo::synced_sends::set_action(conn, &send.sync_id, None)?;
+                        unshared = true;
+                    }
                     conn.execute(
                         "UPDATE pending_actions SET state = 'pending', not_before = ?2,
                                 payload = ?3, attempts = 0, last_error = NULL
@@ -5844,7 +5861,7 @@ impl Core {
                         rusqlite::params![action_id, not_before, payload.to_string()],
                     )?;
                     tx.commit()?;
-                    return Ok((action_id, row.account_id, row.thread_id));
+                    return Ok((action_id, row.account_id, row.thread_id, unshared));
                 }
                 let aid = repo::actions::enqueue(
                     conn,
@@ -5856,10 +5873,10 @@ impl Core {
                     Some(not_before),
                 )?;
                 tx.commit()?;
-                Ok((aid, row.account_id, row.thread_id))
+                Ok((aid, row.account_id, row.thread_id, unshared))
             })
             .await?;
-        if remind_at.is_some() {
+        if remind_at.is_some() || unshared {
             self.device_sync_now();
         }
         // A scheduled draft joins the Scheduled view.
