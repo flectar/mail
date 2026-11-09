@@ -1401,15 +1401,16 @@ impl Core {
     }
 
     /// A checkout page for subscribing the group to `plan`, to open in the
-    /// browser. `None` when the group already pays: the status then says
-    /// so.
+    /// browser. A group that has a subscription already, perhaps one still
+    /// waiting for its first payment, gets the page that manages it instead;
+    /// `None` when there is none to open, and the status says so.
     pub async fn device_sync_checkout(&self, plan: String) -> Result<Option<String>> {
         let client = self.sync_service().require_client()?;
         match client.checkout(&plan).await {
             Ok(url) => Ok(Some(url)),
-            Err(error) if error.code() == Some(flectar_mail_sync_client::ErrorCode::Conflict) => {
+            Err(SyncError::AlreadySubscribed) => {
                 self.device_sync_refresh_billing().await?;
-                Ok(None)
+                Ok(self.device_sync_manage_billing().await.ok())
             }
             Err(error) => Err(sync_error(error)),
         }
