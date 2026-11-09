@@ -1174,6 +1174,11 @@ pub struct FixedWords {
 #[path = "notifications/ui.rs"]
 pub(crate) mod ui;
 
+/// The words without the window, for a process that runs without it.
+#[cfg(any(test, background_engine))]
+#[path = "notifications/words.rs"]
+mod words;
+
 #[cfg(test)]
 mod tests {
     use super::*;
