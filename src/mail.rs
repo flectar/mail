@@ -1261,6 +1261,15 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_unread_badge(&self, enabled: bool) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.unread_badge_enabled = enabled;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_sync_interval_minutes(&self, minutes: i64) -> Result<(), String> {
         self.core
             .set_sync_interval_minutes(minutes)

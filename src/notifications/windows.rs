@@ -207,6 +207,7 @@ impl NotificationHost for Host {
         Controls {
             settings: true,
             sound: true,
+            badge: false,
         }
     }
 

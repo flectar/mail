@@ -89,6 +89,8 @@ export global I18n {
     pure callback notification-mark-read() -> string;
     pure callback notification-archive() -> string;
     pure callback notification-delete() -> string;
+    // What a screen reader says for the count on the app icon.
+    pure callback notification-unread-count(int) -> string;
     // The line a desktop shows for the app while it runs with its window
     // closed (GNOME's Background Apps).
     pure callback background-status() -> string;
@@ -210,6 +212,9 @@ export global I18n {
     }
     notification-open() => { return @tr("Open"); }
     notification-mark-read() => { return @tr("Mark as read"); }
+    notification-unread-count(count) => {
+        return @tr("{n} unread message" | "{n} unread messages" % count);
+    }
     notification-archive() => { return @tr("Archive"); }
     notification-delete() => { return @tr("Delete"); }
     background-status() => { return @tr("Checking for new mail"); }
@@ -785,6 +790,7 @@ export component AppWindow inherits Window {
     callback save_time_format(string);
     callback save_sidebar_icon_style(bool);
     callback save_notification_settings(bool, bool, string);
+    callback save_unread_badge(bool);
     callback save_sync_interval(int);
     callback save_mark_read_on_open(bool);
     callback save_contact_discovery_settings(bool, bool, bool, bool);
@@ -1114,6 +1120,7 @@ export component AppWindow inherits Window {
     in-out property <bool> monochrome_sidebar_icons: false;
     in-out property <bool> notifications_enabled: true;
     in-out property <bool> notification_sound_enabled: true;
+    in-out property <bool> unread_badge_enabled: true;
     in-out property <string> notification_scope: "important";
     in-out property <int> sync_interval_minutes: 5;
     in-out property <bool> mark_read_on_open: true;
@@ -2047,6 +2054,7 @@ export component AppWindow inherits Window {
             monochrome_sidebar_icons <=> root.monochrome_sidebar_icons;
             notifications_enabled <=> root.notifications_enabled;
             notification_sound_enabled <=> root.notification_sound_enabled;
+            unread_badge_enabled <=> root.unread_badge_enabled;
             notification_scope <=> root.notification_scope;
             sync_interval_minutes <=> root.sync_interval_minutes;
             mark_read_on_open <=> root.mark_read_on_open;
@@ -2149,6 +2157,7 @@ export component AppWindow inherits Window {
             save_notification_settings(enabled, sound-enabled, scope) => {
                 root.save_notification_settings(enabled, sound-enabled, scope);
             }
+            save_unread_badge(enabled) => { root.save_unread_badge(enabled); }
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
             save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
             save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }

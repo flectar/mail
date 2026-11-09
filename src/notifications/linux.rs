@@ -112,6 +112,7 @@ impl NotificationHost for Host {
         Controls {
             settings: false,
             sound: !cfg!(feature = "flatpak"),
+            badge: false,
         }
     }
 }
