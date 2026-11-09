@@ -250,6 +250,36 @@ pub(super) fn accounts_changed(app: &AppWindow) {
     });
 }
 
+/// The application is ending. A message someone was writing, in the main
+/// window or one of its own, goes to Drafts: nothing else would keep it.
+pub(super) fn save_open_messages() {
+    with_composers(|composers| {
+        let sessions = composers.sessions.borrow().clone();
+        for session in sessions {
+            if session.disposed.get() || session.send_action.get().is_some() {
+                continue;
+            }
+            let Some(host) = session.host() else {
+                continue;
+            };
+            let ui = host.ui();
+            let body = ui.get_body();
+            if session.only_inserted_signature(&body) {
+                continue;
+            }
+            session.save(
+                ui.get_account_id(),
+                &ui.get_to(),
+                &ui.get_cc(),
+                &ui.get_bcc(),
+                &ui.get_subject(),
+                &body,
+                false,
+            );
+        }
+    });
+}
+
 /// The main window stops or resumes painting. Its own composer lets go of
 /// its pixels and fonts while hidden.
 pub(super) fn main_window_suspended(suspended: bool) {
