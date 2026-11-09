@@ -1,7 +1,7 @@
 //! Loading of `<iframe>` elements into sub-documents.
 
 use std::sync::Arc;
-use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::Sender;
 
 use blitz_traits::navigation::{NavigationOptions, NavigationProvider};
 use blitz_traits::net::{AbortController, AbortSignal, Url};
@@ -31,7 +31,7 @@ pub(crate) struct IframeLoad {
 /// document, which reloads the iframe's sub-document with the new URL.
 struct IframeNavigationProvider {
     node_id: NodeId,
-    tx: SyncSender<DocumentEvent>,
+    tx: Sender<DocumentEvent>,
     shell_provider: Arc<dyn ShellProvider>,
 }
 

@@ -73,10 +73,15 @@ where
     if let Some(lang) = lang {
         use style::properties::{Importance, PropertyDeclaration};
         use style::values::specified::XLang;
-        let block = ServoArc::new(node.guard().wrap(PropertyDeclarationBlock::with_one(
-            PropertyDeclaration::XLang(XLang(style::Atom::from(lang))),
-            Importance::Normal,
-        )));
+        // Word and Outlook put `lang` on most paragraphs and spans; a shared
+        // block keeps those elements sharing styles. The key cannot collide
+        // with a declaration list, which never contains NUL.
+        let block = cached_block(node, format!("\0{lang}"), || {
+            PropertyDeclarationBlock::with_one(
+                PropertyDeclaration::XLang(XLang(style::Atom::from(lang))),
+                Importance::Normal,
+            )
+        });
         hints.push(ApplicableDeclarationBlock::from_declarations(
             block,
             CascadeLevel::new(CascadeOrigin::PresHints),
@@ -95,7 +100,15 @@ where
         return;
     }
 
-    let block = cached_block(node, css);
+    let block = cached_block(node, css.clone(), || {
+        parse_style_attribute(
+            &css,
+            &HINT_URL_DATA,
+            None,
+            QuirksMode::NoQuirks,
+            CssRuleType::Style,
+        )
+    });
     hints.push(ApplicableDeclarationBlock::from_declarations(
         block,
         CascadeLevel::new(CascadeOrigin::PresHints),
@@ -103,16 +116,13 @@ where
     ));
 }
 
-fn cached_block(node: &Node, css: String) -> HintBlock {
-    let parse = |css: &str| {
-        ServoArc::new(node.guard().wrap(parse_style_attribute(
-            css,
-            &HINT_URL_DATA,
-            None,
-            QuirksMode::NoQuirks,
-            CssRuleType::Style,
-        )))
-    };
+/// The document's shared block for `key`, built on first use.
+fn cached_block(
+    node: &Node,
+    key: String,
+    build: impl FnOnce() -> PropertyDeclarationBlock,
+) -> HintBlock {
+    let wrap = |block| ServoArc::new(node.guard().wrap(block));
 
     let mut doc = node;
     while let Some(parent) = doc.parent {
@@ -120,7 +130,7 @@ fn cached_block(node: &Node, css: String) -> HintBlock {
     }
     let NodeData::Document(data) = &doc.data else {
         // Detached subtrees are styled rarely; they just skip the cache.
-        return parse(&css);
+        return wrap(build());
     };
 
     let mut cache = data
@@ -128,11 +138,11 @@ fn cached_block(node: &Node, css: String) -> HintBlock {
         .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(block) = cache.get(css.as_str()) {
+    if let Some(block) = cache.get(key.as_str()) {
         return block.clone();
     }
-    let block = parse(&css);
-    cache.insert(css.into_boxed_str(), block.clone());
+    let block = wrap(build());
+    cache.insert(key.into_boxed_str(), block.clone());
     block
 }
 
@@ -191,7 +201,8 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                 && attr(table, "rules").is_none()
                 && attr(table, "frame").is_none()
             {
-                css.push_str("border:1px inset gray;");
+                // No colour: cell borders follow the cell's `currentcolor`.
+                css.push_str("border-width:1px;border-style:inset;");
             }
         }
     }
@@ -201,7 +212,12 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
         let value = attr.value.as_str();
 
         match name {
-            "align" => align_hint(tag, is_embedded, value, css),
+            "align" => align_hint(
+                tag,
+                is_embedded && *tag != local_name!("video") && *tag != local_name!("marquee"),
+                value,
+                css,
+            ),
             "valign"
                 if is_cell
                     || *tag == local_name!("tr")
@@ -213,7 +229,7 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
             {
                 let keyword = match value.trim().to_ascii_lowercase().as_str() {
                     "top" => "top",
-                    "middle" | "center" => "middle",
+                    "middle" => "middle",
                     "bottom" => "bottom",
                     "baseline" => "baseline",
                     _ => continue,
@@ -226,7 +242,6 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                 let maps_to_dimension = is_embedded
                     || is_cell
                     || *tag == local_name!("table")
-                    || *tag == local_name!("tr")
                     || if is_width {
                         *tag == local_name!("col")
                             || *tag == local_name!("colgroup")
@@ -235,6 +250,7 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                         *tag == local_name!("thead")
                             || *tag == local_name!("tbody")
                             || *tag == local_name!("tfoot")
+                            || *tag == local_name!("tr")
                     };
                 if maps_to_dimension {
                     // `table width` and `td`/`th` in both axes use the
@@ -269,7 +285,7 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                     if let Some(width) = table_border_width(elem) {
                         let _ = write!(css, "border-width:{width}px;");
                         if width > 0 {
-                            css.push_str("border-style:outset;border-color:gray;");
+                            css.push_str("border-style:outset;");
                         }
                     }
                 } else if *tag == local_name!("img")
@@ -277,9 +293,10 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                     || is_image_input
                 {
                     // Width alone would compute back to zero against the
-                    // default border-style of `none`.
+                    // default border-style of `none`. Like Blink and Gecko,
+                    // zero is mapped too; the colour is left alone.
                     if let Some(width) = parse_non_negative_integer(value) {
-                        let _ = write!(css, "border:{width}px solid;");
+                        let _ = write!(css, "border-width:{width}px;border-style:solid;");
                     }
                 }
             }
@@ -294,7 +311,16 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                 }
             }
             "nowrap" if is_cell => css.push_str("white-space:nowrap;"),
-            "bgcolor" => {
+            "bgcolor"
+                if *tag == local_name!("body")
+                    || *tag == local_name!("table")
+                    || *tag == local_name!("thead")
+                    || *tag == local_name!("tbody")
+                    || *tag == local_name!("tfoot")
+                    || *tag == local_name!("tr")
+                    || is_cell
+                    || *tag == local_name!("marquee") =>
+            {
                 if let Some(color) = parse_legacy_color(value) {
                     let _ = write!(css, "background-color:{color};");
                 }
@@ -320,24 +346,27 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                 }
             }
             "hidden" => css.push_str("display:none;"),
-            // `body` margin attributes, as pixel lengths. There is
-            // deliberately no `rightmargin` or `bottommargin`.
-            "marginwidth" | "marginheight" | "leftmargin" | "topmargin"
-                if *tag == local_name!("body") =>
+            _ => {}
+        }
+    }
+
+    // `body` margins: per axis, the first of these attributes that exists
+    // sets both sides; if it does not parse, the default margin stays. There
+    // is no `rightmargin` or `bottommargin`.
+    if *tag == local_name!("body") {
+        for (attrs, sides) in [
+            (["marginheight", "topmargin"], ["top", "bottom"]),
+            (["marginwidth", "leftmargin"], ["left", "right"]),
+        ] {
+            if let Some(px) = attrs
+                .iter()
+                .find_map(|name| attr(elem, name))
+                .and_then(parse_non_negative_integer)
             {
-                if let Some(px) = parse_non_negative_integer(value) {
-                    let sides: &[&str] = match name {
-                        "marginwidth" => &["left", "right"],
-                        "marginheight" => &["top", "bottom"],
-                        "leftmargin" => &["left"],
-                        _ => &["top"],
-                    };
-                    for side in sides {
-                        let _ = write!(css, "margin-{side}:{px}px;");
-                    }
+                for side in sides {
+                    let _ = write!(css, "margin-{side}:{px}px;");
                 }
             }
-            _ => {}
         }
     }
 }
@@ -349,7 +378,7 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
         css.push_str(match value.as_str() {
             "left" => "float:left;",
             "right" => "float:right;",
-            "center" | "middle" => "margin-left:auto;margin-right:auto;",
+            "center" => "margin-left:auto;margin-right:auto;",
             _ => "",
         });
     } else if is_embedded {
@@ -357,7 +386,9 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
             "left" => "float:left;",
             "right" => "float:right;",
             "top" => "vertical-align:top;",
-            "middle" | "absmiddle" | "abscenter" => "vertical-align:middle;",
+            // The spec wants the element's middle on the parent's baseline, which
+            // Stylo cannot express outside Gecko; `middle` is the closest value.
+            "middle" | "center" | "absmiddle" | "abscenter" => "vertical-align:middle;",
             "bottom" | "baseline" => "vertical-align:baseline;",
             "texttop" => "vertical-align:text-top;",
             "absbottom" => "vertical-align:bottom;",
@@ -370,8 +401,12 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
             "center" => "margin-left:auto;margin-right:auto;",
             _ => "",
         });
+    } else if *tag == local_name!("caption") {
+        // Only `bottom` maps; other values leave the caption's text alone.
+        if value == "bottom" {
+            css.push_str("caption-side:bottom;");
+        }
     } else if *tag == local_name!("div")
-        || *tag == local_name!("caption")
         || *tag == local_name!("thead")
         || *tag == local_name!("tbody")
         || *tag == local_name!("tfoot")
@@ -386,6 +421,7 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
             "right" => "text-align:-moz-right;",
             "center" | "middle" => "text-align:-moz-center;",
             "justify" => "text-align:justify;",
+            "absmiddle" if *tag != local_name!("div") => "text-align:center;",
             _ => "",
         });
     } else if *tag == local_name!("p")
@@ -395,7 +431,6 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
         || *tag == local_name!("h4")
         || *tag == local_name!("h5")
         || *tag == local_name!("h6")
-        || *tag == local_name!("legend")
     {
         css.push_str(match value.as_str() {
             "left" => "text-align:left;",
@@ -414,14 +449,10 @@ fn table_border_width(table: &ElementData) -> Option<u32> {
 
 /// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-non-negative-integers
 fn parse_non_negative_integer(value: &str) -> Option<u32> {
-    let value = value.trim_start_matches(|c: char| c.is_ascii_whitespace());
-    let value = value.strip_prefix('+').unwrap_or(value);
-    let digits = value.len() - value.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-    if digits == 0 {
-        return None;
-    }
-    // Saturate absurd values instead of rejecting them, as browsers clamp.
-    Some(value[..digits].parse().unwrap_or(u32::MAX).min(100_000))
+    // Clamp absurd values, which only hostile markup uses.
+    style::servo::attr::parse_unsigned_integer(value.chars())
+        .ok()
+        .map(|value| value.min(100_000))
 }
 
 /// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-dimension-values
@@ -460,14 +491,16 @@ fn parse_svg_size(value: &str) -> Option<String> {
     if unit.is_empty() {
         return Some(format!("{number}px"));
     }
-    const UNITS: &[&str] = &[
-        "px", "em", "ex", "ch", "rem", "vw", "vh", "vmin", "vmax", "cm", "mm", "q", "in", "pt",
-        "pc",
-    ];
-    let unit = unit.to_ascii_lowercase();
-    UNITS
-        .contains(&unit.as_str())
-        .then(|| format!("{number}{unit}"))
+    // Any unit Stylo knows, serialized back from the parsed length.
+    use style_traits::{ParsingMode, ToCss as _};
+    style::values::specified::NoCalcLength::parse_dimension_with_flags(
+        ParsingMode::DEFAULT,
+        false,
+        number,
+        unit,
+    )
+    .ok()
+    .map(|length| length.to_css_string())
 }
 
 /// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-a-legacy-colour-value
@@ -507,7 +540,7 @@ fn parse_legacy_color(value: &str) -> Option<String> {
     if value.starts_with('#') {
         digits.remove(0);
     }
-    while digits.is_empty() || digits.len() % 3 != 0 {
+    while digits.is_empty() || !digits.len().is_multiple_of(3) {
         digits.push(b'0');
     }
     let mut length = digits.len() / 3;
@@ -536,41 +569,38 @@ fn parse_legacy_color(value: &str) -> Option<String> {
     ))
 }
 
-/// The `<font face>` list as CSS. Generic families stay keywords; every other
-/// name is serialized as an escaped string.
+/// The `<font face>` value parsed as a CSS `font-family` value, as browsers
+/// parse it, and serialized back. A value that is not a valid family list
+/// maps to nothing, so the element keeps its inherited family.
 fn font_family_list(value: &str) -> Option<String> {
-    const GENERICS: &[&str] = &[
-        "serif",
-        "sans-serif",
-        "monospace",
-        "cursive",
-        "fantasy",
-        "system-ui",
-    ];
-    let mut out = String::new();
-    for family in value.split(',') {
-        let family = family.trim().trim_matches(|c| c == '"' || c == '\'').trim();
-        if family.is_empty() || family.chars().any(char::is_control) {
-            continue;
-        }
-        if !out.is_empty() {
-            out.push(',');
-        }
-        let lower = family.to_ascii_lowercase();
-        if GENERICS.contains(&lower.as_str()) {
-            out.push_str(&lower);
-        } else {
-            out.push('"');
-            for c in family.chars() {
-                if c == '"' || c == '\\' {
-                    out.push('\\');
-                }
-                out.push(c);
-            }
-            out.push('"');
-        }
-    }
-    (!out.is_empty()).then_some(out)
+    use style::properties::{
+        PropertyDeclaration, PropertyId, SourcePropertyDeclaration, parse_one_declaration_into,
+    };
+    use style::stylesheets::Origin;
+    use style_traits::ParsingMode;
+
+    let property = PropertyId::parse_enabled_for_all_content("font-family").ok()?;
+    let mut declarations = SourcePropertyDeclaration::default();
+    parse_one_declaration_into(
+        &mut declarations,
+        property,
+        value,
+        Origin::Author,
+        &HINT_URL_DATA,
+        None,
+        ParsingMode::DEFAULT,
+        QuirksMode::NoQuirks,
+        CssRuleType::Style,
+    )
+    .ok()?;
+    let declaration = declarations.drain().declarations.next()?;
+    // Only a list of families: no CSS-wide keywords or variables.
+    let PropertyDeclaration::FontFamily(_) = declaration else {
+        return None;
+    };
+    let mut css = String::new();
+    declaration.to_css(&mut css).ok()?;
+    Some(css)
 }
 
 /// https://html.spec.whatwg.org/multipage/rendering.html#rules-for-parsing-a-legacy-font-size
@@ -634,15 +664,33 @@ mod tests {
     }
 
     #[test]
-    fn font_faces_cannot_escape_the_declaration() {
+    fn font_faces_parse_as_css_family_lists() {
         assert_eq!(
             font_family_list(r#"Georgia, "Times New Roman", serif"#).as_deref(),
-            Some(r#""Georgia","Times New Roman",serif"#)
+            Some(r#"Georgia, "Times New Roman", serif"#)
         );
         assert_eq!(
-            font_family_list(r#"a"\;}x{color:red"#).as_deref(),
-            Some(r#""a\"\\;}x{color:red""#)
+            font_family_list("Segoe UI,Tahoma").as_deref(),
+            Some("Segoe UI, Tahoma")
         );
+        // Not a family list: browsers keep the inherited family.
+        assert_eq!(font_family_list("Calibri (Body)"), None);
+        assert_eq!(font_family_list("inherit"), None);
+        assert_eq!(font_family_list(r#"a"\;}x{color:red"#), None);
+        assert_eq!(
+            font_family_list(r#""a;}x{color:red"#).as_deref(),
+            Some(r#""a;}x{color:red""#)
+        );
+    }
+
+    #[test]
+    fn svg_sizes_take_any_css_length() {
+        assert_eq!(parse_svg_size("10").as_deref(), Some("10px"));
+        assert_eq!(parse_svg_size("2lh").as_deref(), Some("2lh"));
+        assert_eq!(parse_svg_size("1.5EM").as_deref(), Some("1.5em"));
+        assert_eq!(parse_svg_size("50%").as_deref(), Some("50%"));
+        assert_eq!(parse_svg_size("3furlongs"), None);
+        assert_eq!(parse_svg_size("-1px"), None);
     }
 
     #[test]
@@ -650,5 +698,9 @@ mod tests {
         assert_eq!(parse_non_negative_integer(" 10px"), Some(10));
         assert_eq!(parse_non_negative_integer("0"), Some(0));
         assert_eq!(parse_non_negative_integer("-1"), None);
+        // The integer rules accept one sign, so "-0" is zero.
+        assert_eq!(parse_non_negative_integer("-0foo"), Some(0));
+        assert_eq!(parse_non_negative_integer("+0%"), Some(0));
+        assert_eq!(parse_non_negative_integer("+-1"), None);
     }
 }

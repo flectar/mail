@@ -1,22 +1,23 @@
 diff --git a/crates/blitz-dom/src/layout/construct.rs b/crates/blitz-dom/src/layout/construct.rs
-index a1b07ff..777cc97 100644
+index a1b07ff..fb6a1de 100644
 --- a/crates/blitz-dom/src/layout/construct.rs
 +++ b/crates/blitz-dom/src/layout/construct.rs
-@@ -1159,7 +1159,11 @@ pub(crate) fn build_inline_layout_into(
+@@ -1159,7 +1159,12 @@ pub(crate) fn build_inline_layout_into(
                  let float = style.map(|s| s.clone_float()).unwrap_or(Float::None);
                  let box_kind = if position.is_absolutely_positioned() {
                      InlineBoxKind::OutOfFlow
 -                } else if float.is_floating() {
 +                } else if cfg!(feature = "floats") && float.is_floating() {
 +                    // Custom boxes yield until the caller places them. Only the
-+                    // float-aware line breaker handles that yield; break_all_lines
-+                    // would keep retrying the same box forever. Without floats,
-+                    // measure and place these boxes in flow like other inline boxes.
++                    // float-aware line breaker places them; otherwise Parley
++                    // appends them with zero size, so the float would overlap the
++                    // text after it. Without floats, lay these boxes out in flow
++                    // like other inline boxes.
                      InlineBoxKind::CustomOutOfFlow
                  } else {
                      InlineBoxKind::InFlow
 diff --git a/crates/blitz-dom/src/layout/inline.rs b/crates/blitz-dom/src/layout/inline.rs
-index 1f98570..00a42e8 100644
+index 1f98570..74c93cb 100644
 --- a/crates/blitz-dom/src/layout/inline.rs
 +++ b/crates/blitz-dom/src/layout/inline.rs
 @@ -16,7 +16,7 @@ use taffy::{
@@ -28,7 +29,7 @@ index 1f98570..00a42e8 100644
  
  use stylo_taffy::StyleFlags;
  
-@@ -391,7 +391,13 @@ impl LayoutPassState<'_> {
+@@ -391,16 +391,24 @@ impl LayoutPassState<'_> {
          };
          #[cfg(feature = "floats")]
          let float_child_inputs = taffy::tree::LayoutInput {
@@ -43,55 +44,226 @@ index 1f98570..00a42e8 100644
              ..child_inputs
          };
  
-@@ -400,7 +406,7 @@ impl LayoutPassState<'_> {
+         // Update inline boxes
+         for ibox in inline_layout.layout.inline_boxes_mut() {
              let style = self.child_layout_style(&self.nodes[NodeId::from_u64(ibox.id)]);
++            // Margin and padding percentages resolve against the containing block's
++            // width on every side (CSS 2.1 §8.3, §8.4).
              let margin = style
                  .margin()
 -                .resolve_or_zero(inputs.parent_size, resolve_calc_value);
-+                .resolve_or_zero(child_inputs.parent_size, resolve_calc_value);
++                .resolve_or_zero(child_inputs.parent_size.width, resolve_calc_value);
  
              #[cfg(feature = "floats")]
              let is_floated = style.float().is_floated();
-@@ -520,7 +526,7 @@ impl LayoutPassState<'_> {
+@@ -509,7 +517,6 @@ impl LayoutPassState<'_> {
+ 
+                 #[cfg(feature = "floats")]
+                 let float_width = match available_space.width {
+-                    AvailableSpace::Definite(_) => 0.0,
+                     AvailableSpace::MinContent => {
+                         let mut width: f32 = 0.0;
+                         for ibox in inline_layout.layout.inline_boxes_mut() {
+@@ -518,9 +525,10 @@ impl LayoutPassState<'_> {
+                                     self.child_layout_style(&self.nodes[NodeId::from_u64(ibox.id)]);
+                                 (
                                      style.float().is_floated(),
-                                     style
-                                         .margin()
+-                                    style
+-                                        .margin()
 -                                        .resolve_or_zero(inputs.parent_size, resolve_calc_value),
-+                                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value),
++                                    style.margin().resolve_or_zero(
++                                        child_inputs.parent_size.width,
++                                        resolve_calc_value,
++                                    ),
                                  )
                              };
  
-@@ -556,7 +562,7 @@ impl LayoutPassState<'_> {
+@@ -535,7 +543,10 @@ impl LayoutPassState<'_> {
+ 
+                         width * scale
+                     }
+-                    AvailableSpace::MaxContent => {
++                    // A definite available width only occurs here when shrink-to-fit sizing,
++                    // which needs the max-content contribution of the floats (backported from
++                    // DioxusLabs/blitz#980).
++                    AvailableSpace::MaxContent | AvailableSpace::Definite(_) => {
+                         // When computing a max-content size the available width is effectively
+                         // infinite, so floats never wrap onto a new "band" due to a lack of
+                         // horizontal space. They only move below preceding floats when the `clear`
+@@ -554,9 +565,10 @@ impl LayoutPassState<'_> {
+                                 (
+                                     style.float(),
                                      style.clear(),
-                                     style
-                                         .margin()
+-                                    style
+-                                        .margin()
 -                                        .resolve_or_zero(inputs.parent_size, resolve_calc_value),
-+                                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value),
++                                    style.margin().resolve_or_zero(
++                                        child_inputs.parent_size.width,
++                                        resolve_calc_value,
++                                    ),
                                  )
                              };
  
-@@ -715,9 +721,12 @@ impl LayoutPassState<'_> {
+@@ -671,6 +683,12 @@ impl LayoutPassState<'_> {
+         // Out-of-flow candidates bubbled up from this container and its in-flow subtree.
+         // These are laid out by the out-of-flow positioning pass (`compute_oof_layout`).
+         let mut oof_candidates = OofCandidates::new();
++        // Floats placed in this formatting context, and out-of-flow candidates bubbled
++        // up from them. They move with the content when `align-content` shifts it.
++        #[cfg(feature = "floats")]
++        let mut placed_floats = Vec::new();
++        #[cfg(feature = "floats")]
++        let mut float_oof_candidates = OofCandidates::new();
+ 
+         // Perform inline layout
+         #[cfg(feature = "floats")]
+@@ -680,7 +698,13 @@ impl LayoutPassState<'_> {
+             let mut has_active_floats = initial_slot.segment_id.is_some();
+             let state = breaker.state_mut();
+             state.set_layout_max_advance(width);
+-            state.set_line_max_advance(initial_slot.width * scale);
++            // Lines have no height limit. An infinite one, unlike Parley's `f32::MAX`
++            // default, can never be exceeded, even by an infinitely tall box.
++            state.set_line_max_height(f32::INFINITY);
++            // With huge insets, f32 rounding can make a float slot slightly wider than
++            // the layout, which Parley's line breaker rejects (DioxusLabs/blitz#1443).
++            let layout_max_advance = state.layout_max_advance();
++            state.set_line_max_advance((initial_slot.width * scale).min(layout_max_advance));
+             state.set_line_x(initial_slot.x * scale);
+             state.set_line_y((initial_slot.y * scale) as f64);
+ 
+@@ -705,7 +729,9 @@ impl LayoutPassState<'_> {
+                                 block_ctx.find_content_slot(min_y as f32, Clear::None, None);
+                             has_active_floats = next_slot.segment_id.is_some();
+ 
+-                            state.set_line_max_advance(next_slot.width * scale);
++                            state.set_line_max_advance(
++                                (next_slot.width * scale).min(layout_max_advance),
++                            );
+                             state.set_line_x(next_slot.x * scale);
+                             state.set_line_y((next_slot.y * scale) as f64);
+                         } else {
+@@ -715,15 +741,18 @@ impl LayoutPassState<'_> {
  
                          continue;
                      }
 -                    YieldData::MaxHeightExceeded(_data) => {
 -                        // TODO
--                        continue;
 +                    YieldData::MaxHeightExceeded(_) => {
-+                        // We never constrain line height, so this means the
-+                        // measured content is unrepresentable. Retrying without
-+                        // changing breaker state would loop forever. Let the
-+                        // embedding application recover from the layout failure.
-+                        panic!("Inline content exceeded the line breaker's height limit");
++                        // Unreachable with an infinite height limit. Should it happen,
++                        // breaking the line again without a limit still makes progress.
++                        debug_assert!(false, "line breaker yielded MaxHeightExceeded");
++                        breaker.state_mut().set_line_max_height(f32::INFINITY);
+                         continue;
                      }
                      YieldData::InlineBoxBreak(box_break_data) => {
                          let state = breaker.state_mut();
-@@ -736,7 +745,7 @@ impl LayoutPassState<'_> {
+                         let node_id = NodeId::from_u64(box_break_data.inline_box_id);
+ 
+-                        let (direction, clear, margin) = {
++                        let (direction, clear, margin, width) = {
+                             let style = self.child_layout_style(&self.nodes[node_id]);
+                             // We can assume that the box is a float because we only set `break_on_box: true` for floats
+                             let direction = match style.float() {
+@@ -734,17 +763,21 @@ impl LayoutPassState<'_> {
+                             (
+                                 direction,
                                  style.clear(),
-                                 style
-                                     .margin()
+-                                style
+-                                    .margin()
 -                                    .resolve_or_zero(inputs.parent_size, resolve_calc_value),
-+                                    .resolve_or_zero(child_inputs.parent_size, resolve_calc_value),
++                                style.margin().resolve_or_zero(
++                                    child_inputs.parent_size.width,
++                                    resolve_calc_value,
++                                ),
++                                style.size().width,
                              )
                          };
  
+                         let margin_sum = margin.sum_axes();
+ 
++                        // The float's margin box shrinks to the available width, so its
++                        // border box gets that width less its margins (CSS 2.1 §10.3.5).
+                         let mut output = self.compute_child_layout(
+                             crate::taffy_node_id(node_id),
+-                            float_child_inputs,
++                            inline_box_inputs(width, margin, float_child_inputs),
+                         );
+                         let min_y = state.line_y() as f32 / scale;
+ 
+@@ -762,7 +795,9 @@ impl LayoutPassState<'_> {
+                             block_ctx.find_content_slot(min_y as f32, Clear::None, None);
+                         has_active_floats = next_slot.segment_id.is_some();
+ 
+-                        state.set_line_max_advance(next_slot.width * scale);
++                        state.set_line_max_advance(
++                            (next_slot.width * scale).min(layout_max_advance),
++                        );
+                         state.set_line_x(next_slot.x * scale);
+                         state.set_line_y((next_slot.y * scale) as f64);
+ 
+@@ -777,9 +812,10 @@ impl LayoutPassState<'_> {
+ 
+                         // Translate anchors from item-relative to container-relative
+                         // coordinates and collect candidates bubbled from the float's subtree
++                        placed_floats.push(node_id);
+                         if !output.oof_candidates.is_empty() {
+                             output.oof_candidates.translate(location);
+-                            oof_candidates.append(&mut output.oof_candidates);
++                            float_oof_candidates.append(&mut output.oof_candidates);
+                         }
+ 
+                         // dbg!(&layout.size);
+@@ -902,9 +938,10 @@ impl LayoutPassState<'_> {
+ 
+         let container_direction = self.nodes[node_id].layout_style().direction();
+ 
+-        // `align-content` aligns the line boxes (as a single unit) within the content box in
+-        // the block axis. Floats are positioned relative to the formatting context and are not
+-        // moved. The offset is stored on the text layout for painting and hit-testing.
++        // `align-content` aligns the entire contents (as a single unit) within the content box
++        // in the block axis (https://drafts.csswg.org/css-align-3/#distribution-block). This
++        // includes table cells' `vertical-align`. The offset is stored on the text layout for
++        // painting and hit-testing.
+         let align_content = BlockContainerStyle::align_content(&self.nodes[node_id].layout_style());
+         let block_offset = if align_content.keyword() == taffy::AlignContentKeyword::Normal {
+             0.0
+@@ -916,6 +953,21 @@ impl LayoutPassState<'_> {
+         inline_layout.block_offset = block_offset;
+         let line_box_top = container_pb.top + block_offset;
+ 
++        // Floats belong to the contents when this box roots their formatting context.
++        #[cfg(feature = "floats")]
++        {
++            if is_bfc_root && block_offset != 0.0 {
++                for &float_id in &placed_floats {
++                    self.nodes[float_id].unrounded_layout_mut().location.y += block_offset;
++                }
++                float_oof_candidates.translate(taffy::Point {
++                    x: 0.0,
++                    y: block_offset,
++                });
++            }
++            oof_candidates.append(&mut float_oof_candidates);
++        }
++
+         // Store sizes and positions of inline boxes
+         let mut ibox_order: u32 = 0;
+         let mut span_cb_flags = StyleFlags::empty();
+@@ -932,13 +984,13 @@ impl LayoutPassState<'_> {
+                     let style = self.child_layout_style(node);
+                     let padding = style
+                         .padding()
+-                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value);
++                        .resolve_or_zero(child_inputs.parent_size.width, resolve_calc_value);
+                     let border = style
+                         .border()
+-                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value);
++                        .resolve_or_zero(child_inputs.parent_size.width, resolve_calc_value);
+                     let margin = style
+                         .margin()
+-                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value);
++                        .resolve_or_zero(child_inputs.parent_size.width, resolve_calc_value);
+ 
+                     #[cfg(feature = "floats")]
+                     let is_floated = style.float() != Float::None;

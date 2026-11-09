@@ -16,7 +16,8 @@ use style::values::computed::length_percentage::CalcLengthPercentage;
 use stylo_taffy::TaffyStyloStyle;
 use taffy::{
     AxisStaticEdge, AxisStaticPosition, BlockContext, CoreStyle as _, DetailedLayoutInfo,
-    FlexDirection, LayoutContainingBlock, LayoutPartialTree, MaybeMath as _, NodeId, OofCandidate,
+    FlexDirection, LayoutContainingBlock, LayoutPartialTree, MaybeMath as _, MaybeResolve as _,
+    NodeId, OofCandidate,
     ResolveOrZero, RoundTree, RunMode, TraversePartialTree, TraverseTree, compute_block_layout,
     compute_cached_layout, compute_flexbox_layout, compute_grid_layout, compute_leaf_layout,
     compute_oof_layout, prelude::*,
@@ -532,39 +533,86 @@ impl LayoutPassState<'_> {
                     let context = Arc::clone(context);
 
                     *context.relax_text_minimums.borrow_mut() = false;
+                    // The border-box width this layout gives the table, if known.
+                    let table_width = inputs.known_dimensions.width.or(match inputs
+                        .available_space
+                        .width
+                    {
+                        taffy::AvailableSpace::Definite(available) => Some(
+                            context
+                                .style
+                                .size
+                                .width
+                                .maybe_resolve(inputs.parent_size.width, resolve_calc_value)
+                                .unwrap_or(available)
+                                .maybe_min(
+                                    context
+                                        .style
+                                        .max_size
+                                        .width
+                                        .maybe_resolve(inputs.parent_size.width, resolve_calc_value),
+                                ),
+                        ),
+                        taffy::AvailableSpace::MaxContent => Some(f32::INFINITY),
+                        taffy::AvailableSpace::MinContent => None,
+                    });
                     let mut table_wrapper = TableTreeWrapper {
                         doc: self,
                         ctx: context,
                     };
+                    table_wrapper.fold_authored_widths(table_width);
+
                     let mut output = compute_grid_layout(&mut table_wrapper, node_id, inputs);
 
-                    // An auto-layout table is never narrower than its columns'
-                    // minimums, even with an authored width or max-width:
-                    // over-wide content widens the table instead of painting
-                    // across its neighbours. Long words in text-only cells
+                    // A table is never narrower than its columns' minimums, even
+                    // with an authored width or max-width: over-wide content
+                    // widens the table instead of painting across its
+                    // neighbours. In auto layout, long words in text-only cells
                     // are the exception: `overflow-wrap` may break them, so
                     // those cells wrap first and the table only widens for
-                    // content that cannot wrap.
-                    if inputs.run_mode == taffy::RunMode::PerformLayout {
-                        if table_wrapper
-                            .required_width()
-                            .is_some_and(|required| required > output.size.width + 0.5)
+                    // content that cannot wrap. Measuring a table at a finite
+                    // width runs the same layout, so a parent that measures it
+                    // (as a table does for a nested one) gets the size its
+                    // layout has. Fixed layout sizes its columns without their
+                    // content, so it widens at any width.
+                    let measuring = inputs.run_mode == RunMode::ComputeSize;
+                    let is_fixed = table_wrapper.ctx.is_fixed;
+                    if is_fixed
+                        || !measuring
+                        || table_width.is_some_and(|width| width.is_finite())
+                    {
+                        let mut layout = taffy::LayoutInput {
+                            run_mode: RunMode::PerformLayout,
+                            known_dimensions: taffy::Size {
+                                width: Some(output.size.width),
+                                ..inputs.known_dimensions
+                            },
+                            ..inputs
+                        };
+                        let mut laid_out = if measuring {
+                            compute_grid_layout(&mut table_wrapper, node_id, layout)
+                        } else {
+                            output
+                        };
+                        if !is_fixed
+                            && table_wrapper
+                                .required_width()
+                                .is_some_and(|required| required > laid_out.size.width + 0.5)
                         {
                             *table_wrapper.ctx.relax_text_minimums.borrow_mut() = true;
-                            output = compute_grid_layout(&mut table_wrapper, node_id, inputs);
+                            laid_out = compute_grid_layout(&mut table_wrapper, node_id, layout);
                         }
                         if let Some(required) = table_wrapper.required_width() {
-                            if required > output.size.width + 0.5 {
-                                let widened = taffy::LayoutInput {
-                                    known_dimensions: taffy::Size {
-                                        width: Some(required),
-                                        ..inputs.known_dimensions
-                                    },
-                                    ..inputs
-                                };
-                                output = compute_grid_layout(&mut table_wrapper, node_id, widened);
+                            if required > laid_out.size.width + 0.5 {
+                                layout.known_dimensions.width = Some(required);
+                                laid_out = compute_grid_layout(&mut table_wrapper, node_id, layout);
                             }
                         }
+                        output = if measuring {
+                            taffy::LayoutOutput::from_outer_size(laid_out.size)
+                        } else {
+                            laid_out
+                        };
                     }
 
                     // Absolutely positioned children take no part in the table grid. Their

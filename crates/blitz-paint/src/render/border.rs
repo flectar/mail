@@ -1,11 +1,10 @@
 use anyrender::PaintScene;
 use blitz_dom::CollapsedEdge;
 use blitz_dom::node::SpecialElementData;
-use kurbo::{
-    Affine, BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _, Stroke, Vec2,
-};
+use kurbo::{BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _, Stroke, Vec2};
 use peniko::{Color, Fill};
 use smallvec::SmallVec;
+use style::color::AbsoluteColor;
 use style::values::computed::{BorderStyle, OutlineStyle};
 
 use crate::{
@@ -101,6 +100,20 @@ fn dashed_ratios(thickness: f64, scale: f64) -> (f64, f64) {
         (2.0, 1.0)
     } else {
         (3.0, 2.0)
+    }
+}
+
+/// The gap that fits a whole number of dashes along an open line of `length`,
+/// starting and ending with a dash, closest to `gap` (Blink's
+/// `SelectBestDashGap`).
+fn best_dash_gap(length: f64, dash: f64, gap: f64) -> f64 {
+    let fewer = ((length + gap) / (dash + gap)).floor().max(2.0);
+    let gap_for = |dashes: f64| (length - dashes * dash) / (dashes - 1.0);
+    let (fewer_gap, more_gap) = (gap_for(fewer), gap_for(fewer + 1.0));
+    if more_gap <= 0.0 || (fewer_gap - gap).abs() < (more_gap - gap).abs() {
+        fewer_gap
+    } else {
+        more_gap
     }
 }
 
@@ -513,11 +526,11 @@ impl ElementCx<'_, '_> {
     }
 
     /// Whether a table paints this element's border in the collapsed model,
-    /// for the table box itself and for each of its cells.
+    /// for the table box itself and for each of its cells. Out-of-flow
+    /// children take no part in the table grid and keep their own border.
     pub(crate) fn border_painted_by_table(&self) -> bool {
-        let collapsed = |data: &SpecialElementData| {
-            matches!(data, SpecialElementData::TableRoot(table) if table.collapsed_borders.is_some())
-        };
+        let collapsed = |data: &SpecialElementData| matches!(data, SpecialElementData::TableRoot(table) if table.collapsed_borders.is_some());
+        let id = self.node.id;
         collapsed(&self.element.special_data)
             || self
                 .node
@@ -525,7 +538,13 @@ impl ElementCx<'_, '_> {
                 .get()
                 .and_then(|parent| self.context.dom.get_node(parent))
                 .and_then(|parent| parent.element_data())
-                .is_some_and(|parent| collapsed(&parent.special_data))
+                .is_some_and(|parent| match &parent.special_data {
+                    SpecialElementData::TableRoot(table) => {
+                        table.collapsed_borders.is_some()
+                            && !table.oof_children.iter().any(|&(child, _)| child == id)
+                    }
+                    _ => false,
+                })
     }
 
     /// Paint the resolved borders of a `border-collapse: collapse` table, on
@@ -545,7 +564,10 @@ impl ElementCx<'_, '_> {
         };
         let (columns, rows) = (&grid_info.columns.positions, &grid_info.rows.positions);
         let (column_count, row_count) = (borders.columns, borders.rows);
-        if column_count == 0 || row_count == 0 || columns.len() < column_count || rows.len() < row_count
+        if column_count == 0
+            || row_count == 0
+            || columns.len() < column_count
+            || rows.len() < row_count
         {
             return;
         }
@@ -553,6 +575,9 @@ impl ElementCx<'_, '_> {
         let rtl = table.rtl;
         // Grid line positions in the table's border box. Vertical lines are
         // numbered in column order, which runs right to left in RTL tables.
+        // Layout rounds each cell's position within the table, so rounding the
+        // lines the same way keeps borders on the cells' edges instead of
+        // smearing them across two pixels.
         let column_line = |line: usize| -> f64 {
             f64::from(match (rtl, line < column_count) {
                 (false, true) => columns[line].start,
@@ -560,6 +585,7 @@ impl ElementCx<'_, '_> {
                 (true, true) => columns[line].end,
                 (true, false) => columns[column_count - 1].start,
             })
+            .round()
         };
         let row_line = |line: usize| -> f64 {
             f64::from(if line < row_count {
@@ -567,28 +593,53 @@ impl ElementCx<'_, '_> {
             } else {
                 rows[row_count - 1].end
             })
+            .round()
         };
         // The physical extent of a vertical edge to the left and right of its line.
         let vertical_extent = |edge: &CollapsedEdge| -> (f64, f64) {
             let (before, after) = (f64::from(edge.before()), f64::from(edge.after()));
-            if rtl { (after, before) } else { (before, after) }
+            if rtl {
+                (after, before)
+            } else {
+                (before, after)
+            }
         };
         // How far the vertical edges meeting horizontal line `line` at vertical
         // line `joint` reach to the left and right, so corners are covered.
         let joint_extent = |line: usize, joint: usize| -> (f64, f64) {
-            let above = line.checked_sub(1).and_then(|row| borders.vertical(row, joint));
-            let below = (line < row_count).then(|| borders.vertical(line, joint)).flatten();
+            let above = line
+                .checked_sub(1)
+                .and_then(|row| borders.vertical(row, joint));
+            let below = (line < row_count)
+                .then(|| borders.vertical(line, joint))
+                .flatten();
             [above, below]
                 .into_iter()
                 .flatten()
                 .map(vertical_extent)
-                .fold((0.0, 0.0), |(l, r), (el, er)| (f64::max(l, el), f64::max(r, er)))
+                .fold((0.0, 0.0), |(l, r), (el, er)| {
+                    (f64::max(l, el), f64::max(r, er))
+                })
+        };
+
+        // Each edge's colour comes from the box that won it, as it is now.
+        let doc = self.context.dom;
+        let painted = |edge: &CollapsedEdge| (*edge, edge.color(doc));
+        // Adjacent edges merge into one run when they paint the same way.
+        // Dashes and dots are laid out per cell edge, as in browsers, so each
+        // edge starts and ends with a dash.
+        let same = |(a, a_color): &(CollapsedEdge, AbsoluteColor),
+                    (b, b_color): &(CollapsedEdge, AbsoluteColor)| {
+            a.width == b.width
+                && a.style == b.style
+                && a_color == b_color
+                && !matches!(a.style, BorderStyle::Dashed | BorderStyle::Dotted)
         };
 
         // Horizontal lines, merged along each line.
         for line in 0..=row_count {
             let y = row_line(line);
-            let mut run: Option<(CollapsedEdge, f64, f64)> = None;
+            let mut run: Option<((CollapsedEdge, AbsoluteColor), f64, f64)> = None;
             for column in 0..=column_count {
                 let edge = (column < column_count)
                     .then(|| borders.horizontal(line, column))
@@ -602,21 +653,21 @@ impl ElementCx<'_, '_> {
                     } else {
                         (start - start_left, end + end_right)
                     };
-                    (*edge, x0, x1)
+                    (painted(edge), x0, x1)
                 });
                 run = match (run, segment) {
-                    (Some((edge, x0, x1)), Some((next, n0, n1))) if edge == next => {
+                    (Some((edge, x0, x1)), Some((next, n0, n1))) if same(&edge, &next) => {
                         Some((edge, x0.min(n0), x1.max(n1)))
                     }
                     (finished, next) => {
-                        if let Some((edge, x0, x1)) = finished {
+                        if let Some(((edge, color), x0, x1)) = finished {
                             let rect = Rect::new(
                                 x0,
                                 y - f64::from(edge.before()),
                                 x1,
                                 y + f64::from(edge.after()),
                             );
-                            self.fill_collapsed_edge(scene, &edge, rect, true);
+                            self.fill_collapsed_edge(scene, &edge, color, rect, true);
                         }
                         next
                     }
@@ -624,24 +675,57 @@ impl ElementCx<'_, '_> {
             }
         }
 
-        // Vertical lines, merged down each line.
+        // A horizontal edge that outranks the vertical ones meeting it owns their
+        // joint: vertical lines stop at its extent instead of cutting through it.
+        let horizontal_owner = |line: usize, joint: usize| -> Option<&CollapsedEdge> {
+            let left = joint
+                .checked_sub(1)
+                .and_then(|c| borders.horizontal(line, c));
+            let right = (joint < column_count)
+                .then(|| borders.horizontal(line, joint))
+                .flatten();
+            let above = line.checked_sub(1).and_then(|r| borders.vertical(r, joint));
+            let below = (line < row_count)
+                .then(|| borders.vertical(line, joint))
+                .flatten();
+            let owner = [left, right]
+                .into_iter()
+                .flatten()
+                .reduce(|a, b| if b.outranks(a) { b } else { a })?;
+            [above, below]
+                .into_iter()
+                .flatten()
+                .all(|vertical| owner.outranks(vertical))
+                .then_some(owner)
+        };
+
+        // Vertical lines, merged down each line where segments touch.
         for line in 0..=column_count {
             let x = column_line(line);
-            let mut run: Option<(CollapsedEdge, f64, f64)> = None;
+            let mut run: Option<((CollapsedEdge, AbsoluteColor), f64, f64)> = None;
             for row in 0..=row_count {
                 let segment = (row < row_count)
                     .then(|| borders.vertical(row, line))
                     .flatten()
-                    .map(|edge| (*edge, row_line(row), row_line(row + 1)));
+                    .and_then(|edge| {
+                        let y0 = row_line(row)
+                            + horizontal_owner(row, line).map_or(0.0, |h| f64::from(h.after()));
+                        let y1 = row_line(row + 1)
+                            - horizontal_owner(row + 1, line)
+                                .map_or(0.0, |h| f64::from(h.before()));
+                        (y1 > y0).then(|| (painted(edge), y0, y1))
+                    });
                 run = match (run, segment) {
-                    (Some((edge, y0, _)), Some((next, _, n1))) if edge == next => {
+                    (Some((edge, y0, y1)), Some((next, n0, n1)))
+                        if same(&edge, &next) && n0 <= y1 =>
+                    {
                         Some((edge, y0, n1))
                     }
                     (finished, next) => {
-                        if let Some((edge, y0, y1)) = finished {
+                        if let Some(((edge, color), y0, y1)) = finished {
                             let (left, right) = vertical_extent(&edge);
                             let rect = Rect::new(x - left, y0, x + right, y1);
-                            self.fill_collapsed_edge(scene, &edge, rect, false);
+                            self.fill_collapsed_edge(scene, &edge, color, rect, false);
                         }
                         next
                     }
@@ -650,21 +734,28 @@ impl ElementCx<'_, '_> {
         }
     }
 
-    /// Fill one merged collapsed edge. Bevelled styles have no single shared
-    /// light source across a collapsed grid, so they paint as solid lines.
+    /// Fill one merged collapsed edge the way Blink paints collapsed borders
+    /// (`table_painters.cc`): each edge is a top (horizontal) or left
+    /// (vertical) box side, `inset` paints as `ridge` and `outset` as `groove`
+    /// (CSS 2.1 §17.6.3), and patterns are laid out in device pixels.
     fn fill_collapsed_edge(
         &self,
         scene: &mut impl PaintScene,
         edge: &CollapsedEdge,
+        color: AbsoluteColor,
         rect: Rect,
         horizontal: bool,
     ) {
-        let color = edge.color.as_srgb_color();
+        let color = color.as_srgb_color();
+        let rect = rect.scale_from_origin(self.scale);
         if color.components[3] <= 0.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
             return;
         }
-        let thickness = if horizontal { rect.height() } else { rect.width() };
-        let length = if horizontal { rect.width() } else { rect.height() };
+        let (thickness, length) = if horizontal {
+            (rect.height(), rect.width())
+        } else {
+            (rect.width(), rect.height())
+        };
         let piece = |offset: f64, size: f64, cross: f64, cross_size: f64| {
             if horizontal {
                 Rect::new(
@@ -683,33 +774,88 @@ impl ElementCx<'_, '_> {
             }
         };
 
+        let style = match edge.style {
+            BorderStyle::Inset => BorderStyle::Ridge,
+            BorderStyle::Outset => BorderStyle::Groove,
+            style => style,
+        };
+        // Blink's `BorderEdge::EffectiveStyle`: too thin to show their detail,
+        // doubles and bevels paint solid.
+        let style = match style {
+            BorderStyle::Double if thickness < 3.0 => BorderStyle::Solid,
+            BorderStyle::Ridge | BorderStyle::Groove if thickness <= 1.0 => BorderStyle::Solid,
+            style => style,
+        };
+
         let mut path = BezPath::new();
-        match edge.style {
-            BorderStyle::Dashed | BorderStyle::Dotted => {
-                let (dash, gap) = if edge.style == BorderStyle::Dashed {
-                    (thickness * 3.0, thickness * 3.0)
+        match style {
+            BorderStyle::Ridge | BorderStyle::Groove => {
+                // An outer half (rounded up) and an inner half, shaded as the
+                // top or left side of `inset` and `outset` borders.
+                let side = if horizontal { Edge::Top } else { Edge::Left };
+                let (outer, inner) = grooved_edge_colors(color, side, style == BorderStyle::Ridge);
+                let split = (thickness / 2.0).ceil();
+                let mut inner_path = BezPath::new();
+                path.extend(piece(0.0, length, 0.0, split).path_elements(0.1));
+                inner_path.extend(piece(0.0, length, split, thickness - split).path_elements(0.1));
+                scene.fill(Fill::NonZero, self.transform, outer, None, &path);
+                scene.fill(Fill::NonZero, self.transform, inner, None, &inner_path);
+                return;
+            }
+            BorderStyle::Dotted if thickness > 3.0 => {
+                // Round dots, the first and last touching the ends.
+                let radius = thickness / 2.0;
+                let step = if length < 2.0 * thickness {
+                    f64::INFINITY
                 } else {
-                    (thickness, thickness)
+                    best_dash_gap(length, thickness, thickness) + thickness
                 };
-                let period = (dash + gap).max(1.0);
-                // Centre the pattern so both ends look alike.
-                let count = ((length + gap) / period).floor().max(1.0);
-                let lead = ((length - (count * period - gap)) / 2.0).max(0.0);
-                let mut offset = lead;
-                while offset < length {
-                    let size = dash.min(length - offset);
-                    path.extend(piece(offset, size, 0.0, thickness).path_elements(0.1));
-                    offset += period;
+                let mut center = radius;
+                while center <= length - radius + 0.01 {
+                    let dot = if horizontal {
+                        Point::new(rect.x0 + center, rect.y0 + radius)
+                    } else {
+                        Point::new(rect.x0 + radius, rect.y0 + center)
+                    };
+                    path.extend(Circle::new(dot, radius).path_elements(0.1));
+                    center += step;
                 }
             }
-            BorderStyle::Double if thickness >= 3.0 => {
+            BorderStyle::Dashed | BorderStyle::Dotted => {
+                // Thin dots are square dashes as long as they are wide.
+                let (dash, gap) = match style {
+                    BorderStyle::Dashed => {
+                        let (dash, gap) = dashed_ratios(thickness, 1.0);
+                        (dash * thickness, gap * thickness)
+                    }
+                    _ => (thickness, thickness),
+                };
+                if length <= 2.0 * dash {
+                    // No room for two dashes: Blink draws a solid line.
+                    path.extend(rect.path_elements(0.1));
+                } else {
+                    // Dashes at both ends, spaced as close to `gap` as fits.
+                    let (dash, gap) = if length <= 2.0 * dash + gap {
+                        let fit = length / (2.0 * dash + gap);
+                        (dash * fit, gap * fit)
+                    } else {
+                        (dash, best_dash_gap(length, dash, gap))
+                    };
+                    let mut offset = 0.0;
+                    while offset < length - 0.01 {
+                        let size = dash.min(length - offset);
+                        path.extend(piece(offset, size, 0.0, thickness).path_elements(0.1));
+                        offset += dash + gap;
+                    }
+                }
+            }
+            BorderStyle::Double => {
                 let line = (thickness / 3.0).round().max(1.0);
                 path.extend(piece(0.0, length, 0.0, line).path_elements(0.1));
                 path.extend(piece(0.0, length, thickness - line, line).path_elements(0.1));
             }
             _ => path.extend(rect.path_elements(0.1)),
         }
-        path.apply_affine(Affine::scale(self.scale));
         scene.fill(Fill::NonZero, self.transform, color, None, &path);
     }
 

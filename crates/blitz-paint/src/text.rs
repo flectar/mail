@@ -5,6 +5,7 @@ use parley::{Affinity, Cursor, Layout, Line, PositionedLayoutItem, Selection};
 use peniko::Fill;
 use std::collections::HashMap;
 use style::properties::generated::longhands::text_decoration_style::computed_value::T as TextDecorationStyle;
+use style::properties::generated::longhands::visibility::computed_value::T as StyloVisibility;
 use style::values::computed::{
     Length, LengthPercentage, TextDecorationLength, TextDecorationLine, TextUnderlinePosition,
 };
@@ -16,12 +17,15 @@ use crate::{FONT_EMBOLDEN_ENABLED, SELECTION_COLOR};
 /// Draw the backgrounds of inline elements (e.g. `<span style="background: ...">`).
 ///
 /// Each glyph run carries the node id of the innermost inline element it belongs to
-/// (via its brush). We look up that node's `background-color` and, if non-transparent,
-/// fill a rectangle covering the run's advance and its font's ascent/descent so that the
-/// background sits behind the text.
+/// (via its brush). Every enclosing inline box paints its own background behind the
+/// run, outermost first, so a transparent inner `<span>` does not hide the background
+/// of the `<a>` around it (email call-to-action labels rely on this).
 ///
-/// The inline root's own background is painted separately (as a normal block box), so
-/// runs belonging to the root are skipped to avoid drawing it twice.
+/// The walk stops at the inline root, whose background is painted as a normal block
+/// box, and at the first box that is not `display: inline`. When the inline root is an
+/// anonymous block, its wrapped children keep their DOM parent, so without that check
+/// the walk would repaint the enclosing block's background behind the text.
+/// `display: contents` boxes paint nothing.
 pub(crate) fn draw_inline_backgrounds<'a>(
     scene: &mut impl PaintScene,
     lines: impl Iterator<Item = Line<'a, TextBrush>>,
@@ -29,6 +33,7 @@ pub(crate) fn draw_inline_backgrounds<'a>(
     transform: Affine,
     inline_root_id: NodeId,
 ) {
+    let mut backgrounds = Vec::new();
     for line in lines {
         for item in line.items() {
             let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
@@ -40,13 +45,8 @@ pub(crate) fn draw_inline_backgrounds<'a>(
                 continue;
             }
 
-            // Parley commonly associates a run with its text node. Backgrounds
-            // used by email CTA links live on an enclosing inline `<a>` or
-            // `<span>`, so walk toward the inline root until a painted
-            // background is found. Looking at the run node alone makes white
-            // button labels appear to vanish on the white message canvas.
+            backgrounds.clear();
             let mut candidate_id = Some(node_id);
-            let mut bg_color = Color::TRANSPARENT;
             while let Some(id) = candidate_id {
                 if id == inline_root_id {
                     break;
@@ -55,19 +55,27 @@ pub(crate) fn draw_inline_backgrounds<'a>(
                     break;
                 };
                 if let Some(styles) = node.primary_styles() {
-                    let current_color = styles.clone_color();
-                    bg_color = styles
-                        .get_background()
-                        .background_color
-                        .resolve_to_absolute(&current_color)
-                        .as_srgb_color();
-                    if bg_color != Color::TRANSPARENT {
-                        break;
+                    let display = styles.clone_display();
+                    if !display.is_contents() {
+                        if !display.is_inline_flow() {
+                            break;
+                        }
+                        if styles.get_inherited_box().visibility == StyloVisibility::Visible {
+                            let current_color = styles.clone_color();
+                            let color = styles
+                                .get_background()
+                                .background_color
+                                .resolve_to_absolute(&current_color)
+                                .as_srgb_color();
+                            if color != Color::TRANSPARENT {
+                                backgrounds.push(color);
+                            }
+                        }
                     }
                 }
                 candidate_id = node.parent;
             }
-            if bg_color == Color::TRANSPARENT {
+            if backgrounds.is_empty() {
                 continue;
             }
 
@@ -79,7 +87,9 @@ pub(crate) fn draw_inline_backgrounds<'a>(
             let y1 = baseline + metrics.descent as f64;
             let rect = Rect::new(x, y0, x + w, y1);
 
-            scene.fill(Fill::NonZero, transform, bg_color, None, &rect);
+            for color in backgrounds.iter().rev() {
+                scene.fill(Fill::NonZero, transform, *color, None, &rect);
+            }
         }
     }
 }
@@ -334,9 +344,12 @@ pub(crate) fn line_paint_bounds(
                 let font_bounds = (*fonts
                     .entry((font.data.id(), font.index))
                     .or_insert_with(|| font_outline_bounds(font)))?;
+                // Some web fonts draw past their `head` bounding box, so allow a
+                // margin that grows with the font size.
+                let margin = (f64::from(run.font_size()) * 0.25).max(2.0);
                 let glyph_bounds = Affine::scale(run.font_size() as f64)
                     .transform_rect_bbox(font_bounds)
-                    .inflate(2.0, 2.0);
+                    .inflate(margin, margin);
                 let synthesis = run
                     .synthesis()
                     .skew()
@@ -802,11 +815,7 @@ pub(crate) fn stroke_text<'a>(
                     scene.draw_glyphs(
                         font,
                         font_size,
-                        // Email content is continuously scalable. Drawing the
-                        // source outlines avoids font-program-specific hinting
-                        // failures that can turn otherwise valid glyphs into
-                        // empty paths (notably Segoe UI digits on Windows).
-                        false, // hint
+                        !FONT_EMBOLDEN_ENABLED, // hint
                         bytemuck::cast_slice(run.normalized_coords()),
                         embolden,
                         Fill::NonZero,

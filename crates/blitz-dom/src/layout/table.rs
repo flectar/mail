@@ -59,14 +59,48 @@ pub struct TableContext {
     /// `overflow-wrap: break-word` wraps long words instead of the table
     /// growing past its container.
     pub relax_text_minimums: AtomicRefCell<bool>,
+    /// Per column in auto layout, the authored length its cells ask for, unless
+    /// a percentage takes precedence.
+    column_lengths: Vec<Option<f32>>,
+    /// Per column in auto layout, the authored percentage, as a fraction.
+    column_percents: Vec<Option<f32>>,
+    /// The table's padding, border and spacing between columns: the part of
+    /// its border-box width no column gets.
+    column_extra: f32,
+    /// The spacing between two columns.
+    column_gap: f32,
+    /// Whether any cell has an authored length width in auto layout.
+    has_authored_lengths: bool,
+    /// How far authored cell widths act as minimums in the current layout.
+    fold: AtomicRefCell<AuthoredFold>,
+    /// Per column, the `min-width` of its `<col>` (0 without one), which its
+    /// single-column cells measure at least as wide as in auto layout.
+    pub(crate) column_floors: Vec<f32>,
+}
+
+/// How far authored column widths are minimums in one layout of an auto table.
+///
+/// Browsers give authored columns their widths while the table can also hold
+/// every other column's min-content width. A narrower table interpolates them
+/// toward their content's min-content width, all by the same fraction, while
+/// auto columns keep their min-content widths: the table width lies between
+/// the min-content and min-content-specified guesses of CSS Tables 3 §3.9.3.
+#[derive(Debug, Default)]
+struct AuthoredFold {
+    /// 0 leaves authored widths out of the minimums; 1 makes them minimums.
+    amount: f32,
+    /// Per column, the width its single-column cells measure at least.
+    floors: Vec<f32>,
 }
 
 #[derive(Debug, Clone)]
 pub struct TableCell {
     pub node_id: NodeId,
     style: taffy::Style<Atom>,
-    vertical_align: CellVerticalAlign,
-    layout_style: ServoArc<ComputedValues>,
+    /// The cell's style as its own layout sees it: the primary style with the
+    /// collapsed half-borders and an authored width left to the column.
+    /// Derived lazily and again whenever the primary style changes.
+    layout_style: CellLayoutStyle,
     /// Zero-based slot of the cell's first row and column.
     pub row: u16,
     pub column: u16,
@@ -76,36 +110,57 @@ pub struct TableCell {
     collapsed_border: Option<taffy::Rect<f32>>,
     /// The authored `width`; the grid item itself is always auto-sized.
     authored_width: taffy::Dimension,
+    /// Whether the cell has an authored length `height`, which its children's
+    /// percentage heights resolve against.
+    has_authored_height: bool,
 }
 
-/// How a cell positions its content within the height of its row(s).
-///
-/// `baseline` is approximated as `top`: aligning first baselines across a row
-/// would need the cell box itself to move, which would detach its background
-/// from the row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CellVerticalAlign {
-    Top,
-    Middle,
-    Bottom,
+/// The primary style a cell's layout style was derived from, and that style.
+#[derive(Debug, Default)]
+struct CellLayoutStyle(AtomicRefCell<Option<(ServoArc<ComputedValues>, ServoArc<ComputedValues>)>>);
+
+impl Clone for CellLayoutStyle {
+    fn clone(&self) -> Self {
+        Self(AtomicRefCell::new(self.0.borrow().clone()))
+    }
 }
 
-impl CellVerticalAlign {
-    fn from_style(style: &ComputedValues) -> Self {
-        use style::values::computed::box_::AlignmentBaseline;
-        use style::values::generics::box_::{BaselineShift, BaselineShiftKeyword};
-        // `vertical-align` is a shorthand: `top`/`bottom` become baseline
-        // shifts, `middle` an alignment baseline.
-        match style.clone_baseline_shift() {
-            BaselineShift::Keyword(BaselineShiftKeyword::Top) => return Self::Top,
-            BaselineShift::Keyword(BaselineShiftKeyword::Bottom) => return Self::Bottom,
-            BaselineShift::Keyword(BaselineShiftKeyword::Center) => return Self::Middle,
-            _ => {}
+impl TableCell {
+    /// The cell's layout style for its current primary style. Only the cell's
+    /// own layout sees it; painting and style sharing keep the primary style.
+    fn layout_style(
+        &self,
+        primary: &ServoArc<ComputedValues>,
+        is_fixed: bool,
+    ) -> ServoArc<ComputedValues> {
+        let mut cached = self.layout_style.0.borrow_mut();
+        if let Some((base, style)) = cached.as_ref()
+            && ServoArc::ptr_eq(base, primary)
+        {
+            return style.clone();
         }
-        match style.clone_alignment_baseline() {
-            AlignmentBaseline::Middle => Self::Middle,
-            _ => Self::Top,
+        let mut style = primary.clone();
+        if let Some(half) = self.collapsed_border {
+            let border = ServoArc::make_mut(&mut style).mutate_border();
+            border.border_top_width.0 = app_units::Au::from_f32_px(half.top);
+            border.border_right_width.0 = app_units::Au::from_f32_px(half.right);
+            border.border_bottom_width.0 = app_units::Au::from_f32_px(half.bottom);
+            border.border_left_width.0 = app_units::Au::from_f32_px(half.left);
+            border.border_top_style = BorderStyle::Solid;
+            border.border_right_style = BorderStyle::Solid;
+            border.border_bottom_style = BorderStyle::Solid;
+            border.border_left_style = BorderStyle::Solid;
         }
+        // The column track carries an authored length, so the cell measures its
+        // content. Like browsers, auto layout treats that width as preferred,
+        // not as a minimum: a fluid table narrows such columns toward their
+        // content.
+        if !is_fixed && self.authored_width.tag() == taffy::CompactLength::LENGTH_TAG {
+            let position = ServoArc::make_mut(&mut style).mutate_position();
+            position.width = style::values::generics::length::Size::Auto;
+        }
+        *cached = Some((primary.clone(), style.clone()));
+        style
     }
 }
 
@@ -125,10 +180,38 @@ pub struct TableRow {
 pub struct CollapsedEdge {
     pub width: f32,
     pub style: BorderStyle,
-    pub color: AbsoluteColor,
+    /// The box whose border won the edge, and which of its sides. The colour
+    /// is read from it when painting: colour changes (including `currentcolor`
+    /// after a `color` change) only repaint, so no rebuild would refresh a copy.
+    source: NodeId,
+    side: u8,
 }
 
 impl CollapsedEdge {
+    /// Whether this edge wins a joint against `other`: the wider edge wins, then
+    /// the edge whose style ranks higher (CSS 2.1 §17.6.2.1, as Blink resolves joints).
+    pub fn outranks(&self, other: &CollapsedEdge) -> bool {
+        (self.width, style_rank(self.style)) > (other.width, style_rank(other.style))
+    }
+
+    /// The edge's colour, resolved from the winning box's current style.
+    pub fn color(&self, doc: &BaseDocument) -> AbsoluteColor {
+        let Some(styles) = doc
+            .get_node(self.source)
+            .and_then(|node| node.primary_styles())
+        else {
+            return AbsoluteColor::TRANSPARENT_BLACK;
+        };
+        let border = styles.get_border();
+        let color = match usize::from(self.side) {
+            TOP => &border.border_top_color,
+            RIGHT => &border.border_right_color,
+            BOTTOM => &border.border_bottom_color,
+            _ => &border.border_left_color,
+        };
+        color.resolve_to_absolute(&styles.clone_color())
+    }
+
     /// The part of the edge before (above or left of) its grid line. Odd
     /// pixel widths put the extra pixel after the line, so a 1px border sits
     /// on whole pixels instead of straddling two.
@@ -174,67 +257,59 @@ const BOTTOM: usize = 2;
 const LEFT: usize = 3;
 
 /// A border that competes for a shared edge, with the precedence of the box
-/// it came from: cell 4, row 3, row group 2, table 1.
+/// it came from (CSS 2.1 §17.6.2.1 rule 4): cell 6, row 5, row group 4,
+/// column 3, column group 2, table 1.
 #[derive(Debug, Clone, Copy)]
 struct BorderCandidate {
     width: f32,
     style: BorderStyle,
-    color: AbsoluteColor,
     origin: u8,
+    source: NodeId,
+    side: u8,
 }
 
-fn border_candidates(style: &ComputedValues, origin: u8) -> [BorderCandidate; 4] {
+fn border_candidates(style: &ComputedValues, origin: u8, source: NodeId) -> [BorderCandidate; 4] {
     let border = style.get_border();
-    let current_color = style.clone_color();
-    let side =
-        |width: app_units::Au, style: BorderStyle, color: &style::values::computed::Color| {
-            BorderCandidate {
-                width: width.to_f32_px(),
-                style,
-                color: color.resolve_to_absolute(&current_color),
-                origin,
-            }
-        };
+    let side = |side: usize, width: app_units::Au, style: BorderStyle| BorderCandidate {
+        width: width.to_f32_px(),
+        style,
+        origin,
+        source,
+        side: side as u8,
+    };
     [
+        side(TOP, border.border_top_width.0, border.border_top_style),
         side(
-            border.border_top_width.0,
-            border.border_top_style,
-            &border.border_top_color,
-        ),
-        side(
+            RIGHT,
             border.border_right_width.0,
             border.border_right_style,
-            &border.border_right_color,
         ),
         side(
+            BOTTOM,
             border.border_bottom_width.0,
             border.border_bottom_style,
-            &border.border_bottom_color,
         ),
-        side(
-            border.border_left_width.0,
-            border.border_left_style,
-            &border.border_left_color,
-        ),
+        side(LEFT, border.border_left_width.0, border.border_left_style),
     ]
+}
+
+/// The style precedence of CSS 2.1 §17.6.2.1, from `double` down to `inset`.
+fn style_rank(style: BorderStyle) -> u8 {
+    match style {
+        BorderStyle::Double => 8,
+        BorderStyle::Solid => 7,
+        BorderStyle::Dashed => 6,
+        BorderStyle::Dotted => 5,
+        BorderStyle::Ridge => 4,
+        BorderStyle::Outset => 3,
+        BorderStyle::Groove => 2,
+        BorderStyle::Inset => 1,
+        BorderStyle::None | BorderStyle::Hidden => 0,
+    }
 }
 
 /// CSS 2.1 §17.6.2.1 border conflict resolution.
 fn resolve_edge(candidates: &[BorderCandidate]) -> Option<CollapsedEdge> {
-    fn style_rank(style: BorderStyle) -> u8 {
-        match style {
-            BorderStyle::Double => 8,
-            BorderStyle::Solid => 7,
-            BorderStyle::Dashed => 6,
-            BorderStyle::Dotted => 5,
-            BorderStyle::Ridge => 4,
-            BorderStyle::Outset => 3,
-            BorderStyle::Groove => 2,
-            BorderStyle::Inset => 1,
-            BorderStyle::None | BorderStyle::Hidden => 0,
-        }
-    }
-
     let mut best: Option<&BorderCandidate> = None;
     for candidate in candidates {
         // `hidden` suppresses every other border on the edge.
@@ -258,13 +333,16 @@ fn resolve_edge(candidates: &[BorderCandidate]) -> Option<CollapsedEdge> {
     best.map(|best| CollapsedEdge {
         width: best.width,
         style: best.style,
-        color: best.color,
+        source: best.source,
+        side: best.side,
     })
 }
 
 /// Grids beyond this many slots skip collapsed resolution, which needs a
-/// slot map, and fall back to each cell painting its own borders.
-const MAX_COLLAPSED_SLOTS: usize = 1 << 20;
+/// slot map, and fall back to each cell painting its own borders. Spans let a
+/// few kilobytes of markup describe a huge grid, so this keeps the edge maps
+/// of hostile mail to about 2 MiB while covering very large real tables.
+const MAX_COLLAPSED_SLOTS: usize = 1 << 16;
 
 /// HTML caps `colspan` at 1000; rows are bounded by Taffy's `i16` lines.
 const MAX_COLSPAN: u16 = 1000;
@@ -379,7 +457,7 @@ pub(crate) fn build_table_context(
 
     let border_collapse = stylo_styles.clone_border_collapse();
     let border_spacing = stylo_styles.clone_border_spacing().0;
-    let table_borders = border_candidates(&stylo_styles, 1);
+    let table_borders = border_candidates(&stylo_styles, 1, table_root_node_id);
     let rtl = stylo_styles.clone_direction() == style::computed_values::direction::T::Rtl;
 
     drop(stylo_styles);
@@ -403,13 +481,25 @@ pub(crate) fn build_table_context(
         groups: Vec::new(),
         columns: 0,
     };
-    // Preserve beta.3's header/body/footer ordering.
+    // Only the first header group renders before the other rows and only the
+    // first footer group after them; later ones are ordinary row groups in
+    // document order (CSS 2.1 §17.2).
+    let first_group = |doc: &BaseDocument, inside: DisplayInside| {
+        children
+            .iter()
+            .copied()
+            .find(|&id| doc.nodes[id].display_style().map(|d| d.inside()) == Some(inside))
+    };
+    let header = first_group(doc, DisplayInside::TableHeaderGroup);
+    let footer = first_group(doc, DisplayInside::TableFooterGroup);
     for order in 0..3 {
         for child_id in children.iter().copied() {
-            let child_order = match doc.nodes[child_id].display_style().map(|d| d.inside()) {
-                Some(DisplayInside::TableHeaderGroup) => 0,
-                Some(DisplayInside::TableFooterGroup) => 2,
-                _ => 1,
+            let child_order = if Some(child_id) == header {
+                0
+            } else if Some(child_id) == footer {
+                2
+            } else {
+                1
             };
             if child_order == order {
                 collector.collect(doc, child_id);
@@ -428,12 +518,19 @@ pub(crate) fn build_table_context(
         ..
     } = collector;
 
-    // Preserve explicit trailing columns but drop empty auto columns.
-    while column_sizes.len() > column_count && column_sizes.last().is_some_and(|c| c.min.is_auto())
+    // A column past the last cell only stays for a positive length width or
+    // min-width. Percentage, calc() and zero widths act as auto there, as in
+    // Gecko and Blink.
+    let has_length_minimum = |column: &TrackSizingFunction| {
+        let min = column.min.into_raw();
+        min.tag() == taffy::CompactLength::LENGTH_TAG && min.value() > 0.0
+    };
+    while column_sizes.len() > column_count && !column_sizes.last().is_some_and(has_length_minimum)
     {
         column_sizes.pop();
         columns.pop();
     }
+    let cell_columns = column_count;
     column_count = column_count.max(column_sizes.len());
 
     // A rowspan never extends past the last row.
@@ -482,7 +579,12 @@ pub(crate) fn build_table_context(
             // shared at row and column boundaries rather than spaced apart.
             style.padding = taffy::Rect::ZERO.map(style_helpers::length);
             let slots = usize::from(row_count) * column_count;
-            if slots > 0 && slots <= MAX_COLLAPSED_SLOTS {
+            if slots == 0 {
+                // With no cells there are no edges, so not even the table's
+                // own border survives conflict resolution.
+                style.border = taffy::Rect::ZERO.map(style_helpers::length);
+            } else if slots <= MAX_COLLAPSED_SLOTS {
+                let column_borders = column_border_candidates(doc, &columns);
                 let borders = resolve_collapsed_borders(
                     usize::from(row_count),
                     column_count,
@@ -491,6 +593,7 @@ pub(crate) fn build_table_context(
                     &cell_borders,
                     &row_borders,
                     &groups,
+                    &column_borders,
                     &table_borders,
                 );
                 // The table box holds the outer half of its edges.
@@ -546,31 +649,8 @@ pub(crate) fn build_table_context(
         }
     };
 
-    // Cache the cell's layout-only computed style once per table construction.
-    // Beta.3 reads styles lazily; changing the author's primary style would also
-    // change painting and style sharing. Only the cell's layout call sees this copy.
-    for cell in &mut cells {
-        let mut layout_style = cell.layout_style.clone();
-        if let Some(half) = cell.collapsed_border {
-            let border = ServoArc::make_mut(&mut layout_style).mutate_border();
-            border.border_top_width.0 = app_units::Au::from_f32_px(half.top);
-            border.border_right_width.0 = app_units::Au::from_f32_px(half.right);
-            border.border_bottom_width.0 = app_units::Au::from_f32_px(half.bottom);
-            border.border_left_width.0 = app_units::Au::from_f32_px(half.left);
-            border.border_top_style = BorderStyle::Solid;
-            border.border_right_style = BorderStyle::Solid;
-            border.border_bottom_style = BorderStyle::Solid;
-            border.border_left_style = BorderStyle::Solid;
-        }
-        if !is_fixed && cell.authored_width.tag() == taffy::CompactLength::LENGTH_TAG {
-            let position = ServoArc::make_mut(&mut layout_style).mutate_position();
-            if position.min_width.is_auto() {
-                position.min_width = position.width.clone();
-            }
-            position.width = style::values::generics::length::Size::Auto;
-        }
-        cell.layout_style = layout_style;
-        if is_fixed {
+    if is_fixed {
+        for cell in &mut cells {
             cell.style.min_size.width = style_helpers::length(0.0);
         }
     }
@@ -599,22 +679,58 @@ pub(crate) fn build_table_context(
             }
         }
     }
+    // The spacing between and around the columns and the table's own
+    // padding and border, which the columns share the table's width with.
+    let gaps = column_count.saturating_sub(1) as f32;
+    let table_pb = style
+        .padding()
+        .resolve_or_zero(None, resolve_calc_value)
+        .horizontal_axis_sum()
+        + style
+            .border()
+            .resolve_or_zero(None, resolve_calc_value)
+            .horizontal_axis_sum();
+    let column_gap = style.gap.width.into_raw().value();
+    let column_extra = gaps * column_gap + table_pb;
+    let has_authored_lengths = !is_fixed
+        && cells
+            .iter()
+            .any(|cell| ColumnHint::from_cell(cell).length.is_some());
+    let (column_lengths, column_percents) = column_hints
+        .iter()
+        .map(|hint| match hint.percent {
+            _ if is_fixed => (None, None),
+            Some(percent) => (None, Some(percent)),
+            None => (hint.length, None),
+        })
+        .unzip();
+
     // When every column has an authored length in a table of definite width,
     // browsers grow those columns in proportion to the authored widths.
+    // Excess width goes to auto columns first, then to length columns in
+    // proportion to their widths, then to percentage columns (CSS Tables 3
+    // §3.9.3). Without auto columns, the next kind grows instead.
     let table_width_is_definite = style.size().width.tag() != taffy::CompactLength::AUTO_TAG;
-    let all_lengths = !column_hints.is_empty()
+    let is_percent = |hint: &ColumnHint| hint.percent.is_some();
+    let is_length = |hint: &ColumnHint| hint.length.is_some() && hint.percent.is_none();
+    let no_auto_columns = !column_hints.is_empty()
         && column_hints
             .iter()
-            .all(|hint| hint.length.is_some() && hint.percent.is_none());
-    let grow_lengths = !is_fixed && table_width_is_definite && all_lengths;
+            .all(|hint| is_length(hint) || is_percent(hint));
+    let grow_lengths = !is_fixed && table_width_is_definite && no_auto_columns;
+    let grow = Growth {
+        lengths: grow_lengths,
+        percents: grow_lengths && !column_hints.iter().any(is_length),
+    };
     style.grid_template_columns = column_hints
         .iter()
-        .map(|hint| hint.track(is_fixed, grow_lengths).into())
+        .map(|hint| hint.track(is_fixed, grow).into())
         .collect();
 
     // Explicit columns take precedence over first-row cell widths in fixed layout.
     // Percentages exclude inner spacing and include a content-box cell's padding/border.
     let mut calc_values = Vec::new();
+    let mut column_floors = vec![0.0; column_count];
     let inner_spacing = if border_collapse == BorderCollapse::Separate {
         border_spacing.width.px() * column_count.saturating_sub(1) as f32
     } else {
@@ -641,7 +757,13 @@ pub(crate) fn build_table_context(
             } else if hint.length.is_none() && hint.calc.is_none() {
                 style_helpers::minmax(style_helpers::length(0.0), style_helpers::fr(1.0))
             } else {
-                hint.track(true, false)
+                hint.track(
+                    true,
+                    Growth {
+                        lengths: false,
+                        percents: false,
+                    },
+                )
             };
             style.grid_template_columns[index] = track.into();
         } else if let Some(column) = column_sizes.get(index) {
@@ -649,8 +771,20 @@ pub(crate) fn build_table_context(
                 && !column.max.is_auto()
             {
                 style.grid_template_columns[index] = (*column).into();
+            } else if has_length_minimum(column) {
+                // A column's `min-width` floors its width: its cells measure at
+                // least that wide, and a column without cells takes it as its size.
+                column_floors[index] = column.min.into_raw().value();
+                if index >= cell_columns {
+                    style.grid_template_columns[index] = (*column).into();
+                }
             }
         }
+    }
+    // A rebuild can move any cell's collapsed half-borders, including cells
+    // whose own style did not change, so no cell may reuse a cached size.
+    for cell in &cells {
+        doc.nodes[cell.node_id].clear_layout_cache();
     }
     let layout_children = cells
         .iter()
@@ -674,6 +808,13 @@ pub(crate) fn build_table_context(
             collapsed_borders,
             rtl,
             relax_text_minimums: AtomicRefCell::new(false),
+            column_lengths,
+            column_percents,
+            column_extra,
+            column_gap,
+            has_authored_lengths,
+            fold: AtomicRefCell::new(AuthoredFold::default()),
+            column_floors,
         },
         layout_children,
     )
@@ -705,53 +846,106 @@ fn collect_columns(
                 collect_columns(doc, child_id, wm, columns, column_sizes);
             }
             doc.nodes[node_id].children = children;
+            if columns.len() == first_column {
+                // Without column children, a column group spans its own
+                // columns (HTML `colgroup span`), sized like a `<col>`.
+                push_columns(&doc.nodes[node_id], wm, columns, column_sizes);
+            }
             for column in &mut columns[first_column..] {
                 column.group.get_or_insert(node_id);
             }
         }
-        DisplayInside::TableColumn => {
-            let style = table_taffy_style(&node.primary_styles().unwrap(), wm);
-            let span: u16 = node
-                .attr(local_name!("span"))
-                .and_then(|val| val.parse::<u16>().ok())
-                .map(|v| v.max(1))
-                .unwrap_or(1);
-            let column: TrackSizingFunction = match style.size().width.tag() {
-                taffy::CompactLength::LENGTH_TAG => {
-                    // A definite `max-width` clamps the column width; a zero width is treated as auto
-                    let mut width = style.size.width.value();
-                    if style.max_size.width.into_raw().tag() == taffy::CompactLength::LENGTH_TAG {
-                        width = width.min(style.max_size.width.into_raw().value());
-                    }
-                    if width > 0.0 {
-                        style_helpers::length(width)
-                    } else {
-                        style_helpers::auto()
-                    }
-                }
-                taffy::CompactLength::PERCENT_TAG => {
-                    style_helpers::percent(style.size.width.value())
-                }
-                // Browsers treat calc() widths on columns as auto
-                _ => style_helpers::auto(),
-            };
-            // A definite `min-width` on a column acts as a floor on its width
-            let column = match style.min_size().width.into_raw().tag() {
-                taffy::CompactLength::LENGTH_TAG if column.max.is_auto() => style_helpers::minmax(
-                    style_helpers::length(style.min_size().width.into_raw().value()),
-                    style_helpers::auto(),
-                ),
-                _ => column,
-            };
-            for _ in 0..span {
-                columns.push(TableColumn {
-                    node_id,
-                    group: None,
-                });
-                column_sizes.push(column);
+        DisplayInside::TableColumn => push_columns(node, wm, columns, column_sizes),
+        _ => {}
+    }
+}
+
+/// The columns a `<col>` (or a column group without columns) stands for.
+fn push_columns(
+    node: &crate::node::Node,
+    wm: WritingMode,
+    columns: &mut Vec<TableColumn>,
+    column_sizes: &mut Vec<TrackSizingFunction>,
+) {
+    let node_id = node.id;
+    let style = table_taffy_style(&node.primary_styles().unwrap(), wm);
+    let span: u16 = node
+        .attr(local_name!("span"))
+        .and_then(|val| val.parse::<u16>().ok())
+        .map(|v| v.clamp(1, MAX_COLSPAN))
+        .unwrap_or(1);
+    let column: TrackSizingFunction = match style.size().width.tag() {
+        taffy::CompactLength::LENGTH_TAG => {
+            // A definite `max-width` clamps the column width; a zero width is treated as auto
+            let mut width = style.size.width.value();
+            if style.max_size.width.into_raw().tag() == taffy::CompactLength::LENGTH_TAG {
+                width = width.min(style.max_size.width.into_raw().value());
+            }
+            if width > 0.0 {
+                style_helpers::length(width)
+            } else {
+                style_helpers::auto()
             }
         }
-        _ => {}
+        taffy::CompactLength::PERCENT_TAG => style_helpers::percent(style.size.width.value()),
+        // Browsers treat calc() widths on columns as auto
+        _ => style_helpers::auto(),
+    };
+    // A definite `min-width` on a column acts as a floor on its width
+    let column = match style.min_size().width.into_raw().tag() {
+        taffy::CompactLength::LENGTH_TAG if column.max.is_auto() => style_helpers::minmax(
+            style_helpers::length(style.min_size().width.into_raw().value()),
+            style_helpers::auto(),
+        ),
+        _ => column,
+    };
+    for _ in 0..span {
+        columns.push(TableColumn {
+            node_id,
+            group: None,
+        });
+        column_sizes.push(column);
+    }
+}
+
+/// The border candidates of the table's columns and column groups.
+struct ColumnBorders {
+    /// Per column, its `<col>`'s borders, as if each column it spans were a
+    /// box of its own (as Blink merges them).
+    columns: Vec<Option<[BorderCandidate; 4]>>,
+    /// Each column group's first and last column and its borders.
+    groups: Vec<(usize, usize, [BorderCandidate; 4])>,
+}
+
+fn column_border_candidates(doc: &BaseDocument, columns: &[TableColumn]) -> ColumnBorders {
+    let candidates = |node_id: NodeId, origin: u8| {
+        doc.nodes[node_id]
+            .primary_styles()
+            .map(|style| border_candidates(&style, origin, node_id))
+    };
+    let mut groups: Vec<(usize, usize, [BorderCandidate; 4])> = Vec::new();
+    let mut previous_group = None;
+    for (index, column) in columns.iter().enumerate() {
+        if column.group.is_some() && column.group == previous_group {
+            if let Some(group) = groups.last_mut() {
+                group.1 = index;
+            }
+        } else if let Some(group) = column.group.and_then(|group| candidates(group, 2)) {
+            groups.push((index, index, group));
+        }
+        previous_group = column.group;
+    }
+    ColumnBorders {
+        columns: columns
+            .iter()
+            // A column group without columns stands for its own columns.
+            .map(|column| {
+                (Some(column.node_id) != column.group)
+                    .then(|| candidates(column.node_id, 3))
+                    .flatten()
+            })
+            .collect(),
+        groups,
     }
 }
 
@@ -764,6 +958,7 @@ fn resolve_collapsed_borders(
     cell_borders: &[[BorderCandidate; 4]],
     row_borders: &[(u16, [BorderCandidate; 4])],
     groups: &[(u16, u16, [BorderCandidate; 4])],
+    column_borders: &ColumnBorders,
     table_borders: &[BorderCandidate; 4],
 ) -> CollapsedBorders {
     const EMPTY: u32 = u32::MAX;
@@ -823,11 +1018,19 @@ fn resolve_collapsed_borders(
                     candidates.push(group.2[TOP]);
                 }
             }
-            if line == 0 {
-                candidates.push(table_borders[TOP]);
-            }
-            if line == rows {
-                candidates.push(table_borders[BOTTOM]);
+            if line == 0 || line == rows {
+                let side = if line == 0 { TOP } else { BOTTOM };
+                if let Some(Some(col)) = column_borders.columns.get(column) {
+                    candidates.push(col[side]);
+                }
+                candidates.extend(
+                    column_borders
+                        .groups
+                        .iter()
+                        .filter(|group| (group.0..=group.1).contains(&column))
+                        .map(|group| group.2[side]),
+                );
+                candidates.push(table_borders[side]);
             }
             horizontal.push(resolve_edge(&candidates));
         }
@@ -850,7 +1053,29 @@ fn resolve_collapsed_borders(
                 let side = if line == 0 { start } else { end };
                 candidates.extend(row_sides[row].map(|row| row[side]));
                 candidates.extend(group_of_row[row].map(|group| group.2[side]));
-                candidates.push(table_borders[side]);
+            }
+            let column_before = line.checked_sub(1);
+            let column_after = (line < columns).then_some(line);
+            candidates.extend(
+                column_before
+                    .and_then(|column| column_borders.columns.get(column).copied().flatten())
+                    .map(|col| col[end]),
+            );
+            candidates.extend(
+                column_after
+                    .and_then(|column| column_borders.columns.get(column).copied().flatten())
+                    .map(|col| col[start]),
+            );
+            for group in &column_borders.groups {
+                if column_before == Some(group.1) {
+                    candidates.push(group.2[end]);
+                }
+                if column_after == Some(group.0) {
+                    candidates.push(group.2[start]);
+                }
+            }
+            if line == 0 || line == columns {
+                candidates.push(table_borders[if line == 0 { start } else { end }]);
             }
             vertical.push(resolve_edge(&candidates));
         }
@@ -942,10 +1167,14 @@ impl TableCollector {
             | DisplayInside::TableFooterGroup
             | DisplayInside::Contents => {
                 let group_borders = (self.collapse && display.inside() != DisplayInside::Contents)
-                    .then(|| node.primary_styles().map(|s| border_candidates(&s, 2)))
+                    .then(|| {
+                        node.primary_styles()
+                            .map(|s| border_candidates(&s, 4, node_id))
+                    })
                     .flatten();
                 let first_row = self.row;
                 let first_row_index = self.rows.len();
+                let first_cell = self.cells.len();
                 let children = std::mem::take(&mut doc.nodes[node_id].children);
                 for child_id in children.iter().copied() {
                     doc.nodes[child_id]
@@ -957,6 +1186,12 @@ impl TableCollector {
                     for row in &mut self.rows[first_row_index..] {
                         row.group.get_or_insert(node_id);
                     }
+                    // HTML's "ending a row group": rowspans stop at the group's last
+                    // row, so the next group starts with no occupied slots.
+                    for cell in &mut self.cells[first_cell..] {
+                        cell.rowspan = cell.rowspan.min(self.row.saturating_sub(cell.row).max(1));
+                    }
+                    self.occupied.fill(0);
                 }
                 if let Some(borders) = group_borders {
                     if self.row > first_row {
@@ -968,7 +1203,10 @@ impl TableCollector {
                 node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
                 let row_borders = self
                     .collapse
-                    .then(|| node.primary_styles().map(|s| border_candidates(&s, 3)))
+                    .then(|| {
+                        node.primary_styles()
+                            .map(|s| border_candidates(&s, 5, node_id))
+                    })
                     .flatten();
                 let height = node.primary_styles().and_then(|s| {
                     let h = table_taffy_style(&s, self.wm).size.height;
@@ -1041,12 +1279,11 @@ impl TableCollector {
             .and_then(|val| val.trim().parse::<u16>().ok())
             .map(|v| if v == 0 { MAX_GRID_LINE } else { v })
             .unwrap_or(1);
-        let (mut style, borders, vertical_align) = {
+        let (mut style, borders) = {
             let stylo_style = node.primary_styles().unwrap();
             (
                 table_taffy_style(&stylo_style, self.wm),
-                border_candidates(&stylo_style, 4),
-                CellVerticalAlign::from_style(&stylo_style),
+                border_candidates(&stylo_style, 6, node_id),
             )
         };
 
@@ -1103,6 +1340,7 @@ impl TableCollector {
             }
         }
         let authored_width = style.size.width;
+        let has_authored_height = style.size.height.tag() == taffy::CompactLength::LENGTH_TAG;
         style.size.width = style_helpers::auto();
         // Cells always fill their row. An authored height is a minimum, which
         // the row already honours through the cell's measured size.
@@ -1112,17 +1350,24 @@ impl TableCollector {
         self.cells.push(TableCell {
             node_id,
             style,
-            vertical_align,
-            layout_style: node.primary_styles().unwrap().clone(),
+            layout_style: CellLayoutStyle::default(),
             row,
             column: column as u16,
             rowspan,
             colspan,
             collapsed_border: None,
             authored_width,
+            has_authored_height,
         });
         self.cell_borders.push(borders);
     }
+}
+
+/// Which authored columns absorb a definite-width table's excess width.
+#[derive(Debug, Clone, Copy)]
+struct Growth {
+    lengths: bool,
+    percents: bool,
 }
 
 /// What the cells of one column ask for, before it becomes a grid track.
@@ -1197,7 +1442,7 @@ impl ColumnHint {
         }
     }
 
-    fn track(&self, is_fixed: bool, grow_lengths: bool) -> TrackSizingFunction {
+    fn track(&self, is_fixed: bool, grow: Growth) -> TrackSizingFunction {
         if is_fixed {
             return match (self.length, self.percent, self.calc) {
                 (Some(length), _, _) => style_helpers::length(length),
@@ -1210,18 +1455,21 @@ impl ColumnHint {
         }
 
         // Auto layout never shrinks a column below its content's min-content
-        // width; the cell measurement folds an authored length into that
-        // floor (see `compute_child_layout`). Over-wide content therefore
-        // widens the table instead of painting over neighbouring cells.
+        // width. Over-wide content therefore widens the table instead of
+        // painting over neighbouring cells.
         //
         // The minimum is `min-content` rather than `auto`: grid clamps an
         // `auto` minimum to a fixed maximum, which would let a 120px image
         // overflow a `width="50"` column.
         let max = if let Some(percent) = self.percent {
-            // A percentage is the column's preferred share of the table.
-            taffy::MaxTrackSizingFunction::percent(percent)
+            if grow.percents {
+                taffy::MaxTrackSizingFunction::fr(percent.max(f32::EPSILON))
+            } else {
+                // A percentage is the column's preferred share of the table.
+                taffy::MaxTrackSizingFunction::percent(percent)
+            }
         } else if let Some(length) = self.length {
-            if grow_lengths {
+            if grow.lengths {
                 taffy::MaxTrackSizingFunction::fr(length.max(f32::EPSILON))
             } else {
                 // Spare width goes to auto columns before authored ones.
@@ -1302,62 +1550,43 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
     ) -> taffy::LayoutOutput {
         let cell = &self.ctx.cells[usize::from(node_id)];
         let dom_id = cell.node_id;
-        let vertical_align = cell.vertical_align;
         let node_id = crate::taffy_node_id(dom_id);
         let measure_without_width =
             !self.ctx.is_fixed && cell.authored_width.tag() == taffy::CompactLength::LENGTH_TAG;
-        let previous_style = self.doc.nodes[dom_id]
-            .layout_data_mut()
-            .style_override
-            .replace(cell.layout_style.clone());
+        let layout_style = self.doc.nodes[dom_id]
+            .primary_styles()
+            .map(|primary| cell.layout_style(&primary, self.ctx.is_fixed));
+        let previous_style = std::mem::replace(
+            &mut self.doc.nodes[dom_id].layout_data_mut().style_override,
+            layout_style,
+        );
 
-        let offset = match (vertical_align, inputs.run_mode, inputs.known_dimensions) {
-            (
-                CellVerticalAlign::Middle | CellVerticalAlign::Bottom,
-                taffy::RunMode::PerformLayout,
-                taffy::Size {
-                    width: Some(cell_width),
-                    height: Some(cell_height),
-                },
-            ) => {
-                let content_height = self.cell_content_height(dom_id, cell_width, &inputs);
-                let free = (cell_height - content_height).max(0.0);
-                if vertical_align == CellVerticalAlign::Middle {
-                    free / 2.0
-                } else {
-                    free
-                }
+        // A cell stretched to its row's height still resolves its children's
+        // percentage heights against its own authored height, not the row's
+        // (as Blink's `ComputeCellBlockSize` does for fixed-height cells).
+        let mut inputs = inputs;
+        if cell.has_authored_height {
+            inputs.known_dimensions_are_definite.height = false;
+        }
+        let mut output = self.doc.compute_child_layout(node_id, inputs);
+
+        // A column's `min-width` floors the content widths of its cells, and so
+        // does the part of an authored width this layout keeps as a minimum.
+        if inputs.run_mode == taffy::RunMode::ComputeSize && inputs.known_dimensions.width.is_none()
+        {
+            let fold = self.ctx.fold.borrow();
+            if cell.colspan == 1 {
+                let column = usize::from(cell.column);
+                let floor = [&self.ctx.column_floors, &fold.floors]
+                    .iter()
+                    .filter_map(|floors| floors.get(column).copied())
+                    .fold(0.0, f32::max);
+                output.size.width = output.size.width.max(floor);
+            } else if measure_without_width && let Some(length) = ColumnHint::from_cell(cell).length
+            {
+                output.size.width += (length - output.size.width).max(0.0) * fold.amount;
             }
-            _ => 0.0,
-        };
-
-        let mut output = if offset > 0.0 {
-            // CSS 2.1 places the extra space above the content of a middle or
-            // bottom aligned cell. Lay the cell out with that space as
-            // additional top padding, so block and inline content move as one.
-            let resolved = self.doc.nodes[dom_id]
-                .layout_style()
-                .padding()
-                .top
-                .resolve_or_zero(inputs.parent_size.width, resolve_calc_value);
-            let previous = self.doc.nodes[dom_id].layout_data().style_override.clone();
-            let overridden = self.doc.nodes[dom_id]
-                .layout_data_mut()
-                .style_override
-                .as_mut()
-                .unwrap();
-            ServoArc::make_mut(overridden).mutate_padding().padding_top =
-                style::values::generics::NonNegative(
-                    style::values::computed::LengthPercentage::new_length(
-                        style::values::computed::Length::new(resolved + offset),
-                    ),
-                );
-            let output = self.doc.compute_child_layout(node_id, inputs);
-            self.doc.nodes[dom_id].layout_data_mut().style_override = previous;
-            output
-        } else {
-            self.doc.compute_child_layout(node_id, inputs)
-        };
+        }
 
         if *self.ctx.relax_text_minimums.borrow()
             && inputs.run_mode == taffy::RunMode::ComputeSize
@@ -1432,12 +1661,124 @@ fn wraps_text_only(doc: &BaseDocument, node_id: NodeId) -> bool {
 }
 
 impl TableTreeWrapper<'_, '_> {
-    /// The border-box width the last layout's columns need, when the table
-    /// uses auto layout. Fixed layout honours the authored width instead.
-    pub(crate) fn required_width(&self) -> Option<f32> {
-        if self.ctx.is_fixed {
-            return None;
+    /// Decides how far authored cell widths are minimums in a layout of the
+    /// table at `table_width`, its border-box width. `None` stands for the
+    /// table's min-content width, which ignores them, as in browsers, so the
+    /// table can narrow inside a constrained parent.
+    pub(crate) fn fold_authored_widths(&mut self, table_width: Option<f32>) {
+        let ctx = Arc::clone(&self.ctx);
+        let lengths = &ctx.column_lengths;
+        let mut fold = AuthoredFold::default();
+        match table_width {
+            _ if !ctx.has_authored_lengths => {}
+            None => {}
+            Some(width) if width.is_infinite() => {
+                fold.amount = 1.0;
+                fold.floors = lengths.iter().map(|length| length.unwrap_or(0.0)).collect();
+            }
+            Some(width) => {
+                // Measure the cells' own min-content widths first.
+                *ctx.fold.borrow_mut() = AuthoredFold::default();
+                let (minimums, spanning) = self.min_content_widths();
+                let available = width - ctx.column_extra;
+                // Per column, the width at no fold and how much a full fold
+                // adds. Percentage columns come before authored lengths.
+                let (base, grow): (Vec<f32>, Vec<f32>) = minimums
+                    .iter()
+                    .enumerate()
+                    .map(|(column, &min)| {
+                        let base = ctx.column_percents[column]
+                            .map_or(min, |percent| min.max(percent * available));
+                        let grow = lengths[column].map_or(0.0, |length| (length - base).max(0.0));
+                        (base, grow)
+                    })
+                    .unzip();
+                // The largest fold that fits the columns, and every spanning
+                // cell together with the columns outside its span.
+                let fit = |base: f32, grow: f32| {
+                    if grow < 0.5 {
+                        1.0
+                    } else {
+                        ((available - base) / grow).clamp(0.0, 1.0)
+                    }
+                };
+                let mut amount = fit(base.iter().sum(), grow.iter().sum());
+                for (span, min, length) in spanning {
+                    let outside = |values: &[f32]| -> f32 {
+                        values[..span.start].iter().chain(&values[span.end..]).sum()
+                    };
+                    let inner_gaps = (span.len() - 1) as f32 * ctx.column_gap;
+                    amount = amount.min(fit(
+                        outside(&base) + min - inner_gaps,
+                        outside(&grow) + (length - min).max(0.0),
+                    ));
+                }
+                fold.amount = amount;
+                fold.floors = base
+                    .iter()
+                    .zip(&grow)
+                    .zip(lengths)
+                    .map(|((&base, &grow), length)| {
+                        if length.is_some() {
+                            base + grow * amount
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect();
+            }
         }
+        *ctx.fold.borrow_mut() = fold;
+    }
+
+    /// The min-content widths of each column's single-column cells, and of
+    /// each spanning cell with an authored length, measured as the grid
+    /// measures them, so the grid reuses the cached results.
+    #[allow(clippy::type_complexity)]
+    fn min_content_widths(&mut self) -> (Vec<f32>, Vec<(Range<usize>, f32, f32)>) {
+        let mut minimums = vec![0.0f32; self.ctx.column_lengths.len()];
+        let mut spanning = Vec::new();
+        for index in 0..self.ctx.cells.len() {
+            let cell = &self.ctx.cells[index];
+            let span =
+                usize::from(cell.column)..usize::from(cell.column) + usize::from(cell.colspan);
+            let length = ColumnHint::from_cell(cell).length;
+            if span.end > minimums.len() || (span.len() != 1 && length.is_none()) {
+                continue;
+            }
+            let width = taffy::LayoutPartialTree::compute_child_layout(
+                self,
+                taffy::NodeId::from(index),
+                taffy::LayoutInput {
+                    known_dimensions: taffy::Size::NONE,
+                    known_dimensions_are_definite: taffy::Size {
+                        width: true,
+                        height: true,
+                    },
+                    parent_size: taffy::Size::NONE,
+                    available_space: taffy::Size {
+                        width: taffy::AvailableSpace::MinContent,
+                        height: taffy::AvailableSpace::MinContent,
+                    },
+                    sizing_mode: taffy::SizingMode::InherentSize,
+                    axis: taffy::RequestedAxis::Horizontal,
+                    run_mode: taffy::RunMode::ComputeSize,
+                    vertical_margins_are_collapsible: taffy::Line::FALSE,
+                },
+            )
+            .size
+            .width;
+            match length {
+                Some(length) if span.len() != 1 => spanning.push((span, width, length)),
+                _ => minimums[span.start] = minimums[span.start].max(width),
+            }
+        }
+        (minimums, spanning)
+    }
+
+    /// The border-box width the last layout's columns need. Fixed layout too
+    /// widens the table to hold its columns (CSS 2.1 §17.5.2.1).
+    pub(crate) fn required_width(&self) -> Option<f32> {
         let info = self.ctx.computed_grid_info.borrow();
         let positions = &info.as_ref()?.columns.positions;
         let start = positions.iter().map(|line| line.start).reduce(f32::min)?;
@@ -1454,50 +1795,6 @@ impl TableTreeWrapper<'_, '_> {
             .resolve_or_zero(None, resolve_calc_value);
         let leading = (start - padding.left - border.left).min(0.0);
         Some(end + padding.right + border.right - leading)
-    }
-
-    /// The border-box height a cell needs for its content at `width`,
-    /// ignoring an authored height, which only sets the row's minimum.
-    fn cell_content_height(
-        &mut self,
-        dom_id: NodeId,
-        width: f32,
-        inputs: &taffy::tree::LayoutInput,
-    ) -> f32 {
-        let measure = taffy::tree::LayoutInput {
-            run_mode: taffy::RunMode::ComputeSize,
-            sizing_mode: taffy::SizingMode::InherentSize,
-            axis: taffy::RequestedAxis::Vertical,
-            known_dimensions: taffy::Size {
-                width: Some(width),
-                height: None,
-            },
-            vertical_margins_are_collapsible: taffy::Line::FALSE,
-            ..*inputs
-        };
-        let node_id = crate::taffy_node_id(dom_id);
-        let style = self.doc.nodes[dom_id].layout_style();
-        let (height, min_height) = (style.size().height, style.min_size().height);
-        drop(style);
-        if height.is_auto() && min_height.is_auto() {
-            // Usually a cache hit from row sizing.
-            return self.doc.compute_child_layout(node_id, measure).size.height;
-        }
-
-        // Measuring without the authored height must not leave that result in
-        // the cell's cache, where it would answer later row-sizing queries.
-        let node = &mut self.doc.nodes[dom_id];
-        node.clear_layout_cache();
-        let previous = node.layout_data().style_override.clone();
-        let overridden = node.layout_data_mut().style_override.as_mut().unwrap();
-        let position = ServoArc::make_mut(overridden).mutate_position();
-        position.height = style::values::generics::length::Size::Auto;
-        position.min_height = style::values::generics::length::Size::Auto;
-        let content_height = self.doc.compute_child_layout(node_id, measure).size.height;
-        let node = &mut self.doc.nodes[dom_id];
-        node.layout_data_mut().style_override = previous;
-        node.clear_layout_cache();
-        content_height
     }
 }
 
@@ -1537,8 +1834,9 @@ mod tests {
         BorderCandidate {
             width,
             style,
-            color: AbsoluteColor::srgb_legacy(origin, 0, 0, 1.0),
             origin,
+            source: NodeId::from_u64(u64::from(origin)),
+            side: TOP as u8,
         }
     }
 
@@ -1566,16 +1864,29 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(edge.style, BorderStyle::Double);
-        // Then origin: the cell beats the row and the table.
+        // Then origin: cell, row, row group, column, column group, table.
         let edge = resolve_edge(&[
             candidate(1.0, BorderStyle::Solid, 1),
-            candidate(1.0, BorderStyle::Solid, 4),
-            candidate(1.0, BorderStyle::Solid, 3),
+            candidate(1.0, BorderStyle::Solid, 6),
+            candidate(1.0, BorderStyle::Solid, 5),
         ])
         .unwrap();
-        assert_eq!(edge.color, AbsoluteColor::srgb_legacy(4, 0, 0, 1.0));
+        assert_eq!(edge.source, NodeId::from_u64(6));
+        let edge = resolve_edge(&[
+            candidate(1.0, BorderStyle::Solid, 2),
+            candidate(1.0, BorderStyle::Solid, 3),
+            candidate(1.0, BorderStyle::Solid, 1),
+        ])
+        .unwrap();
+        assert_eq!(edge.source, NodeId::from_u64(3));
         // `none` never paints.
         assert_eq!(resolve_edge(&[candidate(3.0, BorderStyle::None, 4)]), None);
+    }
+
+    #[test]
+    fn collapsed_edges_stay_small() {
+        // Two edge maps of `MAX_COLLAPSED_SLOTS` slots stay around 2 MiB.
+        assert!(std::mem::size_of::<Option<CollapsedEdge>>() <= 16);
     }
 
     #[test]
@@ -1583,7 +1894,8 @@ mod tests {
         let edge = |width| CollapsedEdge {
             width,
             style: BorderStyle::Solid,
-            color: AbsoluteColor::BLACK,
+            source: NodeId::from_u64(0),
+            side: TOP as u8,
         };
         assert_eq!((edge(1.0).before(), edge(1.0).after()), (0.0, 1.0));
         assert_eq!((edge(2.0).before(), edge(2.0).after()), (1.0, 1.0));

@@ -38,7 +38,7 @@ use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock, RwLockReadGuard, RwLockWriteGuard};
 use std::task::{Context as TaskContext, Waker};
 use style::Atom;
@@ -68,11 +68,6 @@ use style_dom::ElementState;
 use thin_vec::ThinVec;
 use url::Url;
 use web_time::Instant;
-
-// Resource completions may retain decoded image buffers until the document is
-// polled. Keep the queue bounded so a hidden or stalled view has a fixed
-// memory ceiling; producers apply backpressure until the UI drains it.
-const DOCUMENT_EVENT_QUEUE_CAPACITY: usize = 16;
 
 #[cfg(feature = "parallel-construct")]
 use thread_local::ThreadLocal;
@@ -230,6 +225,10 @@ pub enum DocumentEvent {
     },
 }
 
+/// How many repainted nodes a document keeps before treating the whole
+/// document as damaged.
+const MAX_PAINT_UPDATES: usize = 4096;
+
 /// Damage from delivered resources. Paint-only updates preserve resolved layout.
 #[derive(Default, Debug)]
 pub struct ResourceUpdates {
@@ -238,23 +237,60 @@ pub struct ResourceUpdates {
     pub paint_nodes: Vec<NodeId>,
 }
 
-fn image_has_fixed_size(node: &Node) -> bool {
+/// Whether an image's layout cannot depend on its pixels, so a decoded image
+/// only needs a repaint. Its width and height must be fixed lengths, and its
+/// last layout must have used exactly those sizes: when a min/max constraint
+/// applies (such as a reader's `img { max-width: 100% }` in a narrow column),
+/// replaced sizing brings in the natural aspect ratio. Flex and grid items are
+/// excluded because their automatic minimum size depends on the image, as in
+/// Blink's `LayoutImage::NeedsLayoutOnNaturalSizeChange`.
+fn image_has_fixed_size(doc: &BaseDocument, node: &Node) -> bool {
+    use style::values::specified::box_::DisplayInside;
     use taffy::CoreStyle as _;
     if node.primary_styles().is_none() {
         return false;
     }
-    let size = node.layout_style().size();
-    size.width
-        .into_option()
-        .is_some_and(|v| v.is_finite() && v > 0.0)
-        && size
-            .height
-            .into_option()
-            .is_some_and(|v| v.is_finite() && v > 0.0)
+    let in_flex_or_grid = node
+        .layout_parent
+        .get()
+        .and_then(|id| doc.get_node(id))
+        .and_then(|parent| parent.display_style())
+        .is_some_and(|display| {
+            matches!(display.inside(), DisplayInside::Flex | DisplayInside::Grid)
+        });
+    if in_flex_or_grid {
+        return false;
+    }
+    let style = node.layout_style();
+    let size = style.size();
+    let (Some(width), Some(height)) = (size.width.into_option(), size.height.into_option()) else {
+        return false;
+    };
+    if !(width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0) {
+        return false;
+    }
+    let border_box = style.box_sizing() == taffy::BoxSizing::BorderBox;
+    drop(style);
+    let layout = node.unrounded_layout();
+    let (width, height) = if border_box {
+        (width, height)
+    } else {
+        let (padding, border) = (layout.padding, layout.border);
+        (
+            width + padding.left + padding.right + border.left + border.right,
+            height + padding.top + padding.bottom + border.top + border.bottom,
+        )
+    };
+    (layout.size.width - width).abs() < 0.01 && (layout.size.height - height).abs() < 0.01
 }
 
 pub struct BaseDocument {
     pub(crate) image_decode_limits: Option<crate::net::ImageDecodeLimits>,
+    /// Damage from resource events handled since the embedder last drained
+    /// it, including events that `resolve` handled.
+    resource_updates: ResourceUpdates,
+    /// The scale at which nodes' overflow and transforms were last resolved.
+    pub(crate) transforms_scale: f64,
     /// ID of the document
     id: usize,
 
@@ -282,7 +318,7 @@ pub struct BaseDocument {
     pub(crate) subdocument_depth: usize,
 
     // Events
-    pub(crate) tx: SyncSender<DocumentEvent>,
+    pub(crate) tx: Sender<DocumentEvent>,
     // rx will always be Some, except temporarily while processing events
     pub(crate) rx: Option<Receiver<DocumentEvent>>,
 
@@ -494,10 +530,12 @@ impl BaseDocument {
             .html_parser_provider
             .unwrap_or_else(|| Arc::new(DummyHtmlParserProvider));
 
-        let (tx, rx) = sync_channel(DOCUMENT_EVENT_QUEUE_CAPACITY);
+        let (tx, rx) = channel();
 
         let mut doc = Self {
             image_decode_limits: config.image_decode_limits,
+            resource_updates: ResourceUpdates::default(),
+            transforms_scale: 0.0,
             id,
             tx,
             rx: Some(rx),
@@ -1282,17 +1320,10 @@ impl BaseDocument {
         }
     }
 
+    /// Handle pending resource events. Their damage accumulates until
+    /// `drain_pending_updates` takes it.
     pub fn handle_messages(&mut self) {
-        self.drain_pending_messages();
-    }
-
-    /// Drain resource events, reporting whether layout may have changed.
-    pub fn drain_pending_messages(&mut self) -> bool {
-        self.drain_pending_updates().changed
-    }
-
-    pub fn drain_pending_updates(&mut self) -> ResourceUpdates {
-        let mut updates = ResourceUpdates::default();
+        let mut updates = std::mem::take(&mut self.resource_updates);
         // Remove event Reciever from the Document so that we can process events
         // without holding a borrow to the Document
         let rx = self.rx.take().unwrap();
@@ -1313,7 +1344,7 @@ impl BaseDocument {
                                     if matches!(kind, ImageType::Image)
                                         && self
                                             .get_node(id)
-                                            .is_some_and(|node| !image_has_fixed_size(node))
+                                            .is_some_and(|node| !image_has_fixed_size(self, node))
                                     {
                                         updates.layout = true;
                                     }
@@ -1332,6 +1363,29 @@ impl BaseDocument {
 
         // Put Reciever back
         self.rx = Some(rx);
+        // An embedder that never drains must not grow the list without bound;
+        // past that, everything is damaged anyway.
+        if updates.paint_nodes.len() > MAX_PAINT_UPDATES {
+            updates.paint_nodes.sort_unstable();
+            updates.paint_nodes.dedup();
+            if updates.paint_nodes.len() > MAX_PAINT_UPDATES {
+                updates.paint_nodes.clear();
+                updates.layout = true;
+            }
+        }
+        self.resource_updates = updates;
+    }
+
+    /// Drain resource events, reporting whether layout may have changed.
+    pub fn drain_pending_messages(&mut self) -> bool {
+        self.drain_pending_updates().changed
+    }
+
+    /// Handle pending resource events and take the damage of every event
+    /// handled since the last call, including events `resolve` handled.
+    pub fn drain_pending_updates(&mut self) -> ResourceUpdates {
+        self.handle_messages();
+        let mut updates = std::mem::take(&mut self.resource_updates);
         updates.paint_nodes.sort_unstable();
         updates.paint_nodes.dedup();
         updates
@@ -1483,13 +1537,15 @@ impl BaseDocument {
 
         // Apply to all waiting nodes
         for (node_id, image_type) in waiting_nodes {
+            let fixed_size = self
+                .get_node(node_id)
+                .is_some_and(|node| image_has_fixed_size(self, node));
             let Some(node) = self.get_node_mut(node_id) else {
                 continue;
             };
 
             match image_type {
                 ImageType::Image => {
-                    let fixed_size = image_has_fixed_size(node);
                     let element = node.element_data_mut().unwrap();
                     #[cfg(feature = "custom-widget")]
                     if element.custom_widget_data().is_some() {
@@ -2712,27 +2768,122 @@ impl BaseDocument {
         }
 
         let mut result = String::new();
+        let mut previous = None;
         for (node_id, start, end) in &ranges {
             let node = self.get_node(*node_id)?;
             let element_data = node.element_data()?;
             let inline_layout = element_data.inline_layout_data.as_ref()?;
 
-            if *end > inline_layout.text.len() {
+            if inline_layout.text.get(*start..*end).is_none() {
                 continue;
             }
-
-            if !result.is_empty() {
-                result.push('\n');
+            let text = self.visible_text(inline_layout, *start..*end);
+            if text.is_empty() {
+                continue;
             }
-            if let Some(text) = inline_layout.text.get(*start..*end) {
-                result.push_str(text);
+            if let Some(previous) = previous {
+                result.push_str(self.selection_separator(previous, *node_id));
             }
+            result.push_str(&text);
+            previous = Some(*node_id);
         }
 
         if result.is_empty() {
             None
         } else {
             Some(result)
+        }
+    }
+
+    /// The text of `range` in an inline formatting context, leaving out text
+    /// whose `visibility` hides it, as browsers do when copying.
+    fn visible_text(
+        &self,
+        inline_layout: &crate::node::TextLayout,
+        range: std::ops::Range<usize>,
+    ) -> String {
+        use style::computed_values::visibility::T as Visibility;
+        let mut hidden: Vec<std::ops::Range<usize>> = Vec::new();
+        let mut last: Option<(NodeId, bool)> = None;
+        for line in inline_layout.layout.lines() {
+            for run in line.runs() {
+                for cluster in run.clusters() {
+                    let text_range = cluster.text_range();
+                    if text_range.end <= range.start || range.end <= text_range.start {
+                        continue;
+                    }
+                    // A run can mix styles, so each cluster is checked.
+                    let id = cluster.style().brush.id;
+                    let is_hidden = match last {
+                        Some((last_id, is_hidden)) if last_id == id => is_hidden,
+                        _ => {
+                            let is_hidden = self
+                                .get_node(id)
+                                .and_then(|node| node.primary_styles())
+                                .is_some_and(|styles| {
+                                    styles.get_inherited_box().visibility != Visibility::Visible
+                                });
+                            last = Some((id, is_hidden));
+                            is_hidden
+                        }
+                    };
+                    if is_hidden {
+                        hidden
+                            .push(text_range.start.max(range.start)..text_range.end.min(range.end));
+                    }
+                }
+            }
+        }
+        hidden.sort_by_key(|hidden| hidden.start);
+
+        let text = &inline_layout.text;
+        let mut visible = String::new();
+        let mut cursor = range.start;
+        for hidden in hidden {
+            if hidden.start > cursor {
+                visible.push_str(text.get(cursor..hidden.start).unwrap_or_default());
+            }
+            cursor = cursor.max(hidden.end);
+        }
+        if cursor < range.end {
+            visible.push_str(text.get(cursor..range.end).unwrap_or_default());
+        }
+        visible
+    }
+
+    /// What separates the selected text of two consecutive inline formatting
+    /// contexts, as `innerText` and browsers' `Selection.toString()` do: a tab
+    /// between cells of one row, a blank line around a paragraph, and a line
+    /// break between other blocks.
+    fn selection_separator(&self, previous: NodeId, next: NodeId) -> &'static str {
+        use style::values::specified::box_::DisplayInside;
+        let ancestor = |id: NodeId, matches: &dyn Fn(&Node) -> bool| {
+            let mut current = Some(id);
+            while let Some(id) = current {
+                let node = self.get_node(id)?;
+                if matches(node) {
+                    return Some(id);
+                }
+                current = node.parent;
+            }
+            None
+        };
+        let cell = |id| {
+            ancestor(id, &|node| {
+                node.display_style()
+                    .is_some_and(|display| display.inside() == DisplayInside::TableCell)
+            })
+        };
+        let paragraph = |id| {
+            ancestor(id, &|node| {
+                node.data.is_element_with_tag_name(&local_name!("p"))
+            })
+        };
+        let parent = |id: NodeId| self.get_node(id).and_then(|node| node.parent);
+        match (cell(previous), cell(next)) {
+            (Some(a), Some(b)) if a != b && parent(a) == parent(b) => "\t",
+            _ if paragraph(previous) != paragraph(next) => "\n\n",
+            _ => "\n",
         }
     }
 

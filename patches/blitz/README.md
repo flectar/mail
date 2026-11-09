@@ -19,24 +19,27 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 
 | Patch | Purpose |
 | --- | --- |
-| 0001 bounded event queue | Bounds resource completions waiting for the UI, including the CSSOM `fetch_font_face_rules` sender. |
-| 0002 reader resources and images | Decode limits with native JPEG scaling and EXIF orientation, separate intrinsic/pixel sizes, paint-only updates for fixed-size images, resource notifications, selection paragraph separators and range checks. |
-| 0003 email tables and presentational hints | Table collector and automatic sizing (content minimums, proportional authored columns, wrapping), rowspan handling, collapsed edges, cell alignment, cached legacy hints, visibility export and clip-aware hit testing. |
-| 0004 inline floats | Floats-disabled line breaking, bounded float width, the float's own margin basis, and a non-looping height-limit failure. |
-| 0005 email painting and cache | Per-edge collapsed table borders, inline ancestor backgrounds, fixed-image paint invalidation, a bounded line cache with conservative culling, and unhinted email glyphs. |
+| 0002 reader resources and images | Decode limits with native JPEG scaling (CMYK included), progressive-JPEG and allocation guards, premultiplied downscaling and EXIF orientation, separate intrinsic/pixel sizes, paint-only updates for images whose layout cannot change, resource notifications, selection text separated like `innerText` (tabs between cells, blank lines around paragraphs) with range checks. |
+| 0003 email tables and presentational hints | Table collector and automatic sizing (content minimums, authored widths interpolated toward content as in CSS Tables 3, proportional authored columns, wrapping), fixed tables as wide as their columns, rowspan handling, collapsed edges, cached legacy hints and clip-aware hit testing. |
+| 0004 inline floats | Floats-disabled line breaking, bounded float width, the float's own margin basis, no line height limit (so no height-limit failure), float line slots clamped to the layout width, and floats that move with `align-content` (cell `vertical-align`). |
+| 0005 email painting and cache | Per-edge collapsed table borders, inline ancestor backgrounds, fixed-image paint invalidation, a bounded line cache with conservative culling, and culling that keeps shadows and other ink near tile edges. |
 | 0006 repository integration | objc2 dependency-scanner exception, removal of paint's unused `euclid` and `usvg`, and the bounded JPEG decoder dependency. |
 | 0007 unresolvable resource URLs | Skips images, stylesheets, form actions and `@import` rules whose URL cannot be resolved instead of panicking. The reader has no base URL, so a relative `<img src>` failed the whole message. |
-| 0008 offscreen culling bounds | Builds each element's cull box at its own origin, like its scaled scrollable overflow. Tiles far down a message no longer paint the elements above them. |
+| 0008 offscreen culling bounds | Builds each element's cull box at its own origin, like its scaled scrollable overflow, and rescales every element's overflow after a scale change. Tiles far down a message no longer paint the elements above them, nor cull content whose overflow was measured at another scale. |
 
-0001–0006 are not upstream yet. Upstream main adds `cellspacing` and
+0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
+float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
+which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges, which
+backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. Drop the backported parts
 when a release contains them.
 
 Table-cell layout adjustments use temporary computed-style overrides. They do
 not mutate the author's primary style or its shared hint blocks. Each call
-restores the previous override; table reconstruction refreshes cached styles.
+restores the previous override, and a cell's cached override is rebuilt
+whenever its primary style changes.
 
 Beta.3 removed the implicit available-width clamp on replaced elements. The
 reader supplies `img { max-width: 100% }` in its user-agent stylesheet to
