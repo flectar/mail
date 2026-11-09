@@ -582,16 +582,38 @@ fn committed_claim(conn: &Connection, id: &RecordId) -> Result<Option<Option<(St
     ))
 }
 
+/// Whether a device other than the one that scheduled `send` may send it,
+/// for an account of `protocol`, in a group of `members` (hex ids). Gmail
+/// sends a draft only once, so two devices can never both send it. Other
+/// messages go out from the device that scheduled them, unless it left the
+/// group: no device can yet tell for sure that another one already sent
+/// them.
+pub(crate) fn others_may_send(
+    send: &SyncedSend,
+    protocol: Option<&str>,
+    members: &std::collections::HashSet<String>,
+) -> bool {
+    protocol == Some("gmail") || !members.contains(&send.origin)
+}
+
 /// Move the shared sends along on this device, as device `me` (hex): hold
 /// or create its sends, claim the ones due, release the ones it claimed,
-/// and report how its own sends went.
-pub(crate) fn drive(conn: &Connection, me: &str, now: i64, reach: Reach) -> Result<Driven> {
+/// and report how its own sends went. `others_send` says whether a device
+/// besides the one that scheduled a send may send it.
+pub(crate) fn drive(
+    conn: &Connection,
+    me: &str,
+    now: i64,
+    reach: Reach,
+    others_send: &dyn Fn(&SyncedSend, Option<&str>) -> bool,
+) -> Result<Driven> {
     let mut driven = Driven::default();
     for mut send in synced_sends::all(conn)? {
         if send.state != SCHEDULED {
             continue;
         }
         let origin = send.origin == me;
+        let helpers = others_send(&send, protocol(conn, send.account_id)?.as_deref());
 
         // How this device's own send went.
         if let Some(action) = send.action_id {
@@ -717,18 +739,23 @@ pub(crate) fn drive(conn: &Connection, me: &str, now: i64, reach: Reach) -> Resu
         }
 
         if reach != Reach::Usable {
-            let late = match reach {
-                Reach::PaymentRequired => 0,
-                _ => UNREACHABLE_DELAY_MS,
-            };
             // Without Flectar Mail Sync, only the device that scheduled it
-            // sends it, and then without a claim.
+            // sends it, and then without a claim: late, when another device
+            // may have claimed and sent it meanwhile.
+            let late = if reach == Reach::PaymentRequired || !helpers {
+                0
+            } else {
+                UNREACHABLE_DELAY_MS
+            };
             if origin
                 && now >= send.send_at.saturating_add(late)
                 && send.may_send_until != Some(HELD)
             {
                 synced_sends::set_may_send_until(conn, &send.sync_id, Some(HELD))?;
-                synced_sends::set_claim(conn, &send.sync_id, Some(me), Some(HELD), now)?;
+                // The other devices hear of it once the server answers; a
+                // claim that never ended would keep them from ever
+                // stepping in.
+                synced_sends::set_claim(conn, &send.sync_id, Some(me), Some(now + CLAIM_MS), now)?;
                 if release(conn, action, now)? {
                     driven.nudge(send.account_id);
                 }
@@ -794,7 +821,7 @@ pub(crate) fn drive(conn: &Connection, me: &str, now: i64, reach: Reach) -> Resu
                 } else {
                     HELPER_LEAD_MS
                 };
-                if now >= send.send_at - lead {
+                if now >= send.send_at - lead && (origin || helpers) {
                     let until = send.send_at.max(now) + CLAIM_MS;
                     synced_sends::set_claim(conn, &send.sync_id, Some(me), Some(until), now)?;
                     driven.upload = true;
@@ -1010,6 +1037,11 @@ mod tests {
     use crate::db::testutil;
 
     const AT: i64 = 10_000_000;
+
+    /// Claims between devices that may all send each other's messages.
+    fn drive(conn: &Connection, me: &str, now: i64, reach: Reach) -> Result<Driven> {
+        super::drive(conn, me, now, reach, &|_, _| true)
+    }
     const ORIGIN: &str = "aa";
     const HELPER: &str = "bb";
 
@@ -1482,6 +1514,58 @@ mod tests {
         drive(&conn, HELPER, AT + 60 * 60_000, Reach::Unreachable).unwrap();
         assert_eq!(not_before(&conn, action), HELD);
         let _ = sync_id;
+    }
+
+    #[test]
+    fn only_gmail_messages_go_out_from_another_device() {
+        let both: std::collections::HashSet<String> = [ORIGIN.to_owned(), HELPER.to_owned()].into();
+        let policy = |members: std::collections::HashSet<String>| {
+            move |send: &SyncedSend, protocol: Option<&str>| {
+                others_may_send(send, protocol, &members)
+            }
+        };
+
+        // A JMAP message waits for the device that scheduled it, even once
+        // its claim ran out: that device may have sent it.
+        let conn = setup("E1");
+        let sync_id = scheduled_elsewhere(&conn, Some("E1"));
+        let helper = policy(both.clone());
+        super::drive(&conn, HELPER, AT - 10 * 60_000, Reach::Usable, &helper).unwrap();
+        server_has(&conn, &sync_id, Some((ORIGIN, AT + CLAIM_MS)));
+        let later = AT + CLAIM_MS + 1;
+        assert!(
+            !super::drive(&conn, HELPER, later, Reach::Usable, &helper)
+                .unwrap()
+                .upload
+        );
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.claimed_by.as_deref(), Some(ORIGIN));
+
+        // Once that device left the group, another one sends it.
+        let helper = policy([HELPER.to_owned()].into());
+        assert!(
+            super::drive(&conn, HELPER, later, Reach::Usable, &helper)
+                .unwrap()
+                .upload
+        );
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.claimed_by.as_deref(), Some(HELPER));
+
+        // A Gmail message goes from whichever device can.
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert!(others_may_send(&send, Some("gmail"), &both));
+        assert!(!others_may_send(&send, Some("imap"), &both));
+
+        // Without Flectar Mail Sync, the device that scheduled a message no
+        // other one sends sends it on time.
+        let conn = setup("E1");
+        let (sync_id, action) = scheduled_here(&conn);
+        let origin = policy(both);
+        super::drive(&conn, ORIGIN, AT, Reach::Unreachable, &origin).unwrap();
+        assert_eq!(not_before(&conn, action), AT);
+        // The claim it tells the others of ends.
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.claim_until, Some(AT + CLAIM_MS));
     }
 
     #[test]
