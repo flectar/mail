@@ -453,8 +453,19 @@ impl Core {
     }
 
     /// Stop syncing on this device. The app's data stays; `departure` says
-    /// who sends this device's scheduled mail now.
+    /// who sends this device's scheduled mail now. Waits for a run in
+    /// progress, so none records changes made after this.
     async fn drop_sync_state(
+        &self,
+        state: DeviceSyncState,
+        departure: scheduled::Departure,
+    ) -> Result<()> {
+        let _run = self.sync_service().run_lock.lock().await;
+        self.drop_sync_state_locked(state, departure).await
+    }
+
+    /// [`Self::drop_sync_state`], from within a run.
+    async fn drop_sync_state_locked(
         &self,
         state: DeviceSyncState,
         departure: scheduled::Departure,
@@ -1100,11 +1111,11 @@ impl Core {
             // The group goes on without this device, and keeps its
             // scheduled mail.
             SyncError::Removed | SyncError::LoginRefused => {
-                self.drop_sync_state(DeviceSyncState::Removed, scheduled::Departure::Kept)
+                self.drop_sync_state_locked(DeviceSyncState::Removed, scheduled::Departure::Kept)
                     .await?;
             }
             SyncError::GroupDeleted => {
-                self.drop_sync_state(DeviceSyncState::Deleted, scheduled::Departure::Alone)
+                self.drop_sync_state_locked(DeviceSyncState::Deleted, scheduled::Departure::Alone)
                     .await?;
             }
             SyncError::PaymentRequired => {
@@ -1581,6 +1592,21 @@ impl Core {
             }
         }
         self.drop_sync_state(DeviceSyncState::Off, departure).await
+    }
+
+    /// Leave the group before this device's data is deleted, so nothing
+    /// deleted here reaches the other devices. They keep the scheduled mail
+    /// they can send.
+    pub(crate) async fn device_sync_leave_for_reset(&self) -> Result<()> {
+        if let Some(client) = self.sync_service().client() {
+            let own = client.identity().device_id();
+            if let Err(error) = client.remove_device(own).await {
+                // The other devices can still remove this one themselves.
+                tracing::warn!(%error, "could not leave the Flectar Mail Sync group");
+            }
+        }
+        self.drop_sync_state(DeviceSyncState::Off, scheduled::Departure::Kept)
+            .await
     }
 
     /// Before this device leaves the group, take its scheduled mail back:

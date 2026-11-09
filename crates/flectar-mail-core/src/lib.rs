@@ -2821,6 +2821,11 @@ impl Core {
     /// database connections usable. This is the in-app equivalent of a fresh
     /// profile; it deliberately does not touch anything on provider servers.
     pub async fn delete_all_local_data(&self) -> Result<()> {
+        // Leave Flectar Mail Sync first: deleting accounts, templates and
+        // settings while it runs would delete them on every device.
+        if let Err(error) = self.device_sync_leave_for_reset().await {
+            tracing::warn!(%error, "could not turn Flectar Mail Sync off");
+        }
         let account_ids = self
             .db
             .read(|conn| {
@@ -2869,10 +2874,6 @@ impl Core {
                 Ok(())
             })
             .await?;
-        // This device stops syncing; the group goes on without it.
-        if let Err(error) = self.device_sync_turn_off().await {
-            tracing::warn!(%error, "could not turn Flectar Mail Sync off");
-        }
         // Account id 0 owns app-level secrets such as the optional AI key.
         credentials::delete_all_async(self.credentials.clone(), 0).await?;
         let _ = tokio::fs::remove_dir_all(self.paths.draft_attachments_dir()).await;

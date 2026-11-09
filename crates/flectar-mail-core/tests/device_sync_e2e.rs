@@ -324,6 +324,92 @@ async fn two_devices_share_accounts_and_preferences() {
     assert_eq!(phone.get_settings().await.unwrap().theme, "carbon");
 }
 
+/// Pair `joining` into `existing`'s group with a short code.
+async fn join_with_code(existing: &Core, joining: &Core, url: &str) {
+    let mut existing_events = existing.bus.subscribe();
+    let mut joining_events = joining.bus.subscribe();
+    let invitation = existing.device_sync_invite(true).await.unwrap();
+    let code = invitation.code.clone().expect("a short code to show");
+    let pairing = joining
+        .device_sync_join_with_code(Some(url.to_owned()), code)
+        .await
+        .unwrap();
+    pairing_event(&mut existing_events, invitation.pairing, |event| {
+        matches!(event, PairingEvent::Request { .. })
+    })
+    .await;
+    existing.device_sync_accept(invitation.pairing);
+    pairing_event(&mut joining_events, pairing, |event| {
+        *event == PairingEvent::Joined
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resetting_a_device_leaves_the_others_their_data() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let laptop = Arc::new(start_core(laptop_dir.path()).await);
+    let phone = start_core(phone_dir.path()).await;
+    laptop
+        .import_account_configs(vec![
+            imap_account("one@example.com"),
+            imap_account("two@example.com"),
+            imap_account("three@example.com"),
+        ])
+        .await
+        .unwrap();
+    laptop
+        .save_snippet(
+            None,
+            "Thanks".into(),
+            Some("ty".into()),
+            None,
+            "Thanks!".into(),
+        )
+        .await
+        .unwrap();
+    let mut settings = laptop.get_settings().await.unwrap();
+    settings.theme = "carbon".into();
+    laptop.set_settings(settings).await.unwrap();
+    laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+    join_with_code(&laptop, &phone, &server.url).await;
+    assert!(phone.device_sync_run().await.unwrap());
+    assert_eq!(phone.list_accounts().await.unwrap().len(), 3);
+
+    // Sync keeps running on the laptop while it deletes everything.
+    let syncing = {
+        let laptop = laptop.clone();
+        tokio::spawn(async move {
+            for _ in 0..50 {
+                let _ = laptop.device_sync_run().await;
+            }
+        })
+    };
+    laptop.delete_all_local_data().await.unwrap();
+    syncing.await.unwrap();
+    assert!(laptop.list_accounts().await.unwrap().is_empty());
+    assert_eq!(laptop.device_sync_status().state, DeviceSyncState::Off);
+
+    // The phone keeps the group's accounts, templates and preferences.
+    phone.device_sync_run().await.unwrap();
+    assert_eq!(phone.list_accounts().await.unwrap().len(), 3);
+    assert_eq!(phone.list_snippets().await.unwrap().len(), 1);
+    assert_eq!(phone.get_settings().await.unwrap().theme, "carbon");
+    assert_eq!(
+        phone.device_sync_status().devices.len(),
+        1,
+        "the laptop left the group"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn clearing_the_ai_key_keeps_the_sync_keys() {
     let credentials = Arc::new(MemoryCredentials::default());
