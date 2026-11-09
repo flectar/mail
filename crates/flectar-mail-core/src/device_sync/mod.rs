@@ -10,6 +10,7 @@
 //! (`collections`), and runs the sync loop.
 
 mod collections;
+pub(crate) use collections::synced_settings_changed;
 mod merge;
 mod scheduled;
 mod sign_ins;

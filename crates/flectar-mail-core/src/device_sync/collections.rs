@@ -84,6 +84,30 @@ pub(crate) const SYNCED_PREFERENCES: &[&str] = &[
     "syncSignIns",
 ];
 
+/// Settings that become records besides the synced preferences: signatures,
+/// profiles, and what each account carries.
+const SYNCED_SETTINGS: &[&str] = &[
+    "signatureList",
+    "signatureDefaults",
+    "mailProfiles",
+    "accountColors",
+    "accountShortNames",
+    "accountThemes",
+];
+
+/// Whether a change of settings touches what syncs, so it uploads at once
+/// rather than at the next check.
+pub(crate) fn synced_settings_changed(previous: &Settings, next: &Settings) -> bool {
+    let (Ok(previous), Ok(next)) = (serde_json::to_value(previous), serde_json::to_value(next))
+    else {
+        return true;
+    };
+    SYNCED_PREFERENCES
+        .iter()
+        .chain(SYNCED_SETTINGS)
+        .any(|key| previous.get(*key) != next.get(*key))
+}
+
 /// Record ids of named items, derived by the sync client from the group's
 /// keys, so they are the same on every device.
 #[derive(Debug, Default, Clone)]
@@ -2617,9 +2641,23 @@ mod tests {
     }
 
     #[test]
+    fn only_settings_that_sync_wake_sync() {
+        let previous = Settings::default();
+        let mut next = previous.clone();
+        next.theme = "dark".into();
+        assert!(synced_settings_changed(&previous, &next));
+        let mut next = previous.clone();
+        next.account_colors.insert("1".into(), "#ef4444".into());
+        assert!(synced_settings_changed(&previous, &next));
+        let mut next = previous.clone();
+        next.google_client_id = "own-client".into();
+        assert!(!synced_settings_changed(&previous, &next));
+    }
+
+    #[test]
     fn every_synced_preference_is_a_settings_field() {
         let settings = serde_json::to_value(Settings::default()).unwrap();
-        for key in SYNCED_PREFERENCES {
+        for key in SYNCED_PREFERENCES.iter().chain(SYNCED_SETTINGS) {
             assert!(
                 settings.get(*key).is_some(),
                 "{key} is not a settings field"

@@ -9150,7 +9150,8 @@ impl Core {
     pub async fn set_settings(&self, settings: Settings) -> Result<()> {
         let oauth_settings = settings.clone();
         let now_ms = chrono::Utc::now().timestamp_millis();
-        self.db
+        let synced = self
+            .db
             .write(move |conn| {
                 let tx = conn.transaction()?;
                 let previous = repo::settings::get(&tx)?;
@@ -9176,11 +9177,14 @@ impl Core {
                 )?;
                 repo::settings::set(&tx, &settings)?;
                 tx.commit()?;
-                Ok(())
+                Ok(device_sync::synced_settings_changed(&previous, &settings))
             })
             .await?;
         // Keep the resolver in the same order as persisted writes.
         apply_oauth_settings(&oauth_settings);
+        if synced {
+            self.device_sync_now();
+        }
         Ok(())
     }
 
