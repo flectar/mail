@@ -151,6 +151,7 @@ windows = { version = "0.62", default-features = false, features = [
     "Win32_System_Com",
     "Win32_UI_Notifications",
     "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # `windows::core::implement` expands to paths in this crate.
 windows-core = { version = "0.62", default-features = false, features = ["std"] }
