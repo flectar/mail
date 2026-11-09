@@ -399,7 +399,15 @@ impl CosmicComposeEditor {
             self.editor
                 .set_cursor(if collapse_to_start { start } else { end });
             self.editor.set_selection(Selection::None);
-            return Some(self.selection_from_editor());
+            // Left and Right only collapse a selection. The other moves go on
+            // from the edge they head toward, as text fields do: End from a
+            // selection reaches the end of the line.
+            if matches!(
+                motion,
+                Motion::Left | Motion::Right | Motion::Previous | Motion::Next
+            ) {
+                return Some(self.selection_from_editor());
+            }
         } else {
             self.editor.set_selection(Selection::None);
         }
@@ -1257,6 +1265,48 @@ mod tests {
             assert_eq!(surface.layout_key, original_layout);
             document.update_selection(0, 15);
         }
+    }
+
+    #[test]
+    fn moves_other_than_left_and_right_go_on_from_a_selection() {
+        let style = ComposeEditorStyle {
+            text: Color::from_rgb_u8(30, 30, 30),
+            link: Color::from_rgb_u8(0, 90, 180),
+            selection: Color::from_argb_u8(140, 60, 120, 220),
+            selected_text: Color::from_rgb_u8(255, 255, 255),
+        };
+        let mut document = RichComposeDocument::default();
+        document.synchronize("abc def\nsecond line", 0, 0);
+        let mut surface = CosmicComposeEditor::default();
+        let mut press = |selection: ComposeSelection, key: &str| {
+            surface
+                .handle_navigation(
+                    &document, selection, 520.0, 1.0, style, "", key, false, false, false, false,
+                )
+                .unwrap()
+        };
+        let abc = ComposeSelection { start: 0, end: 3 };
+        let def = ComposeSelection { start: 4, end: 7 };
+        // Right and Left collapse to the selection's end and start.
+        assert_eq!(
+            press(abc, "\u{f703}"),
+            ComposeSelection { start: 3, end: 3 }
+        );
+        assert_eq!(
+            press(def, "\u{f702}"),
+            ComposeSelection { start: 4, end: 4 }
+        );
+        // End and Home reach the ends of the line; Down the next line.
+        assert_eq!(
+            press(abc, "\u{f72b}"),
+            ComposeSelection { start: 7, end: 7 }
+        );
+        assert_eq!(
+            press(def, "\u{f729}"),
+            ComposeSelection { start: 0, end: 0 }
+        );
+        let down = press(abc, "\u{f701}");
+        assert!(down.start == down.end && down.start > 8, "{down:?}");
     }
 
     #[test]
