@@ -160,13 +160,14 @@ impl SyncController {
         if updates.settings_changed {
             reload_preferences(app, state, runtime);
         }
-        if updates.accounts_changed {
+        if updates.accounts_changed || updates.accounts_reread {
             reload_accounts(
                 state,
                 runtime,
                 ui_tasks,
                 calendar_month,
                 updates.removed_accounts,
+                updates.accounts_changed,
             );
         }
     }
@@ -1123,6 +1124,7 @@ fn reload_accounts(
     ui_tasks: &UiSender<UiTaskUpdate>,
     calendar_month: NaiveDate,
     removed: Vec<i64>,
+    announce: bool,
 ) {
     let (core, removals) = {
         let state = state.borrow();
@@ -1179,7 +1181,13 @@ fn reload_accounts(
         }
         let _ = updates
             .send(UiTaskUpdate {
-                message: UiMessage::plain("Accounts updated from your other devices."),
+                // Read again after lost events, only one from another device
+                // is announced.
+                message: if announce {
+                    UiMessage::plain("Accounts updated from your other devices.")
+                } else {
+                    UiMessage::EMPTY
+                },
                 accounts: core.load_account_snapshot().await.ok(),
                 account_removal: None,
                 calendar_connections: core.load_calendar_connections().await.ok(),

@@ -3561,7 +3561,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
                 }
             }
-            app.set_sync_status(update.message);
+            if !update.message.is_empty() {
+                app.set_sync_status(update.message);
+            }
         }
     });
 
@@ -5042,7 +5044,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 }
                 apply_calendar(&app, &calendar, Local::now().date_naive());
             }
-            app.set_sync_status(update.message);
+            if !update.message.is_empty() {
+                app.set_sync_status(update.message);
+            }
         }
     });
 

@@ -612,6 +612,9 @@ pub(crate) struct DeviceSyncUpdates {
     /// Another device changed accounts; these were removed.
     pub(crate) accounts_changed: bool,
     pub(crate) removed_accounts: Vec<i64>,
+    /// Events were lost, so the accounts are read again, without saying
+    /// another device changed them.
+    pub(crate) accounts_reread: bool,
 }
 
 impl PendingCoreUpdates {
@@ -885,7 +888,7 @@ pub(crate) fn spawn_core_event_listener(
                         pending.device_sync.status = status;
                     }
                     pending.device_sync.settings_changed = true;
-                    pending.device_sync.accounts_changed = true;
+                    pending.device_sync.accounts_reread = true;
                     true
                 }
                 Ok(_) => false,
