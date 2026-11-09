@@ -892,7 +892,12 @@ impl ComposeSession {
             }
             return;
         };
-        if self.quote_unavailable.get() {
+        // A window that hasn't laid its composer out yet would have the quote
+        // laid out at a pixel's width, only to do it again.
+        if self.quote_unavailable.get()
+            || ui.get_editor_width() <= 1.0
+            || ui.get_editor_viewport_height() <= 1.0
+        {
             return;
         }
         let Some(composers) = self.composers() else {
@@ -901,8 +906,8 @@ impl ComposeSession {
         let Some(app) = composers.app.upgrade() else {
             return;
         };
-        let width = ui.get_editor_width().max(1.0).ceil();
-        let viewport = ui.get_editor_viewport_height().max(1.0).ceil();
+        let width = ui.get_editor_width().ceil();
+        let viewport = ui.get_editor_viewport_height().ceil();
         let scale = view.window.scale_factor();
         let mut slot = self.quote_renderer.borrow_mut();
         if slot.is_none() {
@@ -914,7 +919,12 @@ impl ComposeSession {
             if let Err(error) = renderer.configure_resources(composers.runtime.clone(), false) {
                 tracing::warn!(%error, "quoted message images unavailable");
             }
-            renderer.preparation_viewport = (width as u32, viewport as u32, scale);
+            // In physical pixels, as the reader prepares a message.
+            renderer.preparation_viewport = (
+                (width * scale).ceil() as u32,
+                (viewport * scale).ceil() as u32,
+                scale,
+            );
             // Line the quote up with the reply above it, and give unstyled
             // text such as the attribution line the reply's size rather than
             // the reader's 16px default.
