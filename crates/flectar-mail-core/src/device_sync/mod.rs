@@ -177,11 +177,13 @@ fn sync_plan(plan: Plan) -> SyncPlan {
     }
 }
 
-/// The servers this device had a free trial on.
-async fn trial_servers(store: &credentials::CredentialStoreHandle) -> Vec<String> {
+/// The servers this device had a free trial on: none when nothing is
+/// stored, an error when the store or what it holds can't be read.
+async fn trial_servers(store: &credentials::CredentialStoreHandle) -> Result<Vec<String>> {
     match credentials::load_async(store.clone(), 0, Slot::SyncTrial).await {
-        Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
-        Err(_) => Vec::new(),
+        Ok(text) => Ok(serde_json::from_str(&text)?),
+        Err(error) if credentials::is_missing(&error) => Ok(Vec::new()),
+        Err(error) => Err(error),
     }
 }
 
@@ -1317,6 +1319,7 @@ impl Core {
         let server_url = server_url.trim().trim_end_matches('/');
         trial_servers(&self.credentials)
             .await
+            .unwrap_or_default()
             .iter()
             .any(|known| known == server_url)
     }
@@ -1327,7 +1330,10 @@ impl Core {
     /// platform allows. A store that can't keep it only loses the reminder.
     async fn remember_trial(&self, server_url: &str) {
         let server_url = server_url.trim().trim_end_matches('/');
-        let mut servers = trial_servers(&self.credentials).await;
+        // A list that can't be read now is left as it is, not replaced.
+        let Ok(mut servers) = trial_servers(&self.credentials).await else {
+            return;
+        };
         if servers.iter().any(|known| known == server_url) {
             return;
         }
