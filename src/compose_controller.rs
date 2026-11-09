@@ -30,8 +30,21 @@ pub(super) struct PreparedMessageCompose {
     pub to: String,
     pub cc: String,
     pub subject: String,
+    /// What the editor starts with.
     pub body: String,
+    /// A message edited as new keeps its formatting when this is its own.
+    pub saved: Option<SavedBody>,
+    /// The original a reply or forward carries below the editor.
+    pub quote: Option<ComposeQuote>,
     pub intent: ComposeIntent,
+}
+
+/// A message as it was sent: its HTML, and the plain text that has to say
+/// the same for the HTML's formatting to be kept.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SavedBody {
+    pub html: String,
+    pub text: String,
 }
 
 /// Prepares a reply or forward, or a message edited as new. `translate`
@@ -77,16 +90,20 @@ pub(super) fn prepare_message_compose(
             cc: join_addresses(&source.cc),
             subject: source.subject.clone(),
             body: original_body.trim_end().to_owned(),
+            saved: source.html_body.clone().map(|html| SavedBody {
+                html,
+                text: source.text_body.clone(),
+            }),
+            quote: None,
             intent: ComposeIntent::default(),
         });
     }
 
     if action == "forward" {
-        let original_body = original_body.trim_end();
-        let mut header = format!(
-            "\n\n---------- {} ----------\n",
+        let mut header = vec![format!(
+            "---------- {} ----------",
             translate(UiMessage::plain("Forwarded message"))
-        );
+        )];
         let lines = [
             Some(UiMessage::detail("From: {}", &sender)),
             sent_at
@@ -95,14 +112,8 @@ pub(super) fn prepare_message_compose(
             Some(UiMessage::detail("Subject: {}", &source.subject)),
             Some(UiMessage::detail("To: {}", join_addresses(&source.to))),
         ];
-        for line in lines.into_iter().flatten() {
-            header.push_str(&translate(line));
-            header.push('\n');
-        }
-        header.push('\n');
-        let mut body = String::with_capacity(header.len() + original_body.len());
-        body.push_str(&header);
-        body.push_str(original_body);
+        header.extend(lines.into_iter().flatten().map(&translate));
+        let quote = ComposeQuote::forward(&header, original_body, source.html_body.as_deref());
         // Like a reply, forward from the address the message reached.
         let sender_email = reply_sender(
             &source.sender_identities,
@@ -115,7 +126,9 @@ pub(super) fn prepare_message_compose(
             to: String::new(),
             cc: String::new(),
             subject: prefixed_subject(&source.subject, "Fwd"),
-            body,
+            body: String::new(),
+            saved: None,
+            quote: Some(quote),
             intent: ComposeIntent {
                 mode: "forward".to_owned(),
                 in_reply_to_message_id: None,
@@ -148,27 +161,11 @@ pub(super) fn prepare_message_compose(
     } else {
         String::new()
     };
-    let text = original_body.trim_end();
-    let quoted_len = text
-        .lines()
-        .map(|line| line.len() + 3)
-        .sum::<usize>()
-        .saturating_sub(usize::from(!text.is_empty()));
     let attribution = translate(match &sent_at {
         Some(sent_at) => UiMessage::arguments("On {}, {} wrote:", sent_at, &sender),
         None => UiMessage::detail("{} wrote:", &sender),
     });
-    let mut body = String::with_capacity(attribution.len() + 3 + quoted_len);
-    body.push_str("\n\n");
-    body.push_str(&attribution);
-    body.push('\n');
-    for (index, line) in text.lines().enumerate() {
-        if index > 0 {
-            body.push('\n');
-        }
-        body.push_str("> ");
-        body.push_str(line);
-    }
+    let quote = ComposeQuote::reply(&attribution, original_body, source.html_body.as_deref());
 
     Ok(PreparedMessageCompose {
         account_id: source.account_id,
@@ -176,7 +173,9 @@ pub(super) fn prepare_message_compose(
         to: format_address(primary),
         cc,
         subject: prefixed_subject(&source.subject, "Re"),
-        body,
+        body: String::new(),
+        saved: None,
+        quote: Some(quote),
         intent: ComposeIntent {
             mode: action.to_owned(),
             in_reply_to_message_id: Some(source.message_id),
@@ -633,6 +632,7 @@ mod tests {
             subject: "Launch plan".to_owned(),
             date: 1_777_000_000_000,
             text_body: "First line\nSecond line".to_owned(),
+            html_body: None,
             attachments: Vec::new(),
         }
     }
@@ -649,7 +649,14 @@ mod tests {
             "Jon <jon@example.com>, Lena <lena@example.com>"
         );
         assert_eq!(prepared.subject, "Re: Launch plan");
-        assert!(prepared.body.contains("> First line\n> Second line"));
+        assert!(prepared.body.is_empty(), "the reply starts empty");
+        assert!(
+            prepared
+                .quote
+                .unwrap()
+                .plain
+                .ends_with("wrote:\n> First line\n> Second line")
+        );
         assert_eq!(prepared.intent.in_reply_to_message_id, Some(91));
     }
 
@@ -708,12 +715,14 @@ mod tests {
         assert!(prepared.to.is_empty());
         assert!(prepared.cc.is_empty());
         assert_eq!(prepared.subject, "Fwd: Launch plan");
+        let quote = prepared.quote.unwrap();
+        assert!(quote.forward);
         assert!(
-            prepared
-                .body
-                .contains("---------- Forwarded message ----------")
+            quote
+                .plain
+                .starts_with("---------- Forwarded message ----------")
         );
-        assert!(prepared.body.ends_with("Rendered body"));
+        assert!(quote.plain.ends_with("Rendered body"));
         assert_eq!(prepared.intent.mode, "forward");
         assert_eq!(prepared.intent.in_reply_to_message_id, None);
     }
@@ -745,6 +754,17 @@ mod tests {
         let prepared = prepare_message_compose(&sent, "edit_as_new", "", english).unwrap();
         assert_eq!(prepared.sender_email, "work@example.net");
         assert_eq!(prepared.body, "First line\nSecond line");
+        assert!(prepared.saved.is_none(), "no HTML to keep");
+
+        // Its HTML comes with the plain text it was sent with, which the
+        // HTML has to match for its formatting to be kept.
+        sent.html_body = Some("<div>First line</div><div>Second line</div>".to_owned());
+        let prepared =
+            prepare_message_compose(&sent, "edit_as_new", "Rendered body", english).unwrap();
+        let saved = prepared.saved.unwrap();
+        assert_eq!(saved.html, "<div>First line</div><div>Second line</div>");
+        assert_eq!(saved.text, sent.text_body);
+        assert_eq!(prepared.body, "Rendered body");
     }
 
     #[test]
@@ -758,17 +778,15 @@ mod tests {
         );
         let reply = prepare_message_compose(&source(), "reply", "", english).unwrap();
         assert_eq!(
-            reply.body,
-            format!(
-                "\n\nOn {sent_at}, Maya <maya@example.com> wrote:\n> First line\n> Second line"
-            )
+            reply.quote.unwrap().plain,
+            format!("On {sent_at}, Maya <maya@example.com> wrote:\n> First line\n> Second line")
         );
 
         let forward = prepare_message_compose(&source(), "forward", "", english).unwrap();
         assert_eq!(
-            forward.body,
+            forward.quote.unwrap().plain,
             format!(
-                "\n\n---------- Forwarded message ----------\nFrom: Maya <maya@example.com>\n\
+                "---------- Forwarded message ----------\nFrom: Maya <maya@example.com>\n\
                  Date: {sent_at}\nSubject: Launch plan\n\
                  To: Alex <alex@example.com>, Jon <jon@example.com>\n\nFirst line\nSecond line"
             )
@@ -776,16 +794,30 @@ mod tests {
 
         let shouted = |message: UiMessage| message.english().to_uppercase();
         let forward = prepare_message_compose(&source(), "forward", "", shouted).unwrap();
-        assert!(forward.body.starts_with(
-            "\n\n---------- FORWARDED MESSAGE ----------\nFROM: MAYA <MAYA@EXAMPLE.COM>\nDATE: "
+        assert!(forward.quote.unwrap().plain.starts_with(
+            "---------- FORWARDED MESSAGE ----------\nFROM: MAYA <MAYA@EXAMPLE.COM>\nDATE: "
         ));
         let mut undated = source();
         undated.date = i64::MAX;
         let reply = prepare_message_compose(&undated, "reply", "", english).unwrap();
         assert!(
             reply
-                .body
-                .starts_with("\n\nMaya <maya@example.com> wrote:\n> First line")
+                .quote
+                .unwrap()
+                .plain
+                .starts_with("Maya <maya@example.com> wrote:\n> First line")
+        );
+
+        // An HTML original is quoted as HTML.
+        let mut html = source();
+        html.html_body = Some("<body><p>First <b>line</b></p></body>".to_owned());
+        let reply = prepare_message_compose(&html, "reply", "", english).unwrap();
+        assert!(
+            reply
+                .quote
+                .unwrap()
+                .html
+                .contains("<p>First <b>line</b></p></blockquote>")
         );
     }
 

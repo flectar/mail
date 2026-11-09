@@ -39,11 +39,21 @@ export global ComposerUi {
     in property <string> active-link-url: "";
     // On the desktop a message can move into a window of its own.
     in property <bool> can-pop-out: false;
+    // "reply" or "forward" while the message carries the original below the
+    // editor; empty otherwise.
+    in property <string> quote: "";
+    // The original as text, for screen readers.
+    in property <string> quote-text: "";
+    in-out property <bool> quote-expanded: false;
+    // The original, drawn read-only by the reader's renderer.
+    in property <[ComposeEditorTile]> quote-tiles: [];
+    in property <float> quote-height: 0;
     // Published by the editor surface for the Rust layout.
     in-out property <length> editor-width;
     in-out property <length> editor-viewport-height;
     in-out property <length> editor-scroll-y;
     in-out property <string> editor-preedit-text;
+    in-out property <length> quote-top;
     out property <color> editor-text-color: AppTheme.body;
     out property <color> editor-link-color: AppTheme.accent;
     out property <color> editor-selection-color: AppTheme.accent;
@@ -68,6 +78,8 @@ export global ComposerUi {
     callback use-template(int) -> bool;
     callback save-template(int, string, string, string, string) -> bool;
     callback delete-template(int) -> bool;
+    callback edit-quote();
+    callback remove-quote();
 }
 
 // The composer bound to its window's ComposerUi and the application theme.
@@ -102,6 +114,11 @@ export component BoundComposer inherits EmailComposer {
     code-active: ComposerUi.code-active;
     active-link-url: ComposerUi.active-link-url;
     can-pop-out: ComposerUi.can-pop-out;
+    quote: ComposerUi.quote;
+    quote-text: ComposerUi.quote-text;
+    quote-expanded <=> ComposerUi.quote-expanded;
+    quote-tiles: ComposerUi.quote-tiles;
+    quote-height: ComposerUi.quote-height;
     background-color: AppTheme.surface;
     raised-color: AppTheme.surface-raised;
     control-color: AppTheme.control-bg;
@@ -148,12 +165,15 @@ export component BoundComposer inherits EmailComposer {
     use-template(id) => ComposerUi.use-template(id);
     save-template(id, name, shortcut, subject, body) => ComposerUi.save-template(id, name, shortcut, subject, body);
     delete-template(id) => ComposerUi.delete-template(id);
+    edit-quote => { ComposerUi.edit-quote(); }
+    remove-quote => { ComposerUi.remove-quote(); }
 
     function publish-layout() {
         ComposerUi.editor-width = root.editor-width;
         ComposerUi.editor-viewport-height = root.editor-viewport-height;
         ComposerUi.editor-scroll-y = root.editor-scroll-y;
         ComposerUi.editor-preedit-text = root.editor-preedit-text;
+        ComposerUi.quote-top = root.quote-top;
         ComposerUi.editor-layout-changed();
     }
 

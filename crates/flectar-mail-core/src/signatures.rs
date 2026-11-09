@@ -70,10 +70,12 @@ pub fn insert(body: &str, signature: &str) -> String {
 }
 
 /// Where a reply or forward quotation begins: the paragraph that opens with
-/// a forwarded message's dashed rule, or whose first line introduces `>`
-/// quoted lines. The structure, unlike the wording, is the same in every
-/// language the header was written in.
+/// a forwarded message's dashed rule, or whose first line introduces quoted
+/// lines, written with `>` or as the composer's quote block. The structure,
+/// unlike the wording, is the same in every language the header was written
+/// in.
 fn quotation_start(body: &str) -> Option<usize> {
+    let quoted = |line: &str| line.starts_with('>') || line.starts_with("│ ");
     (0..body.len()).find(|&at| {
         if !body.as_bytes()[at..].starts_with(b"\n\n") {
             return false;
@@ -81,8 +83,7 @@ fn quotation_start(body: &str) -> Option<usize> {
         let paragraph = &body[at + 2..];
         let mut lines = paragraph.lines();
         paragraph.starts_with("---------- ")
-            || (lines.next().is_some_and(|line| !line.starts_with('>'))
-                && lines.next().is_some_and(|line| line.starts_with('>')))
+            || (lines.next().is_some_and(|line| !quoted(line)) && lines.next().is_some_and(quoted))
     })
 }
 
@@ -213,6 +214,11 @@ mod tests {
         assert_eq!(
             insert("Hi\n\n\nPat wrote:\n> Hello", "Me"),
             "Hi\n\n\n-- \nMe\n\nPat wrote:\n> Hello"
+        );
+        // A quote moved into the editor is a quote block under its line.
+        assert_eq!(
+            insert("Reply\n\nPat wrote:\n│ Hello\n│ \n│ Bye", "Me"),
+            "Reply\n\n-- \nMe\n\nPat wrote:\n│ Hello\n│ \n│ Bye"
         );
         assert_eq!(
             insert("On Monday we met.\n\nOnward, then.", "Me"),

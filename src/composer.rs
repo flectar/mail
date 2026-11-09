@@ -26,6 +26,9 @@ pub(super) struct Composers {
     templates: RefCell<Vec<Snippet>>,
     send_updates: UiSender<ComposeSendUpdate>,
     sessions: RefCell<Vec<Rc<ComposeSession>>>,
+    /// Wakes the composers when a quoted message's image finished loading.
+    quote_wake: UiWake,
+    quote_poll_pending: Cell<bool>,
 }
 
 /// One message being written.
@@ -43,6 +46,13 @@ pub(super) struct ComposeSession {
     pub(super) editor: RefCell<LazyComposeEditor>,
     contacts: RefCell<Vec<Address>>,
     pub(super) intent: RefCell<ComposeIntent>,
+    /// The original a reply or forward carries below the editor.
+    quote: RefCell<Option<ComposeQuote>>,
+    /// Draws the original read-only while it is shown, as the reader does.
+    quote_renderer: RefCell<Option<GpuEmailRenderer>>,
+    /// The original could not be drawn, even as text; it is not tried again
+    /// until it changes.
+    quote_unavailable: Cell<bool>,
     send_action: Cell<Option<i64>>,
     picking: Cell<bool>,
     /// The signature block this composer inserted, while the user has not
@@ -154,6 +164,8 @@ pub(super) fn install(
             UiWake::new(app.as_weak(), |app| app.invoke_drain_compose_send_updates()),
         ),
         sessions: RefCell::default(),
+        quote_wake: UiWake::new(app.as_weak(), |app| app.invoke_refresh_composer_quotes()),
+        quote_poll_pending: Cell::new(false),
     });
     COMPOSERS.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&composers)));
 
@@ -172,6 +184,27 @@ pub(super) fn install(
         {
             composers.open_from_message(&app, action.as_str());
         }
+    });
+    let weak = Rc::downgrade(&composers);
+    app.on_refresh_composer_quotes(move || {
+        let Some(composers) = weak.upgrade() else {
+            return;
+        };
+        if composers.quote_poll_pending.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(&composers);
+        // Coalesce a burst of decoded images into one repaint.
+        Timer::single_shot(Duration::from_millis(50), move || {
+            let Some(composers) = weak.upgrade() else {
+                return;
+            };
+            composers.quote_poll_pending.set(false);
+            let sessions = composers.sessions.borrow().clone();
+            for session in sessions {
+                session.poll_quote();
+            }
+        });
     });
     let weak = Rc::downgrade(&composers);
     let send_rx = RefCell::new(send_rx);
@@ -280,6 +313,25 @@ pub(super) fn save_open_messages() {
     });
 }
 
+/// The message colors changed, with the theme or the reader's choice: an
+/// original already drawn below a composer takes them on too.
+pub(super) fn message_colors_changed(app: &AppWindow) {
+    let colors = crate::message_appearance::EmailAppearance::from_app(app);
+    with_composers(|composers| {
+        let sessions = composers.sessions.borrow().clone();
+        for session in sessions {
+            let changed = session
+                .quote_renderer
+                .borrow_mut()
+                .as_mut()
+                .is_some_and(|renderer| renderer.set_appearance(colors));
+            if changed && let Some(host) = session.host() {
+                session.render_quote(&host);
+            }
+        }
+    });
+}
+
 /// The main window stops or resumes painting. Its own composer lets go of
 /// its pixels and fonts while hidden.
 pub(super) fn main_window_suspended(suspended: bool) {
@@ -294,6 +346,8 @@ pub(super) fn main_window_suspended(suspended: bool) {
             if suspended {
                 host.ui().set_editor_tiles(ModelRc::default());
                 session.editor.borrow_mut().release();
+                // A hidden window keeps no quoted pixels either.
+                session.render_quote(&host);
             } else if host.ui().get_open() {
                 session.apply_document(&host);
             }
@@ -354,6 +408,10 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_strike_active(from.get_strike_active());
     to.set_code_active(from.get_code_active());
     to.set_active_link_url(from.get_active_link_url());
+    to.set_quote(from.get_quote());
+    to.set_quote_text(from.get_quote_text());
+    to.set_quote_expanded(from.get_quote_expanded());
+    to.set_quote_height(from.get_quote_height());
 }
 
 /// The sender and signature a message chose, for it moving to another window.
@@ -450,6 +508,9 @@ impl Composers {
             editor: RefCell::default(),
             contacts: RefCell::default(),
             intent: RefCell::default(),
+            quote: RefCell::default(),
+            quote_renderer: RefCell::default(),
+            quote_unavailable: Cell::new(false),
             send_action: Cell::new(None),
             picking: Cell::new(false),
             signature: RefCell::default(),
@@ -594,7 +655,30 @@ impl Composers {
         ui.set_cc(prepared.cc.into());
         ui.set_bcc("".into());
         ui.set_subject(prepared.subject.into());
-        session.document.borrow_mut().load(&prepared.body, 0, 0);
+        let quote = {
+            let mut document = session.document.borrow_mut();
+            // A message edited as new keeps the formatting, and the original
+            // a reply quoted, that it was sent with.
+            let saved = prepared.saved.as_ref();
+            let split = saved.and_then(|saved| {
+                ComposeQuote::split_saved(&saved.html, &saved.text, |own| {
+                    if own.trim().is_empty() {
+                        document.load("", 0, 0);
+                        return Some(0);
+                    }
+                    document.load_html_start(own, &saved.text)
+                })
+            });
+            if split.is_none()
+                && saved
+                    .and_then(|saved| document.load_html(&saved.html, &saved.text))
+                    .is_none()
+            {
+                document.load(&prepared.body, 0, 0);
+            }
+            split
+        };
+        session.set_quote(&ui, prepared.quote.or(quote));
         *session.intent.borrow_mut() = prepared.intent;
         session.show(action, Some(prepared.sender_email));
         // A forward, and a message edited as new, carry the original's files.
@@ -684,21 +768,26 @@ impl Composers {
             })
             .collect();
         apply_compose_files(&ui, &session.files.borrow());
-        {
+        let quote = {
             let mut document = session.document.borrow_mut();
-            // The HTML keeps the draft's formatting; HTML that holds other
-            // text than the draft's opens as the plain text.
-            if document
-                .load_html(
-                    draft.body_html.as_deref().unwrap_or_default(),
-                    &draft.body_text,
-                )
-                .is_none()
-            {
+            let html = draft.body_html.as_deref().unwrap_or_default();
+            // The HTML keeps the draft's formatting and the original it
+            // quotes; HTML that holds other text than the draft's opens as
+            // the plain text.
+            let split = ComposeQuote::split_saved(html, &draft.body_text, |own| {
+                if own.trim().is_empty() {
+                    document.load("", 0, 0);
+                    return Some(0);
+                }
+                document.load_html_start(own, &draft.body_text)
+            });
+            if split.is_none() && document.load_html(html, &draft.body_text).is_none() {
                 let cursor = i32::try_from(draft.body_text.len()).unwrap_or(i32::MAX);
                 document.load(&draft.body_text, cursor, cursor);
             }
-        }
+            split
+        };
+        session.set_quote(&ui, quote);
         *session.intent.borrow_mut() = ComposeIntent {
             mode: draft.mode,
             in_reply_to_message_id: draft.in_reply_to_message_id,
@@ -808,13 +897,159 @@ impl ComposeSession {
 
     /// Fill the editor and the formatting state from the document.
     fn apply_document(&self, host: &HostRef) {
-        let document = self.document.borrow();
-        apply_rich_compose(
-            &host.view(),
-            &document,
-            document.selection(),
-            &mut self.editor.borrow_mut(),
+        {
+            let document = self.document.borrow();
+            apply_rich_compose(
+                &host.view(),
+                &document,
+                document.selection(),
+                &mut self.editor.borrow_mut(),
+            );
+        }
+        self.render_quote(host);
+    }
+
+    /// Draw the visible part of the original below the editor, while it is
+    /// shown. A collapsed or removed original keeps no layout or pixels.
+    fn render_quote(&self, host: &HostRef) {
+        let view = host.view();
+        let ui = &view.ui;
+        let quote = self.quote.borrow();
+        let Some(quote) = quote
+            .as_ref()
+            .filter(|_| ui.get_quote_expanded() && !view.suspended)
+        else {
+            if self.quote_renderer.borrow_mut().take().is_some() {
+                ui.set_quote_tiles(ModelRc::default());
+            }
+            return;
+        };
+        // A window that hasn't laid its composer out yet would have the quote
+        // laid out at a pixel's width, only to do it again.
+        if self.quote_unavailable.get()
+            || ui.get_editor_width() <= 1.0
+            || ui.get_editor_viewport_height() <= 1.0
+        {
+            return;
+        }
+        let Some(composers) = self.composers() else {
+            return;
+        };
+        let Some(app) = composers.app.upgrade() else {
+            return;
+        };
+        let width = ui.get_editor_width().ceil();
+        let viewport = ui.get_editor_viewport_height().ceil();
+        let scale = view.window.scale_factor();
+        let mut slot = self.quote_renderer.borrow_mut();
+        if slot.is_none() {
+            let mut renderer = GpuEmailRenderer::default();
+            renderer.set_appearance(crate::message_appearance::EmailAppearance::from_app(&app));
+            let wake = composers.quote_wake.clone();
+            renderer.set_resource_notifier(Arc::new(move || wake.wake()));
+            // Remote images stay off: embedded ones are part of the quote.
+            if let Err(error) = renderer.configure_resources(composers.runtime.clone(), false) {
+                tracing::warn!(%error, "quoted message images unavailable");
+            }
+            // In physical pixels, as the reader prepares a message.
+            renderer.preparation_viewport = (
+                (width * scale).ceil() as u32,
+                (viewport * scale).ceil() as u32,
+                scale,
+            );
+            // Line the quote up with the reply above it, and give unstyled
+            // text such as the attribution line the reply's size rather than
+            // the reader's 16px default.
+            let html = format!(
+                "<body style=\"margin:8px 0;font-size:{}px\">{}</body>",
+                crate::compose_editor::FONT_SIZE_LOGICAL,
+                quote.html
+            );
+            // An original the renderer can't lay out shows as its text, as
+            // the reader shows such a message; what is sent stays the same.
+            let prepared = renderer.prepare_email_html(&html, false).or_else(|error| {
+                tracing::warn!(%error, "quoted message shown as text");
+                let mut text = format!(
+                    "<body style=\"margin:8px 0;font-size:{}px\"><div style=\"white-space:pre-wrap\">",
+                    crate::compose_editor::FONT_SIZE_LOGICAL
+                );
+                crate::email_document::append_escaped(&mut text, &quote.plain);
+                text.push_str("</div></body>");
+                renderer.prepare_email_html(&text, false)
+            });
+            match prepared {
+                Ok(prepared) => {
+                    renderer.set_auto_fit(true);
+                    renderer.set_email(prepared);
+                }
+                Err(error) => {
+                    self.quote_unavailable.set(true);
+                    ui.set_notice(
+                        UiMessage::detail("Could not show the quoted message: {}", error),
+                        true,
+                    );
+                    return;
+                }
+            }
+            *slot = Some(renderer);
+        }
+        let Some(renderer) = slot.as_mut() else {
+            return;
+        };
+        // The quote shows at the editor's width. Content laid out wider, even
+        // zoomed out, is scaled down to it whole rather than squeezed
+        // sideways, so the part in view reaches further down it.
+        let fit = width / renderer.layout_width.max(width);
+        renderer.set_visible_region(
+            ((ui.get_editor_scroll_y() - ui.get_quote_top()) / fit).max(0.0),
+            viewport / fit,
         );
+        match renderer.render_cpu_if_needed(width as u32, viewport as u32, scale) {
+            Ok(Some(rendered)) => {
+                // Tiles come normalized to the laid-out width.
+                let tiles = rendered
+                    .tiles
+                    .into_iter()
+                    .map(|tile| ComposeEditorTile {
+                        image: tile.image,
+                        y: tile.y * width,
+                        height: tile.height * width,
+                    })
+                    .collect::<Vec<_>>();
+                let retained = ui.get_quote_tiles();
+                if let Some(model) = retained
+                    .as_any()
+                    .downcast_ref::<VecModel<ComposeEditorTile>>()
+                {
+                    crate::reconcile_model_rows_by(
+                        model,
+                        tiles,
+                        |tile| tile.y.to_bits(),
+                        PartialEq::eq,
+                    );
+                } else {
+                    ui.set_quote_tiles(ModelRc::new(VecModel::from(tiles)));
+                }
+                ui.set_quote_height(width * rendered.height as f32 / rendered.width.max(1) as f32);
+            }
+            Ok(None) => {}
+            Err(error) => ui.set_notice(
+                UiMessage::detail("Could not show the quoted message: {}", error),
+                true,
+            ),
+        }
+    }
+
+    /// Fold in images the quoted message finished loading.
+    fn poll_quote(&self) {
+        let polled = self
+            .quote_renderer
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(GpuEmailRenderer::poll_resources);
+        if polled && let Some(host) = self.host() {
+            self.render_quote(&host);
+        }
     }
 
     /// Empty fields; the window's account and template list stay.
@@ -831,6 +1066,11 @@ impl ComposeSession {
         ui.set_bcc("".into());
         ui.set_subject("".into());
         ui.set_body("".into());
+        ui.set_quote("".into());
+        ui.set_quote_text("".into());
+        ui.set_quote_expanded(false);
+        ui.set_quote_tiles(ModelRc::default());
+        ui.set_quote_height(0.0);
         ui.set_notice(UiMessage::EMPTY, false);
         apply_rich_compose_state(&ui, &self.document.borrow(), ComposeSelection::default());
     }
@@ -901,8 +1141,9 @@ impl ComposeSession {
                 true,
             );
         }
-        // The surface draws at the new window's scale factor.
+        // The surfaces draw again at the new window's scale factor.
         self.editor.borrow_mut().reset();
+        *self.quote_renderer.borrow_mut() = None;
         window.ui().set_open(true);
         self.apply_document(&window);
     }
@@ -949,6 +1190,7 @@ impl ComposeSession {
         if minimized {
             host.ui().set_editor_tiles(ModelRc::default());
             self.editor.borrow_mut().release();
+            self.render_quote(&host);
         } else if host.ui().get_open() {
             self.apply_document(&host);
         }
@@ -969,6 +1211,8 @@ impl ComposeSession {
         self.editor.borrow_mut().release();
         self.contacts.borrow_mut().clear();
         *self.intent.borrow_mut() = ComposeIntent::default();
+        *self.quote.borrow_mut() = None;
+        *self.quote_renderer.borrow_mut() = None;
         *self.signature.borrow_mut() = None;
         if let Some(host) = self.host() {
             match &host {
@@ -1013,6 +1257,7 @@ impl ComposeSession {
             .iter()
             .all(|text| text.trim().is_empty())
             && self.files.borrow().is_empty()
+            && self.quote.borrow().is_none()
             && self.only_inserted_signature(&ui.get_body())
     }
 
@@ -1134,6 +1379,18 @@ impl ComposeSession {
                 .is_some_and(|session| session.use_template(id))
         });
         let weak = self.reference();
+        ui.on_edit_quote(move || {
+            if let Some(session) = weak.upgrade() {
+                session.edit_quote();
+            }
+        });
+        let weak = self.reference();
+        ui.on_remove_quote(move || {
+            if let Some(session) = weak.upgrade() {
+                session.remove_quote();
+            }
+        });
+        let weak = self.reference();
         ui.on_delete_template(move |id| {
             weak.upgrade()
                 .is_some_and(|session| session.delete_template(id))
@@ -1176,6 +1433,59 @@ impl ComposeSession {
             .and_then(|composers| composers.app.upgrade())
         {
             mailto_links::open_pending_soon(&app);
+        }
+    }
+
+    /// The original this reply or forward carries, if any.
+    fn set_quote(&self, ui: &ComposerUi<'_>, quote: Option<ComposeQuote>) {
+        ui.set_quote(match &quote {
+            Some(quote) if quote.forward => "forward".into(),
+            Some(_) => "reply".into(),
+            None => "".into(),
+        });
+        ui.set_quote_text(
+            quote
+                .as_ref()
+                .map_or_else(SharedString::new, |quote| quote.plain.as_str().into()),
+        );
+        // A reply's original stays out of the way; a forward is what the
+        // message is about, so it starts open.
+        ui.set_quote_expanded(quote.as_ref().is_some_and(|quote| quote.forward));
+        ui.set_quote_tiles(ModelRc::default());
+        ui.set_quote_height(0.0);
+        *self.quote_renderer.borrow_mut() = None;
+        self.quote_unavailable.set(false);
+        *self.quote.borrow_mut() = quote;
+    }
+
+    /// Move the original into the editor as text, a reply's in a quote
+    /// block, which the user can then edit like the rest of the message.
+    fn edit_quote(&self) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        let Some(quoted) = self
+            .quote
+            .borrow()
+            .as_ref()
+            .map(ComposeQuote::editable_text)
+        else {
+            return;
+        };
+        self.set_quote(&ui, None);
+        self.edit(|document| {
+            let text = document.text();
+            let written = text.trim_end_matches('\n').len();
+            let end = text.len();
+            document.replace_unformatted(written..end, &format!("\n\n{quoted}"), written)
+        });
+    }
+
+    /// Leave the original out of this message.
+    fn remove_quote(&self) {
+        if let Some(host) = self.host() {
+            self.set_quote(&host.ui(), None);
         }
     }
 
@@ -1328,6 +1638,8 @@ impl ComposeSession {
             return;
         };
         apply_compose_editor_surface(&view, &document, document.selection(), &mut editor);
+        drop((document, editor));
+        self.render_quote(&host);
     }
 
     fn pick_attachments(self: &Rc<Self>) {
@@ -1641,8 +1953,30 @@ impl ComposeSession {
             if document.text() != body {
                 document.synchronize(body, body.len() as i32, body.len() as i32);
             }
-            document.body_html()
+            // Blank lines at the end give way to the one above the quote, in
+            // both parts, so a reopened draft finds where the quote starts.
+            if self.quote.borrow().is_some() {
+                document.body_html_above_quote()
+            } else {
+                document.body_html()
+            }
         };
+        // The original goes below what the user wrote, in both parts.
+        let (body, body_html) = match self.quote.borrow().as_ref() {
+            Some(quote) => {
+                let (text, html) = quote.below(body, body_html);
+                (text, Some(html))
+            }
+            None => (body.to_owned(), body_html),
+        };
+        // Recipients reading plain text see quote blocks as quotes; a draft
+        // keeps them as the editor writes them, to reopen as blocks.
+        let body = if send {
+            crate::rich_compose::with_plain_text_quotes(&body)
+        } else {
+            body
+        };
+        let body = body.as_str();
         let intent = self.intent.borrow().clone();
         let sender_email = preferences.get_composer_sender_email();
         if sender_email.is_empty() {
@@ -2138,8 +2472,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_message_pops_out_into_its_own_window_and_frees_the_main_one() {
+    struct Setup {
+        app: AppWindow,
+        composers: Rc<Composers>,
+        _runtime: tokio::runtime::Runtime,
+        _dir: tempfile::TempDir,
+    }
+
+    fn setup() -> Setup {
         slint::platform::set_platform(Box::new(Windows)).unwrap();
         let app = AppWindow::new().unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -2181,6 +2521,22 @@ mod tests {
             true,
         );
 
+        Setup {
+            app,
+            composers,
+            _runtime: runtime,
+            _dir: dir,
+        }
+    }
+
+    #[test]
+    fn a_message_pops_out_into_its_own_window_and_frees_the_main_one() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
         let main = app.global::<ComposerUi>();
 
         // A new message opens in the main window, which offers to pop it out.
@@ -2271,5 +2627,116 @@ mod tests {
         slint::platform::update_timers_and_animations();
         assert_eq!(composers.sessions.borrow().len(), 1);
         assert!(Rc::ptr_eq(&composers.sessions.borrow()[0], &first));
+    }
+
+    #[test]
+    fn a_reply_shows_its_original_read_only_until_edited_or_removed() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.invoke_open_compose("".into());
+        let session = composers.in_app().unwrap();
+        let host = session.host().unwrap();
+        let ui = host.ui();
+        ui.set_editor_width(600.0);
+        ui.set_editor_viewport_height(400.0);
+        let original = || {
+            ComposeQuote::reply(
+                "Maya wrote:",
+                "First line",
+                Some("<p>First <b>line</b></p><p>Second</p>"),
+            )
+        };
+
+        session.set_quote(&ui, Some(original()));
+        assert_eq!(ui.get_quote(), "reply");
+        assert!(
+            !ui.get_quote_expanded(),
+            "a reply's original starts collapsed"
+        );
+        session.layout_changed();
+        assert_eq!(ui.get_quote_tiles().row_count(), 0);
+
+        ui.set_quote_expanded(true);
+        session.layout_changed();
+        assert!(ui.get_quote_tiles().row_count() > 0);
+        assert!(ui.get_quote_height() > 0.0);
+        ui.set_quote_expanded(false);
+        session.layout_changed();
+        assert_eq!(ui.get_quote_tiles().row_count(), 0);
+        assert!(session.quote_renderer.borrow().is_none());
+
+        // Editing moves the original into the editor as a quote block.
+        session.edit_quote();
+        assert_eq!(ui.get_quote(), "");
+        assert!(
+            session
+                .document
+                .borrow()
+                .text()
+                .ends_with("Maya wrote:\n│ First line")
+        );
+
+        session.set_quote(&ui, Some(original()));
+        session.remove_quote();
+        assert_eq!(ui.get_quote(), "");
+        assert!(session.quote.borrow().is_none());
+    }
+
+    #[test]
+    fn an_original_the_renderer_cannot_lay_out_shows_as_text() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.invoke_open_compose("".into());
+        let session = composers.in_app().unwrap();
+        let host = session.host().unwrap();
+        let ui = host.ui();
+        ui.set_editor_width(600.0);
+        ui.set_editor_viewport_height(400.0);
+        // An image at a relative address, which the renderer cannot resolve.
+        let quote =
+            ComposeQuote::reply("Maya wrote:", "Hello", Some("<p>Hello</p><img src=\"x\">"));
+        session.set_quote(&ui, Some(quote));
+        ui.set_quote_expanded(true);
+        session.layout_changed();
+        assert!(ui.get_quote_tiles().row_count() > 0);
+        assert!(!ui.get_notice_is_error());
+        assert!(!session.quote_unavailable.get());
+    }
+
+    #[test]
+    fn an_original_wider_than_the_composer_scales_down_whole() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.invoke_open_compose("".into());
+        let session = composers.in_app().unwrap();
+        let host = session.host().unwrap();
+        let ui = host.ui();
+        ui.set_editor_width(300.0);
+        ui.set_editor_viewport_height(400.0);
+        // Wider than auto-fit zooms out to, at its least, for this width.
+        let wide = "<table style=\"width:900px\"><tr><td>Wide</td></tr></table>";
+        let forward = ComposeQuote::forward(&["Forwarded".to_owned()], "Wide", Some(wide));
+        session.set_quote(&ui, Some(forward));
+        session.layout_changed();
+        let tiles = ui.get_quote_tiles();
+        assert!(tiles.row_count() > 0);
+        for tile in tiles.iter() {
+            let size = tile.image.size();
+            let shown = tile.height / 300.0;
+            let drawn = size.height as f32 / size.width as f32;
+            assert!((shown - drawn).abs() < 0.02, "shown {shown}, drawn {drawn}");
+        }
     }
 }
