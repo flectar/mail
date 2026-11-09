@@ -3260,6 +3260,9 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
     });
 
     let initials = initials(&sender);
+    // The scheduled draft keeps when it goes out, or why it did not, which
+    // only the list row knows.
+    let scheduled = message.is_draft && row.message_id.is_none_or(|id| id == message.id);
     MailMessage {
         id: row.id,
         thread_id: row.thread_id,
@@ -3275,8 +3278,8 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
         preview: message.snippet.clone(),
         date_ms: message.date,
         snoozed_until: row.snoozed_until,
-        send_at: None,
-        send_error: None,
+        send_at: row.send_at.filter(|_| scheduled),
+        send_error: row.send_error.clone().filter(|_| scheduled),
         reply_reminder_at: row.reply_reminder_at,
         reply_reminder_due: row.reply_reminder_due,
         to: message
