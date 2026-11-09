@@ -541,14 +541,16 @@ impl RichComposeDocument {
         Some(html)
     }
 
-    /// Reopens a message from the HTML `body_html` wrote, keeping its
-    /// formatting. Returns `None`, leaving the document untouched, for markup
-    /// the composer could not have written; callers then load the plain text.
-    pub fn load_html(&mut self, html: &str) -> Option<ComposeSelection> {
-        let (text, styles) = import_body_html(html)?;
+    /// Reopens `text`, a saved message's plain text, with the formatting the
+    /// HTML `body_html` wrote for it. Returns `None`, leaving the document
+    /// untouched, when the HTML holds other text: markup the composer could
+    /// not have written, or HTML from versions that kept neither list
+    /// numbers nor spacing. Callers then load the plain text.
+    pub fn load_html(&mut self, html: &str, text: &str) -> Option<ComposeSelection> {
+        let styles = saved_styles(html, text)?;
         let revision = self.revision.wrapping_add(1);
         *self = Self {
-            text,
+            text: text.to_owned(),
             styles,
             revision,
             ..Self::default()
@@ -1693,6 +1695,52 @@ fn import_body_html(html: &str) -> Option<(String, Vec<ComposeStyleRun>)> {
     import.finish()
 }
 
+/// The formatting `html` gives `text`, when the HTML holds that text. HTML
+/// keeps a tab only as a run of spaces, a no-break space as a plain one and
+/// a CRLF line end as LF, so those differences still match; any other means
+/// the HTML belongs to other text.
+fn saved_styles(html: &str, text: &str) -> Option<Vec<ComposeStyleRun>> {
+    let (imported, styles) = import_body_html(html)?;
+    let (expected, offsets) = text_as_html_reads_it(text);
+    if imported != expected {
+        return None;
+    }
+    Some(
+        styles
+            .into_iter()
+            .map(|run| ComposeStyleRun {
+                range: offsets[run.range.start]..offsets[run.range.end],
+                style: run.style,
+            })
+            .filter(|run| !run.range.is_empty())
+            .collect(),
+    )
+}
+
+/// `text` as its HTML imports back, with the byte offset in `text` where
+/// each byte of the result comes from, plus one for the end.
+fn text_as_html_reads_it(text: &str) -> (String, Vec<usize>) {
+    let mut read = String::with_capacity(text.len());
+    let mut offsets = Vec::with_capacity(text.len() + 1);
+    let mut characters = text.char_indices().peekable();
+    while let Some((offset, character)) = characters.next() {
+        match character {
+            '\t' => read.push_str("    "),
+            '\u{a0}' => read.push(' '),
+            // The LF of a CRLF stands at the CR, so formatting that ends
+            // with the line leaves the CR out.
+            '\r' if matches!(characters.peek(), Some((_, '\n'))) => {
+                characters.next();
+                read.push('\n');
+            }
+            other => read.push(other),
+        }
+        offsets.resize(read.len(), offset);
+    }
+    offsets.push(text.len());
+    (read, offsets)
+}
+
 fn ordered(a: usize, b: usize) -> (usize, usize) {
     if a <= b { (a, b) } else { (b, a) }
 }
@@ -2700,7 +2748,9 @@ mod tests {
     fn reopened(document: &RichComposeDocument) -> RichComposeDocument {
         let mut reopened = RichComposeDocument::default();
         let html = document.body_html().unwrap();
-        let selection = reopened.load_html(&html).expect("the draft's own HTML");
+        let selection = reopened
+            .load_html(&html, document.text())
+            .expect("the draft's own HTML");
         let end = reopened.text().len() as i32;
         assert_eq!(selection, ComposeSelection { start: end, end });
         reopened
@@ -2746,12 +2796,14 @@ mod tests {
         let mut document = RichComposeDocument::default();
         let selection = document.load_html(
             "<blockquote>one</blockquote><blockquote><br></blockquote><ol><li>a</li><li>b</li></ol>",
+            "│ one\n│ \n1. a\n2. b",
         );
         assert!(selection.is_some());
         assert_eq!(document.text(), "│ one\n│ \n1. a\n2. b");
 
         let selection = document.load_html(
             "<html><head><meta charset=\"utf-8\"></head><body><div>Hi <a href=\"https://x.example/\" rel=\"noopener noreferrer\">there</a></div>\n<div><br></div></body></html>",
+            "Hi there\n",
         );
         assert!(selection.is_some());
         assert_eq!(document.text(), "Hi there\n");
@@ -2763,20 +2815,29 @@ mod tests {
 
     #[test]
     fn markup_the_composer_cannot_write_is_left_to_the_plain_text() {
-        for html in [
-            "<p>Paragraph</p>",
-            "<table><tr><td>cell</td></tr></table>",
-            "<div style=\"color:red\">red</div>",
-            "<div><img src=\"cid:logo\" alt=\"Logo\"></div>",
-            "<ul><li>one<ul><li>nested</li></ul></li></ul>",
-            "<blockquote><blockquote>nested</blockquote></blockquote>",
-            "<h1>Heading</h1>",
-            "<style>div { color: red }</style><div>styled</div>",
-            "",
+        for (html, text) in [
+            ("<p>Paragraph</p>", "Paragraph"),
+            ("<table><tr><td>cell</td></tr></table>", "cell"),
+            ("<div style=\"color:red\">red</div>", "red"),
+            ("<div><img src=\"cid:logo\" alt=\"Logo\"></div>", "Logo"),
+            (
+                "<ul><li>one<ul><li>nested</li></ul></li></ul>",
+                "• one\n• nested",
+            ),
+            (
+                "<blockquote><blockquote>nested</blockquote></blockquote>",
+                "│ nested",
+            ),
+            ("<h1>Heading</h1>", "Heading"),
+            (
+                "<style>div { color: red }</style><div>styled</div>",
+                "styled",
+            ),
+            ("", ""),
         ] {
             let mut document = RichComposeDocument::default();
             document.load("unchanged", 0, 0);
-            assert_eq!(document.load_html(html), None, "{html}");
+            assert_eq!(document.load_html(html, text), None, "{html}");
             assert_eq!(document.text(), "unchanged");
         }
     }
@@ -2787,6 +2848,7 @@ mod tests {
         document
             .load_html(
                 "<div><a href=\"javascript:alert(1)\">x</a> <a href=\"mailto:a@example.org\">mail</a></div>",
+                "x mail",
             )
             .unwrap();
         assert_eq!(document.text(), "x mail");
@@ -2794,5 +2856,45 @@ mod tests {
             document.body_html().as_deref(),
             Some("<div>x <a href=\"mailto:a@example.org\">mail</a></div>")
         );
+    }
+
+    #[test]
+    fn drafts_whose_html_lost_numbers_or_spacing_reopen_as_their_text() {
+        // Earlier versions saved HTML without list numbers or spacing; only
+        // the plain text still says what these drafts hold.
+        for (html, text) in [
+            (
+                "<ol><li>Budget</li></ol><div><br></div><ol><li>Hiring</li></ol>",
+                "1. Budget\n\n2. Hiring",
+            ),
+            (
+                "<div>Agenda:</div><ol><li>A</li><li>B</li></ol>",
+                "Agenda:\n3. A\n4. B",
+            ),
+            ("<ol><li>was a good year</li></ol>", "2026. was a good year"),
+            ("<div>    indented</div>", "    indented"),
+            ("<div>a</div><div>   </div><div>b</div>", "a\n   \nb"),
+        ] {
+            let mut document = RichComposeDocument::default();
+            document.load("unchanged", 0, 0);
+            assert_eq!(document.load_html(html, text), None, "{text:?}");
+            assert_eq!(document.text(), "unchanged");
+        }
+    }
+
+    #[test]
+    fn tabs_no_break_spaces_and_crlf_reopen_as_written() {
+        let text = "Qty:\t3\u{a0}boxes\r\nNext line";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let boxes = text.find("boxes").unwrap();
+        document.format("bold", text, boxes as i32, (boxes + 5) as i32);
+        let next = text.find("Next").unwrap();
+        document.format("italic", text, next as i32, (next + 4) as i32);
+
+        let reopened = reopened(&document);
+        assert_eq!(reopened.text(), text);
+        assert_eq!(reopened.body_html(), document.body_html());
+        assert_style_coverage(&reopened);
     }
 }

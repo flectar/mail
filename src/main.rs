@@ -6445,12 +6445,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
             {
                 let mut document = document_for_message_compose.borrow_mut();
-                // The HTML keeps the draft's formatting; markup the composer
-                // did not write opens as the plain text.
+                // The HTML keeps the draft's formatting; HTML that holds other
+                // text than the draft's opens as the plain text.
                 let reopened = draft
                     .body_html
                     .as_deref()
-                    .and_then(|html| document.load_html(html));
+                    .and_then(|html| document.load_html(html, &draft.body_text));
                 let selection = match reopened {
                     Some(selection) => selection,
                     None => {
