@@ -109,7 +109,8 @@ impl super::Window for Live {
 }
 
 /// Which of these accounts' new mail the user sees arrive: the focused
-/// window shows the unified Inbox, or that account's, with no search.
+/// window shows that account's Inbox, or the unified Inbox with the account
+/// in it (a mail profile can leave it out), with no search.
 /// Mail never lands in a list the user looks at, so Apple's guidelines
 /// and Geary skip the notification there.
 async fn on_screen(accounts: BTreeSet<i64>) -> Option<BTreeSet<i64>> {
@@ -127,12 +128,12 @@ async fn on_screen(accounts: BTreeSet<i64>) -> Option<BTreeSet<i64>> {
         accounts
             .into_iter()
             .filter(|&account_id| {
-                state.scope == Scope::UNIFIED_INBOX
-                    || state.scope
-                        == Scope::Account {
-                            account_id,
-                            mailbox: StandardMailbox::Inbox,
-                        }
+                let inbox = Scope::Account {
+                    account_id,
+                    mailbox: StandardMailbox::Inbox,
+                };
+                state.scope == inbox
+                    || (state.scope == Scope::UNIFIED_INBOX && state.shows_account(account_id))
             })
             .collect()
     })
@@ -293,11 +294,18 @@ pub(crate) fn core_ready() {
 
 /// Show the conversation a notification is about, in the list that has
 /// it: the one showing, when that is the unified Inbox or the account's,
-/// and otherwise the account's Inbox. It opens once its page arrives, the
-/// way a restored tab opens its conversation.
+/// and otherwise the account's Inbox, leaving a mail profile that leaves the
+/// account out. It opens once its page arrives, the way a restored tab
+/// opens its conversation.
 fn reveal(app: &AppWindow, state: &Rc<RefCell<InboxState>>, route: Route) {
     app.set_settings_open(false);
     app.set_active_view("mail".into());
+    // The active mail profile can leave the account out; every account's
+    // mail shows without one.
+    let shown = state.borrow().shows_account(route.account_id);
+    if !shown {
+        app.invoke_select_mail_profile("".into());
+    }
     let account_inbox = Scope::Account {
         account_id: route.account_id,
         mailbox: StandardMailbox::Inbox,
