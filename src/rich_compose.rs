@@ -327,6 +327,40 @@ impl RichComposeDocument {
         selection
     }
 
+    /// Replaces `range` with `text` as one undoable edit and puts the caret
+    /// at `caret`. The text comes in unformatted: what moves into the message
+    /// from outside it, such as a quote, takes no formatting from the caret.
+    pub fn replace_unformatted(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        caret: usize,
+    ) -> ComposeSelection {
+        let inserted = ComposeStyleRun {
+            range: 0..text.len(),
+            style: CharacterStyle::default(),
+        };
+        let styles = replaced_style_runs(
+            &self.styles,
+            range.start,
+            range.end,
+            std::slice::from_ref(&inserted),
+        );
+        let mut replaced = String::with_capacity(self.text.len() - range.len() + text.len());
+        replaced.push_str(&self.text[..range.start]);
+        replaced.push_str(text);
+        replaced.push_str(&self.text[range.end..]);
+        let before = self.take_snapshot();
+        self.typing_override = None;
+        self.styles = styles;
+        self.text = replaced;
+        self.auto_link_urls();
+        self.bump_revision();
+        let selection = self.update_selection(to_i32(caret), to_i32(caret));
+        self.commit_edit(before);
+        selection
+    }
+
     pub fn format(
         &mut self,
         kind: &str,
@@ -2837,6 +2871,27 @@ mod tests {
         assert_eq!(reopened.body_html(), document.body_html());
         assert_style_coverage(&reopened);
         assert_eq!(reopened.history("undo"), None);
+    }
+
+    #[test]
+    fn text_moved_in_takes_no_formatting_from_the_caret() {
+        let mut document = RichComposeDocument::default();
+        document.load("Thanks", 0, 0);
+        document.format("bold", "Thanks", 0, 6);
+        document.update_selection(6, 6);
+        let selection = document.replace_unformatted(6..6, "\n\nPat wrote:\n│ Hi", 6);
+        assert_eq!(document.text(), "Thanks\n\nPat wrote:\n│ Hi");
+        assert_eq!(selection, ComposeSelection { start: 6, end: 6 });
+        assert_eq!(
+            document.body_html().as_deref(),
+            Some(
+                "<div><strong>Thanks</strong></div><div><br></div><div>Pat wrote:</div>\
+                 <blockquote><div>Hi</div></blockquote>"
+            )
+        );
+        assert_style_coverage(&document);
+        document.history("undo");
+        assert_eq!(document.text(), "Thanks");
     }
 
     #[test]

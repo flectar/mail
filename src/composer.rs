@@ -1404,12 +1404,9 @@ impl ComposeSession {
         self.set_quote(&ui, None);
         self.edit(|document| {
             let text = document.text();
-            let mut combined = String::with_capacity(text.len() + quoted.len() + 2);
-            combined.push_str(text.trim_end_matches('\n'));
-            combined.push_str("\n\n");
-            combined.push_str(&quoted);
-            let caret = text.trim_end_matches('\n').len() as i32;
-            document.synchronize(&combined, caret, caret)
+            let written = text.trim_end_matches('\n').len();
+            let end = text.len();
+            document.replace_unformatted(written..end, &format!("\n\n{quoted}"), written)
         });
     }
 
