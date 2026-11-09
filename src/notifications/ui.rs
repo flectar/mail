@@ -1,13 +1,13 @@
 //! The window's side of new-mail notifications: what it shows, the words in
-//! its language, opening conversations and acting on messages. Everything
-//! here runs on the window's thread.
+//! its language, and opening conversations. Everything here runs on the
+//! window's thread.
 
 use super::{Act, Availability, FixedWords, NotificationHost, Request, Response, Route, Words};
 use crate::{
     AppWindow, I18n, InboxState, SystemNotifications, WindowChrome,
     mail_scope::{Scope, StandardMailbox},
 };
-use flectar_mail_core::models::{ActionKind, MailGrouping};
+use flectar_mail_core::models::MailGrouping;
 use slint::ComponentHandle;
 use std::{
     cell::RefCell,
@@ -53,6 +53,8 @@ pub(crate) fn attach(
             system.set_availability("allowed".into());
             let host = Arc::clone(host);
             system.on_open_settings(move || host.open_settings());
+            #[cfg(background_checks)]
+            system.on_open_app_settings(crate::platform::open_app_settings);
         }
     }
     WINDOW.with(|window| {
@@ -65,11 +67,9 @@ pub(crate) fn attach(
     });
     refresh_availability();
     let app = app.as_weak();
-    let runtime = runtime.clone();
     super::serve_requests(move |request| {
-        let runtime = runtime.clone();
         let _ = app.upgrade_in_event_loop(move |app| match request {
-            Request::Respond(response) => respond(&app, &runtime, response),
+            Request::Respond(response) => respond(&app, response),
             Request::Raise(activation_token) => {
                 crate::window_controller::activate(&app, activation_token);
             }
@@ -131,6 +131,9 @@ async fn on_screen(accounts: BTreeSet<i64>) -> Option<BTreeSet<i64>> {
             && app.global::<WindowChrome>().get_active()
             && app.get_active_view() == "mail"
             && !app.get_settings_open();
+        // A phone's window stays focused while the app is in the background.
+        #[cfg(background_checks)]
+        let looking = looking && crate::platform::app_is_active();
         let state = state.borrow();
         if !looking || !state.query.trim().is_empty() {
             return BTreeSet::new();
@@ -202,6 +205,17 @@ pub(crate) fn refresh_availability() {
     }) else {
         return;
     };
+    #[cfg(background_checks)]
+    if let Some(app) = app.upgrade() {
+        use crate::platform::BackgroundRefresh;
+        let checks = match crate::platform::background_refresh() {
+            BackgroundRefresh::On => "on",
+            BackgroundRefresh::Off => "off",
+            BackgroundRefresh::LowPower => "low-power",
+        };
+        app.global::<SystemNotifications>()
+            .set_background_checks(checks.into());
+    }
     runtime.spawn(async move {
         let availability = match host.availability().await {
             Availability::Allowed => "allowed",
@@ -214,6 +228,45 @@ pub(crate) fn refresh_availability() {
             app.global::<SystemNotifications>()
                 .set_availability(availability.into());
         });
+    });
+}
+
+/// The app came to the front on a phone. The user may have changed the
+/// system's settings meanwhile, and with an account set up it is the moment
+/// to ask for permission.
+#[cfg(background_checks)]
+pub(crate) fn came_to_front() {
+    refresh_availability();
+    if let Some(app) = WINDOW.with(|window| window.borrow().as_ref()?.app.upgrade()) {
+        ask_for_permission(&app);
+    }
+}
+
+/// On a phone, ask the user to allow notifications while the app is in
+/// front with an account to tell of, rather than once mail arrives: a check
+/// in the background can't ask. Called as the app comes to the front and
+/// when the accounts change.
+#[cfg(background_checks)]
+pub(crate) fn ask_for_permission(app: &AppWindow) {
+    use slint::Model;
+    if !app.get_notifications_enabled()
+        || app.get_connected_accounts().row_count() == 0
+        || !crate::platform::app_is_active()
+    {
+        return;
+    }
+    let Some((host, runtime)) = WINDOW.with(|window| {
+        let window = window.borrow();
+        let window = window.as_ref()?;
+        Some((window.host.clone()?, window.runtime.clone()))
+    }) else {
+        return;
+    };
+    runtime.spawn(async move {
+        if host.availability().await == Availability::NotAsked {
+            host.request_permission().await;
+            let _ = slint::invoke_from_event_loop(refresh_availability);
+        }
     });
 }
 
@@ -242,7 +295,9 @@ fn fixed_words(app: &AppWindow) -> FixedWords {
     }
 }
 
-fn respond(app: &AppWindow, runtime: &tokio::runtime::Handle, response: Response) {
+/// A click on a notification: bring the window up and open what it is
+/// about. Buttons don't come here; their actions need only the mail store.
+fn respond(app: &AppWindow, response: Response) {
     let Some(state) = WINDOW.with(|window| window.borrow().as_ref()?.state.upgrade()) else {
         return;
     };
@@ -251,12 +306,13 @@ fn respond(app: &AppWindow, runtime: &tokio::runtime::Handle, response: Response
         act,
         activation_token,
     } = response;
-    if act == Act::Open {
-        crate::window_controller::activate(app, activation_token);
+    if act != Act::Open {
+        return;
     }
-    let Some(core) = state.borrow().core.as_ref().map(|core| core.file_core()) else {
-        // The rest needs the mail store, which a click that started the app
-        // comes before.
+    crate::window_controller::activate(app, activation_token);
+    if state.borrow().core.is_none() {
+        // Opening it needs the mail store, which a click that started the
+        // app comes before.
         WAITING.with(|waiting| {
             waiting.borrow_mut().push(Response {
                 route,
@@ -265,39 +321,19 @@ fn respond(app: &AppWindow, runtime: &tokio::runtime::Handle, response: Response
             });
         });
         return;
-    };
-    let kind = match act {
-        Act::Open => {
-            reveal(app, &state, route);
-            return;
-        }
-        Act::MarkRead => ActionKind::MarkRead,
-        Act::Archive => ActionKind::Archive,
-        Act::Delete => ActionKind::Trash,
-    };
-    let Some(message_id) = route.message_id else {
-        return;
-    };
-    runtime.spawn(async move {
-        if let Err(error) = super::act(&core, kind, message_id).await {
-            tracing::warn!(%error, "notifications: the action failed");
-        }
-    });
+    }
+    reveal(app, &state, route);
 }
 
 /// The mail store opened: answer the clicks that came before it. They run
 /// once the caller is done with the window's state.
 pub(crate) fn core_ready() {
     let _ = slint::invoke_from_event_loop(|| {
-        let Some((app, runtime)) = WINDOW.with(|window| {
-            let window = window.borrow();
-            let window = window.as_ref()?;
-            Some((window.app.upgrade()?, window.runtime.clone()))
-        }) else {
+        let Some(app) = WINDOW.with(|window| window.borrow().as_ref()?.app.upgrade()) else {
             return;
         };
         for response in WAITING.with(RefCell::take) {
-            respond(&app, &runtime, response);
+            respond(&app, response);
         }
     });
 }

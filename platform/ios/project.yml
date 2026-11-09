@@ -21,10 +21,13 @@ targets:
     info:
       path: Info.plist
       properties:
+        # Background checks for new mail (platform/ios/BackgroundChecks.m).
+        BGTaskSchedulerPermittedIdentifiers: [com.flectar.mail.check]
         CFBundleDisplayName: Flectar Mail
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSLocalNetworkUsageDescription: Flectar Mail connects to mail servers on your local network.
+        UIBackgroundModes: [fetch]
         UILaunchScreen: {}
         UIRequiresFullScreen: false
     sources:

@@ -10,8 +10,8 @@
 //! was.
 
 use super::engine::{
-    PriorityFetchCmd, RestoreRequest, SyncCmd, SyncCtx, configured_sync_interval, set_state,
-    set_state_error,
+    PriorityFetchCmd, RestoreRequest, SyncCmd, SyncCtx, caught_up, configured_sync_interval,
+    set_state, set_state_error,
 };
 use super::ingest::{self, Delivery, Importer};
 use crate::accounts::credentials::{self, Slot};
@@ -75,6 +75,7 @@ pub(crate) async fn run(ctx: SyncCtx, mut config: AccountConfig, mut inputs: Inp
             tracing::warn!(account_id, %error, "completing local POP3 actions failed");
         }
         if next_sync.is_some_and(|at| at <= Instant::now()) {
+            let started = now_ms();
             next_sync = match sync(&ctx, &config, &mut catch_up).await {
                 Ok(synced) => {
                     backoff = Duration::from_secs(1);
@@ -83,6 +84,7 @@ pub(crate) async fn run(ctx: SyncCtx, mut config: AccountConfig, mut inputs: Inp
                     ctx.bus.emit(CoreEvent::NetworkState { online: true });
                     let next = match synced {
                         Synced::Complete => {
+                            caught_up(&ctx, account_id, started).await;
                             finish(&mut waiters, Ok(()));
                             Instant::now() + configured_sync_interval(&ctx.db).await
                         }

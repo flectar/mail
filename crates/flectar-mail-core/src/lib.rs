@@ -827,6 +827,13 @@ pub struct Core {
     ai_router_lock: Arc<tokio::sync::Mutex<()>>,
     /// Wakes the loop that copies and moves mail to other accounts.
     transfers: Arc<tokio::sync::Notify>,
+    /// Set once the startup has started the account workers.
+    accounts_started: Arc<tokio::sync::watch::Sender<bool>>,
+    /// When each account's last complete sync before this start began: mail
+    /// that came in after it was caught up on silently, so a check in the
+    /// background tells of it instead (see [`Core::announce_missed`]).
+    /// `None` once the user has seen the Inbox.
+    missed_since: Arc<std::sync::Mutex<Option<std::collections::BTreeMap<i64, i64>>>>,
 }
 
 impl Core {
@@ -903,6 +910,9 @@ impl Core {
         let calendar_db = Db::deferred_calendar(paths.calendar_db_file());
         let files_db = Db::deferred_files(paths.files_db_file());
         let bus = EventBus::new();
+        // Read before any account worker starts, as each records how far it
+        // caught up.
+        let missed_since = db.read(|conn| repo::accounts::caught_up(conn)).await?;
         let core = Core {
             db,
             calendar_db,
@@ -923,6 +933,8 @@ impl Core {
             ui_ready: Arc::new(tokio::sync::Notify::new()),
             ai_router_lock: Arc::new(tokio::sync::Mutex::new(())),
             transfers: Arc::new(tokio::sync::Notify::new()),
+            accounts_started: Arc::new(tokio::sync::watch::Sender::new(false)),
+            missed_since: Arc::new(std::sync::Mutex::new(Some(missed_since))),
         };
 
         // Finish any destructive operation interrupted between the mail and
@@ -1044,6 +1056,7 @@ impl Core {
                     Err(e) => {
                         events::sync_diagnostic("startup_accounts", None, e.code());
                         tracing::error!("listing accounts for startup sync: {e}");
+                        core.accounts_started.send_replace(true);
                         return;
                     }
                 };
@@ -1056,6 +1069,7 @@ impl Core {
                     Err(error) => tracing::error!("finding local mail for startup: {error}"),
                 }
                 events::sync_diagnostic("startup_workers", None, "ready");
+                core.accounts_started.send_replace(true);
                 // Calendar sync tasks for accounts with a syncing calendar
                 // connection, once older CalDAV passwords have moved to theirs.
                 if core.paths.calendar_db_file().exists() {
@@ -2054,6 +2068,18 @@ impl Core {
     pub fn notify_ui_ready(&self) {
         events::sync_diagnostic("ui_ready", None, "notified");
         self.ui_ready.notify_one();
+    }
+
+    /// Start the account workers now, without waiting for a window to report
+    /// ready, and return once they run: for a check in the background, where
+    /// no window shows.
+    pub async fn start_accounts_now(&self) {
+        self.notify_ui_ready();
+        let _ = self
+            .accounts_started
+            .subscribe()
+            .wait_for(|started| *started)
+            .await;
     }
 
     /// Free the SQLite page caches of every open store once a burst of work
@@ -9037,6 +9063,77 @@ impl Core {
             .write(move |conn| repo::notifications::prune(conn, now))
             .await
     }
+
+    /// Queue new-mail notifications for mail that reached an Inbox while no
+    /// copy of the app was following its account. A start catches up on that
+    /// mail silently, which suits a launch the user sees; a phone that starts
+    /// the app in the background to check for mail calls this after the
+    /// check ([`Self::sync_accounts`]), so the mail shows as it would have
+    /// with the app running. Each message is told of once, and nothing once
+    /// [`Self::forget_missed`] ran. Returns how many notifications it queued.
+    pub async fn announce_missed(&self) -> Result<usize> {
+        let since = self
+            .missed_since
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(since) = since.filter(|since| !since.is_empty()) else {
+            return Ok(0);
+        };
+        let now = now_ms();
+        let queued = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let queued = repo::notifications::enqueue_missed(&tx, &since, now)?;
+                tx.commit()?;
+                Ok(queued)
+            })
+            .await?;
+        let mut by_account = std::collections::BTreeMap::<i64, Vec<i64>>::new();
+        for &(account_id, thread_id) in &queued {
+            by_account.entry(account_id).or_default().push(thread_id);
+        }
+        for (account_id, thread_ids) in by_account {
+            tracing::info!(
+                account_id,
+                count = thread_ids.len(),
+                "receive: queued notifications for mail that came while the app wasn't running",
+            );
+            self.bus.emit(CoreEvent::MailNew {
+                account_id,
+                thread_ids,
+            });
+        }
+        Ok(queued.len())
+    }
+
+    /// The user has seen the Inbox since this start, so mail caught up on
+    /// then is no news: [`Self::announce_missed`] does nothing from now on.
+    pub fn forget_missed(&self) {
+        self.missed_since
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+    }
+
+    /// Wait until each of these queued actions has been tried: done, failed
+    /// or cancelled, or waiting to be tried again after an error, such as
+    /// while offline. For a host that must say when a notification's button
+    /// has done its work, as a phone suspends the app soon after.
+    pub async fn wait_for_actions(&self, action_ids: Vec<i64>) -> Result<()> {
+        loop {
+            let ids = action_ids.clone();
+            let untried = self
+                .db
+                .read(move |conn| repo::actions::untried(conn, &ids))
+                .await?;
+            if untried == 0 {
+                return Ok(());
+            }
+            tokio::time::sleep(SEND_STATUS_POLL_INTERVAL).await;
+        }
+    }
 }
 
 /// Build a (incoming → the user's reply) example from one of their sent
@@ -10000,6 +10097,64 @@ mod notification_dispatch_tests {
             second.last_error.as_deref(),
             Some("the host gave no answer")
         );
+    }
+
+    #[tokio::test]
+    async fn mail_that_came_while_the_app_was_closed_is_announced_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_tests(tmp.path());
+        let now = now_ms();
+        let minute = 60_000;
+        // An unread message in the Inbox, received while no copy of the app
+        // ran: after the last run caught up, an hour ago.
+        let arrived = |conn: &rusqlite::Connection, subject: &str, at: i64| -> Result<()> {
+            let (_, id) = db::testutil::seed_message(conn, "a@test.dev", subject, false);
+            conn.execute(
+                "UPDATE messages SET internal_date = ?1 WHERE id = ?2",
+                rusqlite::params![at, id],
+            )?;
+            Ok(())
+        };
+        {
+            let db = Db::open(&paths.db_file()).unwrap();
+            db.write(move |conn| {
+                db::testutil::seed_account(conn);
+                repo::accounts::set_caught_up(conn, 1, now - 60 * minute)?;
+                arrived(conn, "While away", now - 10 * minute)
+            })
+            .await
+            .unwrap();
+        }
+
+        let core = Core::start(paths).await.unwrap();
+        let mut events = core.bus.subscribe();
+        assert_eq!(core.announce_missed().await.unwrap(), 1);
+        assert!(matches!(
+            events.try_recv(),
+            Ok(CoreEvent::MailNew { account_id: 1, .. })
+        ));
+        assert_eq!(core.announce_missed().await.unwrap(), 0);
+
+        // Once the user has seen the Inbox, mail caught up on is no news.
+        core.db
+            .write(move |conn| arrived(conn, "Seen in the Inbox", now - 5 * minute))
+            .await
+            .unwrap();
+        core.forget_missed();
+        assert_eq!(core.announce_missed().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn accounts_start_without_a_window_for_a_background_check() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+        // Well before the minute the start otherwise waits for a window.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            core.start_accounts_now(),
+        )
+        .await
+        .expect("the account workers started");
     }
 
     #[tokio::test]
