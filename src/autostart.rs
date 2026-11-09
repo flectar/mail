@@ -490,11 +490,12 @@ mod startup_task {
 #[cfg(target_os = "windows")]
 mod registry {
     use super::{Applied, BACKGROUND_ARGUMENT, Entry};
+    use crate::platform::windows_install::command_executable;
     use std::{
         ffi::{OsStr, OsString},
         io,
         os::windows::ffi::{OsStrExt, OsStringExt},
-        path::{Path, PathBuf},
+        path::Path,
         ptr::null_mut,
     };
     use windows_sys::Win32::{
@@ -564,14 +565,6 @@ mod registry {
         command.push("\" ");
         command.push(BACKGROUND_ARGUMENT);
         command
-    }
-
-    fn command_executable(command: &str) -> Option<PathBuf> {
-        let executable = match command.strip_prefix('"') {
-            Some(quoted) => quoted.split_once('"')?.0,
-            None => command.split_whitespace().next()?,
-        };
-        (!executable.is_empty()).then(|| PathBuf::from(executable))
     }
 
     fn get_value(subkey: &str, kind: u32) -> io::Result<Option<Vec<u8>>> {

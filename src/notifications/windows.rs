@@ -19,6 +19,7 @@ use super::{
     Act, Alert, AlertId, Availability, Controls, Failure, HostFuture, NotificationHost, Response,
     parse_payload, payload, respond,
 };
+use crate::platform::windows_install::{command_executable, package_family_name, same_file};
 use std::{
     ffi::c_void,
     sync::{Arc, mpsc},
@@ -555,49 +556,12 @@ fn registered_server(class: GUID) -> Option<std::path::PathBuf> {
         .open(format!(r"CLSID\{}\LocalServer32", guid_text(class)))
         .and_then(|key| key.get_string(""))
         .ok()?;
-    command
-        .strip_prefix('"')
-        .and_then(|quoted| quoted.split_once('"'))
-        .map(|(executable, _)| std::path::PathBuf::from(executable))
-}
-
-fn same_file(first: &std::path::Path, second: &std::path::Path) -> bool {
-    match (std::fs::canonicalize(first), std::fs::canonicalize(second)) {
-        (Ok(first), Ok(second)) => first
-            .as_os_str()
-            .to_string_lossy()
-            .eq_ignore_ascii_case(&second.as_os_str().to_string_lossy()),
-        _ => false,
-    }
+    command_executable(&command)
 }
 
 /// `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`, as the registry writes classes.
 fn guid_text(guid: GUID) -> String {
     format!("{{{guid:?}}}")
-}
-
-fn package_family_name() -> Option<String> {
-    use windows_sys::Win32::{
-        Foundation::{APPMODEL_ERROR_NO_PACKAGE, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS},
-        Storage::Packaging::Appx::GetCurrentPackageFamilyName,
-    };
-    let mut length = 0_u32;
-    // SAFETY: a zero length with no buffer only asks for the name's size.
-    let status = unsafe { GetCurrentPackageFamilyName(&mut length, std::ptr::null_mut()) };
-    if status == APPMODEL_ERROR_NO_PACKAGE || status != ERROR_INSUFFICIENT_BUFFER {
-        return None;
-    }
-    let mut buffer = vec![0_u16; length as usize];
-    // SAFETY: `buffer` holds `length` units, as passed.
-    let status = unsafe { GetCurrentPackageFamilyName(&mut length, buffer.as_mut_ptr()) };
-    if status != ERROR_SUCCESS {
-        return None;
-    }
-    let end = buffer
-        .iter()
-        .position(|&unit| unit == 0)
-        .unwrap_or(buffer.len());
-    Some(String::from_utf16_lossy(&buffer[..end]))
 }
 
 /// Whether the process runs as administrator.

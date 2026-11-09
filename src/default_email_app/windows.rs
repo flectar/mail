@@ -4,19 +4,16 @@
 //! default; only the user can, in that page.
 
 use super::{Applied, Done, State, Status};
+use crate::platform::windows_install::{command_executable, package_family_name, same_file};
 use std::{
     ffi::{OsStr, OsString},
     io,
     os::windows::ffi::{OsStrExt, OsStringExt},
-    path::{Path, PathBuf},
+    path::PathBuf,
     ptr::{null, null_mut},
 };
 use windows_sys::Win32::{
-    Foundation::{
-        APPMODEL_ERROR_NO_PACKAGE, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER,
-        ERROR_MORE_DATA, ERROR_SUCCESS, WIN32_ERROR,
-    },
-    Storage::Packaging::Appx::GetCurrentPackageFamilyName,
+    Foundation::{ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS, WIN32_ERROR},
     System::Registry::{
         HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_SZ, RRF_RT_REG_SZ,
         RegDeleteKeyValueW, RegDeleteTreeW, RegGetValueW, RegSetKeyValueW,
@@ -221,21 +218,7 @@ fn registered_executable(registration: &Registration) -> io::Result<Option<PathB
     let Some(command) = get_value(HKEY_CURRENT_USER, &registration.command(), None)? else {
         return Ok(None);
     };
-    let command = command.to_string_lossy();
-    Ok(command
-        .strip_prefix('"')
-        .and_then(|quoted| quoted.split_once('"'))
-        .map(|(executable, _)| PathBuf::from(executable)))
-}
-
-fn same_file(first: &Path, second: &Path) -> bool {
-    match (std::fs::canonicalize(first), std::fs::canonicalize(second)) {
-        (Ok(first), Ok(second)) => first
-            .as_os_str()
-            .to_string_lossy()
-            .eq_ignore_ascii_case(&second.as_os_str().to_string_lossy()),
-        _ => false,
-    }
+    Ok(command_executable(&command.to_string_lossy()))
 }
 
 /// The ProgID that opens mail links for the current user, honoring their
@@ -269,19 +252,6 @@ fn package_application(prog_id: &str) -> Option<String> {
         .ok()
         .flatten()
         .map(|value| value.to_string_lossy().into_owned())
-}
-
-fn package_family_name() -> Option<String> {
-    let mut length = 0_u32;
-    // SAFETY: a zero length with no buffer only asks for the name's size.
-    let status = unsafe { GetCurrentPackageFamilyName(&mut length, null_mut()) };
-    if status == APPMODEL_ERROR_NO_PACKAGE || status != ERROR_INSUFFICIENT_BUFFER {
-        return None;
-    }
-    let mut buffer = vec![0_u16; length as usize];
-    // SAFETY: `buffer` holds `length` units, as passed.
-    let status = unsafe { GetCurrentPackageFamilyName(&mut length, buffer.as_mut_ptr()) };
-    (status == ERROR_SUCCESS).then(|| from_wide(&buffer).to_string_lossy().into_owned())
 }
 
 /// Open Default apps for the user to choose Flectar Mail. Windows 11 opens
