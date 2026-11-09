@@ -101,6 +101,15 @@ server shows them, or the notification portal in the Flatpak, where the desktop
 also decides whether they play a sound. Android and iOS don't show
 notifications yet.
 
+The app icon shows how many unread messages are in the Inbox, counting the
+same mail as notifications: Important mail, or every message with **All new
+mail**. The number stays until the mail is read, here or on another device;
+turn it off with **Unread count on the app icon** in Settings → Notifications.
+macOS shows it on the Dock when badges are allowed for Flectar Mail in its
+notification settings, Windows on the taskbar button, and Linux on docks that
+show counts, such as KDE Plasma's, Ubuntu Dock and Dash to Dock, elementary
+OS's and Plank.
+
 ## Profiles and account colors
 
 Group related accounts into named profiles such as Work or Personal, then give
