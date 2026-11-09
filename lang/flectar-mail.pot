@@ -2916,19 +2916,19 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
-#: ui/components/email-composer.slint:244
+#: ui/components/email-composer.slint:249
 msgid "From"
 msgstr ""
 
-#: ui/components/email-composer.slint:245
+#: ui/components/email-composer.slint:250
 msgid "Verified sender identity"
 msgstr ""
 
-#: ui/components/email-composer.slint:258
+#: ui/components/email-composer.slint:263
 msgid "Signature"
 msgstr ""
 
-#: ui/components/email-composer.slint:352
+#: ui/components/email-composer.slint:357
 msgid "Write your message…"
 msgstr ""
 
