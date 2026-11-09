@@ -292,6 +292,8 @@ fn fixed_words(app: &AppWindow) -> FixedWords {
         mark_read: i18n.invoke_notification_mark_read().into(),
         archive: i18n.invoke_notification_archive().into(),
         delete: i18n.invoke_notification_delete().into(),
+        new_mail_channel: i18n.invoke_notification_new_mail_channel().into(),
+        quiet_mail_channel: i18n.invoke_notification_quiet_mail_channel().into(),
     }
 }
 

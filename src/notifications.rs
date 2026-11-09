@@ -1163,6 +1163,10 @@ pub struct FixedWords {
     pub mark_read: String,
     pub archive: String,
     pub delete: String,
+    /// The names of Android's two notification channels: mail that may play
+    /// the new-mail sound, and the rest.
+    pub new_mail_channel: String,
+    pub quiet_mail_channel: String,
 }
 
 /// The window's side: what it shows, the words in its language, and opening
@@ -1655,6 +1659,7 @@ mod tests {
             mark_read: "Mark as read".into(),
             archive: "Archive".into(),
             delete: "Delete".into(),
+            ..FixedWords::default()
         };
         let mail = NewMailNotification {
             account_id: 1,
