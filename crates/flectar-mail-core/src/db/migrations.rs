@@ -66,8 +66,32 @@ fn convert(conn: &Connection, version: i64) -> Result<()> {
         13 => super::repo::contact_entries::migrate(conn),
         19 => clean_snippets(conn),
         21 => find_verification_codes(conn),
+        33 => sync_existing_snoozes(conn),
         _ => Ok(()),
     }
+}
+
+/// Conversations snoozed before Flectar Mail Sync reach the user's other
+/// devices too, like those snoozed since. The local mail account never syncs.
+fn sync_existing_snoozes(conn: &Connection) -> Result<()> {
+    let snoozes: Vec<(i64, i64, i64)> = conn
+        .prepare(
+            "SELECT s.thread_id, s.account_id, s.wake_at FROM snoozes s
+             JOIN accounts a ON a.id = s.account_id
+             WHERE a.mail_protocol <> 'local'
+               AND NOT EXISTS (SELECT 1 FROM synced_snoozes ss WHERE ss.thread_id = s.thread_id)",
+        )?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (thread_id, account_id, wake_at) in snoozes {
+        let anchor = super::repo::snoozes::anchor(conn, thread_id)?.to_string();
+        conn.execute(
+            "INSERT INTO synced_snoozes (sync_id, account_id, anchor, wake_at, thread_id)
+             VALUES (lower(hex(randomblob(16))), ?1, ?2, ?3, ?4)",
+            rusqlite::params![account_id, anchor, wake_at, thread_id],
+        )?;
+    }
+    Ok(())
 }
 
 /// Finds the codes in received mail stored before codes were looked for,
@@ -644,6 +668,34 @@ mod tests {
                 None
             ]
         );
+    }
+
+    #[test]
+    fn snooze_upgrade_shares_the_snoozes_made_before() {
+        let mut conn = staged(30);
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            "UPDATE messages SET message_id = 'one@test.dev' WHERE id = 1;
+             INSERT INTO messages (
+               id, account_id, thread_id, folder_id, subject, from_addr, to_json, cc_json,
+               date, snippet, message_id, is_draft
+             ) VALUES (2, 1, 1, 1, 'Re: schema', 'me@test.dev', '[]', '[]', 2, '',
+                       'draft@test.dev', 1);
+             INSERT INTO snoozes (thread_id, account_id, wake_at) VALUES (1, 1, 4102444800000);",
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let (account, wake_at, anchor): (i64, i64, String) = conn
+            .query_row(
+                "SELECT account_id, wake_at, anchor FROM synced_snoozes WHERE thread_id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((account, wake_at), (1, 4102444800000));
+        // Named by received mail, not by a draft only this device has.
+        let anchor: serde_json::Value = serde_json::from_str(&anchor).unwrap();
+        assert_eq!(anchor["messageId"], "one@test.dev");
     }
 
     #[test]
