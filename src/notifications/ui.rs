@@ -53,6 +53,8 @@ pub(crate) fn attach(
             system.set_availability("allowed".into());
             let host = Arc::clone(host);
             system.on_open_settings(move || host.open_settings());
+            #[cfg(background_checks)]
+            system.on_open_app_settings(crate::platform::open_app_settings);
         }
     }
     WINDOW.with(|window| {
@@ -129,6 +131,9 @@ async fn on_screen(accounts: BTreeSet<i64>) -> Option<BTreeSet<i64>> {
             && app.global::<WindowChrome>().get_active()
             && app.get_active_view() == "mail"
             && !app.get_settings_open();
+        // A phone's window stays focused while the app is in the background.
+        #[cfg(background_checks)]
+        let looking = looking && crate::platform::app_is_active();
         let state = state.borrow();
         if !looking || !state.query.trim().is_empty() {
             return BTreeSet::new();
@@ -200,6 +205,17 @@ pub(crate) fn refresh_availability() {
     }) else {
         return;
     };
+    #[cfg(background_checks)]
+    if let Some(app) = app.upgrade() {
+        use crate::platform::BackgroundRefresh;
+        let checks = match crate::platform::background_refresh() {
+            BackgroundRefresh::On => "on",
+            BackgroundRefresh::Off => "off",
+            BackgroundRefresh::LowPower => "low-power",
+        };
+        app.global::<SystemNotifications>()
+            .set_background_checks(checks.into());
+    }
     runtime.spawn(async move {
         let availability = match host.availability().await {
             Availability::Allowed => "allowed",
@@ -212,6 +228,45 @@ pub(crate) fn refresh_availability() {
             app.global::<SystemNotifications>()
                 .set_availability(availability.into());
         });
+    });
+}
+
+/// The app came to the front on a phone. The user may have changed the
+/// system's settings meanwhile, and with an account set up it is the moment
+/// to ask for permission.
+#[cfg(background_checks)]
+pub(crate) fn came_to_front() {
+    refresh_availability();
+    if let Some(app) = WINDOW.with(|window| window.borrow().as_ref()?.app.upgrade()) {
+        ask_for_permission(&app);
+    }
+}
+
+/// On a phone, ask the user to allow notifications while the app is in
+/// front with an account to tell of, rather than once mail arrives: a check
+/// in the background can't ask. Called as the app comes to the front and
+/// when the accounts change.
+#[cfg(background_checks)]
+pub(crate) fn ask_for_permission(app: &AppWindow) {
+    use slint::Model;
+    if !app.get_notifications_enabled()
+        || app.get_connected_accounts().row_count() == 0
+        || !crate::platform::app_is_active()
+    {
+        return;
+    }
+    let Some((host, runtime)) = WINDOW.with(|window| {
+        let window = window.borrow();
+        let window = window.as_ref()?;
+        Some((window.host.clone()?, window.runtime.clone()))
+    }) else {
+        return;
+    };
+    runtime.spawn(async move {
+        if host.availability().await == Availability::NotAsked {
+            host.request_permission().await;
+            let _ = slint::invoke_from_event_loop(refresh_availability);
+        }
     });
 }
 

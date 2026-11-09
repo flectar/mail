@@ -1,11 +1,14 @@
-//! New-mail notifications on macOS, through the User Notifications framework.
+//! New-mail notifications on macOS and iOS, through the User Notifications
+//! framework.
 //!
-//! Only that framework: once a bundle id has used it, macOS refuses the older
-//! NSUserNotificationCenter for that id, so the two never mix. It needs the
-//! app bundle, known to Launch Services and signed as a whole; the release
-//! build's ad-hoc bundle signature is enough (Telegram measured authorization
-//! and delivery for such bundles on macOS 27). Outside a bundle the framework
-//! aborts the process, so a build run from the command line shows none.
+//! On macOS only that framework: once a bundle id has used it, macOS refuses
+//! the older NSUserNotificationCenter for that id, so the two never mix. It
+//! needs the app bundle, known to Launch Services and signed as a whole; the
+//! release build's ad-hoc bundle signature is enough (Telegram measured
+//! authorization and delivery for such bundles on macOS 27). Outside a
+//! bundle the framework aborts the process, so a build run from the command
+//! line shows none. An iOS app always runs from its bundle, whose id a
+//! sideloading store rewrites.
 //!
 //! The delegate is installed before the app finishes launching, as Apple
 //! requires, so the click that launched the app reaches it. The system asks
@@ -14,16 +17,21 @@
 
 use super::{
     Act, Alert, AlertId, Availability, Badge, Controls, Failure, FixedWords, HostFuture,
-    NotificationHost, Response, parse_payload, payload, respond,
+    NotificationHost, Response, parse_payload, payload,
 };
 use block2::RcBlock;
+#[cfg(target_os = "macos")]
+use objc2::MainThreadMarker;
 use objc2::{
-    AnyThread, MainThreadMarker, define_class, msg_send,
+    AnyThread, define_class, msg_send,
     rc::Retained,
     runtime::{Bool, NSObject, NSObjectProtocol, ProtocolObject},
 };
+#[cfg(target_os = "macos")]
 use objc2_app_kit::{NSApplication, NSWorkspace};
-use objc2_foundation::{NSArray, NSBundle, NSDictionary, NSError, NSSet, NSString, NSURL};
+use objc2_foundation::{NSArray, NSDictionary, NSError, NSSet, NSString};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{NSBundle, NSURL};
 use objc2_user_notifications::{
     UNAuthorizationOptions, UNAuthorizationStatus, UNErrorCode, UNErrorDomain,
     UNMutableNotificationContent, UNNotification, UNNotificationAction,
@@ -43,9 +51,9 @@ use std::{
 };
 use tokio::sync::oneshot;
 
-/// Whether macOS refused this copy of the app outright. It then answers the
-/// permission request with an error, while its settings still say nobody was
-/// asked.
+/// Whether the system refused this copy of the app outright, as macOS does
+/// for one outside a proper bundle. It then answers the permission request
+/// with an error, while its settings still say nobody was asked.
 static REFUSED: AtomicBool = AtomicBool::new(false);
 
 /// Permission requests waiting for their answer. Apple doesn't say what a
@@ -67,6 +75,7 @@ fn note_refusal(error: Option<&NSError>) {
 }
 
 /// The bundle the framework knows the app by (platform/macos/Info.plist.in).
+#[cfg(target_os = "macos")]
 const BUNDLE_ID: &str = "com.flectar.mail";
 /// Where a notification keeps what a click on it opens.
 const ROUTE_KEY: &str = "route";
@@ -81,6 +90,7 @@ thread_local! {
 }
 
 pub(crate) fn host() -> Option<Arc<dyn NotificationHost>> {
+    #[cfg(target_os = "macos")]
     if !in_app_bundle() {
         return None;
     }
@@ -92,11 +102,13 @@ pub(crate) fn host() -> Option<Arc<dyn NotificationHost>> {
 
 /// macOS launches the app for a click like any other launch, and hands the
 /// click to the delegate once it has finished launching.
+#[cfg(target_os = "macos")]
 pub(crate) fn launched_for_click() -> bool {
     false
 }
 
 /// Whether this process runs from the Flectar Mail app bundle.
+#[cfg(target_os = "macos")]
 fn in_app_bundle() -> bool {
     let bundle = NSBundle::mainBundle();
     bundle
@@ -179,8 +191,9 @@ impl NotificationHost for Host {
             });
             UNUserNotificationCenter::currentNotificationCenter()
                 .requestAuthorizationWithOptions_completionHandler(
-                    // macOS shows the Dock badge only for an app allowed
-                    // badges; without asking for them, no switch appears.
+                    // The system shows the app icon's count only for an app
+                    // allowed badges; without asking for them, no switch
+                    // appears in its settings.
                     UNAuthorizationOptions::Alert
                         | UNAuthorizationOptions::Sound
                         | UNAuthorizationOptions::Badge,
@@ -206,6 +219,7 @@ impl NotificationHost for Host {
     /// The Dock tile's badge, with the count's digits grouped as the UI
     /// groups them. AppKit wants its own thread: the window's while the app
     /// runs, and this one as it quits, once that loop has ended.
+    #[cfg(target_os = "macos")]
     fn set_badge(&self, badge: Option<Badge>) -> HostFuture<()> {
         let apply = move || {
             let Some(main_thread) = MainThreadMarker::new() else {
@@ -226,9 +240,34 @@ impl NotificationHost for Host {
         Box::pin(std::future::ready(()))
     }
 
+    /// The count on the home screen icon, which the system formats.
+    #[cfg(not(target_os = "macos"))]
+    fn set_badge(&self, badge: Option<Badge>) -> HostFuture<()> {
+        let count = badge.map_or(0, |badge| badge.count);
+        Box::pin(answer((), move |done| {
+            let block = RcBlock::new(move |error: *mut NSError| {
+                // SAFETY: a non-null error is a valid NSError for the call.
+                if let Some(error) = unsafe { error.as_ref() } {
+                    tracing::debug!(
+                        error = %error.localizedDescription(),
+                        "notifications: could not show the count on the app icon"
+                    );
+                }
+                done(());
+            });
+            UNUserNotificationCenter::currentNotificationCenter()
+                .setBadgeCount_withCompletionHandler(
+                    objc2_foundation::NSInteger::try_from(count)
+                        .unwrap_or(objc2_foundation::NSInteger::MAX),
+                    Some(&block),
+                );
+        }))
+    }
+
     /// The app's page of Notifications in System Settings. macOS has no
     /// documented link; this is the one Chromium opens, tested by its authors
     /// on macOS 13 to 26.
+    #[cfg(target_os = "macos")]
     fn open_settings(&self) {
         let link = NSString::from_str(&format!(
             "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id={BUNDLE_ID}"
@@ -236,6 +275,12 @@ impl NotificationHost for Host {
         if let Some(url) = NSURL::URLWithString(&link) {
             NSWorkspace::sharedWorkspace().openURL(&url);
         }
+    }
+
+    /// The app's notification settings, where iOS keeps them.
+    #[cfg(not(target_os = "macos"))]
+    fn open_settings(&self) {
+        crate::platform::open_notification_settings();
     }
 
     fn set_words(&self, words: &FixedWords) {
@@ -262,21 +307,23 @@ impl NotificationHost for Host {
                 UNNotificationCategoryOptions::empty(),
             )
         };
+        // A phone's lock screen shows the buttons too: moving mail away
+        // waits for whoever holds it to unlock it.
+        #[cfg(target_os = "macos")]
+        let moves = UNNotificationActionOptions::empty();
+        #[cfg(not(target_os = "macos"))]
+        let moves = UNNotificationActionOptions::AuthenticationRequired;
         let categories = NSSet::from_retained_slice(&[
             category(
                 ARCHIVE_CATEGORY,
-                action(
-                    Act::Archive,
-                    &words.archive,
-                    UNNotificationActionOptions::empty(),
-                ),
+                action(Act::Archive, &words.archive, moves),
             ),
             category(
                 DELETE_CATEGORY,
                 action(
                     Act::Delete,
                     &words.delete,
-                    UNNotificationActionOptions::Destructive,
+                    UNNotificationActionOptions::Destructive | moves,
                 ),
             ),
         ]);
@@ -420,6 +467,9 @@ define_class!(
                 | UNNotificationPresentationOptions::Sound,));
         }
 
+        /// A click or a button. Where the system suspends the app once told
+        /// the response was handled, it is told only once a button's action
+        /// is done.
         #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
         fn did_receive(
             &self,
@@ -427,13 +477,40 @@ define_class!(
             response: &UNNotificationResponse,
             completion_handler: &block2::DynBlock<dyn Fn()>,
         ) {
-            if let Some(response) = self::response(response) {
-                respond(response);
+            let Some(response) = self::response(response) else {
+                completion_handler.call(());
+                return;
+            };
+            #[cfg(background_checks)]
+            {
+                let completion = Completion(completion_handler.copy());
+                super::respond_then(response, move || completion.call());
             }
-            completion_handler.call(());
+            #[cfg(not(background_checks))]
+            {
+                super::respond(response);
+                completion_handler.call(());
+            }
         }
     }
 );
+
+/// The system's completion handler for a response, called once the app has
+/// handled it.
+#[cfg(background_checks)]
+struct Completion(RcBlock<dyn Fn()>);
+
+// SAFETY: the block is the framework's completion handler, which it lets the
+// app call from any thread; copying and releasing a block is thread-safe.
+#[cfg(background_checks)]
+unsafe impl Send for Completion {}
+
+#[cfg(background_checks)]
+impl Completion {
+    fn call(self) {
+        self.0.call(());
+    }
+}
 
 impl Delegate {
     fn new() -> Retained<Self> {

@@ -25,11 +25,13 @@ fn main() {
             .file("platform/ios/AppIcon.m")
             .file("platform/ios/WebAuthentication.m")
             .file("platform/ios/MemoryPressure.m")
+            .file("platform/ios/BackgroundChecks.m")
             .flag("-fobjc-arc")
             .compile("flectar_documents");
         println!("cargo:rustc-link-lib=framework=UIKit");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=AuthenticationServices");
+        println!("cargo:rustc-link-lib=framework=BackgroundTasks");
         // iOS gives the main thread a 1 MB stack, and Slint's generated code
         // for the main window takes a 930 KiB frame when the mailbox first
         // appears (slint-ui/slint#14817). Ask for the 8 MiB the same code gets
@@ -40,6 +42,7 @@ fn main() {
         println!("cargo:rerun-if-changed=platform/ios/AppIcon.m");
         println!("cargo:rerun-if-changed=platform/ios/WebAuthentication.m");
         println!("cargo:rerun-if-changed=platform/ios/MemoryPressure.m");
+        println!("cargo:rerun-if-changed=platform/ios/BackgroundChecks.m");
     }
     if std::env::var_os("CARGO_CFG_TARGET_OS").as_deref() == Some(std::ffi::OsStr::new("windows")) {
         winresource::WindowsResource::new()

@@ -42,8 +42,8 @@ pub use flectar_mail_core::{NewMailNotification, NotificationBatch, Notification
 #[cfg(target_os = "windows")]
 #[path = "notifications/windows.rs"]
 mod platform;
-#[cfg(target_os = "macos")]
-#[path = "notifications/macos.rs"]
+#[cfg(user_notifications)]
+#[path = "notifications/apple.rs"]
 mod platform;
 #[cfg(linux_desktop)]
 #[path = "notifications/linux.rs"]
@@ -63,12 +63,14 @@ mod platform {
     }
 }
 
-/// The desktop platform's notification service, if this system offers one
-/// the app can use, and whether the system started this process to deliver a
-/// click on one of its notifications. Called once, before the window is
-/// created.
+/// The platform's notification service, if this system offers one the app
+/// can use. Called once, before the window is created.
+#[cfg(any(desktop, user_notifications))]
+pub(crate) use platform::host;
+/// Whether the system started this process to deliver a click on one of its
+/// notifications.
 #[cfg(desktop)]
-pub(crate) use platform::{host, launched_for_click};
+pub(crate) use platform::launched_for_click;
 
 /// Whether the system started this process with `argument` to deliver a
 /// click on a notification. Only Windows passes arguments of its own.
@@ -383,6 +385,50 @@ pub fn respond(response: Response) {
     }
 }
 
+/// How long the app stays awake in the background for a button's action to
+/// reach the server, within the half minute or so iOS allows. What doesn't
+/// make it goes out once the app runs again.
+#[cfg(background_checks)]
+const ACT_LIMIT: Duration = Duration::from_secs(25);
+
+/// Report a click or button on a notification, as [`respond`], where the
+/// system may suspend the app soon after it hears the response was handled.
+/// `done` says so once a click went to the window, or once a button's action
+/// is saved; the app then stays awake for it to reach the server
+/// ([`ACT_LIMIT`]).
+#[cfg(background_checks)]
+pub fn respond_then(response: Response, done: impl FnOnce() + Send + 'static) {
+    match (response.act, response.route.message_id) {
+        (Act::Open, _) | (_, None) => {
+            respond(response);
+            done();
+        }
+        (act, Some(message_id)) => {
+            let awake = crate::platform::stay_awake();
+            with_core(move |runtime, core| {
+                let core = Arc::clone(core);
+                runtime.spawn(async move {
+                    let queued = act_on(&core, act, message_id).await;
+                    done();
+                    if let Some(action_ids) = queued {
+                        // A launch for the button starts the accounts that
+                        // carry it out; there may be no window to start them.
+                        let sent = tokio::time::timeout(ACT_LIMIT, async {
+                            core.start_accounts_now().await;
+                            core.wait_for_actions(action_ids).await
+                        })
+                        .await;
+                        if !matches!(sent, Ok(Ok(()))) {
+                            tracing::info!("notifications: the action goes out on the next run");
+                        }
+                    }
+                    drop(awake);
+                });
+            });
+        }
+    }
+}
+
 /// Carry out a button's action on the message; the actions it queued.
 async fn act_on(core: &Core, act: Act, message_id: i64) -> Option<Vec<i64>> {
     let kind = match act {
@@ -448,6 +494,14 @@ fn core_opened(runtime: &tokio::runtime::Handle, core: &Arc<Core>) {
     for errand in waiting {
         errand(runtime, core);
     }
+}
+
+/// The user brought the app to the foreground, where the Inbox shows what
+/// came while it wasn't running: that is no news for a check in the
+/// background ([`flectar_mail_core::Core::forget_missed`]).
+#[cfg(background_checks)]
+pub(crate) fn app_became_active() {
+    with_core(|_, core| core.forget_missed());
 }
 
 /// Stops a [`check_in_background`].
@@ -576,6 +630,13 @@ pub(crate) fn preferences_changed() {
 /// Whether the user wants anything a check in the background brings:
 /// notifications, or the count on the app icon. Kept by the dispatcher.
 static BACKGROUND_CHECKS_WANTED: AtomicBool = AtomicBool::new(false);
+
+/// Whether to ask the system to wake the app now and then to check for new
+/// mail.
+#[cfg(background_checks)]
+pub(crate) fn background_checks_wanted() -> bool {
+    BACKGROUND_CHECKS_WANTED.load(Ordering::Relaxed)
+}
 
 /// Wakes the dispatcher for a [`flush`].
 static FLUSH: Notify = Notify::const_new();
@@ -874,8 +935,12 @@ async fn present(
     let count = batch.mail.len();
     if host.availability().await == Availability::NotAsked {
         // Ask in context, as the mail arrives, and keep the mail until the
-        // user answered: the system refuses it meanwhile.
-        drop(host.request_permission());
+        // user answered: the system refuses it meanwhile. A phone asks once
+        // the app is in front with an account (ui::ask_for_permission), as
+        // this may run in the background.
+        if cfg!(not(background_checks)) {
+            drop(host.request_permission());
+        }
         return vec![
             NotificationOutcome::Retry(
                 "waiting for the user to allow notifications".into()
