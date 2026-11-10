@@ -527,6 +527,23 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_spelling = Rc::clone(state);
+    let runtime_for_spelling = runtime.clone();
+    app.on_save_spelling_enabled(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let languages = crate::spelling::service().and_then(|spelling| spelling.chosen_languages());
+        save_spelling(
+            &app,
+            &state_for_spelling,
+            &runtime_for_spelling,
+            enabled,
+            languages,
+        );
+    });
+
+    let app_weak = app.as_weak();
     let state_for_tabs = Rc::clone(state);
     let runtime_for_tabs = runtime.clone();
     app.on_save_show_tabs(move |enabled| {
@@ -899,6 +916,28 @@ pub(super) fn register_settings_preference_callbacks(
 }
 
 /// Both entry points share one asynchronous persistence path and busy state.
+/// Check spelling or not, in `languages` or the system's, from the settings or a message's
+/// menu. Open messages follow at once.
+pub(super) fn save_spelling(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    enabled: bool,
+    languages: Option<Vec<String>>,
+) {
+    crate::spelling::apply_settings(enabled, languages.clone());
+    crate::spelling::apply_to_window(app);
+    let Some(core) = state.borrow().core.clone() else {
+        return;
+    };
+    if let Err(error) = runtime.block_on(core.set_spelling(enabled, languages)) {
+        app.set_sync_status(UiMessage::detail(
+            "Could not save spelling preference: {}",
+            error,
+        ));
+    }
+}
+
 pub(super) fn register_oauth_settings_callbacks(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,

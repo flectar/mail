@@ -78,6 +78,7 @@ mod rendering_report;
 mod retained_model;
 mod rich_compose;
 mod settings_controller;
+pub mod spelling;
 mod sidebar_model;
 #[cfg(desktop)]
 mod single_instance;
@@ -1874,6 +1875,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let (profile_avatar_raw_tx, profile_avatar_rx) = bounded_ui_channel();
     let profile_avatar_tx = UiSender::new(profile_avatar_raw_tx, profile_avatar_wake);
 
+    spelling::install(&runtime, &platform.paths.cache_dir);
     let profile_avatar_loader = if benchmark_disable_background {
         None
     } else {

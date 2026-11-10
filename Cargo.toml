@@ -188,6 +188,8 @@ x11rb = { version = "0.13", default-features = false }
 wayland-backend = { version = "0.3", default-features = false, features = ["client_system"] }
 wayland-client = { version = "0.31", default-features = false }
 wayland-protocols = { version = "0.32", default-features = false, features = ["client", "staging"] }
+# Spell checking with the system's Hunspell dictionaries, read in place from disk.
+flectar-spell = { path = "crates/flectar-spell" }
 
 # Integrated window frames use winit window attributes and native window events.
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))'.dependencies]

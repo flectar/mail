@@ -638,8 +638,7 @@ pub(crate) async fn load_startup_snapshot(
         core.load_local_mail(),
     );
 
-    let (accounts, scope, page) =
-        mail.unwrap_or_else(|_| (Vec::new(), Scope::UNIFIED_INBOX, None));
+    let (accounts, scope, page) = mail.unwrap_or_else(|_| (Vec::new(), Scope::UNIFIED_INBOX, None));
     metrics.emit(
         "startup_queries_loaded",
         serde_json::json!({
@@ -860,6 +859,11 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
     app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
     app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
+    crate::spelling::apply_settings(
+        settings.spelling_enabled,
+        settings.spelling_languages.clone(),
+    );
+    crate::spelling::apply_to_window(app);
     app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
     app.set_close_to_tray(settings.close_to_tray && !cfg!(mobile));
     crate::window_chrome::apply_preference(
@@ -1196,7 +1200,9 @@ mod warm_start_tests {
         }
 
         // A unified selection that would disappear moves to the survivor.
-        state.borrow_mut().set_scope(Scope::Unified(crate::StandardMailbox::Sent));
+        state
+            .borrow_mut()
+            .set_scope(Scope::Unified(crate::StandardMailbox::Sent));
         assert!(state.borrow_mut().set_connected_accounts(vec![account()]));
         assert_eq!(
             state.borrow().scope,

@@ -1,4 +1,4 @@
-import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow, LocalizedMessage } from "../models.slint";
+import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow, LocalizedMessage, SpellingLanguage } from "../models.slint";
 import { AppTheme } from "../design-system.slint";
 import { EmailComposer } from "email-composer.slint";
 
@@ -63,6 +63,15 @@ export global ComposerUi {
     // The wavy line under misspelled words, brighter on dark backgrounds.
     out property <color> editor-misspelling-color: AppTheme.dark ? #ff7b63 : AppTheme.destructive;
     out property <color> editor-selected-text-color: white;
+    // Spelling, for the editor menu: whether it can be checked here and is, the languages to
+    // choose from, and the misspelled word the menu opened on with its corrections.
+    in property <bool> spelling-available: false;
+    in property <bool> spelling-enabled: false;
+    in property <[SpellingLanguage]> spelling-languages: [];
+    in property <string> spelling-word: "";
+    in property <[string]> spelling-suggestions: [];
+    // Bumped when the editor menu is ready to open.
+    in property <int> editor-menu-serial: 0;
 
     callback close();
     callback pop-out();
@@ -86,6 +95,15 @@ export global ComposerUi {
     callback edit-quote();
     callback remove-quote();
     callback restore-quote();
+    // The user asked for the editor menu at a point of the editor.
+    callback editor-menu-requested(float, float);
+    // The same, from the keyboard: for the word at the caret.
+    callback editor-caret-menu-requested();
+    callback spelling-correct(int);
+    callback spelling-ignore();
+    callback spelling-learn();
+    callback spelling-toggle();
+    callback spelling-toggle-language(int);
 }
 
 // The composer bound to its window's ComposerUi and the application theme.
@@ -126,6 +144,12 @@ export component BoundComposer inherits EmailComposer {
     quote-expanded <=> ComposerUi.quote-expanded;
     quote-tiles: ComposerUi.quote-tiles;
     quote-height: ComposerUi.quote-height;
+    spelling-available: ComposerUi.spelling-available;
+    spelling-enabled: ComposerUi.spelling-enabled;
+    spelling-languages: ComposerUi.spelling-languages;
+    spelling-word: ComposerUi.spelling-word;
+    spelling-suggestions: ComposerUi.spelling-suggestions;
+    editor-menu-serial: ComposerUi.editor-menu-serial;
     background-color: AppTheme.surface;
     raised-color: AppTheme.surface-raised;
     control-color: AppTheme.control-bg;
@@ -175,6 +199,13 @@ export component BoundComposer inherits EmailComposer {
     edit-quote => { ComposerUi.edit-quote(); }
     remove-quote => { ComposerUi.remove-quote(); }
     restore-quote => { ComposerUi.restore-quote(); }
+    editor-menu-requested(x, y) => { ComposerUi.editor-menu-requested(x, y); }
+    editor-caret-menu-requested => { ComposerUi.editor-caret-menu-requested(); }
+    spelling-correct(index) => { ComposerUi.spelling-correct(index); }
+    spelling-ignore => { ComposerUi.spelling-ignore(); }
+    spelling-learn => { ComposerUi.spelling-learn(); }
+    spelling-toggle => { ComposerUi.spelling-toggle(); }
+    spelling-toggle-language(index) => { ComposerUi.spelling-toggle-language(index); }
 
     function publish-layout() {
         ComposerUi.editor-width = root.editor-width;

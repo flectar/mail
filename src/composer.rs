@@ -11,6 +11,10 @@ use slint::SharedString;
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use std::rc::Weak;
 
+mod message_spelling;
+pub(crate) use message_spelling::spelling_changed;
+use message_spelling::{MessageSpelling, apply_spelling_state};
+
 thread_local! {
     static COMPOSERS: RefCell<Option<Rc<Composers>>> = const { RefCell::new(None) };
 }
@@ -46,6 +50,8 @@ struct EditedQuote {
 
 /// One message being written.
 pub(super) struct ComposeSession {
+    /// The session itself, for timers and tasks that finish after a callback returns.
+    this: Weak<ComposeSession>,
     composers: Weak<Composers>,
     host: RefCell<Host>,
     /// Bumped when the message moves to another window, so the callbacks
@@ -78,6 +84,7 @@ pub(super) struct ComposeSession {
     signatures: RefCell<Vec<Signature>>,
     /// Bumped for each sending-account change; older results are dropped.
     preferences_generation: Cell<u64>,
+    spelling: MessageSpelling,
     /// Closed, and waiting for the event loop to let its window go.
     disposed: Cell<bool>,
 }
@@ -516,7 +523,8 @@ impl Composers {
             }
             previous.dispose();
         }
-        let session = Rc::new(ComposeSession {
+        let session = Rc::new_cyclic(|this| ComposeSession {
+            this: this.clone(),
             composers: Rc::downgrade(self),
             host: RefCell::new(Host::Main(app.as_weak())),
             host_id: Cell::new(0),
@@ -536,6 +544,7 @@ impl Composers {
             signature: RefCell::default(),
             signatures: RefCell::default(),
             preferences_generation: Cell::new(0),
+            spelling: MessageSpelling::default(),
             disposed: Cell::new(false),
         });
         session.connect();
@@ -919,14 +928,12 @@ impl ComposeSession {
     fn apply_document(&self, host: &HostRef) {
         {
             let document = self.document.borrow();
-            apply_rich_compose(
-                &host.view(),
-                &document,
-                document.selection(),
-                &mut self.editor.borrow_mut(),
-            );
+            let mut editor = self.editor.borrow_mut();
+            self.underline_found(&document, &mut editor);
+            apply_rich_compose(&host.view(), &document, document.selection(), &mut editor);
         }
         self.render_quote(host);
+        self.check_spelling_soon();
     }
 
     /// Draw the visible part of the original below the editor, while it is
@@ -1312,6 +1319,7 @@ impl ComposeSession {
         self.generation.set(self.generation.get().wrapping_add(1));
         self.preferences_generation
             .set(self.preferences_generation.get().wrapping_add(1));
+        self.clear_spelling();
         self.document.borrow_mut().reset();
         self.editor.borrow_mut().release();
         self.contacts.borrow_mut().clear();
@@ -1508,6 +1516,54 @@ impl ComposeSession {
             weak.upgrade()
                 .is_some_and(|session| session.delete_template(id))
         });
+        apply_spelling_state(&ui);
+        let weak = self.reference();
+        ui.on_editor_menu_requested(move |x, y| {
+            if let Some(session) = weak.upgrade() {
+                session.open_editor_menu(Some((x, y)));
+            }
+        });
+        let weak = self.reference();
+        ui.on_editor_caret_menu_requested(move || {
+            if let Some(session) = weak.upgrade() {
+                session.open_editor_menu(None);
+            }
+        });
+        let weak = self.reference();
+        ui.on_spelling_correct(move |index| {
+            if let Some(session) = weak.upgrade() {
+                session.correct_spelling(index);
+            }
+        });
+        let weak = self.reference();
+        ui.on_spelling_ignore(move || {
+            if let Some(session) = weak.upgrade() {
+                session.ignore_spelling();
+            }
+        });
+        let weak = self.reference();
+        ui.on_spelling_learn(move || {
+            if let Some(session) = weak.upgrade() {
+                session.learn_spelling();
+            }
+        });
+        let weak = self.reference();
+        ui.on_spelling_toggle(move || {
+            if let Some(session) = weak.upgrade()
+                && let Some(spelling) = crate::spelling::service()
+            {
+                session.save_spelling(!spelling.enabled(), spelling.chosen_languages());
+            }
+        });
+        let weak = self.reference();
+        ui.on_spelling_toggle_language(move |index| {
+            if let Some(session) = weak.upgrade()
+                && let Some(spelling) = crate::spelling::service()
+                && let Some(languages) = session.toggled_spelling_language(index)
+            {
+                session.save_spelling(spelling.enabled(), Some(languages));
+            }
+        });
 
         let preferences = host.preferences();
         let weak = self.reference();
@@ -1639,14 +1695,17 @@ impl ComposeSession {
         let Some(host) = self.host() else {
             return;
         };
-        let mut document = self.document.borrow_mut();
-        let selection = change(&mut document);
-        apply_rich_compose(
-            &host.view(),
-            &document,
-            selection,
-            &mut self.editor.borrow_mut(),
-        );
+        {
+            let mut document = self.document.borrow_mut();
+            let selection = change(&mut document);
+            apply_rich_compose(
+                &host.view(),
+                &document,
+                selection,
+                &mut self.editor.borrow_mut(),
+            );
+        }
+        self.check_spelling_soon();
     }
 
     fn update_selection(&self, body: &str, anchor: i32, cursor: i32) {
@@ -1686,6 +1745,7 @@ impl ComposeSession {
                 .as_ref()
                 .map(|edited| document.edit_state(edited.mark))
         };
+        self.check_spelling_soon();
         // Undoing Edit puts the drawn original back, and redoing it moves the
         // original into the text again.
         let ui = host.ui();

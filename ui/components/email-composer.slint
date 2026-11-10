@@ -1,7 +1,7 @@
 import { AccountMailPreferences } from "account-mail-preferences.slint";
 import { SettingsSelectRow } from "settings-components.slint";
 import { ScrollView, VerticalBox } from "std-widgets.slint";
-import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow } from "../models.slint";
+import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow, SpellingLanguage } from "../models.slint";
 import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } from "composer-fields.slint";
 import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerToolbar, DiscardConfirmation, LinkEditor } from "composer-actions.slint";
 import { EmailTemplates } from "email-templates.slint";
@@ -56,6 +56,12 @@ export component EmailComposer inherits Rectangle {
     in-out property <bool> quote-expanded: false;
     in property <[ComposeEditorTile]> quote-tiles: [];
     in property <float> quote-height: 0;
+    in property <bool> spelling-available: false;
+    in property <bool> spelling-enabled: false;
+    in property <[SpellingLanguage]> spelling-languages: [];
+    in property <string> spelling-word: "";
+    in property <[string]> spelling-suggestions: [];
+    in property <int> editor-menu-serial: 0;
 
     in property <color> background-color;
     in property <color> raised-color;
@@ -105,6 +111,13 @@ export component EmailComposer inherits Rectangle {
     callback edit-quote();
     callback remove-quote();
     callback restore-quote();
+    callback editor-menu-requested(float, float);
+    callback editor-caret-menu-requested();
+    callback spelling-correct(int);
+    callback spelling-ignore();
+    callback spelling-learn();
+    callback spelling-toggle();
+    callback spelling-toggle-language(int);
 
     private property <bool> confirm-discard: false;
     private property <bool> link-editor-open: false;
@@ -117,6 +130,17 @@ export component EmailComposer inherits Rectangle {
     private property <bool> ime-edit-pending: false;
     private property <length> input-caret-x: 0px;
     private property <length> input-caret-y: 0px;
+    // Where the editor menu opens, and the state its spelling switch shows: a menu toggles
+    // its own copy, which would otherwise stop following the setting.
+    private property <Point> editor-menu-position;
+    private property <bool> spelling-switch-shown;
+
+    // The application answers a request for the editor menu once the corrections for the
+    // word under the pointer are ready.
+    changed editor-menu-serial => {
+        root.spelling-switch-shown = root.spelling-enabled;
+        editor-menu.show(root.editor-menu-position);
+    }
     private property <bool> has-content: root.to != "" || root.cc != "" || root.bcc != ""
         || root.subject != "" || root.body != "" || root.attachments.length > 0 || root.quote != "";
     private property <bool> can-send: !root.sending && root.selected-account-id > 0 && root.to != "" && (root.body != "" || root.quote != "") && AccountMailPreferences.composer-preferences-ready;
@@ -442,6 +466,15 @@ export component EmailComposer inherits Rectangle {
                     }
                     key-pressed(event) => {
                         root.pending-key-text = "";
+                        // The menu key and Shift+F10 open the editor menu at the caret.
+                        if (event.text == Key.Menu || (event.modifiers.shift && event.text == Key.F10)) {
+                            root.editor-menu-position = {
+                                x: root.editor-caret-x * 1px,
+                                y: (root.editor-caret-y + root.editor-caret-height) * 1px,
+                            };
+                            root.editor-caret-menu-requested();
+                            return accept;
+                        }
                         if ((event.modifiers.control || event.modifiers.meta) && event.text.to-lowercase() == "b") {
                             root.apply-format("bold");
                             return accept;
@@ -501,28 +534,107 @@ export component EmailComposer inherits Rectangle {
                     }
                 }
 
-                editor-hit := TouchArea {
+                // Corrections for a misspelled word, editing, and spelling languages. The
+                // editor's pointer area sits inside it and asks for it on a right press, so
+                // presses reach the editor first, as on Android, where Slint holds every
+                // press on a menu's own area to time a long press.
+                editor-menu := ContextMenuArea {
                     x: 18px;
                     y: 14px;
                     width: root.editor-width;
                     height: root.editor-area-height;
-                    mouse-cursor: text;
 
-                    pointer-event(event) => {
-                        if (event.button == PointerEventButton.left || event.kind == PointerEventKind.move || event.kind == PointerEventKind.cancel) {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
-                                body-input.focus();
+                    Menu {
+                        for suggestion[index] in root.spelling-suggestions : MenuItem {
+                            title: suggestion;
+                            activated => {
+                                root.spelling-correct(index);
+                                body-input.set-selection-offsets(root.selection-start, root.selection-end);
                             }
-                            root.editor-pointer-event(
-                                editor-hit.mouse-x / 1px,
-                                editor-hit.mouse-y / 1px,
-                                event.kind == PointerEventKind.down ? "down" : event.kind == PointerEventKind.move ? "move" : event.kind == PointerEventKind.up ? "up" : "cancel",
-                                event.modifiers.control,
-                                event.modifiers.shift,
-                                event.modifiers.alt,
-                                event.modifiers.meta,
-                            );
-                            body-input.set-selection-offsets(root.selection-start, root.selection-end);
+                        }
+                        if root.spelling-word != "" && root.spelling-suggestions.length == 0 : MenuItem {
+                            title: @tr("No suggestions");
+                            enabled: false;
+                        }
+                        if root.spelling-word != "" : MenuItem {
+                            title: @tr("Add to dictionary");
+                            activated => { root.spelling-learn(); }
+                        }
+                        if root.spelling-word != "" : MenuItem {
+                            title: @tr("Ignore");
+                            activated => { root.spelling-ignore(); }
+                        }
+                        if root.spelling-word != "" : MenuSeparator {}
+                        MenuItem {
+                            title: @tr("Cut");
+                            enabled: !root.sending && root.selection-start != root.selection-end;
+                            activated => { body-input.cut(); }
+                        }
+                        MenuItem {
+                            title: @tr("Copy");
+                            enabled: root.selection-start != root.selection-end;
+                            activated => { body-input.copy(); }
+                        }
+                        MenuItem {
+                            title: @tr("Paste");
+                            enabled: !root.sending;
+                            activated => { body-input.paste(); }
+                        }
+                        MenuItem {
+                            title: @tr("Select all");
+                            enabled: root.body != "";
+                            activated => { body-input.select-all(); }
+                        }
+                        if root.spelling-available : MenuSeparator {}
+                        if root.spelling-available : Menu {
+                            title: @tr("Spelling");
+                            MenuItem {
+                                title: @tr("Check spelling");
+                                checkable: true;
+                                checked <=> root.spelling-switch-shown;
+                                activated => { root.spelling-toggle(); }
+                            }
+                            MenuSeparator {}
+                            for language[index] in root.spelling-languages : MenuItem {
+                                title: language.name;
+                                checkable: true;
+                                checked: language.checked;
+                                enabled: root.spelling-enabled;
+                                activated => { root.spelling-toggle-language(index); }
+                            }
+                            if root.spelling-languages.length == 0 : MenuItem {
+                                title: @tr("No dictionaries installed");
+                                enabled: false;
+                            }
+                        }
+                    }
+
+                    editor-hit := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: text;
+
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                                body-input.focus();
+                                root.editor-menu-position = { x: self.mouse-x, y: self.mouse-y };
+                                root.editor-menu-requested(self.mouse-x / 1px, self.mouse-y / 1px);
+                            }
+                            if (event.button == PointerEventButton.left || event.kind == PointerEventKind.move || event.kind == PointerEventKind.cancel) {
+                                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                    body-input.focus();
+                                }
+                                root.editor-pointer-event(
+                                    editor-hit.mouse-x / 1px,
+                                    editor-hit.mouse-y / 1px,
+                                    event.kind == PointerEventKind.down ? "down" : event.kind == PointerEventKind.move ? "move" : event.kind == PointerEventKind.up ? "up" : "cancel",
+                                    event.modifiers.control,
+                                    event.modifiers.shift,
+                                    event.modifiers.alt,
+                                    event.modifiers.meta,
+                                );
+                                body-input.set-selection-offsets(root.selection-start, root.selection-end);
+                            }
                         }
                     }
                 }

@@ -50,6 +50,8 @@ mod tests {
         assert!(!d.collect_incoming_contacts);
         assert!(!d.contact_suggest_all_accounts);
         assert!(d.suggest_learned_contacts);
+        assert!(d.spelling_enabled);
+        assert_eq!(d.spelling_languages, None);
         assert_eq!(d.workspace_layout, "default");
         assert_eq!(d.calendar_week_start, "monday");
         assert_eq!(d.theme_preset, "default");
@@ -110,6 +112,8 @@ mod tests {
             account_ids: vec![1, 2],
         });
         s.active_mail_profile = Some("work".into());
+        s.spelling_enabled = false;
+        s.spelling_languages = Some(vec!["en_GB".into(), "de_DE".into()]);
         set(&c, &s).unwrap();
 
         let back = get(&c).unwrap();
@@ -136,6 +140,8 @@ mod tests {
         assert_eq!(back.ai_automation_rules, s.ai_automation_rules);
         assert_eq!(back.mail_profiles, s.mail_profiles);
         assert_eq!(back.active_mail_profile.as_deref(), Some("work"));
+        assert!(!back.spelling_enabled);
+        assert_eq!(back.spelling_languages, s.spelling_languages);
         assert_eq!(
             back.signature_defaults
                 .get("1")
@@ -169,6 +175,8 @@ mod tests {
         assert!(!s.collect_incoming_contacts);
         assert!(!s.contact_suggest_all_accounts);
         assert!(s.suggest_learned_contacts);
+        assert!(s.spelling_enabled);
+        assert_eq!(s.spelling_languages, None);
         assert_eq!(s.workspace_layout, "default");
         assert_eq!(s.calendar_week_start, "monday");
         assert_eq!(s.theme_preset, "default");
