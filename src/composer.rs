@@ -5,7 +5,9 @@
 
 use super::*;
 use crate::rich_compose::{EditMark, EditState};
-use flectar_mail_core::models::{Address, AttachmentMeta, SenderIdentity, Signature};
+use flectar_mail_core::models::{
+    Address, AttachmentMeta, SaveDraftArgs, SenderIdentity, Signature,
+};
 use slint::SharedString;
 #[cfg(desktop)]
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
@@ -302,6 +304,21 @@ pub(super) fn accounts_changed(app: &AppWindow) {
                     .invoke_composer_account_changed(account_id);
             } else {
                 session.reset_preferences();
+            }
+        }
+    });
+}
+
+/// Open the draft `draft_id` again, as when its sending was taken back.
+pub(super) fn reopen_draft(draft_id: i64) {
+    with_composers(|composers| {
+        let (Some(app), Some(core)) = (composers.app.upgrade(), composers.core()) else {
+            return;
+        };
+        match composers.runtime.block_on(core.get_draft(draft_id)) {
+            Ok(draft) => composers.show_draft(&app, draft),
+            Err(error) => {
+                app.set_render_status(UiMessage::detail("Could not open draft: {}", error));
             }
         }
     });
@@ -721,13 +738,16 @@ impl Composers {
             app.set_render_status(UiMessage::plain("Only drafts can be reopened for editing."));
             return;
         }
-        let draft = match self.runtime.block_on(core.load_draft(row)) {
-            Ok(draft) => draft,
+        match self.runtime.block_on(core.load_draft(row)) {
+            Ok(draft) => self.show_draft(app, draft),
             Err(error) => {
                 app.set_render_status(UiMessage::detail("Could not open draft: {}", error));
-                return;
             }
-        };
+        }
+    }
+
+    /// Open a saved draft in a composer.
+    fn show_draft(self: &Rc<Self>, app: &AppWindow, draft: SaveDraftArgs) {
         // A draft already open in a composer comes forward instead of opening
         // twice, where each copy's saves would overwrite the other's.
         if let Some(open) = draft.draft_id.and_then(|id| self.holding_draft(id)) {
@@ -2231,8 +2251,29 @@ impl ComposeSession {
             in_reply_to_header: intent.in_reply_to_header.as_deref(),
         };
         if send {
-            match composers.runtime.block_on(core.send_new_message(message)) {
-                Ok(queued) => {
+            let queued = composers
+                .runtime
+                .block_on(core.send_new_message(message))
+                .and_then(|queued| {
+                    let held = crate::undo_send::holds(&queued);
+                    // Without an undo delay the message leaves now, and the
+                    // composer waits for it below.
+                    if !held {
+                        composers
+                            .runtime
+                            .block_on(core.send_now(queued.action_id))?;
+                    }
+                    Ok((queued, held))
+                });
+            match queued {
+                // With one, the composer closes at once, and a notice in the
+                // main window can take the message back until it leaves.
+                Ok((queued, true)) => {
+                    self.dispose();
+                    crate::undo_send::sending(&app, queued);
+                    mailto_links::open_pending_soon(&app);
+                }
+                Ok((queued, false)) => {
                     // Keep the exact saved draft attached to this composer so
                     // a failed submission can be edited and retried in place.
                     self.intent.borrow_mut().draft_id = Some(queued.draft_id);

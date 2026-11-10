@@ -7,6 +7,7 @@ import { MailListPane } from "mail-list-pane.slint";
 import { MailReadingPane } from "mail-reading-pane.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
+import { Notice } from "../notice.slint";
 import { KeyboardKeys } from "../components/kbd.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { MovePickerUi } from "../dialogs/move-dialog.slint";
@@ -228,6 +229,12 @@ export component MailView inherits FocusScope {
         keys: Shortcuts.compose;
         enabled: LocalMailUi.can-send;
         activated => { root.open_compose(); }
+    }
+    // Text fields keep Ctrl+Z for their own undo.
+    KeyBinding {
+        keys: Shortcuts.undo;
+        enabled: Notice.can-undo;
+        activated => { Notice.act(); }
     }
     KeyBinding {
         keys: Shortcuts.search;

@@ -2180,22 +2180,51 @@ impl CoreMailSource {
         self.save_draft(compose_args(message, false)?).await
     }
 
+    /// Save the message and queue it to leave once the user's undo delay
+    /// has passed (`dispatch_at`), which is at once when it is off.
     pub async fn send_new_message(
         &self,
         message: ComposeMessage<'_>,
     ) -> Result<QueueSendResult, String> {
         let draft_id = self.save_draft(compose_args(message, true)?).await?;
-        let queued = self
-            .queue_send(QueueSendArgs {
-                draft_id,
-                send_at: None,
-            })
-            .await?;
+        self.queue_send(QueueSendArgs {
+            draft_id,
+            send_at: None,
+        })
+        .await
+    }
+
+    /// Send a queued message without waiting for the rest of its delay.
+    pub async fn send_now(&self, action_id: i64) -> Result<bool, String> {
         self.core
-            .send_now(queued.action_id)
+            .send_now(action_id)
             .await
-            .map_err(|error| error.to_string())?;
-        Ok(queued)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Take back a queued message before it leaves. False when it is already
+    /// on its way, or gone.
+    pub async fn cancel_send(&self, action_id: i64) -> Result<bool, String> {
+        self.core
+            .cancel_send(action_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn get_draft(&self, draft_id: i64) -> Result<SaveDraftArgs, String> {
+        self.core
+            .get_draft(draft_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_undo_send_seconds(&self, seconds: i64) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.undo_send_seconds = seconds;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub async fn wait_for_send(&self, action_id: i64) -> Result<(), String> {

@@ -10,6 +10,7 @@ export { AppIcon, AppIconVariant } from "app-icon.slint";
 export { DefaultEmailApp } from "default-email-app.slint";
 export { SystemNotifications } from "system-notifications.slint";
 export { Updates } from "updates.slint";
+export { Notice } from "notice.slint";
 import { AppIcon, AppIconVariant } from "app-icon.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
@@ -36,6 +37,8 @@ import { TabOverview } from "components/tab-overview.slint";
 import { WorkspaceFrame } from "components/workspace-layout.slint";
 import { CalendarEventDialog } from "dialogs/calendar-event-dialog.slint";
 import { ComposeDialog } from "dialogs/compose-dialog.slint";
+import { NoticeToast } from "components/notice-toast.slint";
+import { Notice } from "notice.slint";
 import { BoundComposer, ComposerUi } from "components/composer-ui.slint";
 import { ComposerText } from "components/composer-fields.slint";
 export { ComposerUi } from "components/composer-ui.slint";
@@ -267,8 +270,10 @@ export global I18n {
         if (key == "Notification preferences are active for this session.") { return @tr("Notification preferences are active for this session."); }
         if (key == "Notification preferences saved.") { return @tr("Notification preferences saved."); }
         if (key == "Update preference saved.") { return @tr("Update preference saved."); }
+        if (key == "Undo send preference saved.") { return @tr("Undo send preference saved."); }
         if (key == "Could not save notifications: {}") { return @tr("Could not save notifications: {}", argument); }
         if (key == "Could not save the update preference: {}") { return @tr("Could not save the update preference: {}", argument); }
+        if (key == "Could not save the undo send preference: {}") { return @tr("Could not save the undo send preference: {}", argument); }
         if (key == "Sync interval is active for this session.") { return @tr("Sync interval is active for this session."); }
         if (key == "Sync interval set to {} minutes.") { return @tr("Sync interval set to {} minutes.", argument); }
         if (key == "Could not save sync interval: {}") { return @tr("Could not save sync interval: {}", argument); }
@@ -615,6 +620,8 @@ export global I18n {
         if (key == "Connect an account before saving or sending mail.") { return @tr("Connect an account before saving or sending mail."); }
         if (key == "Message queued for delivery (action {}).") { return @tr("Message queued for delivery (action {}).", argument); }
         if (key == "Sending message…") { return @tr("Sending message…"); }
+        if (key == "This message has already been sent.") { return @tr("This message has already been sent."); }
+        if (key == "Could not take the message back: {}") { return @tr("Could not take the message back: {}", argument); }
         if (key == "Message sent.") { return @tr("Message sent."); }
         if (key == "Message was not sent: {} Your draft is preserved.") { return @tr("Message was not sent: {} Your draft is preserved.", argument); }
         if (key == "Draft saved locally (#{}).") { return @tr("Draft saved locally (#{}).", argument); }
@@ -805,6 +812,7 @@ export component AppWindow inherits Window {
     callback save_notification_settings(bool, bool, string);
     callback save_unread_badge(bool);
     callback save_sync_interval(int);
+    callback save_undo_send(int);
     callback save_mark_read_on_open(bool);
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
@@ -1141,6 +1149,7 @@ export component AppWindow inherits Window {
     in-out property <bool> unread_badge_enabled: true;
     in-out property <string> notification_scope: "important";
     in-out property <int> sync_interval_minutes: 5;
+    in-out property <int> undo_send_seconds: 10;
     in-out property <bool> mark_read_on_open: true;
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
@@ -2078,6 +2087,7 @@ export component AppWindow inherits Window {
             unread_badge_enabled <=> root.unread_badge_enabled;
             notification_scope <=> root.notification_scope;
             sync_interval_minutes <=> root.sync_interval_minutes;
+            undo_send_seconds <=> root.undo_send_seconds;
             mark_read_on_open <=> root.mark_read_on_open;
             collect_outgoing_contacts <=> root.collect_outgoing_contacts;
             collect_incoming_contacts <=> root.collect_incoming_contacts;
@@ -2181,6 +2191,7 @@ export component AppWindow inherits Window {
             }
             save_unread_badge(enabled) => { root.save_unread_badge(enabled); }
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
+            save_undo_send(seconds) => { root.save_undo_send(seconds); }
             save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
             save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }
             save_conversation_view(enabled) => { root.save_conversation_view(enabled); }
@@ -2226,6 +2237,21 @@ export component AppWindow inherits Window {
             load_storage_usage => { root.load_storage_usage(); }
             open-link(url) => { root.open_email_link(url); }
         }
+        }
+
+        // A message on its way out, with a way to take it back. A phone's
+        // composer covers the window, so it waits for that to close.
+        if Notice.shown && !(root.compact-layout && ComposerUi.open) : NoticeToast {
+            text: I18n.ui-message(Notice.message.key, Notice.message.argument, Notice.message.second_argument, Notice.message.third_argument);
+            width: min(parent.width - 32px, min(560px, max(320px, self.preferred-width)));
+            x: (parent.width - self.width) / 2;
+            // Above the phone's navigation, and above the compose button
+            // where it shows.
+            y: parent.height - self.height - 20px
+                - (root.compact-primary-nav-visible ? root.compact-primary-nav-height : 0px)
+                - (root.active_view == "mail" && (root.compact-layout || root.mail_sidebar_collapsed)
+                    ? LayoutMetrics.touch-target + 12px : 0px);
+            z: 9000;
         }
 
         if ComposerUi.open : ComposeDialog {

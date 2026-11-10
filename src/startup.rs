@@ -858,6 +858,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
         1 | 5 | 15 => settings.sync_interval_minutes as i32,
         _ => 5,
     });
+    app.set_undo_send_seconds(i32::try_from(settings.undo_send_seconds.clamp(0, 30)).unwrap_or(10));
     app.set_mark_read_on_open(settings.mark_read_on_open);
     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
     app.set_collect_incoming_contacts(settings.collect_incoming_contacts);

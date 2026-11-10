@@ -194,6 +194,25 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_undo_send = Rc::clone(state);
+    let runtime_for_undo_send = runtime.clone();
+    app.on_save_undo_send(move |seconds| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_undo_send.borrow().core.clone() else {
+            return;
+        };
+        match runtime_for_undo_send.block_on(core.set_undo_send_seconds(i64::from(seconds))) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Undo send preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save the undo send preference: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_read_on_open = Rc::clone(state);
     let runtime_for_read_on_open = runtime.clone();
     app.on_save_mark_read_on_open(move |enabled| {

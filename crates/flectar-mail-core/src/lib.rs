@@ -11616,6 +11616,42 @@ mod draft_action_race_tests {
     }
 
     #[tokio::test]
+    async fn a_send_taken_back_in_its_delay_stays_a_draft() {
+        let (core, _temp, draft_id, action_id) = jmap_draft_with_send("pending").await;
+
+        // Undo, while the delay runs.
+        assert!(core.cancel_send(action_id).await.unwrap());
+        let error = core.wait_for_send(action_id).await.unwrap_err();
+        assert!(error.to_string().contains("cancelled"), "{error}");
+        // Taken back once, there is nothing left to take back.
+        assert!(!core.cancel_send(action_id).await.unwrap());
+
+        let is_draft = core
+            .db
+            .read(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT is_draft FROM messages WHERE id = ?1",
+                    [draft_id],
+                    |row| row.get::<_, bool>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert!(is_draft);
+        // It reopens as the draft it was.
+        assert_eq!(
+            core.get_draft(draft_id).await.unwrap().draft_id,
+            Some(draft_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_send_already_on_its_way_cannot_be_taken_back() {
+        let (core, _temp, _draft_id, action_id) = jmap_draft_with_send("inflight").await;
+        assert!(!core.cancel_send(action_id).await.unwrap());
+    }
+
+    #[tokio::test]
     async fn deleting_a_draft_during_submission_is_rejected_without_data_loss() {
         let (core, _temp, draft_id, action_id) = jmap_draft_with_send("inflight").await;
 
