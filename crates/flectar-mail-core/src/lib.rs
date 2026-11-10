@@ -4628,6 +4628,46 @@ impl Core {
         Ok(true)
     }
 
+    /// Take back exactly these actions, such as those of the archive a notice
+    /// tells of: one still waiting never leaves, one the server already has
+    /// is reversed. Unlike [`Core::undo_last`], later actions and sends stay.
+    /// False when none of them could be taken back.
+    pub async fn undo_actions(&self, action_ids: Vec<i64>) -> Result<bool> {
+        let (undone, threads) = self
+            .db
+            .write(move |conn| {
+                let mut undone = false;
+                let mut threads = Vec::new();
+                for id in action_ids {
+                    let Some(action) = repo::actions::get(conn, id)? else {
+                        continue;
+                    };
+                    if action.kind == "send"
+                        || !matches!(action.state.as_str(), "pending" | "inflight" | "done")
+                    {
+                        continue;
+                    }
+                    undone = true;
+                    if let Some(thread_id) = revert_action(conn, &action)?
+                        && !threads.contains(&thread_id)
+                    {
+                        threads.push(thread_id);
+                    }
+                }
+                Ok((undone, threads))
+            })
+            .await?;
+        if !threads.is_empty() {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: threads,
+            });
+        }
+        if undone {
+            self.nudge(None, || SyncCmd::RunActions).await;
+        }
+        Ok(undone)
+    }
+
     pub async fn cancel_send(&self, action_id: i64) -> Result<bool> {
         self.db
             .write(move |conn| repo::actions::try_cancel(conn, action_id))

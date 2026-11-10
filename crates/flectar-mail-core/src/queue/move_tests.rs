@@ -273,6 +273,91 @@ async fn undo_and_star_find_a_moved_message_before_its_mailbox_syncs() {
     assert_eq!(row.folder_id, Some(1));
 }
 
+/// A notice's Undo takes back just its gesture: an archive still waiting
+/// never reaches the server, one the server has goes back, and the star
+/// given before it stays.
+#[tokio::test]
+async fn undoing_a_gesture_takes_back_only_its_own_actions() {
+    let temp = tempfile::tempdir().unwrap();
+    let credentials = Arc::new(DevelopmentFileCredentialStore::new(
+        temp.path().join("credentials.json"),
+    ));
+    let core = Core::start_mail_ui_with_credentials(Paths::for_tests(temp.path()), credentials)
+        .await
+        .unwrap();
+    let (config, thread_id, message_id) = core
+        .db
+        .write(|conn| {
+            testutil::seed_account(conn);
+            conn.execute_batch(
+                "UPDATE folders SET uidvalidity = 7;
+                 INSERT INTO folders (id, account_id, path, role, uidvalidity)
+                   VALUES (2, 1, 'Archive', 'archive', 7);",
+            )?;
+            let (thread_id, message_id) =
+                testutil::seed_message(conn, "alice@test.dev", "Plans", false);
+            conn.execute(
+                "UPDATE messages SET uid = 5, message_id = 'plans@test.dev' WHERE id = ?1",
+                [message_id],
+            )?;
+            Ok((
+                repo::accounts::get_config(conn, 1)?.unwrap(),
+                thread_id,
+                message_id,
+            ))
+        })
+        .await
+        .unwrap();
+    let server = Server::start(BTreeMap::from([
+        ("INBOX".into(), (6, vec![stored(5, "plans@test.dev", &[])])),
+        ("Archive".into(), (10, Vec::new())),
+    ]))
+    .await;
+    let mut session = server.connect().await;
+    let ctx = core.sync_ctx();
+    let perform = |kind| {
+        core.perform_action(PerformActionArgs {
+            kind,
+            target: ActionTarget::Threads(vec![thread_id]),
+            params: None,
+        })
+    };
+    let folder = || {
+        core.db
+            .read(move |conn| repo::messages::get_row(conn, message_id))
+    };
+
+    // Taken back before it ran: nothing reaches the server.
+    let archived = perform(ActionKind::Archive).await.unwrap().action_ids;
+    assert!(core.undo_actions(archived.clone()).await.unwrap());
+    execute_due(&ctx, &config, &mut session).await.unwrap();
+    assert_eq!(server.mailbox("INBOX"), [stored(5, "plans@test.dev", &[])]);
+    assert_eq!(folder().await.unwrap().unwrap().folder_id, Some(1));
+    // Taken back once, there is nothing left to take back.
+    assert!(!core.undo_actions(archived).await.unwrap());
+
+    // Starred, then archived on the server: undoing the archive brings the
+    // message back, still starred.
+    perform(ActionKind::Star).await.unwrap();
+    execute_due(&ctx, &config, &mut session).await.unwrap();
+    let archived = perform(ActionKind::Archive).await.unwrap().action_ids;
+    execute_due(&ctx, &config, &mut session).await.unwrap();
+    assert!(server.mailbox("INBOX").is_empty());
+    assert!(core.undo_actions(archived).await.unwrap());
+    execute_due(&ctx, &config, &mut session).await.unwrap();
+    assert_eq!(
+        server.mailbox("INBOX"),
+        [stored(6, "plans@test.dev", &["\\Flagged"])]
+    );
+    assert!(
+        server
+            .mailbox("Archive")
+            .iter()
+            .all(|message| message.flags.contains(&"\\Deleted".to_string()))
+    );
+    assert_eq!(folder().await.unwrap().unwrap().folder_id, Some(1));
+}
+
 /// A star given just before an archive, with both still waiting, reaches the
 /// message where the server still has it: the archive's local move must not
 /// send the star to the Archive mailbox, where the message isn't yet.
