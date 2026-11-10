@@ -15,6 +15,11 @@ thread_local! {
     static COMPOSERS: RefCell<Option<Rc<Composers>>> = const { RefCell::new(None) };
 }
 
+/// How long a message's own window may take to appear. Winit drops a window
+/// it could not create and reports that only when the app ends.
+#[cfg(desktop)]
+const WINDOW_OPEN_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// What every composer shares: the main window, the mail state and the
 /// user's templates.
 pub(super) struct Composers {
@@ -1157,11 +1162,77 @@ impl ComposeSession {
                 true,
             );
         }
+        // A window that never appears would keep the message out of reach.
+        #[cfg(desktop)]
+        if app.window().has_winit_window() {
+            let session = self.reference();
+            Timer::single_shot(WINDOW_OPEN_TIMEOUT, move || {
+                if let Some(session) = session.upgrade() {
+                    session.window_never_opened();
+                }
+            });
+        }
         // The surfaces draw again at the new window's scale factor.
         self.editor.borrow_mut().reset();
         *self.quote_renderer.borrow_mut() = None;
         window.ui().set_open(true);
         self.apply_document(&window);
+    }
+
+    /// The message's own window never appeared. The message comes back to
+    /// the main window, or goes to Drafts while another message is open there.
+    #[cfg(desktop)]
+    fn window_never_opened(self: &Rc<Self>) {
+        let Some(composers) = self.composers() else {
+            return;
+        };
+        let (Some(app), Some(HostRef::Window(handle))) = (composers.app.upgrade(), self.host())
+        else {
+            return;
+        };
+        if self.disposed.get() || handle.window().has_winit_window() {
+            return;
+        }
+        // One that is only late stays closed rather than opening empty.
+        let _ = handle.hide();
+        let window = HostRef::Window(handle);
+        if composers.in_app().is_some() {
+            let ui = window.ui();
+            self.save(
+                ui.get_account_id(),
+                &ui.get_to(),
+                &ui.get_cc(),
+                &ui.get_bcc(),
+                &ui.get_subject(),
+                &ui.get_body(),
+                false,
+            );
+            app.set_sync_status(if self.disposed.get() {
+                UiMessage::plain(
+                    "Could not open the message in its own window, so it was saved to Drafts.",
+                )
+            } else {
+                UiMessage::plain("Could not open the message in its own window.")
+            });
+            return;
+        }
+        let main = HostRef::Main(app.clone_strong());
+        copy_composer(&window.ui(), &main.ui());
+        copy_preferences(&window.preferences(), &main.preferences());
+        self.host_id.set(self.host_id.get().wrapping_add(1));
+        *self.host.borrow_mut() = Host::Main(app.as_weak());
+        self.connect();
+        self.editor.borrow_mut().reset();
+        *self.quote_renderer.borrow_mut() = None;
+        main.ui().set_open(true);
+        self.apply_document(&main);
+        main.ui().set_notice(
+            UiMessage::plain("Could not open the message in its own window."),
+            true,
+        );
+        // A main window closed meanwhile may now end the app, which saves
+        // the message to Drafts.
+        window_controller::composer_closed();
     }
 
     /// A message's own window returns the memory input leaves behind once
@@ -2725,6 +2796,41 @@ mod tests {
         slint::platform::update_timers_and_animations();
         assert_eq!(composers.sessions.borrow().len(), 1);
         assert!(Rc::ptr_eq(&composers.sessions.borrow()[0], &first));
+    }
+
+    #[test]
+    fn a_message_whose_window_never_opens_comes_back_to_the_main_one() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        let main = app.global::<ComposerUi>();
+        app.invoke_open_compose("first@example.com".into());
+        main.set_subject("Plans".into());
+        let session = composers.in_app().unwrap();
+        main.invoke_pop_out();
+        assert_eq!(open_windows(), 1);
+        assert!(!main.get_open());
+
+        // Winit never created the window.
+        session.window_never_opened();
+        assert_eq!(open_windows(), 0);
+        assert!(session.is_in_app());
+        assert!(main.get_open());
+        assert_eq!(main.get_to(), "first@example.com");
+        assert_eq!(main.get_subject(), "Plans");
+        assert_eq!(
+            main.get_message().key,
+            "Could not open the message in its own window."
+        );
+        assert!(main.get_notice_is_error());
+
+        // The main window's composer works for it again.
+        main.invoke_pop_out();
+        assert_eq!(open_windows(), 1);
+        assert_eq!(session.host().unwrap().ui().get_subject(), "Plans");
     }
 
     #[test]
