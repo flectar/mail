@@ -1,5 +1,6 @@
 use crate::rich_compose::{
-    BOLD, CODE, CharacterStyle, ComposeSelection, ITALIC, RichComposeDocument, STRIKE, UNDERLINE,
+    BOLD, CODE, CharacterStyle, ComposeSelection, Followed, ITALIC, RichComposeDocument, STRIKE,
+    UNDERLINE,
 };
 use cosmic_text::{
     Action, Attrs, AttrsList, BidiParagraphs, Buffer, BufferLine, Color as CosmicColor, Cursor,
@@ -11,10 +12,11 @@ use slint::{Color, Image, Rgba8Pixel, SharedPixelBuffer};
 use std::{
     cell::OnceCell,
     collections::BTreeMap,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, Range},
     sync::Arc,
     time::{Duration, Instant},
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) const FONT_SIZE_LOGICAL: f32 = 13.0;
 const LINE_HEIGHT_LOGICAL: f32 = 18.0;
@@ -38,6 +40,8 @@ pub struct ComposeEditorStyle {
     pub link: Color,
     pub selection: Color,
     pub selected_text: Color,
+    /// The wavy line under misspelled words.
+    pub misspelling: Color,
 }
 
 #[derive(Clone)]
@@ -81,6 +85,16 @@ pub struct CosmicComposeEditor {
     rendered_selection: Option<(i32, i32)>,
     content_height_physical: f32,
     tiles: BTreeMap<u32, RenderedComposeTile>,
+    /// Misspelled words as byte ranges of the document at `misspellings_revision`, and the
+    /// lines drawn under them as the cached tiles show them.
+    misspellings: Vec<Range<usize>>,
+    misspellings_revision: u64,
+    /// A misspelled word found at the caret: the word being typed, marked once the caret
+    /// leaves it.
+    held_misspelling: Option<Range<usize>>,
+    squiggles: Vec<Squiggle>,
+    squiggle_color: u32,
+    squiggles_stale: bool,
     pointer_down: bool,
     last_pointer_down: Option<(Instant, f32, f32)>,
     click_count: u8,
@@ -147,6 +161,12 @@ impl Default for CosmicComposeEditor {
             rendered_selection: None,
             content_height_physical: LINE_HEIGHT_LOGICAL,
             tiles: BTreeMap::new(),
+            misspellings: Vec::new(),
+            misspellings_revision: 0,
+            held_misspelling: None,
+            squiggles: Vec::new(),
+            squiggle_color: 0,
+            squiggles_stale: false,
             pointer_down: false,
             last_pointer_down: None,
             click_count: 0,
@@ -163,9 +183,113 @@ impl CosmicComposeEditor {
         self.visual_text.clear();
         self.rendered_selection = None;
         self.tiles.clear();
+        self.misspellings.clear();
+        self.held_misspelling = None;
+        self.squiggles.clear();
+        self.squiggles_stale = false;
         self.pointer_down = false;
         self.last_pointer_down = None;
         self.click_count = 0;
+    }
+
+    /// Underline `ranges`, the misspelled words of the document as it was at `revision`.
+    /// They follow later edits; a word an edit changes loses its line until it is checked
+    /// again. A newly found word at the caret is the word being typed, and waits for the caret
+    /// to leave it.
+    pub fn set_misspellings(
+        &mut self,
+        document: &RichComposeDocument,
+        revision: u64,
+        ranges: Vec<Range<usize>>,
+    ) {
+        self.follow_misspellings(document);
+        let caret = collapsed_caret(document.selection());
+        let mut misspellings = Vec::with_capacity(ranges.len());
+        let mut held = None;
+        for range in ranges {
+            let Some(range) = follow_word(document, revision, range) else {
+                continue;
+            };
+            let shown = self.misspellings.contains(&range);
+            if !shown && caret.is_some_and(|caret| range.start <= caret && caret <= range.end) {
+                held = Some(range);
+            } else {
+                misspellings.push(range);
+            }
+        }
+        if misspellings != self.misspellings {
+            self.misspellings = misspellings;
+            self.squiggles_stale = true;
+        }
+        self.held_misspelling = held;
+    }
+
+    /// Stop underlining `word` anywhere in the document, as one the user accepted.
+    pub fn accept_word(&mut self, document: &RichComposeDocument, word: &str) {
+        self.follow_misspellings(document);
+        let text = document.text();
+        let is_word = |range: &Range<usize>| text.get(range.clone()) == Some(word);
+        let before = self.misspellings.len();
+        self.misspellings.retain(|range| !is_word(range));
+        if self.misspellings.len() != before {
+            self.squiggles_stale = true;
+        }
+        if self.held_misspelling.as_ref().is_some_and(is_word) {
+            self.held_misspelling = None;
+        }
+    }
+
+    /// The underlined word the caret is in or at the edge of.
+    pub fn misspelling_at_caret(&mut self, document: &RichComposeDocument) -> Option<Range<usize>> {
+        self.follow_misspellings(document);
+        let caret = usize::try_from(document.selection().end).ok()?;
+        self.misspellings
+            .iter()
+            .find(|range| range.start <= caret && caret <= range.end)
+            .cloned()
+    }
+
+    /// The underlined word at a point of the editor, in logical pixels, as last rendered.
+    pub fn misspelling_at(&self, x: f32, y: f32, scale_factor: f32) -> Option<Range<usize>> {
+        let (x, y) = (x * scale_factor.max(1.0), y * scale_factor.max(1.0));
+        self.squiggles
+            .iter()
+            .find(|squiggle| {
+                (squiggle.left..=squiggle.right).contains(&x)
+                    && (squiggle.top..=squiggle.bottom).contains(&y)
+            })
+            .map(|squiggle| squiggle.start..squiggle.end)
+    }
+
+    /// Move the underlined words to where the edits since they were found left them, and mark
+    /// a held word once the caret is off it.
+    fn follow_misspellings(&mut self, document: &RichComposeDocument) {
+        let revision = document.revision();
+        if revision != self.misspellings_revision {
+            if !self.misspellings.is_empty() {
+                self.squiggles_stale = true;
+            }
+            self.misspellings = std::mem::take(&mut self.misspellings)
+                .into_iter()
+                .filter_map(|range| follow_word(document, self.misspellings_revision, range))
+                .collect();
+            self.held_misspelling = self
+                .held_misspelling
+                .take()
+                .and_then(|range| follow_word(document, self.misspellings_revision, range));
+            self.misspellings_revision = revision;
+        }
+        let caret = collapsed_caret(document.selection());
+        if let Some(held) = self
+            .held_misspelling
+            .take_if(|held| !caret.is_some_and(|caret| held.start <= caret && caret <= held.end))
+        {
+            let at = self
+                .misspellings
+                .partition_point(|range| range.start < held.start);
+            self.misspellings.insert(at, held);
+            self.squiggles_stale = true;
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -206,6 +330,22 @@ impl CosmicComposeEditor {
         }
         self.set_selection(selection);
         self.editor.shape_as_needed(&mut self.font_system, false);
+        self.follow_misspellings(document);
+        if relaid_out || self.squiggles_stale {
+            self.squiggles_stale = false;
+            let squiggles = self.squiggle_geometry(document, preedit_text);
+            if squiggles != self.squiggles {
+                self.squiggles = squiggles;
+                self.tiles.clear();
+            }
+        }
+        let squiggle_color = style.misspelling.as_argb_encoded();
+        if squiggle_color != self.squiggle_color {
+            if !self.squiggles.is_empty() {
+                self.tiles.clear();
+            }
+            self.squiggle_color = squiggle_color;
+        }
 
         let (caret_x, caret_y, caret_height) = self.caret_geometry(scale_factor);
         let wanted = desired_tile_range(
@@ -680,6 +820,64 @@ impl CosmicComposeEditor {
         )
     }
 
+    #[cfg(test)]
+    fn glyph_left(&self, offset: usize) -> f32 {
+        self.editor.with_buffer(|buffer| {
+            buffer
+                .layout_runs()
+                .flat_map(|run| run.glyphs.iter())
+                .find(|glyph| glyph.start >= offset)
+                .map_or(f32::MAX, |glyph| glyph.x)
+        })
+    }
+
+    /// Where the lines under misspelled words go in the current layout, one per visual line a
+    /// word is on. None while the IME composes, since the laid-out text then differs.
+    fn squiggle_geometry(
+        &self,
+        document: &RichComposeDocument,
+        preedit_text: &str,
+    ) -> Vec<Squiggle> {
+        if self.misspellings.is_empty() || !preedit_text.is_empty() {
+            return Vec::new();
+        }
+        let text = document.text();
+        let mut squiggles = Vec::new();
+        self.editor.with_buffer(|buffer| {
+            for range in &self.misspellings {
+                let (Ok(start), Ok(end)) = (i32::try_from(range.start), i32::try_from(range.end))
+                else {
+                    continue;
+                };
+                let (start, end) = (global_to_cursor(text, start), global_to_cursor(text, end));
+                if start.line != end.line || start.index >= end.index {
+                    continue;
+                }
+                for run in buffer.layout_runs().filter(|run| run.line_i == start.line) {
+                    let (left, right) = run
+                        .glyphs
+                        .iter()
+                        .filter(|glyph| glyph.start < end.index && glyph.end > start.index)
+                        .fold((f32::MAX, f32::MIN), |(left, right), glyph| {
+                            (left.min(glyph.x), right.max(glyph.x + glyph.w))
+                        });
+                    if left < right {
+                        squiggles.push(Squiggle {
+                            left,
+                            right,
+                            baseline: run.line_y,
+                            top: run.line_top,
+                            bottom: run.line_top + run.line_height,
+                            start: range.start,
+                            end: range.end,
+                        });
+                    }
+                }
+            }
+        });
+        squiggles
+    }
+
     fn render_tile(
         &mut self,
         width: u32,
@@ -704,6 +902,17 @@ impl CosmicComposeEditor {
                 cosmic_color(style.selection),
                 cosmic_color(style.selected_text),
             );
+            let scale = self
+                .layout_key
+                .map_or(1.0, |key| f32::from_bits(key.scale_bits));
+            for squiggle in &self.squiggles {
+                draw_squiggle(
+                    &mut canvas,
+                    squiggle,
+                    scale,
+                    cosmic_color(style.misspelling),
+                );
+            }
         }
         Image::from_rgba8_premultiplied(pixels)
     }
@@ -968,6 +1177,99 @@ fn cosmic_color(color: Color) -> CosmicColor {
     CosmicColor::rgba(color.red(), color.green(), color.blue(), color.alpha())
 }
 
+/// The wavy line under a misspelled word on one visual line, in physical pixels, with the
+/// line's extent and the word's byte range for finding the word under the pointer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Squiggle {
+    left: f32,
+    right: f32,
+    baseline: f32,
+    top: f32,
+    bottom: f32,
+    start: usize,
+    end: usize,
+}
+
+/// The caret's byte offset, unless text is selected.
+fn collapsed_caret(selection: ComposeSelection) -> Option<usize> {
+    (selection.start == selection.end)
+        .then(|| usize::try_from(selection.end).ok())
+        .flatten()
+}
+
+/// Where a word found in the document at `revision` is now, if it is still that whole word.
+fn follow_word(
+    document: &RichComposeDocument,
+    revision: u64,
+    range: Range<usize>,
+) -> Option<Range<usize>> {
+    match document.follow(revision, range) {
+        Followed::Kept(range) | Followed::Bordered(range)
+            if is_whole_word(document.text(), &range) =>
+        {
+            Some(range)
+        }
+        _ => None,
+    }
+}
+
+/// Whether `range` of `text` is one whole word, as spell checking splits text into words. An
+/// edit nearby can join a word to its neighbour, as typing a letter after "teh." does.
+fn is_whole_word(text: &str, range: &Range<usize>) -> bool {
+    if range.start >= range.end
+        || range.end > text.len()
+        || !text.is_char_boundary(range.start)
+        || !text.is_char_boundary(range.end)
+    {
+        return false;
+    }
+    // Word breaks depend on a few characters around them, so a window splits the same.
+    let mut from = range.start.saturating_sub(32);
+    while !text.is_char_boundary(from) {
+        from -= 1;
+    }
+    let mut to = (range.end + 32).min(text.len());
+    while !text.is_char_boundary(to) {
+        to += 1;
+    }
+    text[from..to]
+        .unicode_word_indices()
+        .any(|(start, word)| from + start == range.start && word.len() == range.len())
+}
+
+/// A wave of `scale` pixels' amplitude and line width, two below the baseline, antialiased
+/// along its normal so steep parts don't thin out.
+fn draw_squiggle(canvas: &mut TileCanvas<'_>, squiggle: &Squiggle, scale: f32, color: CosmicColor) {
+    let amplitude = scale;
+    let wavelength = 4.0 * scale;
+    let half_width = 0.5 * scale.max(1.0);
+    let middle = squiggle.baseline + 2.0 * scale + amplitude;
+    let top = (middle - amplitude - half_width - 1.0).floor() as i32;
+    let bottom = (middle + amplitude + half_width + 1.0).ceil() as i32;
+    if bottom < canvas.y_offset as i32 || top > canvas.y_offset.saturating_add(canvas.height) as i32
+    {
+        return;
+    }
+    let tau = std::f32::consts::TAU;
+    for x in squiggle.left.floor() as i32..squiggle.right.ceil() as i32 {
+        let phase = (x as f32 + 0.5 - squiggle.left) / wavelength * tau;
+        let centre = middle - amplitude * phase.sin();
+        let slope = amplitude * tau / wavelength * phase.cos();
+        let reach = half_width * (1.0 + slope * slope).sqrt();
+        for y in (centre - reach - 1.0).floor() as i32..=(centre + reach + 1.0).ceil() as i32 {
+            let coverage = (reach + 0.5 - (y as f32 + 0.5 - centre).abs()).clamp(0.0, 1.0);
+            if coverage > 0.0 {
+                let alpha = (f32::from(color.a()) * coverage).round() as u8;
+                canvas.blend(
+                    x,
+                    y,
+                    CosmicColor::rgba(color.r(), color.g(), color.b(), alpha),
+                );
+            }
+        }
+    }
+}
+
 struct TileCanvas<'a> {
     width: u32,
     height: u32,
@@ -1187,6 +1489,7 @@ mod tests {
             link: Color::from_rgb_u8(0, 90, 180),
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
+            misspelling: Color::from_rgb_u8(183, 55, 49),
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut surface = CosmicComposeEditor::default();
@@ -1268,12 +1571,84 @@ mod tests {
     }
 
     #[test]
+    fn misspellings_are_underlined_under_their_words_only() {
+        let mut document = RichComposeDocument::default();
+        document.load("Teh cat sat", 0, 0);
+        document.update_selection(11, 11);
+        let style = ComposeEditorStyle {
+            text: Color::from_rgb_u8(30, 30, 30),
+            link: Color::from_rgb_u8(0, 90, 180),
+            selection: Color::from_argb_u8(140, 60, 120, 220),
+            selected_text: Color::from_rgb_u8(255, 255, 255),
+            misspelling: Color::from_rgb_u8(255, 0, 0),
+        };
+        for scale in [1.0, 2.0] {
+            let render = |surface: &mut CosmicComposeEditor| {
+                let rendered = surface.render(
+                    &document,
+                    document.selection(),
+                    320.0,
+                    120.0,
+                    0.0,
+                    scale,
+                    style,
+                    "",
+                );
+                rendered.tiles[0]
+                    .image
+                    .to_rgba8_premultiplied()
+                    .unwrap()
+                    .as_bytes()
+                    .to_vec()
+            };
+            let mut plain = CosmicComposeEditor::default();
+            let mut marked = CosmicComposeEditor::default();
+            let without = render(&mut plain);
+            let teh = 0.."Teh".len();
+            marked.set_misspellings(&document, document.revision(), vec![teh]);
+            let with = render(&mut marked);
+            let [squiggle] = marked.squiggles[..] else {
+                panic!("one squiggle expected, got {:?}", marked.squiggles);
+            };
+            let width = (320.0 * scale).ceil() as usize;
+            let changed: Vec<(usize, usize)> = with
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(without.as_chunks::<4>().0)
+                .enumerate()
+                .filter(|(_, (a, b))| a != b)
+                .map(|(i, _)| (i % width, i / width))
+                .collect();
+            assert!(!changed.is_empty());
+            for (x, y) in changed {
+                assert!(
+                    x as f32 >= squiggle.left - 1.0 && x as f32 <= squiggle.right + 1.0,
+                    "pixel {x},{y} outside {squiggle:?}"
+                );
+                assert!(
+                    y as f32 >= squiggle.baseline,
+                    "pixel {x},{y} above {squiggle:?}"
+                );
+            }
+            // The word "cat" after it stays clear.
+            let cat = document.text().find("cat").unwrap();
+            assert!(squiggle.right < marked.glyph_left(cat));
+
+            // Taking the misspelling back repaints the plain text.
+            marked.set_misspellings(&document, document.revision(), Vec::new());
+            assert_eq!(render(&mut marked), without);
+        }
+    }
+
+    #[test]
     fn moves_other_than_left_and_right_go_on_from_a_selection() {
         let style = ComposeEditorStyle {
             text: Color::from_rgb_u8(30, 30, 30),
             link: Color::from_rgb_u8(0, 90, 180),
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
+            misspelling: Color::from_rgb_u8(183, 55, 49),
         };
         let mut document = RichComposeDocument::default();
         document.synchronize("abc def\nsecond line", 0, 0);
@@ -1321,6 +1696,7 @@ mod tests {
             link: Color::from_rgb_u8(0, 90, 180),
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
+            misspelling: Color::from_rgb_u8(183, 55, 49),
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut document = RichComposeDocument::default();
@@ -1456,6 +1832,7 @@ mod tests {
             link: Color::from_rgb_u8(0, 90, 180),
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
+            misspelling: Color::from_rgb_u8(183, 55, 49),
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut document = RichComposeDocument::default();
@@ -1523,6 +1900,7 @@ mod tests {
             link: Color::from_rgb_u8(0, 90, 180),
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
+            misspelling: Color::from_rgb_u8(183, 55, 49),
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut document = RichComposeDocument::default();
@@ -1607,6 +1985,7 @@ mod tests {
                 link: Color::from_rgb_u8(90, 150, 255),
                 selection: Color::from_argb_u8(140, 60, 120, 220),
                 selected_text: Color::from_rgb_u8(255, 255, 255),
+                misspelling: Color::from_rgb_u8(183, 55, 49),
             },
             "",
         );
@@ -1647,6 +2026,7 @@ mod tests {
                 link: Color::from_rgb_u8(90, 150, 255),
                 selection: Color::from_argb_u8(140, 60, 120, 220),
                 selected_text: Color::from_rgb_u8(255, 255, 255),
+                misspelling: Color::from_rgb_u8(183, 55, 49),
             },
             "世界",
         );
@@ -1667,6 +2047,7 @@ mod tests {
             link: Color::from_rgb_u8(90, 150, 255),
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
+            misspelling: Color::from_rgb_u8(183, 55, 49),
         };
 
         for text in ["\n", "first\n", "\nsecond", "first\nsecond"] {
@@ -1725,6 +2106,7 @@ mod tests {
                 link: Color::from_rgb_u8(90, 150, 255),
                 selection: Color::from_argb_u8(140, 60, 120, 220),
                 selected_text: Color::from_rgb_u8(255, 255, 255),
+                misspelling: Color::from_rgb_u8(183, 55, 49),
             },
             "",
         );
@@ -1823,6 +2205,7 @@ mod tests {
             link: Color::from_rgb_u8(0, 90, 180),
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
+            misspelling: Color::from_rgb_u8(183, 55, 49),
         };
         let quote = (0..40)
             .map(|line| format!("> Row {line}: café العربية 👩‍💻 quoted text that wraps\n"))
@@ -1887,5 +2270,124 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn spelling_style() -> ComposeEditorStyle {
+        ComposeEditorStyle {
+            text: Color::from_rgb_u8(30, 30, 30),
+            link: Color::from_rgb_u8(0, 90, 180),
+            selection: Color::from_argb_u8(140, 60, 120, 220),
+            selected_text: Color::from_rgb_u8(255, 255, 255),
+            misspelling: Color::from_rgb_u8(255, 0, 0),
+        }
+    }
+
+    fn underlined(editor: &mut CosmicComposeEditor, document: &RichComposeDocument) -> Vec<String> {
+        editor.render(
+            document,
+            document.selection(),
+            320.0,
+            120.0,
+            0.0,
+            1.0,
+            spelling_style(),
+            "",
+        );
+        editor
+            .squiggles
+            .iter()
+            .map(|squiggle| document.text()[squiggle.start..squiggle.end].to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn underlines_follow_edits_and_leave_words_edits_change() {
+        let mut document = RichComposeDocument::default();
+        document.load("Teh cat sat on teh mat", 22, 22);
+        let mut editor = CosmicComposeEditor::default();
+        let found_at = document.revision();
+        editor.set_misspellings(&document, found_at, vec![0..3, 15..18]);
+        assert_eq!(underlined(&mut editor, &document), ["Teh", "teh"]);
+
+        // Typing at the start moves both lines along.
+        document.synchronize_key_edit("So Teh cat sat on teh mat", 3, 3, "");
+        assert_eq!(underlined(&mut editor, &document), ["Teh", "teh"]);
+        assert_eq!(editor.squiggles[0].start, 3);
+
+        // Correcting a word takes its line away; the other stays.
+        document.synchronize_key_edit("So Teh cat sat on the mat", 21, 21, "");
+        assert_eq!(underlined(&mut editor, &document), ["Teh"]);
+
+        // A letter typed onto the word makes it another word.
+        document.synchronize_key_edit("So Tehx cat sat on the mat", 7, 7, "x");
+        assert!(underlined(&mut editor, &document).is_empty());
+
+        // Undo brings the text back, but not the line: it waits for the next check.
+        document.history("undo");
+        assert!(underlined(&mut editor, &document).is_empty());
+
+        // A check that started before these edits still lands on the right word.
+        editor.set_misspellings(&document, found_at, vec![0..3, 15..18]);
+        assert_eq!(underlined(&mut editor, &document), ["Teh"]);
+    }
+
+    #[test]
+    fn the_word_being_typed_is_underlined_once_the_caret_leaves_it() {
+        let mut document = RichComposeDocument::default();
+        document.load("Thanks, recieve", 15, 15);
+        let mut editor = CosmicComposeEditor::default();
+        let recieve = 8..15;
+        editor.set_misspellings(&document, document.revision(), vec![recieve.clone()]);
+        assert!(underlined(&mut editor, &document).is_empty());
+
+        // Typing a space finishes the word.
+        document.synchronize_key_edit("Thanks, recieve ", 16, 16, " ");
+        assert_eq!(underlined(&mut editor, &document), ["recieve"]);
+
+        // A word already underlined stays so when a later check finds it again with the caret
+        // in it.
+        document.update_selection(10, 10);
+        editor.set_misspellings(&document, document.revision(), vec![recieve]);
+        assert_eq!(underlined(&mut editor, &document), ["recieve"]);
+    }
+
+    #[test]
+    fn the_underlined_word_under_the_pointer_is_found_and_accepted_words_go() {
+        let mut document = RichComposeDocument::default();
+        document.load("Teh cat sat on teh mat", 22, 22);
+        let mut editor = CosmicComposeEditor::default();
+        editor.set_misspellings(&document, document.revision(), vec![0..3, 15..18]);
+        underlined(&mut editor, &document);
+        let first = editor.squiggles[0];
+        let middle_y = (first.top + first.bottom) / 2.0;
+        assert_eq!(
+            editor.misspelling_at((first.left + first.right) / 2.0, middle_y, 1.0),
+            Some(0..3)
+        );
+        assert_eq!(
+            editor.misspelling_at(first.right + 12.0, middle_y, 1.0),
+            None
+        );
+        assert_eq!(
+            editor.misspelling_at(first.left + 1.0, first.bottom + 30.0, 1.0),
+            None
+        );
+
+        editor.accept_word(&document, "teh");
+        assert_eq!(underlined(&mut editor, &document), ["Teh"]);
+    }
+
+    #[test]
+    fn whole_words_are_told_from_parts_of_words() {
+        let text = "Teh. teh.s teh's x-teh";
+        assert!(is_whole_word(text, &(0..3)));
+        assert!(!is_whole_word(text, &(5..8)));
+        assert!(!is_whole_word(text, &(11..14)));
+        assert!(is_whole_word(text, &(19..22)));
+        assert!(!is_whole_word(text, &(0..2)));
+        assert!(!is_whole_word(text, &(20..30)));
+        let accented = "très bien";
+        assert!(is_whole_word(accented, &(0..5)));
+        assert!(!is_whole_word(accented, &(0..3)));
     }
 }

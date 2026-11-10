@@ -38,6 +38,9 @@ pub(crate) fn with_plain_text_quotes(text: &str) -> String {
     plain
 }
 const MAX_HISTORY: usize = 128;
+/// Text edits kept for following positions through them, such as misspelled words found in
+/// the text as it was when a check began.
+const MAX_TEXT_CHANGES: usize = 64;
 // The most recent edit remains undoable even when one transaction exceeds this limit.
 const MAX_HISTORY_BYTES: usize = 32 * 1024 * 1024;
 const MAX_TYPING_GROUP_BYTES: usize = 64;
@@ -107,6 +110,28 @@ pub enum EditState {
     Gone,
 }
 
+/// One edit of the text: the bytes from `start` to `old_end` became those from `start` to
+/// `new_end`, making `revision`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TextChange {
+    revision: u64,
+    start: usize,
+    old_end: usize,
+    new_end: usize,
+}
+
+/// Where a range of the text as it was at some revision is now.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Followed {
+    /// No edit since then reached it.
+    Kept(Range<usize>),
+    /// No edit reached it, but one started or ended right at its edge, so what borders it
+    /// may have changed.
+    Bordered(Range<usize>),
+    /// An edit changed it, or the revision is too old to follow.
+    Lost,
+}
+
 /// Estimated bytes owned by the document and its history. This excludes
 /// allocator overhead, temporary edit buffers, renderer state, and process RAM.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -152,6 +177,10 @@ pub struct RichComposeDocument {
     redo: VecDeque<EditTransaction>,
     typing_group_active: bool,
     revision: u64,
+    /// The latest edits of the text, oldest first.
+    text_changes: VecDeque<TextChange>,
+    /// Positions in the text from this revision on can be followed through `text_changes`.
+    text_changes_since: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -166,6 +195,7 @@ impl RichComposeDocument {
         let revision = self.revision.wrapping_add(1);
         *self = Self::default();
         self.revision = revision;
+        self.text_changes_since = revision;
     }
 
     pub fn text(&self) -> &str {
@@ -181,6 +211,49 @@ impl RichComposeDocument {
 
     pub(crate) fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Where `range`, in the text as it was at `revision`, is now.
+    pub(crate) fn follow(&self, revision: u64, range: Range<usize>) -> Followed {
+        if revision < self.text_changes_since || revision > self.revision {
+            return Followed::Lost;
+        }
+        let mut range = range;
+        let mut bordered = false;
+        for change in self.text_changes.iter().filter(|c| c.revision > revision) {
+            if range.end < change.start {
+                continue;
+            }
+            if range.end == change.start {
+                bordered = true;
+                continue;
+            }
+            if range.start < change.old_end {
+                return Followed::Lost;
+            }
+            bordered |= range.start == change.old_end;
+            let shift = |offset: usize| offset - change.old_end + change.new_end;
+            range = shift(range.start)..shift(range.end);
+        }
+        if bordered {
+            Followed::Bordered(range)
+        } else {
+            Followed::Kept(range)
+        }
+    }
+
+    fn record_text_change(&mut self, start: usize, old_end: usize, new_end: usize) {
+        if self.text_changes.len() == MAX_TEXT_CHANGES
+            && let Some(oldest) = self.text_changes.pop_front()
+        {
+            self.text_changes_since = oldest.revision;
+        }
+        self.text_changes.push_back(TextChange {
+            revision: self.revision,
+            start,
+            old_end,
+            new_end,
+        });
     }
 
     pub(crate) fn style_runs(&self) -> &[ComposeStyleRun] {
@@ -374,9 +447,27 @@ impl RichComposeDocument {
         text: &str,
         caret: usize,
     ) -> ComposeSelection {
+        self.replace_styled(range, text, CharacterStyle::default(), caret)
+    }
+
+    /// Replaces the word at `range` with `text` in the word's formatting, as one undoable
+    /// edit, with the caret after it: a spelling correction.
+    pub fn replace_word(&mut self, range: Range<usize>, text: &str) -> ComposeSelection {
+        let style = self.style_at(range.start).cloned().unwrap_or_default();
+        let caret = range.start + text.len();
+        self.replace_styled(range, text, style, caret)
+    }
+
+    fn replace_styled(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        style: CharacterStyle,
+        caret: usize,
+    ) -> ComposeSelection {
         let inserted = ComposeStyleRun {
             range: 0..text.len(),
-            style: CharacterStyle::default(),
+            style,
         };
         let styles = replaced_style_runs(
             &self.styles,
@@ -678,6 +769,7 @@ impl RichComposeDocument {
             text,
             styles,
             revision,
+            text_changes_since: revision,
             ..Self::default()
         };
         self.auto_link_urls();
@@ -917,6 +1009,10 @@ impl RichComposeDocument {
     }
 
     fn commit_edit_with_key(&mut self, before: Snapshot, key_text: &str) {
+        let (start, old_end, new_end) = text_change_ranges(&before.text, &self.text);
+        if old_end > start || new_end > start {
+            self.record_text_change(start, old_end, new_end);
+        }
         let (start, before_end, after_end) =
             changed_ranges(&before.text, &before.styles, &self.text, &self.styles);
         let before_fragment = edit_fragment(&before.text, &before.styles, start..before_end);
@@ -998,10 +1094,12 @@ impl RichComposeDocument {
             inserted.span_len
         );
         self.replace_style_runs(range.start, range.end, &inserted.styles);
-        if !Arc::ptr_eq(&transaction.before.text, &transaction.after.text) {
+        let text_changed = !Arc::ptr_eq(&transaction.before.text, &transaction.after.text);
+        if text_changed {
             debug_assert_eq!(removed.span_len, removed.text.len());
             debug_assert_eq!(inserted.span_len, inserted.text.len());
-            self.text.replace_range(range, inserted.text.as_ref());
+            self.text
+                .replace_range(range.clone(), inserted.text.as_ref());
         } else {
             debug_assert_eq!(transaction.before.span_len, transaction.after.span_len);
         }
@@ -1009,6 +1107,9 @@ impl RichComposeDocument {
         self.typing_override = typing_override;
         self.selection = selection;
         self.bump_revision();
+        if text_changed {
+            self.record_text_change(range.start, range.end, range.start + inserted.span_len);
+        }
     }
 
     fn trim_history(&mut self) {
@@ -3145,5 +3246,96 @@ mod tests {
         assert_eq!(reopened.text(), text);
         assert_eq!(reopened.body_html(), document.body_html());
         assert_style_coverage(&reopened);
+    }
+
+    #[test]
+    fn positions_follow_edits_before_after_and_beside_them() {
+        let mut document = RichComposeDocument::default();
+        document.load("Teh cat sat on teh mat", 0, 0);
+        let start = document.revision();
+        let first = 0..3;
+        let second = 15..18;
+
+        // Typing at the start moves both words along.
+        document.synchronize_key_edit("Oh, Teh cat sat on teh mat", 4, 4, "");
+        assert_eq!(
+            document.follow(start, first.clone()),
+            Followed::Bordered(4..7)
+        );
+        assert_eq!(
+            document.follow(start, second.clone()),
+            Followed::Kept(19..22)
+        );
+
+        // Bold changes no text and moves nothing.
+        let text = document.text().to_owned();
+        document.format("bold", &text, 8, 11);
+        assert_eq!(
+            document.follow(start, second.clone()),
+            Followed::Kept(19..22)
+        );
+
+        // Editing inside the second word loses it; the first is kept.
+        document.synchronize_key_edit("Oh, Teh cat sat on the mat", 21, 21, "");
+        assert_eq!(document.follow(start, second.clone()), Followed::Lost);
+        assert_eq!(
+            document.follow(start, first.clone()),
+            Followed::Bordered(4..7)
+        );
+
+        // Undo and redo are edits like any other.
+        let typed = document.revision();
+        document.history("undo");
+        assert_eq!(document.text(), "Oh, Teh cat sat on teh mat");
+        assert_eq!(document.follow(typed, 4..7), Followed::Kept(4..7));
+        document.history("redo");
+        assert_eq!(document.follow(typed, 4..7), Followed::Kept(4..7));
+
+        // A word typed onto the end of another borders it.
+        let now = document.revision();
+        document.synchronize_key_edit("Oh, Tehh cat sat on the mat", 8, 8, "h");
+        assert_eq!(document.follow(now, 4..7), Followed::Bordered(4..7));
+    }
+
+    #[test]
+    fn positions_from_before_a_reset_or_too_many_edits_are_lost() {
+        let mut document = RichComposeDocument::default();
+        document.load("Teh cat", 0, 0);
+        let loaded = document.revision();
+        document.reset();
+        assert_eq!(document.follow(loaded, 0..3), Followed::Lost);
+
+        document.load("Teh cat", 0, 0);
+        let loaded = document.revision();
+        let mut text = String::from("Teh cat");
+        for _ in 0..MAX_TEXT_CHANGES + 1 {
+            text.push('!');
+            let end = text.len() as i32;
+            document.synchronize_key_edit(&text, end, end, "!");
+        }
+        assert_eq!(document.follow(loaded, 0..3), Followed::Lost);
+        let recent = document.revision();
+        assert_eq!(document.follow(recent, 0..3), Followed::Kept(0..3));
+        assert_eq!(document.follow(recent + 1, 0..3), Followed::Lost);
+    }
+
+    #[test]
+    fn a_replaced_word_keeps_its_formatting_and_undoes_in_one_step() {
+        let mut document = RichComposeDocument::default();
+        document.load("We recieve it", 0, 0);
+        let text = document.text().to_owned();
+        document.format("bold", &text, 3, 10);
+        let selection = document.replace_word(3..10, "receive");
+        assert_eq!(document.text(), "We receive it");
+        assert_eq!(selection, ComposeSelection { start: 10, end: 10 });
+        let bold = document
+            .style_runs()
+            .iter()
+            .find(|run| run.range.start == 3)
+            .unwrap();
+        assert_eq!(bold.range, 3..10);
+        assert_ne!(bold.style.marks & BOLD, 0);
+        document.history("undo");
+        assert_eq!(document.text(), "We recieve it");
     }
 }

@@ -60,6 +60,8 @@ export global ComposerUi {
     out property <color> editor-text-color: AppTheme.body;
     out property <color> editor-link-color: AppTheme.accent;
     out property <color> editor-selection-color: AppTheme.accent;
+    // The wavy line under misspelled words, brighter on dark backgrounds.
+    out property <color> editor-misspelling-color: AppTheme.dark ? #ff7b63 : AppTheme.destructive;
     out property <color> editor-selected-text-color: white;
 
     callback close();
