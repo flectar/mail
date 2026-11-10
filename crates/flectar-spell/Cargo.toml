@@ -1,0 +1,17 @@
+[package]
+name = "flectar-spell"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+repository = "https://github.com/flectar/mail"
+homepage = "https://flectar.com"
+publish = false
+
+[dependencies]
+encoding_rs = "0.8"
+memmap2 = "0.9"
+spellbook = { path = "../spellbook" }
+unicode-segmentation = "1.13"
+
+[dev-dependencies]
+tempfile = "3"
