@@ -3632,37 +3632,43 @@ impl Core {
         Ok(None)
     }
 
-    /// Unsubscribe from the list a message came from, preferring a signed
-    /// RFC 8058 one-click HTTPS POST, then the RFC 2369 mailto: (sent
-    /// immediately over SMTP), and finally handing the URL back for the
-    /// browser. The returned outcome states what actually happened so the UI
-    /// can toast honestly.
-    pub async fn unsubscribe_message(&self, message_id: i64) -> Result<UnsubscribeOutcome> {
-        let (detail, raw_path) = self
-            .db
-            .read(move |conn| {
-                let detail = repo::messages::detail(conn, message_id)?;
-                let raw_path =
-                    repo::messages::get_row(conn, message_id)?.and_then(|row| row.raw_path);
-                Ok((detail, raw_path))
-            })
-            .await?;
-        let raw = detail
-            .list_unsubscribe
-            .ok_or_else(|| CoreError::NotFound("message has no List-Unsubscribe header".into()))?;
-        // One-click needs the DKIM-Signature fields of the original, which
-        // the reader has downloaded; without them it falls back to the other
-        // ways.
-        let one_click = match &raw_path {
-            Some(raw_path) => {
-                crate::file_io::read_headers(raw_path, MAX_CACHED_HEADER_BYTES, "cached headers")
-                    .await
-                    .is_ok_and(|raw| crate::mime::one_click_signed(&raw))
-            }
-            None => false,
+    /// How the user can leave the list `message_id` came from, worked out
+    /// before anything is sent so the app can ask first: RFC 2369 wants a
+    /// chance to confirm, and RFC 8058 no POST without consent. None when
+    /// the message names no usable way.
+    pub async fn unsubscribe_offer(&self, message_id: i64) -> Result<Option<UnsubscribeOffer>> {
+        let Some((detail, plan)) = self.unsubscribe_plan(message_id).await? else {
+            return Ok(None);
         };
-        let plan = unsubscribe::plan(&raw, one_click)
-            .ok_or_else(|| CoreError::Other("List-Unsubscribe header has no usable URI".into()))?;
+        Ok(Some(match plan {
+            unsubscribe::UnsubscribePlan::OneClick { url } => UnsubscribeOffer::OneClick {
+                host: url::Url::parse(&url)
+                    .ok()
+                    .and_then(|url| url.host_str().map(str::to_owned))
+                    .unwrap_or_default(),
+            },
+            unsubscribe::UnsubscribePlan::Mailto { to, subject, body } => {
+                UnsubscribeOffer::Mailto {
+                    from: self.unsubscribe_sender(&detail).await?,
+                    to,
+                    subject,
+                    body,
+                }
+            }
+            unsubscribe::UnsubscribePlan::Browser { url } => UnsubscribeOffer::Website { url },
+        }))
+    }
+
+    /// Unsubscribe from the list a message came from, the way
+    /// [`Self::unsubscribe_offer`] described: a signed RFC 8058 one-click
+    /// POST, else the RFC 2369 mailto: request, sent like any other message,
+    /// else the web page for the browser. The outcome states what actually
+    /// happened so the UI can tell it honestly.
+    pub async fn unsubscribe_message(&self, message_id: i64) -> Result<UnsubscribeOutcome> {
+        let (detail, plan) = self
+            .unsubscribe_plan(message_id)
+            .await?
+            .ok_or_else(|| CoreError::NotFound("message names no way to unsubscribe".into()))?;
         match plan {
             unsubscribe::UnsubscribePlan::OneClick { url } => {
                 match unsubscribe::post_one_click(&url).await {
@@ -3679,8 +3685,40 @@ impl Core {
                 }
             }
             unsubscribe::UnsubscribePlan::Mailto { to, subject, body } => {
-                self.send_unsubscribe_mail(detail.account_id, &to, &subject, &body)
+                let from = self.unsubscribe_sender(&detail).await?;
+                // The normal send path: the account's own transport, a copy
+                // in Sent, and on failure a draft the user can see.
+                let draft_id = self
+                    .save_draft(SaveDraftArgs {
+                        draft_id: None,
+                        account_id: detail.account_id,
+                        from: Some(Address {
+                            name: None,
+                            email: from,
+                        }),
+                        to: vec![Address {
+                            name: None,
+                            email: to.clone(),
+                        }],
+                        cc: Vec::new(),
+                        bcc: Vec::new(),
+                        subject,
+                        body_text: body,
+                        body_html: None,
+                        mode: "new".into(),
+                        in_reply_to_message_id: None,
+                        in_reply_to_header: None,
+                        attachments: Vec::new(),
+                    })
                     .await?;
+                let queued = self
+                    .queue_send(QueueSendArgs {
+                        draft_id,
+                        send_at: None,
+                    })
+                    .await?;
+                self.send_now(queued.action_id).await?;
+                self.wait_for_send(queued.action_id).await?;
                 tracing::info!(message_id, %to, "mailto unsubscribe sent");
                 Ok(UnsubscribeOutcome::MailtoSent)
             }
@@ -3690,64 +3728,67 @@ impl Core {
         }
     }
 
-    /// Build and send the tiny unsubscribe-request message a mailto: List-
-    /// Unsubscribe asks for. Sent directly (not through the pending-action
-    /// queue): the user expects an immediate, definite answer, and there is no
-    /// draft to reconcile.
-    async fn send_unsubscribe_mail(
+    /// The way to leave the list `message_id` came from. One-click needs
+    /// the DKIM-Signature fields of the original, which the reader has
+    /// downloaded; without them it falls back to the other ways.
+    async fn unsubscribe_plan(
         &self,
-        account_id: i64,
-        to: &str,
-        subject: &str,
-        body: &str,
-    ) -> Result<()> {
-        let cfg = self
+        message_id: i64,
+    ) -> Result<Option<(MessageDetail, unsubscribe::UnsubscribePlan)>> {
+        let (detail, raw_path, local) = self
             .db
-            .read(move |conn| repo::accounts::get_config(conn, account_id))
-            .await?
-            .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
-        let from = Address {
-            name: cfg.display_name.clone(),
-            email: cfg.email.clone(),
-        };
-        let domain = cfg
-            .email
-            .split('@')
-            .nth(1)
-            .unwrap_or("localhost")
-            .to_string();
-        let recipients = [Address {
-            name: None,
-            email: to.to_string(),
-        }];
-        let out = crate::mime::OutgoingMessage {
-            from,
-            reply_to: None,
-            to: &recipients,
-            cc: &[],
-            bcc: &[],
-            subject,
-            body_text: body,
-            body_html: None,
-            in_reply_to: None,
-            references: &[],
-            message_id: None,
-            message_id_domain: &domain,
-            attachments: Vec::new(),
-        };
-        let (_msg_id, raw) = crate::mime::build_message(&out)?;
-        let raw = crate::mail_security::Gpg::default()
-            .protect(&raw, &cfg.settings.security, &cfg.email, out.to)
+            .read(move |conn| {
+                let detail = repo::messages::detail(conn, message_id)?;
+                let raw_path =
+                    repo::messages::get_row(conn, message_id)?.and_then(|row| row.raw_path);
+                let local = repo::accounts::get_config(conn, detail.account_id)?
+                    .is_some_and(|account| account.mail_protocol == MailProtocol::Local);
+                Ok((detail, raw_path, local))
+            })
             .await?;
-        let auth = match cfg.auth_kind {
-            AuthKind::Password => crate::smtp::SmtpAuth::Password(
-                credentials::load_async(self.credentials.clone(), cfg.id, Slot::Password).await?,
-            ),
-            AuthKind::Oauth2 => crate::smtp::SmtpAuth::XOAuth2(
-                self.tokens.access_token(cfg.id, cfg.provider).await?,
-            ),
+        // Answering spam only tells its sender the address is read, and
+        // local mail has no account to answer from.
+        if detail.is_draft || detail.is_outgoing || detail.in_spam || local {
+            return Ok(None);
+        }
+        let Some(list_unsubscribe) = detail.list_unsubscribe.clone() else {
+            return Ok(None);
         };
-        crate::smtp::send_raw(&cfg, &auth, &cfg.email, &[to.to_string()], &raw).await
+        let one_click = match &raw_path {
+            Some(raw_path) => {
+                crate::file_io::read_headers(raw_path, MAX_CACHED_HEADER_BYTES, "cached headers")
+                    .await
+                    .is_ok_and(|raw| crate::mime::one_click_signed(&raw))
+            }
+            None => false,
+        };
+        Ok(unsubscribe::plan(&list_unsubscribe, one_click).map(|plan| (detail, plan)))
+    }
+
+    /// The address an emailed unsubscribe request goes from: the one the
+    /// list writes to, as for a reply (RFC 2369 appendix B.1), else the
+    /// account's default sender.
+    async fn unsubscribe_sender(&self, detail: &MessageDetail) -> Result<String> {
+        let identities = self.list_sender_identities(detail.account_id).await?;
+        let subscribed = crate::sender_identities::reply_sender(
+            &identities,
+            detail.to.iter().chain(detail.cc.iter()),
+        );
+        match subscribed {
+            Some(email) => Ok(email),
+            None => Ok(self.default_sender_identity(detail.account_id).await?.email),
+        }
+    }
+
+    /// The messages in the inbox from the list `message_id` came from,
+    /// itself included, newest first, so the app can offer to archive or
+    /// delete them after an unsubscribe. A list is its List-Id (RFC 2919),
+    /// else its sender's address; mail stored before List-Id was kept, or
+    /// sent without one, is matched by sender among list mail.
+    pub async fn list_inbox_messages(&self, message_id: i64) -> Result<Vec<i64>> {
+        self.db
+            .read(move |conn| repo::messages::list_inbox_messages(conn, message_id))
+            .await
     }
 
     /// Rewrite `src="cid:…"` references in a message body to `data:` URIs built
@@ -12791,5 +12832,124 @@ mod calendar_connection_tests {
                 .await
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod unsubscribe_offer_tests {
+    use super::*;
+
+    const SIGNED: &str = concat!(
+        "Authentication-Results: mx.test.dev; dkim=pass header.i=@news.example header.b=AbCdEfGh\r\n",
+        "DKIM-Signature: v=1; a=rsa-sha256; d=news.example; s=s1;\r\n",
+        "\th=From:To:Subject:List-Unsubscribe:List-Unsubscribe-Post; bh=x;\r\n",
+        "\tb=AbCdEfGh12345\r\n",
+    );
+    const LIST_FIELDS: &str = concat!(
+        "From: News <news@news.example>\r\n",
+        "To: me@test.dev\r\n",
+        "List-Unsubscribe: <mailto:leave@news.example?subject=stop>, <https://news.example/u/1>\r\n",
+        "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n",
+        "Subject: Weekly\r\n\r\nbody\r\n",
+    );
+
+    /// A list message to me@test.dev, whose original (when given) is
+    /// cached on disk as after the reader downloaded it.
+    async fn list_message(original: Option<String>) -> (Core, tempfile::TempDir, i64) {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let raw_path = original.map(|raw| {
+            let path = temp.path().join("list.eml");
+            std::fs::write(&path, raw).unwrap();
+            path.to_string_lossy().into_owned()
+        });
+        let message_id = core
+            .db
+            .write(move |conn| {
+                db::testutil::seed_account(conn);
+                let (_, message_id) =
+                    db::testutil::seed_message(conn, "news@news.example", "Weekly", true);
+                conn.execute(
+                    "UPDATE messages SET to_json = '[{\"email\":\"me@test.dev\"}]',
+                         list_unsubscribe = '<mailto:leave@news.example?subject=stop>, <https://news.example/u/1>',
+                         list_unsubscribe_post = 'List-Unsubscribe=One-Click', raw_path = ?2
+                     WHERE id = ?1",
+                    rusqlite::params![message_id, raw_path],
+                )?;
+                Ok(message_id)
+            })
+            .await
+            .unwrap();
+        (core, temp, message_id)
+    }
+
+    #[tokio::test]
+    async fn one_click_is_offered_only_for_a_signed_request() {
+        let (core, _temp, message_id) = list_message(Some(format!("{SIGNED}{LIST_FIELDS}"))).await;
+        assert_eq!(
+            core.unsubscribe_offer(message_id).await.unwrap(),
+            Some(UnsubscribeOffer::OneClick {
+                host: "news.example".into()
+            })
+        );
+
+        let mailto = Some(UnsubscribeOffer::Mailto {
+            from: "me@test.dev".into(),
+            to: "leave@news.example".into(),
+            subject: "stop".into(),
+            body: "stop".into(),
+        });
+        // A signature that leaves out List-Unsubscribe-Post, or no
+        // downloaded original to check, means asking by email instead.
+        let partial = SIGNED.replace(":List-Unsubscribe-Post", "");
+        let (core, _temp, message_id) = list_message(Some(format!("{partial}{LIST_FIELDS}"))).await;
+        assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), mailto);
+        let (core, _temp, message_id) = list_message(None).await;
+        assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), mailto);
+    }
+
+    #[tokio::test]
+    async fn mail_without_a_way_out_or_of_ones_own_offers_none() {
+        let (core, _temp, message_id) = list_message(None).await;
+        core.db
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE messages SET is_outgoing = 1 WHERE id = ?1",
+                    [message_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), None);
+
+        let (core, _temp, message_id) = list_message(None).await;
+        core.db
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE messages SET list_unsubscribe = 'nothing useful' WHERE id = ?1",
+                    [message_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), None);
+
+        // Nor does spam: answering it confirms the address is read.
+        let (core, _temp, message_id) = list_message(None).await;
+        core.db
+            .write(move |conn| {
+                conn.execute_batch(
+                    "INSERT INTO folders (id, account_id, path, role) VALUES (9, 1, 'Junk', 'spam')",
+                )?;
+                conn.execute("UPDATE messages SET folder_id = 9 WHERE id = ?1", [message_id])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), None);
     }
 }
