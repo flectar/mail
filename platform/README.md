@@ -26,7 +26,8 @@ these aliases with [`cfg_aliases`](https://crates.io/crates/cfg_aliases):
 | `linux_desktop` | A Linux desktop session (portals, X11/Wayland, Secret Service). Excludes OpenHarmony, which also reports `target_os = "linux"`. |
 | `glibc` | Linux with the GNU C library. |
 | `user_notifications` | New-mail notifications through Apple's User Notifications framework (macOS, iOS). |
-| `background_checks` | The system suspends the app in the background and wakes it to check for new mail (iOS). |
+| `background_checks` | The system suspends the app in the background and wakes it to check for new mail (iOS, Android). |
+| `background_engine` | The system may start the app without its window, for a check for new mail or a button on a notification (Android). |
 | `rename_noreplace` | Core only: kernels with an atomic no-replace directory rename. |
 | `secret_service` | Core only: desktops where `keyring` stores secrets through the freedesktop Secret Service (Linux, FreeBSD and OpenBSD, not OpenHarmony). |
 

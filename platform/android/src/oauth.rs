@@ -38,7 +38,11 @@ struct BrokerState {
     pending_redirect: Mutex<Option<PendingRedirect>>,
     pending_google: Mutex<HashMap<i64, oneshot::Sender<Result<PlatformAuthorization>>>>,
     transaction_path: PathBuf,
-    activity: Mutex<GlobalRef>,
+    /// The visible activity, which interactive sign-in needs. `None` once it
+    /// has ended, or in a process started without it.
+    activity: Mutex<Option<GlobalRef>>,
+    /// The Application, for authorization without the activity.
+    context: GlobalRef,
     vm: JavaVM,
     next_request: AtomicI64,
 }
@@ -66,14 +70,14 @@ impl AndroidOAuthBroker {
         // the process. JavaVM is a non-owning handle.
         let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }
             .map_err(|error| CoreError::Other(format!("Android Java VM: {error}")))?;
-        let env = vm
+        let mut env = vm
             .attach_current_thread()
             .map_err(|error| CoreError::Other(format!("attach Android UI thread: {error}")))?;
         // SAFETY: Android keeps the Activity reference valid during this call;
         // new_global_ref promotes it before the borrowed JObject is dropped.
         let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
-        let activity = env
-            .new_global_ref(activity)
+        let retained = env
+            .new_global_ref(&activity)
             .map_err(|error| CoreError::Other(format!("retain Android Activity: {error}")))?;
 
         if let Some(broker) = BROKER.get() {
@@ -87,19 +91,47 @@ impl AndroidOAuthBroker {
                     .activity
                     .lock()
                     .map_err(|_| CoreError::Other("OAuth Activity lock is unavailable".into()))? =
-                    activity;
+                    Some(retained);
             }
             return Ok(broker.clone());
         }
-
+        let context = application_context(&mut env, &activity)?;
         drop(env);
+        Self::install(vm, context, Some(retained), private_root)
+    }
 
+    /// The broker for a process that runs without the activity, such as a
+    /// check for new mail in the background: it refreshes tokens, and leaves
+    /// signing in to the app. `context` is any Context of the app.
+    pub(super) fn background(
+        vm: JavaVM,
+        context: &JObject,
+        private_root: &Path,
+    ) -> Result<Arc<Self>> {
+        if let Some(broker) = BROKER.get() {
+            return Ok(broker.clone());
+        }
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|error| CoreError::Other(format!("attach Android thread: {error}")))?;
+        let context = application_context(&mut env, context)?;
+        drop(env);
+        Self::install(vm, context, None, private_root)
+    }
+
+    fn install(
+        vm: JavaVM,
+        context: GlobalRef,
+        activity: Option<GlobalRef>,
+        private_root: &Path,
+    ) -> Result<Arc<Self>> {
         let broker = Arc::new(Self {
             state: Arc::new(BrokerState {
                 pending_redirect: Mutex::new(None),
                 pending_google: Mutex::new(HashMap::new()),
                 transaction_path: private_root.join("oauth/pending.json"),
                 activity: Mutex::new(activity),
+                context,
                 vm,
                 next_request: AtomicI64::new(1),
             }),
@@ -109,6 +141,16 @@ impl AndroidOAuthBroker {
             .get()
             .cloned()
             .ok_or_else(|| CoreError::Other("Android OAuth broker initialization failed".into()))
+    }
+
+    /// The activity ended: authorization goes through the Application until
+    /// another one starts.
+    pub(super) fn activity_ended() {
+        if let Some(broker) = BROKER.get()
+            && let Ok(mut activity) = broker.state.activity.lock()
+        {
+            *activity = None;
+        }
     }
 
     fn publish_redirect(&self, uri: &str) -> Result<()> {
@@ -174,6 +216,9 @@ impl AndroidOAuthBroker {
             .activity
             .lock()
             .map_err(|_| CoreError::Other("OAuth Activity lock is unavailable".into()))?;
+        let activity = activity
+            .as_ref()
+            .ok_or_else(|| CoreError::Auth("signing in needs Flectar Mail open".into()))?;
         let value = env
             .call_method(
                 activity.as_obj(),
@@ -220,16 +265,39 @@ impl AndroidOAuthBroker {
                 let value = env.new_string(scope)?;
                 env.set_object_array_element(&scope_array, index as i32, value)?;
             }
-            env.call_method(
-                activity.as_obj(),
-                "authorizeGoogle",
-                "([Ljava/lang/String;JZ)V",
-                &[
-                    JValue::Object(scope_array.as_ref()),
-                    JValue::Long(request_id),
-                    JValue::Bool(if interactive { JNI_TRUE } else { JNI_FALSE }),
-                ],
-            )?;
+            match activity.as_ref() {
+                Some(activity) => {
+                    env.call_method(
+                        activity.as_obj(),
+                        "authorizeGoogle",
+                        "([Ljava/lang/String;JZ)V",
+                        &[
+                            JValue::Object(scope_array.as_ref()),
+                            JValue::Long(request_id),
+                            JValue::Bool(if interactive { JNI_TRUE } else { JNI_FALSE }),
+                        ],
+                    )?;
+                }
+                // Without the activity nobody can be asked: only a token
+                // that needs no consent comes back.
+                None => {
+                    let class = crate::java::app_class(
+                        &mut env,
+                        self.state.context.as_obj(),
+                        "com.flectar.mail.GoogleAuthorization",
+                    )?;
+                    env.call_static_method(
+                        &class,
+                        "authorize",
+                        "(Landroid/content/Context;[Ljava/lang/String;J)V",
+                        &[
+                            JValue::Object(self.state.context.as_obj()),
+                            JValue::Object(scope_array.as_ref()),
+                            JValue::Long(request_id),
+                        ],
+                    )?;
+                }
+            }
             Ok(())
         })();
 
@@ -372,8 +440,31 @@ pub(super) fn route_callback_activity(
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeGoogleAuthorizationResult(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _class: JClass,
+    request_id: jlong,
+    access_token: JString,
+    expires_in: jlong,
+    error: JString,
+) {
+    deliver_google_result(env, request_id, access_token, expires_in, error);
+}
+
+/// The answer to a request sent without the activity.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_flectar_mail_GoogleAuthorization_nativeResult(
+    env: JNIEnv,
+    _class: JClass,
+    request_id: jlong,
+    access_token: JString,
+    expires_in: jlong,
+    error: JString,
+) {
+    deliver_google_result(env, request_id, access_token, expires_in, error);
+}
+
+fn deliver_google_result(
+    mut env: JNIEnv,
     request_id: jlong,
     access_token: JString,
     expires_in: jlong,
@@ -432,6 +523,21 @@ pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeMicrosoftRedi
     if let Err(error) = broker.publish_redirect(&uri) {
         tracing::warn!(%error, "rejected Android Microsoft OAuth callback");
     }
+}
+
+/// The Application behind `context`, kept for the process.
+fn application_context(env: &mut JNIEnv, context: &JObject) -> Result<GlobalRef> {
+    let application = env
+        .call_method(
+            context,
+            "getApplicationContext",
+            "()Landroid/content/Context;",
+            &[],
+        )
+        .and_then(|value| value.l())
+        .map_err(|error| CoreError::Other(format!("Android application context: {error}")))?;
+    env.new_global_ref(application)
+        .map_err(|error| CoreError::Other(format!("retain Android application: {error}")))
 }
 
 fn activity_intent_data(app: &slint::android::AndroidApp) -> Option<String> {

@@ -165,22 +165,10 @@ async fn words(summaries: Vec<(u32, Vec<String>)>) -> Option<Words> {
                 let title = i18n
                     .invoke_notification_new_messages(i32::try_from(count).unwrap_or(i32::MAX))
                     .into();
-                let named = senders
-                    .iter()
-                    .take(super::SUMMARY_SENDERS)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let more = senders.len().saturating_sub(super::SUMMARY_SENDERS);
-                let body = if more == 0 {
-                    named
-                } else {
-                    i18n.invoke_notification_more_senders(
-                        named.into(),
-                        i32::try_from(more).unwrap_or(i32::MAX),
-                    )
-                    .into()
-                };
+                let body = super::summary_body(&senders, |named, more| {
+                    i18n.invoke_notification_more_senders(named.into(), more)
+                        .into()
+                });
                 (title, body)
             })
             .collect();
@@ -292,6 +280,8 @@ fn fixed_words(app: &AppWindow) -> FixedWords {
         mark_read: i18n.invoke_notification_mark_read().into(),
         archive: i18n.invoke_notification_archive().into(),
         delete: i18n.invoke_notification_delete().into(),
+        new_mail_channel: i18n.invoke_notification_new_mail_channel().into(),
+        quiet_mail_channel: i18n.invoke_notification_quiet_mail_channel().into(),
     }
 }
 

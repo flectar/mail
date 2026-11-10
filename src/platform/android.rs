@@ -2,7 +2,13 @@
 //! JNI services live in that shell; this module only holds what the shared
 //! application needs at runtime.
 use flectar_mail_core::models::AppIcon;
-use std::{path::PathBuf, sync::OnceLock};
+use std::{
+    path::PathBuf,
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 static PDFIUM_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
 /// Hands the chosen icon's name to the activity.
@@ -110,4 +116,56 @@ pub(crate) fn show_app_icon(icon: AppIcon) {
 /// Android and iOS reach system fonts through the fontique system backend.
 pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
     None
+}
+
+/// Whether the activity is in front of the user, as its host reports it.
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// The activity was resumed (`true`) or paused. Coming to the front, the
+/// user sees what came while the app wasn't running, and with an account set
+/// up it is the moment to ask for permission to notify.
+pub fn set_app_active(active: bool) {
+    ACTIVE.store(active, Ordering::Relaxed);
+    if active {
+        crate::notifications::app_became_active();
+        let _ = slint::invoke_from_event_loop(crate::notifications::ui::came_to_front);
+    }
+}
+
+/// Whether the activity is in front of the user.
+pub(crate) fn app_is_active() -> bool {
+    ACTIVE.load(Ordering::Relaxed)
+}
+
+/// What the host reports and opens about the app's work in the background.
+pub struct BackgroundBridge {
+    /// Whether Android lets the app check for mail in the background now.
+    pub state: Box<dyn Fn() -> super::BackgroundRefresh + Send + Sync>,
+    /// The app's page in Settings, where its background use is allowed.
+    pub open_settings: Box<dyn Fn() + Send + Sync>,
+}
+
+static BACKGROUND: OnceLock<BackgroundBridge> = OnceLock::new();
+
+/// Supply the bridge to the host's background state, once.
+pub fn configure_background(bridge: BackgroundBridge) {
+    let _ = BACKGROUND.set(bridge);
+}
+
+pub(crate) fn background_refresh() -> super::BackgroundRefresh {
+    BACKGROUND
+        .get()
+        .map_or(super::BackgroundRefresh::On, |bridge| (bridge.state)())
+}
+
+pub(crate) fn open_app_settings() {
+    if let Some(bridge) = BACKGROUND.get() {
+        (bridge.open_settings)();
+    }
+}
+
+/// Keeps a mail store opened for a background errand open while the guard
+/// lives, such as while a button's action goes to the server.
+pub(crate) fn stay_awake() -> crate::notifications::engine::Hold {
+    crate::notifications::engine::hold()
 }

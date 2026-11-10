@@ -717,7 +717,13 @@ export component SettingsDialog inherits Rectangle {
     // notifications and the app icon's count show.
     private property <bool> background-checks-noted: SystemNotifications.background-checks != ""
         && (root.notifications_enabled || root.unread_badge_enabled) && !root.notifications-blocked;
-    private property <string> background-checks-text: SystemNotifications.background-checks == "off"
+    private property <string> background-checks-text: AppIcon.platform == "android"
+        ? (SystemNotifications.background-checks == "off"
+            ? @tr("Android restricts Flectar Mail in the background, so new mail shows up only while the app is open.")
+            : SystemNotifications.background-checks == "low-power"
+            ? @tr("Battery Saver pauses checking for new mail while Flectar Mail is in the background.")
+            : @tr("Flectar Mail checks for new mail about every 15 minutes in the background, and less often while your phone is idle."))
+        : SystemNotifications.background-checks == "off"
         ? @tr("Background App Refresh is off for Flectar Mail, so new mail shows up only while the app is open.")
         : SystemNotifications.background-checks == "low-power"
         ? @tr("Low Power Mode pauses checking for new mail while Flectar Mail is in the background.")
@@ -755,7 +761,7 @@ export component SettingsDialog inherits Rectangle {
             : section == "Contacts"
             ? @tr("contacts people suggestions autocomplete recipients senders address book privacy clear")
             : section == "Notifications"
-            ? @tr("notifications alerts sounds desktop new mail unread count badge app icon dock taskbar background app refresh low power mode")
+            ? @tr("notifications alerts sounds desktop new mail unread count badge app icon dock taskbar background app refresh low power mode battery saver")
             : section == "Shortcuts"
             ? @tr("shortcuts keyboard keys compose search archive spam junk trash delete navigation messages reading find zoom caret tabs")
             : section == "Data"
