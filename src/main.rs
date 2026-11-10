@@ -88,7 +88,7 @@ mod tabs;
 mod theme;
 mod ui_dispatch;
 mod ui_message;
-mod undo_send;
+mod undo;
 mod updates;
 mod window_chrome;
 mod window_controller;
@@ -6080,7 +6080,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         cfg!(desktop),
     );
     mailto_links::install(&app, composers);
-    undo_send::install(&app, &state, &runtime);
+    undo::install(&app, &state, &runtime);
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);
     notifications::ui::attach(&app, &state, &runtime, platform.notifications.clone());
@@ -7070,7 +7070,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
     runtime.spawn(async move {
         while let Some((core, target)) = mark_read_rx.recv().await {
-            let result = core.perform_message_action(target, "mark_read").await;
+            let result = core
+                .perform_message_action(target, "mark_read")
+                .await
+                .map(|_| ());
             let _ = read_results.send((target, result)).await;
         }
     });
@@ -7289,7 +7292,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // So are the messages still being written.
     composer::save_open_messages();
     // Messages sent with an undo delay leave now, not at the next start.
-    undo_send::send_before_exit(&runtime);
+    undo::send_before_exit(&runtime);
     let core = state.borrow().core.as_ref().map(CoreMailSource::file_core);
     notifications::withdraw_before_exit(&runtime, core, platform.notifications.clone());
     // The runtime ends with this function.

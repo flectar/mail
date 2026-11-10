@@ -1795,11 +1795,13 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// Act on mail, returning the actions queued for it, which
+    /// [`Self::undo_actions`] can take back.
     pub async fn perform_message_action(
         &self,
         target: MailTarget,
         action: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<i64>, String> {
         let kind = ActionKind::parse(action)
             .ok_or_else(|| format!("unsupported message action: {action}"))?;
         self.core
@@ -1809,7 +1811,15 @@ impl CoreMailSource {
                 params: None,
             })
             .await
-            .map(|_| ())
+            .map(|result| result.action_ids)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Take back the actions of one gesture. False when none could be.
+    pub async fn undo_actions(&self, action_ids: Vec<i64>) -> Result<bool, String> {
+        self.core
+            .undo_actions(action_ids)
+            .await
             .map_err(|error| error.to_string())
     }
 
@@ -1846,11 +1856,13 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// Move mail to a folder of its own account, returning the actions
+    /// queued for it.
     pub async fn move_to_folder(
         &self,
         target: MailTarget,
         target_folder_id: i64,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<i64>, String> {
         self.core
             .perform_action(PerformActionArgs {
                 kind: ActionKind::Move,
@@ -1862,7 +1874,7 @@ impl CoreMailSource {
                 }),
             })
             .await
-            .map(|_| ())
+            .map(|result| result.action_ids)
             .map_err(|error| error.to_string())
     }
 

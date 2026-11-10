@@ -2255,7 +2255,7 @@ impl ComposeSession {
                 .runtime
                 .block_on(core.send_new_message(message))
                 .and_then(|queued| {
-                    let held = crate::undo_send::holds(&queued);
+                    let held = crate::undo::holds(&queued);
                     // Without an undo delay the message leaves now, and the
                     // composer waits for it below.
                     if !held {
@@ -2270,7 +2270,7 @@ impl ComposeSession {
                 // main window can take the message back until it leaves.
                 Ok((queued, true)) => {
                     self.dispose();
-                    crate::undo_send::sending(&app, queued);
+                    crate::undo::sending(&app, queued);
                     mailto_links::open_pending_soon(&app);
                 }
                 Ok((queued, false)) => {
