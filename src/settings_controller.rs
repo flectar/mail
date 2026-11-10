@@ -50,6 +50,66 @@ fn save_download_directory(
     }
 }
 
+/// Wires the Updates card and the sidebar notice to src/updates.rs, and
+/// starts checking in builds that offer it.
+pub(super) fn register_update_callbacks(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    cache_dir: &std::path::Path,
+) {
+    let updates = app.global::<Updates>();
+    updates.set_offered(crate::updates::offered());
+    let app_weak = app.as_weak();
+    let state_for_updates = Rc::clone(state);
+    let runtime_for_updates = runtime.clone();
+    updates.on_set_enabled(move |enabled| {
+        crate::updates::set_enabled(enabled);
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_updates.borrow().core.clone() else {
+            return;
+        };
+        match runtime_for_updates.block_on(core.set_check_for_updates(enabled)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Update preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save the update preference: {}",
+                error,
+            )),
+        }
+    });
+    updates.on_check_now(crate::updates::check_now);
+    updates.on_dismiss(crate::updates::dismiss);
+    let app_weak = app.as_weak();
+    updates.on_open_release(move || {
+        if let (Some(app), Some(page)) = (app_weak.upgrade(), crate::updates::release_page()) {
+            app.invoke_open_email_link(page.into());
+        }
+    });
+    let app_weak = app.as_weak();
+    crate::updates::start(runtime, cache_dir, move |view| {
+        let app_weak = app_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let updates = app.global::<Updates>();
+            updates.set_enabled(view.enabled);
+            updates.set_checking(view.checking);
+            updates.set_failed(view.failed);
+            updates.set_current(view.current);
+            updates.set_dismissed(view.dismissed);
+            let (version, summary) = view
+                .available
+                .map(|release| (release.version, release.summary))
+                .unwrap_or_default();
+            updates.set_version(version.into());
+            updates.set_summary(summary.into());
+        });
+    });
+}
+
 pub(super) fn register_settings_preference_callbacks(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,

@@ -4,6 +4,7 @@ import { WindowChrome } from "../window-chrome.slint";
 import { AppIcon } from "../app-icon.slint";
 import { DefaultEmailApp } from "../default-email-app.slint";
 import { SystemNotifications } from "../system-notifications.slint";
+import { Updates } from "../updates.slint";
 import { AppIconPicker } from "../components/app-icon-picker.slint";
 import { MessageColors } from "../message-colors.slint";
 import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
@@ -719,6 +720,13 @@ export component SettingsDialog inherits Rectangle {
         ? @tr("Desktop notifications") : @tr("New mail notifications");
     // When the system checks for new mail in the background, for what
     // notifications and the app icon's count show.
+    // What the last check for a new version found (src/updates.rs).
+    private property <string> update-status: Updates.version != ""
+        ? @tr("Flectar Mail {} is out.", Updates.version)
+        : Updates.checking ? @tr("Checking for a new version…")
+        : Updates.failed ? @tr("GitHub couldn't be reached. Flectar Mail tries again later.")
+        : Updates.current ? @tr("Flectar Mail is up to date.")
+        : @tr("Flectar Mail checks soon after it starts.");
     private property <bool> background-checks-noted: SystemNotifications.background-checks != ""
         && (root.notifications_enabled || root.unread_badge_enabled) && !root.notifications-blocked;
     private property <string> background-checks-text: AppIcon.platform == "android"
@@ -773,7 +781,8 @@ export component SettingsDialog inherits Rectangle {
             ? @tr("storage data usage mail attachments files databases backup snapshot import export delete")
             : section == "Services"
             ? @tr("services flectar base account sign in subscription paid sync devices business email custom domain mailbox")
-            : @tr("about version credits contributors license flectar") + " " + @tr("Privacy policy");
+            : @tr("about version credits contributors license flectar") + " " + @tr("Privacy policy")
+                + (Updates.offered ? " " + @tr("updates new version release download check") : "");
         return root.settings-search-matches(terms, root.settings-search-query);
     }
 
@@ -2812,6 +2821,106 @@ export component SettingsDialog inherits Rectangle {
                                     font-size: TypeScale.caption;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
+                                }
+                            }
+
+                            if Updates.offered : Rectangle {
+                                height: updates-rows.y + updates-rows.height + 10px;
+                                vertical-stretch: 0;
+                                updates-card := SettingsCard { title: @tr("Updates"); description: @tr("Flectar Mail looks for new versions once a day."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
+                                updates-rows := VerticalBox {
+                                    x: 20px;
+                                    y: updates-card.content-y + 8px;
+                                    width: parent.width - 40px;
+                                    height: self.preferred-height;
+                                    padding-bottom: 8px;
+                                    spacing: 4px;
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Check for new versions");
+                                        description: @tr("It asks GitHub, without any account or mail details.");
+                                        checked: Updates.enabled;
+                                        title-color: root.heading;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            Updates.enabled = checked;
+                                            Updates.set-enabled(checked);
+                                        }
+                                    }
+                                    if Updates.enabled : Rectangle { height: 1px; background: root.border-subtle; }
+                                    // Laid out like the row above, so the texts and the right
+                                    // edge line up.
+                                    if Updates.enabled && !root.compact : HorizontalBox {
+                                        padding-top: 6px;
+                                        spacing: 20px;
+                                        VerticalBox {
+                                            padding-top: 0px;
+                                            padding-bottom: 0px;
+                                            spacing: 2px;
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            Text {
+                                                height: max(17px, self.preferred-height);
+                                                text: root.update-status;
+                                                color: root.heading;
+                                                font-size: TypeScale.secondary;
+                                                font-weight: Updates.version != "" ? 600 : 400;
+                                                wrap: word-wrap;
+                                            }
+                                            if Updates.version != "" && Updates.summary != "" : Text {
+                                                height: max(16px, self.preferred-height);
+                                                text: Updates.summary;
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                wrap: word-wrap;
+                                            }
+                                        }
+                                        if Updates.version != "" : Button {
+                                            width: max(112px, self.content-width);
+                                            height: 32px;
+                                            text: @tr("Download");
+                                            primary: true;
+                                            clicked => { Updates.open-release(); }
+                                        }
+                                        Button {
+                                            width: max(112px, self.content-width);
+                                            height: 32px;
+                                            text: @tr("Check now");
+                                            enabled: !Updates.checking;
+                                            clicked => { Updates.check-now(); }
+                                        }
+                                    }
+                                    if Updates.enabled && root.compact : VerticalBox {
+                                        padding: 8px;
+                                        spacing: 7px;
+                                        Text {
+                                            height: max(17px, self.preferred-height);
+                                            text: root.update-status;
+                                            color: root.heading;
+                                            font-size: TypeScale.secondary;
+                                            font-weight: Updates.version != "" ? 600 : 400;
+                                            wrap: word-wrap;
+                                        }
+                                        if Updates.version != "" && Updates.summary != "" : Text {
+                                            height: max(16px, self.preferred-height);
+                                            text: Updates.summary;
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            wrap: word-wrap;
+                                        }
+                                        if Updates.version != "" : Button {
+                                            height: 36px;
+                                            text: @tr("Download");
+                                            primary: true;
+                                            clicked => { Updates.open-release(); }
+                                        }
+                                        Button {
+                                            height: 36px;
+                                            text: @tr("Check now");
+                                            enabled: !Updates.checking;
+                                            clicked => { Updates.check-now(); }
+                                        }
+                                    }
                                 }
                             }
 

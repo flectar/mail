@@ -676,6 +676,9 @@ pub(super) fn restore_account_backup(
     app.set_notifications_enabled(settings.notifications_enabled);
     app.set_notification_sound_enabled(settings.sound_enabled);
     app.set_unread_badge_enabled(settings.unread_badge_enabled);
+    app.global::<Updates>()
+        .set_enabled(settings.check_for_updates);
+    crate::updates::set_enabled(settings.check_for_updates);
     app.set_notification_scope(settings.notification_scope.clone().into());
     app.set_sync_interval_minutes(settings.sync_interval_minutes as i32);
     app.set_mark_read_on_open(settings.mark_read_on_open);
@@ -1667,6 +1670,8 @@ pub(super) fn register_data_management_callbacks(
                     app.set_notifications_enabled(true);
                     app.set_notification_sound_enabled(true);
                     app.set_unread_badge_enabled(true);
+                    app.global::<Updates>().set_enabled(true);
+                    crate::updates::set_enabled(true);
                     app.set_notification_scope("important".into());
                     app.set_sync_interval_minutes(5);
                     app.set_mark_read_on_open(true);

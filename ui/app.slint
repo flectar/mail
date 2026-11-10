@@ -9,6 +9,7 @@ export { WindowChrome } from "window-chrome.slint";
 export { AppIcon, AppIconVariant } from "app-icon.slint";
 export { DefaultEmailApp } from "default-email-app.slint";
 export { SystemNotifications } from "system-notifications.slint";
+export { Updates } from "updates.slint";
 import { AppIcon, AppIconVariant } from "app-icon.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
@@ -265,7 +266,9 @@ export global I18n {
     ui-message-settings(key, argument, second-argument, third-argument) => {
         if (key == "Notification preferences are active for this session.") { return @tr("Notification preferences are active for this session."); }
         if (key == "Notification preferences saved.") { return @tr("Notification preferences saved."); }
+        if (key == "Update preference saved.") { return @tr("Update preference saved."); }
         if (key == "Could not save notifications: {}") { return @tr("Could not save notifications: {}", argument); }
+        if (key == "Could not save the update preference: {}") { return @tr("Could not save the update preference: {}", argument); }
         if (key == "Sync interval is active for this session.") { return @tr("Sync interval is active for this session."); }
         if (key == "Sync interval set to {} minutes.") { return @tr("Sync interval set to {} minutes.", argument); }
         if (key == "Could not save sync interval: {}") { return @tr("Could not save sync interval: {}", argument); }

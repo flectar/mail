@@ -2,7 +2,7 @@
 
 use crate::{
     AccountPresentationSettings, AccountRow, AppTheme, AppWindow, InboxState, MessageColors,
-    PAGE_SIZE,
+    PAGE_SIZE, Updates,
     account_controller::apply_connected_account_rows,
     avatar_initials,
     calendar::{
@@ -850,6 +850,9 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.set_notifications_enabled(settings.notifications_enabled);
     app.set_notification_sound_enabled(settings.sound_enabled);
     app.set_unread_badge_enabled(settings.unread_badge_enabled);
+    app.global::<Updates>()
+        .set_enabled(settings.check_for_updates);
+    crate::updates::set_enabled(settings.check_for_updates);
     app.set_notification_scope(settings.notification_scope.clone().into());
     app.set_sync_interval_minutes(match settings.sync_interval_minutes {
         1 | 5 | 15 => settings.sync_interval_minutes as i32,
