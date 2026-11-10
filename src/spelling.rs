@@ -4,6 +4,9 @@
 //! system has installed, which `flectar_spell` reads without keeping any of them in the app's
 //! memory between checks. The other platforms have no checker here yet, and the composer
 //! offers none there.
+//!
+//! Nothing is set up until a message is checked, and the last message to close lets go of it
+//! all again, so reading mail costs nothing.
 
 #[cfg(linux_desktop)]
 mod hunspell;
@@ -15,8 +18,12 @@ pub use hunspell::run_index_worker_if_requested;
 use crate::rich_compose::{CODE, ComposeStyleRun, QUOTE_MARKER};
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
+
+/// Whether this platform checks spelling.
+const CHECKS_SPELLING: bool = cfg!(linux_desktop);
 
 thread_local! {
     static SPELLING: RefCell<Option<Rc<Spelling>>> = const { RefCell::new(None) };
@@ -52,42 +59,55 @@ pub(crate) trait Checker: Send + Sync {
 
 /// Spell checking as the user set it up, shared by every message being written.
 pub(crate) struct Spelling {
-    checker: Option<Arc<dyn Checker>>,
+    /// Where the checker keeps what it can rebuild, such as Linux's dictionary indexes.
+    cache_dir: PathBuf,
     runtime: tokio::runtime::Handle,
     enabled: Cell<bool>,
     /// The languages the user chose, or `None` for the system's.
     chosen: RefCell<Option<Vec<String>>>,
-    /// The installed languages, as last listed.
+    /// The checker, from the first check until the last message closes.
+    checker: RefCell<Option<Arc<dyn Checker>>>,
+    /// The installed languages, as last listed while messages were open.
     installed: RefCell<Vec<Language>>,
-    /// The system's languages, most preferred first, as BCP 47 tags.
-    locales: Vec<String>,
-    /// Words added to the personal dictionary since the app started, which pass even before
+    /// Words added to the personal dictionary while messages were open, which pass even before
     /// the dictionary file has them.
     added: RefCell<Vec<String>>,
 }
 
-/// Set up spell checking for this process. `cache_dir` holds what the checker can rebuild,
-/// such as Linux's dictionary indexes.
-pub(crate) fn install(runtime: &tokio::runtime::Handle, cache_dir: &std::path::Path) {
-    let checker = platform_checker(cache_dir);
-    let spelling = Spelling::new(
-        checker,
-        runtime.clone(),
-        sys_locale::get_locales().collect(),
-    );
+/// Set up spell checking for this process, without building anything yet. `cache_dir` is the
+/// app's cache.
+pub(crate) fn install(runtime: &tokio::runtime::Handle, cache_dir: &Path) {
+    let spelling = Spelling {
+        cache_dir: cache_dir.join("spelling"),
+        runtime: runtime.clone(),
+        enabled: Cell::new(true),
+        chosen: RefCell::new(None),
+        checker: RefCell::new(None),
+        installed: RefCell::new(Vec::new()),
+        added: RefCell::new(Vec::new()),
+    };
     SPELLING.with(|slot| *slot.borrow_mut() = Some(Rc::new(spelling)));
 }
 
 #[cfg(linux_desktop)]
-fn platform_checker(cache_dir: &std::path::Path) -> Option<Arc<dyn Checker>> {
-    Some(Arc::new(hunspell::Hunspell::new(
-        cache_dir.join("spelling"),
-    )))
+fn platform_checker(cache_dir: &Path) -> Option<Arc<dyn Checker>> {
+    Some(Arc::new(hunspell::Hunspell::new(cache_dir.to_owned())))
 }
 
 #[cfg(not(linux_desktop))]
-fn platform_checker(_cache_dir: &std::path::Path) -> Option<Arc<dyn Checker>> {
+fn platform_checker(_cache_dir: &Path) -> Option<Arc<dyn Checker>> {
     None
+}
+
+/// Whether any dictionary is installed, found without keeping anything.
+#[cfg(linux_desktop)]
+fn has_dictionaries() -> bool {
+    hunspell::has_dictionaries()
+}
+
+#[cfg(all(desktop, not(linux_desktop)))]
+fn has_dictionaries() -> bool {
+    false
 }
 
 /// Spell checking, once installed.
@@ -114,32 +134,41 @@ pub(crate) fn apply_to_window(app: &crate::AppWindow) {
     let Some(spelling) = service() else {
         return;
     };
-    spelling.refresh_languages();
     app.set_spelling_available(spelling.available());
     app.set_spelling_enabled(spelling.enabled.get());
-    app.set_spelling_installed(!spelling.installed.borrow().is_empty());
+}
+
+/// Settings appeared: say whether there's a dictionary to check with, as installed now.
+#[cfg(desktop)]
+pub(crate) fn settings_shown(app: &crate::AppWindow) {
+    if CHECKS_SPELLING {
+        app.set_spelling_installed(has_dictionaries());
+    }
 }
 
 impl Spelling {
-    fn new(
-        checker: Option<Arc<dyn Checker>>,
-        runtime: tokio::runtime::Handle,
-        locales: Vec<String>,
-    ) -> Self {
-        Self {
-            checker,
-            runtime,
-            enabled: Cell::new(true),
-            chosen: RefCell::new(None),
-            installed: RefCell::new(Vec::new()),
-            locales,
-            added: RefCell::new(Vec::new()),
-        }
-    }
-
     /// Whether this platform can check spelling at all.
     pub(crate) fn available(&self) -> bool {
-        self.checker.is_some()
+        CHECKS_SPELLING
+    }
+
+    /// The checker, built the first time a message needs it.
+    fn checker(&self) -> Option<Arc<dyn Checker>> {
+        if !self.available() {
+            return None;
+        }
+        let mut checker = self.checker.borrow_mut();
+        if checker.is_none() {
+            *checker = platform_checker(&self.cache_dir);
+        }
+        checker.clone()
+    }
+
+    /// Let go of the checker and everything it listed, once no message is being written.
+    pub(crate) fn release(&self) {
+        *self.checker.borrow_mut() = None;
+        *self.installed.borrow_mut() = Vec::new();
+        *self.added.borrow_mut() = Vec::new();
     }
 
     /// Whether the user wants spelling checked, where it can be.
@@ -154,7 +183,7 @@ impl Spelling {
 
     /// List the installed languages again, for dictionaries installed or removed since.
     pub(crate) fn refresh_languages(&self) {
-        if let Some(checker) = &self.checker {
+        if let Some(checker) = self.checker() {
             *self.installed.borrow_mut() = checker.languages();
         }
     }
@@ -179,7 +208,7 @@ impl Spelling {
                 .filter(|id| installed.iter().any(|language| &language.id == *id))
                 .cloned()
                 .collect(),
-            None => default_languages(&installed, &self.locales),
+            None => default_languages(&installed, &sys_locale::get_locales().collect::<Vec<_>>()),
         }
     }
 
@@ -206,7 +235,7 @@ impl Spelling {
         if !self.enabled() {
             return None;
         }
-        let checker = Arc::clone(self.checker.as_ref()?);
+        let checker = self.checker()?;
         let languages = self.active_languages();
         let mut ignored = ignored;
         ignored.extend(self.added.borrow().iter().cloned());
@@ -223,7 +252,7 @@ impl Spelling {
         &self,
         word: String,
     ) -> Option<tokio::task::JoinHandle<Result<Vec<String>, String>>> {
-        let checker = Arc::clone(self.checker.as_ref()?);
+        let checker = self.checker()?;
         let languages = self.active_languages();
         Some(
             self.runtime
@@ -235,11 +264,10 @@ impl Spelling {
     /// most, as they list it.
     pub(crate) fn add_word(&self, word: String) {
         let (Some(checker), Some(language)) =
-            (&self.checker, self.active_languages().first().cloned())
+            (self.checker(), self.active_languages().first().cloned())
         else {
             return;
         };
-        let checker = Arc::clone(checker);
         self.added.borrow_mut().push(word.clone());
         self.runtime.spawn_blocking(move || {
             if let Err(error) = checker.add_word(&word, &language) {
@@ -341,6 +369,26 @@ mod tests {
     fn defaults(ids: &[&str], locales: &[&str]) -> Vec<String> {
         let locales: Vec<String> = locales.iter().map(|locale| (*locale).into()).collect();
         default_languages(&installed(ids), &locales)
+    }
+
+    #[test]
+    fn nothing_is_built_until_a_message_needs_it_and_the_last_one_lets_go() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        install(runtime.handle(), cache.path());
+        let spelling = service().unwrap();
+        apply_settings(true, Some(vec!["en_US".into()]));
+        assert!(spelling.checker.borrow().is_none());
+        assert!(spelling.installed.borrow().is_empty());
+
+        spelling.refresh_languages();
+        assert_eq!(spelling.checker.borrow().is_some(), CHECKS_SPELLING);
+        spelling.release();
+        assert!(spelling.checker.borrow().is_none());
+        assert!(spelling.installed.borrow().is_empty());
+        assert_eq!(spelling.installed.borrow().capacity(), 0);
     }
 
     #[test]

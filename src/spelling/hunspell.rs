@@ -174,6 +174,11 @@ impl Checker for Hunspell {
     }
 }
 
+/// Whether the system has any dictionary installed.
+pub(super) fn has_dictionaries() -> bool {
+    !flectar_spell::find_dictionaries(&flectar_spell::system_dictionary_dirs()).is_empty()
+}
+
 /// Index `dictionary` in a copy of the app started for that alone, which returns its memory
 /// to the system when it exits.
 fn index_in_helper(cache_dir: &Path, dictionary: &Dictionary) -> Result<(), String> {

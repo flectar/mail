@@ -97,8 +97,21 @@ impl ComposeSession {
             });
     }
 
+    /// The message closed. The last one to close lets go of the checker.
     pub(super) fn clear_spelling(&self) {
         self.spelling.clear();
+        let writing = with_composers(|composers| {
+            composers
+                .sessions
+                .borrow()
+                .iter()
+                .any(|session| !session.disposed.get())
+        });
+        if writing == Some(false)
+            && let Some(spelling) = crate::spelling::service()
+        {
+            spelling.release();
+        }
     }
 
     /// Give a fresh editor what the latest check found, before it draws the message.
@@ -131,6 +144,10 @@ impl ComposeSession {
             );
             (document.text().to_owned(), skip, document.revision())
         };
+        // Each message's first check lists the dictionaries installed now.
+        if self.spelling.checked.get().is_none() {
+            spelling.refresh_languages();
+        }
         let ignored = self.spelling.ignored.borrow().clone();
         let Some(task) = spelling.check(text, skip, ignored) else {
             return;

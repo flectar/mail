@@ -219,10 +219,11 @@ distributions package them as `hunspell-` and the language. In the Flatpak,
 English comes with the runtime, and other languages come with the translations
 Flatpak installs for the languages your system uses.
 
-Checking keeps no dictionary in memory. The first time a dictionary is used, a
-short-lived Flectar Mail process indexes its words into the app's cache, and
-each check reads them from that file and lets go when it's done. Windows,
-macOS, Android and iOS don't check spelling yet.
+Checking keeps no dictionary in memory, and nothing is set up until you write.
+The first time a dictionary is used, a short-lived Flectar Mail process indexes
+its words into the app's cache. Each check then reads them from that file and
+lets go when it's done, and closing the last message lets go of the rest.
+Windows, macOS, Android and iOS don't check spelling yet.
 
 ## Storage and backups
 
