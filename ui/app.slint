@@ -1133,6 +1133,8 @@ export component AppWindow inherits Window {
     in property <bool> spelling_available: false;
     in-out property <bool> spelling_enabled: true;
     in property <bool> spelling_installed: true;
+    // Whose spell checker this platform uses: "hunspell", "windows" or "macos".
+    in property <string> spelling_system: "";
     in-out property <bool> group_mail_by_date: true;
     // Group replies into conversations; off lists each message on its own.
     in-out property <bool> conversation_view: true;
@@ -2074,6 +2076,7 @@ export component AppWindow inherits Window {
             spelling_available: root.spelling_available;
             spelling_enabled <=> root.spelling_enabled;
             spelling_installed: root.spelling_installed;
+            spelling_system: root.spelling_system;
             group_mail_by_date <=> root.group_mail_by_date;
             conversation_view <=> root.conversation_view;
             show_account_markers <=> root.show_account_markers;

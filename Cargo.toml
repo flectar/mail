@@ -152,6 +152,7 @@ windows = { version = "0.62", default-features = false, features = [
     "Foundation_Collections",
     "UI_Notifications",
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_System_Com",
     "Win32_UI_Notifications",
     "Win32_UI_Shell",
@@ -190,8 +191,6 @@ x11rb = { version = "0.13", default-features = false }
 wayland-backend = { version = "0.3", default-features = false, features = ["client_system"] }
 wayland-client = { version = "0.31", default-features = false }
 wayland-protocols = { version = "0.32", default-features = false, features = ["client", "staging"] }
-# Spell checking with the system's Hunspell dictionaries, read in place from disk.
-flectar-spell = { path = "crates/flectar-spell" }
 
 # Integrated window frames use winit window attributes and native window events.
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))'.dependencies]
@@ -202,8 +201,8 @@ slint = { version = "1.18.1", default-features = false, features = ["backend-win
 # These AppKit bindings are already in the build.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSApplication", "NSButton", "NSControl", "NSDockTile", "NSImage", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "NSWorkspace"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAppleEventManager", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSSet", "NSString", "NSURL", "NSUserDefaults"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSApplication", "NSButton", "NSControl", "NSDockTile", "NSImage", "NSResponder", "NSRunningApplication", "NSSpellChecker", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAppleEventManager", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSOrthography", "NSRange", "NSSet", "NSString", "NSTextCheckingResult", "NSURL", "NSUserDefaults"] }
 # Launch Services reports a default email app change through a block.
 block2 = { version = "0.6", default-features = false, features = ["std"] }
 # Registers the bundled sign-in agent with Login Items (macOS 13+).
@@ -229,6 +228,9 @@ objc2-security = { version = "0.3", default-features = false, features = ["std",
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
 # The same async-io backend for the file chooser portal; see ashpd above.
 rfd = { version = "0.16", default-features = false, features = ["async-std", "xdg-portal"] }
+# Which words spelling checks, everywhere, and on Linux the checking itself, with the system's
+# Hunspell dictionaries read in place from disk.
+flectar-spell = { path = "crates/flectar-spell" }
 
 [package.metadata.appimage]
 icon = "resources/app-icon/flectar-mail-masked-512.png"

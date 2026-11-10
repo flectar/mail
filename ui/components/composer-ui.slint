@@ -68,6 +68,8 @@ export global ComposerUi {
     in property <bool> spelling-available: false;
     in property <bool> spelling-enabled: false;
     in property <[SpellingLanguage]> spelling-languages: [];
+    // The system picks the languages itself, as macOS does, so there are none to choose.
+    in property <bool> spelling-languages-automatic: false;
     in property <string> spelling-word: "";
     in property <[string]> spelling-suggestions: [];
     // Bumped when the editor menu is ready to open.
@@ -147,6 +149,7 @@ export component BoundComposer inherits EmailComposer {
     spelling-available: ComposerUi.spelling-available;
     spelling-enabled: ComposerUi.spelling-enabled;
     spelling-languages: ComposerUi.spelling-languages;
+    spelling-languages-automatic: ComposerUi.spelling-languages-automatic;
     spelling-word: ComposerUi.spelling-word;
     spelling-suggestions: ComposerUi.spelling-suggestions;
     editor-menu-serial: ComposerUi.editor-menu-serial;
