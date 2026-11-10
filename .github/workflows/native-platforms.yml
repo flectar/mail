@@ -164,6 +164,8 @@ jobs:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
           FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
+          # Release files tell of newer releases; stores update the app themselves.
+          FLECTAR_UPDATE_CHECKS: github
         run: cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
 
       - name: Build AppImage
@@ -250,6 +252,8 @@ jobs:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
           FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
+          # Release files tell of newer releases; stores update the app themselves.
+          FLECTAR_UPDATE_CHECKS: github
         run: cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
       - name: Build and inspect RPM
         env:
@@ -408,6 +412,8 @@ jobs:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
           FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
+          # Release files tell of newer releases; stores update the app themselves.
+          FLECTAR_UPDATE_CHECKS: github
         run: |
           mkdir -p target
           if cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail 2>&1 | tee target/windows-build.log; then
@@ -589,6 +595,8 @@ jobs:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
           FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
+          # Release files tell of newer releases; stores update the app themselves.
+          FLECTAR_UPDATE_CHECKS: github
         run: cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
 
       - name: Create ad-hoc signed app bundle
@@ -672,6 +680,8 @@ jobs:
           FLECTAR_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_ANDROID_CLIENT_ID }}
           FLECTAR_MICROSOFT_ANDROID_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_ANDROID_CLIENT_ID }}
           FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI: ${{ secrets.FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI }}
+          # The APK on GitHub tells of newer releases.
+          FLECTAR_UPDATE_CHECKS: github
         run: |
           args=()
           if [[ "$RELEASE_PRERELEASE" == true ]]; then args+=(--preview); fi
