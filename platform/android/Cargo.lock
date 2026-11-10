@@ -1812,6 +1812,7 @@ dependencies = [
  "pulldown-cmark",
  "reqwest",
  "rfd",
+ "rspolib",
  "seccompiler",
  "serde",
  "serde_json",

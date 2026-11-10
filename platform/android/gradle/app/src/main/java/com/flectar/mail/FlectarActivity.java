@@ -35,6 +35,61 @@ public final class FlectarActivity extends NativeActivity {
 
     private static native void nativeSuspendPdfPreview();
     private static native void nativeTrimMemory(int level, int sdk);
+    private static native void nativeResumed();
+    private static native void nativePaused();
+    private static native void nativeNotificationOpened(String request);
+    private static native void nativeNotificationPermissionAnswered();
+
+    /**
+     * The app is in front of the user: what came while it wasn't running is
+     * no news for a check in the background, and with an account set up it is
+     * the moment to ask for permission to notify.
+     */
+    @Override
+    protected void onResume() {
+        super.onResume();
+        nativeResumed();
+    }
+
+    /** Mail on screen no longer counts as seen once the app leaves the front. */
+    @Override
+    protected void onPause() {
+        nativePaused();
+        super.onPause();
+    }
+
+    /** A tap on a new-mail notification, which opens what it is about. */
+    private static void openNotification(Intent intent) {
+        String request = Notifications.request(intent);
+        if (request != null) {
+            nativeNotificationOpened(request);
+        }
+    }
+
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 0xF1A5;
+
+    /** Called from Rust: ask the user to allow notifications. */
+    public void askNotificationPermission() {
+        runOnUiThread(() -> {
+            Notifications.markAsked(this);
+            if (Build.VERSION.SDK_INT >= 33) {
+                requestPermissions(
+                        new String[] {android.Manifest.permission.POST_NOTIFICATIONS},
+                        NOTIFICATION_PERMISSION_REQUEST);
+            } else {
+                // Allowed unless turned off in Settings, which isn't asked.
+                nativeNotificationPermissionAnswered();
+            }
+        });
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            nativeNotificationPermissionAnswered();
+        }
+    }
 
     @Override
     protected void onStop() {
@@ -257,6 +312,9 @@ public final class FlectarActivity extends NativeActivity {
             pendingDocumentRequest=savedInstanceState.getLong("pendingDocumentRequest",-1);
             pendingDocumentExport=savedInstanceState.getString("pendingDocumentExport","");
             pendingGoogleRequest = savedInstanceState.getLong("pendingGoogleRequest", -1);
+        } else {
+            // Rust keeps the tap until the mail store opens.
+            openNotification(getIntent());
         }
     }
 
@@ -303,6 +361,7 @@ public final class FlectarActivity extends NativeActivity {
                 && "com.flectar.mail".equals(intent.getData().getHost())) {
             nativeMicrosoftRedirect(intent.getData().toString());
         }
+        openNotification(intent);
     }
 
     /** Called from Rust. Must return quickly; Play Services completes asynchronously. */

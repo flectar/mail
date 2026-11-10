@@ -648,6 +648,7 @@ mod tests {
                 account_id: 2,
                 message_id: 70,
             },
+            count: 1,
             title: "Ann & Bo".into(),
             body: "<Plans>".into(),
             preview: Some("See you \u{1}there".into()),

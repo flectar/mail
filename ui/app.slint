@@ -89,6 +89,8 @@ export global I18n {
     pure callback notification-mark-read() -> string;
     pure callback notification-archive() -> string;
     pure callback notification-delete() -> string;
+    pure callback notification-new-mail-channel() -> string;
+    pure callback notification-quiet-mail-channel() -> string;
     // What a screen reader says for the count on the app icon.
     pure callback notification-unread-count(int) -> string;
     // The line a desktop shows for the app while it runs with its window
@@ -217,6 +219,10 @@ export global I18n {
     }
     notification-archive() => { return @tr("Archive"); }
     notification-delete() => { return @tr("Delete"); }
+    // The names of Android's notification channels for new mail, which its
+    // notification settings list: mail that may play a sound, and the rest.
+    notification-new-mail-channel() => { return @tr("New mail"); }
+    notification-quiet-mail-channel() => { return @tr("New mail without sound"); }
     background-status() => { return @tr("Checking for new mail"); }
     last-contacted(date) => { return @tr("Last contacted {}", date); }
     loading-local-data() => { return @tr("Loading local data…"); }
@@ -609,6 +615,8 @@ export global I18n {
         if (key == "Message was not sent: {} Your draft is preserved.") { return @tr("Message was not sent: {} Your draft is preserved.", argument); }
         if (key == "Draft saved locally (#{}).") { return @tr("Draft saved locally (#{}).", argument); }
         if (key == "Compose failed: {}") { return @tr("Compose failed: {}", argument); }
+        if (key == "Could not open the message in its own window.") { return @tr("Could not open the message in its own window."); }
+        if (key == "Could not open the message in its own window, so it was saved to Drafts.") { return @tr("Could not open the message in its own window, so it was saved to Drafts."); }
         if (key == "Connect an account before managing email templates.") { return @tr("Connect an account before managing email templates."); }
         if (key == "Could not load email templates: {}") { return @tr("Could not load email templates: {}", argument); }
         if (key == "Enter a template name.") { return @tr("Enter a template name."); }

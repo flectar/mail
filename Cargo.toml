@@ -251,7 +251,7 @@ auto_link_exclude_list = [
 # These do not appear as normal Rust paths on every host, so dependency
 # scanners need the explicit exceptions.
 [package.metadata.cargo-machete]
-ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "winresource", "cc", "cfg_aliases", "windows-core"]
+ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "winresource", "cc", "cfg_aliases", "rspolib", "windows-core"]
 
 # tests/text_fit.rs measures laid-out text through Slint's item tree, which
 # only the internal crate exposes. It must stay on the version `slint` uses.
@@ -263,6 +263,9 @@ async-trait = "0.1"
 [build-dependencies]
 cc = "1"
 cfg_aliases = "0.2"
+# Reads the translation catalogs as Slint does, for notification words
+# without the window (build.rs).
+rspolib = "0.1.2"
 slint-build = "1.18.1"
 winresource = "0.1"
 

@@ -123,6 +123,10 @@ pub trait NotificationHost: Send + Sync + 'static {
     fn set_badge(&self, _badge: Option<Badge>) -> HostFuture<()> {
         Box::pin(std::future::ready(()))
     }
+    /// Whether the user wants what a check in the background brings, as it
+    /// changes: notifications, or the count on the app icon. Hosts that ask
+    /// the system for such checks schedule or stop them here.
+    fn checks_wanted(&self, _wanted: bool) {}
 }
 
 /// The count of unread mail on the app icon.
@@ -160,6 +164,9 @@ impl Default for Controls {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Alert {
     pub id: AlertId,
+    /// How many new messages it tells of: one, or as many as a summary sums
+    /// up.
+    pub count: u32,
     /// The sender for new mail; "N new messages" for a summary.
     pub title: String,
     /// The subject for new mail; who wrote for a summary.
@@ -484,6 +491,25 @@ fn with_core(errand: impl FnOnce(&tokio::runtime::Handle, &Arc<Core>) + Send + '
     errand(&runtime, &core);
 }
 
+/// The mail store closed with the run that opened it. Errands from now on
+/// wait for the next one, such as a check in the background opens.
+pub(crate) fn core_closed() {
+    ERRANDS.lock().unwrap_or_else(PoisonError::into_inner).ready = None;
+}
+
+/// The mail store could not open: give up the errands that waited for it,
+/// which tells whoever waits on them.
+#[cfg(background_engine)]
+fn drop_waiting_errands() {
+    let waiting = std::mem::take(
+        &mut ERRANDS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .waiting,
+    );
+    drop(waiting);
+}
+
 /// The mail store opened: run the errands that waited for it, in order.
 fn core_opened(runtime: &tokio::runtime::Handle, core: &Arc<Core>) {
     let waiting = {
@@ -498,11 +524,25 @@ fn core_opened(runtime: &tokio::runtime::Handle, core: &Arc<Core>) {
 
 /// The user brought the app to the foreground, where the Inbox shows what
 /// came while it wasn't running: that is no news for a check in the
-/// background ([`flectar_mail_core::Core::forget_missed`]).
+/// background ([`flectar_mail_core::Core::forget_missed`]). The store open
+/// now forgets it, and so does the window's as it opens. A store a check
+/// opens later doesn't: the user hasn't seen what came since.
 #[cfg(background_checks)]
 pub(crate) fn app_became_active() {
-    with_core(|_, core| core.forget_missed());
+    FORGET_WHEN_THE_WINDOW_OPENS.store(true, Ordering::Relaxed);
+    let ready = ERRANDS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .ready
+        .clone();
+    if let Some((_, core)) = ready {
+        core.forget_missed();
+    }
 }
+
+/// The app came to the front before the window's store opened.
+#[cfg(background_checks)]
+static FORGET_WHEN_THE_WINDOW_OPENS: AtomicBool = AtomicBool::new(false);
 
 /// Stops a [`check_in_background`].
 #[cfg_attr(not(background_checks), allow(dead_code))]
@@ -602,6 +642,21 @@ pub(crate) fn serve_requests(handler: impl Fn(Request) + Send + Sync + 'static) 
     }
 }
 
+/// The body of an account's summary of new mail: the first senders it
+/// names, then how many others, as `more` words it.
+fn summary_body(senders: &[String], more: impl FnOnce(String, i32) -> String) -> String {
+    let named = senders
+        .iter()
+        .take(SUMMARY_SENDERS)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    match senders.len().saturating_sub(SUMMARY_SENDERS) {
+        0 => named,
+        others => more(named, i32::try_from(others).unwrap_or(i32::MAX)),
+    }
+}
+
 /// More new messages than this for one account at once are summed up in one
 /// notification. Peers sum up from three (Proton) to five (Mailspring).
 const SUMMARY_AFTER: usize = 3;
@@ -632,8 +687,9 @@ pub(crate) fn preferences_changed() {
 static BACKGROUND_CHECKS_WANTED: AtomicBool = AtomicBool::new(false);
 
 /// Whether to ask the system to wake the app now and then to check for new
-/// mail.
-#[cfg(background_checks)]
+/// mail, for iOS, which asks as the app leaves the front. Android hosts hear
+/// it as it changes ([`NotificationHost::checks_wanted`]).
+#[cfg(all(user_notifications, background_checks))]
 pub(crate) fn background_checks_wanted() -> bool {
     BACKGROUND_CHECKS_WANTED.load(Ordering::Relaxed)
 }
@@ -665,6 +721,10 @@ pub(crate) fn spawn_dispatcher(
     core: Arc<Core>,
     host: Option<Arc<dyn NotificationHost>>,
 ) {
+    #[cfg(background_checks)]
+    if FORGET_WHEN_THE_WINDOW_OPENS.swap(false, Ordering::Relaxed) {
+        core.forget_missed();
+    }
     dispatch_through(runtime, core, host, ui::Live);
 }
 
@@ -684,6 +744,7 @@ fn dispatch_through(
         let mut pruned_at = None;
         let mut enabled = notifications_enabled(&core).await;
         let mut badge = None;
+        let mut told_wanted = None;
         let mut flushed = 0;
         loop {
             let flushing = FLUSHES_ASKED.load(Ordering::Acquire);
@@ -716,8 +777,14 @@ fn dispatch_through(
                     }
                 }
             }
-            BACKGROUND_CHECKS_WANTED
-                .store(host.is_some() && (enabled || counting), Ordering::Relaxed);
+            let wanted = host.is_some() && (enabled || counting);
+            BACKGROUND_CHECKS_WANTED.store(wanted, Ordering::Relaxed);
+            if let Some(host) = host.as_deref()
+                && told_wanted != Some(wanted)
+            {
+                host.checks_wanted(wanted);
+                told_wanted = Some(wanted);
+            }
             flushed = flushing;
             FLUSHES_SERVED.send_replace(flushed);
             tokio::select! {
@@ -1005,6 +1072,7 @@ async fn present(
             }
             Plan::Summary {
                 account_id,
+                count,
                 indices,
                 ..
             } => {
@@ -1015,6 +1083,7 @@ async fn present(
                     .max_by_key(|mail| mail.received_at);
                 alerts.push(Alert {
                     id: AlertId::Summary { account_id },
+                    count,
                     title,
                     body,
                     preview: None,
@@ -1102,6 +1171,7 @@ fn message_alert(mail: &NewMailNotification, words: &FixedWords) -> Alert {
             account_id: mail.account_id,
             message_id: mail.message_id,
         },
+        count: 1,
         title: if sender.is_empty() {
             words.new_message.clone()
         } else {
@@ -1163,12 +1233,27 @@ pub struct FixedWords {
     pub mark_read: String,
     pub archive: String,
     pub delete: String,
+    /// The names of Android's two notification channels: mail that may play
+    /// the new-mail sound, and the rest.
+    pub new_mail_channel: String,
+    pub quiet_mail_channel: String,
 }
 
 /// The window's side: what it shows, the words in its language, and opening
 /// conversations.
 #[path = "notifications/ui.rs"]
 pub(crate) mod ui;
+
+/// The words without the window, for a process that runs without it.
+#[cfg(any(test, background_engine))]
+#[path = "notifications/words.rs"]
+mod words;
+
+/// The mail store without the window, for what Android asks of the app
+/// after its process had ended.
+#[cfg(background_engine)]
+#[path = "notifications/engine.rs"]
+pub mod engine;
 
 #[cfg(test)]
 mod tests {
@@ -1562,6 +1647,7 @@ mod tests {
         let shown = host.shown();
         assert_eq!(shown.len(), 2);
         assert_eq!(shown[0].id, AlertId::Summary { account_id: 1 });
+        assert_eq!(shown[0].count, 4);
         assert_eq!(shown[0].title, "4 new");
         // The newest sender first.
         assert_eq!(shown[0].body, "Ann, Bo");
@@ -1577,6 +1663,7 @@ mod tests {
         // The only mail from a person rings, in the account's own notification.
         assert!(!shown[0].sound);
         assert!(shown[1].sound);
+        assert_eq!(shown[1].count, 1);
     }
 
     #[tokio::test]
@@ -1586,6 +1673,7 @@ mod tests {
         batch.summarized.insert(1, 2);
         let outcomes = present(&host, &NO_SCREEN, batch).await;
         assert_eq!(outcomes, vec![NotificationOutcome::ShownInSummary]);
+        assert_eq!(host.shown()[0].count, 3);
         assert_eq!(host.shown()[0].title, "3 new");
     }
 
@@ -1655,6 +1743,7 @@ mod tests {
             mark_read: "Mark as read".into(),
             archive: "Archive".into(),
             delete: "Delete".into(),
+            ..FixedWords::default()
         };
         let mail = NewMailNotification {
             account_id: 1,
