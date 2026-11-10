@@ -52,7 +52,7 @@ impl Checker for MacSpelling {
         ignored: &[String],
     ) -> Result<Vec<Range<usize>>, String> {
         let (answer, result) = mpsc::sync_channel::<Vec<Range<usize>>>(1);
-        let owned = text.to_owned();
+        let owned = super::checked_text(text, skip);
         on_main(move || {
             let checker = NSSpellChecker::sharedSpellChecker();
             let string = NSString::from_str(&owned);
