@@ -366,6 +366,33 @@ pub fn has_active_move_from(conn: &Connection, message_id: i64, folder_id: i64) 
 }
 
 /// Most recent undoable action (pending or just done, within the window).
+/// Where the first move of `message_id` queued after action `after` takes it
+/// from: its folder, and its UID there when known. Until that move runs, the
+/// server still has the message there, though the local row shows it moved.
+pub fn next_move_source(
+    conn: &Connection,
+    message_id: i64,
+    after: i64,
+) -> Result<Option<(i64, Option<i64>)>> {
+    let payload: Option<String> = conn
+        .query_row(
+            "SELECT payload FROM pending_actions
+             WHERE message_id = ?1 AND id > ?2 AND state IN ('pending', 'inflight')
+               AND kind IN ('archive', 'unarchive', 'trash', 'spam', 'not_spam', 'move')
+             ORDER BY id LIMIT 1",
+            params![message_id, after],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(payload) = payload else {
+        return Ok(None);
+    };
+    let payload: serde_json::Value = parse_json_column(&payload, 0)?;
+    Ok(payload["srcFolderId"]
+        .as_i64()
+        .map(|folder_id| (folder_id, payload["srcUid"].as_i64())))
+}
+
 pub fn last_undoable(conn: &Connection, since_ms: i64) -> Result<Option<PendingAction>> {
     let mut stmt = conn.prepare(
         "SELECT id, account_id, kind, message_id, thread_id, payload, state,

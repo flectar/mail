@@ -272,3 +272,59 @@ async fn undo_and_star_find_a_moved_message_before_its_mailbox_syncs() {
         .unwrap();
     assert_eq!(row.folder_id, Some(1));
 }
+
+/// A star given just before an archive, with both still waiting, reaches the
+/// message where the server still has it: the archive's local move must not
+/// send the star to the Archive mailbox, where the message isn't yet.
+#[tokio::test]
+async fn a_star_waiting_before_an_archive_reaches_the_message() {
+    let temp = tempfile::tempdir().unwrap();
+    let credentials = Arc::new(DevelopmentFileCredentialStore::new(
+        temp.path().join("credentials.json"),
+    ));
+    let core = Core::start_mail_ui_with_credentials(Paths::for_tests(temp.path()), credentials)
+        .await
+        .unwrap();
+    let (config, thread_id) = core
+        .db
+        .write(|conn| {
+            testutil::seed_account(conn);
+            conn.execute_batch(
+                "UPDATE folders SET uidvalidity = 7;
+                 INSERT INTO folders (id, account_id, path, role, uidvalidity)
+                   VALUES (2, 1, 'Archive', 'archive', 7);",
+            )?;
+            let (thread_id, message_id) =
+                testutil::seed_message(conn, "alice@test.dev", "Plans", false);
+            conn.execute(
+                "UPDATE messages SET uid = 5, message_id = 'plans@test.dev' WHERE id = ?1",
+                [message_id],
+            )?;
+            Ok((repo::accounts::get_config(conn, 1)?.unwrap(), thread_id))
+        })
+        .await
+        .unwrap();
+    let server = Server::start(BTreeMap::from([
+        ("INBOX".into(), (6, vec![stored(5, "plans@test.dev", &[])])),
+        ("Archive".into(), (10, Vec::new())),
+    ]))
+    .await;
+    let mut session = server.connect().await;
+    let ctx = core.sync_ctx();
+    let perform = |kind| {
+        core.perform_action(PerformActionArgs {
+            kind,
+            target: ActionTarget::Threads(vec![thread_id]),
+            params: None,
+        })
+    };
+
+    perform(ActionKind::Star).await.unwrap();
+    perform(ActionKind::Archive).await.unwrap();
+    execute_due(&ctx, &config, &mut session).await.unwrap();
+    assert!(server.mailbox("INBOX").is_empty());
+    assert_eq!(
+        server.mailbox("Archive"),
+        [stored(10, "plans@test.dev", &["\\Flagged"])]
+    );
+}
