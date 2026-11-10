@@ -85,31 +85,54 @@ impl Operation {
             _ => false,
         }
     }
-    async fn perform(&self, core: &CoreMailSource, target: MailTarget) -> Result<(), String> {
+    /// What the notice that offers Undo calls it. Permanent deletion,
+    /// labels, copies and moves to another account have none.
+    fn undo_kind(&self) -> Option<&'static str> {
+        let action = match self {
+            Self::Action(action) => action.as_str(),
+            Self::Drop(MailDropDestination::Action(action)) => *action,
+            Self::Drop(MailDropDestination::Folder(_)) => return Some("move"),
+            _ => return None,
+        };
+        match action {
+            "archive" => Some("archive"),
+            "trash" => Some("trash"),
+            "spam" => Some("spam"),
+            "mark_read" => Some("read"),
+            "mark_unread" => Some("unread"),
+            "star" => Some("star"),
+            "unstar" => Some("unstar"),
+            _ => None,
+        }
+    }
+
+    /// Carry it out, returning the actions it queued that Undo can take back.
+    async fn perform(&self, core: &CoreMailSource, target: MailTarget) -> Result<Vec<i64>, String> {
+        let none = |result: Result<(), String>| result.map(|()| Vec::new());
         match self {
             Self::Action(a) => core.perform_message_action(target, a).await,
-            Self::EmptyTrash(account_id) => core.empty_trash(*account_id).await,
-            Self::Label(id, add) => core.perform_label_action(target, *id, *add).await,
+            Self::EmptyTrash(account_id) => none(core.empty_trash(*account_id).await),
+            Self::Label(id, add) => none(core.perform_label_action(target, *id, *add).await),
             Self::Drop(MailDropDestination::Action(a)) => {
                 core.perform_message_action(target, a).await
             }
             Self::Drop(MailDropDestination::Folder(id)) => core.move_to_folder(target, *id).await,
             Self::Drop(MailDropDestination::Transfer(id)) => {
-                core.transfer_to_folder(target, *id, true).await
+                none(core.transfer_to_folder(target, *id, true).await)
             }
             Self::Copy {
                 folder_id,
                 other_account: true,
-            } => core.transfer_to_folder(target, *folder_id, false).await,
+            } => none(core.transfer_to_folder(target, *folder_id, false).await),
             Self::Copy {
                 folder_id,
                 other_account: false,
-            } => core.copy_to_folder(target, *folder_id).await,
+            } => none(core.copy_to_folder(target, *folder_id).await),
             Self::Drop(MailDropDestination::Label(id)) => {
-                core.perform_label_action(target, *id, true).await
+                none(core.perform_label_action(target, *id, true).await)
             }
             Self::Drop(MailDropDestination::Route(tab)) => {
-                core.route_to_tab(target, tab.clone()).await
+                none(core.route_to_tab(target, tab.clone()).await)
             }
         }
     }
@@ -119,11 +142,26 @@ struct ActionRequest {
     epoch: u64,
     operations: Vec<(i32, MailTarget, Operation)>,
 }
+/// A batch Undo can take back, as its notice tells of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct UndoableBatch {
+    /// "archive", "trash", "spam", "move", "read", "unread", "star" or
+    /// "unstar".
+    pub kind: &'static str,
+    /// Whole conversations, rather than single messages.
+    pub conversations: bool,
+    pub count: usize,
+}
+
 struct ActionResult {
     epoch: u64,
     ids: Vec<i32>,
     completed: Vec<i32>,
     moved: Vec<i32>,
+    /// The actions the batch queued, which Undo takes back.
+    action_ids: Vec<i64>,
+    /// Set when every operation was the same undoable one, and all went.
+    undoable: Option<UndoableBatch>,
     error: Option<String>,
     deletion_queued: bool,
     /// Mail started on its way to another account, moving (`true`) or
@@ -322,7 +360,11 @@ pub(super) fn register(
                 None if result.deletion_queued => app.set_render_status(UiMessage::plain(
                     "Permanent deletion queued. Mail will disappear after the server confirms.",
                 )),
-                None => app.set_render_status(UiMessage::plain("Message action completed.")),
+                None => match result.undoable {
+                    // Something Undo can take back: its notice tells of it.
+                    Some(batch) => crate::undo::gesture(&app, result.action_ids, batch),
+                    None => app.set_render_status(UiMessage::plain("Message action completed.")),
+                },
             }
         }
         // Core events accumulated during a batch need only one metadata/list refresh.
@@ -478,13 +520,26 @@ async fn collect_results<F, Fut>(
 ) -> ActionResult
 where
     F: Fn(MailTarget, Operation) -> Fut,
-    Fut: std::future::Future<Output = Result<(), String>>,
+    Fut: std::future::Future<Output = Result<Vec<i64>, String>>,
 {
+    let undo_kind = operations
+        .first()
+        .and_then(|(_, _, operation)| operation.undo_kind())
+        .filter(|kind| {
+            operations
+                .iter()
+                .all(|(_, _, operation)| operation.undo_kind() == Some(*kind))
+        });
+    let conversations = operations
+        .iter()
+        .all(|(_, target, _)| matches!(target, MailTarget::Thread(_)));
     let mut result = ActionResult {
         epoch,
         ids: vec![],
         completed: vec![],
         moved: vec![],
+        action_ids: vec![],
+        undoable: None,
         error: None,
         deletion_queued: false,
         transfer_started: None,
@@ -495,7 +550,8 @@ where
         result.ids.push(id);
         let moves = operation.moves();
         match perform(target, operation).await {
-            Ok(()) => {
+            Ok(action_ids) => {
+                result.action_ids.extend(action_ids);
                 result.deletion_queued |= deletion;
                 result.transfer_started = result.transfer_started.or(transfer);
                 result.completed.push(id);
@@ -507,6 +563,13 @@ where
                 result.error.get_or_insert(error);
             }
         }
+    }
+    if result.error.is_none() && !result.action_ids.is_empty() {
+        result.undoable = undo_kind.map(|kind| UndoableBatch {
+            kind,
+            conversations,
+            count: result.completed.len(),
+        });
     }
     result
 }
@@ -589,7 +652,7 @@ mod tests {
                     if target.thread_id() == 102 {
                         Err("database busy".into())
                     } else {
-                        Ok(())
+                        Ok(vec![target.thread_id() * 10])
                     }
                 }
             },
@@ -599,8 +662,76 @@ mod tests {
         assert_eq!(result.ids, vec![1, 2, 3]);
         assert_eq!(result.completed, vec![1, 3]);
         assert_eq!(result.moved, vec![1]);
+        assert_eq!(result.action_ids, vec![1010, 1030]);
+        // A batch that partly failed offers no Undo.
+        assert_eq!(result.undoable, None);
         assert_eq!(result.error.as_deref(), Some("database busy"));
         assert_eq!(*calls.borrow(), vec![101, 102, 103]);
+    }
+
+    #[tokio::test]
+    async fn a_batch_of_one_undoable_action_offers_undo() {
+        let archive = |id: i64| {
+            (
+                0,
+                MailTarget::Thread(id),
+                Operation::Action("archive".into()),
+            )
+        };
+        let queued = |target: MailTarget, _| async move { Ok(vec![target.thread_id()]) };
+        let result = collect_results(1, vec![archive(1), archive(2)], queued).await;
+        assert_eq!(result.action_ids, vec![1, 2]);
+        assert_eq!(
+            result.undoable,
+            Some(UndoableBatch {
+                kind: "archive",
+                conversations: true,
+                count: 2,
+            })
+        );
+
+        // Single messages moved to a folder.
+        let message = MailTarget::Message {
+            id: 5,
+            thread_id: 4,
+        };
+        let moved = collect_results(
+            1,
+            vec![(0, message, Operation::Drop(MailDropDestination::Folder(9)))],
+            queued,
+        )
+        .await;
+        assert_eq!(
+            moved.undoable,
+            Some(UndoableBatch {
+                kind: "move",
+                conversations: false,
+                count: 1,
+            })
+        );
+
+        // Mixed, or past Undo's reach: no notice.
+        let mixed = collect_results(
+            1,
+            vec![
+                archive(1),
+                (0, MailTarget::Thread(2), Operation::Action("star".into())),
+            ],
+            queued,
+        )
+        .await;
+        assert_eq!(mixed.undoable, None);
+        let deleted = collect_results(
+            1,
+            vec![(
+                0,
+                MailTarget::Thread(1),
+                Operation::Action("delete_permanently".into()),
+            )],
+            queued,
+        )
+        .await;
+        assert_eq!(deleted.undoable, None);
     }
 
     #[tokio::test]
@@ -618,7 +749,7 @@ mod tests {
                 let gate = worker_gate.clone();
                 async move {
                     gate.acquire().await.unwrap().forget();
-                    Ok(())
+                    Ok(Vec::new())
                 }
             },
         ));
