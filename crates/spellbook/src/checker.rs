@@ -5,7 +5,7 @@ use crate::{
         AffData, Affix, AffixKind, CompoundPattern, Pfx, Prefix, Sfx, Suffix, HIDDEN_HOMONYM_FLAG,
     },
     alloc::{fmt, string::String, vec::Vec},
-    classify_casing, erase_chars, AffixingMode, Casing, Dictionary, Flag, FlagSet, Stem, WordList,
+    classify_casing, erase_chars, AffixingMode, Casing, Dictionary, Flag, Flags, WordList,
     AT_COMPOUND_BEGIN, AT_COMPOUND_END, AT_COMPOUND_MIDDLE, FULL_WORD, MAX_WORD_LEN,
 };
 
@@ -192,7 +192,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
         false
     }
 
-    fn spell_casing(&self, word: &str) -> Option<&FlagSet> {
+    fn spell_casing(&self, word: &str) -> Option<Flags<'_>> {
         let casing = classify_casing(word);
         match casing {
             Casing::None | Casing::Camel | Casing::Pascal => {
@@ -228,7 +228,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
         word: &str,
         allow_bad_forceucase: Forceucase,
         hidden_homonym: HiddenHomonym,
-    ) -> Option<&FlagSet> {
+    ) -> Option<Flags<'_>> {
         if let Some(flags) = self.check_simple_word(word, hidden_homonym) {
             return Some(flags);
         }
@@ -237,7 +237,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
             .map(|result| result.flags)
     }
 
-    fn spell_casing_upper(&self, word: &str) -> Option<&FlagSet> {
+    fn spell_casing_upper(&self, word: &str) -> Option<Flags<'_>> {
         // First try the word as-is.
         if let Some(flags) = self.check_word(
             word,
@@ -317,7 +317,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
         .filter(|flags| !has_flag!(flags, self.aff.options.keep_case_flag))
     }
 
-    fn spell_sharps(&self, word: &str) -> Option<&FlagSet> {
+    fn spell_sharps(&self, word: &str) -> Option<Flags<'_>> {
         self.do_spell_sharps(&mut String::from(word), 0, 0, 0)
     }
 
@@ -327,7 +327,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
         position: usize,
         depth: usize,
         replacements: usize,
-    ) -> Option<&FlagSet> {
+    ) -> Option<Flags<'_>> {
         const MAX_DEPTH: usize = 5;
         const SHARP_S_BYTES: &[u8] = "ß".as_bytes();
         debug_assert_eq!(SHARP_S_BYTES.len(), 2);
@@ -372,7 +372,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
         None
     }
 
-    fn spell_casing_title(&self, word: &str) -> Option<&FlagSet> {
+    fn spell_casing_title(&self, word: &str) -> Option<Flags<'_>> {
         // First try the word as-is.
         if let Some(flags) = self.check_word(
             word,
@@ -404,7 +404,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
         &self,
         word: &str,
         hidden_homonym: HiddenHomonym,
-    ) -> Option<&FlagSet> {
+    ) -> Option<Flags<'_>> {
         for (_stem, flags) in self.words.get(word) {
             if has_flag!(flags, self.aff.options.need_affix_flag) {
                 continue;
@@ -509,7 +509,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
                 }
 
                 if !self.is_valid_inside_compound::<MODE>(flags)
-                    && !self.is_valid_inside_compound::<MODE>(&suffix.flags)
+                    && !self.is_valid_inside_compound::<MODE>(Flags::from(&suffix.flags))
                 {
                     continue;
                 }
@@ -570,7 +570,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
                 }
 
                 if !self.is_valid_inside_compound::<MODE>(flags)
-                    && !self.is_valid_inside_compound::<MODE>(&prefix.flags)
+                    && !self.is_valid_inside_compound::<MODE>(Flags::from(&prefix.flags))
                 {
                     continue;
                 }
@@ -607,7 +607,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
         has_flag!(affix.flags, self.aff.options.circumfix_flag)
     }
 
-    fn is_valid_inside_compound<const MODE: AffixingMode>(&self, flags: &FlagSet) -> bool {
+    fn is_valid_inside_compound<const MODE: AffixingMode>(&self, flags: Flags<'_>) -> bool {
         let is_compound = has_flag!(flags, self.aff.options.compound_flag);
 
         match MODE {
@@ -703,8 +703,8 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
                     }
 
                     if !self.is_valid_inside_compound::<MODE>(flags)
-                        && !self.is_valid_inside_compound::<MODE>(&suffix.flags)
-                        && !self.is_valid_inside_compound::<MODE>(&prefix.flags)
+                        && !self.is_valid_inside_compound::<MODE>(Flags::from(&suffix.flags))
+                        && !self.is_valid_inside_compound::<MODE>(Flags::from(&prefix.flags))
                     {
                         continue;
                     }
@@ -1625,7 +1625,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
                     part1_entry,
                 );
             }
-            let part2_word = part2_entry.stem.as_ref();
+            let part2_word = part2_entry.stem;
             if word
                 .get(i..)
                 .is_some_and(|tail| tail.starts_with(part2_word))
@@ -1789,7 +1789,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
                 return None;
             }
 
-            let part2_word = part2_entry.stem.as_ref();
+            let part2_word = part2_entry.stem;
             if word
                 .get(i..)
                 .is_some_and(|tail| tail.starts_with(part2_word))
@@ -1986,7 +1986,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
         syllables.max(1) as u16
     }
 
-    fn calculate_syllable_modifier<const MODE: AffixingMode>(&self, flags: &FlagSet) -> i16 {
+    fn calculate_syllable_modifier<const MODE: AffixingMode>(&self, flags: Flags<'_>) -> i16 {
         // TODO: what do these flags mean?
         let subtract_syllable = MODE == AT_COMPOUND_END
             && !self.aff.compound_syllable_vowels.is_empty()
@@ -1998,7 +1998,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
 
     fn calculate_syllable_modifier_with_suffix<const MODE: AffixingMode>(
         &self,
-        flags: &FlagSet,
+        flags: Flags<'_>,
         suffix: &Suffix,
     ) -> i16 {
         if MODE != AT_COMPOUND_END || self.aff.compound_syllable_vowels.is_empty() {
@@ -2108,7 +2108,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
     fn check_compound_with_rules_impl(
         &self,
         word: &str,
-        words_data: &mut Vec<&'a FlagSet>,
+        words_data: &mut Vec<Flags<'a>>,
         start_pos: usize,
         forceucase: Forceucase,
     ) -> Option<CompoundingResult<'_>> {
@@ -2136,7 +2136,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
             let Some((part1_stem, part1_flags)) =
                 self.words.get(&word[start_pos..i]).find(|(_stem, flags)| {
                     !has_flag!(flags, self.aff.options.need_affix_flag)
-                        && self.aff.compound_rules.has_any_flags(flags)
+                        && self.aff.compound_rules.has_any_flags(*flags)
                 })
             else {
                 continue;
@@ -2147,7 +2147,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
             let direct_match = if let Some((_part2_stem, part2_flags)) =
                 self.words.get(&word[i..]).find(|(_stem, flags)| {
                     !has_flag!(flags, self.aff.options.need_affix_flag)
-                        && self.aff.compound_rules.has_any_flags(flags)
+                        && self.aff.compound_rules.has_any_flags(*flags)
                 }) {
                 words_data.push(part2_flags);
                 let ok = self.aff.compound_rules.any_rule_matches(words_data)
@@ -2333,8 +2333,8 @@ impl HiddenHomonym {
 // Similar to Nuspell's AffixingResult
 #[derive(Debug)]
 pub(crate) struct AffixForm<'aff> {
-    stem: &'aff Stem,
-    flags: &'aff FlagSet,
+    stem: &'aff str,
+    flags: Flags<'aff>,
     // Up to 2 prefixes and/or 2 suffixes allowed.
     prefixes: [Option<&'aff Prefix>; 2],
     suffixes: [Option<&'aff Suffix>; 2],
@@ -2343,15 +2343,15 @@ pub(crate) struct AffixForm<'aff> {
 // TODO: docs.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct CompoundingResult<'aff> {
-    stem: &'aff Stem,
-    flags: &'aff FlagSet,
+    stem: &'aff str,
+    flags: Flags<'aff>,
     num_words_modifier: u16,
     num_syllable_modifier: i16,
     affixed_and_modified: bool,
 }
 
 impl<'aff> CompoundingResult<'aff> {
-    pub fn new(stem: &'aff Stem, flags: &'aff FlagSet) -> Self {
+    pub fn new(stem: &'aff str, flags: Flags<'aff>) -> Self {
         Self {
             stem,
             flags,

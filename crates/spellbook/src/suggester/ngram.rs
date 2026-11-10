@@ -34,7 +34,7 @@ use core::slice;
 use crate::alloc::{collections::BinaryHeap, string::String, vec::Vec};
 
 use crate::aff::{CaseHandling, HIDDEN_HOMONYM_FLAG, MAX_SUGGESTIONS};
-use crate::{FlagSet, FULL_WORD};
+use crate::{Flags, FULL_WORD};
 
 use super::Suggester;
 
@@ -86,7 +86,7 @@ impl<S: BuildHasher> Suggester<'_, S> {
             {
                 continue;
             }
-            let stem = CharsStr::new(stem.as_str(), &mut stem_buf);
+            let stem = CharsStr::new(stem, &mut stem_buf);
             let mut score =
                 left_common_substring_length(&self.checker.aff.options.case_handling, word, stem)
                     as isize;
@@ -151,7 +151,7 @@ impl<S: BuildHasher> Suggester<'_, S> {
         {
             expanded_cross_affix.clear();
             self.expand_stem_for_ngram(
-                stem.as_str(),
+                stem,
                 flags,
                 word_str,
                 &mut expanded_list,
@@ -294,7 +294,7 @@ impl<S: BuildHasher> Suggester<'_, S> {
     fn expand_stem_for_ngram(
         &self,
         stem: &str,
-        flags: &FlagSet,
+        flags: Flags<'_>,
         word: &str,
         expanded_list: &mut Vec<String>,
         cross_affix: &mut Vec<bool>,

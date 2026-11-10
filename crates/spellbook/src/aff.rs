@@ -7,7 +7,7 @@ use crate::{
         string::{String, ToString},
         vec::Vec,
     },
-    AffixingMode, Flag, FlagSet, AT_COMPOUND_BEGIN, AT_COMPOUND_END, FULL_WORD,
+    AffixingMode, Flag, FlagSet, Flags, AT_COMPOUND_BEGIN, AT_COMPOUND_END, FULL_WORD,
 };
 
 use core::{marker::PhantomData, num::NonZeroU16, str::Chars};
@@ -842,7 +842,7 @@ pub(crate) enum CompoundRuleModifier {
 
 type CompoundRule = Box<[CompoundRuleElement]>;
 
-fn compound_rule_matches(pattern: &[CompoundRuleElement], data: &[&FlagSet]) -> bool {
+fn compound_rule_matches(pattern: &[CompoundRuleElement], data: &[Flags<'_>]) -> bool {
     use crate::alloc::vec;
     use CompoundRuleModifier::*;
 
@@ -926,8 +926,8 @@ impl CompoundRuleTable {
     /// Checks whether the given flagset has any flags in common with flags used in any compound
     /// rule.
     #[inline]
-    pub fn has_any_flags(&self, flagset: &FlagSet) -> bool {
-        self.all_flags.has_intersection(flagset)
+    pub fn has_any_flags(&self, flagset: Flags<'_>) -> bool {
+        flagset.has_intersection(&self.all_flags)
     }
 
     /// Checks whether any rule in the compound table matches the sequence of flagsets.
@@ -941,7 +941,7 @@ impl CompoundRuleTable {
     /// digit, `*` meaning as many of those as you want (including none) and then a required `1`
     /// flag and `t` flag - which match the input. compound_rule_matches tries different
     /// interpretations of the modifiers to check if the pattern matches.
-    pub fn any_rule_matches(&self, flagsets: &[&FlagSet]) -> bool {
+    pub fn any_rule_matches(&self, flagsets: &[Flags<'_>]) -> bool {
         self.rules
             .iter()
             .any(|rule| compound_rule_matches(rule, flagsets))
@@ -1660,7 +1660,7 @@ mod test {
 
     fn compound_rule_matches(pattern: &[CompoundRuleElement], data: &str) -> bool {
         let flagsets: Vec<_> = data.chars().map(|ch| flagset!(ch)).collect();
-        let borrowed: Vec<_> = flagsets.iter().collect();
+        let borrowed: Vec<_> = flagsets.iter().map(Flags::from).collect();
         super::compound_rule_matches(pattern, &borrowed)
     }
 

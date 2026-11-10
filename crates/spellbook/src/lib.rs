@@ -27,17 +27,18 @@ pub(crate) mod checker;
 mod hash_bag;
 mod suggester;
 mod umbra_slice;
+mod word_list;
 
 pub use aff::parser::{
     ParseDictionaryError, ParseDictionaryErrorKind, ParseDictionaryErrorSource, ParseFlagError,
 };
 pub use checker::Checker;
 pub use suggester::Suggester;
+pub use word_list::WordIndexError;
 
 use crate::alloc::{borrow::Cow, slice, string::String, vec::Vec};
 use aff::AffData;
 use core::{cmp::Ordering, fmt, hash::BuildHasher};
-use hash_bag::HashBag;
 
 /// Default hasher for hash tables.
 ///
@@ -67,7 +68,7 @@ type Stem = umbra_slice::UmbraString;
 /// Each line in a dictionary's `.dic` file is parsed and inserted into the hash bag. The word
 /// list is central to checking. In a nutshell the checking procedure is to try to find an edit of
 /// the input word's casing and prefixes/suffixes that produces a word in this hash table.
-type WordList<S> = HashBag<Stem, FlagSet, S>;
+use word_list::WordList;
 
 /// A data structure allowing for fast lookup of words in a dictionary.
 ///
@@ -113,6 +114,8 @@ type WordList<S> = HashBag<Stem, FlagSet, S>;
 pub struct Dictionary<S = DefaultHashBuilder> {
     words: WordList<S>,
     aff_data: AffData,
+    /// Ties a word index written by [`Dictionary::word_index`] to this `.aff` file.
+    aff_hash: u64,
 }
 
 #[cfg(feature = "default-hasher")]
@@ -162,7 +165,65 @@ impl<S: BuildHasher + Clone> Dictionary<S> {
         build_hasher: S,
     ) -> Result<Self, ParseDictionaryError> {
         let (words, aff_data) = aff::parser::parse(aff, dic, build_hasher)?;
-        Ok(Self { words, aff_data })
+        Ok(Self {
+            words,
+            aff_data,
+            aff_hash: word_list::aff_hash(aff),
+        })
+    }
+
+    /// Initializes a dictionary whose stems are read in place from `index`, a word index that
+    /// [`Dictionary::word_index`] wrote for the same `.aff` file.
+    ///
+    /// Only the `.aff` file is parsed into memory. `index` is usually a memory-mapped file, so
+    /// the word list occupies page cache rather than heap, and opening the dictionary takes
+    /// about as long as parsing its `.aff` file. Words given to [`Dictionary::add`] are kept in
+    /// memory as usual, and [`Dictionary::remove_stem`] only affects those.
+    pub fn new_with_word_index_and_hasher(
+        aff: &str,
+        index: impl AsRef<[u8]> + Send + Sync + 'static,
+        build_hasher: S,
+    ) -> Result<Self, OpenWordIndexError> {
+        let (mut words, aff_data) =
+            aff::parser::parse(aff, "0", build_hasher).map_err(OpenWordIndexError::Affix)?;
+        let aff_hash = word_list::aff_hash(aff);
+        let index = word_list::WordIndex::new(alloc::boxed::Box::new(index), aff_hash)
+            .map_err(OpenWordIndexError::Index)?;
+        words.set_index(index);
+        Ok(Self {
+            words,
+            aff_data,
+            aff_hash,
+        })
+    }
+}
+
+#[cfg(feature = "default-hasher")]
+impl Dictionary<DefaultHashBuilder> {
+    /// Like [`Dictionary::new_with_word_index_and_hasher`], with the default hasher.
+    pub fn new_with_word_index(
+        aff: &str,
+        index: impl AsRef<[u8]> + Send + Sync + 'static,
+    ) -> Result<Self, OpenWordIndexError> {
+        Self::new_with_word_index_and_hasher(aff, index, DefaultHashBuilder::default())
+    }
+}
+
+/// Why [`Dictionary::new_with_word_index`] failed.
+#[derive(Debug)]
+pub enum OpenWordIndexError {
+    /// The `.aff` file could not be parsed.
+    Affix(ParseDictionaryError),
+    /// The word index could not be read with this `.aff` file.
+    Index(WordIndexError),
+}
+
+impl fmt::Display for OpenWordIndexError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Affix(error) => fmt::Display::fmt(error, f),
+            Self::Index(error) => fmt::Display::fmt(error, f),
+        }
     }
 }
 
@@ -187,6 +248,12 @@ impl<S: BuildHasher> Dictionary<S> {
     /// ```
     pub fn check(&self, word: &str) -> bool {
         self.checker().check(word)
+    }
+
+    /// This dictionary's word list in the format [`Dictionary::new_with_word_index`] reads,
+    /// tied to the `.aff` file the dictionary was parsed with.
+    pub fn word_index(&self) -> Vec<u8> {
+        self.words.to_index(self.aff_hash)
     }
 
     /// Creates a [Checker] that borrows this dictionary.
@@ -409,6 +476,107 @@ impl FlagSet {
     }
 }
 
+/// The flags of one stem, borrowed from parsed words or from a word index.
+#[derive(Clone, Copy)]
+pub(crate) struct Flags<'a>(FlagsRepr<'a>);
+
+#[derive(Clone, Copy)]
+enum FlagsRepr<'a> {
+    Parsed(&'a FlagSet),
+    /// Sorted little-endian flags from a word index.
+    Indexed(&'a [u8]),
+}
+
+impl<'a> From<&'a FlagSet> for Flags<'a> {
+    fn from(flags: &'a FlagSet) -> Self {
+        Self(FlagsRepr::Parsed(flags))
+    }
+}
+
+impl<'a> Flags<'a> {
+    pub(crate) fn from_le_bytes(bytes: &'a [u8]) -> Self {
+        Self(FlagsRepr::Indexed(bytes))
+    }
+
+    /// Checks whether the given flag is contained in the flagset.
+    #[inline]
+    pub fn contains(&self, flag: &Flag) -> bool {
+        match self.0 {
+            FlagsRepr::Parsed(flags) => flags.contains(flag),
+            FlagsRepr::Indexed(bytes) => {
+                let wanted = flag.get();
+                let (mut low, mut high) = (0, bytes.len() / 2);
+                while low < high {
+                    let middle = low + (high - low) / 2;
+                    let value = u16::from_le_bytes([bytes[2 * middle], bytes[2 * middle + 1]]);
+                    match value.cmp(&wanted) {
+                        Ordering::Less => low = middle + 1,
+                        Ordering::Greater => high = middle,
+                        Ordering::Equal => return true,
+                    }
+                }
+                false
+            }
+        }
+    }
+
+    pub fn iter(&self) -> FlagsIter<'a> {
+        match self.0 {
+            FlagsRepr::Parsed(flags) => FlagsIter::Parsed(flags.iter()),
+            FlagsRepr::Indexed(bytes) => FlagsIter::Indexed(bytes.chunks_exact(2)),
+        }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.iter().next().is_none()
+    }
+
+    /// Returns `true` if both sets have at least one element in common.
+    pub fn has_intersection(&self, other: &FlagSet) -> bool {
+        match self.0 {
+            FlagsRepr::Parsed(flags) => flags.has_intersection(other),
+            FlagsRepr::Indexed(_) => self.iter().any(|flag| other.contains(&flag)),
+        }
+    }
+}
+
+pub(crate) enum FlagsIter<'a> {
+    Parsed(slice::Iter<'a, Flag>),
+    Indexed(core::slice::ChunksExact<'a, u8>),
+}
+
+impl Iterator for FlagsIter<'_> {
+    type Item = Flag;
+
+    fn next(&mut self) -> Option<Flag> {
+        match self {
+            Self::Parsed(flags) => flags.next().copied(),
+            // Zero is never a flag; one would only come from a damaged index.
+            Self::Indexed(chunks) => {
+                chunks.find_map(|pair| Flag::new(u16::from_le_bytes([pair[0], pair[1]])))
+            }
+        }
+    }
+}
+
+impl PartialEq for Flags<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+
+impl Eq for Flags<'_> {}
+
+impl fmt::Debug for Flags<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "flagset!{:?}",
+            self.iter().collect::<Vec<_>>()
+        ))
+    }
+}
+
 impl fmt::Debug for FlagSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("flagset!{:?}", self.0.as_slice()))
@@ -515,6 +683,70 @@ static EN_US: once_cell::sync::Lazy<Dictionary> =
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn word_index_checks_and_suggests_like_parsed_words() {
+        use alloc::string::ToString;
+        let indexed = Dictionary::new_with_word_index(EN_US_AFF, EN_US.word_index()).unwrap();
+        assert_eq!(indexed.words.len(), EN_US.words.len());
+        for (stem, _) in EN_US.words.iter() {
+            let mut swapped: Vec<char> = stem.chars().collect();
+            if swapped.len() > 2 {
+                swapped.swap(0, 1);
+            }
+            for word in [
+                stem.to_string(),
+                stem.to_uppercase(),
+                EN_US.aff_data.options.case_handling.titlecase(stem),
+                swapped.into_iter().collect(),
+                alloc::format!("{stem}q"),
+            ] {
+                assert_eq!(EN_US.check(&word), indexed.check(&word), "{word:?}");
+            }
+        }
+        // Ngram suggestion keeps the best-scoring stems in word list order, which a parsed list
+        // takes from its randomly seeded hasher. So tied suggestions come in any order, and a
+        // tie at the cut-off can even change the set from run to run (as for "untill", which
+        // gets "untimely" with about half the seeds). These words give the same set with any
+        // seed.
+        let (mut expected, mut actual) = (Vec::new(), Vec::new());
+        for word in [
+            "recieve",
+            "definately",
+            "seperate",
+            "acommodate",
+            "teh",
+            "wierd",
+            "Thursady",
+            "occured",
+            "becuase",
+            "goverment",
+            "tommorow",
+            "begining",
+            "beleive",
+            "existance",
+        ] {
+            EN_US.suggest(word, &mut expected);
+            indexed.suggest(word, &mut actual);
+            expected.sort_unstable();
+            actual.sort_unstable();
+            assert_eq!(expected, actual, "{word:?}");
+        }
+        EN_US.suggest("untill", &mut expected);
+        indexed.suggest("untill", &mut actual);
+        assert_eq!(expected.first(), actual.first());
+
+        // Added words work on top of an index, and stay out of it.
+        let mut indexed = indexed;
+        assert!(!indexed.check("Flectar"));
+        indexed.add("Flectar").unwrap();
+        assert!(indexed.check("Flectar"));
+        assert_eq!(indexed.word_index(), {
+            let mut parsed = EN_US.clone();
+            parsed.add("Flectar").unwrap();
+            parsed.word_index()
+        });
+    }
 
     macro_rules! flag {
         ( $x:expr ) => {{

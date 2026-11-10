@@ -39,28 +39,32 @@ fn do_check_case(case: &str) {
     let path = manifest_path.join("tests/legacy").join(case);
     let aff = read_to_string(path.with_extension("aff")).unwrap();
     let dic = read_to_string(path.with_extension("dic")).unwrap();
-    let dict = Dictionary::new(&aff, &dic).unwrap();
+    let parsed = Dictionary::new(&aff, &dic).unwrap();
+    // The same words read in place from a word index must check the same.
+    let indexed = Dictionary::new_with_word_index(&aff, parsed.word_index()).unwrap();
 
-    for good_word in fs::read_to_string(path.with_extension("good"))
-        .iter()
-        .flat_map(|text| text.lines())
-    {
-        let word = good_word.trim();
-        assert!(
-            dict.check(word),
-            "expected {word:?} to be correct but it was incorrect"
-        );
-    }
+    for (source, dict) in [("parsed", &parsed), ("indexed", &indexed)] {
+        for good_word in fs::read_to_string(path.with_extension("good"))
+            .iter()
+            .flat_map(|text| text.lines())
+        {
+            let word = good_word.trim();
+            assert!(
+                dict.check(word),
+                "{source}: expected {word:?} to be correct but it was incorrect"
+            );
+        }
 
-    for wrong_word in fs::read_to_string(path.with_extension("wrong"))
-        .iter()
-        .flat_map(|text| text.lines())
-    {
-        let word = wrong_word.trim();
-        assert!(
-            !dict.check(word),
-            "expected {word:?} to be incorrect but it was correct"
-        );
+        for wrong_word in fs::read_to_string(path.with_extension("wrong"))
+            .iter()
+            .flat_map(|text| text.lines())
+        {
+            let word = wrong_word.trim();
+            assert!(
+                !dict.check(word),
+                "{source}: expected {word:?} to be incorrect but it was correct"
+            );
+        }
     }
 }
 
@@ -202,8 +206,14 @@ fn do_suggest_case(case: &str) {
     let path = manifest_path.join("tests/legacy").join(case);
     let aff = read_to_string(path.with_extension("aff")).unwrap();
     let dic = read_to_string(path.with_extension("dic")).unwrap();
-    let dict = Dictionary::new(&aff, &dic).unwrap();
+    let parsed = Dictionary::new(&aff, &dic).unwrap();
+    let indexed = Dictionary::new_with_word_index(&aff, parsed.word_index()).unwrap();
+    for (source, dict) in [("parsed", &parsed), ("indexed", &indexed)] {
+        suggest_case(&path, source, dict);
+    }
+}
 
+fn suggest_case(path: &Path, source: &str, dict: &Dictionary) {
     let mut list_sugs = Vec::new();
     let mut sugs = Vec::new();
     for word in fs::read_to_string(path.with_extension("wrong"))
@@ -213,7 +223,7 @@ fn do_suggest_case(case: &str) {
     {
         assert!(
             !dict.check(word),
-            "word {word:?} was in the .wrong file but was actually correct"
+            "{source}: word {word:?} was in the .wrong file but was actually correct"
         );
 
         dict.suggest(word, &mut sugs);
@@ -237,7 +247,7 @@ fn do_suggest_case(case: &str) {
 
     assert_eq!(
         expected_list_sugs, list_sugs,
-        "(left: expected, right: actual)"
+        "{source} (left: expected, right: actual)"
     );
 }
 

@@ -351,7 +351,11 @@ extern "C" {
     ///
     /// Returns 0 for equal, < 0 for less than and > 0 for greater
     /// than.
-    fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> core::ffi::c_int;
+    fn memcmp(
+        s1: *const core::ffi::c_void,
+        s2: *const core::ffi::c_void,
+        n: usize,
+    ) -> core::ffi::c_int;
 }
 
 // This is a polyfill for `core::ptr::from_ref` introduced in Rust 1.76.0.
