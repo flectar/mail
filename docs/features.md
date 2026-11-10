@@ -225,6 +225,21 @@ its words into the app's cache. Each check then reads them from that file and
 lets go when it's done, and closing the last message lets go of the rest.
 Windows, macOS, Android and iOS don't check spelling yet.
 
+## Undo send
+
+When you send a message, its composer closes and the message waits ten seconds
+before it leaves, while a notice at the bottom of the window says **Sending
+message…** with **Undo**. Undo, or Ctrl+Z (Command-Z on a Mac) while the notice
+shows, takes the message back and opens it again as the draft it was,
+attachments included. Choose 5, 10, 20 or 30 seconds, or turn the delay off,
+with **Undo send** in Settings → General. With it off, the composer stays open
+until the message is sent, and keeps it to fix if sending fails.
+
+If a message can't be sent, the notice says why, the message stays in Drafts,
+and **Open draft** brings it back to fix and send again. Quitting Flectar Mail
+during the delay sends the waiting messages right away rather than at the next
+start.
+
 ## Storage and backups
 
 Settings → Storage shows how much space mail, attachments, offline files, and
