@@ -140,6 +140,8 @@ impl From<WarmStartMessage> for mail::MailMessage {
             attachments: Vec::new(),
             body_pending: true,
             sender_verification: message.sender_verification,
+            // The banner waits for the message itself.
+            can_unsubscribe: false,
             verification_code: None,
             account_uses_labels: message.account_uses_labels,
             first_attachment: None,
@@ -1267,6 +1269,7 @@ mod warm_start_tests {
             attachments: Vec::new(),
             body_pending: false,
             sender_verification: "domain".into(),
+            can_unsubscribe: false,
             verification_code: Some("48291375".into()),
             account_uses_labels: true,
             first_attachment: Some(flectar_mail_core::models::AttachmentMeta {

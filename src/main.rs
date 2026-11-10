@@ -89,6 +89,7 @@ mod theme;
 mod ui_dispatch;
 mod ui_message;
 mod undo;
+mod unsubscribe;
 mod updates;
 mod window_chrome;
 mod window_controller;
@@ -6081,6 +6082,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
     mailto_links::install(&app, composers);
     undo::install(&app, &state, &runtime);
+    unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);
     notifications::ui::attach(&app, &state, &runtime, platform.notifications.clone());

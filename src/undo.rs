@@ -34,6 +34,8 @@ enum Shown {
     Send { action_id: i64, draft_id: i64 },
     /// The actions of one archive, move, deletion or change of marks.
     Gesture { action_ids: Vec<i64> },
+    /// News with nothing to take back.
+    Note,
 }
 
 struct Undo {
@@ -132,6 +134,12 @@ pub(super) fn gesture(app: &AppWindow, action_ids: Vec<i64>, batch: UndoableBatc
             Some(GESTURE_NOTICE_FOR),
         );
     });
+}
+
+/// Tell of something done that cannot be taken back here, such as leaving
+/// a mailing list.
+pub(super) fn tell(app: &AppWindow, message: UiMessage) {
+    with_undo(|undo| undo.show(app, Shown::Note, message, "", Some(ANSWER_NOTICE_FOR)));
 }
 
 /// What the notice says of a batch.
