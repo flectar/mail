@@ -144,12 +144,10 @@ impl ComposeSession {
             );
             (document.text().to_owned(), skip, document.revision())
         };
-        // Each message's first check lists the dictionaries installed now.
-        if self.spelling.checked.get().is_none() {
-            spelling.refresh_languages();
-        }
+        // Each message's first check lists the languages installed now.
+        let relist = self.spelling.checked.get().is_none();
         let ignored = self.spelling.ignored.borrow().clone();
-        let Some(task) = spelling.check(text, skip, ignored) else {
+        let Some(task) = spelling.check(text, skip, ignored, relist) else {
             return;
         };
         self.spelling.running.set(true);
@@ -168,7 +166,13 @@ impl ComposeSession {
                 return;
             }
             match result {
-                Ok(Ok(found)) => {
+                Ok(Ok(checked)) => {
+                    if let Some(installed) = checked.installed
+                        && let Some(spelling) = crate::spelling::service()
+                    {
+                        spelling.set_installed(installed);
+                    }
+                    let found = checked.found;
                     *session.spelling.found.borrow_mut() = Some((revision, found.clone()));
                     session.show_misspellings(Some((revision, found)));
                 }
@@ -204,7 +208,8 @@ impl ComposeSession {
     }
 
     /// The user asked for the editor menu at a point of the editor, or with the keyboard at
-    /// the caret. It opens once the corrections for the word there, if misspelled, are ready.
+    /// the caret. It opens once the languages are listed again and the corrections for the word
+    /// there, if misspelled, are found, both off the UI thread.
     pub(super) fn open_editor_menu(&self, point: Option<(f32, f32)>) {
         let Some(host) = self.host() else {
             return;
@@ -215,12 +220,8 @@ impl ComposeSession {
         *self.spelling.menu_word.borrow_mut() = None;
         ui.set_spelling_word("".into());
         ui.set_spelling_suggestions(ModelRc::default());
-        let spelling = crate::spelling::service();
-        if let Some(spelling) = &spelling {
-            spelling.refresh_languages();
-            self.list_spelling_languages(&ui, spelling);
-        }
         apply_spelling_state(&ui);
+        let spelling = crate::spelling::service().filter(|spelling| spelling.available());
         let word = spelling.as_ref().filter(|s| s.enabled()).and_then(|_| {
             let document = self.document.borrow();
             let mut editor = self.editor.borrow_mut();
@@ -231,28 +232,40 @@ impl ComposeSession {
             let word = document.text().get(range.clone())?.to_owned();
             Some((document.revision(), range, word))
         });
-        let (Some(spelling), Some((revision, range, word))) = (spelling, word) else {
-            ui.set_editor_menu_serial(ui.get_editor_menu_serial().wrapping_add(1));
-            return;
+        let languages = spelling
+            .as_ref()
+            .and_then(|spelling| spelling.list_languages());
+        let corrections = match (&spelling, &word) {
+            (Some(spelling), Some((_, _, word))) => spelling.suggest(word.clone()),
+            _ => None,
         };
-        ui.set_spelling_word(word.as_str().into());
-        let Some(task) = spelling.suggest(word.clone()) else {
-            ui.set_editor_menu_serial(ui.get_editor_menu_serial().wrapping_add(1));
-            return;
-        };
+        if let Some((_, _, word)) = &word {
+            ui.set_spelling_word(word.as_str().into());
+        }
+        let aborts: Vec<_> = languages
+            .iter()
+            .map(|task| task.abort_handle())
+            .chain(corrections.iter().map(|task| task.abort_handle()))
+            .collect();
         let session = self.this.clone();
-        let abort = task.abort_handle();
         if slint::spawn_local(async move {
-            let suggestions = match task.await {
-                Ok(Ok(mut suggestions)) => {
-                    suggestions.truncate(MAX_SUGGESTIONS);
-                    suggestions
-                }
-                Ok(Err(error)) => {
-                    tracing::warn!(%error, "no spelling suggestions");
-                    Vec::new()
-                }
-                Err(_) => Vec::new(),
+            let installed = match languages {
+                Some(task) => task.await.ok(),
+                None => None,
+            };
+            let suggestions = match corrections {
+                Some(task) => match task.await {
+                    Ok(Ok(mut suggestions)) => {
+                        suggestions.truncate(MAX_SUGGESTIONS);
+                        suggestions
+                    }
+                    Ok(Err(error)) => {
+                        tracing::warn!(%error, "no spelling suggestions");
+                        Vec::new()
+                    }
+                    Err(_) => Vec::new(),
+                },
+                None => Vec::new(),
             };
             let Some(session) = session.upgrade() else {
                 return;
@@ -264,19 +277,30 @@ impl ComposeSession {
                 return;
             };
             let ui = host.ui();
-            let model: Vec<SharedString> = suggestions.iter().map(|s| s.as_str().into()).collect();
-            ui.set_spelling_suggestions(ModelRc::new(VecModel::from(model)));
-            *session.spelling.menu_word.borrow_mut() = Some(MenuWord {
-                revision,
-                range,
-                word,
-                suggestions,
-            });
+            if let Some(spelling) = crate::spelling::service() {
+                if let Some(installed) = installed {
+                    spelling.set_installed(installed);
+                }
+                session.list_spelling_languages(&ui, &spelling);
+            }
+            if let Some((revision, range, word)) = word {
+                let model: Vec<SharedString> =
+                    suggestions.iter().map(|s| s.as_str().into()).collect();
+                ui.set_spelling_suggestions(ModelRc::new(VecModel::from(model)));
+                *session.spelling.menu_word.borrow_mut() = Some(MenuWord {
+                    revision,
+                    range,
+                    word,
+                    suggestions,
+                });
+            }
             ui.set_editor_menu_serial(ui.get_editor_menu_serial().wrapping_add(1));
         })
         .is_err()
         {
-            abort.abort();
+            for abort in aborts {
+                abort.abort();
+            }
         }
     }
 
@@ -294,6 +318,7 @@ impl ComposeSession {
             .map(|(language, _)| language.id)
             .collect();
         ui.set_spelling_languages(ModelRc::new(VecModel::from(rows)));
+        ui.set_spelling_languages_automatic(spelling.picks_languages());
     }
 
     /// Where the menu's word is now, if it is still there as the menu found it.
