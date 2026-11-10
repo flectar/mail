@@ -23,6 +23,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(code) = flectar_mail::pdf_preview::run_worker_if_requested() {
         std::process::exit(code);
     }
+    #[cfg(linux_desktop)]
+    if let Some(code) = flectar_mail::spelling::run_index_worker_if_requested() {
+        std::process::exit(code);
+    }
     flectar_mail::run_desktop(flectar_mail::platform::launch_context()?)
 }
 

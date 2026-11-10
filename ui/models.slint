@@ -303,6 +303,12 @@ export struct ComposeEditorTile {
     height: float,
 }
 
+// A language spelling can be checked in, as the editor menu lists it.
+export struct SpellingLanguage {
+    name: string,
+    checked: bool,
+}
+
 export struct EmailTemplateRow {
     id: int,
     name: string,

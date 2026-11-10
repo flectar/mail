@@ -1303,10 +1303,17 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn set_account_sent_copy_policy(&self, account_id: i64, value: &str) -> Result<(), String> {
+    pub async fn set_account_sent_copy_policy(
+        &self,
+        account_id: i64,
+        value: &str,
+    ) -> Result<(), String> {
         let policy = flectar_mail_core::models::SentCopyPolicy::from_storage(value)
             .ok_or_else(|| format!("unsupported Sent copy policy: {value}"))?;
-        self.core.set_account_sent_copy_policy(account_id, policy).await.map_err(|e| e.to_string())
+        self.core
+            .set_account_sent_copy_policy(account_id, policy)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     pub async fn set_mark_read_on_open(&self, enabled: bool) -> Result<(), String> {
@@ -1437,6 +1444,20 @@ impl CoreMailSource {
     pub async fn set_show_avatars(&self, enabled: bool) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.show_avatars = enabled;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_spelling(
+        &self,
+        enabled: bool,
+        languages: Option<Vec<String>>,
+    ) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.spelling_enabled = enabled;
+        settings.spelling_languages = languages;
         self.core
             .set_settings(settings)
             .await
@@ -2321,12 +2342,12 @@ fn append_folder_tree<'a>(
             can_rename: folder.can_rename,
             can_delete: folder.can_delete,
             label,
-            scope: Some(standard_mailbox.map_or(Scope::Folder(folder.id), |mailbox| {
-                Scope::Account {
+            scope: Some(
+                standard_mailbox.map_or(Scope::Folder(folder.id), |mailbox| Scope::Account {
                     account_id: folder.account_id,
                     mailbox,
-                }
-            })),
+                }),
+            ),
             context: account_label.to_owned(),
             detail: String::new(),
             avatar: String::new(),
@@ -2821,13 +2842,15 @@ fn validated_startup_scope(
     let scope = match preferred {
         Scope::Unified(_) | Scope::Important | Scope::Other => Some(preferred),
         // A label can move between sections, e.g. when it becomes automatic.
-        Scope::Label { id, .. } => labels
-            .iter()
-            .find(|label| label.id == id)
-            .map(|label| Scope::Label {
-                kind: LabelKind::of(label.is_auto, label.owner_account_id),
-                id,
-            }),
+        Scope::Label { id, .. } => {
+            labels
+                .iter()
+                .find(|label| label.id == id)
+                .map(|label| Scope::Label {
+                    kind: LabelKind::of(label.is_auto, label.owner_account_id),
+                    id,
+                })
+        }
         Scope::Folder(_) => mailbox_entries(accounts, folders, local_mail)
             .iter()
             .any(|mailbox| mailbox.scope == Some(preferred))
@@ -4542,7 +4565,10 @@ mod account_removal_snapshot_tests {
         .unwrap();
         seed(&source).await;
         let before = source.load_account_snapshot().await.unwrap();
-        let metadata = source.load_mail_metadata(Scope::UNIFIED_INBOX).await.unwrap();
+        let metadata = source
+            .load_mail_metadata(Scope::UNIFIED_INBOX)
+            .await
+            .unwrap();
         let page = source
             .load_page(Scope::UNIFIED_INBOX, "", None, 50, false)
             .await

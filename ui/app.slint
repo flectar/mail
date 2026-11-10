@@ -315,6 +315,7 @@ export global I18n {
         if (key == "Tabs preference updated for this session.") { return @tr("Tabs preference updated for this session."); }
         if (key == "Tabs preference saved.") { return @tr("Tabs preference saved."); }
         if (key == "Could not save tabs preference: {}") { return @tr("Could not save tabs preference: {}", argument); }
+        if (key == "Could not save spelling preference: {}") { return @tr("Could not save spelling preference: {}", argument); }
         if (key == "At most {} tabs can be open. Close a tab to open another.") { return @tr("At most {} tabs can be open. Close a tab to open another.", argument); }
         if (key == "Mail grouping is active for this session.") { return @tr("Mail grouping is active for this session."); }
         if (key == "Mail grouping preference saved.") { return @tr("Mail grouping preference saved."); }
@@ -776,6 +777,7 @@ export component AppWindow inherits Window {
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
     callback save_show_tabs(bool);
+    callback save_spelling_enabled(bool);
     callback save_conversation_view(bool);
     callback save_group_mail_by_date(bool);
     callback choose_download_directory();
@@ -1115,6 +1117,11 @@ export component AppWindow inherits Window {
     in-out property <bool> show_avatars: true;
     // Show tabs: the desktop tab strip, or the compact tab switcher.
     in-out property <bool> show_tabs: true;
+    // Spelling: whether this platform checks it, whether the user wants it, and whether any
+    // dictionary is installed to check with.
+    in property <bool> spelling_available: false;
+    in-out property <bool> spelling_enabled: true;
+    in property <bool> spelling_installed: true;
     in-out property <bool> group_mail_by_date: true;
     // Group replies into conversations; off lists each message on its own.
     in-out property <bool> conversation_view: true;
@@ -2052,6 +2059,9 @@ export component AppWindow inherits Window {
             theme_mode <=> root.theme_mode;
             show_avatars <=> root.show_avatars;
             show_tabs <=> root.show_tabs;
+            spelling_available: root.spelling_available;
+            spelling_enabled <=> root.spelling_enabled;
+            spelling_installed: root.spelling_installed;
             group_mail_by_date <=> root.group_mail_by_date;
             conversation_view <=> root.conversation_view;
             show_account_markers <=> root.show_account_markers;
@@ -2142,6 +2152,7 @@ export component AppWindow inherits Window {
             }
             save_avatar_visibility(enabled) => { root.save_avatar_visibility(enabled); }
             save_show_tabs(enabled) => { root.save_show_tabs(enabled); }
+            save_spelling_enabled(enabled) => { root.save_spelling_enabled(enabled); }
             prepare_profile_members(profile-id, account-id) => {
                 root.prepare_profile_members(profile-id, account-id);
             }

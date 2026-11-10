@@ -463,6 +463,7 @@ pub(super) fn compose_editor_style(ui: &ComposerUi<'_>) -> ComposeEditorStyle {
             selection.blue(),
         ),
         selected_text: ui.get_editor_selected_text_color(),
+        misspelling: ui.get_editor_misspelling_color(),
     }
 }
 

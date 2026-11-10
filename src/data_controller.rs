@@ -510,6 +510,20 @@ pub(super) fn restore_account_backup(
                 settings.suggest_learned_contacts = enabled;
             }
             if let Some(enabled) = preferences
+                .get("spellingEnabled")
+                .and_then(|value| value.as_bool())
+            {
+                settings.spelling_enabled = enabled;
+            }
+            if let Some(languages) = preferences.get("spellingLanguages") {
+                settings.spelling_languages = languages.as_array().map(|languages| {
+                    languages
+                        .iter()
+                        .filter_map(|language| language.as_str().map(str::to_owned))
+                        .collect()
+                });
+            }
+            if let Some(enabled) = preferences
                 .get("notificationsEnabled")
                 .and_then(|value| value.as_bool())
             {
@@ -644,6 +658,11 @@ pub(super) fn restore_account_backup(
         .set_preference(settings.message_appearance.as_str().into());
     app.set_show_avatars(settings.show_avatars);
     app.set_show_tabs(settings.show_tabs);
+    crate::spelling::apply_settings(
+        settings.spelling_enabled,
+        settings.spelling_languages.clone(),
+    );
+    crate::spelling::apply_to_window(app);
     apply_mail_grouping(app, state, runtime, settings.mail_grouping());
     app.set_show_account_markers(settings.show_account_badges);
     crate::window_chrome::apply_preference(
@@ -1327,6 +1346,8 @@ pub(super) fn register_data_management_callbacks(
                     "collectIncomingContacts": settings.collect_incoming_contacts,
                     "contactSuggestAllAccounts": settings.contact_suggest_all_accounts,
                     "suggestLearnedContacts": settings.suggest_learned_contacts,
+                    "spellingEnabled": settings.spelling_enabled,
+                    "spellingLanguages": settings.spelling_languages,
                     "notificationsEnabled": settings.notifications_enabled,
                     "notificationScope": settings.notification_scope,
                     "soundEnabled": settings.sound_enabled,
@@ -1628,7 +1649,8 @@ pub(super) fn register_data_management_callbacks(
                     }
                     apply_calendar(&app, &data_reset_calendar.borrow(), today);
                     app.set_theme_mode("system".into());
-                    app.global::<MessageColors>().set_preference("system".into());
+                    app.global::<MessageColors>()
+                        .set_preference("system".into());
                     app.set_monochrome_sidebar_icons(false);
                     crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);
