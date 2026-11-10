@@ -27,6 +27,9 @@ pub struct ParsedHeaders {
     /// Raw List-Unsubscribe-Post header value; "List-Unsubscribe=One-Click"
     /// marks the HTTPS URI above as an RFC 8058 one-click endpoint.
     pub list_unsubscribe_post: Option<String>,
+    /// The list's identifier from List-Id (RFC 2919), lowercase and without
+    /// its description or angle brackets.
+    pub list_id: Option<String>,
     /// The party that actually transmitted the message, when its domain does
     /// NOT align with From: (mailing lists, ESPs, send-on-behalf - and mail
     /// whose From: is spoofed). First misaligned identity out of the RFC 5322
@@ -2060,9 +2063,23 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
         // is always None; read the raw value and unfold it ourselves.
         list_unsubscribe: raw_header(msg, "List-Unsubscribe"),
         list_unsubscribe_post: raw_header(msg, "List-Unsubscribe-Post"),
+        list_id: raw_header(msg, "List-Id").and_then(|raw| list_id(&raw)),
         via,
         sender_verification,
     }
+}
+
+/// The identifier in a List-Id value: `Weekly news <news.example.com>` names
+/// the list `news.example.com`. Older lists sometimes send the bare
+/// identifier. RFC 2919 limits it to 255 characters.
+pub fn list_id(raw: &str) -> Option<String> {
+    let id = match (raw.rfind('<'), raw.rfind('>')) {
+        (Some(start), Some(end)) if start < end => &raw[start + 1..end],
+        _ => raw,
+    };
+    let id = id.trim();
+    (!id.is_empty() && id.len() <= 255 && !id.contains(char::is_whitespace))
+        .then(|| id.to_ascii_lowercase())
 }
 
 /// Parse a full raw RFC 5322 message.
@@ -2788,6 +2805,25 @@ mod tests {
             "List-Unsubscribe-Post: List-Unsubscribe=Later",
         );
         assert!(!one_click_signed(other_value.as_bytes()));
+    }
+
+    #[test]
+    fn list_id_keeps_only_the_identifier() {
+        assert_eq!(
+            list_id("Weekly news <News.Example.COM>").as_deref(),
+            Some("news.example.com")
+        );
+        assert_eq!(
+            list_id("list.example.org").as_deref(),
+            Some("list.example.org")
+        );
+        assert_eq!(list_id("<>"), None);
+        assert_eq!(list_id("just words"), None);
+        let raw = b"From: a@b.example\r\nList-Id: \"Dev list\"\r\n <dev.lists.example>\r\nSubject: x\r\n\r\nbody";
+        assert_eq!(
+            parse_message(raw).unwrap().headers.list_id.as_deref(),
+            Some("dev.lists.example")
+        );
     }
 
     #[test]

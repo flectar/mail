@@ -108,6 +108,7 @@ async fn seed(db: &Db, port: u16) -> (i64, i64) {
             references: vec![],
             list_unsubscribe: None,
             list_unsubscribe_post: None,
+            list_id: None,
             sender_addr: None,
             sender_verification: Default::default(),
         };

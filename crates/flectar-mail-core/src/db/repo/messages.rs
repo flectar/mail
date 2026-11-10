@@ -32,6 +32,8 @@ pub struct NewMessage {
     pub references: Vec<String>,
     pub list_unsubscribe: Option<String>,
     pub list_unsubscribe_post: Option<String>,
+    /// The List-Id identifier, lowercase (see mime::list_id).
+    pub list_id: Option<String>,
     /// Transmitting party misaligned with From: (see mime::resolve_via):
     /// email or bare DKIM domain, shown as "via" in the UI. None when the
     /// transmitting domain aligns with From:.
@@ -341,8 +343,8 @@ pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> 
             subject, from_name, from_addr, to_json, cc_json, bcc_json, date, internal_date,
             is_read, is_starred, is_draft, is_outgoing, is_automated, has_attachments, size, snippet,
             list_unsubscribe, list_unsubscribe_post, sender_addr, sender_verification,
-            verification_code)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28)",
+            verification_code, list_id)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29)",
         params![
             m.account_id,
             thread_id,
@@ -372,6 +374,7 @@ pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> 
             m.sender_addr,
             m.sender_verification.as_str(),
             verification_code,
+            m.list_id,
         ],
     )?;
     let id = conn.last_insert_rowid();
@@ -818,16 +821,24 @@ pub fn thread_unsubscribe_candidates(
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
-/// Persist a List-Unsubscribe pair recovered from a cached raw message.
-pub fn set_list_unsubscribe(
+/// Keep the list fields a whole message carries: header-only sync stores
+/// none for JMAP mail, and none for mail it stored before it read them.
+/// The List-Unsubscribe pair is replaced together, and a field the message
+/// lacks leaves what is stored.
+pub fn fill_list_headers(
     conn: &Connection,
     id: i64,
-    list_unsubscribe: &str,
+    list_unsubscribe: Option<&str>,
     list_unsubscribe_post: Option<&str>,
+    list_id: Option<&str>,
 ) -> Result<()> {
     conn.execute(
-        "UPDATE messages SET list_unsubscribe = ?2, list_unsubscribe_post = ?3 WHERE id = ?1",
-        params![id, list_unsubscribe, list_unsubscribe_post],
+        "UPDATE messages SET
+             list_unsubscribe_post = CASE WHEN ?2 IS NULL THEN list_unsubscribe_post ELSE ?3 END,
+             list_unsubscribe = COALESCE(?2, list_unsubscribe),
+             list_id = COALESCE(?4, list_id)
+         WHERE id = ?1",
+        params![id, list_unsubscribe, list_unsubscribe_post, list_id],
     )?;
     Ok(())
 }
@@ -1623,6 +1634,7 @@ mod tests {
             references: Vec::new(),
             list_unsubscribe: None,
             list_unsubscribe_post: None,
+            list_id: None,
             sender_addr: None,
             sender_verification: SenderVerification::None,
         }
@@ -1902,11 +1914,12 @@ mod tests {
             vec![(msg_id, "/cache/x.eml".to_string())]
         );
 
-        set_list_unsubscribe(
+        fill_list_headers(
             &c,
             msg_id,
-            "<https://x.dev/u>",
+            Some("<https://x.dev/u>"),
             Some("List-Unsubscribe=One-Click"),
+            Some("news.x.dev"),
         )
         .unwrap();
         assert_eq!(
@@ -1925,6 +1938,18 @@ mod tests {
             d.list_unsubscribe_post.as_deref(),
             Some("List-Unsubscribe=One-Click")
         );
+        // A message without the fields keeps what is stored.
+        fill_list_headers(&c, msg_id, None, None, None).unwrap();
+        let d = detail(&c, msg_id).unwrap();
+        assert_eq!(d.list_unsubscribe.as_deref(), Some("<https://x.dev/u>"));
+        let list_id: Option<String> = c
+            .query_row(
+                "SELECT list_id FROM messages WHERE id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(list_id.as_deref(), Some("news.x.dev"));
     }
 
     #[test]

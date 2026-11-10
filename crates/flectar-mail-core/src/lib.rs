@@ -3608,17 +3608,17 @@ impl Core {
             let Ok(headers) = crate::mime::parse_header_block(&raw) else {
                 continue;
             };
-            let Some(list_unsubscribe) = headers.list_unsubscribe else {
+            if headers.list_unsubscribe.is_none() {
                 continue;
-            };
-            let post = headers.list_unsubscribe_post;
+            }
             self.db
                 .write(move |conn| {
-                    repo::messages::set_list_unsubscribe(
+                    repo::messages::fill_list_headers(
                         conn,
                         id,
-                        &list_unsubscribe,
-                        post.as_deref(),
+                        headers.list_unsubscribe.as_deref(),
+                        headers.list_unsubscribe_post.as_deref(),
+                        headers.list_id.as_deref(),
                     )
                 })
                 .await?;
@@ -5014,6 +5014,7 @@ impl Core {
                             references: Vec::new(),
                             list_unsubscribe: None,
                             list_unsubscribe_post: None,
+                            list_id: None,
                             sender_addr: None,
                             sender_verification: Default::default(),
                         };

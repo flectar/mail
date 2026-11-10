@@ -1376,6 +1376,7 @@ async fn persist_emails(
                         references,
                         list_unsubscribe: None,
                         list_unsubscribe_post: None,
+                        list_id: header_text(&email, "List-Id").and_then(crate::mime::list_id),
                         sender_addr: None,
                         sender_verification: crate::models::SenderVerification::None,
                     };
