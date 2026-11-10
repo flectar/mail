@@ -137,6 +137,10 @@ jobs:
           cargo test --manifest-path crates/parley/Cargo.toml --lib --locked --target-dir target/parley-tests
       - name: Verify the Slint winit clipboard backport
         run: python3 scripts/verify-slint-winit.py
+      - name: Verify and test the vendored spellbook
+        run: |
+          python3 scripts/verify-spellbook.py
+          cargo test --manifest-path crates/spellbook/Cargo.toml --locked --target-dir target/spellbook-tests
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
