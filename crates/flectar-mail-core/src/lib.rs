@@ -3632,19 +3632,36 @@ impl Core {
         Ok(None)
     }
 
-    /// Unsubscribe from the list a message came from, preferring the RFC 8058
-    /// one-click HTTPS POST, then the RFC 2369 mailto: (sent immediately over
-    /// SMTP), and finally handing the URL back for the browser. The returned
-    /// outcome states what actually happened so the UI can toast honestly.
+    /// Unsubscribe from the list a message came from, preferring a signed
+    /// RFC 8058 one-click HTTPS POST, then the RFC 2369 mailto: (sent
+    /// immediately over SMTP), and finally handing the URL back for the
+    /// browser. The returned outcome states what actually happened so the UI
+    /// can toast honestly.
     pub async fn unsubscribe_message(&self, message_id: i64) -> Result<UnsubscribeOutcome> {
-        let detail = self
+        let (detail, raw_path) = self
             .db
-            .read(move |conn| repo::messages::detail(conn, message_id))
+            .read(move |conn| {
+                let detail = repo::messages::detail(conn, message_id)?;
+                let raw_path =
+                    repo::messages::get_row(conn, message_id)?.and_then(|row| row.raw_path);
+                Ok((detail, raw_path))
+            })
             .await?;
         let raw = detail
             .list_unsubscribe
             .ok_or_else(|| CoreError::NotFound("message has no List-Unsubscribe header".into()))?;
-        let plan = unsubscribe::plan(&raw, detail.list_unsubscribe_post.as_deref())
+        // One-click needs the DKIM-Signature fields of the original, which
+        // the reader has downloaded; without them it falls back to the other
+        // ways.
+        let one_click = match &raw_path {
+            Some(raw_path) => {
+                crate::file_io::read_headers(raw_path, MAX_CACHED_HEADER_BYTES, "cached headers")
+                    .await
+                    .is_ok_and(|raw| crate::mime::one_click_signed(&raw))
+            }
+            None => false,
+        };
+        let plan = unsubscribe::plan(&raw, one_click)
             .ok_or_else(|| CoreError::Other("List-Unsubscribe header has no usable URI".into()))?;
         match plan {
             unsubscribe::UnsubscribePlan::OneClick { url } => {

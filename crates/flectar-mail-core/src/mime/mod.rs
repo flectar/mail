@@ -1747,9 +1747,15 @@ fn authentication_results(results: &str) -> Vec<AuthenticationResult<'_>> {
             let properties = tokens
                 .filter_map(|token| token.split_once('='))
                 .filter(|(name, _)| {
-                    ["policy.authority", "header.from", "header.d"]
-                        .iter()
-                        .any(|known| name.trim().eq_ignore_ascii_case(known))
+                    [
+                        "policy.authority",
+                        "header.from",
+                        "header.d",
+                        "header.i",
+                        "header.b",
+                    ]
+                    .iter()
+                    .any(|known| name.trim().eq_ignore_ascii_case(known))
                 })
                 .map(|(name, value)| {
                     (
@@ -1863,6 +1869,124 @@ pub(crate) fn unsubscribe_uris(raw: &str) -> impl Iterator<Item = &str> + Clone 
 pub fn is_one_click_post(raw: &str) -> bool {
     raw.trim()
         .eq_ignore_ascii_case("List-Unsubscribe=One-Click")
+}
+
+/// Whether a message's header block asks for an RFC 8058 one-click
+/// unsubscribe that its sender signed. Section 4 requires a valid DKIM
+/// signature whose h= tag covers both List-Unsubscribe and
+/// List-Unsubscribe-Post; without one, receivers should not offer one-click.
+///
+/// Signatures are not verified here. As with the verified-sender badge, the
+/// result the receiving server put in the topmost Authentication-Results
+/// field (RFC 8601) decides, and its header.b (RFC 6008) tells which
+/// signature passed. When a server reports only the signing domain, every
+/// signature of that domain has to cover both fields. Each field has to
+/// appear exactly once: RFC 2369 allows no more, and a signature that covers
+/// one instance says nothing about another (RFC 6376 section 8.15).
+pub fn one_click_signed(raw: &[u8]) -> bool {
+    let Some(msg) = mail_parser::MessageParser::default().parse_headers(raw) else {
+        return false;
+    };
+    let fields = |name: &'static str| msg.header_as(name, mail_parser::HeaderForm::Raw);
+    let post = fields("List-Unsubscribe-Post");
+    if fields("List-Unsubscribe").len() != 1
+        || post.len() != 1
+        || !post[0].as_text().is_some_and(is_one_click_post)
+    {
+        return false;
+    }
+    let signatures: Vec<DkimSignature> = fields("DKIM-Signature")
+        .iter()
+        .filter_map(|value| value.as_text().and_then(DkimSignature::parse))
+        .collect();
+    let authentication = first_raw_header(&msg, "Authentication-Results").unwrap_or_default();
+    let authentication = without_comments(&authentication);
+    authentication_results(&authentication)
+        .iter()
+        .filter(|result| {
+            result.method.eq_ignore_ascii_case("dkim") && result.result.eq_ignore_ascii_case("pass")
+        })
+        .any(|result| {
+            let mut reported = signatures
+                .iter()
+                .filter(|signature| signature.reported_by(result))
+                .peekable();
+            reported.peek().is_some() && reported.all(DkimSignature::covers_one_click)
+        })
+}
+
+/// The DKIM-Signature tags that say who signed which fields (RFC 6376
+/// section 3.5).
+struct DkimSignature {
+    domain: String,
+    /// Signed field names, lowercase.
+    signed: Vec<String>,
+    /// The signature, without folding whitespace.
+    signature: String,
+}
+
+impl DkimSignature {
+    fn parse(value: &str) -> Option<Self> {
+        let (mut domain, mut signed, mut signature) = (None, None, None);
+        for tag in value.split(';') {
+            let Some((name, value)) = tag.split_once('=') else {
+                continue;
+            };
+            let compact = || -> String { value.split_ascii_whitespace().collect() };
+            // Tag names are case-sensitive.
+            match name.trim() {
+                "d" => domain = Some(compact()),
+                "h" => {
+                    signed = Some(
+                        compact()
+                            .split(':')
+                            .map(str::to_ascii_lowercase)
+                            .collect::<Vec<_>>(),
+                    )
+                }
+                "b" => signature = Some(compact()),
+                _ => {}
+            }
+        }
+        Some(Self {
+            domain: domain.filter(|domain| !domain.is_empty())?,
+            signed: signed?,
+            signature: signature.filter(|signature| !signature.is_empty())?,
+        })
+    }
+
+    /// Whether the receiver's result is about this signature: by the start of
+    /// its b= value (matched case-sensitively, RFC 6008), else by the domain
+    /// it reports. An i= identity names the signing domain or a subdomain.
+    fn reported_by(&self, result: &AuthenticationResult<'_>) -> bool {
+        if let Some(signature) = auth_property(result, "header.b") {
+            return !signature.is_empty() && self.signature.starts_with(signature);
+        }
+        if let Some(domain) = auth_property(result, "header.d") {
+            return self
+                .domain
+                .trim_end_matches('.')
+                .eq_ignore_ascii_case(domain.trim_end_matches('.'));
+        }
+        auth_property(result, "header.i").is_some_and(|identity| {
+            let identity = domain_of(identity).trim_end_matches('.');
+            let domain = self.domain.trim_end_matches('.');
+            identity.eq_ignore_ascii_case(domain)
+                || identity
+                    .len()
+                    .checked_sub(domain.len() + 1)
+                    .is_some_and(|dot| {
+                        identity.as_bytes()[dot] == b'.'
+                            && identity[dot + 1..].eq_ignore_ascii_case(domain)
+                    })
+        })
+    }
+
+    fn covers_one_click(&self) -> bool {
+        ["list-unsubscribe", "list-unsubscribe-post"]
+            .iter()
+            .all(|name| self.signed.iter().any(|signed| signed == name))
+    }
 }
 
 fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
@@ -2572,6 +2696,98 @@ mod tests {
             parsed.headers.list_unsubscribe_post.as_deref(),
             Some("List-Unsubscribe=One-Click")
         );
+    }
+
+    fn one_click_message(authentication: &str, signatures: &[&str]) -> String {
+        let mut raw = format!("Authentication-Results: {authentication}\r\n");
+        for signature in signatures {
+            raw.push_str(&format!("DKIM-Signature: {signature}\r\n"));
+        }
+        raw.push_str(concat!(
+            "From: News <news@news.example>\r\n",
+            "List-Unsubscribe: <https://news.example/u/1>\r\n",
+            "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n",
+            "Subject: Weekly\r\n\r\nbody"
+        ));
+        raw
+    }
+
+    const COVERING: &str = "v=1; a=rsa-sha256; d=news.example; s=s1;\r\n\th=From:Subject:\r\n List-Unsubscribe:List-Unsubscribe-Post; bh=x;\r\n\tb=AbCdEfGh12\r\n 345";
+    const PARTIAL: &str = "v=1; a=rsa-sha256; d=news.example; s=s2; h=From:Subject:List-Unsubscribe; bh=x; b=ZyXwVuTs999";
+
+    #[test]
+    fn one_click_needs_the_passing_signature_to_cover_both_fields() {
+        // Gmail names the signature that passed by the start of its b= tag.
+        let gmail = "mx.google.com; dkim=pass header.i=@news.example header.s=s1 header.b=AbCdEfGh";
+        assert!(one_click_signed(
+            one_click_message(gmail, &[PARTIAL, COVERING]).as_bytes()
+        ));
+        // The case of the b= prefix matters (RFC 6008).
+        let wrong_case = "mx.google.com; dkim=pass header.b=abcdefgh";
+        assert!(!one_click_signed(
+            one_click_message(wrong_case, &[COVERING]).as_bytes()
+        ));
+        // Only the signature that passed counts, not one that covers both.
+        let partial_passed = "mx.example; dkim=pass header.b=ZyXwVuTs; dkim=fail header.b=AbCdEfGh";
+        assert!(!one_click_signed(
+            one_click_message(partial_passed, &[PARTIAL, COVERING]).as_bytes()
+        ));
+        // A claimed pass inside a comment is not a result.
+        let comment = "mx.example; dkim=none (dkim=pass header.b=AbCdEfGh)";
+        assert!(!one_click_signed(
+            one_click_message(comment, &[COVERING]).as_bytes()
+        ));
+        assert!(!one_click_signed(
+            one_click_message("mx.example; dkim=pass header.b=AbCdEfGh", &[]).as_bytes()
+        ));
+    }
+
+    #[test]
+    fn one_click_by_domain_needs_every_signature_of_that_domain() {
+        // Microsoft reports only the signing domain.
+        let microsoft = "spf=pass (sender IP is 192.0.2.1) smtp.mailfrom=news.example; dkim=pass (signature was verified) header.d=news.example;dmarc=pass action=none header.from=news.example;compauth=pass reason=100";
+        assert!(one_click_signed(
+            one_click_message(microsoft, &[COVERING]).as_bytes()
+        ));
+        assert!(!one_click_signed(
+            one_click_message(microsoft, &[COVERING, PARTIAL]).as_bytes()
+        ));
+        let other_domain = "mx.example; dkim=pass header.d=esp.example";
+        assert!(!one_click_signed(
+            one_click_message(other_domain, &[COVERING]).as_bytes()
+        ));
+        // An identity in a subdomain still names the signing domain.
+        let identity = "mx.example; dkim=pass header.i=@mail.news.example";
+        assert!(one_click_signed(
+            one_click_message(identity, &[COVERING]).as_bytes()
+        ));
+        let lookalike = "mx.example; dkim=pass header.i=@evilnews.example";
+        assert!(!one_click_signed(
+            one_click_message(lookalike, &[COVERING]).as_bytes()
+        ));
+    }
+
+    #[test]
+    fn one_click_needs_exactly_one_of_each_field() {
+        let gmail = "mx.google.com; dkim=pass header.b=AbCdEfGh";
+        let signed = one_click_message(gmail, &[COVERING]);
+        let added = signed.replacen(
+            "List-Unsubscribe:",
+            "List-Unsubscribe: <https://elsewhere.example/u>\r\nList-Unsubscribe:",
+            1,
+        );
+        assert!(!one_click_signed(added.as_bytes()));
+        let twice = signed.replacen(
+            "List-Unsubscribe-Post:",
+            "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\nList-Unsubscribe-Post:",
+            1,
+        );
+        assert!(!one_click_signed(twice.as_bytes()));
+        let other_value = signed.replace(
+            "List-Unsubscribe-Post: List-Unsubscribe=One-Click",
+            "List-Unsubscribe-Post: List-Unsubscribe=Later",
+        );
+        assert!(!one_click_signed(other_value.as_bytes()));
     }
 
     #[test]
