@@ -11,6 +11,9 @@ A closer look at what the [README](../README.md) summarizes.
 - [Calendar, contacts, and files](#calendar-contacts-and-files)
 - [Signatures and OpenPGP](#signatures-and-openpgp)
 - [Spell check](#spell-check)
+- [Undo](#undo)
+- [Undo send](#undo-send)
+- [Unsubscribing](#unsubscribing)
 - [Storage and backups](#storage-and-backups)
 - [Importing accounts and mail](#importing-accounts-and-mail)
 - [HTML rendering](#html-rendering)
@@ -247,6 +250,25 @@ If a message can't be sent, the notice says why, the message stays in Drafts,
 and **Open draft** brings it back to fix and send again. Quitting Flectar Mail
 during the delay sends the waiting messages right away rather than at the next
 start.
+
+## Unsubscribing
+
+Mail from a mailing list shows **This message is from a mailing list.** with
+**Unsubscribe** above the message, and its menu has **Unsubscribe…**. Flectar
+Mail asks first and says how the list takes the request.
+
+- If the sender signed a one-click request (RFC 8058), Flectar Mail sends it to
+  the list's website itself. It does so only when your mail server reports a
+  passing DKIM signature that covers the request, as the standard requires.
+- Otherwise, if the list takes requests by email, Flectar Mail sends one from
+  the address the list writes to, and it appears in Sent. **Review email**
+  opens it as a new message to look over before sending.
+- Otherwise the list's unsubscribe page opens in your browser.
+
+Once the request is made, if more of the list's mail is in the inbox, Flectar
+Mail offers to archive it or move it to the trash, with Undo. A list is known by
+its List-Id, or by its sender when it has none. Mail in Spam never offers to
+unsubscribe, since answering spam tells its sender that the address is read.
 
 ## Storage and backups
 
