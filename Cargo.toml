@@ -101,6 +101,8 @@ cosmic-text = { version = "0.19", default-features = false, features = ["std", "
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
 keyboard-types = "0.8"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
+# Compares release versions for update notices (src/updates.rs).
+semver = "1"
 sha2 = "0.10"
 serde.workspace = true
 serde_json.workspace = true
@@ -259,6 +261,8 @@ ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "
 # only the internal crate exposes. It must stay on the version `slint` uses.
 [dev-dependencies]
 i-slint-core = { version = "=1.18.1", default-features = false }
+# src/updates.rs tests its schedule on tokio's paused clock.
+tokio = { version = "1", features = ["macros", "test-util"] }
 # src/platform/web_authentication.rs, which only iOS builds otherwise.
 async-trait = "0.1"
 

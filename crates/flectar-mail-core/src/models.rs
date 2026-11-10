@@ -1996,6 +1996,11 @@ pub struct Settings {
     /// the taskbar, a Linux dock or a phone's home screen.
     #[serde(default = "default_true")]
     pub unread_badge_enabled: bool,
+    /// Ask GitHub once a day whether a newer release is out. Only builds made
+    /// for direct download ask; app stores and package managers update the
+    /// app themselves.
+    #[serde(default = "default_true")]
+    pub check_for_updates: bool,
     /// Which incoming mail raises a desktop notification: "important" (mail that
     /// lands in the Important tab, the default and historical behavior), "all"
     /// (every incoming inbox message), or "tabs" (only the tabs named in
@@ -2209,6 +2214,7 @@ impl Default for Settings {
             spelling_enabled: true,
             spelling_languages: None,
             unread_badge_enabled: true,
+            check_for_updates: true,
             notification_scope: default_notification_scope(),
             notification_tabs: Vec::new(),
             signature_list: Vec::new(),

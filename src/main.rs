@@ -88,6 +88,7 @@ mod tabs;
 mod theme;
 mod ui_dispatch;
 mod ui_message;
+mod updates;
 mod window_chrome;
 mod window_controller;
 
@@ -6067,6 +6068,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     register_settings_preference_callbacks(&app, &state, &runtime);
+    settings_controller::register_update_callbacks(&app, &state, &runtime, &platform.paths.cache_dir);
 
     account_mail_preferences::register(&app, &state, &runtime);
     let composers = composer::install(
