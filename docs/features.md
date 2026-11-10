@@ -234,6 +234,14 @@ done. Closing the last message lets go of the rest, except on macOS, where the
 system keeps its spell checker in each app that has used it, about 0.4 MiB.
 Android and iOS don't check spelling yet.
 
+## Undo
+
+After you archive, delete, move or mark mail as spam, mark it as read or unread,
+or star it, a notice at the bottom of the window says what changed, with
+**Undo**. Undo, or Ctrl+Z (Command-Z on a Mac) while the notice shows, puts the
+mail back as it was, also when the change already reached the server. Permanent
+deletion, labels, and moving or copying mail to another account can't be undone.
+
 ## Undo send
 
 When you send a message, its composer closes and the message waits ten seconds

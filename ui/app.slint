@@ -567,6 +567,24 @@ export global I18n {
         if (key == "Could not copy mail: {}") { return @tr("Could not copy mail: {}", argument); }
         if (key == "Moving mail to the other account…") { return @tr("Moving mail to the other account…"); }
         if (key == "Copying mail to the other account…") { return @tr("Copying mail to the other account…"); }
+        if (key == "{} conversations archived.") { return @tr("Conversation archived." | "{0} conversations archived." % round(argument.to-float()), argument); }
+        if (key == "{} messages archived.") { return @tr("Message archived." | "{0} messages archived." % round(argument.to-float()), argument); }
+        if (key == "{} conversations moved to Trash.") { return @tr("Conversation moved to Trash." | "{0} conversations moved to Trash." % round(argument.to-float()), argument); }
+        if (key == "{} messages moved to Trash.") { return @tr("Message moved to Trash." | "{0} messages moved to Trash." % round(argument.to-float()), argument); }
+        if (key == "{} conversations marked as spam.") { return @tr("Conversation marked as spam." | "{0} conversations marked as spam." % round(argument.to-float()), argument); }
+        if (key == "{} messages marked as spam.") { return @tr("Message marked as spam." | "{0} messages marked as spam." % round(argument.to-float()), argument); }
+        if (key == "{} conversations moved.") { return @tr("Conversation moved." | "{0} conversations moved." % round(argument.to-float()), argument); }
+        if (key == "{} messages moved.") { return @tr("Message moved." | "{0} messages moved." % round(argument.to-float()), argument); }
+        if (key == "{} conversations marked as read.") { return @tr("Conversation marked as read." | "{0} conversations marked as read." % round(argument.to-float()), argument); }
+        if (key == "{} messages marked as read.") { return @tr("Message marked as read." | "{0} messages marked as read." % round(argument.to-float()), argument); }
+        if (key == "{} conversations marked as unread.") { return @tr("Conversation marked as unread." | "{0} conversations marked as unread." % round(argument.to-float()), argument); }
+        if (key == "{} messages marked as unread.") { return @tr("Message marked as unread." | "{0} messages marked as unread." % round(argument.to-float()), argument); }
+        if (key == "{} conversations starred.") { return @tr("Conversation starred." | "{0} conversations starred." % round(argument.to-float()), argument); }
+        if (key == "{} messages starred.") { return @tr("Message starred." | "{0} messages starred." % round(argument.to-float()), argument); }
+        if (key == "{} conversations unstarred.") { return @tr("Conversation unstarred." | "{0} conversations unstarred." % round(argument.to-float()), argument); }
+        if (key == "{} messages unstarred.") { return @tr("Message unstarred." | "{0} messages unstarred." % round(argument.to-float()), argument); }
+        if (key == "This can no longer be undone.") { return @tr("This can no longer be undone."); }
+        if (key == "Could not undo: {}") { return @tr("Could not undo: {}", argument); }
         if (key == "Moved {} messages to the other account.") { return @tr("Moved one message to the other account." | "Moved {0} messages to the other account." % round(argument.to-float()), argument); }
         if (key == "Copied {} messages to the other account.") { return @tr("Copied one message to the other account." | "Copied {0} messages to the other account." % round(argument.to-float()), argument); }
         if (key == "Moved or copied {} messages to the other account.") { return @tr("Moved or copied one message to the other account." | "Moved or copied {0} messages to the other account." % round(argument.to-float()), argument); }
