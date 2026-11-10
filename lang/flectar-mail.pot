@@ -1659,8 +1659,8 @@ msgstr ""
 msgid "Add an account to send mail."
 msgstr ""
 
-#: ui/app.slint:592 ui/components/sidebar.slint:520
-#: ui/app.slint:592 ui/components/sidebar.slint:520 ui/views/mail-list-pane.slint:936
+#: ui/app.slint:592 ui/components/sidebar.slint:585
+#: ui/app.slint:592 ui/components/sidebar.slint:585 ui/views/mail-list-pane.slint:936
 msgid "On this device"
 msgstr ""
 
@@ -3445,81 +3445,97 @@ msgstr ""
 msgid "Account settings"
 msgstr ""
 
-#: ui/components/sidebar.slint:119 ui/views/mail-list-pane.slint:1542
+#: ui/components/sidebar.slint:73
+msgid "New version available"
+msgstr ""
+
+#: ui/components/sidebar.slint:80 ui/dialogs/settings-dialog.slint:2819
+msgid "Version {}"
+msgstr ""
+
+#: ui/components/sidebar.slint:89
+msgid "Flectar Mail {} is out. Open its release page."
+msgstr ""
+
+#: ui/components/sidebar.slint:103
+msgid "Hide until the next version"
+msgstr ""
+
+#: ui/components/sidebar.slint:184 ui/views/mail-list-pane.slint:1542
 msgid "New email"
 msgstr ""
 
-#: ui/components/sidebar.slint:119
+#: ui/components/sidebar.slint:184
 msgid "Add an account"
 msgstr ""
 
-#: ui/components/sidebar.slint:173 ui/components/sidebar.slint:182
-#: ui/components/sidebar.slint:173 ui/components/sidebar.slint:182 ui/components/sidebar.slint:202
+#: ui/components/sidebar.slint:238 ui/components/sidebar.slint:247
+#: ui/components/sidebar.slint:238 ui/components/sidebar.slint:247 ui/components/sidebar.slint:267
 msgid "Find folder or label"
 msgstr ""
 
-#: ui/components/sidebar.slint:219
+#: ui/components/sidebar.slint:284
 msgid "Clear folder filter"
 msgstr ""
 
-#: ui/components/sidebar.slint:235
+#: ui/components/sidebar.slint:300
 msgid "Add account"
 msgstr ""
 
-#: ui/components/sidebar.slint:284
+#: ui/components/sidebar.slint:349
 msgid "ALL ACCOUNTS"
 msgstr ""
 
-#: ui/components/sidebar.slint:293
+#: ui/components/sidebar.slint:358
 msgid "All Inboxes"
 msgstr ""
 
-#: ui/components/sidebar.slint:309 ui/dialogs/move-dialog.slint:44
+#: ui/components/sidebar.slint:374 ui/dialogs/move-dialog.slint:44
 msgid "Inbox"
 msgstr ""
 
-#: ui/components/sidebar.slint:371
+#: ui/components/sidebar.slint:436
 msgid "Categories"
 msgstr ""
 
-#: ui/components/sidebar.slint:389
+#: ui/components/sidebar.slint:454
 msgid "Important"
 msgstr ""
 
-#: ui/components/sidebar.slint:410 ui/dialogs/settings-dialog.slint:275
+#: ui/components/sidebar.slint:475 ui/dialogs/settings-dialog.slint:275
 msgid "Other"
 msgstr ""
 
-#: ui/components/sidebar.slint:455 ui/components/sidebar.slint:621
-#: ui/components/sidebar.slint:455 ui/components/sidebar.slint:621
+#: ui/components/sidebar.slint:520 ui/components/sidebar.slint:686
+#: ui/components/sidebar.slint:520 ui/components/sidebar.slint:686
 msgid "Labels"
 msgstr ""
 
-#: ui/components/sidebar.slint:474
+#: ui/components/sidebar.slint:539
 msgid "Global label {}"
 msgstr ""
 
-#: ui/components/sidebar.slint:507 ui/views/contacts-view.slint:221
-#: ui/components/sidebar.slint:507 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:572 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:572 ui/views/contacts-view.slint:221
 msgid "ACCOUNTS"
 msgstr ""
 
-#: ui/components/sidebar.slint:641
+#: ui/components/sidebar.slint:706
 msgid "{} label, {} account"
 msgstr ""
 
-#: ui/components/sidebar.slint:684 ui/dialogs/folder-dialog.slint:27
-#: ui/components/sidebar.slint:684 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354
-#: ui/components/sidebar.slint:684 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354 ui/views/files-view.slint:578
+#: ui/components/sidebar.slint:749 ui/dialogs/folder-dialog.slint:27
+#: ui/components/sidebar.slint:749 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354
+#: ui/components/sidebar.slint:749 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354 ui/views/files-view.slint:578
 msgid "New folder"
 msgstr ""
 
-#: ui/components/sidebar.slint:701 ui/dialogs/folder-dialog.slint:26
-#: ui/components/sidebar.slint:701 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:766 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:766 ui/dialogs/folder-dialog.slint:26
 msgid "New label"
 msgstr ""
 
-#: ui/components/sidebar.slint:721
+#: ui/components/sidebar.slint:786
 msgid "No folders found"
 msgstr ""
 
@@ -6057,10 +6073,6 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2807
 msgid "A native mail client for a calm, private inbox."
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2819
-msgid "Version {}"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2830
