@@ -1,0 +1,94 @@
+import { IconButton } from "controls.slint";
+import { AppTheme } from "../design-system.slint";
+import { Notice } from "../notice.slint";
+import { TypeScale } from "../typography.slint";
+
+// The notice's button, as text in the accent on the notice.
+component NoticeButton inherits Rectangle {
+    in property <string> text;
+    in property <color> text-color;
+    in property <color> hover-background;
+    callback clicked;
+
+    min-width: label.preferred-width + 20px;
+    height: 32px;
+    border-radius: 6px;
+    background: touch.has-hover ? root.hover-background : transparent;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    label := Text {
+        text: root.text;
+        color: root.text-color;
+        font-size: TypeScale.secondary;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A notice at the foot of the main window, such as "Sending message…" with
+// Undo (src/undo_send.rs). Dark on a light window and light on a dark one,
+// so it stands apart from the mail under it.
+export component NoticeToast inherits Rectangle {
+    in property <string> text;
+
+    private property <string> action-label: Notice.action == "undo" ? @tr("Undo")
+        : Notice.action == "open-draft" ? @tr("Open draft")
+        : "";
+    private property <color> text-color: AppTheme.dark ? #1f1f1f : #f2f2f2;
+    private property <color> action-color: Notice.error
+        ? (AppTheme.dark ? #b3261e : #f2b8b5)
+        : (AppTheme.dark ? #0b57d0 : #a8c7fa);
+    private property <color> hover: AppTheme.dark ? #00000014 : #ffffff1f;
+
+    height: max(48px, layout.preferred-height);
+    border-radius: 8px;
+    background: AppTheme.dark ? #e6e6e3 : #303133;
+    drop-shadow-blur: 16px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: #00000040;
+
+    layout := HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 6px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 4px;
+        alignment: stretch;
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Text {
+                height: max(20px, self.preferred-height);
+                text: root.text;
+                color: root.text-color;
+                font-size: TypeScale.secondary;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+        if root.action-label != "" : NoticeButton {
+            text: root.action-label;
+            text-color: root.action-color;
+            hover-background: root.hover;
+            clicked => { Notice.act(); }
+        }
+        IconButton {
+            width: 32px;
+            height: 32px;
+            icon: @image-url("../icons/lucide/outline/x.svg");
+            icon-size: 14px;
+            icon-color: root.text-color;
+            hover-background: root.hover;
+            tooltip-text: @tr("Close");
+            clicked => { Notice.dismiss(); }
+        }
+    }
+}

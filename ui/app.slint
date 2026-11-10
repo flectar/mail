@@ -10,6 +10,7 @@ export { AppIcon, AppIconVariant } from "app-icon.slint";
 export { DefaultEmailApp } from "default-email-app.slint";
 export { SystemNotifications } from "system-notifications.slint";
 export { Updates } from "updates.slint";
+export { Notice } from "notice.slint";
 import { AppIcon, AppIconVariant } from "app-icon.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
@@ -36,6 +37,8 @@ import { TabOverview } from "components/tab-overview.slint";
 import { WorkspaceFrame } from "components/workspace-layout.slint";
 import { CalendarEventDialog } from "dialogs/calendar-event-dialog.slint";
 import { ComposeDialog } from "dialogs/compose-dialog.slint";
+import { NoticeToast } from "components/notice-toast.slint";
+import { Notice } from "notice.slint";
 import { BoundComposer, ComposerUi } from "components/composer-ui.slint";
 import { ComposerText } from "components/composer-fields.slint";
 export { ComposerUi } from "components/composer-ui.slint";
@@ -615,6 +618,8 @@ export global I18n {
         if (key == "Connect an account before saving or sending mail.") { return @tr("Connect an account before saving or sending mail."); }
         if (key == "Message queued for delivery (action {}).") { return @tr("Message queued for delivery (action {}).", argument); }
         if (key == "Sending message…") { return @tr("Sending message…"); }
+        if (key == "This message has already been sent.") { return @tr("This message has already been sent."); }
+        if (key == "Could not take the message back: {}") { return @tr("Could not take the message back: {}", argument); }
         if (key == "Message sent.") { return @tr("Message sent."); }
         if (key == "Message was not sent: {} Your draft is preserved.") { return @tr("Message was not sent: {} Your draft is preserved.", argument); }
         if (key == "Draft saved locally (#{}).") { return @tr("Draft saved locally (#{}).", argument); }
@@ -2226,6 +2231,21 @@ export component AppWindow inherits Window {
             load_storage_usage => { root.load_storage_usage(); }
             open-link(url) => { root.open_email_link(url); }
         }
+        }
+
+        // A message on its way out, with a way to take it back. A phone's
+        // composer covers the window, so it waits for that to close.
+        if Notice.shown && !(root.compact-layout && ComposerUi.open) : NoticeToast {
+            text: I18n.ui-message(Notice.message.key, Notice.message.argument, Notice.message.second_argument, Notice.message.third_argument);
+            width: min(parent.width - 32px, min(560px, max(320px, self.preferred-width)));
+            x: (parent.width - self.width) / 2;
+            // Above the phone's navigation, and above the compose button
+            // where it shows.
+            y: parent.height - self.height - 20px
+                - (root.compact-primary-nav-visible ? root.compact-primary-nav-height : 0px)
+                - (root.active_view == "mail" && (root.compact-layout || root.mail_sidebar_collapsed)
+                    ? LayoutMetrics.touch-target + 12px : 0px);
+            z: 9000;
         }
 
         if ComposerUi.open : ComposeDialog {

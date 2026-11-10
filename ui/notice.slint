@@ -1,0 +1,16 @@
+import { LocalizedMessage } from "models.slint";
+
+// A short notice at the foot of the main window: a message on its way out,
+// with a way to take it back, and how its sending ended (src/undo_send.rs).
+export global Notice {
+    in property <bool> shown;
+    in property <LocalizedMessage> message;
+    // What its button does: "undo", "open-draft", or "" for no button.
+    in property <string> action;
+    // It tells of something that went wrong.
+    in property <bool> error;
+    // Ctrl+Z (Command-Z on a Mac) takes back what it tells of.
+    out property <bool> can-undo: shown && action == "undo";
+    callback act();
+    callback dismiss();
+}

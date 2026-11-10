@@ -2629,6 +2629,7 @@ export component SettingsDialog inherits Rectangle {
                             ShortcutSection { vertical-stretch: 0; title: @tr("Mail"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading;
                                 ShortcutRow { title: @tr("Compose a new message"); keys: [Shortcuts.compose]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Edit a message as new"); keys: [Shortcuts.edit-as-new]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Take back a message just sent"); keys: [Shortcuts.undo]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Check for new mail"); keys: [Shortcuts.check-mail]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Check every account for new mail"); keys: KeyboardKeys.apple ? [Shortcuts.check-all-mail, Shortcuts.check-all-mail-alternate] : [Shortcuts.check-all-mail]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Search mail"); keys: [Shortcuts.search, Shortcuts.search-alternate]; title-color: root.body-text; separator-color: root.faint-text; }
