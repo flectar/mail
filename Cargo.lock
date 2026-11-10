@@ -2227,6 +2227,7 @@ dependencies = [
  "cssparser 0.38.0",
  "data-url",
  "flectar-mail-core",
+ "flectar-spell",
  "fontique 0.11.1",
  "fontique 0.12.0",
  "futures-util",
@@ -2251,6 +2252,7 @@ dependencies = [
  "rfd",
  "rspolib",
  "seccompiler",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2345,6 +2347,17 @@ dependencies = [
  "blitz-paint",
  "blitz-traits",
  "image",
+]
+
+[[package]]
+name = "flectar-spell"
+version = "0.1.0"
+dependencies = [
+ "encoding_rs",
+ "memmap2",
+ "spellbook",
+ "tempfile",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -7255,6 +7268,14 @@ dependencies = [
  "web-sys",
  "windows-sys 0.61.2",
  "x11rb",
+]
+
+[[package]]
+name = "spellbook"
+version = "0.4.2"
+dependencies = [
+ "foldhash 0.1.5",
+ "hashbrown 0.15.5",
 ]
 
 [[package]]

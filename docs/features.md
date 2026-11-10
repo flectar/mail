@@ -10,6 +10,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Frameless window](#frameless-window)
 - [Calendar, contacts, and files](#calendar-contacts-and-files)
 - [Signatures and OpenPGP](#signatures-and-openpgp)
+- [Spell check](#spell-check)
 - [Storage and backups](#storage-and-backups)
 - [Importing accounts and mail](#importing-accounts-and-mail)
 - [HTML rendering](#html-rendering)
@@ -195,6 +196,57 @@ private-key passphrases. Required encryption blocks delivery when recipient keys
 are missing or invalid; protected drafts remain local until Send.
 
 S/MIME and mobile OpenPGP are not currently supported.
+
+## Spell check
+
+On Linux, Flectar Mail underlines misspelled words as you write, using the
+Hunspell dictionaries installed on your system, the ones other apps there use
+too. Right-click an underlined word for corrections, **Add to dictionary**, or
+**Ignore**, which accepts it in that message. With the keyboard, the menu key or
+Shift+F10 opens the same menu for the word at the cursor. The menu also cuts,
+copies and pastes, and its **Spelling** submenu turns checking on and off and
+chooses your languages. Flectar Mail starts with the languages your system is
+set to, and a word passes when any of the chosen languages has it, so mail in
+two languages needs no switching. A word you're still typing is underlined once
+you move past it, and quoted text, code and the signature the composer added
+aren't checked.
+
+Words you add go to the same lists as in GNOME apps, in
+`~/.config/enchant/<language>.dic`, so they're shared with them. The Flatpak
+keeps its own lists. Turn spell checking off with **Check spelling** in
+Settings → General, which also tells you when no dictionary is installed. Most
+distributions package them as `hunspell-` and the language. In the Flatpak,
+English comes with the runtime, and other languages come with the translations
+Flatpak installs for the languages your system uses.
+
+Checking keeps no dictionary in memory, and nothing is set up until you write.
+The first time a dictionary is used, a short-lived Flectar Mail process indexes
+its words into the app's cache. Each check then reads them from that file and
+lets go when it's done, and closing the last message lets go of the rest.
+Windows, macOS, Android and iOS don't check spelling yet.
+
+## Undo
+
+After you archive, delete, move or mark mail as spam, mark it as read or unread,
+or star it, a notice at the bottom of the window says what changed, with
+**Undo**. Undo, or Ctrl+Z (Command-Z on a Mac) while the notice shows, puts the
+mail back as it was, also when the change already reached the server. Permanent
+deletion, labels, and moving or copying mail to another account can't be undone.
+
+## Undo send
+
+When you send a message, its composer closes and the message waits ten seconds
+before it leaves, while a notice at the bottom of the window says **Sending
+message…** with **Undo**. Undo, or Ctrl+Z (Command-Z on a Mac) while the notice
+shows, takes the message back and opens it again as the draft it was,
+attachments included. Choose 5, 10, 20 or 30 seconds, or turn the delay off,
+with **Undo send** in Settings → General. With it off, the composer stays open
+until the message is sent, and keeps it to fix if sending fails.
+
+If a message can't be sent, the notice says why, the message stays in Drafts,
+and **Open draft** brings it back to fix and send again. Quitting Flectar Mail
+during the delay sends the waiting messages right away rather than at the next
+start.
 
 ## Storage and backups
 

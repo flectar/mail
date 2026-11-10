@@ -12,6 +12,7 @@ import {
 } from "workspace-layout.slint";
 import { LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 import { LocalMailUi } from "../local-mail.slint";
+import { Updates } from "../updates.slint";
 import { TypeScale } from "../typography.slint";
 
 // The profile switcher across a sidebar, as tall as its buttons.
@@ -37,6 +38,70 @@ component SidebarProfileSwitcher inherits Rectangle {
         choose(id) => { root.choose(id); }
         create-profile => { root.create-profile(); }
         manage-profiles => { root.manage-profiles(); }
+    }
+}
+
+// A newer release is out: a quiet line at the foot of the sidebar that leads
+// to its page, until the user puts it away (src/updates.rs).
+component UpdateNotice inherits Rectangle {
+    in property <bool> touch-mode;
+    in property <color> background-color;
+    in property <color> hover-background;
+    in property <color> accent-color;
+    in property <color> title-color;
+    in property <color> muted-color;
+
+    height: max(root.touch-mode ? 52px : 44px, labels.preferred-height + 14px);
+    border-radius: 8px;
+    background: open.has-hover ? root.hover-background : root.background-color;
+
+    Image {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        width: LayoutMetrics.icon-size;
+        height: LayoutMetrics.icon-size;
+        source: @image-url("../icons/lucide/outline/download.svg");
+        colorize: root.accent-color;
+        image-fit: contain;
+        accessible-role: none;
+    }
+    labels := VerticalLayout {
+        x: 12px + LayoutMetrics.icon-size + 10px;
+        width: parent.width - self.x - 38px;
+        alignment: center;
+        Text {
+            text: @tr("New version available");
+            color: root.title-color;
+            font-size: TypeScale.caption;
+            font-weight: 600;
+            overflow: elide;
+        }
+        Text {
+            text: @tr("Version {}", Updates.version);
+            color: root.muted-color;
+            font-size: TypeScale.caption;
+            overflow: elide;
+        }
+    }
+    open := TouchArea {
+        width: parent.width - 38px;
+        accessible-role: button;
+        accessible-label: @tr("Flectar Mail {} is out. Open its release page.", Updates.version);
+        accessible-action-default => { Updates.open-release(); }
+        mouse-cursor: pointer;
+        clicked => { Updates.open-release(); }
+    }
+    IconButton {
+        x: parent.width - 34px;
+        y: (parent.height - self.height) / 2;
+        width: 28px;
+        height: 28px;
+        icon: @image-url("../icons/lucide/outline/x.svg");
+        icon-size: 12px;
+        icon-color: root.muted-color;
+        hover-background: root.hover-background;
+        tooltip-text: @tr("Hide until the next version");
+        clicked => { Updates.dismiss(); }
     }
 }
 
@@ -734,6 +799,18 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                 content-y: mailbox-scroll.content-y;
                 content-height: mailbox-scroll.content-height;
                 visible-height: mailbox-scroll.visible-height;
+            }
+        }
+
+        if Updates.offered && Updates.enabled && Updates.version != "" && !Updates.dismissed : VerticalLayout {
+            padding-bottom: 10px;
+            UpdateNotice {
+                touch-mode: root.touch-mode;
+                background-color: root.hover-background;
+                hover-background: root.selection-background;
+                accent-color: root.accent-color;
+                title-color: root.title-color;
+                muted-color: root.muted-color;
             }
         }
     }

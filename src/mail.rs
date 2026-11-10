@@ -1270,6 +1270,15 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_check_for_updates(&self, enabled: bool) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.check_for_updates = enabled;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_sync_interval_minutes(&self, minutes: i64) -> Result<(), String> {
         self.core
             .set_sync_interval_minutes(minutes)
@@ -1303,10 +1312,17 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn set_account_sent_copy_policy(&self, account_id: i64, value: &str) -> Result<(), String> {
+    pub async fn set_account_sent_copy_policy(
+        &self,
+        account_id: i64,
+        value: &str,
+    ) -> Result<(), String> {
         let policy = flectar_mail_core::models::SentCopyPolicy::from_storage(value)
             .ok_or_else(|| format!("unsupported Sent copy policy: {value}"))?;
-        self.core.set_account_sent_copy_policy(account_id, policy).await.map_err(|e| e.to_string())
+        self.core
+            .set_account_sent_copy_policy(account_id, policy)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     pub async fn set_mark_read_on_open(&self, enabled: bool) -> Result<(), String> {
@@ -1437,6 +1453,20 @@ impl CoreMailSource {
     pub async fn set_show_avatars(&self, enabled: bool) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.show_avatars = enabled;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_spelling(
+        &self,
+        enabled: bool,
+        languages: Option<Vec<String>>,
+    ) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.spelling_enabled = enabled;
+        settings.spelling_languages = languages;
         self.core
             .set_settings(settings)
             .await
@@ -1765,11 +1795,13 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// Act on mail, returning the actions queued for it, which
+    /// [`Self::undo_actions`] can take back.
     pub async fn perform_message_action(
         &self,
         target: MailTarget,
         action: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<i64>, String> {
         let kind = ActionKind::parse(action)
             .ok_or_else(|| format!("unsupported message action: {action}"))?;
         self.core
@@ -1779,7 +1811,15 @@ impl CoreMailSource {
                 params: None,
             })
             .await
-            .map(|_| ())
+            .map(|result| result.action_ids)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Take back the actions of one gesture. False when none could be.
+    pub async fn undo_actions(&self, action_ids: Vec<i64>) -> Result<bool, String> {
+        self.core
+            .undo_actions(action_ids)
+            .await
             .map_err(|error| error.to_string())
     }
 
@@ -1816,11 +1856,13 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// Move mail to a folder of its own account, returning the actions
+    /// queued for it.
     pub async fn move_to_folder(
         &self,
         target: MailTarget,
         target_folder_id: i64,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<i64>, String> {
         self.core
             .perform_action(PerformActionArgs {
                 kind: ActionKind::Move,
@@ -1832,7 +1874,7 @@ impl CoreMailSource {
                 }),
             })
             .await
-            .map(|_| ())
+            .map(|result| result.action_ids)
             .map_err(|error| error.to_string())
     }
 
@@ -2150,22 +2192,51 @@ impl CoreMailSource {
         self.save_draft(compose_args(message, false)?).await
     }
 
+    /// Save the message and queue it to leave once the user's undo delay
+    /// has passed (`dispatch_at`), which is at once when it is off.
     pub async fn send_new_message(
         &self,
         message: ComposeMessage<'_>,
     ) -> Result<QueueSendResult, String> {
         let draft_id = self.save_draft(compose_args(message, true)?).await?;
-        let queued = self
-            .queue_send(QueueSendArgs {
-                draft_id,
-                send_at: None,
-            })
-            .await?;
+        self.queue_send(QueueSendArgs {
+            draft_id,
+            send_at: None,
+        })
+        .await
+    }
+
+    /// Send a queued message without waiting for the rest of its delay.
+    pub async fn send_now(&self, action_id: i64) -> Result<bool, String> {
         self.core
-            .send_now(queued.action_id)
+            .send_now(action_id)
             .await
-            .map_err(|error| error.to_string())?;
-        Ok(queued)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Take back a queued message before it leaves. False when it is already
+    /// on its way, or gone.
+    pub async fn cancel_send(&self, action_id: i64) -> Result<bool, String> {
+        self.core
+            .cancel_send(action_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn get_draft(&self, draft_id: i64) -> Result<SaveDraftArgs, String> {
+        self.core
+            .get_draft(draft_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_undo_send_seconds(&self, seconds: i64) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.undo_send_seconds = seconds;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub async fn wait_for_send(&self, action_id: i64) -> Result<(), String> {
@@ -2321,12 +2392,12 @@ fn append_folder_tree<'a>(
             can_rename: folder.can_rename,
             can_delete: folder.can_delete,
             label,
-            scope: Some(standard_mailbox.map_or(Scope::Folder(folder.id), |mailbox| {
-                Scope::Account {
+            scope: Some(
+                standard_mailbox.map_or(Scope::Folder(folder.id), |mailbox| Scope::Account {
                     account_id: folder.account_id,
                     mailbox,
-                }
-            })),
+                }),
+            ),
             context: account_label.to_owned(),
             detail: String::new(),
             avatar: String::new(),
@@ -2821,13 +2892,15 @@ fn validated_startup_scope(
     let scope = match preferred {
         Scope::Unified(_) | Scope::Important | Scope::Other => Some(preferred),
         // A label can move between sections, e.g. when it becomes automatic.
-        Scope::Label { id, .. } => labels
-            .iter()
-            .find(|label| label.id == id)
-            .map(|label| Scope::Label {
-                kind: LabelKind::of(label.is_auto, label.owner_account_id),
-                id,
-            }),
+        Scope::Label { id, .. } => {
+            labels
+                .iter()
+                .find(|label| label.id == id)
+                .map(|label| Scope::Label {
+                    kind: LabelKind::of(label.is_auto, label.owner_account_id),
+                    id,
+                })
+        }
         Scope::Folder(_) => mailbox_entries(accounts, folders, local_mail)
             .iter()
             .any(|mailbox| mailbox.scope == Some(preferred))
@@ -4542,7 +4615,10 @@ mod account_removal_snapshot_tests {
         .unwrap();
         seed(&source).await;
         let before = source.load_account_snapshot().await.unwrap();
-        let metadata = source.load_mail_metadata(Scope::UNIFIED_INBOX).await.unwrap();
+        let metadata = source
+            .load_mail_metadata(Scope::UNIFIED_INBOX)
+            .await
+            .unwrap();
         let page = source
             .load_page(Scope::UNIFIED_INBOX, "", None, 50, false)
             .await

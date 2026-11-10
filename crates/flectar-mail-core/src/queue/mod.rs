@@ -524,21 +524,32 @@ async fn execute_on_imap(
     }
 }
 
-/// Resolve the message's current remote (folder_name, uid); selects the folder.
+/// Resolve where the server has the message now, for `action` on it, and
+/// select that folder. Actions run in order, so a move queued after this one
+/// hasn't run yet: the server still has the message where that move takes it
+/// from, though the local row already shows it moved.
 async fn resolve_remote(
     ctx: &SyncCtx,
     session: &mut Session,
+    action: &repo::actions::PendingAction,
     message_id: i64,
 ) -> Result<Option<(repo::folders::Folder, u32)>> {
-    let row = ctx
+    let after = action.id;
+    let (row, waiting_move) = ctx
         .db
-        .read(move |conn| repo::messages::get_row(conn, message_id))
+        .read(move |conn| {
+            Ok((
+                repo::messages::get_row(conn, message_id)?,
+                repo::actions::next_move_source(conn, message_id, after)?,
+            ))
+        })
         .await?;
     let Some(row) = row else { return Ok(None) };
-
-    // The payload's remote location: where the message lived when the action
-    // was enqueued (optimistic mutation may have already moved it locally).
-    let Some(folder_id) = row.folder_id else {
+    let (folder_id, known_uid) = match waiting_move {
+        Some((folder_id, uid)) => (Some(folder_id), uid),
+        None => (row.folder_id, row.uid),
+    };
+    let Some(folder_id) = folder_id else {
         return Ok(None);
     };
     let folder = ctx
@@ -549,7 +560,7 @@ async fn resolve_remote(
         return Ok(None);
     };
     imap::select(session, &folder.path).await?;
-    let uid = match valid_uid(row.uid) {
+    let uid = match valid_uid(known_uid) {
         Some(uid) => Some(uid),
         None => uid_by_message_id(session, row.message_id.as_deref()).await?,
     };
@@ -641,7 +652,7 @@ async fn flag_action(
     let Some(message_id) = action.message_id else {
         return Ok(());
     };
-    match resolve_remote(ctx, session, message_id).await? {
+    match resolve_remote(ctx, session, action, message_id).await? {
         Some((_folder, uid)) => imap::store_flag(session, uid, flag, add).await,
         None => Ok(()), // deleted remotely; flag intent is moot
     }
@@ -660,7 +671,7 @@ async fn keyword_action(
     let Some(keyword) = action.payload["keyword"].as_str() else {
         return Ok(());
     };
-    match resolve_remote(ctx, session, message_id).await? {
+    match resolve_remote(ctx, session, action, message_id).await? {
         Some((_folder, uid)) => imap::store_flag(session, uid, keyword, add).await,
         None => Ok(()), // deleted remotely; label intent is moot
     }

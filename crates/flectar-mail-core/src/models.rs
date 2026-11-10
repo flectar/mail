@@ -1984,11 +1984,23 @@ pub struct Settings {
     /// contact-aware search suggestions.
     #[serde(default = "default_true")]
     pub suggest_learned_contacts: bool,
+    /// Underline misspelled words in messages being written.
+    #[serde(default = "default_true")]
+    pub spelling_enabled: bool,
+    /// The languages spelling is checked in, as dictionary names such as "en_US". `None`
+    /// follows the system's languages; an empty list checks none.
+    #[serde(default)]
+    pub spelling_languages: Option<Vec<String>>,
     /// Show on the app icon how many unread messages in the Inboxes the
     /// new-mail notifications cover (see `notification_scope`): the Dock,
     /// the taskbar, a Linux dock or a phone's home screen.
     #[serde(default = "default_true")]
     pub unread_badge_enabled: bool,
+    /// Ask GitHub once a day whether a newer release is out. Only builds made
+    /// for direct download ask; app stores and package managers update the
+    /// app themselves.
+    #[serde(default = "default_true")]
+    pub check_for_updates: bool,
     /// Which incoming mail raises a desktop notification: "important" (mail that
     /// lands in the Important tab, the default and historical behavior), "all"
     /// (every incoming inbox message), or "tabs" (only the tabs named in
@@ -2199,7 +2211,10 @@ impl Default for Settings {
             collect_outgoing_contacts: true,
             collect_incoming_contacts: false,
             suggest_learned_contacts: true,
+            spelling_enabled: true,
+            spelling_languages: None,
             unread_badge_enabled: true,
+            check_for_updates: true,
             notification_scope: default_notification_scope(),
             notification_tabs: Vec::new(),
             signature_list: Vec::new(),
@@ -2538,6 +2553,14 @@ mod tests {
         assert_eq!(s.workspace_layout, "default");
         assert_eq!(s.workspace_list_pane_width, MIN_WORKSPACE_LIST_PANE_WIDTH);
         assert_eq!(s.time_format, TimeFormat::Automatic);
+        // Spelling is checked in the system's languages until the user picks theirs.
+        assert!(s.spelling_enabled);
+        assert_eq!(s.spelling_languages, None);
+        let chosen: Settings = serde_json::from_str(
+            r#"{"theme":"system","undoSendSeconds":10,"spellingLanguages":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(chosen.spelling_languages, Some(Vec::new()));
     }
 
     #[test]

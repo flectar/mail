@@ -4,6 +4,12 @@ Flectar Mail is in development and isn't stable yet. Preview builds are
 published on [GitHub Releases](https://github.com/flectar/mail/releases). The
 [README](../README.md#-get-flectar-mail) lists the files for each platform.
 
+The builds from GitHub Releases tell you when a newer version is out. Once a
+day, Flectar Mail asks GitHub for the list of releases, without any account or
+mail details, and a newer one shows up in the sidebar and in Settings → About,
+where you can also turn the check off. Copies that update another way, such as
+the Microsoft Store package, Flathub or a distribution's package, don't ask.
+
 ## Signing in to Gmail and Outlook
 
 Google OAuth verification requires an annual CASA security assessment, which

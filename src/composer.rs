@@ -5,11 +5,17 @@
 
 use super::*;
 use crate::rich_compose::{EditMark, EditState};
-use flectar_mail_core::models::{Address, AttachmentMeta, SenderIdentity, Signature};
+use flectar_mail_core::models::{
+    Address, AttachmentMeta, SaveDraftArgs, SenderIdentity, Signature,
+};
 use slint::SharedString;
 #[cfg(desktop)]
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use std::rc::Weak;
+
+mod message_spelling;
+pub(crate) use message_spelling::spelling_changed;
+use message_spelling::{MessageSpelling, apply_spelling_state};
 
 thread_local! {
     static COMPOSERS: RefCell<Option<Rc<Composers>>> = const { RefCell::new(None) };
@@ -46,6 +52,8 @@ struct EditedQuote {
 
 /// One message being written.
 pub(super) struct ComposeSession {
+    /// The session itself, for timers and tasks that finish after a callback returns.
+    this: Weak<ComposeSession>,
     composers: Weak<Composers>,
     host: RefCell<Host>,
     /// Bumped when the message moves to another window, so the callbacks
@@ -78,6 +86,7 @@ pub(super) struct ComposeSession {
     signatures: RefCell<Vec<Signature>>,
     /// Bumped for each sending-account change; older results are dropped.
     preferences_generation: Cell<u64>,
+    spelling: MessageSpelling,
     /// Closed, and waiting for the event loop to let its window go.
     disposed: Cell<bool>,
 }
@@ -300,6 +309,21 @@ pub(super) fn accounts_changed(app: &AppWindow) {
     });
 }
 
+/// Open the draft `draft_id` again, as when its sending was taken back.
+pub(super) fn reopen_draft(draft_id: i64) {
+    with_composers(|composers| {
+        let (Some(app), Some(core)) = (composers.app.upgrade(), composers.core()) else {
+            return;
+        };
+        match composers.runtime.block_on(core.get_draft(draft_id)) {
+            Ok(draft) => composers.show_draft(&app, draft),
+            Err(error) => {
+                app.set_render_status(UiMessage::detail("Could not open draft: {}", error));
+            }
+        }
+    });
+}
+
 /// The application is ending. A message someone was writing, in the main
 /// window or one of its own, goes to Drafts: nothing else would keep it.
 pub(super) fn save_open_messages() {
@@ -516,7 +540,8 @@ impl Composers {
             }
             previous.dispose();
         }
-        let session = Rc::new(ComposeSession {
+        let session = Rc::new_cyclic(|this| ComposeSession {
+            this: this.clone(),
             composers: Rc::downgrade(self),
             host: RefCell::new(Host::Main(app.as_weak())),
             host_id: Cell::new(0),
@@ -536,6 +561,7 @@ impl Composers {
             signature: RefCell::default(),
             signatures: RefCell::default(),
             preferences_generation: Cell::new(0),
+            spelling: MessageSpelling::default(),
             disposed: Cell::new(false),
         });
         session.connect();
@@ -712,13 +738,16 @@ impl Composers {
             app.set_render_status(UiMessage::plain("Only drafts can be reopened for editing."));
             return;
         }
-        let draft = match self.runtime.block_on(core.load_draft(row)) {
-            Ok(draft) => draft,
+        match self.runtime.block_on(core.load_draft(row)) {
+            Ok(draft) => self.show_draft(app, draft),
             Err(error) => {
                 app.set_render_status(UiMessage::detail("Could not open draft: {}", error));
-                return;
             }
-        };
+        }
+    }
+
+    /// Open a saved draft in a composer.
+    fn show_draft(self: &Rc<Self>, app: &AppWindow, draft: SaveDraftArgs) {
         // A draft already open in a composer comes forward instead of opening
         // twice, where each copy's saves would overwrite the other's.
         if let Some(open) = draft.draft_id.and_then(|id| self.holding_draft(id)) {
@@ -919,14 +948,12 @@ impl ComposeSession {
     fn apply_document(&self, host: &HostRef) {
         {
             let document = self.document.borrow();
-            apply_rich_compose(
-                &host.view(),
-                &document,
-                document.selection(),
-                &mut self.editor.borrow_mut(),
-            );
+            let mut editor = self.editor.borrow_mut();
+            self.underline_found(&document, &mut editor);
+            apply_rich_compose(&host.view(), &document, document.selection(), &mut editor);
         }
         self.render_quote(host);
+        self.check_spelling_soon();
     }
 
     /// Draw the visible part of the original below the editor, while it is
@@ -1312,6 +1339,7 @@ impl ComposeSession {
         self.generation.set(self.generation.get().wrapping_add(1));
         self.preferences_generation
             .set(self.preferences_generation.get().wrapping_add(1));
+        self.clear_spelling();
         self.document.borrow_mut().reset();
         self.editor.borrow_mut().release();
         self.contacts.borrow_mut().clear();
@@ -1508,6 +1536,54 @@ impl ComposeSession {
             weak.upgrade()
                 .is_some_and(|session| session.delete_template(id))
         });
+        apply_spelling_state(&ui);
+        let weak = self.reference();
+        ui.on_editor_menu_requested(move |x, y| {
+            if let Some(session) = weak.upgrade() {
+                session.open_editor_menu(Some((x, y)));
+            }
+        });
+        let weak = self.reference();
+        ui.on_editor_caret_menu_requested(move || {
+            if let Some(session) = weak.upgrade() {
+                session.open_editor_menu(None);
+            }
+        });
+        let weak = self.reference();
+        ui.on_spelling_correct(move |index| {
+            if let Some(session) = weak.upgrade() {
+                session.correct_spelling(index);
+            }
+        });
+        let weak = self.reference();
+        ui.on_spelling_ignore(move || {
+            if let Some(session) = weak.upgrade() {
+                session.ignore_spelling();
+            }
+        });
+        let weak = self.reference();
+        ui.on_spelling_learn(move || {
+            if let Some(session) = weak.upgrade() {
+                session.learn_spelling();
+            }
+        });
+        let weak = self.reference();
+        ui.on_spelling_toggle(move || {
+            if let Some(session) = weak.upgrade()
+                && let Some(spelling) = crate::spelling::service()
+            {
+                session.save_spelling(!spelling.enabled(), spelling.chosen_languages());
+            }
+        });
+        let weak = self.reference();
+        ui.on_spelling_toggle_language(move |index| {
+            if let Some(session) = weak.upgrade()
+                && let Some(spelling) = crate::spelling::service()
+                && let Some(languages) = session.toggled_spelling_language(index)
+            {
+                session.save_spelling(spelling.enabled(), Some(languages));
+            }
+        });
 
         let preferences = host.preferences();
         let weak = self.reference();
@@ -1639,14 +1715,17 @@ impl ComposeSession {
         let Some(host) = self.host() else {
             return;
         };
-        let mut document = self.document.borrow_mut();
-        let selection = change(&mut document);
-        apply_rich_compose(
-            &host.view(),
-            &document,
-            selection,
-            &mut self.editor.borrow_mut(),
-        );
+        {
+            let mut document = self.document.borrow_mut();
+            let selection = change(&mut document);
+            apply_rich_compose(
+                &host.view(),
+                &document,
+                selection,
+                &mut self.editor.borrow_mut(),
+            );
+        }
+        self.check_spelling_soon();
     }
 
     fn update_selection(&self, body: &str, anchor: i32, cursor: i32) {
@@ -1686,6 +1765,7 @@ impl ComposeSession {
                 .as_ref()
                 .map(|edited| document.edit_state(edited.mark))
         };
+        self.check_spelling_soon();
         // Undoing Edit puts the drawn original back, and redoing it moves the
         // original into the text again.
         let ui = host.ui();
@@ -2171,8 +2251,29 @@ impl ComposeSession {
             in_reply_to_header: intent.in_reply_to_header.as_deref(),
         };
         if send {
-            match composers.runtime.block_on(core.send_new_message(message)) {
-                Ok(queued) => {
+            let queued = composers
+                .runtime
+                .block_on(core.send_new_message(message))
+                .and_then(|queued| {
+                    let held = crate::undo::holds(&queued);
+                    // Without an undo delay the message leaves now, and the
+                    // composer waits for it below.
+                    if !held {
+                        composers
+                            .runtime
+                            .block_on(core.send_now(queued.action_id))?;
+                    }
+                    Ok((queued, held))
+                });
+            match queued {
+                // With one, the composer closes at once, and a notice in the
+                // main window can take the message back until it leaves.
+                Ok((queued, true)) => {
+                    self.dispose();
+                    crate::undo::sending(&app, queued);
+                    mailto_links::open_pending_soon(&app);
+                }
+                Ok((queued, false)) => {
                     // Keep the exact saved draft attached to this composer so
                     // a failed submission can be edited and retried in place.
                     self.intent.borrow_mut().draft_id = Some(queued.draft_id);

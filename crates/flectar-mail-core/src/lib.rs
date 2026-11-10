@@ -4628,6 +4628,46 @@ impl Core {
         Ok(true)
     }
 
+    /// Take back exactly these actions, such as those of the archive a notice
+    /// tells of: one still waiting never leaves, one the server already has
+    /// is reversed. Unlike [`Core::undo_last`], later actions and sends stay.
+    /// False when none of them could be taken back.
+    pub async fn undo_actions(&self, action_ids: Vec<i64>) -> Result<bool> {
+        let (undone, threads) = self
+            .db
+            .write(move |conn| {
+                let mut undone = false;
+                let mut threads = Vec::new();
+                for id in action_ids {
+                    let Some(action) = repo::actions::get(conn, id)? else {
+                        continue;
+                    };
+                    if action.kind == "send"
+                        || !matches!(action.state.as_str(), "pending" | "inflight" | "done")
+                    {
+                        continue;
+                    }
+                    undone = true;
+                    if let Some(thread_id) = revert_action(conn, &action)?
+                        && !threads.contains(&thread_id)
+                    {
+                        threads.push(thread_id);
+                    }
+                }
+                Ok((undone, threads))
+            })
+            .await?;
+        if !threads.is_empty() {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: threads,
+            });
+        }
+        if undone {
+            self.nudge(None, || SyncCmd::RunActions).await;
+        }
+        Ok(undone)
+    }
+
     pub async fn cancel_send(&self, action_id: i64) -> Result<bool> {
         self.db
             .write(move |conn| repo::actions::try_cancel(conn, action_id))
@@ -11613,6 +11653,42 @@ mod draft_action_race_tests {
             })
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_send_taken_back_in_its_delay_stays_a_draft() {
+        let (core, _temp, draft_id, action_id) = jmap_draft_with_send("pending").await;
+
+        // Undo, while the delay runs.
+        assert!(core.cancel_send(action_id).await.unwrap());
+        let error = core.wait_for_send(action_id).await.unwrap_err();
+        assert!(error.to_string().contains("cancelled"), "{error}");
+        // Taken back once, there is nothing left to take back.
+        assert!(!core.cancel_send(action_id).await.unwrap());
+
+        let is_draft = core
+            .db
+            .read(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT is_draft FROM messages WHERE id = ?1",
+                    [draft_id],
+                    |row| row.get::<_, bool>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert!(is_draft);
+        // It reopens as the draft it was.
+        assert_eq!(
+            core.get_draft(draft_id).await.unwrap().draft_id,
+            Some(draft_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_send_already_on_its_way_cannot_be_taken_back() {
+        let (core, _temp, _draft_id, action_id) = jmap_draft_with_send("inflight").await;
+        assert!(!core.cancel_send(action_id).await.unwrap());
     }
 
     #[tokio::test]

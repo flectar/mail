@@ -39,6 +39,9 @@ modules:
         CARGO_BUILD_JOBS: '1'
         CARGO_HOME: /run/build/flectar-mail/cargo
         CARGO_NET_OFFLINE: 'true'
+        # The bundle on GitHub tells of newer releases. Flathub updates the
+        # app itself, so its manifest leaves this out.
+        FLECTAR_UPDATE_CHECKS: github
     build-commands:
       - cargo build --offline --locked --release --no-default-features --features remote-content,gpu-renderer,flatpak --bin flectar-mail
       - install -Dm0755 target/release/flectar-mail /app/bin/flectar-mail

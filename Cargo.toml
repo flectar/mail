@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/flectar-mail-core", "crates/renderer-probe"]
-exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-winit", "crates/parley", "crates/parley_emoji"]
+members = ["crates/flectar-mail-core", "crates/flectar-spell", "crates/renderer-probe"]
+exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-winit", "crates/parley", "crates/parley_emoji", "crates/spellbook"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -101,6 +101,8 @@ cosmic-text = { version = "0.19", default-features = false, features = ["std", "
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
 keyboard-types = "0.8"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
+# Compares release versions for update notices (src/updates.rs).
+semver = "1"
 sha2 = "0.10"
 serde.workspace = true
 serde_json.workspace = true
@@ -188,6 +190,8 @@ x11rb = { version = "0.13", default-features = false }
 wayland-backend = { version = "0.3", default-features = false, features = ["client_system"] }
 wayland-client = { version = "0.31", default-features = false }
 wayland-protocols = { version = "0.32", default-features = false, features = ["client", "staging"] }
+# Spell checking with the system's Hunspell dictionaries, read in place from disk.
+flectar-spell = { path = "crates/flectar-spell" }
 
 # Integrated window frames use winit window attributes and native window events.
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))'.dependencies]
@@ -257,6 +261,8 @@ ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "
 # only the internal crate exposes. It must stay on the version `slint` uses.
 [dev-dependencies]
 i-slint-core = { version = "=1.18.1", default-features = false }
+# src/updates.rs tests its schedule on tokio's paused clock.
+tokio = { version = "1", features = ["macros", "test-util"] }
 # src/platform/web_authentication.rs, which only iOS builds otherwise.
 async-trait = "0.1"
 

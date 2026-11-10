@@ -510,6 +510,20 @@ pub(super) fn restore_account_backup(
                 settings.suggest_learned_contacts = enabled;
             }
             if let Some(enabled) = preferences
+                .get("spellingEnabled")
+                .and_then(|value| value.as_bool())
+            {
+                settings.spelling_enabled = enabled;
+            }
+            if let Some(languages) = preferences.get("spellingLanguages") {
+                settings.spelling_languages = languages.as_array().map(|languages| {
+                    languages
+                        .iter()
+                        .filter_map(|language| language.as_str().map(str::to_owned))
+                        .collect()
+                });
+            }
+            if let Some(enabled) = preferences
                 .get("notificationsEnabled")
                 .and_then(|value| value.as_bool())
             {
@@ -644,6 +658,11 @@ pub(super) fn restore_account_backup(
         .set_preference(settings.message_appearance.as_str().into());
     app.set_show_avatars(settings.show_avatars);
     app.set_show_tabs(settings.show_tabs);
+    crate::spelling::apply_settings(
+        settings.spelling_enabled,
+        settings.spelling_languages.clone(),
+    );
+    crate::spelling::apply_to_window(app);
     apply_mail_grouping(app, state, runtime, settings.mail_grouping());
     app.set_show_account_markers(settings.show_account_badges);
     crate::window_chrome::apply_preference(
@@ -657,8 +676,12 @@ pub(super) fn restore_account_backup(
     app.set_notifications_enabled(settings.notifications_enabled);
     app.set_notification_sound_enabled(settings.sound_enabled);
     app.set_unread_badge_enabled(settings.unread_badge_enabled);
+    app.global::<Updates>()
+        .set_enabled(settings.check_for_updates);
+    crate::updates::set_enabled(settings.check_for_updates);
     app.set_notification_scope(settings.notification_scope.clone().into());
     app.set_sync_interval_minutes(settings.sync_interval_minutes as i32);
+    app.set_undo_send_seconds(i32::try_from(settings.undo_send_seconds.clamp(0, 30)).unwrap_or(10));
     app.set_mark_read_on_open(settings.mark_read_on_open);
     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
     app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
@@ -1327,6 +1350,8 @@ pub(super) fn register_data_management_callbacks(
                     "collectIncomingContacts": settings.collect_incoming_contacts,
                     "contactSuggestAllAccounts": settings.contact_suggest_all_accounts,
                     "suggestLearnedContacts": settings.suggest_learned_contacts,
+                    "spellingEnabled": settings.spelling_enabled,
+                    "spellingLanguages": settings.spelling_languages,
                     "notificationsEnabled": settings.notifications_enabled,
                     "notificationScope": settings.notification_scope,
                     "soundEnabled": settings.sound_enabled,
@@ -1628,7 +1653,8 @@ pub(super) fn register_data_management_callbacks(
                     }
                     apply_calendar(&app, &data_reset_calendar.borrow(), today);
                     app.set_theme_mode("system".into());
-                    app.global::<MessageColors>().set_preference("system".into());
+                    app.global::<MessageColors>()
+                        .set_preference("system".into());
                     app.set_monochrome_sidebar_icons(false);
                     crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);
@@ -1645,8 +1671,11 @@ pub(super) fn register_data_management_callbacks(
                     app.set_notifications_enabled(true);
                     app.set_notification_sound_enabled(true);
                     app.set_unread_badge_enabled(true);
+                    app.global::<Updates>().set_enabled(true);
+                    crate::updates::set_enabled(true);
                     app.set_notification_scope("important".into());
                     app.set_sync_interval_minutes(5);
+                    app.set_undo_send_seconds(10);
                     app.set_mark_read_on_open(true);
                     app.set_remote_images_enabled(false);
                     app.set_close_to_tray(false);

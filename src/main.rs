@@ -80,6 +80,7 @@ mod rendering_report;
 mod retained_model;
 mod rich_compose;
 mod settings_controller;
+pub mod spelling;
 mod sidebar_model;
 #[cfg(desktop)]
 mod single_instance;
@@ -89,6 +90,8 @@ mod tabs;
 mod theme;
 mod ui_dispatch;
 mod ui_message;
+mod undo;
+mod updates;
 mod window_chrome;
 mod window_controller;
 
@@ -1888,6 +1891,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let (profile_avatar_raw_tx, profile_avatar_rx) = bounded_ui_channel();
     let profile_avatar_tx = UiSender::new(profile_avatar_raw_tx, profile_avatar_wake);
 
+    spelling::install(&runtime, &platform.paths.cache_dir);
     let profile_avatar_loader = if benchmark_disable_background {
         None
     } else {
@@ -6079,6 +6083,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     register_settings_preference_callbacks(&app, &state, &runtime);
+    settings_controller::register_update_callbacks(&app, &state, &runtime, &platform.paths.cache_dir);
 
     account_mail_preferences::register(&app, &state, &runtime);
     let composers = composer::install(
@@ -6089,6 +6094,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         cfg!(desktop),
     );
     mailto_links::install(&app, composers);
+    undo::install(&app, &state, &runtime);
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);
     notifications::ui::attach(&app, &state, &runtime, platform.notifications.clone());
@@ -7078,7 +7084,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
     runtime.spawn(async move {
         while let Some((core, target)) = mark_read_rx.recv().await {
-            let result = core.perform_message_action(target, "mark_read").await;
+            let result = core
+                .perform_message_action(target, "mark_read")
+                .await
+                .map(|_| ());
             let _ = read_results.send((target, result)).await;
         }
     });
@@ -7296,6 +7305,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     app.global::<TabsUi>().invoke_flush();
     // So are the messages still being written.
     composer::save_open_messages();
+    // Messages sent with an undo delay leave now, not at the next start.
+    undo::send_before_exit(&runtime);
     let core = state.borrow().core.as_ref().map(CoreMailSource::file_core);
     notifications::withdraw_before_exit(&runtime, core, platform.notifications.clone());
     // The runtime ends with this function.

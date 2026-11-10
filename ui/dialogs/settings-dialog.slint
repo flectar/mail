@@ -4,6 +4,7 @@ import { WindowChrome } from "../window-chrome.slint";
 import { AppIcon } from "../app-icon.slint";
 import { DefaultEmailApp } from "../default-email-app.slint";
 import { SystemNotifications } from "../system-notifications.slint";
+import { Updates } from "../updates.slint";
 import { AppIconPicker } from "../components/app-icon-picker.slint";
 import { MessageColors } from "../message-colors.slint";
 import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
@@ -486,6 +487,9 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
     in-out property <bool> show_tabs: true;
+    in property <bool> spelling_available: false;
+    in-out property <bool> spelling_enabled: true;
+    in property <bool> spelling_installed: false;
     in-out property <bool> group_mail_by_date: true;
     in-out property <bool> conversation_view: true;
     in-out property <bool> show_account_markers: false;
@@ -499,6 +503,9 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> unread_badge_enabled: true;
     in-out property <string> notification_scope: "important";
     in-out property <int> sync_interval_minutes: 5;
+    // How long a sent message waits before it leaves, so that it can be
+    // taken back; 0 sends it at once.
+    in-out property <int> undo_send_seconds: 10;
     in-out property <bool> mark_read_on_open: true;
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
@@ -593,6 +600,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
     callback save_show_tabs(bool);
+    callback save_spelling_enabled(bool);
     callback save_group_mail_by_date(bool);
     callback save_conversation_view(bool);
     callback choose_download_directory();
@@ -614,6 +622,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_notification_settings(bool, bool, string);
     callback save_unread_badge(bool);
     callback save_sync_interval(int);
+    callback save_undo_send(int);
     callback save_mark_read_on_open(bool);
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
@@ -663,6 +672,17 @@ export component SettingsDialog inherits Rectangle {
         @tr("Every 5 minutes"),
         @tr("Every 15 minutes"),
     ];
+    private property <[string]> undo-send-options: [
+        @tr("Off"),
+        @tr("5 seconds"),
+        @tr("10 seconds"),
+        @tr("20 seconds"),
+        @tr("30 seconds"),
+    ];
+    private property <int> undo-send-index: root.undo_send_seconds <= 0 ? 0
+        : root.undo_send_seconds <= 5 ? 1
+        : root.undo_send_seconds <= 10 ? 2
+        : root.undo_send_seconds <= 20 ? 3 : 4;
     private property <[string]> notification-options: [
         @tr("Off"),
         @tr("Important mail"),
@@ -719,6 +739,13 @@ export component SettingsDialog inherits Rectangle {
         ? @tr("Desktop notifications") : @tr("New mail notifications");
     // When the system checks for new mail in the background, for what
     // notifications and the app icon's count show.
+    // What the last check for a new version found (src/updates.rs).
+    private property <string> update-status: Updates.version != ""
+        ? @tr("Flectar Mail {} is out.", Updates.version)
+        : Updates.checking ? @tr("Checking for a new version…")
+        : Updates.failed ? @tr("GitHub couldn't be reached. Flectar Mail tries again later.")
+        : Updates.current ? @tr("Flectar Mail is up to date.")
+        : @tr("Flectar Mail checks soon after it starts.");
     private property <bool> background-checks-noted: SystemNotifications.background-checks != ""
         && (root.notifications_enabled || root.unread_badge_enabled) && !root.notifications-blocked;
     private property <string> background-checks-text: AppIcon.platform == "android"
@@ -759,7 +786,8 @@ export component SettingsDialog inherits Rectangle {
         if section == "Notifications" && SystemNotifications.availability == "" { return false; }
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads")
+            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads") + " " + @tr("sending undo send delay take back")
+                + " " + @tr("spelling spell check dictionary misspelled words")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap pop3 jmap caldav carddav mail history server oauth security signatures")
             : section == "Contacts"
@@ -772,7 +800,8 @@ export component SettingsDialog inherits Rectangle {
             ? @tr("storage data usage mail attachments files databases backup snapshot import export delete")
             : section == "Services"
             ? @tr("services flectar base account sign in subscription paid sync devices business email custom domain mailbox")
-            : @tr("about version credits contributors license flectar") + " " + @tr("Privacy policy");
+            : @tr("about version credits contributors license flectar") + " " + @tr("Privacy policy")
+                + (Updates.offered ? " " + @tr("updates new version release download check") : "");
         return root.settings-search-matches(terms, root.settings-search-query);
     }
 
@@ -793,6 +822,11 @@ export component SettingsDialog inherits Rectangle {
             root.new-profile-requested = false;
             root.open-new-profile(-1);
         }
+    }
+
+    function select-undo-send(index: int) {
+        root.undo_send_seconds = index == 0 ? 0 : index == 1 ? 5 : index == 2 ? 10 : index == 3 ? 20 : 30;
+        root.save_undo_send(root.undo_send_seconds);
     }
 
     function select-sync-interval(index: int) {
@@ -1276,6 +1310,21 @@ export component SettingsDialog inherits Rectangle {
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-time-format(index); }
                                     }
+                                    if root.spelling_available : Rectangle { height: 1px; background: root.border-subtle; }
+                                    if root.spelling_available : SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Check spelling");
+                                        description: root.spelling_installed
+                                            ? @tr("Underline misspelled words in messages you write. Right-click a word for corrections and languages.")
+                                            : @tr("Install Hunspell dictionaries for your languages from your system's software to check spelling.");
+                                        checked: root.spelling_enabled;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.spelling_enabled = checked;
+                                            root.save_spelling_enabled(checked);
+                                        }
+                                    }
                                 }
                             }
 
@@ -1342,6 +1391,32 @@ export component SettingsDialog inherits Rectangle {
                                                 root.save_mark_read_on_open(self.checked);
                                             }
                                         }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: max(root.compact ? 150px : 112px, self.preferred-height);
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding-top: 18px;
+                                    padding-right: 20px;
+                                    padding-bottom: 18px;
+                                    padding-left: 20px;
+                                    spacing: 4px;
+                                    Text { height: max(22px, self.preferred-height); text: @tr("Sending"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; vertical-alignment: center; wrap: word-wrap; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Undo send");
+                                        description: @tr("How long a sent message waits before it leaves, so that you can take it back.");
+                                        choices: root.undo-send-options;
+                                        selected-index: root.undo-send-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { root.select-undo-send(index); }
                                     }
                                 }
                             }
@@ -2604,6 +2679,7 @@ export component SettingsDialog inherits Rectangle {
                             ShortcutSection { vertical-stretch: 0; title: @tr("Mail"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading;
                                 ShortcutRow { title: @tr("Compose a new message"); keys: [Shortcuts.compose]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Edit a message as new"); keys: [Shortcuts.edit-as-new]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Take back a message just sent"); keys: [Shortcuts.undo]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Check for new mail"); keys: [Shortcuts.check-mail]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Check every account for new mail"); keys: KeyboardKeys.apple ? [Shortcuts.check-all-mail, Shortcuts.check-all-mail-alternate] : [Shortcuts.check-all-mail]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Search mail"); keys: [Shortcuts.search, Shortcuts.search-alternate]; title-color: root.body-text; separator-color: root.faint-text; }
@@ -2796,6 +2872,106 @@ export component SettingsDialog inherits Rectangle {
                                     font-size: TypeScale.caption;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
+                                }
+                            }
+
+                            if Updates.offered : Rectangle {
+                                height: updates-rows.y + updates-rows.height + 10px;
+                                vertical-stretch: 0;
+                                updates-card := SettingsCard { title: @tr("Updates"); description: @tr("Flectar Mail looks for new versions once a day."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
+                                updates-rows := VerticalBox {
+                                    x: 20px;
+                                    y: updates-card.content-y + 8px;
+                                    width: parent.width - 40px;
+                                    height: self.preferred-height;
+                                    padding-bottom: 8px;
+                                    spacing: 4px;
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Check for new versions");
+                                        description: @tr("It asks GitHub, without any account or mail details.");
+                                        checked: Updates.enabled;
+                                        title-color: root.heading;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            Updates.enabled = checked;
+                                            Updates.set-enabled(checked);
+                                        }
+                                    }
+                                    if Updates.enabled : Rectangle { height: 1px; background: root.border-subtle; }
+                                    // Laid out like the row above, so the texts and the right
+                                    // edge line up.
+                                    if Updates.enabled && !root.compact : HorizontalBox {
+                                        padding-top: 6px;
+                                        spacing: 20px;
+                                        VerticalBox {
+                                            padding-top: 0px;
+                                            padding-bottom: 0px;
+                                            spacing: 2px;
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            Text {
+                                                height: max(17px, self.preferred-height);
+                                                text: root.update-status;
+                                                color: root.heading;
+                                                font-size: TypeScale.secondary;
+                                                font-weight: Updates.version != "" ? 600 : 400;
+                                                wrap: word-wrap;
+                                            }
+                                            if Updates.version != "" && Updates.summary != "" : Text {
+                                                height: max(16px, self.preferred-height);
+                                                text: Updates.summary;
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                wrap: word-wrap;
+                                            }
+                                        }
+                                        if Updates.version != "" : Button {
+                                            width: max(112px, self.content-width);
+                                            height: 32px;
+                                            text: @tr("Download");
+                                            primary: true;
+                                            clicked => { Updates.open-release(); }
+                                        }
+                                        Button {
+                                            width: max(112px, self.content-width);
+                                            height: 32px;
+                                            text: @tr("Check now");
+                                            enabled: !Updates.checking;
+                                            clicked => { Updates.check-now(); }
+                                        }
+                                    }
+                                    if Updates.enabled && root.compact : VerticalBox {
+                                        padding: 8px;
+                                        spacing: 7px;
+                                        Text {
+                                            height: max(17px, self.preferred-height);
+                                            text: root.update-status;
+                                            color: root.heading;
+                                            font-size: TypeScale.secondary;
+                                            font-weight: Updates.version != "" ? 600 : 400;
+                                            wrap: word-wrap;
+                                        }
+                                        if Updates.version != "" && Updates.summary != "" : Text {
+                                            height: max(16px, self.preferred-height);
+                                            text: Updates.summary;
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            wrap: word-wrap;
+                                        }
+                                        if Updates.version != "" : Button {
+                                            height: 36px;
+                                            text: @tr("Download");
+                                            primary: true;
+                                            clicked => { Updates.open-release(); }
+                                        }
+                                        Button {
+                                            height: 36px;
+                                            text: @tr("Check now");
+                                            enabled: !Updates.checking;
+                                            clicked => { Updates.check-now(); }
+                                        }
+                                    }
                                 }
                             }
 

@@ -50,6 +50,66 @@ fn save_download_directory(
     }
 }
 
+/// Wires the Updates card and the sidebar notice to src/updates.rs, and
+/// starts checking in builds that offer it.
+pub(super) fn register_update_callbacks(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    cache_dir: &std::path::Path,
+) {
+    let updates = app.global::<Updates>();
+    updates.set_offered(crate::updates::offered());
+    let app_weak = app.as_weak();
+    let state_for_updates = Rc::clone(state);
+    let runtime_for_updates = runtime.clone();
+    updates.on_set_enabled(move |enabled| {
+        crate::updates::set_enabled(enabled);
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_updates.borrow().core.clone() else {
+            return;
+        };
+        match runtime_for_updates.block_on(core.set_check_for_updates(enabled)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Update preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save the update preference: {}",
+                error,
+            )),
+        }
+    });
+    updates.on_check_now(crate::updates::check_now);
+    updates.on_dismiss(crate::updates::dismiss);
+    let app_weak = app.as_weak();
+    updates.on_open_release(move || {
+        if let (Some(app), Some(page)) = (app_weak.upgrade(), crate::updates::release_page()) {
+            app.invoke_open_email_link(page.into());
+        }
+    });
+    let app_weak = app.as_weak();
+    crate::updates::start(runtime, cache_dir, move |view| {
+        let app_weak = app_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let updates = app.global::<Updates>();
+            updates.set_enabled(view.enabled);
+            updates.set_checking(view.checking);
+            updates.set_failed(view.failed);
+            updates.set_current(view.current);
+            updates.set_dismissed(view.dismissed);
+            let (version, summary) = view
+                .available
+                .map(|release| (release.version, release.summary))
+                .unwrap_or_default();
+            updates.set_version(version.into());
+            updates.set_summary(summary.into());
+        });
+    });
+}
+
 pub(super) fn register_settings_preference_callbacks(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -130,6 +190,25 @@ pub(super) fn register_settings_preference_callbacks(
             Err(error) => {
                 app.set_sync_status(UiMessage::detail("Could not save sync interval: {}", error))
             }
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_undo_send = Rc::clone(state);
+    let runtime_for_undo_send = runtime.clone();
+    app.on_save_undo_send(move |seconds| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_undo_send.borrow().core.clone() else {
+            return;
+        };
+        match runtime_for_undo_send.block_on(core.set_undo_send_seconds(i64::from(seconds))) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Undo send preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save the undo send preference: {}",
+                error,
+            )),
         }
     });
 
@@ -527,6 +606,23 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_spelling = Rc::clone(state);
+    let runtime_for_spelling = runtime.clone();
+    app.on_save_spelling_enabled(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let languages = crate::spelling::service().and_then(|spelling| spelling.chosen_languages());
+        save_spelling(
+            &app,
+            &state_for_spelling,
+            &runtime_for_spelling,
+            enabled,
+            languages,
+        );
+    });
+
+    let app_weak = app.as_weak();
     let state_for_tabs = Rc::clone(state);
     let runtime_for_tabs = runtime.clone();
     app.on_save_show_tabs(move |enabled| {
@@ -899,6 +995,28 @@ pub(super) fn register_settings_preference_callbacks(
 }
 
 /// Both entry points share one asynchronous persistence path and busy state.
+/// Check spelling or not, in `languages` or the system's, from the settings or a message's
+/// menu. Open messages follow at once.
+pub(super) fn save_spelling(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    enabled: bool,
+    languages: Option<Vec<String>>,
+) {
+    crate::spelling::apply_settings(enabled, languages.clone());
+    crate::spelling::apply_to_window(app);
+    let Some(core) = state.borrow().core.clone() else {
+        return;
+    };
+    if let Err(error) = runtime.block_on(core.set_spelling(enabled, languages)) {
+        app.set_sync_status(UiMessage::detail(
+            "Could not save spelling preference: {}",
+            error,
+        ));
+    }
+}
+
 pub(super) fn register_oauth_settings_callbacks(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
