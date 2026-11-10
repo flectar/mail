@@ -501,6 +501,9 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> unread_badge_enabled: true;
     in-out property <string> notification_scope: "important";
     in-out property <int> sync_interval_minutes: 5;
+    // How long a sent message waits before it leaves, so that it can be
+    // taken back; 0 sends it at once.
+    in-out property <int> undo_send_seconds: 10;
     in-out property <bool> mark_read_on_open: true;
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
@@ -616,6 +619,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_notification_settings(bool, bool, string);
     callback save_unread_badge(bool);
     callback save_sync_interval(int);
+    callback save_undo_send(int);
     callback save_mark_read_on_open(bool);
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
@@ -664,6 +668,17 @@ export component SettingsDialog inherits Rectangle {
         @tr("Every 5 minutes"),
         @tr("Every 15 minutes"),
     ];
+    private property <[string]> undo-send-options: [
+        @tr("Off"),
+        @tr("5 seconds"),
+        @tr("10 seconds"),
+        @tr("20 seconds"),
+        @tr("30 seconds"),
+    ];
+    private property <int> undo-send-index: root.undo_send_seconds <= 0 ? 0
+        : root.undo_send_seconds <= 5 ? 1
+        : root.undo_send_seconds <= 10 ? 2
+        : root.undo_send_seconds <= 20 ? 3 : 4;
     private property <[string]> notification-options: [
         @tr("Off"),
         @tr("Important mail"),
@@ -767,7 +782,7 @@ export component SettingsDialog inherits Rectangle {
         if section == "Notifications" && SystemNotifications.availability == "" { return false; }
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads")
+            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads") + " " + @tr("sending undo send delay take back")
                 + " " + @tr("spelling spell check dictionary misspelled words")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap pop3 jmap caldav carddav mail history server oauth security signatures")
@@ -803,6 +818,11 @@ export component SettingsDialog inherits Rectangle {
             root.new-profile-requested = false;
             root.open-new-profile(-1);
         }
+    }
+
+    function select-undo-send(index: int) {
+        root.undo_send_seconds = index == 0 ? 0 : index == 1 ? 5 : index == 2 ? 10 : index == 3 ? 20 : 30;
+        root.save_undo_send(root.undo_send_seconds);
     }
 
     function select-sync-interval(index: int) {
@@ -1367,6 +1387,32 @@ export component SettingsDialog inherits Rectangle {
                                                 root.save_mark_read_on_open(self.checked);
                                             }
                                         }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: max(root.compact ? 150px : 112px, self.preferred-height);
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding-top: 18px;
+                                    padding-right: 20px;
+                                    padding-bottom: 18px;
+                                    padding-left: 20px;
+                                    spacing: 4px;
+                                    Text { height: max(22px, self.preferred-height); text: @tr("Sending"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; vertical-alignment: center; wrap: word-wrap; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Undo send");
+                                        description: @tr("How long a sent message waits before it leaves, so that you can take it back.");
+                                        choices: root.undo-send-options;
+                                        selected-index: root.undo-send-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { root.select-undo-send(index); }
                                     }
                                 }
                             }

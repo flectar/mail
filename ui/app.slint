@@ -270,8 +270,10 @@ export global I18n {
         if (key == "Notification preferences are active for this session.") { return @tr("Notification preferences are active for this session."); }
         if (key == "Notification preferences saved.") { return @tr("Notification preferences saved."); }
         if (key == "Update preference saved.") { return @tr("Update preference saved."); }
+        if (key == "Undo send preference saved.") { return @tr("Undo send preference saved."); }
         if (key == "Could not save notifications: {}") { return @tr("Could not save notifications: {}", argument); }
         if (key == "Could not save the update preference: {}") { return @tr("Could not save the update preference: {}", argument); }
+        if (key == "Could not save the undo send preference: {}") { return @tr("Could not save the undo send preference: {}", argument); }
         if (key == "Sync interval is active for this session.") { return @tr("Sync interval is active for this session."); }
         if (key == "Sync interval set to {} minutes.") { return @tr("Sync interval set to {} minutes.", argument); }
         if (key == "Could not save sync interval: {}") { return @tr("Could not save sync interval: {}", argument); }
@@ -810,6 +812,7 @@ export component AppWindow inherits Window {
     callback save_notification_settings(bool, bool, string);
     callback save_unread_badge(bool);
     callback save_sync_interval(int);
+    callback save_undo_send(int);
     callback save_mark_read_on_open(bool);
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
@@ -1146,6 +1149,7 @@ export component AppWindow inherits Window {
     in-out property <bool> unread_badge_enabled: true;
     in-out property <string> notification_scope: "important";
     in-out property <int> sync_interval_minutes: 5;
+    in-out property <int> undo_send_seconds: 10;
     in-out property <bool> mark_read_on_open: true;
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
@@ -2083,6 +2087,7 @@ export component AppWindow inherits Window {
             unread_badge_enabled <=> root.unread_badge_enabled;
             notification_scope <=> root.notification_scope;
             sync_interval_minutes <=> root.sync_interval_minutes;
+            undo_send_seconds <=> root.undo_send_seconds;
             mark_read_on_open <=> root.mark_read_on_open;
             collect_outgoing_contacts <=> root.collect_outgoing_contacts;
             collect_incoming_contacts <=> root.collect_incoming_contacts;
@@ -2186,6 +2191,7 @@ export component AppWindow inherits Window {
             }
             save_unread_badge(enabled) => { root.save_unread_badge(enabled); }
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
+            save_undo_send(seconds) => { root.save_undo_send(seconds); }
             save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
             save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }
             save_conversation_view(enabled) => { root.save_conversation_view(enabled); }

@@ -2218,6 +2218,15 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_undo_send_seconds(&self, seconds: i64) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.undo_send_seconds = seconds;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn wait_for_send(&self, action_id: i64) -> Result<(), String> {
         self.core
             .wait_for_send(action_id)
