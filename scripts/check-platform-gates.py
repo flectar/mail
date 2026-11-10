@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-SCANNED = ["build.rs", "src", "tests", "examples", "crates/flectar-mail-core"]
+SCANNED = ["build.rs", "src", "tests", "examples", "crates/flectar-mail-core", "crates/flectar-spell"]
 
 # The platform layer is where operating systems are named on purpose.
 PLATFORM_LAYER = [
