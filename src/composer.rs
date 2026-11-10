@@ -1540,13 +1540,19 @@ impl ComposeSession {
         let weak = self.reference();
         ui.on_editor_menu_requested(move |x, y| {
             if let Some(session) = weak.upgrade() {
-                session.open_editor_menu(Some((x, y)));
+                session.open_editor_menu(Some((x, y)), false);
             }
         });
         let weak = self.reference();
         ui.on_editor_caret_menu_requested(move || {
             if let Some(session) = weak.upgrade() {
-                session.open_editor_menu(None);
+                session.open_editor_menu(None, false);
+            }
+        });
+        let weak = self.reference();
+        ui.on_editor_tapped(move |x, y| {
+            if let Some(session) = weak.upgrade() {
+                session.word_tapped(x, y);
             }
         });
         let weak = self.reference();
@@ -1832,6 +1838,9 @@ impl ComposeSession {
     }
 
     fn pointer(&self, x: f32, y: f32, kind: &str, shift: bool) {
+        if kind == "down" {
+            self.editor_pressed();
+        }
         let Some(host) = self.host() else {
             return;
         };

@@ -74,6 +74,10 @@ export global ComposerUi {
     in property <[string]> spelling-suggestions: [];
     // Bumped when the editor menu is ready to open.
     in property <int> editor-menu-serial: 0;
+    // The menu is for a word tapped on a touch screen: it holds only spelling, and opens
+    // below the word's line, at this height in the editor.
+    in property <bool> editor-menu-touch: false;
+    in property <length> editor-menu-word-bottom: 0px;
 
     callback close();
     callback pop-out();
@@ -101,6 +105,8 @@ export global ComposerUi {
     callback editor-menu-requested(float, float);
     // The same, from the keyboard: for the word at the caret.
     callback editor-caret-menu-requested();
+    // A tap on a touch screen, which left the caret where it landed.
+    callback editor-tapped(float, float);
     callback spelling-correct(int);
     callback spelling-ignore();
     callback spelling-learn();
@@ -153,6 +159,8 @@ export component BoundComposer inherits EmailComposer {
     spelling-word: ComposerUi.spelling-word;
     spelling-suggestions: ComposerUi.spelling-suggestions;
     editor-menu-serial: ComposerUi.editor-menu-serial;
+    editor-menu-touch: ComposerUi.editor-menu-touch;
+    editor-menu-word-bottom: ComposerUi.editor-menu-word-bottom;
     background-color: AppTheme.surface;
     raised-color: AppTheme.surface-raised;
     control-color: AppTheme.control-bg;
@@ -204,6 +212,7 @@ export component BoundComposer inherits EmailComposer {
     restore-quote => { ComposerUi.restore-quote(); }
     editor-menu-requested(x, y) => { ComposerUi.editor-menu-requested(x, y); }
     editor-caret-menu-requested => { ComposerUi.editor-caret-menu-requested(); }
+    editor-tapped(x, y) => { ComposerUi.editor-tapped(x, y); }
     spelling-correct(index) => { ComposerUi.spelling-correct(index); }
     spelling-ignore => { ComposerUi.spelling-ignore(); }
     spelling-learn => { ComposerUi.spelling-learn(); }
