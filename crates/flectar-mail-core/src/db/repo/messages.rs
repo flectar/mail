@@ -32,6 +32,8 @@ pub struct NewMessage {
     pub references: Vec<String>,
     pub list_unsubscribe: Option<String>,
     pub list_unsubscribe_post: Option<String>,
+    /// The List-Id identifier, lowercase (see mime::list_id).
+    pub list_id: Option<String>,
     /// Transmitting party misaligned with From: (see mime::resolve_via):
     /// email or bare DKIM domain, shown as "via" in the UI. None when the
     /// transmitting domain aligns with From:.
@@ -341,8 +343,8 @@ pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> 
             subject, from_name, from_addr, to_json, cc_json, bcc_json, date, internal_date,
             is_read, is_starred, is_draft, is_outgoing, is_automated, has_attachments, size, snippet,
             list_unsubscribe, list_unsubscribe_post, sender_addr, sender_verification,
-            verification_code)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28)",
+            verification_code, list_id)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29)",
         params![
             m.account_id,
             thread_id,
@@ -372,6 +374,7 @@ pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> 
             m.sender_addr,
             m.sender_verification.as_str(),
             verification_code,
+            m.list_id,
         ],
     )?;
     let id = conn.last_insert_rowid();
@@ -818,16 +821,64 @@ pub fn thread_unsubscribe_candidates(
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
-/// Persist a List-Unsubscribe pair recovered from a cached raw message.
-pub fn set_list_unsubscribe(
+/// The inbox messages of `message_id`'s account from the same list, itself
+/// included, newest first. A list is its List-Id; without one, its sender's
+/// address among mail with list fields. Mail stored before List-Id was kept
+/// has none, so it goes with each list of its sender.
+pub fn list_inbox_messages(conn: &Connection, message_id: i64) -> Result<Vec<i64>> {
+    let Some((account_id, list_id, from_addr)) = conn
+        .query_row(
+            "SELECT account_id, list_id, LOWER(from_addr) FROM messages
+             WHERE id = ?1 AND (list_id IS NOT NULL OR list_unsubscribe IS NOT NULL)",
+            params![message_id],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()?
+    else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = conn.prepare(
+        "SELECT m.id FROM messages m
+         WHERE m.account_id = ?1 AND m.is_draft = 0 AND m.is_outgoing = 0
+           AND ((?2 IS NOT NULL AND m.list_id = ?2)
+                OR (?3 IS NOT NULL AND m.list_id IS NULL AND m.list_unsubscribe IS NOT NULL
+                    AND LOWER(m.from_addr) = ?3))
+           AND (EXISTS (SELECT 1 FROM folders f
+                        WHERE f.id = m.folder_id AND f.role = 'inbox')
+                OR EXISTS (SELECT 1 FROM message_folders mf
+                           JOIN folders f ON f.id = mf.folder_id
+                           WHERE mf.message_id = m.id AND f.role = 'inbox'))
+         ORDER BY m.date DESC, m.id DESC
+         LIMIT 10000",
+    )?;
+    let rows = stmt.query_map(params![account_id, list_id, from_addr], |r| r.get(0))?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// Keep the list fields a whole message carries: header-only sync stores
+/// none for JMAP mail, and none for mail it stored before it read them.
+/// The List-Unsubscribe pair is replaced together, and a field the message
+/// lacks leaves what is stored.
+pub fn fill_list_headers(
     conn: &Connection,
     id: i64,
-    list_unsubscribe: &str,
+    list_unsubscribe: Option<&str>,
     list_unsubscribe_post: Option<&str>,
+    list_id: Option<&str>,
 ) -> Result<()> {
     conn.execute(
-        "UPDATE messages SET list_unsubscribe = ?2, list_unsubscribe_post = ?3 WHERE id = ?1",
-        params![id, list_unsubscribe, list_unsubscribe_post],
+        "UPDATE messages SET
+             list_unsubscribe_post = CASE WHEN ?2 IS NULL THEN list_unsubscribe_post ELSE ?3 END,
+             list_unsubscribe = COALESCE(?2, list_unsubscribe),
+             list_id = COALESCE(?4, list_id)
+         WHERE id = ?1",
+        params![id, list_unsubscribe, list_unsubscribe_post, list_id],
     )?;
     Ok(())
 }
@@ -1148,6 +1199,7 @@ fn detail_from_row(row: &rusqlite::Row) -> rusqlite::Result<MessageDetail> {
         ),
         send_state: row.get("send_state")?,
         send_error: row.get("send_error")?,
+        in_spam: row.get("in_spam")?,
     })
 }
 
@@ -1182,7 +1234,10 @@ const DETAIL_MESSAGE_COLS: &str = "
     m.is_outgoing AS is_outgoing, m.snippet AS snippet, m.body_state AS body_state,
     m.local_body_note AS local_body_note, m.list_unsubscribe AS list_unsubscribe,
     m.list_unsubscribe_post AS list_unsubscribe_post, m.sender_addr AS sender_addr,
-    m.sender_verification AS sender_verification";
+    m.sender_verification AS sender_verification,
+    EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = 'spam')
+        OR EXISTS (SELECT 1 FROM message_folders mf JOIN folders f ON f.id = mf.folder_id
+                   WHERE mf.message_id = m.id AND f.role = 'spam') AS in_spam";
 
 fn attachment_meta_from_row(
     row: &rusqlite::Row,
@@ -1623,6 +1678,7 @@ mod tests {
             references: Vec::new(),
             list_unsubscribe: None,
             list_unsubscribe_post: None,
+            list_id: None,
             sender_addr: None,
             sender_verification: SenderVerification::None,
         }
@@ -1902,11 +1958,12 @@ mod tests {
             vec![(msg_id, "/cache/x.eml".to_string())]
         );
 
-        set_list_unsubscribe(
+        fill_list_headers(
             &c,
             msg_id,
-            "<https://x.dev/u>",
+            Some("<https://x.dev/u>"),
             Some("List-Unsubscribe=One-Click"),
+            Some("news.x.dev"),
         )
         .unwrap();
         assert_eq!(
@@ -1925,6 +1982,82 @@ mod tests {
             d.list_unsubscribe_post.as_deref(),
             Some("List-Unsubscribe=One-Click")
         );
+        // A message without the fields keeps what is stored.
+        fill_list_headers(&c, msg_id, None, None, None).unwrap();
+        let d = detail(&c, msg_id).unwrap();
+        assert_eq!(d.list_unsubscribe.as_deref(), Some("<https://x.dev/u>"));
+        let list_id: Option<String> = c
+            .query_row(
+                "SELECT list_id FROM messages WHERE id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(list_id.as_deref(), Some("news.x.dev"));
+    }
+
+    #[test]
+    fn a_lists_inbox_mail_is_found_by_list_id_or_by_sender() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute_batch(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Archive', 'archive');
+             INSERT INTO folders (id, account_id, path, role) VALUES (3, 1, '[Gmail]/All Mail', 'all');",
+        )
+        .unwrap();
+        let message = |from: &str, list_id: Option<&str>, unsubscribe: bool, date: i64| {
+            let (_, id) = testutil::seed_message(&conn, from, "News", true);
+            conn.execute(
+                "UPDATE messages SET list_id = ?2, date = ?3,
+                     list_unsubscribe = CASE WHEN ?4 THEN '<https://x.example/u>' END
+                 WHERE id = ?1",
+                params![id, list_id, date, unsubscribe],
+            )
+            .unwrap();
+            id
+        };
+        let newest = message("news@x.example", Some("news.x.example"), true, 3000);
+        // Another sender on the same list, as in a discussion list.
+        let member = message("member@y.example", Some("news.x.example"), false, 2000);
+        // Stored before List-Id was kept: matched by its sender.
+        let legacy = message("NEWS@x.example", None, true, 1000);
+        let archived = message("news@x.example", Some("news.x.example"), true, 2500);
+        conn.execute(
+            "UPDATE messages SET folder_id = 2 WHERE id = ?1",
+            [archived],
+        )
+        .unwrap();
+        // In the inbox through a label, as Gmail and JMAP file it.
+        let labelled = message("news@x.example", Some("news.x.example"), true, 1500);
+        conn.execute(
+            "UPDATE messages SET folder_id = 3 WHERE id = ?1",
+            [labelled],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 1)",
+            [labelled],
+        )
+        .unwrap();
+        let other_list = message("news@x.example", Some("deals.x.example"), true, 2200);
+        let personal = message("news@x.example", None, false, 2100);
+        let draft = message("news@x.example", Some("news.x.example"), true, 2600);
+        conn.execute("UPDATE messages SET is_draft = 1 WHERE id = ?1", [draft])
+            .unwrap();
+
+        assert_eq!(
+            list_inbox_messages(&conn, newest).unwrap(),
+            vec![newest, member, labelled, legacy]
+        );
+        // Mail sent without List-Id stands for its sender's list mail.
+        assert_eq!(list_inbox_messages(&conn, legacy).unwrap(), vec![legacy]);
+        // Which list older mail came from is unknown, so it goes with each
+        // list of its sender.
+        assert_eq!(
+            list_inbox_messages(&conn, other_list).unwrap(),
+            vec![other_list, legacy]
+        );
+        assert!(list_inbox_messages(&conn, personal).unwrap().is_empty());
     }
 
     #[test]

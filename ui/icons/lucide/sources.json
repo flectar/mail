@@ -135,6 +135,9 @@
     "mail.svg": {
       "source": "mail"
     },
+    "mail-x.svg": {
+      "source": "mail-x"
+    },
     "paper-airplane.svg": {
       "source": "send"
     },
@@ -458,6 +461,10 @@
     "mail-open": {
       "path": "sources/mail-open.svg",
       "sha256": "956ac99f10de1ea60b444ed7f4e7834a6604a2e57e4c71b349106def64ea5d9b"
+    },
+    "mail-x": {
+      "path": "sources/mail-x.svg",
+      "sha256": "60f0553127a77adbefafd92cdfc692988444e8a4df0abba4494295cbc4f1fe38"
     },
     "maximize": {
       "path": "sources/maximize.svg",

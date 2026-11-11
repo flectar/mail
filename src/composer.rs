@@ -324,6 +324,16 @@ pub(super) fn reopen_draft(draft_id: i64) {
     });
 }
 
+/// Open a new message already written, for the user to look over and send,
+/// such as an emailed unsubscribe request (RFC 2369 appendix B.2.4).
+pub(super) fn compose_written(message: SaveDraftArgs) {
+    with_composers(|composers| {
+        if let Some(app) = composers.app.upgrade() {
+            composers.show_written(&app, message, "new");
+        }
+    });
+}
+
 /// The application is ending. A message someone was writing, in the main
 /// window or one of its own, goes to Drafts: nothing else would keep it.
 pub(super) fn save_open_messages() {
@@ -748,6 +758,12 @@ impl Composers {
 
     /// Open a saved draft in a composer.
     fn show_draft(self: &Rc<Self>, app: &AppWindow, draft: SaveDraftArgs) {
+        self.show_written(app, draft, "draft");
+    }
+
+    /// Open a written message in a composer: a saved draft (`mode` "draft"),
+    /// or a new message the user has yet to look over ("new").
+    fn show_written(self: &Rc<Self>, app: &AppWindow, draft: SaveDraftArgs, mode: &str) {
         // A draft already open in a composer comes forward instead of opening
         // twice, where each copy's saves would overwrite the other's.
         if let Some(open) = draft.draft_id.and_then(|id| self.holding_draft(id)) {
@@ -843,7 +859,7 @@ impl Composers {
             in_reply_to_header: draft.in_reply_to_header,
             draft_id: draft.draft_id,
         };
-        session.show("draft", Some(draft_sender_email));
+        session.show(mode, Some(draft_sender_email));
     }
 
     /// A send reached its end: a sent message closes its composer, a failed

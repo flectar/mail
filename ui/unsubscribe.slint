@@ -1,0 +1,28 @@
+// Leaving the mailing list the open message came from (src/unsubscribe.rs).
+export global Unsubscribe {
+    // The open message names a way to leave its list.
+    in property <bool> available;
+    // Where the dialog is: "" (closed), "confirm", "working", "done",
+    // "website" (the list's page has to finish it) or "error".
+    in property <string> stage;
+    // How the list takes the request: "one-click", "mailto" or "website".
+    in property <string> kind;
+    // Who the list mail is from.
+    in property <string> sender;
+    // The web host a request goes to.
+    in property <string> host;
+    // An emailed request's address, and the address it goes from.
+    in property <string> to;
+    in property <string> from;
+    // After the request, the list's messages still in the inbox.
+    in property <int> inbox-count;
+    // Why the request failed, as the core put it.
+    in property <string> error;
+    callback start();
+    callback confirm();
+    // Open an emailed request in the composer instead of sending it.
+    callback review();
+    // "archive" or "trash" the list's messages in the inbox.
+    callback clean-up(string);
+    callback close();
+}

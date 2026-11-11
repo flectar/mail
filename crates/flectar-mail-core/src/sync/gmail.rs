@@ -1833,7 +1833,8 @@ async fn store_resources(
                              has_attachments = ?18, size = ?19, snippet = ?20,
                              list_unsubscribe = ?21, list_unsubscribe_post = ?22,
                              sender_addr = ?23, sender_verification = ?24,
-                             gmail_sync_generation = COALESCE(?25, gmail_sync_generation)
+                             gmail_sync_generation = COALESCE(?25, gmail_sync_generation),
+                             list_id = ?26
                          WHERE id = ?1",
                         params![
                             existing.id,
@@ -1865,6 +1866,7 @@ async fn store_resources(
                             resource.headers.via,
                             resource.headers.sender_verification.as_str(),
                             generation,
+                            resource.headers.list_id,
                         ],
                     )?;
                     existing.id
@@ -1894,6 +1896,7 @@ async fn store_resources(
                         references: resource.headers.references.clone(),
                         list_unsubscribe: resource.headers.list_unsubscribe.clone(),
                         list_unsubscribe_post: resource.headers.list_unsubscribe_post.clone(),
+                        list_id: resource.headers.list_id.clone(),
                         sender_addr: resource.headers.via.clone(),
                         sender_verification: resource.headers.sender_verification,
                     };

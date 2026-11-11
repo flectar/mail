@@ -20,6 +20,7 @@ import { MessageColors } from "../message-colors.slint";
 import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { LocalMailUi } from "../local-mail.slint";
+import { Unsubscribe } from "../unsubscribe.slint";
 
 component ReaderControl inherits ToolbarIconButton {
     tooltip-above: true;
@@ -352,6 +353,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
         { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
+        { id: "unsubscribe", title: @tr("Unsubscribe…"), icon: @image-url("../icons/lucide/outline/mail-x.svg"), disabled: !Unsubscribe.available },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
@@ -372,6 +374,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
         { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
+        { id: "unsubscribe", title: @tr("Unsubscribe…"), icon: @image-url("../icons/lucide/outline/mail-x.svg"), disabled: !Unsubscribe.available },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
@@ -1073,6 +1076,8 @@ export component MailReadingPane inherits FocusScope {
                                         label-popup.show();
                                     } else if action == "openpgp" {
                                         AccountMailPreferences.read-message();
+                                    } else if action == "unsubscribe" {
+                                        Unsubscribe.start();
                                     } else if action == "print" {
                                         root.print_message();
                                     } else if action == "browser" {
@@ -1310,6 +1315,35 @@ export component MailReadingPane inherits FocusScope {
                                         ReaderControl { compact: root.compact; icon: @image-url("../icons/lucide/outline/chevron-up.svg"); tooltip-text: @tr("Previous match"); clicked => { EmailReader.find(EmailReader.query, -1); } }
                                         ReaderControl { compact: root.compact; icon: @image-url("../icons/lucide/outline/chevron-down.svg"); tooltip-text: @tr("Next match"); clicked => { EmailReader.find(EmailReader.query, 1); } }
                                         ReaderControl { compact: root.compact; icon: @image-url("../icons/lucide/outline/x.svg"); tooltip-text: @tr("Close find"); clicked => { EmailReader.find-open = false; } }
+                                    }
+                                    // RFC 2369 list mail: a way out, above the message as
+                                    // Apple Mail, Outlook and Fastmail put it.
+                                    if Unsubscribe.available && !LocalMailUi.selected : HorizontalBox {
+                                        // The padding leaves the button's height, so the
+                                        // text and icon center on it.
+                                        height: root.compact ? 44px : 32px; padding: 0px; spacing: 8px;
+                                        padding-top: root.compact ? 4px : 3px; padding-bottom: root.compact ? 4px : 3px;
+                                        accessible-role: groupbox;
+                                        accessible-label: @tr("This message is from a mailing list.");
+                                        Rectangle {
+                                            width: LayoutMetrics.icon-size;
+                                            Image {
+                                                y: (parent.height - self.height) / 2;
+                                                width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size;
+                                                source: @image-url("../icons/lucide/outline/mail-x.svg");
+                                                colorize: root.secondary-text;
+                                                image-fit: contain;
+                                                accessible-role: none;
+                                            }
+                                        }
+                                        Text { text: @tr("This message is from a mailing list."); overflow: elide; color: root.secondary-text; vertical-alignment: center; horizontal-stretch: 1; }
+                                        Button {
+                                            width: max(96px, self.content-width);
+                                            height: root.compact ? 36px : 26px;
+                                            text: @tr("Unsubscribe");
+                                            accessible-id: "message-unsubscribe";
+                                            clicked => { Unsubscribe.start(); }
+                                        }
                                     }
                                     if EmailReader.failed-images > 0 && !root.remote-images-blocked && !root.text_mode && !root.source_mode && !EmailReader.reader-mode : HorizontalBox {
                                         height: root.compact ? 44px : 32px; padding: 0px; spacing: 6px;

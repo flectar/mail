@@ -1,7 +1,8 @@
 import { LocalizedMessage } from "models.slint";
 
-// A short notice at the foot of the main window: a message on its way out,
-// with a way to take it back, and how its sending ended (src/undo_send.rs).
+// A short notice at the foot of the main window: what was just done, often
+// with a way to take it back, such as a message on its way out and how its
+// sending ended (src/undo.rs).
 export global Notice {
     in property <bool> shown;
     in property <LocalizedMessage> message;
