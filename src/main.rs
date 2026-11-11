@@ -79,6 +79,7 @@ mod retained_model;
 mod rich_compose;
 mod settings_controller;
 pub mod spelling;
+pub use spelling::{SpellingHost, SpellingSession};
 mod sidebar_model;
 #[cfg(desktop)]
 mod single_instance;
@@ -1444,6 +1445,9 @@ pub struct PlatformContext {
     /// has none. Desktop builds leave it empty: `run` creates the platform's
     /// own once this process owns the profile.
     pub notifications: Option<Arc<dyn NotificationHost>>,
+    /// The system's spell checker, where the app has none of its own for the
+    /// platform: Android's. `None` elsewhere.
+    pub spelling: Option<Arc<dyn SpellingHost>>,
     pub paths: Paths,
     pub documents: Arc<dyn documents::DocumentProvider>,
     pub credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
@@ -1459,6 +1463,7 @@ impl PlatformContext {
             paths,
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
+            spelling: None,
             documents: documents::default_provider(),
             credentials,
             oauth_redirects: Arc::new(
@@ -1480,6 +1485,7 @@ impl PlatformContext {
             paths: Self::app_private_paths(data_root, cache_dir),
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
+            spelling: None,
             documents,
             credentials,
             oauth_redirects,
@@ -1877,7 +1883,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let (profile_avatar_raw_tx, profile_avatar_rx) = bounded_ui_channel();
     let profile_avatar_tx = UiSender::new(profile_avatar_raw_tx, profile_avatar_wake);
 
-    spelling::install(&runtime, &platform.paths.cache_dir);
+    spelling::install(
+        &runtime,
+        &platform.paths.cache_dir,
+        platform.spelling.clone(),
+    );
     let profile_avatar_loader = if benchmark_disable_background {
         None
     } else {

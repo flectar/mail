@@ -3,6 +3,9 @@
 mod documents;
 mod oauth;
 mod security;
+mod spelling;
+
+pub(crate) use spelling::spell_checker;
 
 use flectar_mail_core::models::AppIcon;
 use std::{
@@ -27,6 +30,9 @@ unsafe extern "C" {
 
 /// Names this platform to the settings that describe it.
 pub(crate) const NAME: &str = "ios";
+
+/// iOS checks spelling with its own spell checker, in the app.
+pub(crate) const CHECKS_SPELLING: bool = true;
 
 /// Called by PdfPreview.m when the app is backgrounded or under memory
 /// pressure.
@@ -181,6 +187,8 @@ pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::err
         // Set up before the app finishes launching, so the tap that launched
         // it reaches the app.
         notifications: crate::notifications::host(),
+        // The app's own, through crate::platform::spell_checker.
+        spelling: None,
         paths: flectar_mail_core::config::Paths::new(
             root.join("Library/Application Support/Flectar"),
             root.join("Library/Caches/Flectar"),

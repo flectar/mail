@@ -1313,10 +1313,16 @@ export component SettingsDialog inherits Rectangle {
                                         title: @tr("Check spelling");
                                         description: !root.spelling_installed && root.spelling_system == "windows"
                                             ? @tr("Add a language in Windows Settings, under Time & language, to check spelling.")
+                                            : !root.spelling_installed && root.spelling_system == "android"
+                                            ? @tr("Turn on the spell checker in Android's settings to check spelling.")
                                             : !root.spelling_installed
                                             ? @tr("Install Hunspell dictionaries for your languages from your system's software to check spelling.")
                                             : root.spelling_system == "macos"
                                             ? @tr("Underline misspelled words in messages you write, in the languages set in System Settings. Right-click a word for corrections.")
+                                            : root.spelling_system == "android"
+                                            ? @tr("Underline misspelled words in messages you write, in the language set for Android's spell checker. Tap a word for corrections.")
+                                            : root.spelling_system == "ios"
+                                            ? @tr("Underline misspelled words in messages you write, in your preferred languages from Settings. Tap a word for corrections.")
                                             : @tr("Underline misspelled words in messages you write. Right-click a word for corrections and languages.");
                                         checked: root.spelling_enabled;
                                         title-color: root.body-text;
