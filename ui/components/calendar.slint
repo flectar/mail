@@ -411,6 +411,9 @@ export component FunctionalCalendarView inherits Rectangle {
     callback clear-agenda-filters;
     callback edit-event(int);
     callback delete-event(int);
+    // Answer the invitation with this id: "accepted", "tentative" or
+    // "declined".
+    callback answer-event(int, string);
     // Open an event's details when asked from elsewhere, such as the card
     // above an invitation in mail.
     in property <CalendarEventRow> reveal-event;
@@ -437,6 +440,9 @@ export component FunctionalCalendarView inherits Rectangle {
     private property <string> detail-join-url: "";
     private property <int> detail-event-id: 0;
     private property <bool> detail-event-editable: false;
+    private property <bool> detail-answerable: false;
+    private property <bool> detail-removable: false;
+    private property <string> detail-my-answer: "";
     private property <bool> delete-confirmation-open: false;
 
     function show-source(source: CalendarSourceRow) {
@@ -462,6 +468,9 @@ export component FunctionalCalendarView inherits Rectangle {
         root.detail-join-url = "";
         root.detail-event-id = 0;
         root.detail-event-editable = false;
+        root.detail-answerable = false;
+        root.detail-removable = false;
+        root.detail-my-answer = "";
         root.detail-open = true;
     }
 
@@ -477,15 +486,31 @@ export component FunctionalCalendarView inherits Rectangle {
         root.detail-organizer = event.organizer;
         root.detail-access = "";
         root.detail-sync = "";
-        root.detail-status = event.status;
-        root.detail-rsvp = event.rsvp-status;
+        root.detail-status = root.status-label(event.status);
+        root.detail-rsvp = root.answer-label(event.rsvp-status);
         root.detail-recurrence = event.recurrence;
         root.detail-attendees = event.attendees;
         root.detail-description = event.description;
         root.detail-join-url = event.join-url;
         root.detail-event-id = event.id;
         root.detail-event-editable = event.editable;
+        root.detail-answerable = event.answerable;
+        root.detail-removable = event.removable;
+        root.detail-my-answer = event.rsvp-status;
         root.detail-open = true;
+    }
+
+    pure function answer-label(answer: string) -> string {
+        return answer == "ACCEPTED" ? @tr("Accepted")
+            : answer == "TENTATIVE" ? @tr("Maybe")
+            : answer == "DECLINED" ? @tr("Declined") : answer;
+    }
+
+    // An event's STATUS (RFC 5545), which servers write in either case.
+    pure function status-label(status: string) -> string {
+        return status == "CONFIRMED" || status == "confirmed" ? @tr("Confirmed")
+            : status == "TENTATIVE" || status == "tentative" ? @tr("Tentative")
+            : status == "CANCELLED" || status == "cancelled" ? @tr("Cancelled") : status;
     }
 
     private property <length> main-x: root.compact ? 0px : calendar-sidebar.current-width;
@@ -928,6 +953,9 @@ export component FunctionalCalendarView inherits Rectangle {
         description: root.detail-description;
         join-url: root.detail-join-url;
         editable: root.detail-event-editable;
+        answerable: root.detail-answerable;
+        removable: root.detail-removable;
+        my-answer: root.detail-my-answer;
         accent: root.accent-color;
         accent-soft: root.accent-background;
         border: root.ui-border-color;
@@ -941,6 +969,14 @@ export component FunctionalCalendarView inherits Rectangle {
             root.edit-event(root.detail-event-id);
         }
         delete-event => { root.delete-confirmation-open = true; }
+        answer(response) => {
+            root.detail-my-answer = response == "accepted" ? "ACCEPTED" : response == "tentative" ? "TENTATIVE" : "DECLINED";
+            root.answer-event(root.detail-event-id, response);
+        }
+        remove-event => {
+            root.detail-open = false;
+            root.delete-event(root.detail-event-id);
+        }
     }
 
     ConfirmationDialog {

@@ -56,6 +56,7 @@ fn from_row(row: &Row) -> rusqlite::Result<CalendarEvent> {
         all_day: row.get::<_, i64>("all_day")? != 0,
         status: row.get("status")?,
         method: row.get("method")?,
+        invited: false,
     })
 }
 

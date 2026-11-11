@@ -2357,6 +2357,10 @@ pub struct CalendarEvent {
     pub all_day: bool,
     pub status: Option<String>,
     pub method: Option<String>,
+    /// The user is among its guests and doesn't organize it, so it is theirs
+    /// to answer. Set by [`crate::Core::list_events`].
+    #[serde(default)]
+    pub invited: bool,
 }
 
 /// How a calendar connection reaches its server. An account holds at most

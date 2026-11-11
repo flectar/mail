@@ -6302,7 +6302,61 @@ impl Core {
             }
         }
         events.sort_by_key(|e| e.starts_at);
+        self.mark_invitations(&mut events).await?;
         Ok(events)
+    }
+
+    /// Tell which events are the user's to answer, and fill in their answer
+    /// where only the guest list holds it, as on a calendar server's copy.
+    async fn mark_invitations(&self, events: &mut [CalendarEvent]) -> Result<()> {
+        let accounts: Vec<i64> = events
+            .iter()
+            .filter(|event| !event.attendees.is_empty())
+            .map(|event| event.account_id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if accounts.is_empty() {
+            return Ok(());
+        }
+        let own = self
+            .db
+            .read(move |conn| {
+                accounts
+                    .into_iter()
+                    .map(|account_id| {
+                        Ok((
+                            account_id,
+                            repo::sender_identities::own_addresses(conn, account_id)?,
+                        ))
+                    })
+                    .collect::<Result<HashMap<_, _>>>()
+            })
+            .await?;
+        for event in events {
+            let Some(own) = own.get(&event.account_id) else {
+                continue;
+            };
+            let organized = event
+                .organizer
+                .as_deref()
+                .is_some_and(|organizer| own.contains(organizer));
+            let Some(mine) = event
+                .attendees
+                .iter()
+                .find(|attendee| own.contains(&attendee.email))
+            else {
+                continue;
+            };
+            event.invited = !organized && !event.is_local;
+            if event.invited && event.rsvp_status.is_none() {
+                event.rsvp_status = mine
+                    .partstat
+                    .clone()
+                    .filter(|answer| answer != "NEEDS-ACTION");
+            }
+        }
+        Ok(())
     }
 
     /// Create a meeting. The event lands on the local calendar immediately;
@@ -13782,6 +13836,54 @@ mod invitation_tests {
         assert!(shown.starts_at > now_ms() - week && shown.starts_at <= now_ms() + week);
         assert_eq!((shown.starts_at - first) % week, 0);
         assert_eq!(shown.ends_at, Some(shown.starts_at + 60 * 60_000));
+    }
+
+    #[tokio::test]
+    async fn listed_invitations_are_the_users_to_answer() {
+        let (core, _temp, _) = invited().await;
+        // A calendar server's copy, whose guest list holds the answer.
+        core.calendar_db
+            .write(|conn| {
+                conn.execute(
+                    "INSERT INTO calendar_events
+                     (account_id, ical_uid, summary, organizer, attendees_json,
+                      starts_at, ends_at, all_day, is_local)
+                     VALUES (1, 'copy@example.com', 'Copy', 'dave@example.com', ?1,
+                             1800000000000, 1800003600000, 0, 0)",
+                    rusqlite::params![r#"[{"email":"me@test.dev","partstat":"ACCEPTED"}]"#],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let events = core.list_events(0, 2_000_000_000_000).await.unwrap();
+        let listed = |title: &str| {
+            events
+                .iter()
+                .find(|event| event.summary.as_deref() == Some(title))
+                .unwrap()
+                .clone()
+        };
+        let review = listed("Design review");
+        assert!(review.invited && review.rsvp_status.is_none());
+        let copy = listed("Copy");
+        assert!(copy.invited);
+        assert_eq!(copy.rsvp_status.as_deref(), Some("ACCEPTED"));
+
+        core.rsvp_event(answer(review.id, "tentative", None))
+            .await
+            .unwrap();
+        let review = listed_after(&core, "Design review").await;
+        assert_eq!(review.rsvp_status.as_deref(), Some("TENTATIVE"));
+    }
+
+    async fn listed_after(core: &Core, title: &str) -> CalendarEvent {
+        core.list_events(0, 2_000_000_000_000)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|event| event.summary.as_deref() == Some(title))
+            .unwrap()
     }
 
     #[tokio::test]
