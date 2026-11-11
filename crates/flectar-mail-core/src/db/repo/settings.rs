@@ -53,6 +53,8 @@ mod tests {
         assert!(d.spelling_enabled);
         assert_eq!(d.spelling_languages, None);
         assert_eq!(d.workspace_layout, "default");
+        assert_eq!(d.compose_font, "default");
+        assert_eq!(d.compose_text_size, "normal");
         assert_eq!(d.calendar_week_start, "monday");
         assert_eq!(d.theme_preset, "default");
         assert_eq!(
@@ -163,6 +165,8 @@ mod tests {
         let s = get(&c).unwrap();
         assert_eq!(s.theme, "snow");
         assert_eq!(s.undo_send_seconds, 20);
+        assert_eq!(s.compose_font, "default");
+        assert_eq!(s.compose_text_size, "normal");
         assert!(s.load_remote_images);
         assert!(s.mark_read_on_open);
         assert!(!s.monochrome_sidebar_icons);

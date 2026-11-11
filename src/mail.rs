@@ -2330,6 +2330,16 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_compose_text_style(&self, font: String, size: String) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.compose_font = font;
+        settings.compose_text_size = size;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_undo_send_seconds(&self, seconds: i64) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.undo_send_seconds = seconds;

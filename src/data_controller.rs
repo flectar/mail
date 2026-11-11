@@ -682,6 +682,8 @@ pub(super) fn restore_account_backup(
     app.set_notification_scope(settings.notification_scope.clone().into());
     app.set_sync_interval_minutes(settings.sync_interval_minutes as i32);
     app.set_undo_send_seconds(i32::try_from(settings.undo_send_seconds.clamp(0, 30)).unwrap_or(10));
+    app.set_compose_font(settings.compose_font.as_str().into());
+    app.set_compose_text_size(settings.compose_text_size.as_str().into());
     app.set_mark_read_on_open(settings.mark_read_on_open);
     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
     app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
@@ -1676,6 +1678,8 @@ pub(super) fn register_data_management_callbacks(
                     app.set_notification_scope("important".into());
                     app.set_sync_interval_minutes(5);
                     app.set_undo_send_seconds(10);
+                    app.set_compose_font("default".into());
+                    app.set_compose_text_size("normal".into());
                     app.set_mark_read_on_open(true);
                     app.set_remote_images_enabled(false);
                     app.set_close_to_tray(false);

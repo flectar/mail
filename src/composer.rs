@@ -580,6 +580,12 @@ impl Composers {
             disposed: Cell::new(false),
         });
         session.connect();
+        // What's written starts in the default text style from Settings.
+        session.document.borrow_mut().set_base_style(
+            crate::rich_compose::FontFamily::from_name(&app.get_compose_font()).unwrap_or_default(),
+            crate::rich_compose::TextSize::from_name(&app.get_compose_text_size())
+                .unwrap_or_default(),
+        );
         let host = session.host()?;
         let ui = host.ui();
         ui.set_can_pop_out(self.pop_out);

@@ -213,6 +213,26 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_text_style = Rc::clone(state);
+    let runtime_for_text_style = runtime.clone();
+    app.on_save_compose_text_style(move |font, size| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_text_style.borrow().core.clone() else {
+            return;
+        };
+        match runtime_for_text_style.block_on(core.set_compose_text_style(font.into(), size.into()))
+        {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Text style preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save the text style preference: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_read_on_open = Rc::clone(state);
     let runtime_for_read_on_open = runtime.clone();
     app.on_save_mark_read_on_open(move |enabled| {

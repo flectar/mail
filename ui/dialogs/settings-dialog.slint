@@ -506,6 +506,9 @@ export component SettingsDialog inherits Rectangle {
     // How long a sent message waits before it leaves, so that it can be
     // taken back; 0 sends it at once.
     in-out property <int> undo_send_seconds: 10;
+    // The font and size new messages start in.
+    in-out property <string> compose_font: "default";
+    in-out property <string> compose_text_size: "normal";
     in-out property <bool> mark_read_on_open: true;
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
@@ -622,6 +625,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_unread_badge(bool);
     callback save_sync_interval(int);
     callback save_undo_send(int);
+    callback save_compose_text_style(string, string);
     callback save_mark_read_on_open(bool);
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
@@ -681,6 +685,22 @@ export component SettingsDialog inherits Rectangle {
         : root.undo_send_seconds <= 5 ? 1
         : root.undo_send_seconds <= 10 ? 2
         : root.undo_send_seconds <= 20 ? 3 : 4;
+    private property <[string]> compose-font-options: [
+        @tr("font" => "Default"),
+        @tr("font" => "Serif"),
+        @tr("font" => "Fixed width"),
+    ];
+    private property <int> compose-font-index: root.compose_font == "serif" ? 1
+        : root.compose_font == "monospace" ? 2 : 0;
+    private property <[string]> compose-size-options: [
+        @tr("text size" => "Small"),
+        @tr("text size" => "Normal"),
+        @tr("text size" => "Large"),
+        @tr("text size" => "Huge"),
+    ];
+    private property <int> compose-size-index: root.compose_text_size == "small" ? 0
+        : root.compose_text_size == "large" ? 2
+        : root.compose_text_size == "huge" ? 3 : 1;
     private property <[string]> notification-options: [
         @tr("Off"),
         @tr("Important mail"),
@@ -786,6 +806,7 @@ export component SettingsDialog inherits Rectangle {
         let terms = section == "General"
             ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads") + " " + @tr("sending undo send delay take back")
                 + " " + @tr("spelling spell check dictionary misspelled words")
+                + " " + @tr("writing default text style font typeface text size")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap pop3 jmap caldav carddav mail history server oauth security signatures")
             : section == "Contacts"
@@ -820,6 +841,16 @@ export component SettingsDialog inherits Rectangle {
             root.new-profile-requested = false;
             root.open-new-profile(-1);
         }
+    }
+
+    function select-compose-font(index: int) {
+        root.compose_font = index == 1 ? "serif" : index == 2 ? "monospace" : "default";
+        root.save_compose_text_style(root.compose_font, root.compose_text_size);
+    }
+
+    function select-compose-size(index: int) {
+        root.compose_text_size = index == 0 ? "small" : index == 2 ? "large" : index == 3 ? "huge" : "normal";
+        root.save_compose_text_style(root.compose_font, root.compose_text_size);
     }
 
     function select-undo-send(index: int) {
@@ -1399,6 +1430,43 @@ export component SettingsDialog inherits Rectangle {
                                                 root.save_mark_read_on_open(self.checked);
                                             }
                                         }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: max(root.compact ? 154px : 116px, self.preferred-height);
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding-top: 15px;
+                                    padding-right: 20px;
+                                    padding-bottom: 15px;
+                                    padding-left: 20px;
+                                    spacing: 5px;
+                                    Text { text: @tr("Writing"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Font");
+                                        description: @tr("New messages, replies and forwards start in this font. Default names none, so each reader sees their own.");
+                                        choices: root.compose-font-options;
+                                        selected-index: root.compose-font-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { root.select-compose-font(index); }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Text size");
+                                        description: @tr("New messages, replies and forwards start at this size.");
+                                        choices: root.compose-size-options;
+                                        selected-index: root.compose-size-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { root.select-compose-size(index); }
                                     }
                                 }
                             }

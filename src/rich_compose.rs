@@ -87,7 +87,7 @@ impl TextSize {
         }
     }
 
-    fn from_name(name: &str) -> Option<Self> {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|size| size.name() == name)
     }
 
@@ -140,7 +140,7 @@ impl FontFamily {
         }
     }
 
-    fn from_name(name: &str) -> Option<Self> {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|family| family.name() == name)
     }
 
@@ -326,6 +326,9 @@ pub struct RichComposeDocument {
     styles: Vec<ComposeStyleRun>,
     typing_style: CharacterStyle,
     typing_override: Option<usize>,
+    /// The font and size of the default text style from Settings, which an empty message starts
+    /// in and removing formatting returns to.
+    base: CharacterStyle,
     selection: (i32, i32),
     undo: VecDeque<EditTransaction>,
     redo: VecDeque<EditTransaction>,
@@ -354,6 +357,22 @@ impl RichComposeDocument {
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Sets the default text style's font and size. What's typed into an empty message starts
+    /// in it.
+    pub(crate) fn set_base_style(&mut self, family: FontFamily, size: TextSize) {
+        self.base = CharacterStyle {
+            family,
+            size,
+            ..CharacterStyle::default()
+        };
+        if self.text.is_empty() {
+            self.typing_style = CharacterStyle {
+                align: self.typing_style.align,
+                ..self.base.clone()
+            };
+        }
     }
 
     pub fn selection(&self) -> ComposeSelection {
@@ -565,7 +584,7 @@ impl RichComposeDocument {
     /// The style of what's typed at `cursor`: that of the text before it, or at the start of a
     /// line, list item or quote, of the text after it, past the marker. An empty last line goes
     /// on in the style and alignment of the line above it, as pressing Enter does in a word
-    /// processor, but not in its link.
+    /// processor, but not in its link, and an empty message starts in the default text style.
     fn typing_style_at(&self, cursor: usize) -> CharacterStyle {
         let line_start = self.text[..cursor].rfind('\n').map_or(0, |index| index + 1);
         let line_end = self.text[cursor..]
@@ -574,7 +593,10 @@ impl RichComposeDocument {
         let content_start = line_start
             + block_prefix_text(&self.text[line_start..line_end]).map_or(0, |(_, bytes)| bytes);
         if cursor > content_start {
-            return self.style_at(cursor - 1).cloned().unwrap_or_default();
+            return self
+                .style_at(cursor - 1)
+                .cloned()
+                .unwrap_or_else(|| self.base.clone());
         }
         if let Some(style) = self.style_at(content_start) {
             return style.clone();
@@ -582,11 +604,14 @@ impl RichComposeDocument {
         line_start
             .checked_sub(1)
             .and_then(|line_end_above| self.style_at(line_end_above))
-            .map_or_else(CharacterStyle::default, |style| CharacterStyle {
-                link: None,
-                link_is_auto: false,
-                ..style.clone()
-            })
+            .map_or_else(
+                || self.base.clone(),
+                |style| CharacterStyle {
+                    link: None,
+                    link_is_auto: false,
+                    ..style.clone()
+                },
+            )
     }
 
     pub fn insert_text(&mut self, value: &str) -> ComposeSelection {
@@ -721,16 +746,19 @@ impl RichComposeDocument {
                 "underline" => self.toggle_mark(UNDERLINE, start, end),
                 "strike" => self.toggle_mark(STRIKE, start, end),
                 "code" => self.toggle_mark(CODE, start, end),
-                // Plain text again, as Remove formatting leaves it in other composers: links and
-                // paragraphs' alignment stay.
-                "clear" => self.set_text_style(start, end, |style| {
-                    *style = CharacterStyle {
-                        link: style.link.clone(),
-                        link_is_auto: style.link_is_auto,
-                        align: style.align,
-                        ..CharacterStyle::default()
-                    };
-                }),
+                // Back to the default text style, as Remove formatting leaves text in other
+                // composers: links and paragraphs' alignment stay.
+                "clear" => {
+                    let base = self.base.clone();
+                    self.set_text_style(start, end, |style| {
+                        *style = CharacterStyle {
+                            link: style.link.clone(),
+                            link_is_auto: style.link_is_auto,
+                            align: style.align,
+                            ..base.clone()
+                        };
+                    });
+                }
                 "bullet" => return self.toggle_block(BlockKind::Bullet, start, end),
                 "number" => return self.toggle_block(BlockKind::Number, start, end),
                 "quote" => return self.toggle_block(BlockKind::Quote, start, end),
@@ -4020,6 +4048,46 @@ mod tests {
         document.format("color:#cc0000", text, 0, 2);
         document.update_selection(0, 5);
         assert_eq!(document.active_marks().color, None);
+    }
+
+    #[test]
+    fn messages_start_in_the_default_text_style() {
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Serif, TextSize::Large);
+        document.load("", 0, 0);
+        assert_eq!(document.active_marks().family, Some(FontFamily::Serif));
+        document.synchronize_key_edit("Hi", 2, 2, "i");
+        assert_eq!(
+            document.body_html().unwrap(),
+            "<div><span style=\"font-size:x-large;font-family:Times New Roman, Times, serif\">Hi</span></div>"
+        );
+
+        // Text a new message opens with, such as a signature, starts in it too.
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Monospace, TextSize::Normal);
+        document.load("\n\n-- \nAlex", 0, 0);
+        assert!(
+            document
+                .styles
+                .iter()
+                .all(|run| run.style.family == FontFamily::Monospace)
+        );
+        assert_eq!(document.active_marks().family, Some(FontFamily::Monospace));
+    }
+
+    #[test]
+    fn removing_formatting_returns_to_the_default_text_style() {
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Monospace, TextSize::Small);
+        document.load("abc", 3, 3);
+        for command in ["bold", "color:#cc0000", "size:huge", "family:serif"] {
+            document.format(command, "abc", 0, 3);
+        }
+        document.format("clear", "abc", 0, 3);
+        let [run] = &document.styles[..] else {
+            panic!("one run expected, got {:?}", document.styles);
+        };
+        assert_eq!(run.style, document.base);
     }
 
     #[test]
