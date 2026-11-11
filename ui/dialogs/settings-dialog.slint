@@ -488,6 +488,7 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> spelling_available: false;
     in-out property <bool> spelling_enabled: true;
     in property <bool> spelling_installed: false;
+    in property <string> spelling_system: "";
     in-out property <bool> group_mail_by_date: true;
     in-out property <bool> conversation_view: true;
     in-out property <bool> show_account_markers: false;
@@ -1310,9 +1311,13 @@ export component SettingsDialog inherits Rectangle {
                                     if root.spelling_available : SettingsSwitchRow {
                                         compact: root.compact;
                                         title: @tr("Check spelling");
-                                        description: root.spelling_installed
-                                            ? @tr("Underline misspelled words in messages you write. Right-click a word for corrections and languages.")
-                                            : @tr("Install Hunspell dictionaries for your languages from your system's software to check spelling.");
+                                        description: !root.spelling_installed && root.spelling_system == "windows"
+                                            ? @tr("Add a language in Windows Settings, under Time & language, to check spelling.")
+                                            : !root.spelling_installed
+                                            ? @tr("Install Hunspell dictionaries for your languages from your system's software to check spelling.")
+                                            : root.spelling_system == "macos"
+                                            ? @tr("Underline misspelled words in messages you write, in the languages set in System Settings. Right-click a word for corrections.")
+                                            : @tr("Underline misspelled words in messages you write. Right-click a word for corrections and languages.");
                                         checked: root.spelling_enabled;
                                         title-color: root.body-text;
                                         description-color: root.faint-text;

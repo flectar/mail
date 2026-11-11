@@ -368,7 +368,11 @@ pub(super) fn register_window_preference_callbacks(
         let app_weak = app.as_weak();
         app.on_settings_shown(move || {
             if let Some(app) = app_weak.upgrade() {
-                crate::spelling::settings_shown(&app);
+                let window = app.as_weak();
+                crate::spelling::settings_shown(move |installed| {
+                    let _ = window
+                        .upgrade_in_event_loop(move |app| app.set_spelling_installed(installed));
+                });
                 launch_at_login.refresh(&app, false);
                 if let Some(default_email_app) = &default_email_app {
                     default_email_app.refresh(&app);

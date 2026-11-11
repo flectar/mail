@@ -59,6 +59,7 @@ export component EmailComposer inherits Rectangle {
     in property <bool> spelling-available: false;
     in property <bool> spelling-enabled: false;
     in property <[SpellingLanguage]> spelling-languages: [];
+    in property <bool> spelling-languages-automatic: false;
     in property <string> spelling-word: "";
     in property <[string]> spelling-suggestions: [];
     in property <int> editor-menu-serial: 0;
@@ -594,7 +595,7 @@ export component EmailComposer inherits Rectangle {
                                 checked <=> root.spelling-switch-shown;
                                 activated => { root.spelling-toggle(); }
                             }
-                            MenuSeparator {}
+                            if !root.spelling-languages-automatic : MenuSeparator {}
                             for language[index] in root.spelling-languages : MenuItem {
                                 title: language.name;
                                 checkable: true;
@@ -602,7 +603,7 @@ export component EmailComposer inherits Rectangle {
                                 enabled: root.spelling-enabled;
                                 activated => { root.spelling-toggle-language(index); }
                             }
-                            if root.spelling-languages.length == 0 : MenuItem {
+                            if !root.spelling-languages-automatic && root.spelling-languages.length == 0 : MenuItem {
                                 title: @tr("No dictionaries installed");
                                 enabled: false;
                             }
