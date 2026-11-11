@@ -1134,6 +1134,70 @@ pub(crate) fn merge_occurrences(
     Some(merged.render())
 }
 
+/// `calendar` with `attendee`'s participation set to `partstat` in each of
+/// its events. Answering through a calendar server is this change to the
+/// attendee's own copy (RFC 6638 §3.2.2.3), and a server may refuse an
+/// attendee changing anything else, so every other line stays as it was.
+/// None when the calendar doesn't list the attendee.
+pub(crate) fn with_partstat(calendar: &str, attendee: &str, partstat: &str) -> Option<String> {
+    let mut parts = CalendarParts::parse(calendar);
+    let mut found = false;
+    for component in parts
+        .components
+        .iter_mut()
+        .filter(|component| component.kind == "VEVENT")
+    {
+        let mut depth = 0usize;
+        for line in component.lines.iter_mut() {
+            let upper = line.to_ascii_uppercase();
+            if upper.starts_with("BEGIN:") {
+                depth += 1;
+                continue;
+            }
+            if upper.starts_with("END:") {
+                depth = depth.saturating_sub(1);
+                continue;
+            }
+            let listed = depth == 1
+                && raw_parts(line).is_some_and(|(name, _, value)| {
+                    name.eq_ignore_ascii_case("ATTENDEE")
+                        && cal_address(value).eq_ignore_ascii_case(attendee)
+                });
+            if !listed {
+                continue;
+            }
+            let kept = without_params(line, |name| name.eq_ignore_ascii_case("PARTSTAT"));
+            if let Some((head, value)) = split_value(&kept) {
+                *line = format!("{};PARTSTAT={partstat}:{value}", head.trim_end_matches(';'));
+                found = true;
+            }
+        }
+    }
+    found.then(|| parts.render())
+}
+
+/// Whether the calendar's organizer is marked as scheduled by the client
+/// (ORGANIZER;SCHEDULE-AGENT=CLIENT, RFC 6638 §7.1): its server then tells
+/// the organizer nothing, and answers go by mail.
+pub(crate) fn client_schedules(calendar: &str) -> bool {
+    CalendarParts::parse(calendar)
+        .components
+        .iter()
+        .filter(|component| component.kind == "VEVENT")
+        .flat_map(Component::own_lines)
+        .any(|line| {
+            raw_parts(line).is_some_and(|(name, segments, _)| {
+                name.eq_ignore_ascii_case("ORGANIZER")
+                    && segments.iter().any(|segment| {
+                        segment.split_once('=').is_some_and(|(key, value)| {
+                            key.eq_ignore_ascii_case("SCHEDULE-AGENT")
+                                && value.trim_matches('"').eq_ignore_ascii_case("CLIENT")
+                        })
+                    })
+            })
+        })
+}
+
 /// An attendee's answer to an invitation (METHOD:REPLY, RFC 5546 §3.2.3).
 pub struct ReplySpec<'a> {
     /// The invitation as received. Its event's details are copied from it
@@ -1706,6 +1770,45 @@ mod tests {
             2,
             "the series and its moved occurrence"
         );
+    }
+
+    #[test]
+    fn answering_on_a_server_changes_only_the_attendees_participation() {
+        let answered = with_partstat(INVITATION, "BOB@example.com", "ACCEPTED").unwrap();
+        let lines = unfolded(&answered);
+        let bob: Vec<&String> = lines
+            .iter()
+            .filter(|line| line.starts_with("ATTENDEE") && line.ends_with("bob@example.com"))
+            .collect();
+        assert_eq!(
+            bob,
+            [
+                "ATTENDEE;CN=\"Doe, Bob\";ROLE=REQ-PARTICIPANT;RSVP=TRUE;PARTSTAT=ACCEPTED:mailto:bob@example.com",
+                "ATTENDEE;RSVP=TRUE;PARTSTAT=ACCEPTED:mailto:bob@example.com",
+            ],
+            "in the series and its moved occurrence"
+        );
+        let unchanged =
+            |line: &&String| !(line.starts_with("ATTENDEE") && line.ends_with("bob@example.com"));
+        assert_eq!(
+            lines.iter().filter(unchanged).collect::<Vec<_>>(),
+            unfolded(&CalendarParts::parse(INVITATION).render())
+                .iter()
+                .filter(unchanged)
+                .collect::<Vec<_>>(),
+            "everything else is as the server sent it"
+        );
+        assert!(with_partstat(INVITATION, "nobody@example.com", "ACCEPTED").is_none());
+    }
+
+    #[test]
+    fn a_copy_the_client_schedules_is_recognized() {
+        assert!(!client_schedules(INVITATION));
+        let stored = INVITATION.replace(
+            "ORGANIZER;CN=Alice;SCHEDULE-AGENT=SERVER:",
+            "ORGANIZER;CN=Alice;SCHEDULE-AGENT=CLIENT:",
+        );
+        assert!(client_schedules(&stored));
     }
 
     #[test]

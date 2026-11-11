@@ -176,7 +176,10 @@ pub fn apply_invitation(
             }
             Some("COUNTER" | "REFRESH" | "DECLINECOUNTER") => {}
             Some("CANCEL") => apply_cancel(conn, &invitation)?,
-            _ => apply_request(conn, &invitation, own)?,
+            _ => {
+                apply_request(conn, &invitation, own)?;
+                join_held_series(conn, account_id, uid)?;
+            }
         }
     }
     Ok(())
@@ -861,18 +864,62 @@ pub fn delete_by_href(conn: &Connection, calendar_id: i64, href: &str) -> Result
 
 /// Record which (unstored) series master an occurrence/exception row belongs
 /// to, so a later series-wide deletion can find it via `delete_by_href`.
+/// Record that the occurrence `href` belongs to Exchange's series
+/// `series_master_id`, known by `series_uid`, the UID its invitation
+/// carried. An invitation to that series known from mail is then the
+/// series Exchange holds: it is answered there and shown from there.
 pub fn set_series_master(
     conn: &Connection,
     calendar_id: i64,
     href: &str,
     series_master_id: &str,
+    series_uid: &str,
 ) -> Result<()> {
     conn.execute(
-        "UPDATE calendar_events SET series_master_id = ?3
+        "UPDATE calendar_events SET series_master_id = ?3, series_uid = ?4
          WHERE calendar_id = ?1 AND caldav_href = ?2",
-        params![calendar_id, href, series_master_id],
+        params![calendar_id, href, series_master_id, series_uid],
+    )?;
+    conn.execute(
+        "UPDATE calendar_events SET series_master_id = ?3
+         WHERE calendar_id IS NULL AND message_id IS NOT NULL AND ical_uid = ?2
+           AND account_id = (SELECT account_id FROM calendars WHERE id = ?1)",
+        params![calendar_id, series_uid, series_master_id],
     )?;
     Ok(())
+}
+
+/// Tie an invitation known from mail to the series Exchange already holds
+/// for it, if any (see [`set_series_master`]).
+fn join_held_series(conn: &Connection, account_id: i64, uid: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE calendar_events SET series_master_id = (
+             SELECT held.series_master_id FROM calendar_events held
+             WHERE held.account_id = ?1 AND held.series_uid = ?2
+               AND held.calendar_id IS NOT NULL AND held.series_master_id IS NOT NULL
+             LIMIT 1)
+         WHERE account_id = ?1 AND ical_uid = ?2 AND calendar_id IS NULL
+           AND message_id IS NOT NULL AND series_master_id IS NULL",
+        params![account_id, uid],
+    )?;
+    Ok(())
+}
+
+/// For an invitation known from mail whose series Exchange holds: that
+/// series' Graph id, and a calendar holding its occurrences.
+pub fn held_series(conn: &Connection, event_id: i64) -> Result<Option<(String, i64)>> {
+    Ok(conn
+        .query_row(
+            "SELECT mail.series_master_id, held.calendar_id
+             FROM calendar_events mail
+             JOIN calendar_events held ON held.series_master_id = mail.series_master_id
+                  AND held.account_id = mail.account_id AND held.calendar_id IS NOT NULL
+             WHERE mail.id = ?1 AND mail.calendar_id IS NULL
+             LIMIT 1",
+            params![event_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
 }
 
 /// Record our RSVP (ACCEPTED | TENTATIVE | DECLINED).
@@ -927,6 +974,9 @@ pub fn list_range(conn: &Connection, start_ms: i64, end_ms: i64) -> Result<Vec<C
            AND (calendar_id IS NULL OR EXISTS (
                 SELECT 1 FROM calendars c WHERE c.id = calendar_events.calendar_id AND c.enabled = 1
            ))
+           -- An invitation known from mail whose series Exchange holds shows
+           -- from there.
+           AND (calendar_id IS NOT NULL OR message_id IS NULL OR series_master_id IS NULL)
          ORDER BY starts_at ASC, id ASC"
     ))?;
     let rows = stmt
@@ -943,6 +993,9 @@ pub fn recurring_masters(conn: &Connection, end_ms: i64) -> Result<Vec<SyncRow>>
            AND (calendar_id IS NULL OR EXISTS (
                 SELECT 1 FROM calendars c WHERE c.id = calendar_events.calendar_id AND c.enabled = 1
            ))
+           -- An invitation known from mail whose series Exchange holds shows
+           -- from there.
+           AND (calendar_id IS NOT NULL OR message_id IS NULL OR series_master_id IS NULL)
          ORDER BY starts_at ASC, id ASC"
     ))?;
     let rows = stmt
@@ -977,6 +1030,9 @@ pub fn upcoming_for_notify(
            AND (calendar_id IS NULL OR EXISTS (
                 SELECT 1 FROM calendars c WHERE c.id = calendar_events.calendar_id AND c.enabled = 1
            ))
+           -- An invitation known from mail whose series Exchange holds shows
+           -- from there.
+           AND (calendar_id IS NOT NULL OR message_id IS NULL OR series_master_id IS NULL)
            AND starts_at > ?1 AND starts_at <= ?1 + ?2
            AND (notified_at IS NULL OR notified_at < starts_at)
          ORDER BY starts_at LIMIT 20"
@@ -1282,6 +1338,71 @@ mod tests {
         apply(&c, 81, moved);
         apply(&c, 84, &moved.replace("SEQUENCE:1", "SEQUENCE:0"));
         assert_eq!(ical_raw(&c, id).unwrap(), raw);
+    }
+
+    /// Exchange's occurrences of the SERIES meeting, as Graph sync stores
+    /// them: each by its own Graph id, tied to the series' Graph id.
+    fn exchange_occurrences(c: &Connection, calendar: i64) {
+        for (href, start) in [
+            ("occ-1", at("20261102T090000Z")),
+            ("occ-2", at("20261109T090000Z")),
+        ] {
+            let ev = IcsEvent {
+                uid: href.into(),
+                summary: Some("Weekly".into()),
+                starts_at_ms: start,
+                ends_at_ms: Some(start + 3_600_000),
+                ..Default::default()
+            };
+            upsert_remote(c, 1, calendar, href, "\"e\"", "", &ev).unwrap();
+            set_series_master(c, calendar, href, "master-1", "weekly@test").unwrap();
+        }
+    }
+
+    fn shown(c: &Connection) -> Vec<i64> {
+        list_range(c, 0, i64::MAX / 2)
+            .unwrap()
+            .iter()
+            .map(|event| event.id)
+            .collect()
+    }
+
+    #[test]
+    fn a_recurring_meeting_exchange_holds_shows_from_there_alone() {
+        let c = testutil::calendar_conn();
+        let calendar = seed_calendar(&c);
+        exchange_occurrences(&c, calendar);
+        apply(&c, 80, SERIES);
+        let mail = for_message(&c, 80).unwrap()[0].id;
+        assert_eq!(shown(&c).len(), 2, "Exchange's two occurrences");
+        assert!(!shown(&c).contains(&mail));
+        assert!(
+            recurring_masters(&c, i64::MAX / 2)
+                .unwrap()
+                .iter()
+                .all(|master| master.event.id != mail),
+            "nor expanded from mail"
+        );
+        assert_eq!(
+            held_series(&c, mail).unwrap(),
+            Some(("master-1".into(), calendar))
+        );
+    }
+
+    #[test]
+    fn an_invitation_read_first_joins_its_series_when_exchange_syncs() {
+        let c = testutil::calendar_conn();
+        let calendar = seed_calendar(&c);
+        apply(&c, 80, SERIES);
+        let mail = for_message(&c, 80).unwrap()[0].id;
+        assert!(shown(&c).contains(&mail));
+        assert_eq!(held_series(&c, mail).unwrap(), None);
+        exchange_occurrences(&c, calendar);
+        assert!(!shown(&c).contains(&mail));
+        assert_eq!(
+            held_series(&c, mail).unwrap(),
+            Some(("master-1".into(), calendar))
+        );
     }
 
     #[test]
@@ -1596,8 +1717,8 @@ mod tests {
         let mut day2 = sample_ics_event();
         day2.uid = "occ-2@graph".into();
         upsert_remote(&c, 1, cal, "occ-2", "\"e1\"", "", &day2).unwrap();
-        set_series_master(&c, cal, "occ-1", "series-master-1").unwrap();
-        set_series_master(&c, cal, "occ-2", "series-master-1").unwrap();
+        set_series_master(&c, cal, "occ-1", "series-master-1", "series-1@test").unwrap();
+        set_series_master(&c, cal, "occ-2", "series-master-1", "series-1@test").unwrap();
 
         assert_eq!(list_range(&c, 0, i64::MAX / 2).unwrap().len(), 2);
 

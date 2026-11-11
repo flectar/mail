@@ -239,6 +239,17 @@ pub fn next_send_due_at(conn: &Connection, account_id: i64) -> Result<Option<i64
         .flatten())
 }
 
+/// Cancel the answers to invitations still waiting to reach the server of
+/// event `event_id`. Returns how many there were.
+pub fn cancel_waiting_answers(conn: &Connection, event_id: i64) -> Result<usize> {
+    Ok(conn.execute(
+        "UPDATE pending_actions SET state = 'cancelled'
+         WHERE kind = 'cal_answer' AND state = 'pending'
+           AND json_extract(payload, '$.eventId') = ?1",
+        params![event_id],
+    )?)
+}
+
 /// The messages the actions `ids` act on, each once.
 pub fn message_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<i64>> {
     let mut statement = conn.prepare("SELECT message_id FROM pending_actions WHERE id = ?1")?;

@@ -117,6 +117,55 @@ async fn push_row(
     Ok(())
 }
 
+/// Answer an invitation in the user's copy on a CalDAV server: the copy as
+/// this app last had it, with only the attendee's PARTSTAT changed, written
+/// over that version (If-Match). A server that schedules (RFC 6638 §3.2.2.3)
+/// then tells the organizer. When the copy changed on the server meanwhile,
+/// the next pull brings it and the answer is tried again.
+pub async fn put_partstat(
+    db: &Db,
+    t: &dyn Transport,
+    row: &SyncRow,
+    calendar: &Calendar,
+    attendee: &str,
+    partstat: &str,
+) -> Result<()> {
+    let (Some(href), Some(raw)) = (row.caldav_href.as_deref(), row.ical_raw.as_deref()) else {
+        return Err(super::err("the server's copy of the event isn't here yet"));
+    };
+    let body = crate::calendar::with_partstat(raw, attendee, partstat)
+        .ok_or_else(|| super::err("the server's copy doesn't list the invited address"))?;
+    let url = super::discovery::resolve(&calendar.url, href)?;
+    let headers: Vec<(&str, &str)> = match row.etag.as_deref() {
+        Some(etag) => vec![("If-Match", etag)],
+        None => Vec::new(),
+    };
+    let mut resp = t
+        .request("PUT", &url, None, &headers, Some(body.clone()))
+        .await?;
+    if !resp.ok() {
+        return Err(super::err(format!("PUT {url}: HTTP {}", resp.status)));
+    }
+    if resp.etag.is_none()
+        && let Ok(head) = t.request("HEAD", &url, None, &[], None).await
+    {
+        resp.etag = head.etag;
+    }
+    let (event_id, calendar_id, href) = (row.event.id, calendar.id, href.to_string());
+    let etag = resp.etag;
+    db.write(move |conn| {
+        repo::calendar::clear_dirty_set_etag(
+            conn,
+            event_id,
+            calendar_id,
+            &href,
+            etag.as_deref(),
+            &body,
+        )
+    })
+    .await
+}
+
 async fn push_delete(db: &Db, t: &dyn Transport, row: &SyncRow, calendar: &Calendar) -> Result<()> {
     let event_id = row.event.id;
     let Some(href) = row.caldav_href.clone() else {
@@ -126,10 +175,22 @@ async fn push_delete(db: &Db, t: &dyn Transport, row: &SyncRow, calendar: &Calen
         return Ok(());
     };
     let abs_url = super::discovery::resolve(&calendar.url, &href)?;
-    let headers: Vec<(&str, &str)> = match &row.etag {
+    let mut headers: Vec<(&str, &str)> = match &row.etag {
         Some(etag) => vec![("If-Match", etag.as_str())],
         None => vec![],
     };
+    // Removing an invitation its organizer cancelled tells them nothing:
+    // without this, a scheduling server may send a decline (RFC 6638 §8.1).
+    // Deleting marks every row cancelled, so the server's copy says whether
+    // the organizer did.
+    let cancelled_by_organizer = row.ical_raw.as_deref().is_some_and(|raw| {
+        crate::calendar::parse_ics(raw)
+            .iter()
+            .any(|ev| ev.recurrence_id_ms.is_none() && ev.status.as_deref() == Some("CANCELLED"))
+    });
+    if !row.event.is_local && cancelled_by_organizer {
+        headers.push(("Schedule-Reply", "F"));
+    }
     let resp = t.request("DELETE", &abs_url, None, &headers, None).await?;
     match resp.status {
         s if (200..300).contains(&s) || s == 404 => {
@@ -312,7 +373,14 @@ pub fn build_put_body(row: &SyncRow, self_email: Option<&str>) -> String {
     if let Some(o) = &ev.organizer
         && !o.is_empty()
     {
-        fold(&format!("ORGANIZER:mailto:{o}"), &mut out);
+        // The copy of an invitation: this app sends its answers by mail, so
+        // the server must not send its own (RFC 6638 §3.2.2.2).
+        let agent = if ev.is_local {
+            ""
+        } else {
+            ";SCHEDULE-AGENT=CLIENT"
+        };
+        fold(&format!("ORGANIZER{agent}:mailto:{o}"), &mut out);
     }
     for a in &ev.attendees {
         // Our own PARTSTAT reflects the local RSVP.
@@ -522,6 +590,7 @@ mod tests {
             .unwrap();
 
         let ok = DavResponse {
+            dav: None,
             status: 204,
             etag: Some("\"e1\"".into()),
             body: String::new(),
@@ -595,6 +664,7 @@ mod tests {
             .unwrap();
 
         let ok = DavResponse {
+            dav: None,
             status: 201,
             etag: Some("\"n1\"".into()),
             body: String::new(),
@@ -636,11 +706,13 @@ mod tests {
             .unwrap();
 
         let precondition = DavResponse {
+            dav: None,
             status: 412,
             etag: None,
             body: String::new(),
         };
         let server_copy = DavResponse {
+            dav: None,
             status: 200,
             etag: Some("\"srv\"".into()),
             body: "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:p1@server\r\nSUMMARY:Server truth\r\nDTSTART:20260801T090000Z\r\nDTEND:20260801T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR".into(),
@@ -674,6 +746,7 @@ mod tests {
             .unwrap();
 
         let ok = DavResponse {
+            dav: None,
             status: 204,
             etag: None,
             body: String::new(),
@@ -685,12 +758,169 @@ mod tests {
         {
             let seen = t.seen.lock().unwrap();
             assert_eq!(seen[0].0, "DELETE");
+            let headers = t.headers_seen.lock().unwrap();
+            assert!(
+                !headers[0].contains_key("Schedule-Reply"),
+                "deleting an event that still takes place is the server's to tell"
+            );
         }
         assert!(
             db.read(move |c| repo::calendar::sync_row_for(c, id))
                 .await
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_invitation_copy_leaves_the_answers_to_this_app() {
+        let (db, _dir) = seed_db().await;
+        let bus = EventBus::new();
+        // An invitation known from mail, accepted, going to calendar 10.
+        db.write(|c| {
+            c.execute(
+                "INSERT INTO calendar_events
+                    (account_id, message_id, calendar_id, ical_uid, method, summary, organizer,
+                     attendees_json, starts_at, ends_at, rsvp_status, dirty)
+                 VALUES (1, 7, 10, 'inv-2@remote', 'REQUEST', 'Invite', 'alice@x',
+                     '[{\"email\":\"me@test.dev\",\"partstat\":\"NEEDS-ACTION\"}]',
+                     1000, 2000, 'ACCEPTED', 1)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let created = DavResponse {
+            status: 201,
+            etag: Some("\"n1\"".into()),
+            ..Default::default()
+        };
+        let t = MockTransport::new(vec![created]);
+        push_dirty(&db, &bus, &t, 1, "me@test.dev").await.unwrap();
+        let seen = t.seen.lock().unwrap();
+        assert_eq!(seen[0].0, "PUT");
+        let body = seen[0].2.as_ref().unwrap();
+        assert!(
+            body.contains("ORGANIZER;SCHEDULE-AGENT=CLIENT:mailto:alice@x"),
+            "{body}"
+        );
+        assert!(
+            body.contains("ATTENDEE;PARTSTAT=ACCEPTED:mailto:me@test.dev"),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn removing_a_cancelled_invitation_tells_the_organizer_nothing() {
+        let (db, _dir) = seed_db().await;
+        let bus = EventBus::new();
+        let id = seed_synced_event(&db).await;
+        db.write(move |c| {
+            c.execute(
+                "UPDATE calendar_events SET ical_raw = ?2 WHERE id = ?1",
+                rusqlite::params![
+                    id,
+                    "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:p1@server\r\nSTATUS:CANCELLED\r\nDTSTART:20260801T090000Z\r\nORGANIZER:mailto:alice@x\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+                ],
+            )?;
+            repo::calendar::mark_deleted(c, id)
+        })
+        .await
+        .unwrap();
+        let ok = DavResponse {
+            status: 204,
+            ..Default::default()
+        };
+        let t = MockTransport::new(vec![ok]);
+        push_dirty(&db, &bus, &t, 1, "me@example.com")
+            .await
+            .unwrap();
+        let headers = t.headers_seen.lock().unwrap();
+        assert_eq!(t.seen.lock().unwrap()[0].0, "DELETE");
+        assert_eq!(
+            headers[0].get("Schedule-Reply").map(String::as_str),
+            Some("F")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_answer_on_the_server_changes_only_the_attendees_participation() {
+        let (db, _dir) = seed_db().await;
+        let raw = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:inv-3@remote\r\nDTSTART;TZID=Europe/Madrid:20261120T100000\r\nSUMMARY:Review\r\nORGANIZER;CN=Alice:mailto:alice@x\r\nATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:me@test.dev\r\nX-SERVER-PROP:kept\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let id = db
+            .write(move |c| {
+                let ev = crate::calendar::parse_ics(raw).remove(0);
+                repo::calendar::upsert_remote(
+                    c,
+                    1,
+                    10,
+                    "/cal/me/work/inv3.ics",
+                    "\"e1\"",
+                    raw,
+                    &ev,
+                )?;
+                c.query_row(
+                    "SELECT id FROM calendar_events WHERE ical_uid = 'inv-3@remote'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(Into::into)
+            })
+            .await
+            .unwrap();
+        let (row, calendar) = db
+            .read(move |c| {
+                Ok((
+                    repo::calendar::sync_row_for(c, id)?.unwrap(),
+                    repo::caldav::get_calendar(c, 10)?.unwrap(),
+                ))
+            })
+            .await
+            .unwrap();
+        let written = DavResponse {
+            status: 204,
+            etag: Some("\"e2\"".into()),
+            ..Default::default()
+        };
+        let t = MockTransport::new(vec![written]);
+        put_partstat(&db, &t, &row, &calendar, "ME@test.dev", "DECLINED")
+            .await
+            .unwrap();
+
+        let (method, url, body) = t.seen.lock().unwrap()[0].clone();
+        assert_eq!(method, "PUT");
+        assert_eq!(url, "https://dav.example.com/cal/me/work/inv3.ics");
+        let body = body.unwrap();
+        assert!(
+            body.contains("ATTENDEE;RSVP=TRUE;PARTSTAT=DECLINED:mailto:me@test.dev"),
+            "{body}"
+        );
+        for kept in [
+            "X-SERVER-PROP:kept",
+            "DTSTART;TZID=Europe/Madrid:20261120T100000",
+            "ORGANIZER;CN=Alice:mailto:alice@x",
+        ] {
+            assert!(body.contains(kept), "{kept} in {body}");
+        }
+        assert_eq!(
+            t.headers_seen.lock().unwrap()[0]
+                .get("If-Match")
+                .map(String::as_str),
+            Some("\"e1\"")
+        );
+        let stored = db
+            .read(move |c| repo::calendar::sync_row_for(c, id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.etag.as_deref(), Some("\"e2\""));
+        assert_eq!(stored.ical_raw.as_deref(), Some(body.as_str()));
+        assert!(
+            put_partstat(&db, &t, &row, &calendar, "someone@else.dev", "ACCEPTED")
+                .await
+                .is_err(),
+            "an address the copy doesn't list"
         );
     }
 
@@ -737,6 +967,7 @@ mod tests {
         let _ = id;
 
         let ok = DavResponse {
+            dav: None,
             status: 204,
             etag: Some("\"i1\"".into()),
             body: String::new(),

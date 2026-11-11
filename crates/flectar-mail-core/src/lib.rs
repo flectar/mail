@@ -6496,8 +6496,10 @@ impl Core {
         .map(|_| ())
     }
 
-    /// Answer an invite: store our response and email an ICS METHOD:REPLY to
-    /// the organizer (the standard-compliant path every calendar understands).
+    /// Answer an invitation. The organizer hears of it once ([`AnswerRoute`]):
+    /// from the calendar server holding the event, or by a METHOD:REPLY email
+    /// for an event this app only knows from mail, or that its server keeps
+    /// without telling anyone.
     pub async fn rsvp_event(&self, args: RsvpEventArgs) -> Result<CalendarEvent> {
         let partstat = match args.response.as_str() {
             "accepted" => "ACCEPTED",
@@ -6506,18 +6508,34 @@ impl Core {
             _ => return Err(CoreError::Other("invalid RSVP response".into())),
         };
         let event_id = args.event_id;
-        let (ev, uid_seq, invitation) = self
+        let (row, held_by, held_series, scheduling, default) = self
             .calendar_db
             .read(move |conn| {
-                Ok((
-                    repo::calendar::get(conn, event_id)?,
-                    repo::calendar::uid_and_sequence(conn, event_id)?,
-                    repo::calendar::ical_raw(conn, event_id)?,
-                ))
+                let row = repo::calendar::sync_row_for(conn, event_id)?
+                    .ok_or_else(|| CoreError::NotFound("event".into()))?;
+                // The calendar holding the server's copy, when there is one,
+                // or the series Exchange holds for an invitation from mail.
+                let held_series = repo::calendar::held_series(conn, event_id)?;
+                let held_in = row
+                    .event
+                    .calendar_id
+                    .filter(|_| row.caldav_href.is_some())
+                    .or(held_series.as_ref().map(|(_, calendar_id)| *calendar_id));
+                let held_by = match held_in {
+                    Some(id) => repo::caldav::get_calendar(conn, id)?,
+                    None => None,
+                };
+                let scheduling = match &held_by {
+                    Some(calendar) => repo::caldav::scheduling(conn, calendar.connection_id)?
+                        .map(|(scheduling, _)| scheduling),
+                    None => None,
+                };
+                let default = repo::caldav::default_calendar(conn, row.event.account_id)?;
+                Ok((row, held_by, held_series, scheduling, default))
             })
             .await?;
-        let ev = ev.ok_or_else(|| CoreError::NotFound("event".into()))?;
-        let (uid, sequence) = uid_seq.ok_or_else(|| CoreError::NotFound("event".into()))?;
+        let (uid, sequence, invitation) = (row.ical_uid, row.sequence, row.ical_raw);
+        let ev = row.event;
 
         let account_id = ev.account_id;
         let (account, identities) = self
@@ -6531,10 +6549,23 @@ impl Core {
             .await?;
         let account = account.ok_or_else(|| CoreError::NotFound("account".into()))?;
 
+        let answering = Answering::of(&account, &identities, &ev.attendees);
+        let route = AnswerRoute::of(
+            held_by.as_ref(),
+            scheduling.as_ref(),
+            invitation
+                .as_deref()
+                .is_some_and(calendar::client_schedules),
+            &answering.attendee.email,
+            default.as_ref(),
+            partstat,
+        );
         // Reply goes to the organizer; without one there is nobody to notify,
         // but we still record the response locally.
-        if let Some(organizer) = ev.organizer.clone().filter(|o| !o.is_empty()) {
-            let answering = Answering::of(&account, &identities, &ev.attendees);
+        if let Some(organizer) = ev.organizer.clone().filter(|o| !o.is_empty())
+            && args.notify
+            && route.mails()
+        {
             let ics = calendar::build_reply_ics(&calendar::ReplySpec {
                 invitation: invitation.as_deref(),
                 uid: &uid,
@@ -6587,12 +6618,46 @@ impl Core {
             .await?;
         }
 
+        let answer = caldav::task::QueuedAnswer {
+            event_id,
+            partstat: partstat.to_string(),
+            attendee: answering.attendee.email.clone(),
+            comment: args.comment.clone(),
+            notify: args.notify,
+            meeting: held_series.as_ref().map(|(meeting, _)| meeting.clone()),
+            calendar_id: held_series.as_ref().map(|(_, calendar_id)| *calendar_id),
+        };
+        let payload = serde_json::to_value(&answer)?;
         self.calendar_db
-            .write(move |conn| repo::calendar::set_rsvp(conn, event_id, partstat))
+            .write(move |conn| {
+                repo::calendar::set_rsvp(conn, event_id, partstat)?;
+                // An answer still waiting gives way to this one, so the
+                // organizer isn't told twice.
+                repo::actions::cancel_waiting_answers(conn, event_id)?;
+                if route.reaches_server() {
+                    repo::actions::enqueue(
+                        conn,
+                        account_id,
+                        caldav::task::ANSWER_KIND,
+                        None,
+                        None,
+                        &payload,
+                        None,
+                    )?;
+                }
+                Ok(())
+            })
             .await?;
-        // CalDAV-backed invites also sync the PARTSTAT change to the server.
-        self.enqueue_cal_push(event_id, ev.account_id, "cal_put")
-            .await?;
+        match route {
+            AnswerRoute::Server | AnswerRoute::ServerAndMail => {
+                self.nudge_cal(Some(account_id)).await;
+            }
+            AnswerRoute::Mail { store: true } => {
+                self.enqueue_cal_push(event_id, account_id, "cal_put")
+                    .await?;
+            }
+            AnswerRoute::Mail { store: false } => {}
+        }
         self.calendar_db
             .read(move |conn| repo::calendar::get(conn, event_id))
             .await?
@@ -9859,6 +9924,68 @@ struct CalendarMail<'a> {
     method: &'a str,
     /// The message this one answers, whose conversation it joins.
     in_reply_to: Option<i64>,
+}
+
+/// Who tells an invitation's organizer of an answer: the calendar server
+/// holding the event or this app's mail, never both, since each would send
+/// its own reply (RFC 6638 §7.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnswerRoute {
+    /// The server holding the event: Exchange or Google, which answer
+    /// through their own APIs, or a CalDAV server that schedules for the
+    /// invited address.
+    Server,
+    /// The server stores the answer but tells no one, so it goes by mail too.
+    ServerAndMail,
+    /// Mail alone, for an event known only from mail. With `store`, a copy
+    /// goes to the account's CalDAV calendar, marked as answered by mail.
+    Mail { store: bool },
+}
+
+impl AnswerRoute {
+    /// `held_by` is the calendar holding the server's copy of the event, if
+    /// any; `scheduling` what its server said of scheduling; `client_schedules`
+    /// whether that copy is marked as answered by the client. `default` is
+    /// the account's default calendar, which new copies go to.
+    fn of(
+        held_by: Option<&Calendar>,
+        scheduling: Option<&caldav::discovery::Scheduling>,
+        client_schedules: bool,
+        attendee: &str,
+        default: Option<&Calendar>,
+        partstat: &str,
+    ) -> Self {
+        match held_by.map(|calendar| calendar.kind) {
+            Some(CalendarConnectionKind::Microsoft | CalendarConnectionKind::Google) => {
+                Self::Server
+            }
+            Some(CalendarConnectionKind::Generic) => {
+                if !client_schedules
+                    && scheduling.is_some_and(|scheduling| scheduling.answers_for(attendee))
+                {
+                    Self::Server
+                } else {
+                    Self::ServerAndMail
+                }
+            }
+            None => Self::Mail {
+                store: partstat != "DECLINED"
+                    && default.is_some_and(|calendar| {
+                        calendar.kind == CalendarConnectionKind::Generic
+                            && calendar.enabled
+                            && !calendar.read_only
+                    }),
+            },
+        }
+    }
+
+    fn mails(self) -> bool {
+        !matches!(self, Self::Server)
+    }
+
+    fn reaches_server(self) -> bool {
+        matches!(self, Self::Server | Self::ServerAndMail)
+    }
 }
 
 /// Who answers an invitation in an account.
@@ -13437,16 +13564,190 @@ mod invitation_tests {
         assert_eq!(invitations(&core, id).await.len(), 1);
     }
 
+    /// The server's copy of the invitation's event, in a calendar of a
+    /// connection of `kind`.
+    async fn held_by(core: &Core, event: i64, kind: CalendarConnectionKind) {
+        core.calendar_db
+            .write(move |conn| {
+                conn.execute(
+                    "INSERT INTO calendar_connections (id, account_id, kind, base_url)
+                     VALUES (5, 1, ?1, 'https://dav.example.com/')",
+                    [kind.as_str()],
+                )?;
+                conn.execute(
+                    "INSERT INTO calendars (id, account_id, connection_id, url, enabled)
+                     VALUES (50, 1, 5, 'https://dav.example.com/cal/', 1)",
+                    [],
+                )?;
+                conn.execute(
+                    "UPDATE calendar_events
+                     SET calendar_id = 50, caldav_href = 'meeting-1', etag = 'e1'
+                     WHERE id = ?1",
+                    [event],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    async fn drafts(core: &Core) -> i64 {
+        core.db
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT COUNT(*) FROM messages WHERE is_draft = 1",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// Answers queued for a calendar server: their states and payloads.
+    async fn queued_answers(core: &Core) -> Vec<(String, serde_json::Value)> {
+        core.calendar_db
+            .read(|conn| {
+                let mut statement = conn.prepare(
+                    "SELECT state, payload FROM pending_actions
+                     WHERE kind = 'cal_answer' ORDER BY id",
+                )?;
+                let rows = statement
+                    .query_map([], |row| Ok((row.get(0)?, row.get::<_, String>(1)?)))?
+                    .collect::<rusqlite::Result<Vec<(String, String)>>>()?;
+                Ok(rows
+                    .into_iter()
+                    .map(|(state, payload)| (state, serde_json::from_str(&payload).unwrap()))
+                    .collect())
+            })
+            .await
+            .unwrap()
+    }
+
+    fn answer(event_id: i64, response: &str, comment: Option<&str>) -> RsvpEventArgs {
+        RsvpEventArgs {
+            event_id,
+            response: response.into(),
+            comment: comment.map(Into::into),
+            notify: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_invitation_in_exchange_is_answered_there_alone() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        held_by(&core, event, CalendarConnectionKind::Microsoft).await;
+
+        core.rsvp_event(answer(event, "tentative", Some("Maybe")))
+            .await
+            .unwrap();
+        assert_eq!(drafts(&core).await, 0, "Exchange tells the organizer");
+        assert_eq!(
+            queued_answers(&core).await,
+            [(
+                "pending".to_string(),
+                serde_json::json!({
+                    "eventId": event,
+                    "partstat": "TENTATIVE",
+                    "attendee": "me@test.dev",
+                    "comment": "Maybe",
+                    "notify": true
+                })
+            )]
+        );
+
+        // A change of mind replaces the answer still waiting.
+        core.rsvp_event(answer(event, "declined", None))
+            .await
+            .unwrap();
+        let states: Vec<String> = queued_answers(&core)
+            .await
+            .into_iter()
+            .map(|(state, _)| state)
+            .collect();
+        assert_eq!(states, ["cancelled", "pending"]);
+    }
+
+    #[tokio::test]
+    async fn an_invitation_whose_series_exchange_holds_is_answered_there() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        core.calendar_db
+            .write(|conn| {
+                conn.execute(
+                    "INSERT INTO calendar_connections (id, account_id, kind, base_url)
+                     VALUES (5, 1, 'microsoft', 'https://graph.microsoft.com/')",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO calendars (id, account_id, connection_id, url, enabled)
+                     VALUES (50, 1, 5, 'outlook-calendar', 1)",
+                    [],
+                )?;
+                let occurrence = calendar::IcsEvent {
+                    uid: "occ-1".into(),
+                    summary: Some("Design review".into()),
+                    starts_at_ms: 1_000,
+                    ends_at_ms: Some(2_000),
+                    ..Default::default()
+                };
+                repo::calendar::upsert_remote(conn, 1, 50, "occ-1", "", "", &occurrence)?;
+                repo::calendar::set_series_master(
+                    conn,
+                    50,
+                    "occ-1",
+                    "master-1",
+                    "review-1@example.com",
+                )
+            })
+            .await
+            .unwrap();
+
+        core.rsvp_event(answer(event, "accepted", None))
+            .await
+            .unwrap();
+        assert_eq!(drafts(&core).await, 0, "Exchange tells the organizer");
+        let queued = queued_answers(&core).await;
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].1["meeting"], "master-1");
+        assert_eq!(queued[0].1["calendarId"], 50);
+    }
+
+    #[tokio::test]
+    async fn a_caldav_server_that_does_not_schedule_keeps_the_answer_and_mail_tells() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        held_by(&core, event, CalendarConnectionKind::Generic).await;
+        core.rsvp_event(answer(event, "accepted", None))
+            .await
+            .unwrap();
+        assert_eq!(drafts(&core).await, 1);
+        assert_eq!(queued_answers(&core).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_answer_kept_quiet_sends_no_mail() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        let answered = core
+            .rsvp_event(RsvpEventArgs {
+                notify: false,
+                ..answer(event, "declined", None)
+            })
+            .await
+            .unwrap();
+        assert_eq!(answered.rsvp_status.as_deref(), Some("DECLINED"));
+        assert_eq!(drafts(&core).await, 0);
+        assert!(queued_answers(&core).await.is_empty());
+    }
+
     #[tokio::test]
     async fn an_answer_goes_to_the_organizer_as_an_imip_reply() {
         let (core, _temp, id) = invited().await;
         let event = invitations(&core, id).await[0].id;
         let answered = core
-            .rsvp_event(RsvpEventArgs {
-                event_id: event,
-                response: "accepted".into(),
-                comment: Some("See you there".into()),
-            })
+            .rsvp_event(answer(event, "accepted", Some("See you there")))
             .await
             .unwrap();
         assert_eq!(answered.rsvp_status.as_deref(), Some("ACCEPTED"));
@@ -13511,6 +13812,115 @@ mod invitation_tests {
                 .is_some_and(|text| text.contains("accepted your invitation to Design review")),
             "{:?}",
             parsed.text
+        );
+    }
+}
+
+#[cfg(test)]
+mod answer_route_tests {
+    use super::*;
+    use caldav::discovery::Scheduling;
+
+    fn calendar(kind: CalendarConnectionKind) -> Calendar {
+        Calendar {
+            id: 10,
+            account_id: 1,
+            connection_id: 1,
+            kind,
+            url: "https://dav.example.com/cal/me/work/".into(),
+            display_name: None,
+            color: None,
+            read_only: false,
+            enabled: true,
+            is_default: true,
+            last_synced_at: None,
+        }
+    }
+
+    fn scheduling(addresses: &[&str]) -> Scheduling {
+        Scheduling {
+            auto_schedule: true,
+            addresses: addresses.iter().map(|a| a.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn exactly_one_party_tells_the_organizer() {
+        let route = |held_by: Option<Calendar>, scheduling: Option<Scheduling>, client: bool| {
+            AnswerRoute::of(
+                held_by.as_ref(),
+                scheduling.as_ref(),
+                client,
+                "Me@Example.com",
+                None,
+                "ACCEPTED",
+            )
+        };
+        use CalendarConnectionKind::*;
+        assert_eq!(
+            route(Some(calendar(Microsoft)), None, false),
+            AnswerRoute::Server
+        );
+        assert_eq!(
+            route(Some(calendar(Google)), None, false),
+            AnswerRoute::Server
+        );
+        let scheduled = || Some(scheduling(&["me@example.com"]));
+        assert_eq!(
+            route(Some(calendar(Generic)), scheduled(), false),
+            AnswerRoute::Server
+        );
+        // A server that doesn't schedule, or not for this address, or whose
+        // copy is marked as answered by the client, stores the answer only.
+        for (scheduling, client) in [
+            (None, false),
+            (Some(Scheduling::default()), false),
+            (Some(scheduling(&["alias@example.com"])), false),
+            (scheduled(), true),
+        ] {
+            assert_eq!(
+                route(Some(calendar(Generic)), scheduling, client),
+                AnswerRoute::ServerAndMail
+            );
+        }
+        assert!(!AnswerRoute::Server.mails());
+        assert!(AnswerRoute::ServerAndMail.mails() && AnswerRoute::ServerAndMail.reaches_server());
+    }
+
+    #[test]
+    fn an_invitation_known_from_mail_is_kept_only_on_a_caldav_server() {
+        use CalendarConnectionKind::*;
+        let route = |default: Option<Calendar>, partstat: &str| {
+            AnswerRoute::of(
+                None,
+                None,
+                false,
+                "me@example.com",
+                default.as_ref(),
+                partstat,
+            )
+        };
+        assert_eq!(route(None, "ACCEPTED"), AnswerRoute::Mail { store: false });
+        assert_eq!(
+            route(Some(calendar(Generic)), "ACCEPTED"),
+            AnswerRoute::Mail { store: true }
+        );
+        assert_eq!(
+            route(Some(calendar(Generic)), "DECLINED"),
+            AnswerRoute::Mail { store: false },
+            "nothing to keep"
+        );
+        for provider in [Google, Microsoft] {
+            assert_eq!(
+                route(Some(calendar(provider)), "ACCEPTED"),
+                AnswerRoute::Mail { store: false }
+            );
+        }
+        let mut read_only = calendar(Generic);
+        read_only.read_only = true;
+        assert_eq!(
+            route(Some(read_only), "TENTATIVE"),
+            AnswerRoute::Mail { store: false }
         );
     }
 }
