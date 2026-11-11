@@ -411,6 +411,11 @@ export component FunctionalCalendarView inherits Rectangle {
     callback clear-agenda-filters;
     callback edit-event(int);
     callback delete-event(int);
+    // Open an event's details when asked from elsewhere, such as the card
+    // above an invitation in mail.
+    in property <CalendarEventRow> reveal-event;
+    in property <int> reveal-request: 0;
+    changed reveal-request => { root.show-event(root.reveal-event); }
 
     private property <bool> detail-open: false;
     private property <string> detail-kind: "event";

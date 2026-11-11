@@ -78,6 +78,9 @@ pub(crate) struct LocalCalendarState {
     pub(crate) agenda_filters: Rc<crate::retained_model::RetainedModel<CalendarAgendaFilterRow>>,
     // View filters never pause provider sync or change stored calendar visibility.
     pub(crate) agenda_hidden: HashSet<i64>,
+    /// An event whose details open once the calendar has loaded, as asked
+    /// from the card above an invitation (src/invitation.rs).
+    pub(crate) reveal: Option<i64>,
 }
 
 impl LocalCalendarState {
@@ -93,6 +96,7 @@ impl LocalCalendarState {
             agenda_rows: Rc::default(),
             agenda_filters: Rc::default(),
             agenda_hidden: HashSet::new(),
+            reveal: None,
         }
     }
 
@@ -671,6 +675,28 @@ fn event_row(
         status: event.status.clone().into(),
         source: if event.is_local { "local" } else { "provider" }.into(),
     }
+}
+
+/// Open the details of the event asked for before the calendar loaded, now
+/// that it shows. Its occurrence on the selected day is preferred.
+pub(crate) fn reveal_asked_event(app: &AppWindow, state: &mut LocalCalendarState) {
+    let Some(id) = state.reveal.take() else {
+        return;
+    };
+    let Ok(id) = i32::try_from(id) else {
+        return;
+    };
+    let mut occurrences = state.events.iter().filter(|event| event.id == id);
+    let Some(event) = occurrences
+        .clone()
+        .find(|event| event.date == state.selected_date)
+        .or_else(|| occurrences.next())
+    else {
+        return;
+    };
+    let row = event_row(app, state, &date_format::current(), event);
+    app.set_calendar_reveal_event(row);
+    app.set_calendar_reveal_request(app.get_calendar_reveal_request().wrapping_add(1));
 }
 
 pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today: NaiveDate) {

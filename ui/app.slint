@@ -13,6 +13,7 @@ export { Updates } from "updates.slint";
 export { Notice } from "notice.slint";
 export { Unsubscribe } from "unsubscribe.slint";
 export { BlockSender } from "block-sender.slint";
+export { Invitation } from "invitation.slint";
 import { AppIcon, AppIconVariant } from "app-icon.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
@@ -500,6 +501,8 @@ export global I18n {
         if (key == "Could not delete event: {}") { return @tr("Could not delete event: {}", argument); }
         if (key == "Event deleted, but refresh failed: {}") { return @tr("Event deleted, but refresh failed: {}", argument); }
         if (key == "Event deleted.") { return @tr("Event deleted."); }
+        if (key == "Could not answer: {}") { return @tr("Could not answer: {}", argument); }
+        if (key == "Could not remove the event: {}") { return @tr("Could not remove the event: {}", argument); }
         if (key == "Use YYYY-MM-DD for the date and a time such as {}.") { return @tr("Use YYYY-MM-DD for the date and a time such as {}.", argument); }
         if (key == "Event duration must be a number of minutes.") { return @tr("Event duration must be a number of minutes."); }
         if (key == "Add a title and choose a duration from 15 to 1440 minutes.") { return @tr("Add a title and choose a duration from 15 to 1440 minutes."); }
@@ -892,6 +895,9 @@ export component AppWindow inherits Window {
     callback load-remote-images-for-message();
     callback calendar-navigate(string, int);
     callback calendar-select-date(string);
+    // Open an event's details in the calendar (src/invitation.rs).
+    in-out property <CalendarEventRow> calendar-reveal-event;
+    in-out property <int> calendar-reveal-request: 0;
     callback calendar-set-view(string);
     callback calendar-set-source-enabled(int, bool);
     callback calendar-toggle-agenda-filter(int, bool);
@@ -1854,6 +1860,8 @@ export component AppWindow inherits Window {
             new-event => { root.calendar-open-editor(); }
             edit-event(event-id) => { root.calendar-edit-event(event-id); }
             delete-event(event-id) => { root.calendar-delete-event(event-id); }
+            reveal-event: root.calendar-reveal-event;
+            reveal-request: root.calendar-reveal-request;
             open-link(url) => { root.open_email_link(url); }
         }
         }

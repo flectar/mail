@@ -8,12 +8,12 @@ use flectar_mail_core::{
         Account, AccountConfig, ActionKind, ActionParams, ActionTarget, AddPasswordAccountArgs,
         Address, BlockOffer, BlockResult, CalendarConnection, CalendarEvent, CardDavConnection,
         ConnectCaldavArgs, ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage,
-        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, Label, MailGrouping,
-        MailHistory, MailProfile, MailProtocol, MailboxBadgeCounts, MessageCursor, MessageDetail,
-        MessageSearchCursor, MessageSummary, PerformActionArgs, PortableAccountConfig, Provider,
-        QueueSendArgs, QueueSendResult, SaveDraftArgs, SearchCursor, Settings, Snippet,
-        ThreadCursor, ThreadSummary, UnsubscribeOffer, UnsubscribeOutcome, View,
-        normalized_workspace_list_pane_width, roles,
+        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, InvitationCard, Label,
+        MailGrouping, MailHistory, MailProfile, MailProtocol, MailboxBadgeCounts, MessageCursor,
+        MessageDetail, MessageSearchCursor, MessageSummary, PerformActionArgs,
+        PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult, RsvpEventArgs,
+        SaveDraftArgs, SearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary,
+        UnsubscribeOffer, UnsubscribeOutcome, View, normalized_workspace_list_pane_width, roles,
     },
 };
 #[cfg(test)]
@@ -95,6 +95,9 @@ pub struct MailMessage {
     pub can_block: bool,
     /// Its sender is blocked: their mail goes to Spam.
     pub sender_blocked: bool,
+    /// The calendar the message carries, as the card above it shows it
+    /// (#228). Loaded with the message's body.
+    pub invitation: Option<flectar_mail_core::models::InvitationCard>,
     /// The one-time code the message asks its reader to enter.
     pub verification_code: Option<String>,
     /// Gmail labels are tags; other accounts file labels like folders.
@@ -140,6 +143,7 @@ impl MailMessage {
             can_unsubscribe: false,
             can_block: false,
             sender_blocked: false,
+            invitation: None,
             verification_code: None,
             account_uses_labels: false,
             first_attachment: None,
@@ -914,8 +918,9 @@ impl CoreMailSource {
                 .get_body(message_id)
                 .await
                 .map_err(|error| error.to_string())?;
-            let message = detail_to_conversation_message(row, &message, true)
+            let mut message = detail_to_conversation_message(row, &message, true)
                 .ok_or_else(|| "message id is out of range".to_owned())?;
+            message.invitation = self.invitation_card(message_id).await;
             return Ok(MailConversation {
                 messages: vec![message],
             });
@@ -944,7 +949,7 @@ impl CoreMailSource {
         {
             *message = selected;
         }
-        let messages = thread
+        let mut messages = thread
             .messages
             .iter()
             .filter_map(|message| {
@@ -953,6 +958,15 @@ impl CoreMailSource {
             .collect::<Vec<_>>();
         if messages.is_empty() {
             return Err("thread has no messages".to_owned());
+        }
+        // The open message's card comes with its body, so the message
+        // doesn't move down when the card arrives.
+        let card = self.invitation_card(selected_message_id).await;
+        if let Some(message) = messages
+            .iter_mut()
+            .find(|message| i64::from(message.id) == selected_message_id)
+        {
+            message.invitation = card;
         }
         Ok(MailConversation { messages })
     }
@@ -2137,6 +2151,32 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// The card above a message that carries a calendar. One that can't be
+    /// read leaves the message without a card.
+    pub async fn invitation_card(&self, message_id: i64) -> Option<InvitationCard> {
+        self.core
+            .invitation_card(message_id)
+            .await
+            .unwrap_or_else(|error| {
+                eprintln!("invitation card for message {message_id} unavailable: {error}");
+                None
+            })
+    }
+
+    /// Answer an invitation; the core tells its organizer.
+    pub async fn rsvp_event(&self, event_id: i64, response: &str) -> Result<(), String> {
+        self.core
+            .rsvp_event(RsvpEventArgs {
+                event_id,
+                response: response.to_owned(),
+                comment: None,
+                notify: true,
+            })
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn delete_event(&self, event_id: i64) -> Result<(), String> {
         self.core
             .delete_event(event_id, false)
@@ -3080,6 +3120,7 @@ fn summary_to_message(
         can_unsubscribe: false,
         can_block: false,
         sender_blocked: false,
+        invitation: None,
         verification_code: thread.verification_code,
         account_uses_labels: thread_account
             .is_some_and(|account| account.mail_protocol == MailProtocol::Gmail),
@@ -3188,6 +3229,7 @@ fn message_summary_to_message(
         can_unsubscribe: false,
         can_block: false,
         sender_blocked: false,
+        invitation: None,
         verification_code: message.verification_code,
         account_uses_labels: message_account
             .is_some_and(|account| account.mail_protocol == MailProtocol::Gmail),
@@ -3306,6 +3348,7 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
             }),
         can_block: !message.is_draft && !message.is_outgoing && message.from.email.contains('@'),
         sender_blocked: message.sender_blocked,
+        invitation: None,
         verification_code: row.verification_code.clone(),
         account_uses_labels: row.account_uses_labels,
         first_attachment: row.first_attachment.clone(),

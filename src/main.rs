@@ -26,6 +26,7 @@ mod email_document;
 pub mod favicon;
 mod files_controller;
 mod import_controller;
+mod invitation;
 mod keyboard_keys;
 mod latest_load;
 mod mail;
@@ -4026,6 +4027,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         {
             app.invoke_reload_calendar_connections();
         }
+        if pending.calendar_changed {
+            invitation::refresh();
+        }
         if pending.calendar_changed
             && let Some(app) = mail_update_app.upgrade()
             && app.get_active_view() == "calendar"
@@ -4613,6 +4617,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         calendar.accounts = calendar_accounts;
                         calendar.sources = calendar_sources;
                         apply_calendar(&app, &calendar, Local::now().date_naive());
+                        calendar::reveal_asked_event(&app, &mut calendar);
                     }
                     refresh_connected_accounts(&app, &startup_state);
                 }
@@ -6097,6 +6102,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     undo::install(&app, &state, &runtime);
     unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
     block_sender::install(&app, &state, &runtime);
+    invitation::install(&app, &state, &calendar_state, &runtime);
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);
     notifications::ui::attach(&app, &state, &runtime, platform.notifications.clone());
