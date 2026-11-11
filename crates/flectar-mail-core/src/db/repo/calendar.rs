@@ -1106,7 +1106,10 @@ pub fn recurring_masters(conn: &Connection, end_ms: i64) -> Result<Vec<SyncRow>>
     Ok(rows)
 }
 
-/// Events attached to one message (for the invite card in the thread view).
+/// The events a message's invitation left in the calendar, while they still
+/// name it. The card above a message reads the message's own calendar
+/// instead ([`message_calendar`]), so only tests look events up this way.
+#[cfg(test)]
 pub fn for_message(conn: &Connection, message_id: i64) -> Result<Vec<CalendarEvent>> {
     let mut stmt = conn.prepare(event_select!(
         "WHERE message_id = ?1 AND deleted = 0 ORDER BY starts_at"
