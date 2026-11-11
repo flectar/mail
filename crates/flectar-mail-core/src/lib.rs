@@ -3048,11 +3048,16 @@ impl Core {
                     |row| row.get(0),
                 )?;
                 let mut statement = conn.prepare(
-                    "SELECT file_path, filename FROM draft_attachments WHERE draft_id = ?1",
+                    "SELECT file_path, filename, mime_type
+                     FROM draft_attachments WHERE draft_id = ?1",
                 )?;
                 let staged = statement
                     .query_map([draft_id], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 Ok((detail, serde_json::from_str::<Vec<Address>>(&bcc)?, staged))
@@ -3064,7 +3069,7 @@ impl Core {
             .ok();
         let mut attachments = Vec::new();
         let mut budget = MAX_DRAFT_ATTACHMENT_BYTES;
-        for (path, filename) in staged {
+        for (path, filename, mime_type) in staged {
             let path = tokio::fs::canonicalize(&path).await?;
             if !staging_root
                 .as_ref()
@@ -3077,7 +3082,8 @@ impl Core {
             let bytes = crate::file_io::read(&path, budget, "draft attachment").await?;
             budget -= bytes.len();
             attachments.push(crate::mime::OutgoingAttachment {
-                mime_type: crate::queue::mime_guess_from_name(&filename),
+                mime_type: mime_type
+                    .unwrap_or_else(|| crate::queue::mime_guess_from_name(&filename)),
                 filename,
                 bytes,
             });
@@ -4669,7 +4675,100 @@ impl Core {
         for acc in touched_accounts {
             self.nudge(Some(acc), || SyncCmd::RunActions).await;
         }
+        if matches!(args.kind, ActionKind::Spam | ActionKind::NotSpam) {
+            let ids = action_ids.clone();
+            let moved = self
+                .db
+                .read(move |conn| repo::actions::message_ids(conn, &ids))
+                .await?;
+            self.invitations_follow(moved, args.kind == ActionKind::Spam)
+                .await;
+        }
         Ok(ActionResult { action_ids })
+    }
+
+    /// Invitations follow their mail in and out of Spam. Mail moved there
+    /// takes the invitations it brought, still unanswered, out of the calendar
+    /// (CalConnect's guidance against calendar abuse), and mail moved back
+    /// brings them again. Failing here leaves the move itself done.
+    async fn invitations_follow(&self, message_ids: Vec<i64>, into_spam: bool) {
+        if message_ids.is_empty() {
+            return;
+        }
+        let result = if into_spam {
+            self.forget_invitations(message_ids).await
+        } else {
+            self.reapply_invitations(message_ids).await
+        };
+        if let Err(error) = result {
+            tracing::warn!(%error, into_spam, "calendar: invitations could not follow their mail");
+        }
+    }
+
+    async fn forget_invitations(&self, message_ids: Vec<i64>) -> Result<()> {
+        let owners = self
+            .db
+            .read(move |conn| {
+                let mut owners = Vec::new();
+                for id in message_ids {
+                    if let Some(row) = repo::messages::get_row(conn, id)? {
+                        owners.push((id, row.account_id));
+                    }
+                }
+                Ok(owners)
+            })
+            .await?;
+        let changed = self
+            .calendar_db
+            .write(move |conn| {
+                let mut changed = Vec::new();
+                for (message_id, account_id) in owners {
+                    if repo::calendar::forget_unanswered_invitation(conn, message_id)? > 0
+                        && !changed.contains(&account_id)
+                    {
+                        changed.push(account_id);
+                    }
+                }
+                Ok(changed)
+            })
+            .await?;
+        for account_id in changed {
+            self.bus.emit(CoreEvent::CalendarUpdated { account_id });
+        }
+        Ok(())
+    }
+
+    async fn reapply_invitations(&self, message_ids: Vec<i64>) -> Result<()> {
+        let stored = self
+            .db
+            .read(move |conn| {
+                let mut stored = Vec::new();
+                for id in message_ids {
+                    if let Some(row) = repo::messages::get_row(conn, id)?
+                        && let Some(path) = row.raw_path
+                    {
+                        stored.push((id, row.account_id, path));
+                    }
+                }
+                Ok(stored)
+            })
+            .await?;
+        let ctx = self.sync_ctx();
+        for (message_id, account_id, path) in stored {
+            // Mail whose body isn't here yet brings its invitations when
+            // it is fetched, like any other.
+            let Ok(raw) = file_io::read(&path, MAX_CACHED_MESSAGE_BYTES, "stored message").await
+            else {
+                continue;
+            };
+            let Ok(parsed) = crate::mime::parse_message(&raw) else {
+                continue;
+            };
+            let calendars = sync::ingest::calendar_parts(&parsed);
+            sync::ingest::store_calendar_events(&ctx, account_id, vec![(message_id, calendars)])
+                .await?;
+        }
+        Ok(())
     }
 
     /// Queue a provider-side purge of Trash for one account or all accounts.
@@ -4778,11 +4877,12 @@ impl Core {
     /// is reversed. Unlike [`Core::undo_last`], later actions and sends stay.
     /// False when none of them could be taken back.
     pub async fn undo_actions(&self, action_ids: Vec<i64>) -> Result<bool> {
-        let (undone, threads) = self
+        let (undone, threads, out_of_spam, into_spam) = self
             .db
             .write(move |conn| {
                 let mut undone = false;
                 let mut threads = Vec::new();
+                let (mut out_of_spam, mut into_spam) = (Vec::new(), Vec::new());
                 for id in action_ids {
                     let Some(action) = repo::actions::get(conn, id)? else {
                         continue;
@@ -4798,10 +4898,17 @@ impl Core {
                     {
                         threads.push(thread_id);
                     }
+                    match (action.kind.as_str(), action.message_id) {
+                        ("spam", Some(message_id)) => out_of_spam.push(message_id),
+                        ("not_spam", Some(message_id)) => into_spam.push(message_id),
+                        _ => {}
+                    }
                 }
-                Ok((undone, threads))
+                Ok((undone, threads, out_of_spam, into_spam))
             })
             .await?;
+        self.invitations_follow(out_of_spam, false).await;
+        self.invitations_follow(into_spam, true).await;
         if !threads.is_empty() {
             self.bus.emit(CoreEvent::MailUpdated {
                 thread_ids: threads,
@@ -5024,6 +5131,7 @@ impl Core {
             staged.push(crate::models::DraftAttachmentIn {
                 file_path,
                 filename: att.filename.clone(),
+                mime_type: att.mime_type.clone(),
             });
         }
         let retained_paths: HashSet<String> = staged
@@ -5192,8 +5300,9 @@ impl Core {
                 )?;
                 for att in &staged {
                     tx.execute(
-                        "INSERT INTO draft_attachments (draft_id, file_path, filename) VALUES (?1,?2,?3)",
-                        rusqlite::params![draft_id, att.file_path, att.filename],
+                        "INSERT INTO draft_attachments (draft_id, file_path, filename, mime_type)
+                         VALUES (?1, ?2, ?3, ?4)",
+                        rusqlite::params![draft_id, att.file_path, att.filename, att.mime_type],
                     )?;
                 }
                 tx.execute(
@@ -5328,7 +5437,7 @@ impl Core {
                 }
 
                 let mut stmt = conn.prepare(
-                    "SELECT file_path, filename
+                    "SELECT file_path, filename, mime_type
                      FROM draft_attachments WHERE draft_id = ?1 ORDER BY id",
                 )?;
                 draft.0.attachments = stmt
@@ -5336,6 +5445,7 @@ impl Core {
                         Ok(crate::models::DraftAttachmentIn {
                             file_path: row.get(0)?,
                             filename: row.get(1)?,
+                            mime_type: row.get(2)?,
                         })
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -5370,6 +5480,7 @@ impl Core {
                 } else {
                     crate::mime::decode_encoded_words(&filename)
                 },
+                mime_type: None,
             });
         }
         Ok(draft)
@@ -6243,6 +6354,7 @@ impl Core {
                 email: a.email.clone(),
                 name: a.name.clone(),
                 partstat: Some("NEEDS-ACTION".into()),
+                answered_at: None,
             })
             .collect();
 
@@ -6297,13 +6409,16 @@ impl Core {
                 dtstamp_ms: now_ms(),
             });
             let body_text = invite_body_text(&args);
-            self.send_calendar_mail(
+            self.send_calendar_mail(CalendarMail {
                 account_id,
-                args.attendees.clone(),
-                format!("Invitation: {}", args.summary.trim()),
+                from: None,
+                to: args.attendees.clone(),
+                subject: format!("Invitation: {}", args.summary.trim()),
                 body_text,
-                &ics,
-            )
+                ics: &ics,
+                method: "REQUEST",
+                in_reply_to: None,
+            })
             .await?;
         }
 
@@ -6391,12 +6506,13 @@ impl Core {
             _ => return Err(CoreError::Other("invalid RSVP response".into())),
         };
         let event_id = args.event_id;
-        let (ev, uid_seq) = self
+        let (ev, uid_seq, invitation) = self
             .calendar_db
             .read(move |conn| {
                 Ok((
                     repo::calendar::get(conn, event_id)?,
                     repo::calendar::uid_and_sequence(conn, event_id)?,
+                    repo::calendar::ical_raw(conn, event_id)?,
                 ))
             })
             .await?;
@@ -6404,50 +6520,70 @@ impl Core {
         let (uid, sequence) = uid_seq.ok_or_else(|| CoreError::NotFound("event".into()))?;
 
         let account_id = ev.account_id;
-        let account = self
+        let (account, identities) = self
             .db
-            .read(move |conn| repo::accounts::get(conn, account_id))
-            .await?
-            .ok_or_else(|| CoreError::NotFound("account".into()))?;
+            .read(move |conn| {
+                Ok((
+                    repo::accounts::get(conn, account_id)?,
+                    repo::sender_identities::list(conn, account_id)?,
+                ))
+            })
+            .await?;
+        let account = account.ok_or_else(|| CoreError::NotFound("account".into()))?;
 
         // Reply goes to the organizer; without one there is nobody to notify,
         // but we still record the response locally.
         if let Some(organizer) = ev.organizer.clone().filter(|o| !o.is_empty()) {
-            let me = Address {
-                name: account.display_name.clone(),
-                email: account.email.clone(),
-            };
+            let answering = Answering::of(&account, &identities, &ev.attendees);
             let ics = calendar::build_reply_ics(&calendar::ReplySpec {
+                invitation: invitation.as_deref(),
                 uid: &uid,
+                recurrence_id_ms: None,
+                all_day: ev.all_day,
                 sequence,
                 summary: ev.summary.as_deref(),
+                organizer: &organizer,
+                attendee: &answering.attendee,
+                sent_by: answering.sent_by.as_deref(),
                 partstat,
-                organizer_email: &organizer,
-                attendee: &me,
-                starts_at_ms: ev.starts_at,
-                ends_at_ms: ev.ends_at,
+                comment: args.comment.as_deref(),
                 dtstamp_ms: now_ms(),
             });
-            let verb = match partstat {
-                "ACCEPTED" => "Accepted",
-                "TENTATIVE" => "Tentative",
-                _ => "Declined",
+            let (verb, answered) = match partstat {
+                "ACCEPTED" => ("Accepted", "accepted"),
+                "TENTATIVE" => ("Tentative", "tentatively accepted"),
+                _ => ("Declined", "declined"),
             };
             let title = ev.summary.clone().unwrap_or_else(|| "(no title)".into());
-            self.send_calendar_mail(
+            let who = answering
+                .attendee
+                .name
+                .clone()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| answering.attendee.email.clone());
+            let mut body_text = format!("{who} has {answered} your invitation to {title}.");
+            if let Some(comment) = args
+                .comment
+                .as_deref()
+                .map(str::trim)
+                .filter(|c| !c.is_empty())
+            {
+                body_text.push_str("\n\n");
+                body_text.push_str(comment);
+            }
+            self.send_calendar_mail(CalendarMail {
                 account_id,
-                vec![Address {
+                from: Some(answering.from),
+                to: vec![Address {
                     name: None,
                     email: organizer,
                 }],
-                format!("{verb}: {title}"),
-                format!(
-                    "{} has responded {} to: {title}",
-                    account.email,
-                    verb.to_lowercase()
-                ),
-                &ics,
-            )
+                subject: format!("{verb}: {title}"),
+                body_text,
+                ics: &ics,
+                method: "REPLY",
+                in_reply_to: ev.message_id,
+            })
             .await?;
         }
 
@@ -6490,15 +6626,19 @@ impl Core {
         let attendees: Vec<EventAttendee> = args
             .attendees
             .iter()
-            .map(|a| EventAttendee {
-                email: a.email.clone(),
-                name: a.name.clone(),
-                partstat: existing
+            .map(|a| {
+                let previous = existing
                     .attendees
                     .iter()
-                    .find(|old| old.email.eq_ignore_ascii_case(&a.email))
-                    .and_then(|old| old.partstat.clone())
-                    .or_else(|| Some("NEEDS-ACTION".into())),
+                    .find(|old| old.email.eq_ignore_ascii_case(&a.email));
+                EventAttendee {
+                    email: a.email.clone(),
+                    name: a.name.clone(),
+                    partstat: previous
+                        .and_then(|old| old.partstat.clone())
+                        .or_else(|| Some("NEEDS-ACTION".into())),
+                    answered_at: previous.and_then(|old| old.answered_at),
+                }
             })
             .collect();
 
@@ -6551,13 +6691,16 @@ impl Core {
                 all_day: args.all_day,
                 attendees: args.attendees.clone(),
             });
-            self.send_calendar_mail(
+            self.send_calendar_mail(CalendarMail {
                 account_id,
-                args.attendees.clone(),
-                format!("Updated invitation: {}", args.summary.trim()),
-                body,
-                &ics,
-            )
+                from: None,
+                to: args.attendees.clone(),
+                subject: format!("Updated invitation: {}", args.summary.trim()),
+                body_text: body,
+                ics: &ics,
+                method: "REQUEST",
+                in_reply_to: None,
+            })
             .await?;
         }
 
@@ -6617,13 +6760,16 @@ impl Core {
                 ends_at_ms: ev.ends_at.unwrap_or(ev.starts_at + 1_800_000),
                 dtstamp_ms: now_ms(),
             });
-            self.send_calendar_mail(
+            self.send_calendar_mail(CalendarMail {
                 account_id,
+                from: None,
                 to,
-                format!("Cancelled: {title}"),
-                format!("{title} has been cancelled."),
-                &ics,
-            )
+                subject: format!("Cancelled: {title}"),
+                body_text: format!("{title} has been cancelled."),
+                ics: &ics,
+                method: "CANCEL",
+                in_reply_to: None,
+            })
             .await?;
         }
 
@@ -7242,16 +7388,20 @@ impl Core {
         Ok(())
     }
 
-    /// Draft + queue an email carrying an ICS part, through the normal send
-    /// pipeline. The ICS is staged like an attachment.
-    async fn send_calendar_mail(
-        &self,
-        account_id: i64,
-        to: Vec<Address>,
-        subject: String,
-        body_text: String,
-        ics: &str,
-    ) -> Result<()> {
+    /// Draft + queue a calendar email through the normal send pipeline. The
+    /// ICS is staged like an attachment, typed so that it goes out as an
+    /// iMIP message (RFC 6047).
+    async fn send_calendar_mail(&self, mail: CalendarMail<'_>) -> Result<()> {
+        let CalendarMail {
+            account_id,
+            from,
+            to,
+            subject,
+            body_text,
+            ics,
+            method,
+            in_reply_to,
+        } = mail;
         let tmp_dir = self.paths.temp_dir();
         tokio::fs::create_dir_all(&tmp_dir).await?;
         let tmp_path = tmp_dir.join(format!("invite-{}.ics", crate::mime::rand_token()));
@@ -7261,19 +7411,25 @@ impl Core {
             .save_draft(SaveDraftArgs {
                 draft_id: None,
                 account_id,
-                from: None,
+                from,
                 to,
                 cc: Vec::new(),
                 bcc: Vec::new(),
                 subject,
                 body_text,
                 body_html: None,
-                mode: "new".into(),
-                in_reply_to_message_id: None,
+                mode: if in_reply_to.is_some() {
+                    "reply"
+                } else {
+                    "new"
+                }
+                .into(),
+                in_reply_to_message_id: in_reply_to,
                 in_reply_to_header: None,
                 attachments: vec![DraftAttachmentIn {
                     file_path: tmp_path.to_string_lossy().into_owned(),
                     filename: "invite.ics".into(),
+                    mime_type: Some(format!("text/calendar; method={method}; charset=UTF-8")),
                 }],
             })
             .await?;
@@ -9689,6 +9845,89 @@ fn thread_in_inbox(tx: &rusqlite::Transaction, thread_id: i64) -> Result<bool> {
     )?)
 }
 
+/// One calendar email: an invitation, its update or cancellation, or an
+/// answer to one.
+struct CalendarMail<'a> {
+    account_id: i64,
+    /// The identity to send from; None sends from the account's default.
+    from: Option<Address>,
+    to: Vec<Address>,
+    subject: String,
+    body_text: String,
+    /// The iCalendar object, and its METHOD.
+    ics: &'a str,
+    method: &'a str,
+    /// The message this one answers, whose conversation it joins.
+    in_reply_to: Option<i64>,
+}
+
+/// Who answers an invitation in an account.
+struct Answering {
+    /// The invited address answering, as the invitation lists it.
+    attendee: Address,
+    /// The identity the answer is sent from.
+    from: Address,
+    /// The sending address when it isn't the invited one (RFC 5546 §2.1.3).
+    sent_by: Option<String>,
+}
+
+impl Answering {
+    /// Answer as the account's identity the invitation was sent to, chosen as
+    /// for a reply to mail sent to the attendees. An account the invitation
+    /// doesn't list answers as itself, a guest the organizer may add (RFC 5546
+    /// §3.2.2.6).
+    fn of(account: &Account, identities: &[SenderIdentity], attendees: &[EventAttendee]) -> Self {
+        let listed: Vec<Address> = attendees
+            .iter()
+            .map(|attendee| Address {
+                name: attendee.name.clone(),
+                email: attendee.email.clone(),
+            })
+            .collect();
+        let primary = Address {
+            name: account.display_name.clone(),
+            email: account.email.clone(),
+        };
+        let Some(from_email) = sender_identities::reply_sender(identities, listed.iter()) else {
+            return Self {
+                attendee: primary.clone(),
+                from: primary,
+                sent_by: None,
+            };
+        };
+        // The entry the identity answers for: its own address, or the one a
+        // wildcard or subaddress identity covers.
+        let attendee = listed
+            .iter()
+            .find(|attendee| attendee.email.eq_ignore_ascii_case(&from_email))
+            .or_else(|| {
+                listed
+                    .iter()
+                    .find(|attendee| sender_identities::is_own_address(identities, &attendee.email))
+            })
+            .cloned()
+            .unwrap_or_else(|| Address {
+                name: None,
+                email: from_email.clone(),
+            });
+        let name = identities
+            .iter()
+            .find(|identity| identity.email.eq_ignore_ascii_case(&from_email))
+            .and_then(|identity| identity.display_name.clone())
+            .or_else(|| account.display_name.clone());
+        let sent_by =
+            (!from_email.eq_ignore_ascii_case(&attendee.email)).then(|| from_email.clone());
+        Self {
+            attendee,
+            from: Address {
+                name,
+                email: from_email,
+            },
+            sent_by,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn enqueue_move(
     tx: &rusqlite::Transaction,
@@ -11464,6 +11703,7 @@ mod draft_staging_tests {
             attachments: vec![DraftAttachmentIn {
                 file_path: source.to_string_lossy().into_owned(),
                 filename: filename.into(),
+                mime_type: None,
             }],
         }
     }
@@ -13089,5 +13329,188 @@ mod unsubscribe_offer_tests {
             .await
             .unwrap();
         assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), None);
+    }
+}
+
+#[cfg(test)]
+mod invitation_tests {
+    use super::*;
+
+    const INVITATION: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:review-1@example.com\r\nSEQUENCE:0\r\nDTSTAMP:20261101T080000Z\r\nDTSTART:20261120T090000Z\r\nDTEND:20261120T100000Z\r\nSUMMARY:Design review\r\nORGANIZER;CN=Alice:mailto:alice@example.com\r\nATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:me@test.dev\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:carol@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    /// An invitation from alice@example.com to me@test.dev in the inbox,
+    /// with its original on disk as after the reader downloaded it, and a
+    /// Junk folder to move it to.
+    async fn invited() -> (Core, tempfile::TempDir, i64) {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let path = temp.path().join("invite.eml");
+        std::fs::write(
+            &path,
+            format!(
+                "From: Alice <alice@example.com>\r\nTo: me@test.dev\r\nSubject: Invitation: Design review\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nYou're invited.\r\n--b\r\nContent-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n\r\n{INVITATION}--b--\r\n"
+            ),
+        )
+        .unwrap();
+        let raw_path = path.to_string_lossy().into_owned();
+        let message_id = core
+            .db
+            .write(move |conn| {
+                db::testutil::seed_account(conn);
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Junk', 'spam')",
+                    [],
+                )?;
+                let (_, id) = db::testutil::seed_message(
+                    conn,
+                    "alice@example.com",
+                    "Invitation: Design review",
+                    false,
+                );
+                conn.execute(
+                    "UPDATE messages SET raw_path = ?2 WHERE id = ?1",
+                    rusqlite::params![id, raw_path],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        sync::ingest::store_calendar_events(
+            &core.sync_ctx(),
+            1,
+            vec![(message_id, vec![INVITATION.into()])],
+        )
+        .await
+        .unwrap();
+        (core, temp, message_id)
+    }
+
+    async fn invitations(core: &Core, message_id: i64) -> Vec<CalendarEvent> {
+        core.events_for_message(message_id).await.unwrap()
+    }
+
+    fn to_spam(message_id: i64) -> PerformActionArgs {
+        PerformActionArgs {
+            kind: ActionKind::Spam,
+            target: ActionTarget::Messages(vec![message_id]),
+            params: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_invitation_follows_its_mail_in_and_out_of_spam() {
+        let (core, _temp, id) = invited().await;
+        assert_eq!(invitations(&core, id).await.len(), 1);
+
+        let moved = core.perform_action(to_spam(id)).await.unwrap();
+        assert!(
+            invitations(&core, id).await.is_empty(),
+            "spam leaves the calendar"
+        );
+        // Read again while in Spam, it stays out.
+        sync::ingest::store_calendar_events(
+            &core.sync_ctx(),
+            1,
+            vec![(id, vec![INVITATION.into()])],
+        )
+        .await
+        .unwrap();
+        assert!(invitations(&core, id).await.is_empty());
+
+        assert!(core.undo_actions(moved.action_ids).await.unwrap());
+        let back = invitations(&core, id).await;
+        assert_eq!(back.len(), 1, "back in the inbox, it's back");
+        assert_eq!(back[0].summary.as_deref(), Some("Design review"));
+    }
+
+    #[tokio::test]
+    async fn an_answered_invitation_stays_when_its_mail_goes_to_spam() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        core.calendar_db
+            .write(move |conn| repo::calendar::set_rsvp(conn, event, "ACCEPTED"))
+            .await
+            .unwrap();
+        core.perform_action(to_spam(id)).await.unwrap();
+        assert_eq!(invitations(&core, id).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_answer_goes_to_the_organizer_as_an_imip_reply() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        let answered = core
+            .rsvp_event(RsvpEventArgs {
+                event_id: event,
+                response: "accepted".into(),
+                comment: Some("See you there".into()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(answered.rsvp_status.as_deref(), Some("ACCEPTED"));
+
+        let (draft, thread, to) = core
+            .db
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT id, thread_id, to_json FROM messages WHERE is_draft = 1",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )?)
+            })
+            .await
+            .unwrap();
+        let invitation_thread = core
+            .db
+            .read(move |conn| Ok(repo::messages::get_row(conn, id)?.unwrap().thread_id))
+            .await
+            .unwrap();
+        assert_eq!(
+            Some(thread),
+            invitation_thread,
+            "the answer joins the invitation"
+        );
+        assert!(to.contains("alice@example.com"));
+
+        let (_, in_reply_to) = core
+            .db
+            .read(move |conn| repo::messages::draft_reply_headers(conn, draft))
+            .await
+            .unwrap();
+        assert_eq!(in_reply_to.as_deref(), Some("mid-1"));
+        let raw = core.draft_message(draft).await.unwrap();
+        let parsed = crate::mime::parse_message(&raw).unwrap();
+        assert_eq!(parsed.calendar_parts.len(), 1);
+        let reply = &parsed.calendar_parts[0];
+        let lines: Vec<&str> = reply
+            .lines()
+            .map(|line| line.trim_end_matches('\r'))
+            .collect();
+        for line in [
+            "METHOD:REPLY",
+            "UID:review-1@example.com",
+            "DTSTART:20261120T090000Z",
+            "ATTENDEE;PARTSTAT=ACCEPTED:mailto:me@test.dev",
+            "COMMENT:See you there",
+        ] {
+            assert!(lines.contains(&line), "{line} missing from:\n{reply}");
+        }
+        assert!(!reply.contains("carol@example.com"), "only my own answer");
+        assert!(
+            parsed
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("accepted your invitation to Design review")),
+            "{:?}",
+            parsed.text
+        );
     }
 }

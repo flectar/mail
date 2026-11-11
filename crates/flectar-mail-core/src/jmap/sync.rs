@@ -2178,11 +2178,16 @@ async fn build_draft_message(
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
             let (references, in_reply_to) = repo::messages::draft_reply_headers(conn, draft_id)?;
-            let mut stmt =
-                conn.prepare("SELECT file_path,filename FROM draft_attachments WHERE draft_id=?1")?;
+            let mut stmt = conn.prepare(
+                "SELECT file_path,filename,mime_type FROM draft_attachments WHERE draft_id=?1",
+            )?;
             let attachments = stmt
                 .query_map(params![draft_id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let bcc = serde_json::from_str::<Vec<Address>>(&bcc_json)?;
@@ -2227,7 +2232,7 @@ async fn build_draft_message(
         .await
         .ok();
     let mut outgoing_attachments = Vec::new();
-    for (path, filename) in attachments {
+    for (path, filename, mime_type) in attachments {
         let canonical = tokio::fs::canonicalize(&path)
             .await
             .map_err(|error| CoreError::Other(format!("attachment {filename}: {error}")))?;
@@ -2250,7 +2255,7 @@ async fn build_draft_message(
             )));
         }
         outgoing_attachments.push(crate::mime::OutgoingAttachment {
-            mime_type: crate::queue::mime_guess_from_name(&filename),
+            mime_type: mime_type.unwrap_or_else(|| crate::queue::mime_guess_from_name(&filename)),
             filename,
             bytes: crate::file_io::read(
                 canonical,
@@ -2839,7 +2844,7 @@ async fn fetch_body(
     let connected = body_session(ctx, config, session).await?;
     let raw = download_message_bounded(connected, &expected_blob).await?;
     let parsed = crate::mime::parse_message(&raw)?;
-    let calendar_events = crate::sync::ingest::calendar_events(&parsed);
+    let calendar_events = crate::sync::ingest::calendar_parts(&parsed);
     let dir = ctx.paths.mail_dir(config.id);
     tokio::fs::create_dir_all(&dir).await?;
     let path = dir.join(format!("{message_id}.jmap.eml"));
@@ -2872,7 +2877,8 @@ async fn fetch_body(
         let _ = tokio::fs::remove_file(path).await;
         return Ok(());
     }
-    crate::sync::ingest::store_calendar_events(ctx, config.id, message_id, calendar_events).await?;
+    crate::sync::ingest::store_calendar_events(ctx, config.id, vec![(message_id, calendar_events)])
+        .await?;
     if let Some(thread_id) = thread_id {
         ctx.bus.emit(CoreEvent::MailUpdated {
             thread_ids: vec![thread_id],

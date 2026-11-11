@@ -1378,6 +1378,10 @@ pub struct ActionResult {
 pub struct DraftAttachmentIn {
     pub file_path: String,
     pub filename: String,
+    /// The part's Content-Type when the name alone doesn't give it, such as
+    /// a calendar invitation's `text/calendar; method=REQUEST`.
+    #[serde(default)]
+    pub mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2430,6 +2434,10 @@ pub struct EventAttendee {
     pub name: Option<String>,
     /// NEEDS-ACTION | ACCEPTED | TENTATIVE | DECLINED
     pub partstat: Option<String>,
+    /// When the attendee wrote their newest answer to the user's invitation
+    /// (its DTSTAMP), so an older answer read later doesn't replace it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2461,6 +2469,9 @@ pub struct RsvpEventArgs {
     pub event_id: i64,
     /// accepted | tentative | declined
     pub response: String,
+    /// A note to the organizer, sent with the answer.
+    #[serde(default)]
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

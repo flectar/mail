@@ -288,6 +288,8 @@ fn ics_event(ev: &graph::DeltaEvent) -> IcsEvent {
         summary: ev.subject.clone(),
         location: ev.location.clone(),
         organizer: ev.organizer_email.clone(),
+        organizer_name: None,
+        dtstamp_ms: None,
         description: ev.body_preview.clone(),
         attendees: ev
             .attendees
@@ -296,6 +298,7 @@ fn ics_event(ev: &graph::DeltaEvent) -> IcsEvent {
                 email: email.clone(),
                 name: name.clone(),
                 partstat: partstat.clone(),
+                ..Default::default()
             })
             .collect(),
         join_url: ev.join_url.clone(),

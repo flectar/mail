@@ -140,6 +140,9 @@ CREATE INDEX idx_calendar_actions_due
 "#,
     ),
     Migration::TableRebuild(include_str!("migrations/calendar_002_connections.sql")),
+    Migration::Plain(include_str!(
+        "migrations/calendar_003_invitation_dtstamp.sql"
+    )),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

@@ -2269,6 +2269,70 @@ struct MessageAttachment<'a> {
     bytes: std::borrow::Cow<'a, [u8]>,
 }
 
+/// The METHOD of an attachment marked as an iMIP calendar part (RFC 6047
+/// §2.4): `text/calendar` with a `method` parameter. A calendar file the
+/// user attached has none, and goes out as a plain attachment.
+fn imip_method(mime_type: &str) -> Option<&str> {
+    let mut parts = mime_type.split(';');
+    if !parts.next()?.trim().eq_ignore_ascii_case("text/calendar") {
+        return None;
+    }
+    parts
+        .find_map(|parameter| {
+            let (name, value) = parameter.split_once('=')?;
+            name.trim()
+                .eq_ignore_ascii_case("method")
+                .then(|| value.trim().trim_matches('"'))
+        })
+        .filter(|method| !method.is_empty())
+}
+
+/// The body of an iMIP message (RFC 6047 §2.4 and §4.2): the text, any HTML
+/// and the calendar as alternatives of one another, so mail programs that
+/// don't read calendars show the text. The calendar is attached again as
+/// invite.ics for programs that only look at attachments, followed by any
+/// other attachments.
+fn imip_body<'a>(
+    out: &'a OutgoingMessage<'_>,
+    calendar: MessageAttachment<'a>,
+    attachments: Vec<MessageAttachment<'a>>,
+) -> mail_builder::mime::MimePart<'a> {
+    use mail_builder::headers::content_type::ContentType;
+    use mail_builder::mime::{BodyPart, MimePart};
+
+    let method = imip_method(&calendar.mime_type)
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    let mut alternatives = vec![MimePart::new("text/plain", out.body_text)];
+    if let Some(html) = out.body_html.filter(|html| !html.trim().is_empty()) {
+        alternatives.push(MimePart::new("text/html", html));
+    }
+    alternatives.push(MimePart::new(
+        ContentType::new("text/calendar")
+            .attribute("method", method)
+            .attribute("charset", "UTF-8"),
+        String::from_utf8_lossy(&calendar.bytes).into_owned(),
+    ));
+    let mut parts = vec![MimePart::new("multipart/alternative", alternatives)];
+    parts.push(
+        MimePart::new(
+            ContentType::new("application/ics").attribute("name", calendar.filename.clone()),
+            BodyPart::Binary(calendar.bytes),
+        )
+        .attachment(calendar.filename),
+    );
+    for attachment in attachments {
+        parts.push(
+            MimePart::new(
+                ContentType::new(attachment.mime_type),
+                BodyPart::Binary(attachment.bytes),
+            )
+            .attachment(attachment.filename),
+        );
+    }
+    MimePart::new("multipart/mixed", parts)
+}
+
 /// Build a raw RFC 5322 message. Returns (message_id, raw_bytes).
 pub fn build_message(out: &OutgoingMessage) -> Result<(String, Vec<u8>)> {
     build_message_with_attachments(
@@ -2311,6 +2375,11 @@ fn build_message_with_attachments<'a>(
     let mut binary_output_bytes = 0usize;
     let mut other_source_bytes = out.body_text.len();
     let mut part_count = 0usize;
+    let mut attachments: Vec<MessageAttachment<'a>> = attachments.into_iter().collect();
+    let calendar = attachments
+        .iter()
+        .position(|attachment| imip_method(&attachment.mime_type).is_some())
+        .map(|index| attachments.remove(index));
     let stable_id = out
         .message_id
         .map(str::trim)
@@ -2365,6 +2434,7 @@ fn build_message_with_attachments<'a>(
 
     if let Some(html) = out.body_html
         && !html.trim().is_empty()
+        && calendar.is_none()
     {
         let (html, inline_images) = extract_data_uri_images(html);
         other_source_bytes = other_source_bytes.saturating_add(html.len());
@@ -2386,7 +2456,7 @@ fn build_message_with_attachments<'a>(
     if !out.bcc.is_empty() {
         builder = builder.bcc(addresses(out.bcc));
     }
-    for att in attachments {
+    for att in &attachments {
         if att
             .mime_type
             .get(..5)
@@ -2398,11 +2468,22 @@ fn build_message_with_attachments<'a>(
                 binary_output_bytes.saturating_add(encoded_binary_len(att.bytes.len()));
         }
         part_count += 1;
-        builder = builder.attachment(
-            mail_builder::headers::content_type::ContentType::new(att.mime_type),
-            att.filename,
-            mail_builder::mime::BodyPart::Binary(att.bytes),
-        );
+    }
+    if let Some(calendar) = calendar {
+        // The calendar goes out twice: inline and as invite.ics.
+        other_source_bytes = other_source_bytes
+            .saturating_add(out.body_html.map_or(0, str::len))
+            .saturating_add(calendar.bytes.len().saturating_mul(2));
+        part_count += 3;
+        builder = builder.body(imip_body(out, calendar, attachments));
+    } else {
+        for att in attachments {
+            builder = builder.attachment(
+                mail_builder::headers::content_type::ContentType::new(att.mime_type),
+                att.filename,
+                mail_builder::mime::BodyPart::Binary(att.bytes),
+            );
+        }
     }
     if let Some(irt) = out.in_reply_to {
         builder = builder.in_reply_to(irt.trim_matches(['<', '>']));
@@ -3088,6 +3169,88 @@ mod tests {
         assert!(s.contains("multipart/alternative"), "raw:\n{s}");
         assert!(s.contains("text/html"));
         assert!(s.contains("text/plain"));
+    }
+
+    const ANSWER: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:evt-1@example.com\r\nSEQUENCE:0\r\nORGANIZER:mailto:alice@example.com\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:me@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    fn part_types(raw: &[u8]) -> Vec<String> {
+        let message = mail_parser::MessageParser::default().parse(raw).unwrap();
+        message
+            .parts
+            .iter()
+            .map(|part| {
+                let content_type = part.content_type().unwrap();
+                let mut kind = format!(
+                    "{}/{}",
+                    content_type.ctype(),
+                    content_type.subtype().unwrap_or_default()
+                );
+                for name in ["method", "charset", "name"] {
+                    if let Some(value) = content_type.attribute(name) {
+                        kind.push_str(&format!(";{name}={value}"));
+                    }
+                }
+                kind.to_ascii_lowercase()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_calendar_part_goes_out_as_an_imip_message() {
+        let mut message = outgoing("Accepted: Design review", None);
+        message.attachments = vec![
+            OutgoingAttachment {
+                filename: "invite.ics".into(),
+                mime_type: "text/calendar; method=reply; charset=UTF-8".into(),
+                bytes: ANSWER.as_bytes().to_vec(),
+            },
+            OutgoingAttachment {
+                filename: "agenda.pdf".into(),
+                mime_type: "application/pdf".into(),
+                bytes: b"%PDF-1.7".to_vec(),
+            },
+        ];
+        let (_, raw) = build_message(&message).unwrap();
+        // RFC 6047 §2.4: the method parameter matches METHOD, and the text
+        // stands in for mail programs that don't read calendars.
+        assert_eq!(
+            part_types(&raw),
+            [
+                "multipart/mixed",
+                "multipart/alternative",
+                "text/plain;charset=utf-8",
+                "text/calendar;method=reply;charset=utf-8",
+                "application/ics;name=invite.ics",
+                "application/pdf",
+            ]
+        );
+        let parsed = parse_message(&raw).unwrap();
+        assert_eq!(
+            parsed.calendar_parts.len(),
+            1,
+            "the attached copy isn't read twice"
+        );
+        assert!(parsed.calendar_parts[0].contains("UID:evt-1@example.com"));
+        assert_eq!(parsed.text.as_deref(), Some("Accepted: Design review"));
+    }
+
+    #[test]
+    fn a_calendar_file_the_user_attached_stays_an_attachment() {
+        let mut message = outgoing("The event", None);
+        message.attachments.push(OutgoingAttachment {
+            filename: "event.ics".into(),
+            mime_type: "text/calendar".into(),
+            bytes: ANSWER.as_bytes().to_vec(),
+        });
+        let (_, raw) = build_message(&message).unwrap();
+        assert_eq!(
+            part_types(&raw),
+            [
+                "multipart/mixed",
+                "text/plain;charset=utf-8",
+                "text/calendar"
+            ]
+        );
     }
 
     #[test]

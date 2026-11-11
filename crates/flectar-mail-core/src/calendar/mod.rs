@@ -14,6 +14,13 @@ pub struct IcsAttendee {
     pub name: Option<String>,
     /// NEEDS-ACTION | ACCEPTED | TENTATIVE | DECLINED
     pub partstat: Option<String>,
+    /// The organizer asked this attendee to reply (RSVP=TRUE). RFC 5545
+    /// makes FALSE the default.
+    pub rsvp: bool,
+    /// REQ-PARTICIPANT, OPT-PARTICIPANT, NON-PARTICIPANT or CHAIR.
+    pub role: Option<String>,
+    /// INDIVIDUAL, GROUP, RESOURCE, ROOM or UNKNOWN.
+    pub cutype: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -23,6 +30,11 @@ pub struct IcsEvent {
     pub summary: Option<String>,
     pub location: Option<String>,
     pub organizer: Option<String>,
+    /// The organizer's display name (CN).
+    pub organizer_name: Option<String>,
+    /// When this version of the event was written (DTSTAMP). It orders two
+    /// versions with the same SEQUENCE (RFC 5546 §2.1.5).
+    pub dtstamp_ms: Option<i64>,
     pub description: Option<String>,
     pub attendees: Vec<IcsAttendee>,
     /// Video-call link: explicit URL/X-GOOGLE-CONFERENCE property, or the
@@ -373,6 +385,54 @@ fn resolve_dt(
     parse_dt(v)
 }
 
+/// The address in a CAL-ADDRESS value such as an ORGANIZER or ATTENDEE:
+/// the "mailto:" scheme comes off in any case.
+fn cal_address(value: &str) -> String {
+    let value = value.trim();
+    match value.get(..7) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("mailto:") => value[7..].trim().to_string(),
+        _ => value.to_string(),
+    }
+}
+
+/// An RFC 5545 DURATION ("PT1H30M", "P1D", "P2W", "-PT15M") in milliseconds.
+/// None for anything else.
+fn parse_duration(value: &str) -> Option<i64> {
+    let value = value.trim();
+    let (sign, value) = match value.strip_prefix('-') {
+        Some(rest) => (-1, rest),
+        None => (1, value.strip_prefix('+').unwrap_or(value)),
+    };
+    let mut rest = value.strip_prefix('P')?;
+    let mut total = 0i64;
+    let mut in_time = false;
+    let mut parts = 0;
+    while !rest.is_empty() {
+        if let Some(time) = rest.strip_prefix('T') {
+            if in_time {
+                return None;
+            }
+            in_time = true;
+            rest = time;
+            continue;
+        }
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let number: i64 = rest[..digits].parse().ok()?;
+        let unit = match (rest[digits..].chars().next()?, in_time) {
+            ('W', false) => 7 * 86_400_000,
+            ('D', false) => 86_400_000,
+            ('H', true) => 3_600_000,
+            ('M', true) => 60_000,
+            ('S', true) => 1_000,
+            _ => return None,
+        };
+        total = total.checked_add(number.checked_mul(unit)?)?;
+        rest = &rest[digits + 1..];
+        parts += 1;
+    }
+    (parts > 0).then_some(sign * total)
+}
+
 fn unescape(v: &str) -> String {
     let mut out = String::with_capacity(v.len());
     let mut chars = v.chars();
@@ -426,18 +486,31 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
     let mut method: Option<String> = None;
     let mut events = Vec::new();
     let mut current: Option<IcsEvent> = None;
+    // Components inside the VEVENT being read, such as a VALARM, whose
+    // properties are not the event's.
+    let mut nested = 0usize;
+    let mut duration_ms: Option<i64> = None;
 
     for line in &lines {
         let Some((key, params, value)) = split_prop(line) else {
             continue;
         };
         match key.as_str() {
-            "BEGIN" if value.eq_ignore_ascii_case("VEVENT") => {
+            "BEGIN" if current.is_none() && value.eq_ignore_ascii_case("VEVENT") => {
                 current = Some(IcsEvent::default());
+                nested = 0;
+                duration_ms = None;
             }
+            "BEGIN" if current.is_some() => nested += 1,
+            "END" if current.is_some() && nested > 0 => nested -= 1,
             "END" if value.eq_ignore_ascii_case("VEVENT") => {
                 if let Some(mut ev) = current.take() {
                     ev.method = method.clone();
+                    if ev.ends_at_ms.is_none()
+                        && let Some(duration) = duration_ms
+                    {
+                        ev.ends_at_ms = ev.starts_at_ms.checked_add(duration);
+                    }
                     if ev.join_url.is_none() {
                         ev.join_url = ev
                             .location
@@ -445,16 +518,25 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
                             .and_then(find_join_url)
                             .or_else(|| ev.description.as_deref().and_then(find_join_url));
                     }
-                    if !ev.uid.is_empty() && ev.starts_at_ms != 0 {
+                    // Answers and cancellations may name an event by its
+                    // UID alone (RFC 5546 §3.2); anything else needs a start.
+                    let names_only = matches!(
+                        method.as_deref(),
+                        Some("REPLY" | "CANCEL" | "REFRESH" | "COUNTER" | "DECLINECOUNTER")
+                    );
+                    if !ev.uid.is_empty() && (ev.starts_at_ms != 0 || names_only) {
                         events.push(ev);
                     }
                 }
             }
-            "METHOD" if current.is_none() => method = Some(value.to_ascii_uppercase()),
+            "METHOD" if current.is_none() => method = Some(value.trim().to_ascii_uppercase()),
+            _ if nested > 0 => {}
             _ => {
                 let Some(ev) = current.as_mut() else { continue };
                 match key.as_str() {
                     "UID" => ev.uid = value.trim().to_string(),
+                    "DTSTAMP" => ev.dtstamp_ms = parse_dt(value).map(|(ms, _)| ms),
+                    "DURATION" => duration_ms = parse_duration(value),
                     "SUMMARY" => ev.summary = Some(unescape(value.trim())),
                     "LOCATION" => ev.location = Some(unescape(value.trim())),
                     "DESCRIPTION" => ev.description = Some(unescape(value.trim())),
@@ -462,7 +544,8 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
                     "SEQUENCE" => ev.sequence = value.trim().parse().unwrap_or(0),
                     "RRULE" => ev.rrule = Some(value.trim().to_string()),
                     "RECURRENCE-ID" => {
-                        ev.recurrence_id_ms = parse_dt(value).map(|(ms, _)| ms);
+                        let tzid = param(&params, "TZID");
+                        ev.recurrence_id_ms = resolve_dt(value, tzid, &tztable).map(|(ms, _)| ms);
                     }
                     "EXDATE" => {
                         // Collected by the recurrence expander from the raw
@@ -477,16 +560,21 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
                         }
                     }
                     "ORGANIZER" => {
-                        ev.organizer = Some(value.trim().trim_start_matches("mailto:").to_string());
+                        ev.organizer = Some(cal_address(value));
+                        ev.organizer_name = param(&params, "CN").map(str::to_string);
                     }
                     "ATTENDEE" => {
-                        let email = value.trim().trim_start_matches("mailto:").to_string();
+                        let email = cal_address(value);
                         if !email.is_empty() {
+                            let upper = |key| param(&params, key).map(str::to_ascii_uppercase);
                             ev.attendees.push(IcsAttendee {
                                 email,
                                 name: param(&params, "CN").map(str::to_string),
-                                partstat: param(&params, "PARTSTAT")
-                                    .map(|s| s.to_ascii_uppercase()),
+                                partstat: upper("PARTSTAT"),
+                                rsvp: param(&params, "RSVP")
+                                    .is_some_and(|rsvp| rsvp.eq_ignore_ascii_case("TRUE")),
+                                role: upper("ROLE"),
+                                cutype: upper("CUTYPE"),
                             });
                         }
                     }
@@ -714,36 +802,593 @@ pub fn build_cancel_ics(spec: &InviteSpec) -> String {
     })
 }
 
-/// Details for an RSVP reply (METHOD:REPLY).
+/// A content line split into its name, its parameters as written (such as
+/// `CN="Doe, Jane"`) and its value.
+fn raw_parts(line: &str) -> Option<(&str, Vec<&str>, &str)> {
+    let mut quoted = false;
+    let mut colon = None;
+    for (index, character) in line.char_indices() {
+        match character {
+            '"' => quoted = !quoted,
+            ':' if !quoted => {
+                colon = Some(index);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let colon = colon?;
+    let head = &line[..colon];
+    let mut segments = Vec::new();
+    let mut start = 0;
+    quoted = false;
+    for (index, character) in head.char_indices() {
+        match character {
+            '"' => quoted = !quoted,
+            ';' if !quoted => {
+                segments.push(&head[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    segments.push(&head[start..]);
+    let name = segments.remove(0);
+    Some((name, segments, &line[colon + 1..]))
+}
+
+/// Whether `line` is one of the properties `names`.
+fn property_is(line: &str, names: &[&str]) -> bool {
+    raw_parts(line).is_some_and(|(name, _, _)| names.iter().any(|n| name.eq_ignore_ascii_case(n)))
+}
+
+/// One top-level component of a calendar, such as a VEVENT or a VTIMEZONE,
+/// as its unfolded lines with BEGIN and END.
+#[derive(Debug, Clone)]
+struct Component {
+    kind: String,
+    lines: Vec<String>,
+}
+
+impl Component {
+    /// The component's own properties, without those of the components it
+    /// holds (such as a VALARM's).
+    fn own_lines(&self) -> impl Iterator<Item = &str> {
+        let mut depth = 0usize;
+        self.lines.iter().filter_map(move |line| {
+            let upper = line.to_ascii_uppercase();
+            if upper.starts_with("BEGIN:") {
+                depth += 1;
+                None
+            } else if upper.starts_with("END:") {
+                depth = depth.saturating_sub(1);
+                None
+            } else {
+                (depth == 1).then_some(line.as_str())
+            }
+        })
+    }
+}
+
+/// What identifies a VEVENT among the versions of an event, and orders
+/// them (RFC 5546 §2.1.5).
+#[derive(Debug, Clone, Default, PartialEq)]
+struct EventKey {
+    uid: String,
+    recurrence_id_ms: Option<i64>,
+    sequence: i64,
+    dtstamp_ms: Option<i64>,
+}
+
+impl EventKey {
+    /// This version replaces `stored`: a higher SEQUENCE, or the same one
+    /// written no earlier. Re-reading the stored version itself counts, so
+    /// applying a message twice changes nothing.
+    fn supersedes(&self, stored: &EventKey) -> bool {
+        self.sequence > stored.sequence
+            || (self.sequence == stored.sequence
+                && match (self.dtstamp_ms, stored.dtstamp_ms) {
+                    (Some(new), Some(old)) => new >= old,
+                    _ => true,
+                })
+    }
+}
+
+/// A calendar split into its own properties and its top-level components,
+/// so components can be replaced, added or cleaned without rewriting the
+/// rest of it.
+#[derive(Debug, Clone, Default)]
+struct CalendarParts {
+    properties: Vec<String>,
+    components: Vec<Component>,
+}
+
+impl CalendarParts {
+    fn parse(text: &str) -> Self {
+        let mut parts = Self::default();
+        let mut current: Option<Component> = None;
+        let mut depth = 0usize;
+        for line in unfold(text) {
+            let line = line.into_owned();
+            let upper = line.to_ascii_uppercase();
+            if let Some(component) = current.as_mut() {
+                component.lines.push(line);
+                if upper.starts_with("BEGIN:") {
+                    depth += 1;
+                } else if upper.starts_with("END:") {
+                    depth -= 1;
+                    if depth == 0
+                        && let Some(component) = current.take()
+                    {
+                        parts.components.push(component);
+                    }
+                }
+                continue;
+            }
+            if line.trim().is_empty() || upper == "BEGIN:VCALENDAR" || upper == "END:VCALENDAR" {
+                continue;
+            }
+            if let Some(kind) = upper.strip_prefix("BEGIN:") {
+                current = Some(Component {
+                    kind: kind.trim().to_string(),
+                    lines: vec![line],
+                });
+                depth = 1;
+            } else {
+                parts.properties.push(line);
+            }
+        }
+        parts
+    }
+
+    fn render(&self) -> String {
+        let mut out = String::new();
+        push_prop(&mut out, "BEGIN", "VCALENDAR");
+        for line in &self.properties {
+            fold(line, &mut out);
+        }
+        for component in &self.components {
+            for line in &component.lines {
+                fold(line, &mut out);
+            }
+        }
+        push_prop(&mut out, "END", "VCALENDAR");
+        out
+    }
+
+    fn zones(&self) -> HashMap<String, Vec<TzObservance>> {
+        let lines: Vec<Cow<'_, str>> = self
+            .components
+            .iter()
+            .filter(|component| component.kind == "VTIMEZONE")
+            .flat_map(|component| {
+                component
+                    .lines
+                    .iter()
+                    .map(|line| Cow::Borrowed(line.as_str()))
+            })
+            .collect();
+        parse_vtimezones(&lines)
+    }
+
+    fn zone_id(component: &Component) -> Option<String> {
+        component.own_lines().find_map(|line| {
+            let (key, _, value) = split_prop(line)?;
+            (key == "TZID").then(|| value.trim().to_string())
+        })
+    }
+
+    fn event_key(
+        component: &Component,
+        zones: &HashMap<String, Vec<TzObservance>>,
+    ) -> Option<EventKey> {
+        if component.kind != "VEVENT" {
+            return None;
+        }
+        let mut key = EventKey::default();
+        for line in component.own_lines() {
+            let Some((name, params, value)) = split_prop(line) else {
+                continue;
+            };
+            match name.as_str() {
+                "UID" => key.uid = value.trim().to_string(),
+                "RECURRENCE-ID" => {
+                    key.recurrence_id_ms =
+                        resolve_dt(value, param(&params, "TZID"), zones).map(|(ms, _)| ms);
+                }
+                "SEQUENCE" => key.sequence = value.trim().parse().unwrap_or(0),
+                "DTSTAMP" => key.dtstamp_ms = parse_dt(value).map(|(ms, _)| ms),
+                _ => {}
+            }
+        }
+        Some(key)
+    }
+}
+
+/// What an invitation leaves in the calendar: its events, without the
+/// METHOD that made it a message (RFC 4791 §4.1) and without the alarms they
+/// carry, since an organizer's reminders aren't the attendee's (RFC 9671 §4).
+pub(crate) fn stored_form(calendar: &str) -> String {
+    let mut parts = CalendarParts::parse(calendar);
+    parts
+        .properties
+        .retain(|line| !property_is(line, &["METHOD"]));
+    for component in &mut parts.components {
+        if component.kind != "VEVENT" {
+            continue;
+        }
+        let mut kept = Vec::with_capacity(component.lines.len());
+        let mut alarm_depth = 0usize;
+        for line in std::mem::take(&mut component.lines) {
+            let upper = line.to_ascii_uppercase();
+            if alarm_depth > 0 {
+                if upper.starts_with("BEGIN:") {
+                    alarm_depth += 1;
+                } else if upper.starts_with("END:") {
+                    alarm_depth -= 1;
+                }
+                continue;
+            }
+            if upper == "BEGIN:VALARM" {
+                alarm_depth = 1;
+                continue;
+            }
+            kept.push(line);
+        }
+        component.lines = kept;
+    }
+    parts.render()
+}
+
+/// `stored` with the occurrences of `uid` that `update` describes (VEVENTs
+/// with a RECURRENCE-ID): each replaces the stored version of that
+/// occurrence when it is newer, or joins the calendar. With `cancel` they
+/// join as cancelled, which takes those occurrences out of the series.
+/// Returns None when nothing changed. `stored` may be empty.
+pub(crate) fn merge_occurrences(
+    stored: &str,
+    update: &str,
+    uid: &str,
+    cancel: bool,
+) -> Option<String> {
+    let mut merged = CalendarParts::parse(stored);
+    let incoming = CalendarParts::parse(update);
+    let incoming_zones = incoming.zones();
+    let mut changed = false;
+    for component in &incoming.components {
+        let Some(key) = CalendarParts::event_key(component, &incoming_zones) else {
+            continue;
+        };
+        let Some(occurrence) = key.recurrence_id_ms else {
+            continue;
+        };
+        if key.uid != uid {
+            continue;
+        }
+        let mut component = component.clone();
+        if cancel {
+            component
+                .lines
+                .retain(|line| !property_is(line, &["STATUS"]));
+            let end = component.lines.len().saturating_sub(1);
+            component.lines.insert(end, "STATUS:CANCELLED".into());
+            // A cancellation may name the occurrence alone; the stored
+            // occurrence starts where it would have.
+            let has_start = component
+                .own_lines()
+                .any(|line| property_is(line, &["DTSTART"]));
+            let recurrence_id = component
+                .own_lines()
+                .find(|line| property_is(line, &["RECURRENCE-ID"]))
+                .map(str::to_string);
+            if !has_start && let Some(recurrence_id) = recurrence_id {
+                let start = format!("DTSTART{}", &recurrence_id["RECURRENCE-ID".len()..]);
+                component.lines.insert(end, start);
+            }
+        }
+        let stored_zones = merged.zones();
+        let existing = merged.components.iter().position(|stored| {
+            CalendarParts::event_key(stored, &stored_zones).is_some_and(|stored| {
+                stored.uid == uid
+                    && stored
+                        .recurrence_id_ms
+                        .is_some_and(|id| (id - occurrence).abs() < 60_000)
+            })
+        });
+        match existing {
+            Some(index) => {
+                let stored_key = CalendarParts::event_key(&merged.components[index], &stored_zones);
+                if stored_key.is_some_and(|stored| key.supersedes(&stored)) {
+                    merged.components[index] = component;
+                    changed = true;
+                }
+            }
+            None => {
+                merged.components.push(component);
+                changed = true;
+            }
+        }
+    }
+    if !changed {
+        return None;
+    }
+    if merged.properties.is_empty() {
+        merged.properties = incoming
+            .properties
+            .iter()
+            .filter(|line| !property_is(line, &["METHOD"]))
+            .cloned()
+            .collect();
+    }
+    // The zones the occurrences' times refer to come along.
+    for zone in incoming.components.iter().filter(|c| c.kind == "VTIMEZONE") {
+        let id = CalendarParts::zone_id(zone);
+        let known = merged
+            .components
+            .iter()
+            .any(|c| c.kind == "VTIMEZONE" && CalendarParts::zone_id(c) == id);
+        if !known {
+            merged.components.insert(0, zone.clone());
+        }
+    }
+    Some(merged.render())
+}
+
+/// An attendee's answer to an invitation (METHOD:REPLY, RFC 5546 §3.2.3).
 pub struct ReplySpec<'a> {
+    /// The invitation as received. Its event's details are copied from it
+    /// unchanged, as RFC 5546 requires; without it the reply carries only
+    /// what identifies the event.
+    pub invitation: Option<&'a str>,
     pub uid: &'a str,
+    /// The occurrence answered (its original start); None answers them all.
+    pub recurrence_id_ms: Option<i64>,
+    /// The event lasts whole days, so an occurrence is named by its date.
+    pub all_day: bool,
+    /// The invitation's SEQUENCE, used when the invitation isn't at hand.
     pub sequence: i64,
     pub summary: Option<&'a str>,
+    pub organizer: &'a str,
+    /// The invited address answering.
+    pub attendee: &'a Address,
+    /// Who sends the answer for the invited address, when that's another
+    /// address (SENT-BY).
+    pub sent_by: Option<&'a str>,
     /// ACCEPTED | TENTATIVE | DECLINED
     pub partstat: &'a str,
-    pub organizer_email: &'a str,
-    pub attendee: &'a Address,
-    pub starts_at_ms: i64,
-    pub ends_at_ms: Option<i64>,
+    /// A note to the organizer.
+    pub comment: Option<&'a str>,
     pub dtstamp_ms: i64,
 }
 
-/// Build a METHOD:REPLY calendar answering an invite.
-pub fn build_reply_ics(spec: &ReplySpec) -> String {
-    calendar_shell("REPLY", |out| {
-        push_prop(out, "UID", spec.uid);
-        push_prop(out, "DTSTAMP", &fmt_utc(spec.dtstamp_ms));
-        push_prop(out, "SEQUENCE", &spec.sequence.to_string());
-        push_prop(out, "DTSTART", &fmt_utc(spec.starts_at_ms));
-        if let Some(end) = spec.ends_at_ms {
-            push_prop(out, "DTEND", &fmt_utc(end));
-        }
-        if let Some(s) = spec.summary {
-            push_prop(out, "SUMMARY", &escape(s));
-        }
-        fold_parts(["ORGANIZER:mailto:", spec.organizer_email], out);
-        attendee_prop(out, spec.attendee, &["PARTSTAT=", spec.partstat]);
+/// The event's own lines a reply repeats unchanged. The rest of the event,
+/// such as alarms, the description and the other attendees, stays out.
+const REPLY_COPIED: &[&str] = &[
+    "UID",
+    "RECURRENCE-ID",
+    "SEQUENCE",
+    "DTSTART",
+    "DTEND",
+    "DURATION",
+    "SUMMARY",
+    "LOCATION",
+];
+
+/// Parameters that only belong between a CalDAV client and its server,
+/// which RFC 6638 §7 forbids in scheduling messages.
+fn is_server_scheduling_param(name: &str) -> bool {
+    ["SCHEDULE-AGENT", "SCHEDULE-STATUS", "SCHEDULE-FORCE-SEND"]
+        .iter()
+        .any(|param| name.eq_ignore_ascii_case(param))
+}
+
+fn segment_name(segment: &str) -> &str {
+    segment.split_once('=').map_or(segment, |(name, _)| name)
+}
+
+/// The TZID a property line refers to, if any.
+fn line_tzid(line: &str) -> Option<String> {
+    let (_, segments, _) = raw_parts(line)?;
+    segments.iter().find_map(|segment| {
+        let (name, value) = segment.split_once('=')?;
+        name.eq_ignore_ascii_case("TZID")
+            .then(|| value.trim_matches('"').to_string())
     })
+}
+
+/// Build a METHOD:REPLY calendar answering an invitation. Only one ATTENDEE
+/// goes back, the invited address answering, and the event's details are the
+/// invitation's own lines: rewriting them would be a change, which only a
+/// COUNTER may propose.
+pub fn build_reply_ics(spec: &ReplySpec) -> String {
+    let invitation = spec
+        .invitation
+        .map(CalendarParts::parse)
+        .unwrap_or_default();
+    let zones = invitation.zones();
+    let events: Vec<(EventKey, &Component)> = invitation
+        .components
+        .iter()
+        .filter_map(|component| {
+            CalendarParts::event_key(component, &zones)
+                .filter(|key| key.uid == spec.uid)
+                .map(|key| (key, component))
+        })
+        .collect();
+    let same = |a: i64, b: i64| (a - b).abs() < 60_000;
+    let occurrence = spec.recurrence_id_ms.and_then(|wanted| {
+        events
+            .iter()
+            .find(|(key, _)| key.recurrence_id_ms.is_some_and(|id| same(id, wanted)))
+    });
+    let master = events
+        .iter()
+        .find(|(key, _)| key.recurrence_id_ms.is_none());
+    // An occurrence the invitation doesn't describe on its own repeats only
+    // the series' identity: the series' times aren't this occurrence's.
+    let (source, whole) = match (spec.recurrence_id_ms, occurrence, master) {
+        (_, Some((_, event)), _) => (Some(*event), true),
+        (None, None, Some((_, event))) => (Some(*event), true),
+        (Some(_), None, Some((_, event))) => (Some(*event), false),
+        _ => (None, false),
+    };
+    let invited = |line: &str| {
+        raw_parts(line).is_some_and(|(name, _, value)| {
+            name.eq_ignore_ascii_case("ATTENDEE")
+                && cal_address(value).eq_ignore_ascii_case(&spec.attendee.email)
+        })
+    };
+
+    let mut copied: Vec<String> = Vec::new();
+    let mut organizer_line = None;
+    let mut attendee_line = None;
+    if let Some(event) = source {
+        for line in event.own_lines() {
+            if property_is(line, &["ORGANIZER"]) {
+                organizer_line = Some(without_params(line, is_server_scheduling_param));
+            } else if invited(line) {
+                attendee_line = Some(line.to_string());
+            } else if (whole && property_is(line, REPLY_COPIED))
+                || (!whole && property_is(line, &["UID", "SEQUENCE", "SUMMARY"]))
+            {
+                copied.push(line.to_string());
+            }
+        }
+    }
+    let mut needed_zones: Vec<String> = Vec::new();
+    for line in &copied {
+        if let Some(tzid) = line_tzid(line)
+            && !needed_zones.contains(&tzid)
+        {
+            needed_zones.push(tzid);
+        }
+    }
+
+    let mut out = String::new();
+    push_prop(&mut out, "BEGIN", "VCALENDAR");
+    push_prop(
+        &mut out,
+        "PRODID",
+        "-//FlectarMail//FlectarMail Calendar//EN",
+    );
+    push_prop(&mut out, "VERSION", "2.0");
+    push_prop(&mut out, "METHOD", "REPLY");
+    for zone in invitation
+        .components
+        .iter()
+        .filter(|component| component.kind == "VTIMEZONE")
+    {
+        if CalendarParts::zone_id(zone).is_some_and(|id| needed_zones.contains(&id)) {
+            for line in &zone.lines {
+                fold(line, &mut out);
+            }
+        }
+    }
+    push_prop(&mut out, "BEGIN", "VEVENT");
+    if copied.is_empty() {
+        push_prop(&mut out, "UID", spec.uid);
+        push_prop(&mut out, "SEQUENCE", &spec.sequence.to_string());
+        if let Some(summary) = spec.summary {
+            push_prop(&mut out, "SUMMARY", &escape(summary));
+        }
+    }
+    for line in &copied {
+        fold(line, &mut out);
+    }
+    if let Some(original) = spec.recurrence_id_ms
+        && !whole
+    {
+        let value = if spec.all_day {
+            format!("RECURRENCE-ID;VALUE=DATE:{}", fmt_utc_date(original))
+        } else {
+            format!("RECURRENCE-ID:{}", fmt_utc(original))
+        };
+        fold(&value, &mut out);
+    }
+    push_prop(&mut out, "DTSTAMP", &fmt_utc(spec.dtstamp_ms));
+    match organizer_line {
+        Some(line) => fold(&line, &mut out),
+        None => fold_parts(["ORGANIZER:mailto:", spec.organizer], &mut out),
+    }
+    let mut attendee = match &attendee_line {
+        Some(line) => without_params(line, |name| {
+            name.eq_ignore_ascii_case("PARTSTAT")
+                || name.eq_ignore_ascii_case("RSVP")
+                || name.eq_ignore_ascii_case("SENT-BY")
+                || is_server_scheduling_param(name)
+        }),
+        None => {
+            let mut line = String::from("ATTENDEE");
+            if let Some(name) = spec
+                .attendee
+                .name
+                .as_deref()
+                .filter(|name| !name.is_empty())
+            {
+                line.push_str(";CN=");
+                line.push_str(&param_value(name));
+            }
+            line.push_str(":mailto:");
+            line.push_str(&spec.attendee.email);
+            line
+        }
+    };
+    if let Some((head, value)) = split_value(&attendee) {
+        let mut line = head.trim_end_matches(';').to_string();
+        line.push_str(";PARTSTAT=");
+        line.push_str(spec.partstat);
+        if let Some(sent_by) = spec.sent_by {
+            line.push_str(";SENT-BY=\"mailto:");
+            line.push_str(sent_by);
+            line.push('"');
+        }
+        line.push(':');
+        line.push_str(value);
+        attendee = line;
+    }
+    fold(&attendee, &mut out);
+    if let Some(comment) = spec.comment.map(str::trim).filter(|c| !c.is_empty()) {
+        push_prop(&mut out, "COMMENT", &escape(comment));
+    }
+    push_prop(&mut out, "END", "VEVENT");
+    push_prop(&mut out, "END", "VCALENDAR");
+    out
+}
+
+/// `line` with the parameters `drop` names removed, the rest as written.
+fn without_params(line: &str, drop: impl Fn(&str) -> bool) -> String {
+    let Some((name, segments, value)) = raw_parts(line) else {
+        return line.to_string();
+    };
+    let mut out = name.to_string();
+    for segment in segments {
+        if !drop(segment_name(segment)) {
+            out.push(';');
+            out.push_str(segment);
+        }
+    }
+    out.push(':');
+    out.push_str(value);
+    out
+}
+
+/// A line's name and parameters, and its value.
+fn split_value(line: &str) -> Option<(&str, &str)> {
+    let (name, segments, value) = raw_parts(line)?;
+    let head_len = name.len()
+        + segments
+            .iter()
+            .map(|segment| segment.len() + 1)
+            .sum::<usize>();
+    Some((&line[..head_len], value))
+}
+
+fn fmt_utc_date(ms: i64) -> String {
+    Utc.timestamp_millis_opt(ms)
+        .earliest()
+        .unwrap_or_else(Utc::now)
+        .format("%Y%m%d")
+        .to_string()
 }
 
 #[cfg(test)]
@@ -868,6 +1513,65 @@ mod tests {
     }
 
     #[test]
+    fn reads_what_answering_an_invitation_needs() {
+        let ics = "BEGIN:VCALENDAR\r\nMETHOD:request\r\nBEGIN:VEVENT\r\nUID:evt-5\r\nDTSTAMP:20260701T080000Z\r\nORGANIZER;CN=Alice A:MAILTO:alice@example.com\r\nATTENDEE;CN=Bob;ROLE=opt-participant;CUTYPE=INDIVIDUAL;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:MAILTO:bob@example.com\r\nATTENDEE;CUTYPE=GROUP:mailto:team@example.com\r\nDTSTART:20260720T090000Z\r\nDURATION:PT1H30M\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        let ev = &parse_ics(ics)[0];
+        assert_eq!(ev.method.as_deref(), Some("REQUEST"));
+        assert_eq!(ev.organizer.as_deref(), Some("alice@example.com"));
+        assert_eq!(ev.organizer_name.as_deref(), Some("Alice A"));
+        assert_eq!(
+            ev.dtstamp_ms,
+            parse_dt("20260701T080000Z").map(|(ms, _)| ms)
+        );
+        assert_eq!(ev.ends_at_ms, Some(ev.starts_at_ms + 90 * 60_000));
+        let bob = &ev.attendees[0];
+        assert_eq!(bob.email, "bob@example.com");
+        assert!(bob.rsvp);
+        assert_eq!(bob.role.as_deref(), Some("OPT-PARTICIPANT"));
+        assert_eq!(bob.cutype.as_deref(), Some("INDIVIDUAL"));
+        let team = &ev.attendees[1];
+        assert!(!team.rsvp, "RSVP is FALSE unless the organizer asks");
+        assert_eq!(team.cutype.as_deref(), Some("GROUP"));
+    }
+
+    #[test]
+    fn an_alarm_inside_the_event_keeps_its_own_properties() {
+        let ics = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:evt-6\r\nSUMMARY:Planning\r\nDESCRIPTION:Agenda\r\nDTSTART:20260720T090000Z\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nLOCATION:Room 2\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        let events = parse_ics(ics);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].description.as_deref(), Some("Agenda"));
+        assert_eq!(
+            events[0].location.as_deref(),
+            Some("Room 2"),
+            "properties after the alarm are the event's again"
+        );
+    }
+
+    #[test]
+    fn an_occurrence_is_found_in_its_own_time_zone() {
+        let ics = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VTIMEZONE\r\nTZID:SE Asia Standard Time\r\nBEGIN:STANDARD\r\nDTSTART:16010101T000000\r\nTZOFFSETFROM:+0700\r\nTZOFFSETTO:+0700\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID;TZID=SE Asia Standard Time:20260714T080000\r\nDTSTART;TZID=SE Asia Standard Time:20260714T100000\r\nDTEND;TZID=SE Asia Standard Time:20260714T103000\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        let ev = &parse_ics(ics)[0];
+        // 08:00 at UTC+7 is 01:00 UTC.
+        assert_eq!(
+            ev.recurrence_id_ms,
+            parse_dt("20260714T010000Z").map(|(ms, _)| ms)
+        );
+    }
+
+    #[test]
+    fn durations_follow_rfc_5545() {
+        assert_eq!(parse_duration("PT1H30M"), Some(90 * 60_000));
+        assert_eq!(parse_duration("P1D"), Some(86_400_000));
+        assert_eq!(parse_duration("P2W"), Some(14 * 86_400_000));
+        assert_eq!(parse_duration("P1DT12H"), Some(36 * 3_600_000));
+        assert_eq!(parse_duration("-PT15M"), Some(-15 * 60_000));
+        assert_eq!(parse_duration("P"), None);
+        assert_eq!(parse_duration("PT"), None);
+        assert_eq!(parse_duration("PT1D"), None);
+        assert_eq!(parse_duration("1H"), None);
+    }
+
+    #[test]
     fn request_roundtrips_through_parser() {
         let organizer = Address {
             name: Some("Dean".into()),
@@ -916,26 +1620,157 @@ mod tests {
         }
     }
 
-    #[test]
-    fn reply_roundtrips_through_parser() {
-        let me = Address {
-            name: None,
-            email: "bd@northbeam.com".into(),
-        };
-        let ics = build_reply_ics(&ReplySpec {
-            uid: "evt-1@cal.example.com",
-            sequence: 1,
-            summary: Some("Design review"),
+    const INVITATION: &str = "BEGIN:VCALENDAR\r\nPRODID:-//Example//EN\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VTIMEZONE\r\nTZID:Europe/Madrid\r\nBEGIN:STANDARD\r\nDTSTART:16010101T000000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\nBEGIN:VTIMEZONE\r\nTZID:Asia/Tokyo\r\nBEGIN:STANDARD\r\nDTSTART:16010101T000000\r\nTZOFFSETFROM:+0900\r\nTZOFFSETTO:+0900\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:weekly-1@example.com\r\nSEQUENCE:3\r\nDTSTAMP:20261101T080000Z\r\nDTSTART;TZID=Europe/Madrid:20261102T100000\r\nDTEND;TZID=Europe/Madrid:20261102T110000\r\nRRULE:FREQ=WEEKLY\r\nSUMMARY:Weekly sync\r\nLOCATION:Room 4\r\nDESCRIPTION:A long agenda\r\nORGANIZER;CN=Alice;SCHEDULE-AGENT=SERVER:mailto:alice@example.com\r\nATTENDEE;CN=\"Doe, Bob\";ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:bob@example.com\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:carol@example.com\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:weekly-1@example.com\r\nRECURRENCE-ID;TZID=Europe/Madrid:20261109T100000\r\nSEQUENCE:4\r\nDTSTART;TZID=Europe/Madrid:20261109T120000\r\nDTEND;TZID=Europe/Madrid:20261109T130000\r\nSUMMARY:Weekly sync (moved)\r\nORGANIZER;CN=Alice:mailto:alice@example.com\r\nATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:bob@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    fn bob() -> Address {
+        Address {
+            name: Some("Bob".into()),
+            email: "BOB@example.com".into(),
+        }
+    }
+
+    fn answer<'a>(invitation: Option<&'a str>, attendee: &'a Address) -> ReplySpec<'a> {
+        ReplySpec {
+            invitation,
+            uid: "weekly-1@example.com",
+            recurrence_id_ms: None,
+            all_day: false,
+            sequence: 3,
+            summary: Some("Weekly sync"),
+            organizer: "alice@example.com",
+            attendee,
+            sent_by: None,
             partstat: "ACCEPTED",
-            organizer_email: "alice@example.com",
-            attendee: &me,
-            starts_at_ms: 1_784_124_000_000,
-            ends_at_ms: None,
-            dtstamp_ms: 1_784_000_000_000,
+            comment: None,
+            dtstamp_ms: 1_794_000_000_000,
+        }
+    }
+
+    fn unfolded(ics: &str) -> Vec<String> {
+        unfold(ics).into_iter().map(Cow::into_owned).collect()
+    }
+
+    #[test]
+    fn a_reply_repeats_the_invitation_and_answers_for_one_attendee() {
+        let me = bob();
+        let ics = build_reply_ics(&ReplySpec {
+            comment: Some("See you there"),
+            ..answer(Some(INVITATION), &me)
         });
+        let lines = unfolded(&ics);
+        let has = |line: &str| lines.iter().any(|l| l == line);
+        assert!(has("METHOD:REPLY"));
+        assert!(has("UID:weekly-1@example.com"));
+        assert!(has("SEQUENCE:3"));
+        // The organizer's own times, in their zone, with that zone.
+        assert!(has("DTSTART;TZID=Europe/Madrid:20261102T100000"));
+        assert!(has("TZID:Europe/Madrid"));
+        assert!(
+            !has("TZID:Asia/Tokyo"),
+            "zones the reply doesn't use stay out"
+        );
+        assert!(has("ORGANIZER;CN=Alice:mailto:alice@example.com"));
+        assert!(has(
+            "ATTENDEE;CN=\"Doe, Bob\";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:bob@example.com"
+        ));
+        assert!(has("COMMENT:See you there"));
+        assert!(has(&format!("DTSTAMP:{}", fmt_utc(1_794_000_000_000))));
+        let attendees = lines.iter().filter(|l| l.starts_with("ATTENDEE")).count();
+        assert_eq!(attendees, 1, "only the attendee answering");
+        for absent in [
+            "RRULE",
+            "DESCRIPTION",
+            "BEGIN:VALARM",
+            "RECURRENCE-ID",
+            "SCHEDULE-AGENT",
+        ] {
+            assert!(!ics.contains(absent), "{absent} in:\n{ics}");
+        }
         let ev = &parse_ics(&ics)[0];
         assert_eq!(ev.method.as_deref(), Some("REPLY"));
         assert_eq!(ev.attendees[0].partstat.as_deref(), Some("ACCEPTED"));
-        assert_eq!(ev.attendees[0].email, "bd@northbeam.com");
+    }
+
+    #[test]
+    fn the_stored_form_drops_the_method_and_the_organizers_alarms() {
+        let stored = stored_form(INVITATION);
+        assert!(!stored.contains("METHOD"), "{stored}");
+        assert!(!stored.contains("VALARM"), "{stored}");
+        assert!(stored.contains("RRULE:FREQ=WEEKLY"));
+        assert!(
+            stored.contains("TZID:Asia/Tokyo"),
+            "the rest stays as it was"
+        );
+        assert_eq!(
+            parse_ics(&stored).len(),
+            2,
+            "the series and its moved occurrence"
+        );
+    }
+
+    #[test]
+    fn a_moved_occurrence_is_answered_with_its_own_details() {
+        let me = bob();
+        let moved = parse_ics(INVITATION)[1].recurrence_id_ms;
+        let ics = build_reply_ics(&ReplySpec {
+            recurrence_id_ms: moved,
+            partstat: "DECLINED",
+            ..answer(Some(INVITATION), &me)
+        });
+        let lines = unfolded(&ics);
+        let has = |line: &str| lines.iter().any(|l| l == line);
+        assert!(has("RECURRENCE-ID;TZID=Europe/Madrid:20261109T100000"));
+        assert!(has("SEQUENCE:4"));
+        assert!(has("DTSTART;TZID=Europe/Madrid:20261109T120000"));
+        assert!(has("ATTENDEE;PARTSTAT=DECLINED:mailto:bob@example.com"));
+    }
+
+    #[test]
+    fn an_occurrence_the_invitation_does_not_list_is_named_by_its_start() {
+        let me = bob();
+        // The third week's 10:00 in Madrid (UTC+1) is 09:00 UTC.
+        let third = parse_dt("20261116T090000Z").map(|(ms, _)| ms);
+        let ics = build_reply_ics(&ReplySpec {
+            recurrence_id_ms: third,
+            partstat: "DECLINED",
+            ..answer(Some(INVITATION), &me)
+        });
+        let lines = unfolded(&ics);
+        assert!(lines.iter().any(|l| l == "RECURRENCE-ID:20261116T090000Z"));
+        assert!(
+            !ics.contains("DTSTART"),
+            "the series' start isn't this occurrence's"
+        );
+        assert!(lines.iter().any(|l| l == "SEQUENCE:3"));
+
+        let ics = build_reply_ics(&ReplySpec {
+            recurrence_id_ms: parse_dt("20261116").map(|(ms, _)| ms),
+            all_day: true,
+            ..answer(None, &me)
+        });
+        assert!(
+            unfolded(&ics)
+                .iter()
+                .any(|l| l == "RECURRENCE-ID;VALUE=DATE:20261116")
+        );
+    }
+
+    #[test]
+    fn without_the_invitation_a_reply_names_only_the_event() {
+        let me = bob();
+        let ics = build_reply_ics(&ReplySpec {
+            sent_by: Some("assistant@example.com"),
+            ..answer(None, &me)
+        });
+        let lines = unfolded(&ics);
+        let has = |line: &str| lines.iter().any(|l| l == line);
+        assert!(has("UID:weekly-1@example.com"));
+        assert!(has("SEQUENCE:3"));
+        assert!(has("SUMMARY:Weekly sync"));
+        assert!(has("ORGANIZER:mailto:alice@example.com"));
+        assert!(has(
+            "ATTENDEE;CN=Bob;PARTSTAT=ACCEPTED;SENT-BY=\"mailto:assistant@example.com\":mailto:BOB@example.com"
+        ));
+        assert!(!ics.contains("DTSTART"), "no times it could get wrong");
     }
 }
