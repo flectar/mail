@@ -1228,7 +1228,7 @@ fn character_attrs(
         attrs = attrs.strikethrough();
     }
     match style.family {
-        FontFamily::SansSerif => {}
+        FontFamily::Default => {}
         FontFamily::Serif => attrs = attrs.family(Family::Serif),
         FontFamily::Monospace => attrs = attrs.family(Family::Monospace),
     }

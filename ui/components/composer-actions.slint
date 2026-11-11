@@ -315,7 +315,7 @@ export component ComposerToolbar inherits Rectangle {
     in property <string> active-color: "none";
     in property <string> active-highlight: "none";
     in property <string> active-size: "normal";
-    in property <string> active-family: "sans-serif";
+    in property <string> active-family: "default";
     in property <string> active-align: "left";
     in property <bool> link-active: false;
     in property <bool> can-link: false;
@@ -359,7 +359,7 @@ export component ComposerToolbar inherits Rectangle {
                 }
 
                 Menu {
-                    MenuItem { title: @tr("font" => "Sans serif"); checkable: true; checked: root.active-family == "sans-serif"; activated => { root.apply-format("family:sans-serif"); } }
+                    MenuItem { title: @tr("font" => "Default"); checkable: true; checked: root.active-family == "default"; activated => { root.apply-format("family:default"); } }
                     MenuItem { title: @tr("font" => "Serif"); checkable: true; checked: root.active-family == "serif"; activated => { root.apply-format("family:serif"); } }
                     MenuItem { title: @tr("font" => "Fixed width"); checkable: true; checked: root.active-family == "monospace"; activated => { root.apply-format("family:monospace"); } }
                 }

@@ -119,22 +119,22 @@ impl TextSize {
     }
 }
 
-/// The font families the composer offers: the reader's usual sans-serif font, or a serif or
-/// monospace one, sent with the font lists Thunderbird uses.
+/// The font families the composer offers: none, which leaves each reader their own font as
+/// plain text does, or a serif or monospace one, sent with the font lists Thunderbird uses.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum FontFamily {
     #[default]
-    SansSerif,
+    Default,
     Serif,
     Monospace,
 }
 
 impl FontFamily {
-    pub(crate) const ALL: [Self; 3] = [Self::SansSerif, Self::Serif, Self::Monospace];
+    pub(crate) const ALL: [Self; 3] = [Self::Default, Self::Serif, Self::Monospace];
 
     pub(crate) fn name(self) -> &'static str {
         match self {
-            Self::SansSerif => "sans-serif",
+            Self::Default => "default",
             Self::Serif => "serif",
             Self::Monospace => "monospace",
         }
@@ -146,7 +146,7 @@ impl FontFamily {
 
     fn css(self) -> Option<&'static str> {
         match self {
-            Self::SansSerif => None,
+            Self::Default => None,
             Self::Serif => Some("Times New Roman, Times, serif"),
             Self::Monospace => Some("Courier New, Courier, monospace"),
         }
@@ -3993,7 +3993,7 @@ mod tests {
         assert_eq!(active.color, Some(Some(0x1a73e8)));
         assert_eq!(active.highlight, Some(None));
         assert_eq!(active.size, None);
-        assert_eq!(active.family, Some(FontFamily::SansSerif));
+        assert_eq!(active.family, Some(FontFamily::Default));
         document.update_selection(1, 1);
         assert_eq!(document.active_marks().size, Some(TextSize::Large));
         // At a caret, the next characters' style can change before they're typed.

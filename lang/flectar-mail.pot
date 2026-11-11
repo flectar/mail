@@ -2992,7 +2992,7 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:362
 msgctxt "font"
-msgid "Sans serif"
+msgid "Default"
 msgstr ""
 
 #: ui/components/composer-actions.slint:363

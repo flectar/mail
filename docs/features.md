@@ -206,8 +206,9 @@ S/MIME and mobile OpenPGP are not currently supported.
 
 The composer's toolbar sets the font, size and color of text, a highlight
 behind it, and how each paragraph lines up, next to bold, italic, underline,
-strikethrough, lists, quotes, inline code and links. Fonts are sans serif,
-serif or fixed width, and sizes small, normal, large or huge. Text color and
+strikethrough, lists, quotes, inline code and links. The font is **Default**,
+which names none so that each reader sees their own, as with plain text, or
+serif or fixed width. Sizes are small, normal, large or huge. Text color and
 highlight each offer 64 colors, and **Automatic** or **No highlight** takes a
 color off. **Remove formatting** returns the selection to plain text and keeps
 its links and alignment. From the keyboard, Ctrl+Shift+L, Ctrl+Shift+E and
