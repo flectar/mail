@@ -217,10 +217,11 @@ composer added aren't checked. Turn spell checking off with **Check spelling**
 in Settings → General, which also says when there's nothing to check with.
 
 On Windows and Linux, the **Spelling** submenu also chooses your languages.
-Flectar Mail starts with the languages your system is set to, and a word passes
-when any of the chosen languages has it, so mail in two languages needs no
-switching. On iOS it checks in your preferred languages, from Settings under
-General, Language & Region, the same way. On macOS, the system picks the
+Flectar Mail starts with the display language you chose in Settings, if any,
+and the languages your system is set to, and a word passes when any of the
+chosen languages has it, so mail in two languages needs no switching. On iOS it
+checks in the same display language and your preferred languages, from Settings
+under General, Language & Region, the same way. On macOS, the system picks the
 language of what you write from the ones set in System Settings, under
 Keyboard, Text Input. On Android, the spell checker chosen in Android's
 settings checks, usually the keyboard's, in the language set there.
