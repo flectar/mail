@@ -357,29 +357,30 @@ pub(super) fn register_window_preference_callbacks(
             app.set_settings_open(!app.get_settings_open());
         }
     });
-    // The startup entry and the default email app can also change in the
-    // system's own settings, so read them again whenever Settings appears:
-    // from the rail, a tab or a shortcut into a settings page.
+    // Spelling languages, the startup entry and the default email app can also
+    // change in the system's own settings, so read them again whenever
+    // Settings appears: from the rail, a tab or a shortcut into a settings page.
     #[cfg(desktop)]
-    {
-        let launch_at_login = LaunchAtLogin::register(app, runtime);
-        let default_email_app =
-            crate::default_email_app::DefaultEmailAppRow::register(app, runtime);
-        let app_weak = app.as_weak();
-        app.on_settings_shown(move || {
-            if let Some(app) = app_weak.upgrade() {
-                let window = app.as_weak();
-                crate::spelling::settings_shown(move |installed| {
-                    let _ = window
-                        .upgrade_in_event_loop(move |app| app.set_spelling_installed(installed));
-                });
+    let launch_at_login = LaunchAtLogin::register(app, runtime);
+    #[cfg(desktop)]
+    let default_email_app = crate::default_email_app::DefaultEmailAppRow::register(app, runtime);
+    let app_weak = app.as_weak();
+    app.on_settings_shown(move || {
+        if let Some(app) = app_weak.upgrade() {
+            let window = app.as_weak();
+            crate::spelling::settings_shown(move |installed| {
+                let _ =
+                    window.upgrade_in_event_loop(move |app| app.set_spelling_installed(installed));
+            });
+            #[cfg(desktop)]
+            {
                 launch_at_login.refresh(&app, false);
                 if let Some(default_email_app) = &default_email_app {
                     default_email_app.refresh(&app);
                 }
             }
-        });
-    }
+        }
+    });
 
     let app_weak = app.as_weak();
     let state_for_frame = Rc::clone(state);

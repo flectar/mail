@@ -147,6 +147,10 @@ fn android_main(app: slint::android::AndroidApp) {
     );
     let host: std::sync::Arc<dyn flectar_mail::NotificationHost> = notifications.clone();
     platform.notifications = Some(host);
+    match spelling::AndroidSpelling::new(&app) {
+        Ok(spelling) => platform.spelling = Some(std::sync::Arc::new(spelling)),
+        Err(error) => tracing::warn!(%error, "spell checking unavailable"),
+    }
     slint::android::init(app).expect("failed to initialize Slint's Android backend");
     flectar_mail::run(platform).expect("Flectar Mail terminated with an error");
     // Work that outlives the activity, such as a check for new mail, asks
@@ -176,3 +180,5 @@ mod launcher_icon;
 mod memory;
 #[cfg(target_os = "android")]
 mod pdf;
+#[cfg(target_os = "android")]
+mod spelling;

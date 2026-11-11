@@ -57,6 +57,7 @@ host-provided service:
 | `oauth_redirects` | Loopback redirect broker | Implements `OAuthRedirectBroker` (app links, custom schemes) |
 | `external_urls` | System URL launcher | `ExternalUrlOpener::new` with the host's native URL bridge |
 | `notifications` | `None`; `run` creates the platform's own (toasts, User Notifications, the freedesktop server or the portal) | A `NotificationHost` that shows, withdraws and reports on notifications, or `None` where the host has none. The shared app decides what to show, sums up bursts and translates the text; the host lays each notification out, says per notification whether the system took it, and reports clicks and buttons through `respond`, or `respond_then` where the system suspends the app soon after. Where the system wakes the app to check for mail (`background_checks`), the host calls `check_in_background` when it does and `app_became_active` when the app comes to the front |
+| `spelling` | `None`; the app checks with the system's dictionaries or spell checker itself | A `SpellingHost` where the app has no checker of its own, or `None`. Android's host brings the spell checker chosen in the system's settings, which checks in its own process. The app opens a `SpellingSession` at a message's first check, calls it off the UI thread with the text in pieces, and drops it when the last message closes. iOS needs none, since the app checks with UITextChecker itself |
 
 Mobile hosts use `PlatformContext::app_private(data_root, cache_dir, documents,
 credentials, oauth_redirects)`, which keeps durable data below

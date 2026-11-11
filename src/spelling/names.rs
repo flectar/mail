@@ -2,7 +2,7 @@
 //! listed by their language's own name for itself, "Deutsch (Schweiz, frami)", as language
 //! menus list them so each reader finds their own.
 
-// Only Linux lists its languages so far; other platforms check none.
+// Systems that pick their languages, as macOS and Android do, name none here.
 #[cfg_attr(not(linux_desktop), allow(dead_code))]
 mod data {
     include!("names_data.rs");
@@ -39,7 +39,7 @@ pub(super) fn main_region(language: &str) -> Option<&'static str> {
 /// A dictionary's name for people: "Deutsch (Schweiz)" for "de_CH", with the rest of its code
 /// after the region, "Deutsch (Schweiz, frami)". Codes CLDR has no name for stay as they are.
 #[cfg_attr(not(linux_desktop), allow(dead_code))]
-pub(super) fn display_name(id: &str) -> String {
+pub(crate) fn display_name(id: &str) -> String {
     let language = language_of(id);
     let Some((_, name, _)) = LANGUAGES.iter().find(|(code, ..)| *code == language) else {
         return id.to_owned();

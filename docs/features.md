@@ -202,40 +202,48 @@ S/MIME and mobile OpenPGP are not currently supported.
 
 ## Spell check
 
-Flectar Mail underlines misspelled words as you write. On Windows and macOS it
-uses the system's own spell checker, and on Linux the Hunspell dictionaries
-installed on your system, the ones other apps there use too. Right-click an
-underlined word for corrections, **Add to dictionary**, or **Ignore**, which
-accepts it in that message. With the keyboard, the menu key or Shift+F10 opens
-the same menu for the word at the cursor. The menu also cuts, copies and pastes,
-and its **Spelling** submenu turns checking on and off. A word you're still
-typing is underlined once you move past it, and quoted text, code and the
-signature the composer added aren't checked. Turn spell checking off with
-**Check spelling** in Settings → General, which also says when there's nothing
-to check with.
+Flectar Mail underlines misspelled words as you write. On Windows, macOS, iOS
+and Android it uses the system's own spell checker, and on Linux the Hunspell
+dictionaries installed on your system, the ones other apps there use too.
+Right-click an underlined word for corrections, **Add to dictionary**, or
+**Ignore**, which accepts it in that message. With the keyboard, the menu key
+or Shift+F10 opens the same menu for the word at the cursor. The menu also
+cuts, copies and pastes, and its **Spelling** submenu turns checking on and
+off. On a phone, or any touch screen, tap an underlined word for the same
+corrections, without the editing commands. A word you're still typing is
+underlined once you move past it, and quoted text, code and the signature the
+composer added aren't checked. Turn spell checking off with **Check spelling**
+in Settings → General, which also says when there's nothing to check with.
 
 On Windows and Linux, the **Spelling** submenu also chooses your languages.
 Flectar Mail starts with the languages your system is set to, and a word passes
 when any of the chosen languages has it, so mail in two languages needs no
-switching. On macOS, the system picks the language of what you write from the
-ones set in System Settings, under Keyboard, Text Input.
+switching. On iOS it checks in your preferred languages, from Settings under
+General, Language & Region, the same way. On macOS, the system picks the
+language of what you write from the ones set in System Settings, under
+Keyboard, Text Input. On Android, the spell checker chosen in Android's
+settings checks, usually the keyboard's, in the language set there.
 
 Words you add go where the system keeps them, so other apps share them. On
 Windows that's the list in Windows Settings, and on macOS the dictionary
 **Learn Spelling** adds to. On Linux it's the lists GNOME apps use, in
-`~/.config/enchant/<language>.dic`, and the Flatpak keeps its own. Windows
-checks the languages added in Windows Settings, under Time & language. On
-Linux, most distributions package dictionaries as `hunspell-` and the language.
-In the Flatpak, English comes with the runtime, and other languages come with
-the translations Flatpak installs for the languages your system uses.
+`~/.config/enchant/<language>.dic`, and the Flatpak keeps its own. On iOS the
+system learns the word. On Android, **Add to dictionary** opens Android's own
+dialog for the personal dictionary, as its text fields do. Windows checks the
+languages added in Windows Settings, under Time & language. On Linux, most
+distributions package dictionaries as `hunspell-` and the language. In the
+Flatpak, English comes with the runtime, and other languages come with the
+translations Flatpak installs for the languages your system uses.
 
 Checking keeps no dictionary in memory, and nothing is set up until you write.
-Windows and macOS check in a system process. On Linux, the first time a
+Windows and macOS check in a system process, and Android in the spell
+checker's own process, usually the keyboard's. On Linux, the first time a
 dictionary is used, a short-lived Flectar Mail process indexes its words into
 the app's cache, and each check reads them from that file and lets go when it's
-done. Closing the last message lets go of the rest, except on macOS, where the
-system keeps its spell checker in each app that has used it, about 0.4 MiB.
-Android and iOS don't check spelling yet.
+done. Closing the last message lets go of the rest, except where the system
+keeps its spell checker in each app that has used it: on macOS about 0.4 MiB,
+and on iOS, which checks in the app, about 3 MiB for English and 4 MiB with
+Spanish too in the iOS Simulator, until the app quits.
 
 ## Undo
 

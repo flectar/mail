@@ -63,6 +63,9 @@ export component EmailComposer inherits Rectangle {
     in property <string> spelling-word: "";
     in property <[string]> spelling-suggestions: [];
     in property <int> editor-menu-serial: 0;
+    // The menu is for a tapped word: only spelling, below the word's line.
+    in property <bool> editor-menu-touch: false;
+    in property <length> editor-menu-word-bottom: 0px;
 
     in property <color> background-color;
     in property <color> raised-color;
@@ -114,6 +117,7 @@ export component EmailComposer inherits Rectangle {
     callback restore-quote();
     callback editor-menu-requested(float, float);
     callback editor-caret-menu-requested();
+    callback editor-tapped(float, float);
     callback spelling-correct(int);
     callback spelling-ignore();
     callback spelling-learn();
@@ -135,12 +139,28 @@ export component EmailComposer inherits Rectangle {
     // its own copy, which would otherwise stop following the setting.
     private property <Point> editor-menu-position;
     private property <bool> spelling-switch-shown;
+    // Where a finger went down on the editor, and whether it has stayed there, so lifting
+    // it is a tap.
+    private property <Point> touch-down-position;
+    private property <bool> touch-still;
 
     // The application answers a request for the editor menu once the corrections for the
-    // word under the pointer are ready.
+    // word under the pointer are ready. A tapped word's menu opens below its line, so the
+    // word stays in sight, as phones show corrections.
     changed editor-menu-serial => {
         root.spelling-switch-shown = root.spelling-enabled;
+        if (root.editor-menu-touch) {
+            root.editor-menu-position = {
+                x: root.editor-menu-position.x,
+                y: root.editor-menu-word-bottom,
+            };
+        }
         editor-menu.show(root.editor-menu-position);
+        // A menu takes the focus, which puts a phone's keyboard away. Taps choose from it
+        // without focus, so the message keeps it and the keyboard stays, as phones keep it.
+        if (root.editor-menu-touch) {
+            body-input.focus();
+        }
     }
     private property <bool> has-content: root.to != "" || root.cc != "" || root.bcc != ""
         || root.subject != "" || root.body != "" || root.attachments.length > 0 || root.quote != "";
@@ -565,23 +585,24 @@ export component EmailComposer inherits Rectangle {
                             title: @tr("Ignore");
                             activated => { root.spelling-ignore(); }
                         }
-                        if root.spelling-word != "" : MenuSeparator {}
-                        MenuItem {
+                        // A tapped word's menu holds only spelling, as phones offer.
+                        if root.spelling-word != "" && !root.editor-menu-touch : MenuSeparator {}
+                        if !root.editor-menu-touch : MenuItem {
                             title: @tr("Cut");
                             enabled: !root.sending && root.selection-start != root.selection-end;
                             activated => { body-input.cut(); }
                         }
-                        MenuItem {
+                        if !root.editor-menu-touch : MenuItem {
                             title: @tr("Copy");
                             enabled: root.selection-start != root.selection-end;
                             activated => { body-input.copy(); }
                         }
-                        MenuItem {
+                        if !root.editor-menu-touch : MenuItem {
                             title: @tr("Paste");
                             enabled: !root.sending;
                             activated => { body-input.paste(); }
                         }
-                        MenuItem {
+                        if !root.editor-menu-touch : MenuItem {
                             title: @tr("Select all");
                             enabled: root.body != "";
                             activated => { body-input.select-all(); }
@@ -635,6 +656,24 @@ export component EmailComposer inherits Rectangle {
                                     event.modifiers.meta,
                                 );
                                 body-input.set-selection-offsets(root.selection-start, root.selection-end);
+                            }
+                            // A finger lifted where it went down: a tap, which may be on a
+                            // misspelled word. A drag, or a scroll that takes the touch, isn't.
+                            if (event.touch-finger-id != 0) {
+                                if (event.kind == PointerEventKind.down) {
+                                    root.touch-down-position = { x: self.mouse-x, y: self.mouse-y };
+                                    root.touch-still = true;
+                                } else if (event.kind == PointerEventKind.move) {
+                                    if (abs(self.mouse-x - root.touch-down-position.x) > 8px || abs(self.mouse-y - root.touch-down-position.y) > 8px) {
+                                        root.touch-still = false;
+                                    }
+                                } else if (event.kind == PointerEventKind.up && root.touch-still) {
+                                    root.touch-still = false;
+                                    root.editor-menu-position = { x: self.mouse-x, y: self.mouse-y };
+                                    root.editor-tapped(self.mouse-x / 1px, self.mouse-y / 1px);
+                                } else {
+                                    root.touch-still = false;
+                                }
                             }
                         }
                     }

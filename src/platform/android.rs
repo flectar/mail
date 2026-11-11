@@ -18,6 +18,14 @@ static LAUNCHER_ICON: OnceLock<LauncherIconSwitch> = OnceLock::new();
 /// Names this platform to the settings that describe it.
 pub(crate) const NAME: &str = "android";
 
+/// The spell checker is the one the user chose in Android's settings, which the host brings
+/// as `PlatformContext::spelling`.
+pub(crate) const CHECKS_SPELLING: bool = false;
+
+pub(crate) fn spell_checker() -> Option<std::sync::Arc<dyn crate::spelling::Checker>> {
+    None
+}
+
 /// Supply ApplicationInfo.nativeLibraryDir, never a document-controlled path.
 /// The APK uses extracted native libraries so this is a private installed file.
 pub fn configure_pdfium(directory: PathBuf) -> Result<(), String> {

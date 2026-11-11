@@ -15,6 +15,8 @@ const MAX_SUGGESTIONS: usize = 5;
 #[derive(Default)]
 pub(super) struct MessageSpelling {
     timer: Timer,
+    /// A tapped misspelled word's menu, waiting until a second tap can't make it a double tap.
+    tap_timer: Timer,
     /// A check is running.
     running: Cell<bool>,
     /// The revision of the text the latest check began from.
@@ -43,6 +45,7 @@ struct MenuWord {
 impl MessageSpelling {
     fn clear(&self) {
         self.timer.stop();
+        self.tap_timer.stop();
         self.checked.set(None);
         *self.found.borrow_mut() = None;
         self.ignored.borrow_mut().clear();
@@ -207,31 +210,81 @@ impl ComposeSession {
         apply_compose_editor_surface(&view, &document, document.selection(), &mut editor);
     }
 
+    /// A tap on a touch screen left the caret at a point of the editor. On a misspelled word,
+    /// its corrections open once a second tap can't make it a double tap, which selects the
+    /// word instead, as phones' text fields wait.
+    pub(super) fn word_tapped(&self, x: f32, y: f32) {
+        self.spelling.tap_timer.stop();
+        let Some(host) = self.host() else {
+            return;
+        };
+        let collapsed = {
+            let selection = self.document.borrow().selection();
+            selection.start == selection.end
+        };
+        let scale = host.window().scale_factor();
+        if !spelling_enabled()
+            || !collapsed
+            || self.editor.borrow().misspelling_at(x, y, scale).is_none()
+        {
+            return;
+        }
+        // Text changed in the meantime may have moved the word, so then nothing opens.
+        let revision = self.document.borrow().revision();
+        let session = self.this.clone();
+        self.spelling.tap_timer.start(
+            slint::TimerMode::SingleShot,
+            crate::compose_editor::DOUBLE_CLICK_INTERVAL,
+            move || {
+                if let Some(session) = session.upgrade()
+                    && session.document.borrow().revision() == revision
+                {
+                    session.open_editor_menu(Some((x, y)), true);
+                }
+            },
+        );
+    }
+
+    /// A press in the editor: a tapped word waiting for its menu was tapped again, or the
+    /// finger moved on.
+    pub(super) fn editor_pressed(&self) {
+        self.spelling.tap_timer.stop();
+    }
+
     /// The user asked for the editor menu at a point of the editor, or with the keyboard at
     /// the caret. It opens once the languages are listed again and the corrections for the word
-    /// there, if misspelled, are found, both off the UI thread.
-    pub(super) fn open_editor_menu(&self, point: Option<(f32, f32)>) {
+    /// there, if misspelled, are found, both off the UI thread. A `tapped` word's menu holds
+    /// only spelling, and opens only for a misspelled word.
+    pub(super) fn open_editor_menu(&self, point: Option<(f32, f32)>, tapped: bool) {
         let Some(host) = self.host() else {
             return;
         };
         let ui = host.ui();
+        let spelling = crate::spelling::service().filter(|spelling| spelling.available());
+        let scale = host.window().scale_factor();
+        let word = spelling.as_ref().filter(|s| s.enabled()).and_then(|_| {
+            let document = self.document.borrow();
+            let mut editor = self.editor.borrow_mut();
+            let range = match point {
+                Some((x, y)) => editor.misspelling_at(x, y, scale),
+                None => editor.misspelling_at_caret(&document),
+            }?;
+            let word = document.text().get(range.clone())?.to_owned();
+            Some((document.revision(), range, word))
+        });
+        let line_bottom = match point {
+            Some((x, y)) if tapped => self.editor.borrow().misspelling_line_bottom(x, y, scale),
+            _ => None,
+        };
+        if tapped && (word.is_none() || line_bottom.is_none()) {
+            return;
+        }
         let generation = self.spelling.menu_generation.get().wrapping_add(1);
         self.spelling.menu_generation.set(generation);
         *self.spelling.menu_word.borrow_mut() = None;
         ui.set_spelling_word("".into());
         ui.set_spelling_suggestions(ModelRc::default());
         apply_spelling_state(&ui);
-        let spelling = crate::spelling::service().filter(|spelling| spelling.available());
-        let word = spelling.as_ref().filter(|s| s.enabled()).and_then(|_| {
-            let document = self.document.borrow();
-            let mut editor = self.editor.borrow_mut();
-            let range = match point {
-                Some((x, y)) => editor.misspelling_at(x, y, host.window().scale_factor()),
-                None => editor.misspelling_at_caret(&document),
-            }?;
-            let word = document.text().get(range.clone())?.to_owned();
-            Some((document.revision(), range, word))
-        });
         let languages = spelling
             .as_ref()
             .and_then(|spelling| spelling.list_languages());
@@ -293,6 +346,10 @@ impl ComposeSession {
                     word,
                     suggestions,
                 });
+            }
+            ui.set_editor_menu_touch(tapped);
+            if let Some(bottom) = line_bottom {
+                ui.set_editor_menu_word_bottom(bottom);
             }
             ui.set_editor_menu_serial(ui.get_editor_menu_serial().wrapping_add(1));
         })

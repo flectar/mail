@@ -210,7 +210,7 @@ impl Checker for WindowsSpelling {
         skip: &[Range<usize>],
         ignored: &[String],
     ) -> Result<Vec<Range<usize>>, String> {
-        let wide = HSTRING::from(text);
+        let wide = HSTRING::from(super::checked_text(text, skip).as_str());
         let languages = languages.to_vec();
         let flagged = self.run(move |session| {
             languages
