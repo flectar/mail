@@ -21,6 +21,20 @@ pub fn set_html(html: &str, text: &str) -> bool {
     }
 }
 
+/// The HTML on the clipboard, which apps put there with the text they copy.
+pub fn html() -> Option<String> {
+    #[cfg(desktop)]
+    return CLIPBOARD.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = arboard::Clipboard::new().ok();
+        }
+        slot.as_mut()?.get().html().ok()
+    });
+    #[cfg(mobile)]
+    None
+}
+
 pub fn set_primary(text: &str) {
     #[cfg(linux_desktop)]
     if !text.is_empty() {

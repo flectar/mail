@@ -93,6 +93,12 @@ export global ComposerUi {
     callback pick-attachments();
     callback remove-attachment(int);
     callback format(string, string, int, int);
+    // Pastes the clipboard's HTML over the selection of the body given, with its
+    // formatting: false when it holds none, for the plain text to go in.
+    callback paste-formatted(string, int, int) -> bool;
+    // Puts the selection on the clipboard with its formatting, and for a cut takes it
+    // out: false when the plain text is left to copy.
+    callback copy-formatted(bool, string, int, int) -> bool;
     callback link(string, string, int, int);
     callback edit-body(string, int, int, string);
     callback update-selection(string, int, int);
@@ -203,6 +209,8 @@ export component BoundComposer inherits EmailComposer {
     pick-attachments => { ComposerUi.pick-attachments(); }
     remove-attachment(index) => { ComposerUi.remove-attachment(index); }
     format-requested(kind, body, anchor, cursor) => { ComposerUi.format(kind, body, anchor, cursor); }
+    paste-requested(body, anchor, cursor) => { return ComposerUi.paste-formatted(body, anchor, cursor); }
+    copy-requested(cut, body, anchor, cursor) => { return ComposerUi.copy-formatted(cut, body, anchor, cursor); }
     link-requested(url, body, anchor, cursor) => { ComposerUi.link(url, body, anchor, cursor); }
     body-edited(body, anchor, cursor, key-text) => { ComposerUi.edit-body(body, anchor, cursor, key-text); }
     selection-changed(body, anchor, cursor) => { ComposerUi.update-selection(body, anchor, cursor); }

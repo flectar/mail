@@ -1485,6 +1485,16 @@ impl ComposeSession {
             }
         });
         let weak = self.reference();
+        ui.on_paste_formatted(move |body, anchor, cursor| {
+            weak.upgrade()
+                .is_some_and(|session| session.paste_formatted(&body, anchor, cursor))
+        });
+        let weak = self.reference();
+        ui.on_copy_formatted(move |cut, body, anchor, cursor| {
+            weak.upgrade()
+                .is_some_and(|session| session.copy_formatted(cut, &body, anchor, cursor))
+        });
+        let weak = self.reference();
         ui.on_link(move |url, body, anchor, cursor| {
             if let Some(session) = weak.upgrade() {
                 session.edit(|document| document.set_link(&url, &body, anchor, cursor));
@@ -1759,6 +1769,70 @@ impl ComposeSession {
             );
         }
         self.check_spelling_soon();
+    }
+
+    /// Pastes the HTML on the clipboard over the selection, with the formatting the composer
+    /// keeps. False when the clipboard holds none, for the plain text to go in.
+    fn paste_formatted(&self, body: &str, anchor: i32, cursor: i32) -> bool {
+        let Some(html) = crate::reader_clipboard::html() else {
+            return false;
+        };
+        let Some(host) = self.host() else {
+            return false;
+        };
+        {
+            let mut document = self.document.borrow_mut();
+            if document.text() != body {
+                document.synchronize(body, anchor, cursor);
+            } else {
+                document.update_selection(anchor, cursor);
+            }
+            let Some(selection) = document.paste_html(&html) else {
+                return false;
+            };
+            apply_rich_compose(
+                &host.view(),
+                &document,
+                selection,
+                &mut self.editor.borrow_mut(),
+            );
+        }
+        self.check_spelling_soon();
+        true
+    }
+
+    /// Puts the selection on the clipboard as HTML and plain text, so that it pastes back with
+    /// its formatting, and for a cut takes it out. False when the plain text is left to copy.
+    fn copy_formatted(&self, cut: bool, body: &str, anchor: i32, cursor: i32) -> bool {
+        let Some(host) = self.host() else {
+            return false;
+        };
+        {
+            let mut document = self.document.borrow_mut();
+            if document.text() != body {
+                document.synchronize(body, anchor, cursor);
+            } else {
+                document.update_selection(anchor, cursor);
+            }
+            let Some((html, text)) = document.selection_html() else {
+                return false;
+            };
+            if !crate::reader_clipboard::set_html(&html, &text) {
+                return false;
+            }
+            if !cut {
+                return true;
+            }
+            let selection = document.insert_text("");
+            apply_rich_compose(
+                &host.view(),
+                &document,
+                selection,
+                &mut self.editor.borrow_mut(),
+            );
+        }
+        self.check_spelling_soon();
+        true
     }
 
     fn update_selection(&self, body: &str, anchor: i32, cursor: i32) {

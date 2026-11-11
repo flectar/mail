@@ -104,6 +104,8 @@ export component EmailComposer inherits Rectangle {
     callback pick-attachments;
     callback remove-attachment(int);
     callback format-requested(string, string, int, int);
+    callback paste-requested(string, int, int) -> bool;
+    callback copy-requested(bool, string, int, int) -> bool;
     callback link-requested(string, string, int, int);
     callback body-edited(string, int, int, string);
     callback selection-changed(string, int, int);
@@ -170,6 +172,28 @@ export component EmailComposer inherits Rectangle {
     private property <bool> has-content: root.to != "" || root.cc != "" || root.bcc != ""
         || root.subject != "" || root.body != "" || root.attachments.length > 0 || root.quote != "";
     private property <bool> can-send: !root.sending && root.selected-account-id > 0 && root.to != "" && (root.body != "" || root.quote != "") && AccountMailPreferences.composer-preferences-ready;
+
+    // Pastes what the clipboard holds with its formatting, or as plain text in the message's
+    // style when it holds none.
+    function paste-formatted() {
+        if (root.paste-requested(root.body, body-input.anchor-position-byte-offset, body-input.cursor-position_byte_offset)) {
+            body-input.set-selection-offsets(root.selection-start, root.selection-end);
+        } else {
+            body-input.paste();
+        }
+    }
+
+    // Copies or cuts the selection with its formatting, or as plain text where the clipboard
+    // takes only that.
+    function copy-formatted(cut: bool) {
+        if (root.copy-requested(cut, root.body, body-input.anchor-position-byte-offset, body-input.cursor-position_byte_offset)) {
+            body-input.set-selection-offsets(root.selection-start, root.selection-end);
+        } else if (cut) {
+            body-input.cut();
+        } else {
+            body-input.copy();
+        }
+    }
 
     function apply-format(kind: string) {
         if (kind == "link") {
@@ -540,6 +564,22 @@ export component EmailComposer inherits Rectangle {
                             root.apply-format("clear");
                             return accept;
                         }
+                        // Pasting keeps the clipboard's formatting, and with Shift as well pastes
+                        // plain text, as browsers and other mail apps do.
+                        if (((event.modifiers.control || event.modifiers.meta) && event.text.to-lowercase() == "v")
+                            || (event.modifiers.shift && event.text == Key.Insert)) {
+                            if (event.modifiers.shift && event.text != Key.Insert) {
+                                self.paste();
+                            } else {
+                                root.paste-formatted();
+                            }
+                            return accept;
+                        }
+                        if ((event.modifiers.control || event.modifiers.meta) && !event.modifiers.shift
+                            && (event.text.to-lowercase() == "c" || event.text.to-lowercase() == "x")) {
+                            root.copy-formatted(event.text.to-lowercase() == "x");
+                            return accept;
+                        }
                         if ((event.modifiers.control || event.modifiers.meta) && event.text.to-lowercase() == "z") {
                             root.history-requested(event.modifiers.shift ? "redo" : "undo");
                             self.set-selection-offsets(root.selection-start, root.selection-end);
@@ -618,15 +658,20 @@ export component EmailComposer inherits Rectangle {
                         if !root.editor-menu-touch : MenuItem {
                             title: @tr("Cut");
                             enabled: !root.sending && root.selection-start != root.selection-end;
-                            activated => { body-input.cut(); }
+                            activated => { root.copy-formatted(true); }
                         }
                         if !root.editor-menu-touch : MenuItem {
                             title: @tr("Copy");
                             enabled: root.selection-start != root.selection-end;
-                            activated => { body-input.copy(); }
+                            activated => { root.copy-formatted(false); }
                         }
                         if !root.editor-menu-touch : MenuItem {
                             title: @tr("Paste");
+                            enabled: !root.sending;
+                            activated => { root.paste-formatted(); }
+                        }
+                        if !root.editor-menu-touch : MenuItem {
+                            title: @tr("Paste as plain text");
                             enabled: !root.sending;
                             activated => { body-input.paste(); }
                         }
