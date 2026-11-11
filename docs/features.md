@@ -14,6 +14,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Undo](#undo)
 - [Undo send](#undo-send)
 - [Unsubscribing](#unsubscribing)
+- [Blocking senders](#blocking-senders)
 - [Storage and backups](#storage-and-backups)
 - [Importing accounts and mail](#importing-accounts-and-mail)
 - [HTML rendering](#html-rendering)
@@ -287,6 +288,17 @@ Once the request is made, if more of the list's mail is in the inbox, Flectar
 Mail offers to archive it or move it to the trash, with Undo. A list is known by
 its List-Id, or by its sender when it has none. Mail in Spam never offers to
 unsubscribe, since answering spam tells its sender that the address is read.
+
+## Blocking senders
+
+**Block sender…** in a message's menu asks first, then sends that address's
+mail to Spam in every account. What is in an inbox now moves there, with Undo,
+and Flectar Mail moves their new mail there as it receives it, without a
+notification. The list is kept on this device, so other apps can show their new
+mail in the inbox until Flectar Mail checks for mail.
+
+**Unblock sender** in the same menu, or **Unblock** in Settings → Contacts →
+Blocked senders, stops it. Mail already in Spam stays there.
 
 ## Storage and backups
 

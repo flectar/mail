@@ -2854,6 +2854,10 @@ async fn store_headers(
                 repo::labels::reconcile_keywords(&tx, msg_id, &fh.flags.keywords)?;
                 repo::threads::recompute(&tx, imported.thread_id)?;
                 repo::search::index_message(&tx, msg_id)?;
+                // Mail from a blocked sender goes to Spam as it arrives.
+                if crate::turn_away(&tx, msg_id)? {
+                    continue;
+                }
                 importer.learn_contacts(&tx, &parsed, &imported)?;
                 // Only mail past the inbox watermark arrived while this
                 // account was being followed.

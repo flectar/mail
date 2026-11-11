@@ -7,6 +7,7 @@ mod app_runtime;
 mod attachment_controller;
 #[cfg(desktop)]
 mod autostart;
+mod block_sender;
 mod browser;
 pub use browser::ExternalUrlOpener;
 mod calendar;
@@ -4539,6 +4540,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     app.set_startup_hydrated(true);
                     app.set_startup_ready(true);
                     mailto_links::open_pending_soon(&app);
+                    block_sender::refresh();
                     app.invoke_product_changed(app.get_active_view());
                     app.global::<TabsUi>().invoke_restore_active();
                     app.set_startup_failed(false);
@@ -6094,6 +6096,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     mailto_links::install(&app, composers);
     undo::install(&app, &state, &runtime);
     unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
+    block_sender::install(&app, &state, &runtime);
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);
     notifications::ui::attach(&app, &state, &runtime, platform.notifications.clone());

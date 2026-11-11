@@ -3791,6 +3791,93 @@ impl Core {
             .await
     }
 
+    /// `address` as the block list keeps it, with how many of its messages
+    /// are in an inbox now, for the confirmation shown before blocking it.
+    /// None for something that isn't an address.
+    pub async fn block_offer(&self, address: &str) -> Result<Option<BlockOffer>> {
+        let Some(address) = repo::blocked::normalized(address) else {
+            return Ok(None);
+        };
+        self.db
+            .read(move |conn| {
+                let inbox_count = repo::blocked::inbox_messages(conn, &address)?.len();
+                Ok(Some(BlockOffer {
+                    address,
+                    inbox_count,
+                }))
+            })
+            .await
+    }
+
+    /// Block `address`: from now on its mail that sync stores in an inbox
+    /// goes to Spam, and what is in an inbox now moves there, which
+    /// [`Self::undo_actions`] can take back.
+    pub async fn block_sender(&self, address: &str) -> Result<BlockResult> {
+        let address = repo::blocked::normalized(address)
+            .ok_or_else(|| CoreError::Other(format!("not an address: {address}")))?;
+        let (address, newly_blocked, inbox) = self
+            .db
+            .write(move |conn| {
+                let newly_blocked = repo::blocked::block(conn, &address, now_ms())?;
+                let inbox = repo::blocked::inbox_messages(conn, &address)?;
+                Ok((address, newly_blocked, inbox))
+            })
+            .await?;
+        let moved = inbox.len();
+        let action_ids = if inbox.is_empty() {
+            Vec::new()
+        } else {
+            let result = self
+                .perform_action(PerformActionArgs {
+                    kind: ActionKind::Spam,
+                    target: ActionTarget::Messages(inbox),
+                    params: None,
+                })
+                .await;
+            match result {
+                Ok(result) => result.action_ids,
+                Err(error) => {
+                    // Failing to block leaves the sender unblocked.
+                    if newly_blocked {
+                        let address = address.clone();
+                        let unblocked = self
+                            .db
+                            .write(move |conn| repo::blocked::unblock(conn, &address))
+                            .await;
+                        if let Err(unblock_error) = unblocked {
+                            tracing::warn!(
+                                error = %unblock_error,
+                                "could not take back a failed block"
+                            );
+                        }
+                    }
+                    return Err(error);
+                }
+            }
+        };
+        tracing::info!(moved, "blocked a sender");
+        Ok(BlockResult {
+            address,
+            action_ids,
+            moved,
+        })
+    }
+
+    /// Stop sending `address`'s mail to Spam. What is there stays.
+    pub async fn unblock_sender(&self, address: &str) -> Result<()> {
+        let Some(address) = repo::blocked::normalized(address) else {
+            return Ok(());
+        };
+        self.db
+            .write(move |conn| repo::blocked::unblock(conn, &address).map(drop))
+            .await
+    }
+
+    /// Every blocked sender, alphabetically.
+    pub async fn blocked_senders(&self) -> Result<Vec<BlockedSender>> {
+        self.db.read(|conn| repo::blocked::list(conn)).await
+    }
+
     /// Rewrite `src="cid:…"` references in a message body to `data:` URIs built
     /// from its inline attachments so embedded images render in the native
     /// HTML renderer. No-op when the body has no cid: references. On any
@@ -9602,6 +9689,104 @@ fn thread_in_inbox(tx: &rusqlite::Transaction, thread_id: i64) -> Result<bool> {
     )?)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn enqueue_move(
+    tx: &rusqlite::Transaction,
+    account_id: i64,
+    thread_id: i64,
+    msg_id: i64,
+    src_folder: Option<i64>,
+    src_uid: Option<i64>,
+    target: i64,
+    kind_str: &str,
+    multi_mailbox: bool,
+    message_only: bool,
+) -> Result<i64> {
+    let mut payload = serde_json::json!({
+        "srcFolderId": src_folder,
+        "srcUid": src_uid,
+        "targetFolderId": target,
+    });
+    if message_only {
+        payload["messageOnly"] = serde_json::Value::Bool(true);
+    }
+    repo::messages::set_uid_and_folder(tx, msg_id, target, None)?;
+    if multi_mailbox {
+        if let Some(src_folder) = src_folder {
+            tx.execute(
+                "DELETE FROM message_folders WHERE message_id = ?1 AND folder_id = ?2",
+                rusqlite::params![msg_id, src_folder],
+            )?;
+        }
+        tx.execute(
+            "INSERT OR IGNORE INTO message_folders (message_id, folder_id)
+             VALUES (?1, ?2)",
+            rusqlite::params![msg_id, target],
+        )?;
+    }
+    let aid = repo::actions::enqueue(
+        tx,
+        account_id,
+        kind_str,
+        Some(msg_id),
+        Some(thread_id),
+        &payload,
+        None,
+    )?;
+    Ok(aid)
+}
+
+/// Send a message sync just stored in an inbox to Spam when its sender is
+/// blocked (see [`repo::blocked`]), as Move to spam does for one message, in
+/// the transaction that stored it: it never shows in the inbox and isn't
+/// announced. Returns whether it did.
+pub(crate) fn turn_away(tx: &rusqlite::Transaction, message_id: i64) -> Result<bool> {
+    if !repo::blocked::turned_away(tx, message_id)? {
+        return Ok(false);
+    }
+    let (account_id, thread_id, folder_id, uid, protocol): (
+        i64,
+        i64,
+        Option<i64>,
+        Option<i64>,
+        MailProtocol,
+    ) = tx.query_row(
+        "SELECT m.account_id, m.thread_id, m.folder_id, m.uid, a.mail_protocol
+         FROM messages m JOIN accounts a ON a.id = m.account_id
+         WHERE m.id = ?1",
+        rusqlite::params![message_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+    )?;
+    let Some(spam) = repo::folders::by_role(tx, account_id, roles::SPAM)? else {
+        return Ok(false);
+    };
+    if folder_id.is_none() || folder_id == Some(spam.id) {
+        return Ok(false);
+    }
+    enqueue_move(
+        tx,
+        account_id,
+        thread_id,
+        message_id,
+        folder_id,
+        uid,
+        spam.id,
+        "spam",
+        protocol.has_multi_mailbox_messages(),
+        true,
+    )?;
+    if !thread_in_inbox(tx, thread_id)? {
+        repo::snoozes::clear(tx, thread_id)?;
+    }
+    repo::threads::recompute(tx, thread_id)?;
+    tracing::info!(
+        account_id,
+        message_id,
+        "receive: sent mail from a blocked sender to spam"
+    );
+    Ok(true)
+}
+
 /// Optimistic local mutation + enqueue, in one transaction.
 /// Returns (action_id, account_id) pairs.
 ///
@@ -9671,53 +9856,6 @@ fn apply_thread_action(
 
     fn folder_of(tx: &rusqlite::Transaction, account_id: i64, role: &str) -> Result<Option<i64>> {
         Ok(repo::folders::by_role(tx, account_id, role)?.map(|f| f.id))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn enqueue_move(
-        tx: &rusqlite::Transaction,
-        account_id: i64,
-        thread_id: i64,
-        msg_id: i64,
-        src_folder: Option<i64>,
-        src_uid: Option<i64>,
-        target: i64,
-        kind_str: &str,
-        multi_mailbox: bool,
-        message_only: bool,
-    ) -> Result<i64> {
-        let mut payload = serde_json::json!({
-            "srcFolderId": src_folder,
-            "srcUid": src_uid,
-            "targetFolderId": target,
-        });
-        if message_only {
-            payload["messageOnly"] = serde_json::Value::Bool(true);
-        }
-        repo::messages::set_uid_and_folder(tx, msg_id, target, None)?;
-        if multi_mailbox {
-            if let Some(src_folder) = src_folder {
-                tx.execute(
-                    "DELETE FROM message_folders WHERE message_id = ?1 AND folder_id = ?2",
-                    rusqlite::params![msg_id, src_folder],
-                )?;
-            }
-            tx.execute(
-                "INSERT OR IGNORE INTO message_folders (message_id, folder_id)
-                 VALUES (?1, ?2)",
-                rusqlite::params![msg_id, target],
-            )?;
-        }
-        let aid = repo::actions::enqueue(
-            tx,
-            account_id,
-            kind_str,
-            Some(msg_id),
-            Some(thread_id),
-            &payload,
-            None,
-        )?;
-        Ok(aid)
     }
 
     match kind {

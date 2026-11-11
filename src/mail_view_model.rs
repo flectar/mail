@@ -1872,6 +1872,8 @@ mod tests {
             body_pending: true,
             sender_verification: String::new(),
             can_unsubscribe: false,
+            can_block: false,
+            sender_blocked: false,
             verification_code: None,
             account_uses_labels: false,
             first_attachment: None,

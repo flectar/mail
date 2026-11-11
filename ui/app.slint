@@ -12,6 +12,7 @@ export { SystemNotifications } from "system-notifications.slint";
 export { Updates } from "updates.slint";
 export { Notice } from "notice.slint";
 export { Unsubscribe } from "unsubscribe.slint";
+export { BlockSender } from "block-sender.slint";
 import { AppIcon, AppIconVariant } from "app-icon.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
@@ -42,6 +43,8 @@ import { NoticeToast } from "components/notice-toast.slint";
 import { Notice } from "notice.slint";
 import { UnsubscribeDialog } from "dialogs/unsubscribe-dialog.slint";
 import { Unsubscribe } from "unsubscribe.slint";
+import { BlockSenderDialog } from "dialogs/block-sender-dialog.slint";
+import { BlockSender } from "block-sender.slint";
 import { BoundComposer, ComposerUi } from "components/composer-ui.slint";
 import { ComposerText } from "components/composer-fields.slint";
 export { ComposerUi } from "components/composer-ui.slint";
@@ -592,6 +595,10 @@ export global I18n {
         if (key == "Could not unsubscribe: {}") { return @tr("Could not unsubscribe: {}", argument); }
         if (key == "Unsubscribed from {}.") { return @tr("Unsubscribed from {}.", argument); }
         if (key == "Unsubscribe request sent to {}.") { return @tr("Unsubscribe request sent to {}.", argument); }
+        if (key == "Blocked {}.") { return @tr("Blocked {}.", argument); }
+        if (key == "Unblocked {}.") { return @tr("Unblocked {}.", argument); }
+        if (key == "Could not block: {}") { return @tr("Could not block: {}", argument); }
+        if (key == "Could not unblock: {}") { return @tr("Could not unblock: {}", argument); }
         if (key == "Moved {} messages to the other account.") { return @tr("Moved one message to the other account." | "Moved {0} messages to the other account." % round(argument.to-float()), argument); }
         if (key == "Copied {} messages to the other account.") { return @tr("Copied one message to the other account." | "Copied {0} messages to the other account." % round(argument.to-float()), argument); }
         if (key == "Moved or copied {} messages to the other account.") { return @tr("Moved or copied one message to the other account." | "Moved or copied {0} messages to the other account." % round(argument.to-float()), argument); }
@@ -2319,6 +2326,14 @@ export component AppWindow inherits Window {
     }
 
     if Unsubscribe.stage != "" : UnsubscribeDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        z: 16000;
+    }
+
+    if BlockSender.stage != "" : BlockSenderDialog {
         x: root.content-x;
         y: root.content-y;
         width: root.content-width;
