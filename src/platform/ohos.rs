@@ -10,6 +10,13 @@ static PDFIUM_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
 /// Names this platform to the settings that describe it.
 pub(crate) const NAME: &str = "ohos";
 
+/// OpenHarmony has no spell checker for apps.
+pub(crate) const CHECKS_SPELLING: bool = false;
+
+pub(crate) fn spell_checker() -> Option<std::sync::Arc<dyn crate::spelling::Checker>> {
+    None
+}
+
 /// Supply the application's native library directory (the hap's `libs/<abi>`,
 /// which the host derives from its own loaded module path). Never a
 /// document-controlled path.

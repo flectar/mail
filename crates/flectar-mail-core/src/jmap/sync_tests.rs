@@ -472,6 +472,74 @@ async fn run_live_sync(
 }
 
 #[tokio::test]
+async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
+    let (_dir, ctx, config) = fixture().await;
+    ctx.db
+        .write(|conn| {
+            conn.execute_batch(
+                "INSERT INTO jmap_sync_state(account_id,email_state) VALUES(1,'state-0');
+                 INSERT INTO folders (id, account_id, path, role, jmap_id)
+                   VALUES (2, 1, 'Junk', 'spam', 'junk-remote');",
+            )?;
+            repo::blocked::block(conn, "sender@mail.example", 0)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let now = chrono::Utc::now();
+    let mut friend = received(email("friend", "conversation-friend"), now);
+    friend["from"] = json!([{"name": "Friend", "email": "friend@mail.example"}]);
+    let emails = vec![
+        received(email("blocked", "conversation-blocked"), now),
+        friend,
+    ];
+    let changes = json!({"created": ["blocked", "friend"], "updated": [], "destroyed": []});
+    let (connected, task) = server(emails, Some(changes), None).await;
+    run_live_sync(&ctx, &config, &connected, now.timestamp_millis() - 60_000)
+        .await
+        .unwrap();
+    task.abort();
+
+    ctx.db
+        .read(|conn| {
+            let placed = |jmap_id: &str| -> rusqlite::Result<(i64, Vec<i64>)> {
+                let (id, folder_id): (i64, i64) = conn.query_row(
+                    "SELECT id, folder_id FROM messages WHERE jmap_id = ?1",
+                    [jmap_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                let mut stmt = conn.prepare(
+                    "SELECT folder_id FROM message_folders WHERE message_id = ?1 ORDER BY folder_id",
+                )?;
+                let mailboxes = stmt
+                    .query_map([id], |row| row.get(0))?
+                    .collect::<rusqlite::Result<Vec<i64>>>()?;
+                Ok((folder_id, mailboxes))
+            };
+            // Its mailboxes were in place before it moved, so it left the
+            // inbox in all of them.
+            assert_eq!(placed("blocked")?, (2, vec![2]));
+            assert_eq!(placed("friend")?, (1, vec![1]));
+            let pending: Vec<String> = conn
+                .prepare("SELECT kind FROM pending_actions")?
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            assert_eq!(pending, ["spam"]);
+            let notified: Vec<String> = conn
+                .prepare(
+                    "SELECT m.jmap_id FROM notification_outbox o
+                     JOIN messages m ON m.id = o.message_id",
+                )?
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            assert_eq!(notified, ["friend"]);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn live_inbox_arrivals_queue_notifications() {
     let (_dir, ctx, config) = fixture().await;
     ctx.db

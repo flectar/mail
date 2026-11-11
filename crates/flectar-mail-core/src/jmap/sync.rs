@@ -1260,12 +1260,16 @@ async fn persist_emails(
                     && !is_automated
                     && let Some(sender) = &from
                     && !crate::mime::robot_sender(&sender.email)
+                    && !repo::blocked::is_blocked(&tx, &sender.email.to_ascii_lowercase())?
                 {
                     repo::contacts::harvest(&tx, account_id, sender, false, date)?;
                 }
                 let mut pending_keywords = false;
                 let mut pending_mailboxes = false;
                 let local_id;
+                // For mail new here that arrived live in the Inbox, whether
+                // its notification may play a sound.
+                let mut announce = None;
 
                 if let Some(existing) = existing {
                     (pending_keywords, pending_mailboxes) =
@@ -1376,6 +1380,7 @@ async fn persist_emails(
                         references,
                         list_unsubscribe: None,
                         list_unsubscribe_post: None,
+                        list_id: header_text(&email, "List-Id").and_then(crate::mime::list_id),
                         sender_addr: None,
                         sender_verification: crate::models::SenderVerification::None,
                     };
@@ -1400,11 +1405,8 @@ async fn persist_emails(
                             date,
                             now_ms(),
                         )
-                        && !notified_threads.contains(&thread_id)
                     {
-                        let audible = crate::sync::ingest::chime_worthy(is_automated, &from_email);
-                        repo::notifications::enqueue(&tx, local_id, audible)?;
-                        notified_threads.push(thread_id);
+                        announce = Some(crate::sync::ingest::chime_worthy(is_automated, &from_email));
                     }
                 }
                 if !pending_mailboxes {
@@ -1414,6 +1416,16 @@ async fn persist_emails(
                     repo::labels::reconcile_keywords(&tx, local_id, &keywords)?;
                 }
                 repo::search::index_message(&tx, local_id)?;
+                // Mail from a blocked sender goes to Spam as it arrives, once
+                // its mailboxes are in place.
+                let turned_away = inserted && crate::turn_away(&tx, local_id)?;
+                if let Some(audible) = announce
+                    && !turned_away
+                    && !notified_threads.contains(&thread_id)
+                {
+                    repo::notifications::enqueue(&tx, local_id, audible)?;
+                    notified_threads.push(thread_id);
+                }
                 changed_threads.insert(thread_id);
             }
 

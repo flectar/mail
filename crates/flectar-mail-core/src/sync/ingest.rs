@@ -142,6 +142,7 @@ impl Importer {
             references: headers.references.clone(),
             list_unsubscribe: headers.list_unsubscribe.clone(),
             list_unsubscribe_post: headers.list_unsubscribe_post.clone(),
+            list_id: headers.list_id.clone(),
             sender_addr: headers.via.clone(),
             sender_verification: headers.sender_verification,
         };
@@ -301,7 +302,7 @@ pub(crate) fn parse_or_text(raw: &[u8]) -> ParsedBody {
 }
 
 /// Store a parsed full message: its text and sanitized HTML, the raw file,
-/// attachments, sender verification, and the search index.
+/// attachments, sender verification, list fields, and the search index.
 pub(crate) fn store_body(
     conn: &Connection,
     message_id: i64,
@@ -324,6 +325,13 @@ pub(crate) fn store_body(
         Some(&parsed.snippet),
     )?;
     repo::messages::set_sender_verification(conn, message_id, parsed.headers.sender_verification)?;
+    repo::messages::fill_list_headers(
+        conn,
+        message_id,
+        parsed.headers.list_unsubscribe.as_deref(),
+        parsed.headers.list_unsubscribe_post.as_deref(),
+        parsed.headers.list_id.as_deref(),
+    )?;
     let attachments: Vec<_> = parsed
         .attachments
         .iter()

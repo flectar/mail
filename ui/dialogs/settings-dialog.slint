@@ -32,6 +32,7 @@ import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/worksp
 import { TabSwitcherButton } from "../components/tab-overview.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { Numbers } from "../numbers.slint";
+import { BlockSender } from "../block-sender.slint";
 
 // Use the same focusable controls in both account-card layouts.
 component AccountActions inherits HorizontalLayout {
@@ -490,6 +491,7 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> spelling_available: false;
     in-out property <bool> spelling_enabled: true;
     in property <bool> spelling_installed: false;
+    in property <string> spelling_system: "";
     in-out property <bool> group_mail_by_date: true;
     in-out property <bool> conversation_view: true;
     in-out property <bool> show_account_markers: false;
@@ -1314,9 +1316,19 @@ export component SettingsDialog inherits Rectangle {
                                     if root.spelling_available : SettingsSwitchRow {
                                         compact: root.compact;
                                         title: @tr("Check spelling");
-                                        description: root.spelling_installed
-                                            ? @tr("Underline misspelled words in messages you write. Right-click a word for corrections and languages.")
-                                            : @tr("Install Hunspell dictionaries for your languages from your system's software to check spelling.");
+                                        description: !root.spelling_installed && root.spelling_system == "windows"
+                                            ? @tr("Add a language in Windows Settings, under Time & language, to check spelling.")
+                                            : !root.spelling_installed && root.spelling_system == "android"
+                                            ? @tr("Turn on the spell checker in Android's settings to check spelling.")
+                                            : !root.spelling_installed
+                                            ? @tr("Install Hunspell dictionaries for your languages from your system's software to check spelling.")
+                                            : root.spelling_system == "macos"
+                                            ? @tr("Underline misspelled words in messages you write, in the languages set in System Settings. Right-click a word for corrections.")
+                                            : root.spelling_system == "android"
+                                            ? @tr("Underline misspelled words in messages you write, in the language set for Android's spell checker. Tap a word for corrections.")
+                                            : root.spelling_system == "ios"
+                                            ? @tr("Underline misspelled words in messages you write, in your preferred languages from Settings. Tap a word for corrections.")
+                                            : @tr("Underline misspelled words in messages you write. Right-click a word for corrections and languages.");
                                         checked: root.spelling_enabled;
                                         title-color: root.body-text;
                                         description-color: root.faint-text;
@@ -1889,6 +1901,53 @@ export component SettingsDialog inherits Rectangle {
                                                     root.clear-contact-suggestions-confirming = true;
                                                 }
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                height: max(112px, blocked-senders.preferred-height);
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                blocked-senders := VerticalBox {
+                                    padding: 18px;
+                                    spacing: 8px;
+                                    Text { text: @tr("Blocked senders"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+                                    Text {
+                                        height: self.preferred-height;
+                                        text: @tr("Their mail goes to Spam when Flectar Mail receives it. Block a sender from the menu of one of their messages.");
+                                        color: root.faint-text;
+                                        font-size: TypeScale.caption;
+                                        wrap: word-wrap;
+                                    }
+                                    if BlockSender.addresses.length == 0 : Text {
+                                        text: @tr("No one is blocked.");
+                                        color: root.secondary-text;
+                                        font-size: TypeScale.secondary;
+                                        wrap: word-wrap;
+                                    }
+                                    for address in BlockSender.addresses : HorizontalBox {
+                                        height: 36px;
+                                        // The buttons line up with the card's other buttons.
+                                        padding: 0px;
+                                        padding-right: 8px;
+                                        spacing: 8px;
+                                        Text {
+                                            text: address;
+                                            color: root.body-text;
+                                            font-size: TypeScale.secondary;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            horizontal-stretch: 1;
+                                        }
+                                        Button {
+                                            width: max(96px, self.content-width);
+                                            horizontal-stretch: 0;
+                                            text: @tr("Unblock");
+                                            accessible-label: @tr("Unblock {}", address);
+                                            clicked => { BlockSender.unblock(address); }
                                         }
                                     }
                                 }

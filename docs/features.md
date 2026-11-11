@@ -11,6 +11,10 @@ A closer look at what the [README](../README.md) summarizes.
 - [Calendar, contacts, and files](#calendar-contacts-and-files)
 - [Signatures and OpenPGP](#signatures-and-openpgp)
 - [Spell check](#spell-check)
+- [Undo](#undo)
+- [Undo send](#undo-send)
+- [Unsubscribing](#unsubscribing)
+- [Blocking senders](#blocking-senders)
 - [Storage and backups](#storage-and-backups)
 - [Importing accounts and mail](#importing-accounts-and-mail)
 - [HTML rendering](#html-rendering)
@@ -199,31 +203,49 @@ S/MIME and mobile OpenPGP are not currently supported.
 
 ## Spell check
 
-On Linux, Flectar Mail underlines misspelled words as you write, using the
-Hunspell dictionaries installed on your system, the ones other apps there use
-too. Right-click an underlined word for corrections, **Add to dictionary**, or
-**Ignore**, which accepts it in that message. With the keyboard, the menu key or
-Shift+F10 opens the same menu for the word at the cursor. The menu also cuts,
-copies and pastes, and its **Spelling** submenu turns checking on and off and
-chooses your languages. Flectar Mail starts with the languages your system is
-set to, and a word passes when any of the chosen languages has it, so mail in
-two languages needs no switching. A word you're still typing is underlined once
-you move past it, and quoted text, code and the signature the composer added
-aren't checked.
+Flectar Mail underlines misspelled words as you write. On Windows, macOS, iOS
+and Android it uses the system's own spell checker, and on Linux the Hunspell
+dictionaries installed on your system, the ones other apps there use too.
+Right-click an underlined word for corrections, **Add to dictionary**, or
+**Ignore**, which accepts it in that message. With the keyboard, the menu key
+or Shift+F10 opens the same menu for the word at the cursor. The menu also
+cuts, copies and pastes, and its **Spelling** submenu turns checking on and
+off. On a phone, or any touch screen, tap an underlined word for the same
+corrections, without the editing commands. A word you're still typing is
+underlined once you move past it, and quoted text, code and the signature the
+composer added aren't checked. Turn spell checking off with **Check spelling**
+in Settings → General, which also says when there's nothing to check with.
 
-Words you add go to the same lists as in GNOME apps, in
-`~/.config/enchant/<language>.dic`, so they're shared with them. The Flatpak
-keeps its own lists. Turn spell checking off with **Check spelling** in
-Settings → General, which also tells you when no dictionary is installed. Most
-distributions package them as `hunspell-` and the language. In the Flatpak,
-English comes with the runtime, and other languages come with the translations
-Flatpak installs for the languages your system uses.
+On Windows and Linux, the **Spelling** submenu also chooses your languages.
+Flectar Mail starts with the display language you chose in Settings, if any,
+and the languages your system is set to, and a word passes when any of the
+chosen languages has it, so mail in two languages needs no switching. On iOS it
+checks in the same display language and your preferred languages, from Settings
+under General, Language & Region, the same way. On macOS, the system picks the
+language of what you write from the ones set in System Settings, under
+Keyboard, Text Input. On Android, the spell checker chosen in Android's
+settings checks, usually the keyboard's, in the language set there.
+
+Words you add go where the system keeps them, so other apps share them. On
+Windows that's the list in Windows Settings, and on macOS the dictionary
+**Learn Spelling** adds to. On Linux it's the lists GNOME apps use, in
+`~/.config/enchant/<language>.dic`, and the Flatpak keeps its own. On iOS the
+system learns the word. On Android, **Add to dictionary** opens Android's own
+dialog for the personal dictionary, as its text fields do. Windows checks the
+languages added in Windows Settings, under Time & language. On Linux, most
+distributions package dictionaries as `hunspell-` and the language. In the
+Flatpak, English comes with the runtime, and other languages come with the
+translations Flatpak installs for the languages your system uses.
 
 Checking keeps no dictionary in memory, and nothing is set up until you write.
-The first time a dictionary is used, a short-lived Flectar Mail process indexes
-its words into the app's cache. Each check then reads them from that file and
-lets go when it's done, and closing the last message lets go of the rest.
-Windows, macOS, Android and iOS don't check spelling yet.
+Windows and macOS check in a system process, and Android in the spell
+checker's own process, usually the keyboard's. On Linux, the first time a
+dictionary is used, a short-lived Flectar Mail process indexes its words into
+the app's cache, and each check reads them from that file and lets go when it's
+done. Closing the last message lets go of the rest, except where the system
+keeps its spell checker in each app that has used it: on macOS about 0.4 MiB,
+and on iOS, which checks in the app, about 3 MiB for English and 4 MiB with
+Spanish too in the iOS Simulator, until the app quits.
 
 ## Undo
 
@@ -247,6 +269,36 @@ If a message can't be sent, the notice says why, the message stays in Drafts,
 and **Open draft** brings it back to fix and send again. Quitting Flectar Mail
 during the delay sends the waiting messages right away rather than at the next
 start.
+
+## Unsubscribing
+
+Mail from a mailing list shows **This message is from a mailing list.** with
+**Unsubscribe** above the message, and its menu has **Unsubscribe…**. Flectar
+Mail asks first and says how the list takes the request.
+
+- If the sender signed a one-click request (RFC 8058), Flectar Mail sends it to
+  the list's website itself. It does so only when your mail server reports a
+  passing DKIM signature that covers the request, as the standard requires.
+- Otherwise, if the list takes requests by email, Flectar Mail sends one from
+  the address the list writes to, and it appears in Sent. **Review email**
+  opens it as a new message to look over before sending.
+- Otherwise the list's unsubscribe page opens in your browser.
+
+Once the request is made, if more of the list's mail is in the inbox, Flectar
+Mail offers to archive it or move it to the trash, with Undo. A list is known by
+its List-Id, or by its sender when it has none. Mail in Spam never offers to
+unsubscribe, since answering spam tells its sender that the address is read.
+
+## Blocking senders
+
+**Block sender…** in a message's menu asks first, then sends that address's
+mail to Spam in every account. What is in an inbox now moves there, with Undo,
+and Flectar Mail moves their new mail there as it receives it, without a
+notification. The list is kept on this device, so other apps can show their new
+mail in the inbox until Flectar Mail checks for mail.
+
+**Unblock sender** in the same menu, or **Unblock** in Settings → Contacts →
+Blocked senders, stops it. Mail already in Spam stays there.
 
 ## Storage and backups
 

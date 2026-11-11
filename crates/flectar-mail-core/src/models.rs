@@ -1086,6 +1086,59 @@ pub struct MessageDetail {
     pub send_state: Option<String>,
     /// The last delivery error when `send_state` is `"failed"`.
     pub send_error: Option<String>,
+    /// It is in its account's spam folder, as a folder or a label.
+    pub in_spam: bool,
+    /// Its sender is blocked: their mail goes to Spam.
+    pub sender_blocked: bool,
+}
+
+/// A sender whose mail goes to Spam.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockedSender {
+    /// Lowercase.
+    pub address: String,
+    pub blocked_at: i64,
+}
+
+/// A sender, for the confirmation shown before blocking them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockOffer {
+    /// Lowercase.
+    pub address: String,
+    /// How many of their messages are in an inbox now, which blocking moves
+    /// to Spam.
+    pub inbox_count: usize,
+}
+
+/// What blocking a sender did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockResult {
+    pub address: String,
+    /// The moves of their inbox mail to Spam, for Undo.
+    pub action_ids: Vec<i64>,
+    /// How many messages moved.
+    pub moved: usize,
+}
+
+/// How the user can leave a mailing list, for the confirmation shown before
+/// anything is sent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum UnsubscribeOffer {
+    /// The sender's signed RFC 8058 request to a web address on this host.
+    OneClick { host: String },
+    /// An RFC 2369 request by email, sent from `from` to `to`.
+    Mailto {
+        from: String,
+        to: String,
+        subject: String,
+        body: String,
+    },
+    /// Only the list's own web page, for the browser.
+    Website { url: String },
 }
 
 /// What actually happened when the user asked to unsubscribe - the UI's toast

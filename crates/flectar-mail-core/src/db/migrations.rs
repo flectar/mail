@@ -49,6 +49,8 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/030_folder_server_only_unseen.sql")),
     Migration::Plain(include_str!("migrations/031_notification_tracking.sql")),
     Migration::Plain(include_str!("migrations/032_account_caught_up_at.sql")),
+    Migration::Plain(include_str!("migrations/033_list_id.sql")),
+    Migration::Plain(include_str!("migrations/034_blocked_senders.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -339,6 +341,7 @@ mod tests {
             "attachment_files_fts",
             "attachment_text_fts",
             "attachments",
+            "blocked_senders",
             "contact_accounts",
             "contact_entries",
             "contact_values",

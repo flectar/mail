@@ -119,6 +119,10 @@ pub(super) fn email_viewport_size(app: &AppWindow) -> (u32, u32) {
 pub(super) fn clear_reader_projection(app: &AppWindow) {
     app.global::<MessageColors>().set_original(false);
     app.global::<AccountMailPreferences>().invoke_close_reader();
+    app.global::<Unsubscribe>().set_available(false);
+    let block = app.global::<BlockSender>();
+    block.set_available(false);
+    block.set_blocked(false);
     let reader = app.global::<EmailReader>();
     reader.set_available(false);
     reader.set_body_pending(false);
@@ -157,6 +161,11 @@ pub(super) fn apply_email(
     app.set_selected_starred(email.starred);
     app.set_selected_unread(email.unread);
     app.set_selected_sender_verification(email.sender_verification.clone().into());
+    app.global::<Unsubscribe>()
+        .set_available(email.can_unsubscribe);
+    let block = app.global::<BlockSender>();
+    block.set_available(email.can_block);
+    block.set_blocked(email.sender_blocked);
     let reader = app.global::<EmailReader>();
     reader.set_body_pending(email.body_pending);
     reader.set_authored_text(email.text.clone().unwrap_or_default().into());

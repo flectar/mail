@@ -26,7 +26,8 @@ pub(crate) const UI_FONT_DATA: &[u8] = include_bytes!(
 );
 const TILE_HEIGHT_LOGICAL: f32 = 384.0;
 const TILE_OVERSCAN: u32 = 1;
-const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(450);
+/// How soon a second click or tap counts as a double one.
+pub(crate) const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(450);
 const MULTI_CLICK_DISTANCE: f32 = 5.0;
 // cosmic-text 0.19's rich-text path omits the final empty paragraph when the
 // supplied text ends in a newline. Keep that paragraph alive in the layout
@@ -251,14 +252,23 @@ impl CosmicComposeEditor {
 
     /// The underlined word at a point of the editor, in logical pixels, as last rendered.
     pub fn misspelling_at(&self, x: f32, y: f32, scale_factor: f32) -> Option<Range<usize>> {
-        let (x, y) = (x * scale_factor.max(1.0), y * scale_factor.max(1.0));
-        self.squiggles
-            .iter()
-            .find(|squiggle| {
-                (squiggle.left..=squiggle.right).contains(&x)
-                    && (squiggle.top..=squiggle.bottom).contains(&y)
-            })
+        self.squiggle_at(x, y, scale_factor)
             .map(|squiggle| squiggle.start..squiggle.end)
+    }
+
+    /// The bottom of the line of the underlined word at a point of the editor, in logical
+    /// pixels, where a menu for the word opens without covering it.
+    pub fn misspelling_line_bottom(&self, x: f32, y: f32, scale_factor: f32) -> Option<f32> {
+        self.squiggle_at(x, y, scale_factor)
+            .map(|squiggle| squiggle.bottom / scale_factor.max(1.0))
+    }
+
+    fn squiggle_at(&self, x: f32, y: f32, scale_factor: f32) -> Option<&Squiggle> {
+        let (x, y) = (x * scale_factor.max(1.0), y * scale_factor.max(1.0));
+        self.squiggles.iter().find(|squiggle| {
+            (squiggle.left..=squiggle.right).contains(&x)
+                && (squiggle.top..=squiggle.bottom).contains(&y)
+        })
     }
 
     /// Move the underlined words to where the edits since they were found left them, and mark
@@ -2371,6 +2381,16 @@ mod tests {
         assert_eq!(
             editor.misspelling_at(first.left + 1.0, first.bottom + 30.0, 1.0),
             None
+        );
+        // A tapped word's menu opens below its line, in logical pixels at any scale.
+        let middle_x = (first.left + first.right) / 2.0;
+        assert_eq!(
+            editor.misspelling_line_bottom(middle_x, middle_y, 1.0),
+            Some(first.bottom)
+        );
+        assert_eq!(
+            editor.misspelling_line_bottom(middle_x / 2.0, middle_y / 2.0, 2.0),
+            Some(first.bottom / 2.0)
         );
 
         editor.accept_word(&document, "teh");

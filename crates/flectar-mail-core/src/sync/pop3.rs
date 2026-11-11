@@ -854,8 +854,11 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
             )?;
             ingest::store_body(tx, imported.message_id, &path_string, &parsed)?;
             repo::threads::recompute(tx, imported.thread_id)?;
-            importer.learn_contacts(tx, &parsed.headers, &imported)?;
-            importer.announce(tx, &imported, live)?;
+            // Mail from a blocked sender goes to Spam as it arrives.
+            if !crate::turn_away(tx, imported.message_id)? {
+                importer.learn_contacts(tx, &parsed.headers, &imported)?;
+                importer.announce(tx, &imported, live)?;
+            }
             let message_id = imported.message_id;
             let (thread_ids, fresh) = importer.finish(tx)?;
             repo::pop3::record_stored(tx, account_id, &uidl, size, sent_at, message_id, now)?;

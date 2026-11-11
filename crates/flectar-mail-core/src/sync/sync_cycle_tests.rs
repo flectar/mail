@@ -261,6 +261,7 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
                     references: Vec::new(),
                     list_unsubscribe: None,
                     list_unsubscribe_post: None,
+                    list_id: None,
                     sender_addr: None,
                     sender_verification: SenderVerification::None,
                 },
@@ -659,6 +660,87 @@ async fn deleted_headers_are_skipped_without_stalling_progress_or_notifying() {
     .await
     .unwrap();
     assert_eq!(updated.len(), 1);
+}
+
+#[tokio::test]
+async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
+    let (_dir, ctx, config, folder) = deleted_mail_context(1).await;
+    let (account_id, inbox) = (config.id, folder.id);
+    let spam = ctx
+        .db
+        .write(move |conn| {
+            let spam =
+                repo::folders::upsert(conn, account_id, "Junk", Some("/"), Some(roles::SPAM))?;
+            repo::blocked::block(conn, "sender@example.test", 0)?;
+            Ok(spam)
+        })
+        .await
+        .unwrap();
+    let (updated, fresh) = store_headers(
+        &ctx,
+        &config,
+        &folder,
+        vec![deletion_header(50, false)],
+        Some(1),
+        NewHeaders::Insert,
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.len(), 1);
+    assert!(fresh.is_empty());
+    ctx.db
+        .read(move |conn| {
+            let (id, folder_id, uid): (i64, Option<i64>, Option<i64>) = conn.query_row(
+                "SELECT id, folder_id, uid FROM messages
+                 WHERE message_id = 'deletion-50@example.test'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            assert_eq!((folder_id, uid), (Some(spam), None));
+            // The server copy moves out of the inbox like Move to spam's.
+            let (kind, payload): (String, String) = conn.query_row(
+                "SELECT kind, payload FROM pending_actions WHERE message_id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            assert_eq!(kind, "spam");
+            let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+            assert_eq!(payload["srcFolderId"], inbox);
+            assert_eq!(payload["srcUid"], 50);
+            assert_eq!(payload["messageOnly"], true);
+            let notifications: i64 =
+                conn.query_row("SELECT COUNT(*) FROM notification_outbox", [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(notifications, 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // Once unblocked, their mail arrives as before.
+    ctx.db
+        .write(|conn| repo::blocked::unblock(conn, "sender@example.test"))
+        .await
+        .unwrap();
+    let (_, fresh) = store_headers(
+        &ctx,
+        &config,
+        &folder,
+        vec![deletion_header(51, false)],
+        Some(1),
+        NewHeaders::Insert,
+    )
+    .await
+    .unwrap();
+    assert_eq!(fresh.len(), 1);
+    ctx.db
+        .read(move |conn| {
+            assert!(repo::messages::by_folder_uid(conn, inbox, 51)?.is_some());
+            Ok(())
+        })
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -1413,6 +1495,7 @@ fn seed_unread(
             references: Vec::new(),
             list_unsubscribe: None,
             list_unsubscribe_post: None,
+            list_id: None,
             sender_addr: None,
             sender_verification: SenderVerification::None,
         },

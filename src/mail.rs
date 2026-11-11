@@ -6,12 +6,13 @@ use flectar_mail_core::{
     events::CoreEvent,
     models::{
         Account, AccountConfig, ActionKind, ActionParams, ActionTarget, AddPasswordAccountArgs,
-        Address, CalendarConnection, CalendarEvent, CardDavConnection, ConnectCaldavArgs,
-        ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage, CreateEventArgs, CustomTheme,
-        DraftAttachmentIn, FolderInfo, Label, MailGrouping, MailHistory, MailProfile, MailProtocol,
-        MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor, MessageSummary,
-        PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult,
-        SaveDraftArgs, SearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary, View,
+        Address, BlockOffer, BlockResult, CalendarConnection, CalendarEvent, CardDavConnection,
+        ConnectCaldavArgs, ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage,
+        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, Label, MailGrouping,
+        MailHistory, MailProfile, MailProtocol, MailboxBadgeCounts, MessageCursor, MessageDetail,
+        MessageSearchCursor, MessageSummary, PerformActionArgs, PortableAccountConfig, Provider,
+        QueueSendArgs, QueueSendResult, SaveDraftArgs, SearchCursor, Settings, Snippet,
+        ThreadCursor, ThreadSummary, UnsubscribeOffer, UnsubscribeOutcome, View,
         normalized_workspace_list_pane_width, roles,
     },
 };
@@ -87,6 +88,13 @@ pub struct MailMessage {
     /// Empty, or the strongest receiver-reported authentication kind:
     /// domain, microsoft, bimi, or brand.
     pub sender_verification: String,
+    /// The message names a way to leave the mailing list it came from, and
+    /// is neither one's own nor in the spam folder.
+    pub can_unsubscribe: bool,
+    /// Someone else sent the message, from an address that can be blocked.
+    pub can_block: bool,
+    /// Its sender is blocked: their mail goes to Spam.
+    pub sender_blocked: bool,
     /// The one-time code the message asks its reader to enter.
     pub verification_code: Option<String>,
     /// Gmail labels are tags; other accounts file labels like folders.
@@ -129,6 +137,9 @@ impl MailMessage {
             text: None,
             body_pending: false,
             sender_verification: String::new(),
+            can_unsubscribe: false,
+            can_block: false,
+            sender_blocked: false,
             verification_code: None,
             account_uses_labels: false,
             first_attachment: None,
@@ -1815,6 +1826,95 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// The message a row leaves its mailing list from: the message itself,
+    /// or the newest of a conversation's that names a way to.
+    pub async fn unsubscribe_message_of(&self, target: MailTarget) -> Result<Option<i64>, String> {
+        match target {
+            MailTarget::Message { id, .. } => Ok(Some(id)),
+            MailTarget::Thread(thread_id) => self
+                .core
+                .thread_unsubscribe_message(thread_id)
+                .await
+                .map_err(|error| error.to_string()),
+        }
+    }
+
+    pub async fn unsubscribe_offer(
+        &self,
+        message_id: i64,
+    ) -> Result<Option<UnsubscribeOffer>, String> {
+        self.core
+            .unsubscribe_offer(message_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn unsubscribe(&self, message_id: i64) -> Result<UnsubscribeOutcome, String> {
+        self.core
+            .unsubscribe_message(message_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// The inbox messages from the list `message_id` came from.
+    pub async fn list_inbox_messages(&self, message_id: i64) -> Result<Vec<i64>, String> {
+        self.core
+            .list_inbox_messages(message_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Archive or delete these messages; the ids of the actions, for Undo.
+    pub async fn act_on_messages(
+        &self,
+        message_ids: Vec<i64>,
+        action: &str,
+    ) -> Result<Vec<i64>, String> {
+        let kind = ActionKind::parse(action)
+            .ok_or_else(|| format!("unsupported message action: {action}"))?;
+        self.core
+            .perform_action(PerformActionArgs {
+                kind,
+                target: ActionTarget::Messages(message_ids),
+                params: None,
+            })
+            .await
+            .map(|result| result.action_ids)
+            .map_err(|error| error.to_string())
+    }
+
+    /// `address` as it would be blocked, for the confirmation first.
+    pub async fn block_offer(&self, address: &str) -> Result<Option<BlockOffer>, String> {
+        self.core
+            .block_offer(address)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Block `address`; what moved to Spam, for Undo.
+    pub async fn block_sender(&self, address: &str) -> Result<BlockResult, String> {
+        self.core
+            .block_sender(address)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn unblock_sender(&self, address: &str) -> Result<(), String> {
+        self.core
+            .unblock_sender(address)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Every blocked address, alphabetically.
+    pub async fn blocked_addresses(&self) -> Result<Vec<String>, String> {
+        self.core
+            .blocked_senders()
+            .await
+            .map(|senders| senders.into_iter().map(|sender| sender.address).collect())
+            .map_err(|error| error.to_string())
+    }
+
     /// Take back the actions of one gesture. False when none could be.
     pub async fn undo_actions(&self, action_ids: Vec<i64>) -> Result<bool, String> {
         self.core
@@ -2977,6 +3077,9 @@ fn summary_to_message(
         text: None,
         body_pending: true,
         sender_verification: String::new(),
+        can_unsubscribe: false,
+        can_block: false,
+        sender_blocked: false,
         verification_code: thread.verification_code,
         account_uses_labels: thread_account
             .is_some_and(|account| account.mail_protocol == MailProtocol::Gmail),
@@ -3082,6 +3185,9 @@ fn message_summary_to_message(
         text: None,
         body_pending: true,
         sender_verification: String::new(),
+        can_unsubscribe: false,
+        can_block: false,
+        sender_blocked: false,
         verification_code: message.verification_code,
         account_uses_labels: message_account
             .is_some_and(|account| account.mail_protocol == MailProtocol::Gmail),
@@ -3192,6 +3298,14 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
         },
         body_pending: message.body_state != "cached",
         sender_verification: message.sender_verification.as_str().to_owned(),
+        can_unsubscribe: !message.is_draft
+            && !message.is_outgoing
+            && !message.in_spam
+            && message.list_unsubscribe.as_deref().is_some_and(|header| {
+                flectar_mail_core::unsubscribe::plan(header, false).is_some()
+            }),
+        can_block: !message.is_draft && !message.is_outgoing && message.from.email.contains('@'),
+        sender_blocked: message.sender_blocked,
         verification_code: row.verification_code.clone(),
         account_uses_labels: row.account_uses_labels,
         first_attachment: row.first_attachment.clone(),

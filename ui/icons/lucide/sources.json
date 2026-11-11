@@ -9,6 +9,9 @@
     "arrow-left.svg": {
       "source": "arrow-left"
     },
+    "ban.svg": {
+      "source": "ban"
+    },
     "bold.svg": {
       "source": "bold"
     },
@@ -135,6 +138,9 @@
     "mail.svg": {
       "source": "mail"
     },
+    "mail-x.svg": {
+      "source": "mail-x"
+    },
     "paper-airplane.svg": {
       "source": "send"
     },
@@ -226,6 +232,10 @@
     "arrow-left": {
       "path": "sources/arrow-left.svg",
       "sha256": "bef90f9aa435042faf0b71d95e7f9da0f2dff2bb026cafaca2f506aee4c45c03"
+    },
+    "ban": {
+      "path": "sources/ban.svg",
+      "sha256": "7cdacf6d52ee1b4da0406b62bb738c9ff2c2acc98f097ff2916534887fcf280c"
     },
     "bell": {
       "path": "sources/bell.svg",
@@ -458,6 +468,10 @@
     "mail-open": {
       "path": "sources/mail-open.svg",
       "sha256": "956ac99f10de1ea60b444ed7f4e7834a6604a2e57e4c71b349106def64ea5d9b"
+    },
+    "mail-x": {
+      "path": "sources/mail-x.svg",
+      "sha256": "60f0553127a77adbefafd92cdfc692988444e8a4df0abba4494295cbc4f1fe38"
     },
     "maximize": {
       "path": "sources/maximize.svg",

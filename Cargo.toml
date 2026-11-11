@@ -92,6 +92,9 @@ vello = { version = "0.11", optional = true }
 # This native shell currently exposes keyword/FTS search, not local semantic
 # search. Do not link Candle, tokenizers, or Hugging Face into every AppImage.
 flectar-mail-core = { path = "crates/flectar-mail-core", default-features = false }
+# Which words spelling checks, everywhere, and on Linux the checking itself, with the system's
+# Hunspell dictionaries read in place from disk.
+flectar-spell = { path = "crates/flectar-spell" }
 # Slint uses Fontique 0.11; Blitz beta.4 uses 0.12. Both must load
 # Fontconfig dynamically so the rendering stacks agree on the native ABI.
 fontique_0_11 = { package = "fontique", version = "=0.11.1", features = ["fontconfig-dlopen"] }
@@ -152,6 +155,7 @@ windows = { version = "0.62", default-features = false, features = [
     "Foundation_Collections",
     "UI_Notifications",
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_System_Com",
     "Win32_UI_Notifications",
     "Win32_UI_Shell",
@@ -190,8 +194,6 @@ x11rb = { version = "0.13", default-features = false }
 wayland-backend = { version = "0.3", default-features = false, features = ["client_system"] }
 wayland-client = { version = "0.31", default-features = false }
 wayland-protocols = { version = "0.32", default-features = false, features = ["client", "staging"] }
-# Spell checking with the system's Hunspell dictionaries, read in place from disk.
-flectar-spell = { path = "crates/flectar-spell" }
 
 # Integrated window frames use winit window attributes and native window events.
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))'.dependencies]
@@ -202,8 +204,8 @@ slint = { version = "1.18.1", default-features = false, features = ["backend-win
 # These AppKit bindings are already in the build.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSApplication", "NSButton", "NSControl", "NSDockTile", "NSImage", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "NSWorkspace"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAppleEventManager", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSSet", "NSString", "NSURL", "NSUserDefaults"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSApplication", "NSButton", "NSControl", "NSDockTile", "NSImage", "NSResponder", "NSRunningApplication", "NSSpellChecker", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAppleEventManager", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSOrthography", "NSRange", "NSSet", "NSString", "NSTextCheckingResult", "NSURL", "NSUserDefaults"] }
 # Launch Services reports a default email app change through a block.
 block2 = { version = "0.6", default-features = false, features = ["std"] }
 # Registers the bundled sign-in agent with Login Items (macOS 13+).
@@ -219,10 +221,13 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 
 # Account secrets live in the iOS Keychain (src/platform/ios/security.rs), and
 # sign-in uses the core's async OAuth broker trait (src/platform/web_authentication.rs).
+# Spelling is checked with UITextChecker (src/platform/ios/spelling.rs).
 [target.'cfg(target_os = "ios")'.dependencies]
 async-trait = "0.1"
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFData", "CFDictionary", "CFNumber", "CFString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSObjCRuntime", "NSRange"] }
 objc2-security = { version = "0.3", default-features = false, features = ["std", "SecBase", "SecItem"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UITextChecker"] }
 
 # This is `desktop`; keep it in step with the `mobile` alias in build.rs.
 [target.'cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))'.dependencies]

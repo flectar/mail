@@ -1,0 +1,136 @@
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { AppTheme } from "../design-system.slint";
+import { Button } from "../components/button.slint";
+import { TypeScale } from "../typography.slint";
+import { BlockSender } from "../block-sender.slint";
+
+// Asks before blocking the sender of the open message: their mail goes to
+// Spam from then on, and what is in an inbox now moves there
+// (src/block_sender.rs).
+export component BlockSenderDialog inherits Rectangle {
+    private property <bool> narrow: panel.width < 360px;
+    private property <bool> working: BlockSender.stage == "working";
+    private property <string> title: @tr("Block {}?", BlockSender.name != "" ? BlockSender.name : BlockSender.address);
+
+    visible: BlockSender.stage != "";
+    background: #00000088;
+    z: 1000;
+    accessible-role: groupbox;
+    accessible-label: root.title;
+
+    function cancel() {
+        if !root.working {
+            BlockSender.close();
+        }
+    }
+
+    changed visible => {
+        if self.visible {
+            dialog-focus.focus();
+        }
+    }
+
+    // Consume pointer input over the scrim.
+    TouchArea { }
+
+    panel := Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(440px, parent.width - 32px);
+        height: max(172px, dialog-content.preferred-height);
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: AppTheme.border;
+        background: AppTheme.surface;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: #00000055;
+
+        dialog-focus := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    root.cancel();
+                    return accept;
+                }
+                reject
+            }
+
+            dialog-content := VerticalBox {
+                padding-top: 22px;
+                padding-right: 22px;
+                padding-bottom: 20px;
+                padding-left: 22px;
+                spacing: 12px;
+
+                HorizontalBox {
+                    height: max(root.narrow ? 56px : 42px, dialog-title.preferred-height + 16px);
+                    padding: 0px;
+                    spacing: 12px;
+                    Rectangle {
+                        width: 42px;
+                        height: 42px;
+                        border-radius: 21px;
+                        background: AppTheme.accent-soft;
+                        Image {
+                            x: 11px;
+                            y: 11px;
+                            width: 20px;
+                            height: 20px;
+                            source: @image-url("../icons/lucide/outline/ban.svg");
+                            colorize: AppTheme.accent;
+                            image-fit: contain;
+                            accessible-role: none;
+                        }
+                    }
+                    dialog-title := Text {
+                        text: root.title;
+                        color: AppTheme.title;
+                        font-size: TypeScale.heading;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+
+                Text {
+                    height: max(24px, self.preferred-height);
+                    text: @tr("Future mail from {} will go to Spam.", BlockSender.address);
+                    color: AppTheme.body;
+                    font-size: TypeScale.secondary;
+                    wrap: word-wrap;
+                }
+                if BlockSender.inbox-count > 0 : Text {
+                    height: self.preferred-height;
+                    text: @tr("Their message in your inbox moves there now." | "Their {n} messages in your inbox move there now." % BlockSender.inbox-count);
+                    color: AppTheme.muted;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+                Rectangle { vertical-stretch: 1; }
+
+                // Wide panels put the buttons in a row, the main one last;
+                // narrow ones stack them, the main one first.
+                GridLayout {
+                    spacing: 8px;
+                    Button {
+                        row: root.narrow ? 1 : 0;
+                        col: 0;
+                        height: 34px;
+                        enabled: !root.working;
+                        text: @tr("Cancel");
+                        clicked => { BlockSender.close(); }
+                    }
+                    Button {
+                        row: 0;
+                        col: root.narrow ? 0 : 1;
+                        height: 34px;
+                        primary: true;
+                        enabled: !root.working;
+                        text: root.working ? @tr("Blocking…") : @tr("Block");
+                        clicked => { BlockSender.confirm(); }
+                    }
+                }
+            }
+        }
+    }
+}

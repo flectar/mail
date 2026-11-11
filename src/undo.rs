@@ -34,6 +34,13 @@ enum Shown {
     Send { action_id: i64, draft_id: i64 },
     /// The actions of one archive, move, deletion or change of marks.
     Gesture { action_ids: Vec<i64> },
+    /// A sender just blocked, and the moves of their inbox mail to Spam.
+    Block {
+        address: String,
+        action_ids: Vec<i64>,
+    },
+    /// News with nothing to take back.
+    Note,
 }
 
 struct Undo {
@@ -132,6 +139,30 @@ pub(super) fn gesture(app: &AppWindow, action_ids: Vec<i64>, batch: UndoableBatc
             Some(GESTURE_NOTICE_FOR),
         );
     });
+}
+
+/// A sender was just blocked: tell of it, with Undo, which unblocks them
+/// and puts their mail back.
+pub(super) fn blocked(app: &AppWindow, address: String, action_ids: Vec<i64>) {
+    with_undo(|undo| {
+        let message = UiMessage::detail("Blocked {}.", &address);
+        undo.show(
+            app,
+            Shown::Block {
+                address,
+                action_ids,
+            },
+            message,
+            "undo",
+            Some(GESTURE_NOTICE_FOR),
+        );
+    });
+}
+
+/// Tell of something done that cannot be taken back here, such as leaving
+/// a mailing list.
+pub(super) fn tell(app: &AppWindow, message: UiMessage) {
+    with_undo(|undo| undo.show(app, Shown::Note, message, "", Some(ANSWER_NOTICE_FOR)));
 }
 
 /// What the notice says of a batch.
@@ -247,6 +278,13 @@ impl Undo {
                 },
             ) => self.undo_send(&app, action_id, draft_id),
             ("undo", Shown::Gesture { action_ids }) => self.undo_gesture(&app, action_ids),
+            (
+                "undo",
+                Shown::Block {
+                    address,
+                    action_ids,
+                },
+            ) => self.undo_block(&app, address, action_ids),
             ("open-draft", Shown::Send { draft_id, .. }) => {
                 self.hide_notice();
                 composer::reopen_draft(draft_id);
@@ -303,6 +341,42 @@ impl Undo {
         };
         // The mail list follows the core's update of the mail put back.
         match self.runtime.block_on(core.undo_actions(action_ids)) {
+            Ok(true) => self.hide_notice(),
+            Ok(false) => self.show(
+                app,
+                shown,
+                UiMessage::plain("This can no longer be undone."),
+                "",
+                Some(ANSWER_NOTICE_FOR),
+            ),
+            Err(error) => self.show(
+                app,
+                shown,
+                UiMessage::detail("Could not undo: {}", error),
+                "",
+                Some(ANSWER_NOTICE_FOR),
+            ),
+        }
+    }
+
+    fn undo_block(self: &Rc<Self>, app: &AppWindow, address: String, action_ids: Vec<i64>) {
+        let Some(core) = self.state.borrow().core.clone() else {
+            return;
+        };
+        let shown = Shown::Block {
+            address: address.clone(),
+            action_ids: action_ids.clone(),
+        };
+        let unblocked = self.runtime.block_on(core.unblock_sender(&address));
+        if unblocked.is_ok() {
+            crate::block_sender::unblocked(&address);
+        }
+        let result = match unblocked {
+            Err(error) => Err(error),
+            Ok(()) if action_ids.is_empty() => Ok(true),
+            Ok(()) => self.runtime.block_on(core.undo_actions(action_ids)),
+        };
+        match result {
             Ok(true) => self.hide_notice(),
             Ok(false) => self.show(
                 app,

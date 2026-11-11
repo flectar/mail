@@ -7,6 +7,7 @@ mod app_runtime;
 mod attachment_controller;
 #[cfg(desktop)]
 mod autostart;
+mod block_sender;
 mod browser;
 pub use browser::ExternalUrlOpener;
 mod calendar;
@@ -81,6 +82,7 @@ mod retained_model;
 mod rich_compose;
 mod settings_controller;
 pub mod spelling;
+pub use spelling::{SpellingHost, SpellingSession};
 mod sidebar_model;
 #[cfg(desktop)]
 mod single_instance;
@@ -91,6 +93,7 @@ mod theme;
 mod ui_dispatch;
 mod ui_message;
 mod undo;
+mod unsubscribe;
 mod updates;
 mod window_chrome;
 mod window_controller;
@@ -1174,6 +1177,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
         language => language,
     };
     number_format::set_language(selected);
+    spelling::apply_display_language(language_mode);
     if let Err(error) = slint::select_bundled_translation(selected) {
         eprintln!("could not select {selected} translation: {error}");
     }
@@ -1449,6 +1453,9 @@ pub struct PlatformContext {
     /// Host hook for withdrawing a first-use privacy consent, when the host
     /// stores one.
     pub privacy_consent: PrivacyConsent,
+    /// The system's spell checker, where the app has none of its own for the
+    /// platform: Android's. `None` elsewhere.
+    pub spelling: Option<Arc<dyn SpellingHost>>,
     pub paths: Paths,
     pub documents: Arc<dyn documents::DocumentProvider>,
     pub credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
@@ -1465,6 +1472,7 @@ impl PlatformContext {
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
             privacy_consent: PrivacyConsent::default(),
+            spelling: None,
             documents: documents::default_provider(),
             credentials,
             oauth_redirects: Arc::new(
@@ -1487,6 +1495,7 @@ impl PlatformContext {
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
             privacy_consent: PrivacyConsent::default(),
+            spelling: None,
             documents,
             credentials,
             oauth_redirects,
@@ -1891,7 +1900,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let (profile_avatar_raw_tx, profile_avatar_rx) = bounded_ui_channel();
     let profile_avatar_tx = UiSender::new(profile_avatar_raw_tx, profile_avatar_wake);
 
-    spelling::install(&runtime, &platform.paths.cache_dir);
+    spelling::install(
+        &runtime,
+        &platform.paths.cache_dir,
+        platform.spelling.clone(),
+    );
     let profile_avatar_loader = if benchmark_disable_background {
         None
     } else {
@@ -4541,6 +4554,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     app.set_startup_hydrated(true);
                     app.set_startup_ready(true);
                     mailto_links::open_pending_soon(&app);
+                    block_sender::refresh();
                     app.invoke_product_changed(app.get_active_view());
                     app.global::<TabsUi>().invoke_restore_active();
                     app.set_startup_failed(false);
@@ -6095,6 +6109,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
     mailto_links::install(&app, composers);
     undo::install(&app, &state, &runtime);
+    unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
+    block_sender::install(&app, &state, &runtime);
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);
     notifications::ui::attach(&app, &state, &runtime, platform.notifications.clone());
