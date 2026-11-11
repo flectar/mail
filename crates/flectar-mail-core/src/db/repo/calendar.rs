@@ -656,6 +656,7 @@ mod tests {
                 email: "me@test.dev".into(),
                 name: Some("Me".into()),
                 partstat: Some("NEEDS-ACTION".into()),
+                ..Default::default()
             }],
             join_url: Some("https://meet.google.com/x".into()),
             sequence: 1,

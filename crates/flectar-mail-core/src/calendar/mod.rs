@@ -14,6 +14,13 @@ pub struct IcsAttendee {
     pub name: Option<String>,
     /// NEEDS-ACTION | ACCEPTED | TENTATIVE | DECLINED
     pub partstat: Option<String>,
+    /// The organizer asked this attendee to reply (RSVP=TRUE). RFC 5545
+    /// makes FALSE the default.
+    pub rsvp: bool,
+    /// REQ-PARTICIPANT, OPT-PARTICIPANT, NON-PARTICIPANT or CHAIR.
+    pub role: Option<String>,
+    /// INDIVIDUAL, GROUP, RESOURCE, ROOM or UNKNOWN.
+    pub cutype: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -23,6 +30,11 @@ pub struct IcsEvent {
     pub summary: Option<String>,
     pub location: Option<String>,
     pub organizer: Option<String>,
+    /// The organizer's display name (CN).
+    pub organizer_name: Option<String>,
+    /// When this version of the event was written (DTSTAMP). It orders two
+    /// versions with the same SEQUENCE (RFC 5546 §2.1.5).
+    pub dtstamp_ms: Option<i64>,
     pub description: Option<String>,
     pub attendees: Vec<IcsAttendee>,
     /// Video-call link: explicit URL/X-GOOGLE-CONFERENCE property, or the
@@ -373,6 +385,54 @@ fn resolve_dt(
     parse_dt(v)
 }
 
+/// The address in a CAL-ADDRESS value such as an ORGANIZER or ATTENDEE:
+/// the "mailto:" scheme comes off in any case.
+fn cal_address(value: &str) -> String {
+    let value = value.trim();
+    match value.get(..7) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("mailto:") => value[7..].trim().to_string(),
+        _ => value.to_string(),
+    }
+}
+
+/// An RFC 5545 DURATION ("PT1H30M", "P1D", "P2W", "-PT15M") in milliseconds.
+/// None for anything else.
+fn parse_duration(value: &str) -> Option<i64> {
+    let value = value.trim();
+    let (sign, value) = match value.strip_prefix('-') {
+        Some(rest) => (-1, rest),
+        None => (1, value.strip_prefix('+').unwrap_or(value)),
+    };
+    let mut rest = value.strip_prefix('P')?;
+    let mut total = 0i64;
+    let mut in_time = false;
+    let mut parts = 0;
+    while !rest.is_empty() {
+        if let Some(time) = rest.strip_prefix('T') {
+            if in_time {
+                return None;
+            }
+            in_time = true;
+            rest = time;
+            continue;
+        }
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let number: i64 = rest[..digits].parse().ok()?;
+        let unit = match (rest[digits..].chars().next()?, in_time) {
+            ('W', false) => 7 * 86_400_000,
+            ('D', false) => 86_400_000,
+            ('H', true) => 3_600_000,
+            ('M', true) => 60_000,
+            ('S', true) => 1_000,
+            _ => return None,
+        };
+        total = total.checked_add(number.checked_mul(unit)?)?;
+        rest = &rest[digits + 1..];
+        parts += 1;
+    }
+    (parts > 0).then_some(sign * total)
+}
+
 fn unescape(v: &str) -> String {
     let mut out = String::with_capacity(v.len());
     let mut chars = v.chars();
@@ -426,18 +486,31 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
     let mut method: Option<String> = None;
     let mut events = Vec::new();
     let mut current: Option<IcsEvent> = None;
+    // Components inside the VEVENT being read, such as a VALARM, whose
+    // properties are not the event's.
+    let mut nested = 0usize;
+    let mut duration_ms: Option<i64> = None;
 
     for line in &lines {
         let Some((key, params, value)) = split_prop(line) else {
             continue;
         };
         match key.as_str() {
-            "BEGIN" if value.eq_ignore_ascii_case("VEVENT") => {
+            "BEGIN" if current.is_none() && value.eq_ignore_ascii_case("VEVENT") => {
                 current = Some(IcsEvent::default());
+                nested = 0;
+                duration_ms = None;
             }
+            "BEGIN" if current.is_some() => nested += 1,
+            "END" if current.is_some() && nested > 0 => nested -= 1,
             "END" if value.eq_ignore_ascii_case("VEVENT") => {
                 if let Some(mut ev) = current.take() {
                     ev.method = method.clone();
+                    if ev.ends_at_ms.is_none()
+                        && let Some(duration) = duration_ms
+                    {
+                        ev.ends_at_ms = ev.starts_at_ms.checked_add(duration);
+                    }
                     if ev.join_url.is_none() {
                         ev.join_url = ev
                             .location
@@ -450,11 +523,14 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
                     }
                 }
             }
-            "METHOD" if current.is_none() => method = Some(value.to_ascii_uppercase()),
+            "METHOD" if current.is_none() => method = Some(value.trim().to_ascii_uppercase()),
+            _ if nested > 0 => {}
             _ => {
                 let Some(ev) = current.as_mut() else { continue };
                 match key.as_str() {
                     "UID" => ev.uid = value.trim().to_string(),
+                    "DTSTAMP" => ev.dtstamp_ms = parse_dt(value).map(|(ms, _)| ms),
+                    "DURATION" => duration_ms = parse_duration(value),
                     "SUMMARY" => ev.summary = Some(unescape(value.trim())),
                     "LOCATION" => ev.location = Some(unescape(value.trim())),
                     "DESCRIPTION" => ev.description = Some(unescape(value.trim())),
@@ -462,7 +538,8 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
                     "SEQUENCE" => ev.sequence = value.trim().parse().unwrap_or(0),
                     "RRULE" => ev.rrule = Some(value.trim().to_string()),
                     "RECURRENCE-ID" => {
-                        ev.recurrence_id_ms = parse_dt(value).map(|(ms, _)| ms);
+                        let tzid = param(&params, "TZID");
+                        ev.recurrence_id_ms = resolve_dt(value, tzid, &tztable).map(|(ms, _)| ms);
                     }
                     "EXDATE" => {
                         // Collected by the recurrence expander from the raw
@@ -477,16 +554,21 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
                         }
                     }
                     "ORGANIZER" => {
-                        ev.organizer = Some(value.trim().trim_start_matches("mailto:").to_string());
+                        ev.organizer = Some(cal_address(value));
+                        ev.organizer_name = param(&params, "CN").map(str::to_string);
                     }
                     "ATTENDEE" => {
-                        let email = value.trim().trim_start_matches("mailto:").to_string();
+                        let email = cal_address(value);
                         if !email.is_empty() {
+                            let upper = |key| param(&params, key).map(str::to_ascii_uppercase);
                             ev.attendees.push(IcsAttendee {
                                 email,
                                 name: param(&params, "CN").map(str::to_string),
-                                partstat: param(&params, "PARTSTAT")
-                                    .map(|s| s.to_ascii_uppercase()),
+                                partstat: upper("PARTSTAT"),
+                                rsvp: param(&params, "RSVP")
+                                    .is_some_and(|rsvp| rsvp.eq_ignore_ascii_case("TRUE")),
+                                role: upper("ROLE"),
+                                cutype: upper("CUTYPE"),
                             });
                         }
                     }
@@ -865,6 +947,65 @@ mod tests {
             Some("https://acme.zoom.us/j/123456?pwd=x")
         );
         assert_eq!(find_join_url("call me at https://example.com/x"), None);
+    }
+
+    #[test]
+    fn reads_what_answering_an_invitation_needs() {
+        let ics = "BEGIN:VCALENDAR\r\nMETHOD:request\r\nBEGIN:VEVENT\r\nUID:evt-5\r\nDTSTAMP:20260701T080000Z\r\nORGANIZER;CN=Alice A:MAILTO:alice@example.com\r\nATTENDEE;CN=Bob;ROLE=opt-participant;CUTYPE=INDIVIDUAL;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:MAILTO:bob@example.com\r\nATTENDEE;CUTYPE=GROUP:mailto:team@example.com\r\nDTSTART:20260720T090000Z\r\nDURATION:PT1H30M\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        let ev = &parse_ics(ics)[0];
+        assert_eq!(ev.method.as_deref(), Some("REQUEST"));
+        assert_eq!(ev.organizer.as_deref(), Some("alice@example.com"));
+        assert_eq!(ev.organizer_name.as_deref(), Some("Alice A"));
+        assert_eq!(
+            ev.dtstamp_ms,
+            parse_dt("20260701T080000Z").map(|(ms, _)| ms)
+        );
+        assert_eq!(ev.ends_at_ms, Some(ev.starts_at_ms + 90 * 60_000));
+        let bob = &ev.attendees[0];
+        assert_eq!(bob.email, "bob@example.com");
+        assert!(bob.rsvp);
+        assert_eq!(bob.role.as_deref(), Some("OPT-PARTICIPANT"));
+        assert_eq!(bob.cutype.as_deref(), Some("INDIVIDUAL"));
+        let team = &ev.attendees[1];
+        assert!(!team.rsvp, "RSVP is FALSE unless the organizer asks");
+        assert_eq!(team.cutype.as_deref(), Some("GROUP"));
+    }
+
+    #[test]
+    fn an_alarm_inside_the_event_keeps_its_own_properties() {
+        let ics = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:evt-6\r\nSUMMARY:Planning\r\nDESCRIPTION:Agenda\r\nDTSTART:20260720T090000Z\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nLOCATION:Room 2\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        let events = parse_ics(ics);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].description.as_deref(), Some("Agenda"));
+        assert_eq!(
+            events[0].location.as_deref(),
+            Some("Room 2"),
+            "properties after the alarm are the event's again"
+        );
+    }
+
+    #[test]
+    fn an_occurrence_is_found_in_its_own_time_zone() {
+        let ics = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VTIMEZONE\r\nTZID:SE Asia Standard Time\r\nBEGIN:STANDARD\r\nDTSTART:16010101T000000\r\nTZOFFSETFROM:+0700\r\nTZOFFSETTO:+0700\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:series-1\r\nRECURRENCE-ID;TZID=SE Asia Standard Time:20260714T080000\r\nDTSTART;TZID=SE Asia Standard Time:20260714T100000\r\nDTEND;TZID=SE Asia Standard Time:20260714T103000\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        let ev = &parse_ics(ics)[0];
+        // 08:00 at UTC+7 is 01:00 UTC.
+        assert_eq!(
+            ev.recurrence_id_ms,
+            parse_dt("20260714T010000Z").map(|(ms, _)| ms)
+        );
+    }
+
+    #[test]
+    fn durations_follow_rfc_5545() {
+        assert_eq!(parse_duration("PT1H30M"), Some(90 * 60_000));
+        assert_eq!(parse_duration("P1D"), Some(86_400_000));
+        assert_eq!(parse_duration("P2W"), Some(14 * 86_400_000));
+        assert_eq!(parse_duration("P1DT12H"), Some(36 * 3_600_000));
+        assert_eq!(parse_duration("-PT15M"), Some(-15 * 60_000));
+        assert_eq!(parse_duration("P"), None);
+        assert_eq!(parse_duration("PT"), None);
+        assert_eq!(parse_duration("PT1D"), None);
+        assert_eq!(parse_duration("1H"), None);
     }
 
     #[test]

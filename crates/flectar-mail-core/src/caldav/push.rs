@@ -708,6 +708,7 @@ mod tests {
                         email: "me@test.dev".into(),
                         name: None,
                         partstat: Some("NEEDS-ACTION".into()),
+                        ..Default::default()
                     }],
                     starts_at_ms: 1_000,
                     ends_at_ms: Some(2_000),
