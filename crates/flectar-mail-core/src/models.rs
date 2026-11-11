@@ -1378,6 +1378,10 @@ pub struct ActionResult {
 pub struct DraftAttachmentIn {
     pub file_path: String,
     pub filename: String,
+    /// The part's Content-Type when the name alone doesn't give it, such as
+    /// a calendar invitation's `text/calendar; method=REQUEST`.
+    #[serde(default)]
+    pub mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2465,6 +2469,9 @@ pub struct RsvpEventArgs {
     pub event_id: i64,
     /// accepted | tentative | declined
     pub response: String,
+    /// A note to the organizer, sent with the answer.
+    #[serde(default)]
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

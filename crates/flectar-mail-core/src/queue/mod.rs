@@ -1007,14 +1007,15 @@ async fn send_action(
         })
         .await?;
 
-    let att_rows: Vec<(String, String)> = ctx
+    let att_rows: Vec<(String, String, Option<String>)> = ctx
         .db
         .read(move |conn| {
-            let mut stmt = conn
-                .prepare("SELECT file_path, filename FROM draft_attachments WHERE draft_id = ?1")?;
+            let mut stmt = conn.prepare(
+                "SELECT file_path, filename, mime_type FROM draft_attachments WHERE draft_id = ?1",
+            )?;
             let rows = stmt
                 .query_map(rusqlite::params![draft_id], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
@@ -1028,7 +1029,7 @@ async fn send_action(
         .ok();
     let mut attachments = Vec::new();
     let mut attachment_bytes = 0usize;
-    for (path, filename) in att_rows {
+    for (path, filename, mime_type) in att_rows {
         let canon = tokio::fs::canonicalize(&path)
             .await
             .map_err(|e| CoreError::Other(format!("attachment {filename}: {e}")))?;
@@ -1043,7 +1044,7 @@ async fn send_action(
         let remaining = crate::MAX_DRAFT_ATTACHMENT_BYTES.saturating_sub(attachment_bytes);
         let bytes = crate::file_io::read(&canon, remaining, "draft attachment").await?;
         attachment_bytes += bytes.len();
-        let mime_type = mime_guess_from_name(&filename);
+        let mime_type = mime_type.unwrap_or_else(|| mime_guess_from_name(&filename));
         attachments.push(crate::mime::OutgoingAttachment {
             filename,
             mime_type,
