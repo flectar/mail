@@ -15,6 +15,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Undo send](#undo-send)
 - [Unsubscribing](#unsubscribing)
 - [Blocking senders](#blocking-senders)
+- [Calendar invitations](#calendar-invitations)
 - [Storage and backups](#storage-and-backups)
 - [Importing accounts and mail](#importing-accounts-and-mail)
 - [HTML rendering](#html-rendering)
@@ -299,6 +300,30 @@ mail in the inbox until Flectar Mail checks for mail.
 
 **Unblock sender** in the same menu, or **Unblock** in Settings → Contacts →
 Blocked senders, stops it. Mail already in Spam stays there.
+
+## Calendar invitations
+
+A message with an invitation shows a card above it with the event's day and
+time, where it takes place, who organizes it, and how many guests have accepted.
+It also says when the event clashes with others in your calendar. **Accept**,
+**Maybe** and **Decline** answer it, and your answer stays selected, so another
+click changes it. **Join** opens an online meeting, and the calendar button
+opens the event in the calendar.
+
+Your answer reaches the organizer once, from wherever the event is kept.
+Microsoft and Google calendars answer through their own service, a CalDAV
+server that schedules for your address tells the organizer itself, and
+otherwise Flectar Mail emails a reply from the address the invitation was sent
+to.
+
+The card also shows updates, cancellations, and answers to your own
+invitations. A cancelled event offers **Remove from calendar**, which takes it
+out without telling anyone. An invitation that a newer version has replaced
+says so and is answered from the newer one. Invitations in Spam or Trash, and
+from blocked senders, stay out of your calendar, so their card has no answers.
+
+Invitations can also be answered from **My response** in an event's details in
+the calendar.
 
 ## Storage and backups
 
