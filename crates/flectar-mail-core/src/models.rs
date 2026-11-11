@@ -2472,6 +2472,10 @@ pub struct RsvpEventArgs {
     /// A note to the organizer, sent with the answer.
     #[serde(default)]
     pub comment: Option<String>,
+    /// Tell the organizer. Off records the answer quietly, where the
+    /// calendar server lets that be chosen.
+    #[serde(default = "default_true")]
+    pub notify: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

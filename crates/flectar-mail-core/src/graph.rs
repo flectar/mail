@@ -275,6 +275,57 @@ pub async fn delete_calendar_event(access_token: &str, event_id: &str) -> Result
     }
 }
 
+/// The Graph action that answers a meeting with an iCalendar participation
+/// status.
+fn answer_action(partstat: &str) -> Result<&'static str> {
+    match partstat {
+        "ACCEPTED" => Ok("accept"),
+        "TENTATIVE" => Ok("tentativelyAccept"),
+        "DECLINED" => Ok("decline"),
+        other => Err(CoreError::Other(format!("no meeting answer is {other}"))),
+    }
+}
+
+/// The body of an answer: whether Exchange tells the organizer, and the
+/// note that goes with it.
+fn answer_body(comment: Option<&str>, send_response: bool) -> serde_json::Value {
+    let mut body = serde_json::json!({ "sendResponse": send_response });
+    if let Some(comment) = comment.map(str::trim).filter(|comment| !comment.is_empty()) {
+        body["comment"] = comment.into();
+    }
+    body
+}
+
+/// Answer a meeting the user is invited to: `POST /me/events/{id}/accept`,
+/// `tentativelyAccept` or `decline`. With `send_response` Exchange sends the
+/// organizer the answer and its comment.
+pub async fn answer_event(
+    access_token: &str,
+    event_id: &str,
+    partstat: &str,
+    comment: Option<&str>,
+    send_response: bool,
+) -> Result<()> {
+    let action = answer_action(partstat)?;
+    let url = graph_resource_url(&["me", "events", event_id, action])?;
+    let body = answer_body(comment, send_response);
+    let (status, text) = request_raw(
+        reqwest::Method::POST,
+        access_token,
+        url.as_str(),
+        Some(&body),
+    )
+    .await?;
+    if (200..300).contains(&status) {
+        Ok(())
+    } else {
+        Err(CoreError::Network(format!(
+            "graph {action} failed ({status}): {}",
+            response_excerpt(&text)
+        )))
+    }
+}
+
 /// One calendar from `GET /me/calendars`.
 pub struct GraphCalendar {
     pub id: String,
@@ -547,6 +598,28 @@ fn graph_datetime(ms: i64, all_day: bool) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_meeting_is_answered_with_its_own_graph_action() {
+        assert_eq!(answer_action("ACCEPTED").unwrap(), "accept");
+        assert_eq!(answer_action("TENTATIVE").unwrap(), "tentativelyAccept");
+        assert_eq!(answer_action("DECLINED").unwrap(), "decline");
+        assert!(answer_action("NEEDS-ACTION").is_err());
+        assert_eq!(
+            answer_body(Some(" Running late "), true),
+            serde_json::json!({ "sendResponse": true, "comment": "Running late" })
+        );
+        assert_eq!(
+            answer_body(Some("  "), false),
+            serde_json::json!({ "sendResponse": false })
+        );
+        assert_eq!(
+            graph_resource_url(&["me", "events", "AAMk/AD1=", "accept"])
+                .unwrap()
+                .as_str(),
+            "https://graph.microsoft.com/v1.0/me/events/AAMk%2FAD1=/accept"
+        );
+    }
 
     #[test]
     fn parses_delta_event_fields() {

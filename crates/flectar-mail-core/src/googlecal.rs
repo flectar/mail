@@ -170,6 +170,169 @@ pub fn reconcile_calendars(
     repo::caldav::connection_calendars(conn, connection.id)
 }
 
+const CALENDARS_URL: &str = "https://www.googleapis.com/calendar/v3/calendars";
+const MAX_EVENT_BODY_BYTES: usize = 4 * 1024 * 1024;
+
+/// The user's copy of a meeting in one of their Google calendars.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingCopy {
+    /// The Calendar API's id for it.
+    pub event_id: String,
+    /// The attendee entry Google marks as the calendar's owner (`self`).
+    pub self_email: Option<String>,
+}
+
+/// `calendars/{calendar_id}/events[/{event_id}]`, each id one path segment:
+/// calendar ids hold characters such as `#` and `@`.
+fn events_url(calendar_id: &str, event_id: Option<&str>) -> Result<url::Url> {
+    let mut url = url::Url::parse(CALENDARS_URL).map_err(|error| {
+        CoreError::Other(format!("invalid built-in Google Calendar URL: {error}"))
+    })?;
+    {
+        let mut path = url.path_segments_mut().map_err(|_| {
+            CoreError::Other("built-in Google Calendar URL cannot hold path segments".into())
+        })?;
+        path.push(calendar_id).push("events");
+        if let Some(event_id) = event_id {
+            path.push(event_id);
+        }
+    }
+    Ok(url)
+}
+
+/// Find the user's copy of the meeting with iCalendar UID `ical_uid` in the
+/// Google calendar `calendar_id` (`events.list` with `iCalUID`). For a series
+/// the copy is the series, not one of its changed occurrences.
+pub async fn find_meeting(
+    access_token: &str,
+    calendar_id: &str,
+    ical_uid: &str,
+) -> Result<Option<MeetingCopy>> {
+    let mut url = events_url(calendar_id, None)?;
+    url.query_pairs_mut()
+        .append_pair("iCalUID", ical_uid)
+        .append_pair("showDeleted", "false")
+        .append_pair("maxResults", "50");
+    let response = calendar_http_client()?
+        .get(url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(network_error)?;
+    let status = response.status();
+    let body = http_body::text(
+        response,
+        MAX_EVENT_BODY_BYTES,
+        "Google Calendar events response",
+    )
+    .await?;
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(CoreError::NeedsReauth);
+    }
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !status.is_success() {
+        return Err(answer_error(status.as_u16(), &body));
+    }
+    parse_meeting_copy(&body)
+}
+
+fn parse_meeting_copy(body: &str) -> Result<Option<MeetingCopy>> {
+    let value: serde_json::Value = serde_json::from_str(body)
+        .map_err(|error| CoreError::CalDav(format!("Google Calendar events response: {error}")))?;
+    let Some(items) = value.get("items").and_then(serde_json::Value::as_array) else {
+        return Ok(None);
+    };
+    let item = items
+        .iter()
+        .find(|item| item.get("recurringEventId").is_none())
+        .or_else(|| items.first());
+    let Some((item, event_id)) = item.and_then(|item| Some((item, item.get("id")?.as_str()?)))
+    else {
+        return Ok(None);
+    };
+    let self_email = item
+        .get("attendees")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|attendees| {
+            attendees.iter().find(|attendee| {
+                attendee.get("self").and_then(serde_json::Value::as_bool) == Some(true)
+            })
+        })
+        .and_then(|attendee| attendee.get("email")?.as_str())
+        .map(str::to_owned);
+    Ok(Some(MeetingCopy {
+        event_id: event_id.to_owned(),
+        self_email,
+    }))
+}
+
+/// The `events.patch` body that answers a meeting: the user's own attendee
+/// entry alone, with `attendeesOmitted` so the other attendees stay as they
+/// are.
+fn answer_patch(email: &str, partstat: &str, comment: Option<&str>) -> Result<serde_json::Value> {
+    let response = match partstat {
+        "ACCEPTED" => "accepted",
+        "TENTATIVE" => "tentative",
+        "DECLINED" => "declined",
+        other => return Err(CoreError::Other(format!("no meeting answer is {other}"))),
+    };
+    let mut attendee = serde_json::json!({ "email": email, "responseStatus": response });
+    if let Some(comment) = comment.map(str::trim).filter(|comment| !comment.is_empty()) {
+        attendee["comment"] = comment.into();
+    }
+    Ok(serde_json::json!({ "attendeesOmitted": true, "attendees": [attendee] }))
+}
+
+/// Answer a meeting on the user's copy of it (`events.patch`). With
+/// `notify` Google sends the change on (`sendUpdates=all`), which is how the
+/// organizer hears of it.
+pub async fn answer_meeting(
+    access_token: &str,
+    calendar_id: &str,
+    copy: &MeetingCopy,
+    attendee: &str,
+    partstat: &str,
+    comment: Option<&str>,
+    notify: bool,
+) -> Result<()> {
+    let email = copy.self_email.as_deref().unwrap_or(attendee);
+    let body = answer_patch(email, partstat, comment)?;
+    let mut url = events_url(calendar_id, Some(&copy.event_id))?;
+    url.query_pairs_mut()
+        .append_pair("sendUpdates", if notify { "all" } else { "none" });
+    let response = calendar_http_client()?
+        .patch(url)
+        .bearer_auth(access_token)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body.to_string())
+        .send()
+        .await
+        .map_err(network_error)?;
+    let status = response.status();
+    let text = http_body::text(
+        response,
+        MAX_EVENT_BODY_BYTES,
+        "Google Calendar answer response",
+    )
+    .await?;
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(CoreError::NeedsReauth);
+    }
+    if !status.is_success() {
+        return Err(answer_error(status.as_u16(), &text));
+    }
+    Ok(())
+}
+
+fn answer_error(status: u16, body: &str) -> CoreError {
+    CoreError::CalDav(format!(
+        "Google Calendar couldn't answer the meeting (HTTP {status}).{}",
+        response_excerpt(body)
+    ))
+}
+
 fn name_for_sort(calendar: &GoogleCalendar) -> String {
     calendar
         .name
@@ -275,6 +438,44 @@ fn parse_calendar(value: &serde_json::Value) -> Option<GoogleCalendar> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_meeting_is_answered_on_the_users_own_copy() {
+        assert_eq!(
+            events_url("team#holidays@group.v.calendar.google.com", Some("abc_1"))
+                .unwrap()
+                .as_str(),
+            "https://www.googleapis.com/calendar/v3/calendars/team%23holidays@group.v.calendar.google.com/events/abc_1"
+        );
+        // The series, not its changed occurrence, and the owner's entry.
+        let listed = r#"{"items": [
+            {"id": "abc_20261116", "recurringEventId": "abc",
+             "attendees": [{"email": "me@example.com", "self": true}]},
+            {"id": "abc", "attendees": [
+                {"email": "alice@example.com", "organizer": true},
+                {"email": "Me@Example.com", "self": true, "responseStatus": "needsAction"}]}
+        ]}"#;
+        assert_eq!(
+            parse_meeting_copy(listed).unwrap(),
+            Some(MeetingCopy {
+                event_id: "abc".into(),
+                self_email: Some("Me@Example.com".into()),
+            })
+        );
+        assert_eq!(parse_meeting_copy(r#"{"items": []}"#).unwrap(), None);
+        assert_eq!(
+            answer_patch("Me@Example.com", "TENTATIVE", Some(" Maybe late ")).unwrap(),
+            serde_json::json!({
+                "attendeesOmitted": true,
+                "attendees": [{
+                    "email": "Me@Example.com",
+                    "responseStatus": "tentative",
+                    "comment": "Maybe late"
+                }]
+            })
+        );
+        assert!(answer_patch("me@example.com", "NEEDS-ACTION", None).is_err());
+    }
 
     #[test]
     fn parses_primary_birthdays_and_hidden_calendars() {

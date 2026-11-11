@@ -23,7 +23,28 @@ use super::route::PendingPush;
 use super::sync::{Synced, sync_connection};
 
 const COLLECTION_REFRESH_SECS: i64 = 6 * 60 * 60;
+const SCHEDULING_REFRESH_MS: i64 = 24 * 60 * 60 * 1_000;
 const MAX_ATTEMPTS: i64 = 8;
+
+/// The kind of a queued answer to an invitation.
+pub const ANSWER_KIND: &str = "cal_answer";
+
+/// An answer to an invitation, queued by [`crate::Core::rsvp_event`] for the
+/// calendar server that holds the event: Exchange, Google, or a CalDAV
+/// server.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedAnswer {
+    pub event_id: i64,
+    /// ACCEPTED, TENTATIVE or DECLINED.
+    pub partstat: String,
+    /// The invited address answering.
+    pub attendee: String,
+    #[serde(default)]
+    pub comment: Option<String>,
+    /// Whether the organizer is told, where the server lets that be chosen.
+    pub notify: bool,
+}
 
 #[derive(Clone)]
 pub struct CalTaskHandle {
@@ -235,22 +256,30 @@ impl Cycle<'_> {
             return Ok(());
         }
 
-        // Claim due cal_% actions up front; the routed pushes below are what
-        // actually perform them (actions are nudges carrying intent).
+        // Claim due cal_% actions up front. Answers to invitations are carried
+        // out on their own below; the rest are nudges carrying intent, which
+        // the routed pushes perform.
         let now = now_ms();
-        let claimed: Vec<(i64, i64)> = self
+        let claimed: Vec<repo::actions::PendingAction> = self
             .db
             .write(move |conn| {
                 let due = repo::actions::due_calendar(conn, account_id, now, 50)?;
                 let mut out = Vec::new();
                 for a in due {
                     if repo::actions::try_claim(conn, a.id)? {
-                        out.push((a.id, a.attempts));
+                        out.push(a);
                     }
                 }
                 Ok(out)
             })
             .await?;
+        let (answers, claimed): (Vec<_>, Vec<_>) = claimed
+            .into_iter()
+            .partition(|action| action.kind == ANSWER_KIND);
+        let claimed: Vec<(i64, i64)> = claimed
+            .into_iter()
+            .map(|action| (action.id, action.attempts))
+            .collect();
 
         let self_email = self
             .mail_db
@@ -273,6 +302,42 @@ impl Cycle<'_> {
                     states_changed |= self.record(&cfg, Some(error_text(&error))).await?;
                 }
             }
+        }
+
+        for (cfg, session) in &sessions {
+            self.refresh_scheduling(cfg, session).await;
+        }
+        // Answers go before the pull, which then brings the answered copies.
+        let mut answered = Vec::new();
+        for action in &answers {
+            let outcome = self.answer(&sessions, action).await;
+            if let Err(error) = &outcome {
+                tracing::warn!("answer {} to an invitation failed: {error}", action.id);
+            }
+            answered.push((
+                action.id,
+                action.attempts,
+                outcome.err().map(|e| e.to_string()),
+            ));
+        }
+        if !answered.is_empty() {
+            self.db
+                .write(move |conn| {
+                    for (id, attempts, error) in &answered {
+                        match error {
+                            None => repo::actions::set_state(conn, *id, "done", None)?,
+                            Some(message) if *attempts + 1 >= MAX_ATTEMPTS => {
+                                repo::actions::set_state(conn, *id, "failed", Some(message))?
+                            }
+                            Some(message) => {
+                                let backoff = 60_000 * (1 << (*attempts).min(6));
+                                repo::actions::bump_attempt(conn, *id, now_ms() + backoff, message)?
+                            }
+                        }
+                    }
+                    Ok(())
+                })
+                .await?;
         }
 
         // One snapshot routes every pending change to exactly one connection.
@@ -358,6 +423,137 @@ impl Cycle<'_> {
                 Ok(())
             })
             .await
+    }
+
+    /// Ask a CalDAV server whether it schedules for the account, when that
+    /// is unknown or a day old ([`super::discovery::scheduling`]). Answers to
+    /// invitations in its calendars go by mail until it says so.
+    async fn refresh_scheduling(&self, cfg: &ConnectionConfig, session: &Session) {
+        let Session::Dav {
+            transport,
+            google_token: None,
+        } = session
+        else {
+            return;
+        };
+        let connection_id = cfg.id;
+        let known = self
+            .db
+            .read(move |conn| {
+                Ok((
+                    repo::caldav::scheduling(conn, connection_id)?,
+                    repo::caldav::connection_calendars(conn, connection_id)?,
+                ))
+            })
+            .await;
+        let Ok((known, calendars)) = known else {
+            return;
+        };
+        let fresh =
+            known.is_some_and(|(_, checked_at)| now_ms() - checked_at < SCHEDULING_REFRESH_MS);
+        let Some(calendar) = calendars.first().filter(|_| !fresh) else {
+            return;
+        };
+        match super::discovery::scheduling(transport, &calendar.url, cfg.principal_url.as_deref())
+            .await
+        {
+            Ok(scheduling) => {
+                let stored = self
+                    .db
+                    .write(move |conn| {
+                        repo::caldav::set_scheduling(conn, connection_id, &scheduling, now_ms())
+                    })
+                    .await;
+                if let Err(error) = stored {
+                    tracing::warn!("calendar connection {connection_id}: {error}");
+                }
+            }
+            Err(error) => tracing::debug!(
+                "calendar connection {connection_id} did not say whether it schedules: {error}"
+            ),
+        }
+    }
+
+    /// Carry out a queued answer to an invitation through the server that
+    /// holds its event. An event no longer there has nothing to answer.
+    async fn answer(
+        &self,
+        sessions: &[(ConnectionConfig, Session)],
+        action: &repo::actions::PendingAction,
+    ) -> Result<()> {
+        let answer: QueuedAnswer = serde_json::from_value(action.payload.clone())?;
+        let event_id = answer.event_id;
+        let (row, calendar) = self
+            .db
+            .read(move |conn| {
+                let row = repo::calendar::sync_row_for(conn, event_id)?;
+                let calendar = match row.as_ref().and_then(|row| row.event.calendar_id) {
+                    Some(id) => repo::caldav::get_calendar(conn, id)?,
+                    None => None,
+                };
+                Ok((row, calendar))
+            })
+            .await?;
+        let (Some(row), Some(calendar)) = (row, calendar) else {
+            return Ok(());
+        };
+        if row.deleted {
+            return Ok(());
+        }
+        let Some((_, session)) = sessions
+            .iter()
+            .find(|(cfg, _)| cfg.id == calendar.connection_id)
+        else {
+            return Err(CoreError::Other(
+                "the calendar holding the invitation did not sign in".into(),
+            ));
+        };
+        let comment = answer.comment.as_deref();
+        match session {
+            Session::Graph { token } => {
+                let meeting = row.caldav_href.as_deref().ok_or_else(|| {
+                    CoreError::Other("the meeting isn't in the Outlook calendar yet".into())
+                })?;
+                crate::graph::answer_event(token, meeting, &answer.partstat, comment, answer.notify)
+                    .await
+            }
+            Session::Dav {
+                google_token: Some(token),
+                ..
+            } => {
+                let calendar_id = super::google_calendar_id(&calendar.url)
+                    .ok_or_else(|| CoreError::Other("not a Google calendar".into()))?;
+                let copy = crate::googlecal::find_meeting(token, &calendar_id, &row.ical_uid)
+                    .await?
+                    .ok_or_else(|| {
+                        CoreError::CalDav("Google Calendar doesn't have this meeting".into())
+                    })?;
+                crate::googlecal::answer_meeting(
+                    token,
+                    &calendar_id,
+                    &copy,
+                    &answer.attendee,
+                    &answer.partstat,
+                    comment,
+                    answer.notify,
+                )
+                .await
+            }
+            Session::Dav {
+                transport,
+                google_token: None,
+            } => {
+                super::push::put_partstat(
+                    self.db,
+                    transport,
+                    &row,
+                    &calendar,
+                    &answer.attendee,
+                    &answer.partstat,
+                )
+                .await
+            }
+        }
     }
 
     /// One connection's pushes and pull. Also reports whether a Google
