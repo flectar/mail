@@ -511,8 +511,17 @@ impl RichComposeDocument {
                 std::slice::from_ref(&inserted),
             );
             let before = self.take_snapshot();
+            let marker_len = effective_text.len().saturating_sub(new_text.len());
             self.styles = styles;
             self.text = effective_text.into_owned();
+            if marker_len > 0 {
+                // The marker of a list item that Enter continues, which readers show in their
+                // usual text, as markers the toolbar adds come in.
+                let marker_end = valid_offset(&self.text, cursor);
+                self.edit_styles(marker_end - marker_len, marker_end, |style| {
+                    *style = CharacterStyle::default();
+                });
+            }
             self.auto_link_urls();
             self.normalize_alignment(start..new_end);
             self.bump_revision();
@@ -541,27 +550,7 @@ impl RichComposeDocument {
         self.selection = (to_i32(anchor), to_i32(cursor));
 
         if anchor == cursor && self.typing_override != Some(cursor) {
-            self.typing_style = if self.text[..cursor]
-                .char_indices()
-                .next_back()
-                .is_some_and(|(_, character)| character != '\n')
-            {
-                self.style_at(cursor.saturating_sub(1))
-                    .cloned()
-                    .unwrap_or_default()
-            } else if let Some(style) = self.style_at(cursor) {
-                style.clone()
-            } else {
-                // A new last line goes on in the alignment of the paragraph above it, as
-                // pressing Enter does in a word processor.
-                CharacterStyle {
-                    align: cursor
-                        .checked_sub(1)
-                        .and_then(|before| self.style_at(before))
-                        .map_or_else(Alignment::default, |style| style.align),
-                    ..CharacterStyle::default()
-                }
-            };
+            self.typing_style = self.typing_style_at(cursor);
             self.typing_override = None;
         } else if anchor != cursor {
             self.typing_override = None;
@@ -571,6 +560,33 @@ impl RichComposeDocument {
             start: to_i32(anchor),
             end: to_i32(cursor),
         }
+    }
+
+    /// The style of what's typed at `cursor`: that of the text before it, or at the start of a
+    /// line, list item or quote, of the text after it, past the marker. An empty last line goes
+    /// on in the style and alignment of the line above it, as pressing Enter does in a word
+    /// processor, but not in its link.
+    fn typing_style_at(&self, cursor: usize) -> CharacterStyle {
+        let line_start = self.text[..cursor].rfind('\n').map_or(0, |index| index + 1);
+        let line_end = self.text[cursor..]
+            .find('\n')
+            .map_or(self.text.len(), |index| cursor + index);
+        let content_start = line_start
+            + block_prefix_text(&self.text[line_start..line_end]).map_or(0, |(_, bytes)| bytes);
+        if cursor > content_start {
+            return self.style_at(cursor - 1).cloned().unwrap_or_default();
+        }
+        if let Some(style) = self.style_at(content_start) {
+            return style.clone();
+        }
+        line_start
+            .checked_sub(1)
+            .and_then(|line_end_above| self.style_at(line_end_above))
+            .map_or_else(CharacterStyle::default, |style| CharacterStyle {
+                link: None,
+                link_is_auto: false,
+                ..style.clone()
+            })
     }
 
     pub fn insert_text(&mut self, value: &str) -> ComposeSelection {
@@ -4004,6 +4020,62 @@ mod tests {
         document.format("color:#cc0000", text, 0, 2);
         document.update_selection(0, 5);
         assert_eq!(document.active_marks().color, None);
+    }
+
+    #[test]
+    fn enter_at_the_end_goes_on_in_the_text_style_but_not_its_link() {
+        let mut document = RichComposeDocument::default();
+        document.load("Big", 3, 3);
+        document.format("size:huge", "Big", 0, 3);
+        document.format("color:#cc0000", "Big", 0, 3);
+        document.update_selection(3, 3);
+        document.synchronize_key_edit("Big\n", 4, 4, "\n");
+        document.synchronize_key_edit("Big\nx", 5, 5, "x");
+        let x = document.style_at(4).unwrap();
+        assert_eq!((x.size, x.color), (TextSize::Huge, Some(0xcc0000)));
+
+        let text = "See https://example.com";
+        let mut document = RichComposeDocument::default();
+        document.load(text, text.len() as i32, text.len() as i32);
+        assert!(document.style_at(text.len() - 1).unwrap().link.is_some());
+        let entered = format!("{text}\n");
+        let end = entered.len() as i32;
+        document.synchronize_key_edit(&entered, end, end, "\n");
+        assert_eq!(document.typing_style().link, None);
+    }
+
+    #[test]
+    fn list_items_type_in_their_text_style_after_plain_markers() {
+        let text = "• Big";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let content = text.find("Big").unwrap();
+        document.format("size:huge", text, content as i32, text.len() as i32);
+        // Right after the marker, typing goes on in the item's text.
+        document.update_selection(content as i32, content as i32);
+        assert_eq!(document.active_marks().size, Some(TextSize::Huge));
+
+        // Enter continues the list. The new marker is plain, as readers show markers, and
+        // what's typed after it goes on in the item's style.
+        let end = text.len() as i32;
+        document.update_selection(end, end);
+        document.synchronize_key_edit("• Big\n", end + 1, end + 1, "\n");
+        assert_eq!(document.text(), "• Big\n• ");
+        let marker = document.text().rfind('•').unwrap();
+        assert_eq!(document.style_at(marker).unwrap().size, TextSize::Normal);
+        assert_eq!(document.active_marks().size, Some(TextSize::Huge));
+        let typed = format!("{}x", document.text());
+        let caret = typed.len() as i32;
+        document.synchronize_key_edit(&typed, caret, caret, "x");
+        assert_eq!(
+            document.style_at(typed.len() - 1).unwrap().size,
+            TextSize::Huge
+        );
+        assert_eq!(
+            document.body_html().unwrap(),
+            "<ul><li><span style=\"font-size:xx-large\">Big</span></li>\
+             <li><span style=\"font-size:xx-large\">x</span></li></ul>"
+        );
     }
 
     #[test]
