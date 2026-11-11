@@ -50,6 +50,151 @@ pub(crate) struct CharacterStyle {
     pub(crate) marks: u8,
     pub(crate) link: Option<Arc<str>>,
     link_is_auto: bool,
+    /// The text color, or none for the reader's own.
+    pub(crate) color: Option<Rgb>,
+    /// The color behind the text.
+    pub(crate) highlight: Option<Rgb>,
+    pub(crate) size: TextSize,
+    pub(crate) family: FontFamily,
+    /// The alignment of the paragraph the character is in, which all of its characters share:
+    /// that of its first character after any list or quote marker.
+    pub(crate) align: Alignment,
+}
+
+/// A color as `0xRRGGBB`.
+pub(crate) type Rgb = u32;
+
+/// The text sizes the composer offers. Mail goes out with CSS size keywords, as other
+/// composers' `<font size>` steps do, so each reader scales them from their own normal size.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TextSize {
+    Small,
+    #[default]
+    Normal,
+    Large,
+    Huge,
+}
+
+impl TextSize {
+    pub(crate) const ALL: [Self; 4] = [Self::Small, Self::Normal, Self::Large, Self::Huge];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Normal => "normal",
+            Self::Large => "large",
+            Self::Huge => "huge",
+        }
+    }
+
+    fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|size| size.name() == name)
+    }
+
+    /// The CSS keyword sent for it: 13, 24 and 32 pixels against the usual 16, as `<font
+    /// size>` 2, 5 and 6 are.
+    fn css(self) -> Option<&'static str> {
+        match self {
+            Self::Small => Some("small"),
+            Self::Normal => None,
+            Self::Large => Some("x-large"),
+            Self::Huge => Some("xx-large"),
+        }
+    }
+
+    fn from_css(value: &str) -> Option<Self> {
+        [Self::Small, Self::Large, Self::Huge]
+            .into_iter()
+            .find(|size| size.css() == Some(value))
+    }
+
+    /// Its size against normal text, as the keywords it's sent with are.
+    pub(crate) fn scale(self) -> f32 {
+        match self {
+            Self::Small => 13.0 / 16.0,
+            Self::Normal => 1.0,
+            Self::Large => 1.5,
+            Self::Huge => 2.0,
+        }
+    }
+}
+
+/// The font families the composer offers: the reader's usual sans-serif font, or a serif or
+/// monospace one, sent with the font lists Thunderbird uses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum FontFamily {
+    #[default]
+    SansSerif,
+    Serif,
+    Monospace,
+}
+
+impl FontFamily {
+    pub(crate) const ALL: [Self; 3] = [Self::SansSerif, Self::Serif, Self::Monospace];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::SansSerif => "sans-serif",
+            Self::Serif => "serif",
+            Self::Monospace => "monospace",
+        }
+    }
+
+    fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|family| family.name() == name)
+    }
+
+    fn css(self) -> Option<&'static str> {
+        match self {
+            Self::SansSerif => None,
+            Self::Serif => Some("Times New Roman, Times, serif"),
+            Self::Monospace => Some("Courier New, Courier, monospace"),
+        }
+    }
+
+    fn from_css(value: &str) -> Option<Self> {
+        [Self::Serif, Self::Monospace]
+            .into_iter()
+            .find(|family| family.css() == Some(value))
+    }
+}
+
+/// How a paragraph lines up.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Alignment {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+impl Alignment {
+    pub(crate) const ALL: [Self; 3] = [Self::Left, Self::Center, Self::Right];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Center => "center",
+            Self::Right => "right",
+        }
+    }
+
+    fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|align| align.name() == name)
+    }
+}
+
+/// `#rrggbb` as a color.
+fn parse_rgb(value: &str) -> Option<Rgb> {
+    let hex = value.strip_prefix('#')?;
+    (hex.len() == 6 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| Rgb::from_str_radix(hex, 16).ok())
+        .flatten()
+}
+
+/// A color as CSS writes it in mail: `#rrggbb`, which every reader takes.
+pub(crate) fn css_rgb(color: Rgb) -> String {
+    format!("#{color:06x}")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,6 +297,15 @@ pub struct ActiveMarks {
     pub underline: bool,
     pub strike: bool,
     pub code: bool,
+    /// The text color all of the selection shares, which may be none, or nothing when it
+    /// mixes several.
+    pub(crate) color: Option<Option<Rgb>>,
+    pub(crate) highlight: Option<Option<Rgb>>,
+    /// The size all of the selection has, or none when it has several.
+    pub(crate) size: Option<TextSize>,
+    pub(crate) family: Option<FontFamily>,
+    /// The alignment of the paragraph the selection starts in.
+    pub(crate) align: Alignment,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -360,6 +514,7 @@ impl RichComposeDocument {
             self.styles = styles;
             self.text = effective_text.into_owned();
             self.auto_link_urls();
+            self.normalize_alignment(start..new_end);
             self.bump_revision();
             let selection = self.update_selection_internal(anchor, cursor, false);
             self.commit_edit_with_key(before, key_text);
@@ -394,8 +549,18 @@ impl RichComposeDocument {
                 self.style_at(cursor.saturating_sub(1))
                     .cloned()
                     .unwrap_or_default()
+            } else if let Some(style) = self.style_at(cursor) {
+                style.clone()
             } else {
-                self.style_at(cursor).cloned().unwrap_or_default()
+                // A new last line goes on in the alignment of the paragraph above it, as
+                // pressing Enter does in a word processor.
+                CharacterStyle {
+                    align: cursor
+                        .checked_sub(1)
+                        .and_then(|before| self.style_at(before))
+                        .map_or_else(Alignment::default, |style| style.align),
+                    ..CharacterStyle::default()
+                }
             };
             self.typing_override = None;
         } else if anchor != cursor {
@@ -431,6 +596,7 @@ impl RichComposeDocument {
         self.styles = styles;
         self.text = text;
         self.auto_link_urls();
+        self.normalize_alignment(start..start + value.len());
         self.bump_revision();
         let caret = start.saturating_add(value.len());
         let selection = self.update_selection(to_i32(caret), to_i32(caret));
@@ -484,6 +650,7 @@ impl RichComposeDocument {
         self.styles = styles;
         self.text = replaced;
         self.auto_link_urls();
+        self.normalize_alignment(range.start..range.start + text.len());
         self.bump_revision();
         let selection = self.update_selection(to_i32(caret), to_i32(caret));
         self.commit_edit(before);
@@ -508,16 +675,51 @@ impl RichComposeDocument {
         let cursor = valid_offset(&self.text, cursor);
         let (start, end) = ordered(anchor, cursor);
 
-        match kind {
-            "bold" => self.toggle_mark(BOLD, start, end),
-            "italic" => self.toggle_mark(ITALIC, start, end),
-            "underline" => self.toggle_mark(UNDERLINE, start, end),
-            "strike" => self.toggle_mark(STRIKE, start, end),
-            "code" => self.toggle_mark(CODE, start, end),
-            "bullet" => return self.toggle_block(BlockKind::Bullet, start, end),
-            "number" => return self.toggle_block(BlockKind::Number, start, end),
-            "quote" => return self.toggle_block(BlockKind::Quote, start, end),
-            _ => {}
+        match kind.split_once(':') {
+            Some(("color", value)) => {
+                let color = parse_rgb(value);
+                self.set_text_style(start, end, |style| style.color = color);
+            }
+            Some(("highlight", value)) => {
+                let highlight = parse_rgb(value);
+                self.set_text_style(start, end, |style| style.highlight = highlight);
+            }
+            Some(("size", value)) => {
+                if let Some(size) = TextSize::from_name(value) {
+                    self.set_text_style(start, end, |style| style.size = size);
+                }
+            }
+            Some(("family", value)) => {
+                if let Some(family) = FontFamily::from_name(value) {
+                    self.set_text_style(start, end, |style| style.family = family);
+                }
+            }
+            Some(("align", value)) => {
+                if let Some(align) = Alignment::from_name(value) {
+                    self.set_alignment(start, end, align);
+                }
+            }
+            _ => match kind {
+                "bold" => self.toggle_mark(BOLD, start, end),
+                "italic" => self.toggle_mark(ITALIC, start, end),
+                "underline" => self.toggle_mark(UNDERLINE, start, end),
+                "strike" => self.toggle_mark(STRIKE, start, end),
+                "code" => self.toggle_mark(CODE, start, end),
+                // Plain text again, as Remove formatting leaves it in other composers: links and
+                // paragraphs' alignment stay.
+                "clear" => self.set_text_style(start, end, |style| {
+                    *style = CharacterStyle {
+                        link: style.link.clone(),
+                        link_is_auto: style.link_is_auto,
+                        align: style.align,
+                        ..CharacterStyle::default()
+                    };
+                }),
+                "bullet" => return self.toggle_block(BlockKind::Bullet, start, end),
+                "number" => return self.toggle_block(BlockKind::Number, start, end),
+                "quote" => return self.toggle_block(BlockKind::Quote, start, end),
+                _ => {}
+            },
         }
 
         self.selection = (to_i32(start), to_i32(end));
@@ -577,11 +779,11 @@ impl RichComposeDocument {
         let anchor = valid_offset(&self.text, self.selection.0);
         let cursor = valid_offset(&self.text, self.selection.1);
         let (start, end) = ordered(anchor, cursor);
-        let marks = if start == end {
-            self.typing_style.marks
+        let typing = std::slice::from_ref(&self.typing_style);
+        let selected: Vec<&CharacterStyle> = if start == end {
+            typing.iter().collect()
         } else {
-            let mut relevant = self
-                .styles
+            self.styles
                 .iter()
                 .filter(|run| run.range.start < end && run.range.end > start)
                 .filter(|run| {
@@ -589,19 +791,53 @@ impl RichComposeDocument {
                         .chars()
                         .any(|character| !character.is_whitespace())
                 })
-                .map(|run| run.style.marks);
-            relevant
-                .next()
-                .map(|first| relevant.fold(first, |common, value| common & value))
-                .unwrap_or_default()
+                .map(|run| &run.style)
+                .collect()
         };
+        let marks = selected
+            .iter()
+            .map(|style| style.marks)
+            .reduce(|common, value| common & value)
+            .unwrap_or_default();
+        /// The value every selected character shares, if they share one.
+        fn shared<T: PartialEq + Copy>(
+            styles: &[&CharacterStyle],
+            value: impl Fn(&CharacterStyle) -> T,
+        ) -> Option<T> {
+            let first = value(styles.first()?);
+            styles
+                .iter()
+                .all(|style| value(style) == first)
+                .then_some(first)
+        }
+        let line_start = self.text[..start].rfind('\n').map_or(0, |index| index + 1);
         ActiveMarks {
             bold: marks & BOLD != 0,
             italic: marks & ITALIC != 0,
             underline: marks & UNDERLINE != 0,
             strike: marks & STRIKE != 0,
             code: marks & CODE != 0,
+            color: shared(&selected, |style| style.color),
+            highlight: shared(&selected, |style| style.highlight),
+            size: shared(&selected, |style| style.size),
+            family: shared(&selected, |style| style.family),
+            align: if start == end && line_start == self.text.len() {
+                self.typing_style.align
+            } else {
+                self.paragraph_alignment(line_start)
+            },
         }
+    }
+
+    /// The alignment of the paragraph starting at `line_start`: that of its first character
+    /// after any list or quote marker, or of its line end when it holds nothing else.
+    pub(crate) fn paragraph_alignment(&self, line_start: usize) -> Alignment {
+        let line = &self.text[line_start..];
+        let line = &line[..line.find('\n').unwrap_or(line.len())];
+        let marker = block_prefix_text(line).map_or(0, |(_, bytes)| bytes);
+        self.style_at(line_start + marker)
+            .or_else(|| self.style_at(line_start))
+            .map_or_else(Alignment::default, |style| style.align)
     }
 
     pub fn active_link(&self) -> Option<&str> {
@@ -692,6 +928,7 @@ impl RichComposeDocument {
             // Text pasted from Windows ends its lines with CRLF.
             let end = line_start + line.strip_suffix('\r').unwrap_or(line).len();
             let content = (line_start + skip).min(end)..end;
+            let align = self.paragraph_alignment(line_start);
             match block.map(|(block, _)| block) {
                 Some(LineBlock::Bullet) => {
                     if open != Some(OpenHtmlBlock::Bullets) {
@@ -699,7 +936,7 @@ impl RichComposeDocument {
                         html.push_str("<ul>");
                         open = Some(OpenHtmlBlock::Bullets);
                     }
-                    html.push_str("<li>");
+                    append_list_item_start(&mut html, align);
                     append_inline_html(&mut html, &self.text, &self.styles, content);
                     html.push_str("</li>");
                 }
@@ -718,7 +955,7 @@ impl RichComposeDocument {
                         }
                     }
                     open = Some(OpenHtmlBlock::Numbers { next: number + 1 });
-                    html.push_str("<li>");
+                    append_list_item_start(&mut html, align);
                     append_inline_html(&mut html, &self.text, &self.styles, content);
                     html.push_str("</li>");
                 }
@@ -728,11 +965,11 @@ impl RichComposeDocument {
                         html.push_str("<blockquote>");
                         open = Some(OpenHtmlBlock::Quote);
                     }
-                    append_line_html(&mut html, &self.text, &self.styles, content);
+                    append_line_html(&mut html, &self.text, &self.styles, content, align);
                 }
                 None => {
                     close_html_block(&mut html, &mut open);
-                    append_line_html(&mut html, &self.text, &self.styles, content);
+                    append_line_html(&mut html, &self.text, &self.styles, content, align);
                 }
             }
             line_start += line.len() + 1;
@@ -773,6 +1010,7 @@ impl RichComposeDocument {
             ..Self::default()
         };
         self.auto_link_urls();
+        self.normalize_alignment(0..self.text.len());
         let end = to_i32(self.text.len());
         self.update_selection(end, end)
     }
@@ -806,6 +1044,86 @@ impl RichComposeDocument {
         });
         self.bump_revision();
         self.commit_style_edit(start_byte, before);
+    }
+
+    /// Changes the style of the text from `start_byte` to `end_byte` as one undoable edit, or
+    /// of what's typed next at a caret.
+    fn set_text_style(
+        &mut self,
+        start_byte: usize,
+        end_byte: usize,
+        mut edit: impl FnMut(&mut CharacterStyle),
+    ) {
+        if start_byte == end_byte {
+            edit(&mut self.typing_style);
+            self.typing_override = Some(start_byte);
+            self.bump_revision();
+            return;
+        }
+        let before = self.begin_style_edit(start_byte..end_byte);
+        self.typing_override = None;
+        self.edit_styles(start_byte, end_byte, edit);
+        self.bump_revision();
+        self.commit_style_edit(start_byte, before);
+    }
+
+    /// Aligns every paragraph from `start_byte` to `end_byte`, or the caret's, as one undoable
+    /// edit. An empty last line has nothing to hold it, so what's typed there takes it.
+    fn set_alignment(&mut self, start_byte: usize, end_byte: usize, align: Alignment) {
+        let first = self.text[..start_byte]
+            .rfind('\n')
+            .map_or(0, |index| index + 1);
+        // A selection that ends where a paragraph starts leaves that paragraph alone.
+        let end_probe = if end_byte > start_byte && self.text[..end_byte].ends_with('\n') {
+            end_byte - 1
+        } else {
+            end_byte
+        };
+        let last = self.text[end_probe..]
+            .find('\n')
+            .map_or(self.text.len(), |index| end_probe + index + 1);
+        self.typing_style.align = align;
+        if first == last {
+            self.typing_override = Some(start_byte);
+            self.bump_revision();
+            return;
+        }
+        let before = self.begin_style_edit(first..last);
+        self.edit_styles(first, last, |style| style.align = align);
+        self.bump_revision();
+        self.commit_style_edit(first, before);
+    }
+
+    /// Gives every character of the paragraphs from `range.start` to `range.end` its
+    /// paragraph's alignment, after an edit that may have joined or split them.
+    fn normalize_alignment(&mut self, range: Range<usize>) {
+        let mut line_start = self.text[..range.start.min(self.text.len())]
+            .rfind('\n')
+            .map_or(0, |index| index + 1);
+        let mut changes = Vec::new();
+        while line_start < self.text.len() {
+            let line_end = self.text[line_start..]
+                .find('\n')
+                .map_or(self.text.len(), |index| line_start + index + 1);
+            let align = self.paragraph_alignment(line_start);
+            let first = self
+                .styles
+                .partition_point(|run| run.range.end <= line_start);
+            if self.styles[first..]
+                .iter()
+                .take_while(|run| run.range.start < line_end)
+                .any(|run| run.style.align != align)
+            {
+                changes.push((line_start..line_end, align));
+            }
+            if line_end > range.end {
+                break;
+            }
+            line_start = line_end;
+        }
+        for (line, align) in changes {
+            self.edit_styles(line.start, line.end, |style| style.align = align);
+        }
     }
 
     fn toggle_block(
@@ -857,9 +1175,13 @@ impl RichComposeDocument {
         let mut end = 0;
         for (index, line) in before.text.split('\n').enumerate() {
             if index > 0 {
+                // A line end keeps its style, which holds an empty paragraph's alignment.
                 let byte = text.len();
                 text.push('\n');
-                push_style_run(&mut styles, byte..text.len(), CharacterStyle::default());
+                let style = style_at_runs(&before.styles, source_start - 1)
+                    .cloned()
+                    .unwrap_or_default();
+                push_style_run(&mut styles, byte..text.len(), style);
             }
             if index == start_line {
                 start = text.len();
@@ -898,6 +1220,8 @@ impl RichComposeDocument {
         }
         self.text = text;
         self.styles = styles;
+        // Markers come in plain, and take their paragraphs' alignment.
+        self.normalize_alignment(start..end);
         self.bump_revision();
         self.selection = (to_i32(start), to_i32(end));
         self.commit_edit(before);
@@ -1534,19 +1858,69 @@ fn close_html_block(html: &mut String, open: &mut Option<OpenHtmlBlock>) {
     }
 }
 
+/// A centered or right-aligned paragraph is written with both the `align` attribute and
+/// `text-align`, as Outlook writes it: readers that drop one keep the other.
 fn append_line_html(
     output: &mut String,
     text: &str,
     styles: &[ComposeStyleRun],
     range: Range<usize>,
+    align: Alignment,
 ) {
-    output.push_str("<div>");
+    match align {
+        Alignment::Left => output.push_str("<div>"),
+        align => {
+            output.push_str("<div align=\"");
+            output.push_str(align.name());
+            output.push_str("\" style=\"text-align:");
+            output.push_str(align.name());
+            output.push_str("\">");
+        }
+    }
     if range.is_empty() {
         output.push_str("<br>");
     } else {
         append_inline_html(output, text, styles, range);
     }
     output.push_str("</div>");
+}
+
+fn append_list_item_start(output: &mut String, align: Alignment) {
+    match align {
+        Alignment::Left => output.push_str("<li>"),
+        align => {
+            output.push_str("<li style=\"text-align:");
+            output.push_str(align.name());
+            output.push_str("\">");
+        }
+    }
+}
+
+/// The CSS for a run's color, highlight, size and font, if it has any: what goes in the
+/// `style` of the span around it. Colors are `#rrggbb`, which every reader takes.
+fn run_css(style: &CharacterStyle) -> Option<String> {
+    let mut css = String::new();
+    let mut declare = |property: &str, value: &str| {
+        if !css.is_empty() {
+            css.push(';');
+        }
+        css.push_str(property);
+        css.push(':');
+        css.push_str(value);
+    };
+    if let Some(color) = style.color {
+        declare("color", &css_rgb(color));
+    }
+    if let Some(highlight) = style.highlight {
+        declare("background-color", &css_rgb(highlight));
+    }
+    if let Some(size) = style.size.css() {
+        declare("font-size", size);
+    }
+    if let Some(family) = style.family.css() {
+        declare("font-family", family);
+    }
+    (!css.is_empty()).then_some(css)
 }
 
 fn append_inline_html(
@@ -1594,6 +1968,12 @@ fn append_html_run(
         }
         output.push_str("\">");
     }
+    let css = run_css(style);
+    if let Some(css) = &css {
+        output.push_str("<span style=\"");
+        output.push_str(css);
+        output.push_str("\">");
+    }
     let tags = [
         (BOLD, "strong"),
         (ITALIC, "em"),
@@ -1625,6 +2005,9 @@ fn append_html_run(
             output.push('>');
         }
     }
+    if css.is_some() {
+        output.push_str("</span>");
+    }
     if style.link.is_some() {
         output.push_str("</a>");
     }
@@ -1646,7 +2029,8 @@ enum HtmlToken {
         name: String,
         href: Option<String>,
         start: Option<String>,
-        styled: bool,
+        style: Option<String>,
+        align: Option<String>,
     },
     End(String),
     Text(String),
@@ -1673,7 +2057,8 @@ impl TokenSink for HtmlTokenSink {
                     name: tag.name.as_str().to_owned(),
                     href: attribute("href"),
                     start: attribute("start"),
-                    styled: attribute("style").is_some(),
+                    style: attribute("style"),
+                    align: attribute("align"),
                 }
             }
             Token::CharacterTokens(text) => HtmlToken::Text(text.to_string()),
@@ -1712,6 +2097,8 @@ struct HtmlImport {
     styles: Vec<ComposeStyleRun>,
     marks: [u32; 5],
     links: Vec<Option<Arc<str>>>,
+    /// The styles of the spans the text is in, innermost last: none for a span without one.
+    spans: Vec<Option<SpanStyle>>,
     list: Option<ImportedList>,
     in_item: bool,
     in_quote: bool,
@@ -1719,6 +2106,57 @@ struct HtmlImport {
     line_open: bool,
     line_has_text: bool,
     pending_space: Option<CharacterStyle>,
+    /// The alignment of the paragraph being read, and of each line read so far.
+    align: Alignment,
+    line_aligns: Vec<Alignment>,
+}
+
+/// The color, highlight, size and font a span gives the text in it.
+#[derive(Clone, Copy, Default)]
+struct SpanStyle {
+    color: Option<Rgb>,
+    highlight: Option<Rgb>,
+    size: Option<TextSize>,
+    family: Option<FontFamily>,
+}
+
+impl SpanStyle {
+    /// The style `run_css` writes, or `None` for any other CSS.
+    fn from_saved_css(css: &str) -> Option<Self> {
+        let mut span = Self::default();
+        for declaration in css.split(';').filter(|part| !part.trim().is_empty()) {
+            let (property, value) = declaration.split_once(':')?;
+            let value = value.trim();
+            match property.trim() {
+                "color" => span.color = Some(parse_rgb(value)?),
+                "background-color" => span.highlight = Some(parse_rgb(value)?),
+                "font-size" => span.size = Some(TextSize::from_css(value)?),
+                "font-family" => span.family = Some(FontFamily::from_css(value)?),
+                _ => return None,
+            }
+        }
+        Some(span)
+    }
+}
+
+/// The alignment `append_line_html` writes for a paragraph, from its `align` attribute and
+/// `style`, or `None` for anything else.
+fn saved_alignment(align: Option<&str>, style: Option<&str>) -> Option<Alignment> {
+    let from_style = match style.map(str::trim) {
+        None => None,
+        Some(style) => {
+            let value = style.strip_prefix("text-align:")?.trim();
+            Some(Alignment::from_name(value).filter(|align| *align != Alignment::Left)?)
+        }
+    };
+    let from_attribute = match align {
+        None => None,
+        Some(value) => Some(Alignment::from_name(value.trim())?),
+    };
+    match (from_attribute, from_style) {
+        (Some(attribute), Some(style)) if attribute != style => None,
+        (attribute, style) => Some(style.or(attribute).unwrap_or_default()),
+    }
 }
 
 impl HtmlImport {
@@ -1728,10 +2166,22 @@ impl HtmlImport {
             .zip(self.marks)
             .filter(|(_, depth)| *depth > 0)
             .fold(0, |marks, (mark, _)| marks | mark);
+        let span = |value: fn(&SpanStyle) -> bool| {
+            self.spans.iter().rev().flatten().find(|span| value(span))
+        };
         CharacterStyle {
             marks,
             link: self.links.last().cloned().flatten(),
             link_is_auto: false,
+            color: span(|span| span.color.is_some()).and_then(|span| span.color),
+            highlight: span(|span| span.highlight.is_some()).and_then(|span| span.highlight),
+            size: span(|span| span.size.is_some())
+                .and_then(|span| span.size)
+                .unwrap_or_default(),
+            family: span(|span| span.family.is_some())
+                .and_then(|span| span.family)
+                .unwrap_or_default(),
+            align: Alignment::default(),
         }
     }
 
@@ -1746,6 +2196,7 @@ impl HtmlImport {
             self.push("\n", CharacterStyle::default());
         }
         self.lines += 1;
+        self.line_aligns.push(self.align);
         self.line_open = true;
         self.line_has_text = false;
         self.pending_space = None;
@@ -1789,12 +2240,33 @@ impl HtmlImport {
     fn token(&mut self, token: HtmlToken) -> Option<()> {
         match token {
             HtmlToken::Text(text) => self.characters(&text),
-            HtmlToken::Start { styled: true, .. } => return None,
             HtmlToken::Start {
-                name, href, start, ..
+                name, style, align, ..
+            } if (style.is_some() || align.is_some())
+                && !matches!(name.as_str(), "span" | "div" | "li") =>
+            {
+                return None;
+            }
+            HtmlToken::Start {
+                name,
+                href,
+                start,
+                style,
+                align,
             } => match name.as_str() {
-                "html" | "head" | "body" | "meta" | "span" => {}
-                "div" if !self.in_item => self.end_line(),
+                "html" | "head" | "body" | "meta" => {}
+                "span" => {
+                    let span = match style {
+                        Some(css) => Some(SpanStyle::from_saved_css(&css)?),
+                        None => None,
+                    };
+                    self.spans.push(span);
+                }
+                "div" if !self.in_item => {
+                    self.end_line();
+                    self.align = saved_alignment(align.as_deref(), style.as_deref())?;
+                }
+                "div" if style.is_some() || align.is_some() => return None,
                 "br" if !self.in_item => {
                     if !self.line_open {
                         self.start_line();
@@ -1812,7 +2284,11 @@ impl HtmlImport {
                 }
                 "li" => {
                     let list = self.list?;
+                    if align.is_some() {
+                        return None;
+                    }
                     self.end_line();
+                    self.align = saved_alignment(None, style.as_deref())?;
                     self.start_line();
                     if list.ordered {
                         self.push(&format!("{}. ", list.next), CharacterStyle::default());
@@ -1844,11 +2320,18 @@ impl HtmlImport {
                 tag => self.marks[imported_mark(tag)?] += 1,
             },
             HtmlToken::End(name) => match name.as_str() {
-                "html" | "head" | "body" | "meta" | "span" | "br" => {}
-                "div" => self.end_line(),
+                "html" | "head" | "body" | "meta" | "br" => {}
+                "span" => {
+                    self.spans.pop();
+                }
+                "div" => {
+                    self.end_line();
+                    self.align = Alignment::default();
+                }
                 "li" => {
                     self.in_item = false;
                     self.end_line();
+                    self.align = Alignment::default();
                 }
                 "ul" | "ol" => {
                     self.list = None;
@@ -1875,6 +2358,31 @@ impl HtmlImport {
         if self.lines == 0 {
             return None;
         }
+        // Each line, with the line end after it, takes its paragraph's alignment.
+        let mut line_start = 0;
+        for align in std::mem::take(&mut self.line_aligns) {
+            let line_end = self.text[line_start..]
+                .find('\n')
+                .map_or(self.text.len(), |index| line_start + index + 1);
+            if align != Alignment::default() {
+                split_style_run_at(&mut self.styles, line_start);
+                split_style_run_at(&mut self.styles, line_end);
+                for run in &mut self.styles {
+                    if run.range.start >= line_start && run.range.end <= line_end {
+                        run.style.align = align;
+                    }
+                }
+            }
+            line_start = line_end;
+        }
+        self.styles.dedup_by(|next, previous| {
+            if previous.range.end == next.range.start && previous.style == next.style {
+                previous.range.end = next.range.end;
+                true
+            } else {
+                false
+            }
+        });
         // A link written over its own address was found by `auto_link_urls`
         // where it would link that address again; anywhere else the user
         // set it by hand.
@@ -2632,7 +3140,7 @@ mod tests {
                 style: CharacterStyle {
                     marks: BOLD,
                     link: Some(link.clone()),
-                    link_is_auto: false,
+                    ..CharacterStyle::default()
                 },
             },
             ComposeStyleRun {
@@ -2640,7 +3148,7 @@ mod tests {
                 style: CharacterStyle {
                     marks: ITALIC,
                     link: Some(link.clone()),
-                    link_is_auto: false,
+                    ..CharacterStyle::default()
                 },
             },
         ];
@@ -3337,5 +3845,197 @@ mod tests {
         assert_ne!(bold.style.marks & BOLD, 0);
         document.history("undo");
         assert_eq!(document.text(), "We recieve it");
+    }
+
+    #[test]
+    fn colors_sizes_and_fonts_go_out_as_spans_and_reopen() {
+        let text = "Red big serif highlighted plain";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let at = |word: &str| {
+            let start = text.find(word).unwrap();
+            (start as i32, (start + word.len()) as i32)
+        };
+        let (start, end) = at("Red");
+        document.format("color:#d93025", text, start, end);
+        let (start, end) = at("big");
+        document.format("size:huge", text, start, end);
+        let (start, end) = at("serif");
+        document.format("family:serif", text, start, end);
+        let (start, end) = at("highlighted");
+        document.format("highlight:#fff475", text, start, end);
+        document.format("bold", text, start, end);
+        let html = document.body_html().unwrap();
+        assert_eq!(
+            html,
+            "<div><span style=\"color:#d93025\">Red</span> \
+             <span style=\"font-size:xx-large\">big</span> \
+             <span style=\"font-family:Times New Roman, Times, serif\">serif</span> \
+             <span style=\"background-color:#fff475\"><strong>highlighted</strong></span> \
+             plain</div>"
+        );
+        let reopened = reopened(&document);
+        assert_eq!(reopened.styles, document.styles);
+        assert_eq!(reopened.body_html().unwrap(), html);
+    }
+
+    #[test]
+    fn a_paragraph_keeps_its_alignment_through_typing_and_reopening() {
+        let mut document = RichComposeDocument::default();
+        document.load("Title", 5, 5);
+        document.format("align:center", "Title", 5, 5);
+        assert_eq!(document.active_marks().align, Alignment::Center);
+        // Enter at the end goes on centered, as in a word processor, and so does what's
+        // typed there.
+        document.synchronize_key_edit("Title\n", 6, 6, "\n");
+        assert_eq!(document.active_marks().align, Alignment::Center);
+        document.synchronize_key_edit("Title\nSub", 9, 9, "");
+        let centered = "<div align=\"center\" style=\"text-align:center\">";
+        assert_eq!(
+            document.body_html().unwrap(),
+            format!("{centered}Title</div>{centered}Sub</div>")
+        );
+        let reopened = reopened(&document);
+        assert_eq!(reopened.paragraph_alignment(6), Alignment::Center);
+        assert_eq!(reopened.body_html(), document.body_html());
+
+        // Undo takes the alignment back with the rest of the edit.
+        document.format("align:right", "Title\nSub", 0, 0);
+        assert_eq!(document.paragraph_alignment(0), Alignment::Right);
+        document.history("undo").unwrap();
+        assert_eq!(document.paragraph_alignment(0), Alignment::Center);
+    }
+
+    #[test]
+    fn joined_paragraphs_take_the_first_ones_alignment() {
+        let mut document = RichComposeDocument::default();
+        document.load("Left\nCentered", 0, 0);
+        document.format("align:center", "Left\nCentered", 6, 6);
+        assert_eq!(document.paragraph_alignment(5), Alignment::Center);
+        assert_eq!(document.paragraph_alignment(0), Alignment::Left);
+        // Backspace at the start of the second paragraph joins it to the first.
+        document.synchronize_key_edit("LeftCentered", 4, 4, "");
+        assert!(
+            document
+                .styles
+                .iter()
+                .all(|run| run.style.align == Alignment::Left)
+        );
+        assert_eq!(
+            document.body_html().as_deref(),
+            Some("<div>LeftCentered</div>")
+        );
+        assert_style_coverage(&document);
+    }
+
+    #[test]
+    fn lists_keep_their_paragraphs_alignment() {
+        let text = "One\nTwo";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        document.format("align:right", text, 0, text.len() as i32);
+        document.format("bullet", text, 0, text.len() as i32);
+        assert_eq!(document.text(), "• One\n• Two");
+        assert_eq!(
+            document.body_html().as_deref(),
+            Some(
+                "<ul><li style=\"text-align:right\">One</li>\
+                 <li style=\"text-align:right\">Two</li></ul>"
+            )
+        );
+        let reopened = reopened(&document);
+        assert_eq!(reopened.body_html(), document.body_html());
+        assert_style_coverage(&document);
+    }
+
+    #[test]
+    fn removing_formatting_keeps_links_and_alignment() {
+        let text = "See https://example.org now";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let all = text.len() as i32;
+        for kind in [
+            "bold",
+            "color:#d93025",
+            "highlight:#fff475",
+            "size:large",
+            "family:monospace",
+            "align:center",
+        ] {
+            document.format(kind, text, 0, all);
+        }
+        document.format("clear", text, 0, all);
+        assert_eq!(
+            document.body_html().as_deref(),
+            Some(
+                "<div align=\"center\" style=\"text-align:center\">See \
+                 <a href=\"https://example.org\">https://example.org</a> now</div>"
+            )
+        );
+        document.history("undo").unwrap();
+        assert!(
+            document
+                .body_html()
+                .unwrap()
+                .contains("font-family:Courier New")
+        );
+    }
+
+    #[test]
+    fn the_toolbar_shows_what_the_whole_selection_shares() {
+        let text = "ab cd";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        document.format("color:#1a73e8", text, 0, 5);
+        document.format("size:large", text, 0, 2);
+        document.update_selection(0, 5);
+        let active = document.active_marks();
+        assert_eq!(active.color, Some(Some(0x1a73e8)));
+        assert_eq!(active.highlight, Some(None));
+        assert_eq!(active.size, None);
+        assert_eq!(active.family, Some(FontFamily::SansSerif));
+        document.update_selection(1, 1);
+        assert_eq!(document.active_marks().size, Some(TextSize::Large));
+        // At a caret, the next characters' style can change before they're typed.
+        document.update_selection(5, 5);
+        document.format("color:none", text, 5, 5);
+        assert_eq!(document.active_marks().color, Some(None));
+        // Text in several colors shares none.
+        document.format("color:#cc0000", text, 0, 2);
+        document.update_selection(0, 5);
+        assert_eq!(document.active_marks().color, None);
+    }
+
+    #[test]
+    fn only_the_styles_the_composer_writes_reopen() {
+        for (html, text) in [
+            ("<div><span style=\"color:red\">red</span></div>", "red"),
+            (
+                "<div><span style=\"color:rgb(1, 2, 3)\">rgb</span></div>",
+                "rgb",
+            ),
+            ("<div><span style=\"font-size:13px\">px</span></div>", "px"),
+            (
+                "<div><span style=\"font-family:Comic Sans MS\">comic</span></div>",
+                "comic",
+            ),
+            (
+                "<div style=\"text-align:justify\">justified</div>",
+                "justified",
+            ),
+            (
+                "<div align=\"center\" style=\"text-align:right\">mixed</div>",
+                "mixed",
+            ),
+            (
+                "<div><strong style=\"color:#d93025\">red</strong></div>",
+                "red",
+            ),
+        ] {
+            let mut document = RichComposeDocument::default();
+            document.load("unchanged", 0, 0);
+            assert_eq!(document.load_html(html, text), None, "{html}");
+            assert_eq!(document.text(), "unchanged");
+        }
     }
 }

@@ -481,6 +481,21 @@ pub(super) fn apply_rich_compose_state(
     ui.set_strike_active(active.strike);
     ui.set_code_active(active.code);
     ui.set_active_link_url(document.active_link().unwrap_or_default().into());
+    ui.set_active_color(color_choice(active.color));
+    ui.set_active_highlight(color_choice(active.highlight));
+    ui.set_active_size(active.size.map_or("", |size| size.name()).into());
+    ui.set_active_family(active.family.map_or("", |family| family.name()).into());
+    ui.set_active_align(active.align.name().into());
+}
+
+/// A color the selection shares as the toolbar shows it: `#rrggbb`, `none` when it has none,
+/// or nothing when it mixes several.
+fn color_choice(color: Option<Option<rich_compose::Rgb>>) -> slint::SharedString {
+    match color {
+        Some(Some(color)) => rich_compose::css_rgb(color).into(),
+        Some(None) => "none".into(),
+        None => slint::SharedString::new(),
+    }
 }
 
 pub(super) fn apply_compose_contacts(

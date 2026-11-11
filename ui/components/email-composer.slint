@@ -48,6 +48,11 @@ export component EmailComposer inherits Rectangle {
     in property <bool> strike-active: false;
     in property <bool> code-active: false;
     in property <string> active-link-url: "";
+    in property <string> active-color: "none";
+    in property <string> active-highlight: "none";
+    in property <string> active-size: "normal";
+    in property <string> active-family: "sans-serif";
+    in property <string> active-align: "left";
     in property <bool> can-pop-out: false;
     // "reply" or "forward" when the original goes below the editor.
     in property <string> quote: "";
@@ -393,11 +398,17 @@ export component EmailComposer inherits Rectangle {
             raised-color: root.raised-color;
             secondary-color: root.secondary-color;
             subtle-border-color: root.subtle-border-color;
+            body-color: root.body-color;
             bold-active: root.bold-active;
             italic-active: root.italic-active;
             underline-active: root.underline-active;
             strike-active: root.strike-active;
             code-active: root.code-active;
+            active-color: root.active-color;
+            active-highlight: root.active-highlight;
+            active-size: root.active-size;
+            active-family: root.active-family;
+            active-align: root.active-align;
             link-active: root.active-link-url != "";
             can-link: root.selection-start != root.selection-end;
             apply-format(kind) => { root.apply-format(kind); }
@@ -510,6 +521,23 @@ export component EmailComposer inherits Rectangle {
                         }
                         if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.shift && event.text.to-lowercase() == "x") {
                             root.apply-format("strike");
+                            return accept;
+                        }
+                        // Paragraph alignment and removing formatting, with the keys webmail uses.
+                        if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.shift && event.text.to-lowercase() == "l") {
+                            root.apply-format("align:left");
+                            return accept;
+                        }
+                        if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.shift && event.text.to-lowercase() == "e") {
+                            root.apply-format("align:center");
+                            return accept;
+                        }
+                        if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.shift && event.text.to-lowercase() == "r") {
+                            root.apply-format("align:right");
+                            return accept;
+                        }
+                        if ((event.modifiers.control || event.modifiers.meta) && event.text == "\\") {
+                            root.apply-format("clear");
                             return accept;
                         }
                         if ((event.modifiers.control || event.modifiers.meta) && event.text.to-lowercase() == "z") {

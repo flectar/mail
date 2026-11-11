@@ -1,11 +1,11 @@
 use crate::rich_compose::{
-    BOLD, CODE, CharacterStyle, ComposeSelection, Followed, ITALIC, RichComposeDocument, STRIKE,
-    UNDERLINE,
+    Alignment, BOLD, CODE, CharacterStyle, ComposeSelection, Followed, FontFamily, ITALIC, Rgb,
+    RichComposeDocument, STRIKE, TextSize, UNDERLINE,
 };
 use cosmic_text::{
-    Action, Attrs, AttrsList, BidiParagraphs, Buffer, BufferLine, Color as CosmicColor, Cursor,
-    Edit, Editor, Family, FontSystem, LineEnding, Metrics, Motion, PhysicalGlyph, Renderer, Scroll,
-    Selection, Shaping, Style, SwashCache, SwashContent, UnderlineStyle, Weight, Wrap,
+    Action, Align, Attrs, AttrsList, BidiParagraphs, Buffer, BufferLine, Color as CosmicColor,
+    Cursor, Edit, Editor, Family, FontSystem, LineEnding, Metrics, Motion, PhysicalGlyph, Renderer,
+    Scroll, Selection, Shaping, Style, SwashCache, SwashContent, UnderlineStyle, Weight, Wrap,
     fontdb::Source,
 };
 use slint::{Color, Image, Rgba8Pixel, SharedPixelBuffer};
@@ -67,6 +67,8 @@ struct LayoutKey {
     scale_bits: u32,
     text_color: u32,
     link_color: u32,
+    /// How an empty last line lines up, which follows the caret.
+    last_line_align: Alignment,
 }
 
 /// Retained cosmic-text layout and raster cache for the composer body.
@@ -581,14 +583,25 @@ impl CosmicComposeEditor {
         preedit_text: &str,
     ) -> bool {
         let physical_width = (logical_width.max(1.0) * scale_factor).ceil().max(1.0) as u32;
+        let text = document.text();
+        // An empty last line has no characters to hold its alignment: it lines up as typing
+        // there would, in the caret's alignment while the caret is on it.
+        let last_line_align = if valid_offset(text, selection.end) == text.len() {
+            document.typing_style().align
+        } else {
+            text.len()
+                .checked_sub(1)
+                .map_or_else(Alignment::default, |end| document.paragraph_alignment(end))
+        };
         let key = LayoutKey {
             revision: document.revision(),
             physical_width,
             scale_bits: scale_factor.to_bits(),
             text_color: style.text.as_argb_encoded(),
             link_color: style.link.as_argb_encoded(),
+            last_line_align,
         };
-        let preedit_offset = valid_offset(document.text(), selection.end);
+        let preedit_offset = valid_offset(text, selection.end);
         if self.layout_key == Some(key)
             && self.layout_preedit_text == preedit_text
             && (preedit_text.is_empty() || self.layout_preedit_offset == preedit_offset)
@@ -603,13 +616,12 @@ impl CosmicComposeEditor {
         let default_attrs = Attrs::new()
             .family(Family::Name(UI_FONT_FAMILY))
             .color(cosmic_color(style.text));
-        let mut spans = rich_spans(
-            document,
-            preedit_offset,
-            preedit_text,
-            &default_attrs,
-            cosmic_color(style.link),
-        );
+        let look = TextLook {
+            dark: luminance(style.text) > 0.5,
+            metrics,
+            link: cosmic_color(style.link),
+        };
+        let mut spans = rich_spans(document, preedit_offset, preedit_text, &default_attrs, look);
         self.visual_text.clear();
         self.visual_text
             .push_str(&document.text()[..preedit_offset]);
@@ -623,7 +635,30 @@ impl CosmicComposeEditor {
             ));
         }
 
-        let lines = rich_lines(&spans, &default_attrs);
+        // Each paragraph lines up as the document says, found from where it starts in the text
+        // laid out, which holds any IME composition.
+        let align_at = |visual_start: usize| {
+            let start = if visual_start <= preedit_offset {
+                visual_start
+            } else {
+                visual_start
+                    .saturating_sub(preedit_text.len())
+                    .max(preedit_offset)
+            }
+            .min(text.len());
+            let align = if start == text.len() && (text.is_empty() || text.ends_with('\n')) {
+                last_line_align
+            } else {
+                let line_start = text[..start].rfind('\n').map_or(0, |index| index + 1);
+                document.paragraph_alignment(line_start)
+            };
+            match align {
+                Alignment::Left => None,
+                Alignment::Center => Some(Align::Center),
+                Alignment::Right => Some(Align::Right),
+            }
+        };
+        let lines = rich_lines(&spans, &default_attrs, align_at);
         let font_system = &mut self.font_system;
         self.editor.with_buffer_mut(|buffer| {
             buffer.set_metrics_and_size(metrics, Some(physical_width as f32), None);
@@ -814,18 +849,27 @@ impl CosmicComposeEditor {
             return (0.0, 0.0, LINE_HEIGHT_LOGICAL);
         };
         let cursor = self.editor.cursor();
-        let line_height = self.editor.with_buffer(|buffer| {
-            buffer
-                .layout_runs()
-                .find(|run| {
-                    run.line_i == cursor.line
-                        && run.cursor_position(&cursor).is_some()
-                        && (run.line_top - y as f32).abs() < 0.5
-                })
-                .map_or(LINE_HEIGHT_LOGICAL * scale_factor, |run| run.line_height)
+        let (x, line_height) = self.editor.with_buffer(|buffer| {
+            let run = buffer.layout_runs().find(|run| {
+                run.line_i == cursor.line
+                    && run.cursor_position(&cursor).is_some()
+                    && (run.line_top - y as f32).abs() < 0.5
+            });
+            let Some(run) = run else {
+                return (x as f32, LINE_HEIGHT_LOGICAL * scale_factor);
+            };
+            // cosmic-text puts the caret at the start of a line with nothing on it, whatever
+            // its alignment.
+            let width = buffer.size().0.unwrap_or_default();
+            let x = match buffer.lines[cursor.line].align() {
+                Some(Align::Center) if run.glyphs.is_empty() => width / 2.0,
+                Some(Align::Right) if run.glyphs.is_empty() => width,
+                _ => x as f32,
+            };
+            (x, run.line_height)
         });
         (
-            x as f32 / scale_factor,
+            x / scale_factor,
             y as f32 / scale_factor,
             line_height / scale_factor,
         )
@@ -901,6 +945,31 @@ impl CosmicComposeEditor {
             let mut canvas =
                 TileCanvas::new(width, tile_height, tile_start, pixels.make_mut_bytes());
             let editor = &self.editor;
+            // Highlights go behind the text and the selection.
+            editor.with_buffer(|buffer| {
+                let tile_end = tile_start.saturating_add(tile_height) as f32;
+                for run in buffer.layout_runs() {
+                    if run.line_top > tile_end {
+                        break;
+                    }
+                    if run.line_top + run.line_height < tile_start as f32 {
+                        continue;
+                    }
+                    for glyph in run.glyphs.iter() {
+                        if glyph.metadata & HIGHLIGHTED == 0 {
+                            continue;
+                        }
+                        let left = glyph.x.floor();
+                        canvas.rectangle(
+                            left as i32,
+                            run.line_top.floor() as i32,
+                            (glyph.x + glyph.w - left).ceil() as u32,
+                            run.line_height.ceil() as u32,
+                            cosmic_rgb((glyph.metadata & 0xff_ff_ff) as Rgb),
+                        );
+                    }
+                }
+            });
             let mut renderer = TileRenderer {
                 font_system: &mut self.font_system,
                 swash_cache: &mut self.swash_cache,
@@ -994,16 +1063,16 @@ fn rich_spans<'a>(
     preedit_offset: usize,
     preedit_text: &'a str,
     default_attrs: &Attrs<'static>,
-    link_color: CosmicColor,
+    look: TextLook,
 ) -> Vec<(&'a str, Attrs<'static>)> {
     let runs = document.style_runs();
     let mut spans = Vec::with_capacity(runs.len().saturating_add(2).max(1));
     let mut inserted_preedit = preedit_text.is_empty();
-    let preedit_attrs = character_attrs(default_attrs, document.typing_style(), link_color)
+    let preedit_attrs = character_attrs(default_attrs, document.typing_style(), look)
         .underline(UnderlineStyle::Single);
 
     for run in runs {
-        let attrs = character_attrs(default_attrs, &run.style, link_color);
+        let attrs = character_attrs(default_attrs, &run.style, look);
         if !inserted_preedit && preedit_offset <= run.range.start {
             push_span(&mut spans, preedit_text, preedit_attrs.clone());
             inserted_preedit = true;
@@ -1034,11 +1103,16 @@ fn rich_spans<'a>(
     spans
 }
 
-/// Splits styled spans into paragraphs the way `Buffer::set_rich_text` does.
+/// A paragraph to lay out: its text, styles and alignment.
+type RichLine = (String, AttrsList, Option<Align>);
+
+/// Splits styled spans into paragraphs the way `Buffer::set_rich_text` does, each aligned as
+/// `align_at` says for where it starts.
 fn rich_lines(
     spans: &[(&str, Attrs<'static>)],
     default_attrs: &Attrs<'static>,
-) -> Vec<(String, AttrsList)> {
+    align_at: impl Fn(usize) -> Option<Align>,
+) -> Vec<RichLine> {
     let mut text = String::with_capacity(spans.iter().map(|(span, _)| span.len()).sum());
     let mut ranges = Vec::with_capacity(spans.len());
     for (span, attrs) in spans {
@@ -1069,10 +1143,10 @@ fn rich_lines(
                 attrs_list.add_span(span_start - start..span_end - start, attrs);
             }
         }
-        lines.push((paragraph.to_owned(), attrs_list));
+        lines.push((paragraph.to_owned(), attrs_list, align_at(start)));
     }
     if lines.is_empty() {
-        lines.push((String::new(), AttrsList::new(default_attrs)));
+        lines.push((String::new(), AttrsList::new(default_attrs), align_at(0)));
     }
     lines
 }
@@ -1080,15 +1154,12 @@ fn rich_lines(
 /// Keeps the shaped lines an edit left alone. Only the changed middle is
 /// replaced, so typing reshapes one paragraph instead of the whole draft.
 /// Returns the indexes of the new lines.
-fn replace_changed_lines(
-    buffer: &mut Buffer,
-    lines: Vec<(String, AttrsList)>,
-) -> std::ops::Range<usize> {
-    let unchanged = |line: &BufferLine, (text, attrs): &(String, AttrsList)| {
+fn replace_changed_lines(buffer: &mut Buffer, lines: Vec<RichLine>) -> std::ops::Range<usize> {
+    let unchanged = |line: &BufferLine, (text, attrs, align): &RichLine| {
         line.text() == text
             && line.attrs_list() == attrs
             && line.ending() == LineEnding::default()
-            && line.align().is_none()
+            && line.align() == *align
     };
     let prefix = buffer
         .lines
@@ -1111,8 +1182,10 @@ fn replace_changed_lines(
         .into_iter()
         .take(new_end)
         .skip(prefix)
-        .map(|(text, attrs)| {
-            BufferLine::new(text, LineEnding::default(), attrs, Shaping::Advanced)
+        .map(|(text, attrs, align)| {
+            let mut line = BufferLine::new(text, LineEnding::default(), attrs, Shaping::Advanced);
+            line.set_align(align);
+            line
         });
     buffer.lines.splice(prefix..old_end, replacement);
     prefix..new_end
@@ -1124,10 +1197,22 @@ fn push_span<'a>(spans: &mut Vec<(&'a str, Attrs<'static>)>, text: &'a str, attr
     }
 }
 
+/// What styled text looks like in the editor: the theme's darkness, the size of normal text
+/// and the color of links.
+#[derive(Clone, Copy)]
+struct TextLook {
+    dark: bool,
+    metrics: Metrics,
+    link: CosmicColor,
+}
+
+/// Marks a glyph's metadata as highlighted, with the highlight's color in its low bits.
+const HIGHLIGHTED: usize = 1 << 24;
+
 fn character_attrs(
     default_attrs: &Attrs<'static>,
     style: &CharacterStyle,
-    link_color: CosmicColor,
+    look: TextLook,
 ) -> Attrs<'static> {
     let mut attrs = default_attrs.clone();
     if style.marks & BOLD != 0 {
@@ -1142,13 +1227,80 @@ fn character_attrs(
     if style.marks & STRIKE != 0 {
         attrs = attrs.strikethrough();
     }
+    match style.family {
+        FontFamily::SansSerif => {}
+        FontFamily::Serif => attrs = attrs.family(Family::Serif),
+        FontFamily::Monospace => attrs = attrs.family(Family::Monospace),
+    }
     if style.marks & CODE != 0 {
         attrs = attrs.family(Family::Monospace);
     }
+    if style.size != TextSize::Normal {
+        let scale = style.size.scale();
+        attrs = attrs.metrics(Metrics::new(
+            look.metrics.font_size * scale,
+            look.metrics.line_height * scale,
+        ));
+    }
     if style.link.is_some() {
-        attrs = attrs.color(link_color);
+        attrs = attrs.color(look.link);
+    }
+    match (style.highlight, style.color) {
+        // Text on a highlight keeps to the highlight's contrast in either theme.
+        (Some(highlight), color) => {
+            attrs = attrs
+                .metadata(HIGHLIGHTED | highlight as usize)
+                .color(cosmic_rgb(color.unwrap_or(text_on(highlight))));
+        }
+        (None, Some(color)) => attrs = attrs.color(cosmic_rgb(shown_color(color, look.dark))),
+        (None, None) => {}
     }
     attrs
+}
+
+fn cosmic_rgb(color: Rgb) -> CosmicColor {
+    CosmicColor::rgb((color >> 16) as u8, (color >> 8) as u8, color as u8)
+}
+
+/// Relative luminance, as WCAG defines it.
+fn rgb_luminance(color: Rgb) -> f32 {
+    let channel = |shift: u32| {
+        let value = ((color >> shift) & 0xff) as f32 / 255.0;
+        if value <= 0.040_45 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+}
+
+fn luminance(color: Color) -> f32 {
+    rgb_luminance(
+        (u32::from(color.red()) << 16) | (u32::from(color.green()) << 8) | u32::from(color.blue()),
+    )
+}
+
+/// Near-black or white, whichever reads on `highlight`.
+fn text_on(highlight: Rgb) -> Rgb {
+    if rgb_luminance(highlight) > 0.18 {
+        0x20_21_24
+    } else {
+        0xff_ff_ff
+    }
+}
+
+/// A text color as the editor shows it: as chosen, or lightened toward white on a dark theme
+/// when it would be too dark to read there. The message keeps the chosen color.
+fn shown_color(color: Rgb, dark: bool) -> Rgb {
+    if !dark || rgb_luminance(color) >= 0.18 {
+        return color;
+    }
+    let lighten = |shift: u32| {
+        let value = (color >> shift) & 0xff;
+        (value + (0xff - value) / 2) << shift
+    };
+    lighten(16) | lighten(8) | lighten(0)
 }
 
 fn navigation_motion(key: &str, control: bool, alt: bool, meta: bool) -> Option<Motion> {
@@ -2001,13 +2153,22 @@ mod tests {
         }
     }
 
+    /// The look of a light theme at scale 1.
+    fn test_look() -> TextLook {
+        TextLook {
+            dark: false,
+            metrics: Metrics::new(FONT_SIZE_LOGICAL, LINE_HEIGHT_LOGICAL),
+            link: CosmicColor::rgb(0, 90, 180),
+        }
+    }
+
     #[test]
     fn layout_spans_borrow_long_unicode_text_and_preedit() {
         let mut document = RichComposeDocument::default();
         document.synchronize(&"é".repeat(512 * 1024), 2, 2);
         let preedit = String::from("世界");
         let attrs = Attrs::new().family(Family::Name(UI_FONT_FAMILY));
-        let spans = rich_spans(&document, 2, &preedit, &attrs, CosmicColor::rgb(0, 90, 180));
+        let spans = rich_spans(&document, 2, &preedit, &attrs, test_look());
 
         assert_eq!(spans.len(), 3);
         assert_eq!(spans[0].0, "é");
@@ -2059,7 +2220,7 @@ mod tests {
             document.text().len(),
             "",
             &default_attrs,
-            CosmicColor::rgb(90, 150, 255),
+            test_look(),
         );
         assert_eq!(spans[0].1.text_decoration.underline, UnderlineStyle::Single);
         assert!(spans[0].1.text_decoration.strikethrough);
@@ -2208,11 +2369,12 @@ mod tests {
                 Shaping::Advanced,
                 None,
             );
-            let lines = rich_lines(&spans, &base);
+            let lines = rich_lines(&spans, &base, |_| None);
             assert_eq!(lines.len(), expected.lines.len(), "{spans:?}");
-            for ((text, attrs), line) in lines.iter().zip(&expected.lines) {
+            for ((text, attrs, align), line) in lines.iter().zip(&expected.lines) {
                 assert_eq!(text, line.text());
                 assert_eq!(attrs, line.attrs_list());
+                assert_eq!(*align, line.align());
             }
         }
     }
@@ -2227,8 +2389,10 @@ mod tests {
             .map(|line| format!("> quoted line {line}\n"))
             .collect::<String>();
         let mut apply = |buffer: &mut Buffer, text: &str| {
-            let replaced =
-                replace_changed_lines(buffer, rich_lines(&[(text, attrs.clone())], &attrs));
+            let replaced = replace_changed_lines(
+                buffer,
+                rich_lines(&[(text, attrs.clone())], &attrs, |_| None),
+            );
             let reshaped = buffer
                 .lines
                 .iter()
@@ -2457,6 +2621,264 @@ mod tests {
         assert!(!is_whole_word(accented, &(0..3)));
     }
 
+    /// Lays `document` out `width` logical pixels wide at `scale` and returns the first tile's
+    /// pixels, one row after another, `width * scale` pixels to a row.
+    fn painted(
+        editor: &mut CosmicComposeEditor,
+        document: &RichComposeDocument,
+        width: f32,
+        scale: f32,
+        style: ComposeEditorStyle,
+    ) -> Vec<[u8; 4]> {
+        let rendered = editor.render(
+            document,
+            document.selection(),
+            width,
+            200.0,
+            0.0,
+            scale,
+            style,
+            "",
+        );
+        rendered.tiles[0]
+            .image
+            .to_rgba8_premultiplied()
+            .unwrap()
+            .as_bytes()
+            .as_chunks::<4>()
+            .0
+            .to_vec()
+    }
+
+    /// Where each visual line's glyphs start and end.
+    fn line_extents(editor: &CosmicComposeEditor) -> Vec<(f32, f32)> {
+        editor.editor.with_buffer(|buffer| {
+            buffer
+                .layout_runs()
+                .map(|run| {
+                    let left = run.glyphs.first().map_or(f32::MAX, |glyph| glyph.x);
+                    let right = run
+                        .glyphs
+                        .last()
+                        .map_or(f32::MIN, |glyph| glyph.x + glyph.w);
+                    (left, right)
+                })
+                .collect()
+        })
+    }
+
+    #[test]
+    fn highlights_paint_behind_their_words_only() {
+        let mut document = RichComposeDocument::default();
+        document.load("plain marked plain", 0, 0);
+        let text = document.text().to_owned();
+        let marked = text.find("marked").unwrap();
+        let marked_end = marked + "marked".len();
+        document.format("highlight:#ffeb3b", &text, marked as i32, marked_end as i32);
+        document.update_selection(0, 0);
+        // On a dark theme the text on a light highlight turns dark to stay readable.
+        let dark = ComposeEditorStyle {
+            text: Color::from_rgb_u8(230, 230, 230),
+            ..spelling_style()
+        };
+        for (style, scale) in [(spelling_style(), 1.0), (dark, 2.0)] {
+            let mut editor = CosmicComposeEditor::default();
+            let pixels = painted(&mut editor, &document, 320.0, scale, style);
+            let width = (320.0 * scale) as usize;
+            let (left, right) = (editor.glyph_left(marked), editor.glyph_left(marked_end));
+            let highlighted: Vec<usize> = pixels
+                .iter()
+                .enumerate()
+                .filter(|(_, pixel)| **pixel == [0xff, 0xeb, 0x3b, 0xff])
+                .map(|(index, _)| index % width)
+                .collect();
+            assert!(!highlighted.is_empty());
+            for x in highlighted {
+                assert!(
+                    x as f32 >= left.floor() && x as f32 <= right.ceil(),
+                    "highlight at {x} outside {left}..{right}"
+                );
+            }
+            assert!(
+                pixels.contains(&[0x20, 0x21, 0x24, 0xff]),
+                "no dark text on the highlight"
+            );
+        }
+    }
+
+    #[test]
+    fn paragraphs_line_up_as_the_document_says() {
+        let mut document = RichComposeDocument::default();
+        document.load("left\ncenter\nright\n", 0, 0);
+        let mut editor = CosmicComposeEditor::default();
+        painted(&mut editor, &document, 320.0, 1.0, spelling_style());
+        let text = document.text().to_owned();
+        let center = text.find("center").unwrap() as i32;
+        let right = text.find("right").unwrap() as i32;
+        document.format("align:center", &text, center, center);
+        document.format("align:right", &text, right, right);
+        let end = text.len() as i32;
+        document.update_selection(end, end);
+        let pixels = painted(&mut editor, &document, 320.0, 1.0, spelling_style());
+
+        let lines = line_extents(&editor);
+        assert!(lines[0].0 < 1.0, "{lines:?}");
+        assert!(
+            (lines[1].0 - (320.0 - lines[1].1)).abs() <= 1.0,
+            "{lines:?}"
+        );
+        assert!(lines[2].1 > 319.0, "{lines:?}");
+        // The empty line after them goes on as the paragraph above it.
+        let rendered = editor.render(
+            &document,
+            document.selection(),
+            320.0,
+            200.0,
+            0.0,
+            1.0,
+            spelling_style(),
+            "",
+        );
+        assert!(rendered.caret_x > 310.0, "caret at {}", rendered.caret_x);
+
+        // Lines kept from the layout before match a fresh one.
+        assert_eq!(
+            pixels,
+            painted(
+                &mut CosmicComposeEditor::default(),
+                &document,
+                320.0,
+                1.0,
+                spelling_style()
+            )
+        );
+
+        // Centering the empty line moves the caret there, and leaving it takes it back to the
+        // alignment typing there would have.
+        document.format("align:center", &text, end, end);
+        let caret_x = |editor: &mut CosmicComposeEditor, document: &RichComposeDocument| {
+            editor
+                .render(
+                    document,
+                    document.selection(),
+                    320.0,
+                    200.0,
+                    0.0,
+                    1.0,
+                    spelling_style(),
+                    "",
+                )
+                .caret_x
+        };
+        assert!((caret_x(&mut editor, &document) - 160.0).abs() <= 1.0);
+        document.update_selection(0, 0);
+        caret_x(&mut editor, &document);
+        document.update_selection(end, end);
+        assert!(caret_x(&mut editor, &document) > 310.0);
+    }
+
+    #[test]
+    fn the_caret_on_an_empty_line_sits_where_typing_goes() {
+        let caret_x = |document: &RichComposeDocument| {
+            CosmicComposeEditor::default()
+                .render(
+                    document,
+                    document.selection(),
+                    320.0,
+                    200.0,
+                    0.0,
+                    1.0,
+                    spelling_style(),
+                    "",
+                )
+                .caret_x
+        };
+        let mut document = RichComposeDocument::default();
+        document.format("align:right", "", 0, 0);
+        assert_eq!(caret_x(&document), 320.0);
+
+        let mut document = RichComposeDocument::default();
+        document.load("first\n\nlast", 0, 0);
+        let text = document.text().to_owned();
+        document.format("align:center", &text, 0, text.len() as i32);
+        document.update_selection(6, 6);
+        assert_eq!(caret_x(&document), 160.0);
+    }
+
+    #[test]
+    fn bigger_text_makes_its_line_taller() {
+        let mut document = RichComposeDocument::default();
+        document.load("normal\nhuge", 0, 0);
+        let text = document.text().to_owned();
+        let huge = text.find("huge").unwrap() as i32;
+        let mut editor = CosmicComposeEditor::default();
+        let render = |editor: &mut CosmicComposeEditor, document: &RichComposeDocument| {
+            editor.render(
+                document,
+                document.selection(),
+                320.0,
+                200.0,
+                0.0,
+                1.0,
+                spelling_style(),
+                "",
+            )
+        };
+        let before = render(&mut editor, &document).content_height;
+        document.format("size:huge", &text, huge, text.len() as i32);
+        let end = text.len() as i32;
+        document.update_selection(end, end);
+        let after = render(&mut editor, &document);
+        assert_eq!(after.content_height, before + LINE_HEIGHT_LOGICAL);
+        assert_eq!(after.caret_height, LINE_HEIGHT_LOGICAL * 2.0);
+        assert_eq!(after.caret_y, LINE_HEIGHT_LOGICAL);
+    }
+
+    /// The style a character gets from the toolbar's `commands`.
+    fn style_from(commands: &[&str]) -> CharacterStyle {
+        let mut document = RichComposeDocument::default();
+        document.load("x", 0, 0);
+        for command in commands {
+            document.format(command, "x", 0, 1);
+        }
+        document.style_runs()[0].style.clone()
+    }
+
+    #[test]
+    fn character_styles_become_text_attributes() {
+        let base = Attrs::new().family(Family::Name(UI_FONT_FAMILY));
+        let look = test_look();
+        let styled = style_from(&["color:#1a73e8", "size:small", "family:serif"]);
+        let attrs = character_attrs(&base, &styled, look);
+        assert_eq!(attrs.color_opt, Some(CosmicColor::rgb(0x1a, 0x73, 0xe8)));
+        assert_eq!(attrs.family, Family::Serif);
+        assert_eq!(
+            attrs.metrics_opt.map(Metrics::from),
+            Some(Metrics::new(
+                FONT_SIZE_LOGICAL * 13.0 / 16.0,
+                LINE_HEIGHT_LOGICAL * 13.0 / 16.0
+            ))
+        );
+        assert_eq!(attrs.metadata, 0);
+
+        // Normal text keeps the editor's own size, family and color.
+        let plain = character_attrs(&base, &CharacterStyle::default(), look);
+        assert_eq!(plain, base);
+
+        // Code stays monospace whatever the family.
+        let code = style_from(&["family:serif", "code"]);
+        assert_eq!(
+            character_attrs(&base, &code, look).family,
+            Family::Monospace
+        );
+
+        // A highlight marks the glyphs with its color, and the text on it reads either way.
+        let highlighted = style_from(&["highlight:#0b5394"]);
+        let attrs = character_attrs(&base, &highlighted, look);
+        assert_eq!(attrs.metadata, HIGHLIGHTED | 0x0b_53_94);
+        assert_eq!(attrs.color_opt, Some(CosmicColor::rgb(0xff, 0xff, 0xff)));
+    }
+
     #[test]
     fn serif_and_monospace_text_use_installed_fonts() {
         let editor = CosmicComposeEditor::default();
@@ -2472,5 +2894,17 @@ mod tests {
                 db.family_name(&family)
             );
         }
+    }
+
+    #[test]
+    fn dark_colors_lighten_on_a_dark_theme_only() {
+        let navy = 0x0b_1f_4d;
+        assert_eq!(shown_color(navy, false), navy);
+        let shown = shown_color(navy, true);
+        assert!(rgb_luminance(shown) > rgb_luminance(navy));
+        // Colors that already read on a dark background stay as chosen.
+        assert_eq!(shown_color(0xff_eb_3b, true), 0xff_eb_3b);
+        assert_eq!(text_on(0xff_eb_3b), 0x20_21_24);
+        assert_eq!(text_on(0x0b_53_94), 0xff_ff_ff);
     }
 }

@@ -37,6 +37,14 @@ export global ComposerUi {
     in property <bool> strike-active: false;
     in property <bool> code-active: false;
     in property <string> active-link-url: "";
+    // What the selection's text shares, for the toolbar: its color and highlight as
+    // "#rrggbb" or "none", its size and font, each empty when it mixes several, and the
+    // alignment of the paragraph it starts in.
+    in property <string> active-color: "none";
+    in property <string> active-highlight: "none";
+    in property <string> active-size: "normal";
+    in property <string> active-family: "sans-serif";
+    in property <string> active-align: "left";
     // On the desktop a message can move into a window of its own.
     in property <bool> can-pop-out: false;
     // "reply" or "forward" while the message carries the original below the
@@ -145,6 +153,11 @@ export component BoundComposer inherits EmailComposer {
     strike-active: ComposerUi.strike-active;
     code-active: ComposerUi.code-active;
     active-link-url: ComposerUi.active-link-url;
+    active-color: ComposerUi.active-color;
+    active-highlight: ComposerUi.active-highlight;
+    active-size: ComposerUi.active-size;
+    active-family: ComposerUi.active-family;
+    active-align: ComposerUi.active-align;
     can-pop-out: ComposerUi.can-pop-out;
     quote: ComposerUi.quote;
     quote-left-out: ComposerUi.quote-left-out;
