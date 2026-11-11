@@ -1200,6 +1200,7 @@ fn detail_from_row(row: &rusqlite::Row) -> rusqlite::Result<MessageDetail> {
         send_state: row.get("send_state")?,
         send_error: row.get("send_error")?,
         in_spam: row.get("in_spam")?,
+        sender_blocked: row.get("sender_blocked")?,
     })
 }
 
@@ -1237,7 +1238,9 @@ const DETAIL_MESSAGE_COLS: &str = "
     m.sender_verification AS sender_verification,
     EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = 'spam')
         OR EXISTS (SELECT 1 FROM message_folders mf JOIN folders f ON f.id = mf.folder_id
-                   WHERE mf.message_id = m.id AND f.role = 'spam') AS in_spam";
+                   WHERE mf.message_id = m.id AND f.role = 'spam') AS in_spam,
+    EXISTS (SELECT 1 FROM blocked_senders b WHERE b.address = LOWER(m.from_addr))
+        AS sender_blocked";
 
 fn attachment_meta_from_row(
     row: &rusqlite::Row,

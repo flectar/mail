@@ -721,6 +721,57 @@ async fn mail_that_came_while_the_app_was_closed_stays_silent() {
 }
 
 #[tokio::test]
+async fn a_blocked_senders_mail_goes_to_junk_unannounced() {
+    let fixture = fixture(vec![recent("a", "Backlog")]).await;
+    fixture.sync().await.unwrap();
+    fixture
+        .ctx
+        .db
+        .write(|conn| repo::blocked::block(conn, "alice@example.com", 0))
+        .await
+        .unwrap();
+    let junk = || async {
+        fixture
+            .ctx
+            .db
+            .read(|conn| {
+                let mut statement = conn.prepare(
+                    "SELECT m.subject FROM messages m JOIN folders f ON f.id = m.folder_id
+                     WHERE f.role = 'spam' ORDER BY m.id",
+                )?;
+                Ok(statement
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<Vec<String>>>()?)
+            })
+            .await
+            .unwrap()
+    };
+
+    fixture
+        .server
+        .lock()
+        .unwrap()
+        .maildrop
+        .push(recent("b", "Fresh"));
+    fixture.sync().await.unwrap();
+    assert_eq!(fixture.inbox().await, ["Backlog"]);
+    assert_eq!(junk().await, ["Fresh"]);
+    assert_eq!(fixture.queued_notifications().await, 0);
+
+    // Also what came while the app was closed, which arrives silently.
+    fixture.restart();
+    fixture
+        .server
+        .lock()
+        .unwrap()
+        .maildrop
+        .push(recent("c", "While closed"));
+    fixture.sync().await.unwrap();
+    assert_eq!(fixture.inbox().await, ["Backlog"]);
+    assert_eq!(junk().await, ["Fresh", "While closed"]);
+}
+
+#[tokio::test]
 async fn deleting_mail_here_completes_at_once_and_never_downloads_it_again() {
     let fixture = fixture(vec![recent("a", "Gone")]).await;
     fixture.sync().await.unwrap();

@@ -1918,6 +1918,8 @@ async fn store_resources(
                     repo::labels::add_to_message(&tx, local_message_id, local_id)?;
                 }
                 repo::search::index_message(&tx, local_message_id)?;
+                // Mail from a blocked sender goes to Spam as it arrives.
+                let turned_away = inserted && crate::turn_away(&tx, local_message_id)?;
 
                 if inserted
                     && is_outgoing
@@ -1938,6 +1940,7 @@ async fn store_resources(
                         }
                     }
                 } else if inserted
+                    && !turned_away
                     && settings.collect_incoming_contacts
                     && resource.internal_date >= incoming_learning_since
                     && !resource.headers.is_automated
@@ -1956,6 +1959,7 @@ async fn store_resources(
                 // that reached the Inbox after the cutoff.
                 if notify_new
                     && inserted
+                    && !turned_away
                     && label_set.contains("INBOX")
                     && crate::sync::ingest::arrival_eligible(
                         notification_cutoff.is_none_or(|cutoff| resource.internal_date >= cutoff),
@@ -4134,6 +4138,106 @@ async fn fetch_attachment(ctx: &SyncCtx, api: &GmailApi, attachment_id: i64) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
+        let dir = tempfile::tempdir().unwrap();
+        let credentials: crate::accounts::credentials::CredentialStoreHandle = std::sync::Arc::new(
+            crate::accounts::credentials::DevelopmentFileCredentialStore::new(
+                dir.path().join("credentials.json"),
+            ),
+        );
+        let ctx = SyncCtx {
+            db: crate::db::Db::open(&dir.path().join("mail.db")).unwrap(),
+            calendar_db: crate::db::Db::deferred_calendar(dir.path().join("calendar.db")),
+            bus: crate::events::EventBus::new(),
+            paths: std::sync::Arc::new(crate::config::Paths::for_tests(dir.path())),
+            tokens: crate::oauth::tokens::TokenProvider::new(
+                credentials.clone(),
+                std::sync::Arc::new(crate::oauth::redirect::LoopbackRedirectBroker::default()),
+            ),
+            credentials,
+        };
+        let config = ctx
+            .db
+            .write(|conn| {
+                crate::db::testutil::seed_account(conn);
+                conn.execute_batch(
+                    "UPDATE accounts SET mail_protocol = 'gmail', provider = 'gmail' WHERE id = 1;
+                     INSERT INTO folders (id, account_id, path, role) VALUES
+                       (2, 1, '[Gmail]/Spam', 'spam'),
+                       (3, 1, 'Archive', 'archive'),
+                       (4, 1, '[Gmail]/All Mail', 'all');
+                     INSERT INTO gmail_labels (account_id, provider_id, name, folder_id) VALUES
+                       (1, 'INBOX', 'INBOX', 1),
+                       (1, 'SPAM', 'SPAM', 2);",
+                )?;
+                repo::blocked::block(conn, "ads@shop.test", 0)?;
+                Ok(repo::accounts::get_config(conn, 1)?.unwrap())
+            })
+            .await
+            .unwrap();
+        let now = now_ms();
+        let resource = |id: &str, from: &str| {
+            json!({
+                "id": id, "threadId": format!("thread-{id}"),
+                "labelIds": ["INBOX", "UNREAD"], "internalDate": now.to_string(),
+                "sizeEstimate": 100, "snippet": "Hello",
+                "payload": {"headers": [
+                    {"name": "From", "value": from},
+                    {"name": "To", "value": "me@test.dev"},
+                    {"name": "Subject", "value": "Hello"},
+                    {"name": "Message-ID", "value": format!("<{id}@shop.test>")},
+                ]}
+            })
+        };
+        let resources = [
+            resource("sale", "Shop <Ads@Shop.test>"),
+            resource("note", "Friend <friend@test.dev>"),
+        ];
+        store_resources(&ctx, &config, &resources, None, false, true, None)
+            .await
+            .unwrap();
+
+        ctx.db
+            .read(|conn| {
+                let placed = |gm_msgid: &str| -> rusqlite::Result<(i64, Vec<i64>)> {
+                    let (id, folder_id): (i64, i64) = conn.query_row(
+                        "SELECT id, folder_id FROM messages WHERE gm_msgid = ?1",
+                        [gm_msgid],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?;
+                    let mut stmt = conn.prepare(
+                        "SELECT folder_id FROM message_folders WHERE message_id = ?1
+                         ORDER BY folder_id",
+                    )?;
+                    let labels = stmt
+                        .query_map([id], |row| row.get(0))?
+                        .collect::<rusqlite::Result<Vec<i64>>>()?;
+                    Ok((folder_id, labels))
+                };
+                // It left the inbox for Spam. All Mail keeps it until the
+                // server's labels come back, as after Move to spam.
+                assert_eq!(placed("sale")?, (2, vec![2, 4]));
+                assert_eq!(placed("note")?, (1, vec![1, 4]));
+                let pending: Vec<String> = conn
+                    .prepare("SELECT kind FROM pending_actions")?
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                assert_eq!(pending, ["spam"]);
+                let notified: Vec<String> = conn
+                    .prepare(
+                        "SELECT m.gm_msgid FROM notification_outbox o
+                         JOIN messages m ON m.id = o.message_id",
+                    )?
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                assert_eq!(notified, ["note"]);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
 
     #[test]
     fn single_message_actions_leave_the_rest_of_the_conversation() {

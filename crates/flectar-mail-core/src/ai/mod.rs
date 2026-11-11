@@ -1447,6 +1447,7 @@ mod tests {
             send_state: None,
             send_error: None,
             in_spam: false,
+            sender_blocked: false,
         }
     }
 
