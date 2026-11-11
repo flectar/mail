@@ -6508,13 +6508,19 @@ impl Core {
             _ => return Err(CoreError::Other("invalid RSVP response".into())),
         };
         let event_id = args.event_id;
-        let (row, held_by, scheduling, default) = self
+        let (row, held_by, held_series, scheduling, default) = self
             .calendar_db
             .read(move |conn| {
                 let row = repo::calendar::sync_row_for(conn, event_id)?
                     .ok_or_else(|| CoreError::NotFound("event".into()))?;
-                // The calendar holding the server's copy, when there is one.
-                let held_in = row.event.calendar_id.filter(|_| row.caldav_href.is_some());
+                // The calendar holding the server's copy, when there is one,
+                // or the series Exchange holds for an invitation from mail.
+                let held_series = repo::calendar::held_series(conn, event_id)?;
+                let held_in = row
+                    .event
+                    .calendar_id
+                    .filter(|_| row.caldav_href.is_some())
+                    .or(held_series.as_ref().map(|(_, calendar_id)| *calendar_id));
                 let held_by = match held_in {
                     Some(id) => repo::caldav::get_calendar(conn, id)?,
                     None => None,
@@ -6525,7 +6531,7 @@ impl Core {
                     None => None,
                 };
                 let default = repo::caldav::default_calendar(conn, row.event.account_id)?;
-                Ok((row, held_by, scheduling, default))
+                Ok((row, held_by, held_series, scheduling, default))
             })
             .await?;
         let (uid, sequence, invitation) = (row.ical_uid, row.sequence, row.ical_raw);
@@ -6618,6 +6624,8 @@ impl Core {
             attendee: answering.attendee.email.clone(),
             comment: args.comment.clone(),
             notify: args.notify,
+            meeting: held_series.as_ref().map(|(meeting, _)| meeting.clone()),
+            calendar_id: held_series.as_ref().map(|(_, calendar_id)| *calendar_id),
         };
         let payload = serde_json::to_value(&answer)?;
         self.calendar_db
@@ -13659,6 +13667,51 @@ mod invitation_tests {
             .map(|(state, _)| state)
             .collect();
         assert_eq!(states, ["cancelled", "pending"]);
+    }
+
+    #[tokio::test]
+    async fn an_invitation_whose_series_exchange_holds_is_answered_there() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        core.calendar_db
+            .write(|conn| {
+                conn.execute(
+                    "INSERT INTO calendar_connections (id, account_id, kind, base_url)
+                     VALUES (5, 1, 'microsoft', 'https://graph.microsoft.com/')",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO calendars (id, account_id, connection_id, url, enabled)
+                     VALUES (50, 1, 5, 'outlook-calendar', 1)",
+                    [],
+                )?;
+                let occurrence = calendar::IcsEvent {
+                    uid: "occ-1".into(),
+                    summary: Some("Design review".into()),
+                    starts_at_ms: 1_000,
+                    ends_at_ms: Some(2_000),
+                    ..Default::default()
+                };
+                repo::calendar::upsert_remote(conn, 1, 50, "occ-1", "", "", &occurrence)?;
+                repo::calendar::set_series_master(
+                    conn,
+                    50,
+                    "occ-1",
+                    "master-1",
+                    "review-1@example.com",
+                )
+            })
+            .await
+            .unwrap();
+
+        core.rsvp_event(answer(event, "accepted", None))
+            .await
+            .unwrap();
+        assert_eq!(drafts(&core).await, 0, "Exchange tells the organizer");
+        let queued = queued_answers(&core).await;
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].1["meeting"], "master-1");
+        assert_eq!(queued[0].1["calendarId"], 50);
     }
 
     #[tokio::test]

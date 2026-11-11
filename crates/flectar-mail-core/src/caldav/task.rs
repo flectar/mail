@@ -44,6 +44,12 @@ pub struct QueuedAnswer {
     pub comment: Option<String>,
     /// Whether the organizer is told, where the server lets that be chosen.
     pub notify: bool,
+    /// For an invitation known from mail whose series Exchange holds: the
+    /// series' Graph id, answered in its stead, and a calendar holding it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meeting: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calendar_id: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -482,12 +488,13 @@ impl Cycle<'_> {
         action: &repo::actions::PendingAction,
     ) -> Result<()> {
         let answer: QueuedAnswer = serde_json::from_value(action.payload.clone())?;
-        let event_id = answer.event_id;
+        let (event_id, held_in) = (answer.event_id, answer.calendar_id);
         let (row, calendar) = self
             .db
             .read(move |conn| {
                 let row = repo::calendar::sync_row_for(conn, event_id)?;
-                let calendar = match row.as_ref().and_then(|row| row.event.calendar_id) {
+                let calendar = match held_in.or(row.as_ref().and_then(|row| row.event.calendar_id))
+                {
                     Some(id) => repo::caldav::get_calendar(conn, id)?,
                     None => None,
                 };
@@ -511,7 +518,8 @@ impl Cycle<'_> {
         let comment = answer.comment.as_deref();
         match session {
             Session::Graph { token } => {
-                let meeting = row.caldav_href.as_deref().ok_or_else(|| {
+                let meeting = answer.meeting.as_deref().or(row.caldav_href.as_deref());
+                let meeting = meeting.ok_or_else(|| {
                     CoreError::Other("the meeting isn't in the Outlook calendar yet".into())
                 })?;
                 crate::graph::answer_event(token, meeting, &answer.partstat, comment, answer.notify)
