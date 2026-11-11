@@ -906,8 +906,10 @@ export component AppWindow inherits Window {
     callback load-remote-images-for-message();
     callback calendar-navigate(string, int);
     callback calendar-select-date(string);
-    // Answer an invitation from its details: event id and response.
-    callback calendar-answer-event(int, string);
+    // Answer an invitation from its details: the event's id, the response,
+    // and for one occurrence of a repeating event its RECURRENCE-ID (else
+    // empty).
+    callback calendar-answer-event(int, string, string);
     // Open an event's details in the calendar (src/invitation.rs).
     in-out property <CalendarEventRow> calendar-reveal-event;
     in-out property <int> calendar-reveal-request: 0;
@@ -1873,7 +1875,7 @@ export component AppWindow inherits Window {
             new-event => { root.calendar-open-editor(); }
             edit-event(event-id) => { root.calendar-edit-event(event-id); }
             delete-event(event-id) => { root.calendar-delete-event(event-id); }
-            answer-event(event-id, response) => { root.calendar-answer-event(event-id, response); }
+            answer-event(event-id, response, occurrence) => { root.calendar-answer-event(event-id, response, occurrence); }
             reveal-event: root.calendar-reveal-event;
             reveal-request: root.calendar-reveal-request;
             open-link(url) => { root.open_email_link(url); }

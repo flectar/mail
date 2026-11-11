@@ -38,12 +38,19 @@ component DetailField inherits Rectangle {
     }
 }
 
-// The user's answer to an invitation, with the buttons that change it.
+// The user's answer to an invitation, with the buttons that change it. For
+// one occurrence of a repeating event it asks first whether the answer is
+// for that occurrence or for all of them.
 component AnswerField inherits VerticalLayout {
     in property <string> my-answer;
+    in property <bool> repeats;
     in property <bool> compact;
     in property <color> label-color;
-    callback answer(string);
+    in property <color> text-color;
+    // The response, and whether it answers the whole event.
+    callback answer(string, bool);
+    // A response waiting for that choice.
+    private property <string> pending: "";
     spacing: 6px;
 
     Text {
@@ -53,7 +60,7 @@ component AnswerField inherits VerticalLayout {
         font-weight: 700;
         letter-spacing: 0.4px;
     }
-    HorizontalLayout {
+    if root.pending == "" : HorizontalLayout {
         spacing: 8px;
         alignment: start;
         for choice in [
@@ -66,7 +73,51 @@ component AnswerField inherits VerticalLayout {
             text: choice.label;
             checkable: true;
             selected: root.my-answer == choice.answer;
-            clicked => { root.answer(choice.response); }
+            clicked => {
+                if root.repeats {
+                    root.pending = choice.response;
+                } else {
+                    root.answer(choice.response, true);
+                }
+            }
+        }
+    }
+    if root.pending != "" : VerticalLayout {
+        spacing: 8px;
+        Text {
+            text: @tr("Answer for only this event, or for every event in the series?");
+            color: root.text-color;
+            font-size: TypeScale.secondary;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Button {
+                height: root.compact ? 40px : 32px;
+                width: max(88px, self.content-width);
+                text: @tr("This event");
+                primary: true;
+                clicked => {
+                    root.answer(root.pending, false);
+                    root.pending = "";
+                }
+            }
+            Button {
+                height: root.compact ? 40px : 32px;
+                width: max(88px, self.content-width);
+                text: @tr("All events");
+                clicked => {
+                    root.answer(root.pending, true);
+                    root.pending = "";
+                }
+            }
+            Button {
+                height: root.compact ? 40px : 32px;
+                width: max(88px, self.content-width);
+                text: @tr("Cancel");
+                clicked => { root.pending = ""; }
+            }
         }
     }
 }
@@ -93,6 +144,8 @@ export component CalendarDetailsDialog inherits Rectangle {
     // An invitation the user can answer here, and their answer to it.
     in property <bool> answerable: false;
     in property <string> my-answer;
+    // It is one occurrence of a repeating event.
+    in property <bool> repeats: false;
     // A cancelled event from someone else, which can be taken out of the
     // calendar.
     in property <bool> removable: false;
@@ -111,7 +164,8 @@ export component CalendarDetailsDialog inherits Rectangle {
     callback open-link(string);
     callback edit-event;
     callback delete-event;
-    callback answer(string);
+    // The response, and whether it answers the whole event.
+    callback answer(string, bool);
     callback remove-event;
 
     visible: root.open;
@@ -226,9 +280,11 @@ export component CalendarDetailsDialog inherits Rectangle {
                 if !root.answerable : DetailField { label: @tr("MY RESPONSE"); value: root.rsvp; label-color: root.muted-text; value-color: root.title-color; }
                 if root.answerable : AnswerField {
                     my-answer: root.my-answer;
+                    repeats: root.repeats;
                     compact: root.compact;
                     label-color: root.muted-text;
-                    answer(response) => { root.answer(response); }
+                    text-color: root.title-color;
+                    answer(response, whole) => { root.answer(response, whole); }
                 }
                 DetailField { label: @tr("RECURRENCE"); value: root.recurrence; label-color: root.muted-text; value-color: root.title-color; }
                 DetailField { label: @tr("ATTENDEES"); value: root.attendees; multiline: true; label-color: root.muted-text; value-color: root.title-color; }
