@@ -360,6 +360,12 @@ export struct CalendarEventRow {
     recurrence: string,
     status: string,
     source: string,
+    // An invitation the user can answer: they are among its guests, don't
+    // organize it, and it isn't cancelled.
+    answerable: bool,
+    // A cancelled event from someone else, which the user can take out of
+    // their calendar.
+    removable: bool,
 }
 
 // A flat model lets ListView virtualize individual events, including busy days.

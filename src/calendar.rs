@@ -10,7 +10,7 @@ use chrono::{
     Timelike, Utc,
 };
 use flectar_mail_core::models::{
-    Account, Address, Calendar, CalendarConnectionKind, CalendarEvent,
+    Account, Address, Calendar, CalendarConnectionKind, CalendarEvent, EventAttendee,
 };
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::{
@@ -34,13 +34,21 @@ pub(crate) struct LocalCalendarEvent {
     pub(crate) location: String,
     pub(crate) organizer: String,
     pub(crate) description: String,
-    pub(crate) attendees: String,
+    pub(crate) attendees: Vec<EventAttendee>,
     pub(crate) attendee_addresses: Vec<Address>,
     pub(crate) join_url: String,
     pub(crate) rsvp_status: String,
     pub(crate) recurrence: String,
     pub(crate) status: String,
     pub(crate) is_local: bool,
+    /// The user is among its guests and doesn't organize it.
+    pub(crate) invited: bool,
+}
+
+impl LocalCalendarEvent {
+    pub(crate) fn cancelled(&self) -> bool {
+        self.status.eq_ignore_ascii_case("cancelled")
+    }
 }
 
 #[derive(Clone)]
@@ -78,6 +86,9 @@ pub(crate) struct LocalCalendarState {
     pub(crate) agenda_filters: Rc<crate::retained_model::RetainedModel<CalendarAgendaFilterRow>>,
     // View filters never pause provider sync or change stored calendar visibility.
     pub(crate) agenda_hidden: HashSet<i64>,
+    /// An event whose details open once the calendar has loaded, as asked
+    /// from the card above an invitation (src/invitation.rs).
+    pub(crate) reveal: Option<i64>,
 }
 
 impl LocalCalendarState {
@@ -93,6 +104,7 @@ impl LocalCalendarState {
             agenda_rows: Rc::default(),
             agenda_filters: Rc::default(),
             agenda_hidden: HashSet::new(),
+            reveal: None,
         }
     }
 
@@ -206,25 +218,6 @@ pub(crate) fn core_calendar_event(event: CalendarEvent) -> LocalCalendarEvent {
             .map(|value| value.naive_local())
     }
     .unwrap_or_else(|| Local::now().naive_local());
-    let attendees = event
-        .attendees
-        .iter()
-        .map(|attendee| {
-            let identity = attendee
-                .name
-                .as_ref()
-                .filter(|name| !name.trim().is_empty())
-                .map(|name| format!("{name} <{}>", attendee.email))
-                .unwrap_or_else(|| attendee.email.clone());
-            attendee
-                .partstat
-                .as_ref()
-                .filter(|status| !status.trim().is_empty())
-                .map(|status| format!("{identity} · {}", status.replace('-', " ")))
-                .unwrap_or(identity)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
     let attendee_addresses = event
         .attendees
         .iter()
@@ -273,13 +266,14 @@ pub(crate) fn core_calendar_event(event: CalendarEvent) -> LocalCalendarEvent {
         location: event.location.unwrap_or_default(),
         organizer: event.organizer.unwrap_or_default(),
         description: event.description.unwrap_or_default(),
-        attendees,
+        attendees: event.attendees,
         attendee_addresses,
         join_url: event.join_url.unwrap_or_default(),
         rsvp_status: event.rsvp_status.unwrap_or_default(),
         recurrence: event.rrule.unwrap_or_default(),
         status: event.status.unwrap_or_default(),
         is_local: event.is_local,
+        invited: event.invited,
     }
 }
 
@@ -664,13 +658,64 @@ fn event_row(
         location: event.location.clone().into(),
         organizer: event.organizer.clone().into(),
         description: event.description.clone().into(),
-        attendees: event.attendees.clone().into(),
+        attendees: guest_list(app, &event.attendees).into(),
         join_url: event.join_url.clone().into(),
         rsvp_status: event.rsvp_status.clone().into(),
         recurrence: event.recurrence.clone().into(),
         status: event.status.clone().into(),
         source: if event.is_local { "local" } else { "provider" }.into(),
+        answerable: event.invited && !event.cancelled(),
+        removable: !event.is_local && event.cancelled(),
     }
+}
+
+/// Open the details of the event asked for before the calendar loaded, now
+/// that it shows. Its occurrence on the selected day is preferred.
+pub(crate) fn reveal_asked_event(app: &AppWindow, state: &mut LocalCalendarState) {
+    let Some(id) = state.reveal.take() else {
+        return;
+    };
+    let Ok(id) = i32::try_from(id) else {
+        return;
+    };
+    let mut occurrences = state.events.iter().filter(|event| event.id == id);
+    let Some(event) = occurrences
+        .clone()
+        .find(|event| event.date == state.selected_date)
+        .or_else(|| occurrences.next())
+    else {
+        return;
+    };
+    let row = event_row(app, state, &date_format::current(), event);
+    app.set_calendar_reveal_event(row);
+    app.set_calendar_reveal_request(app.get_calendar_reveal_request().wrapping_add(1));
+}
+
+/// An event's guests, one a line, each with their answer in the user's
+/// language.
+fn guest_list(app: &AppWindow, guests: &[EventAttendee]) -> String {
+    let i18n = app.global::<I18n>();
+    guests
+        .iter()
+        .map(|guest| {
+            let identity = guest
+                .name
+                .as_ref()
+                .filter(|name| !name.trim().is_empty())
+                .map(|name| format!("{name} <{}>", guest.email))
+                .unwrap_or_else(|| guest.email.clone());
+            guest
+                .partstat
+                .as_ref()
+                .filter(|answer| !answer.trim().is_empty())
+                .map(|answer| {
+                    let answer = answer.to_ascii_uppercase();
+                    format!("{identity} · {}", i18n.invoke_guest_answer(answer.into()))
+                })
+                .unwrap_or(identity)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today: NaiveDate) {
@@ -836,13 +881,14 @@ mod tests {
             location: String::new(),
             organizer: String::new(),
             description: String::new(),
-            attendees: String::new(),
+            attendees: Vec::new(),
             attendee_addresses: Vec::new(),
             join_url: String::new(),
             rsvp_status: String::new(),
             recurrence: String::new(),
             status: String::new(),
             is_local: true,
+            invited: false,
         }
     }
 

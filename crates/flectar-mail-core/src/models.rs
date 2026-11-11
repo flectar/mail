@@ -2357,6 +2357,10 @@ pub struct CalendarEvent {
     pub all_day: bool,
     pub status: Option<String>,
     pub method: Option<String>,
+    /// The user is among its guests and doesn't organize it, so it is theirs
+    /// to answer. Set by [`crate::Core::list_events`].
+    #[serde(default)]
+    pub invited: bool,
 }
 
 /// How a calendar connection reaches its server. An account holds at most
@@ -2427,7 +2431,7 @@ pub struct CalendarConnection {
     pub calendars: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventAttendee {
     pub email: String,
@@ -2461,6 +2465,67 @@ pub struct CreateEventArgs {
     /// Invites are emailed (ICS METHOD:REQUEST) to every attendee.
     #[serde(default)]
     pub attendees: Vec<Address>,
+}
+
+/// What a message's calendar does with its event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InvitationKind {
+    /// An invitation, or an update of one.
+    Request,
+    /// The organizer cancelled the event, or some of its occurrences.
+    Cancel,
+    /// An attendee's answer to an event the user organizes.
+    Reply,
+    /// An attendee proposes a change.
+    Counter,
+    /// The organizer turns down a proposed change.
+    DeclineCounter,
+    /// An event to add, with nothing to answer.
+    Publish,
+    /// An attendee asks for the invitation again.
+    Refresh,
+}
+
+/// A message's calendar as the card above the message shows it (#228): the
+/// message's own version of the event, set against the user's calendar now.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvitationCard {
+    pub kind: InvitationKind,
+    pub title: Option<String>,
+    pub starts_at: i64,
+    pub ends_at: Option<i64>,
+    pub all_day: bool,
+    /// The event repeats.
+    pub repeats: bool,
+    /// The message is about one occurrence of an event that repeats.
+    pub occurrence: bool,
+    pub location: Option<String>,
+    pub join_url: Option<String>,
+    pub organizer: Option<Address>,
+    /// The guests and their answers, as the message lists them.
+    pub attendees: Vec<EventAttendee>,
+    /// The event in the user's calendar, while it is there.
+    pub event_id: Option<i64>,
+    /// The user's answer, as their calendar has it.
+    pub my_answer: Option<String>,
+    /// The user's address the invitation names. None when they aren't on
+    /// its guest list, such as for a forwarded invitation.
+    pub invited_as: Option<String>,
+    /// The user organizes the event.
+    pub organized: bool,
+    /// The calendar has a newer version of the event than this message.
+    pub out_of_date: bool,
+    /// The event is cancelled.
+    pub cancelled: bool,
+    /// For an answer: who answered, and how.
+    pub answer: Option<EventAttendee>,
+    /// The message is in Spam or Trash, or from a blocked sender. Its card
+    /// shows, but nothing is answered from it until it is moved out.
+    pub kept_out: bool,
+    /// The titles of the user's other events at the same time.
+    pub conflicts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

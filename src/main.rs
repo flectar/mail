@@ -26,6 +26,7 @@ mod email_document;
 pub mod favicon;
 mod files_controller;
 mod import_controller;
+mod invitation;
 mod keyboard_keys;
 mod latest_load;
 mod mail;
@@ -3165,6 +3166,36 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let app_weak = app.as_weak();
+    let calendar_for_answer = Rc::clone(&calendar_state);
+    let runtime_for_calendar_answer = runtime.clone();
+    let inbox_for_calendar_answer = Rc::clone(&state);
+    app.on_calendar_answer_event(move |event_id, response| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = inbox_for_calendar_answer.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Calendar storage is unavailable."));
+            return;
+        };
+        if let Err(error) = runtime_for_calendar_answer
+            .block_on(core.rsvp_event(i64::from(event_id), response.as_str()))
+        {
+            app.set_sync_status(UiMessage::detail("Could not answer: {}", error));
+        }
+        let today = Local::now().date_naive();
+        let mut calendar = calendar_for_answer.borrow_mut();
+        if let Err(error) = refresh_calendar_events(
+            &core,
+            &runtime_for_calendar_answer,
+            &mut calendar,
+            &inbox_for_calendar_answer.borrow().connected_accounts,
+        ) {
+            app.set_sync_status(UiMessage::detail("Could not load calendar: {}", error));
+        }
+        apply_calendar(&app, &calendar, today);
+    });
+
+    let app_weak = app.as_weak();
     let calendar_for_delete = Rc::clone(&calendar_state);
     let runtime_for_calendar_delete = runtime.clone();
     let inbox_for_calendar_delete = Rc::clone(&state);
@@ -3173,17 +3204,20 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        let is_local = calendar_for_delete
+        // Events created here, and cancelled ones from others, which leave
+        // the calendar without telling anyone.
+        let Some(is_local) = calendar_for_delete
             .borrow()
             .events
             .iter()
-            .any(|event| event.id == event_id && event.is_local);
-        if !is_local {
+            .find(|event| event.id == event_id && (event.is_local || event.cancelled()))
+            .map(|event| event.is_local)
+        else {
             app.set_sync_status(UiMessage::plain(
                 "Only events created in Flectar Mail can be deleted.",
             ));
             return;
-        }
+        };
         let Some(core) = inbox_for_calendar_delete.borrow().core.clone() else {
             app.set_sync_status(UiMessage::plain("Calendar storage is unavailable."));
             return;
@@ -3211,8 +3245,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 "Event deleted, but refresh failed: {}",
                 error,
             ));
-        } else {
+        } else if is_local {
             app.set_sync_status(UiMessage::plain("Event deleted."));
+        } else {
+            app.set_sync_status(UiMessage::plain("Removed from your calendar."));
         }
         apply_calendar(&app, &calendar, today);
     });
@@ -4026,6 +4062,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         {
             app.invoke_reload_calendar_connections();
         }
+        if pending.calendar_changed {
+            invitation::refresh();
+        }
         if pending.calendar_changed
             && let Some(app) = mail_update_app.upgrade()
             && app.get_active_view() == "calendar"
@@ -4613,6 +4652,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         calendar.accounts = calendar_accounts;
                         calendar.sources = calendar_sources;
                         apply_calendar(&app, &calendar, Local::now().date_naive());
+                        calendar::reveal_asked_event(&app, &mut calendar);
                     }
                     refresh_connected_accounts(&app, &startup_state);
                 }
@@ -6097,6 +6137,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     undo::install(&app, &state, &runtime);
     unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
     block_sender::install(&app, &state, &runtime);
+    invitation::install(&app, &state, &calendar_state, &runtime);
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);
     notifications::ui::attach(&app, &state, &runtime, platform.notifications.clone());

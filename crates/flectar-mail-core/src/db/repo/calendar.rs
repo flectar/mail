@@ -56,6 +56,7 @@ fn from_row(row: &Row) -> rusqlite::Result<CalendarEvent> {
         all_day: row.get::<_, i64>("all_day")? != 0,
         status: row.get("status")?,
         method: row.get("method")?,
+        invited: false,
     })
 }
 
@@ -937,7 +938,6 @@ pub fn get(conn: &Connection, event_id: i64) -> Result<Option<CalendarEvent>> {
     Ok(rows.next().transpose()?)
 }
 
-/// The stored iCal UID + sequence (needed to build an RSVP reply).
 /// Take out of the calendar the invitation a message brought, while it is
 /// still unanswered and only known from mail. Returns how many rows went.
 pub fn forget_unanswered_invitation(conn: &Connection, message_id: i64) -> Result<usize> {
@@ -962,6 +962,92 @@ pub fn ical_raw(conn: &Connection, event_id: i64) -> Result<Option<String>> {
         .flatten())
 }
 
+/// The user's calendar's version of an event: the row an invitation for it
+/// updates, with what tells two versions apart.
+#[derive(Debug, Clone)]
+pub struct CalendarVersion {
+    pub event: CalendarEvent,
+    pub sequence: i64,
+    pub dtstamp: Option<i64>,
+    pub deleted: bool,
+}
+
+/// The calendar's version of `uid` in the account, if it has one.
+pub fn version(conn: &Connection, account_id: i64, uid: &str) -> Result<Option<CalendarVersion>> {
+    let Some(id) = preferred_mail_row(conn, account_id, uid)? else {
+        return Ok(None);
+    };
+    let Some(event) = get(conn, id)? else {
+        return Ok(None);
+    };
+    let (sequence, dtstamp, deleted): (i64, Option<i64>, i64) = conn.query_row(
+        "SELECT sequence, dtstamp, deleted FROM calendar_events WHERE id = ?1",
+        params![id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    Ok(Some(CalendarVersion {
+        event,
+        sequence,
+        dtstamp,
+        deleted: deleted != 0,
+    }))
+}
+
+/// The rows that are the meeting `uid` in the account: its own, and the
+/// occurrences Exchange keeps of it (see [`set_series_master`]).
+pub fn meeting_rows(conn: &Connection, account_id: i64, uid: &str) -> Result<Vec<i64>> {
+    let mut statement = conn.prepare(
+        "SELECT id FROM calendar_events
+         WHERE account_id = ?1 AND (ical_uid = ?2 OR series_uid = ?2)",
+    )?;
+    let rows = statement
+        .query_map(params![account_id, uid], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Keep the calendar a message carries, for the card shown above it.
+pub fn keep_message_calendar(
+    conn: &Connection,
+    account_id: i64,
+    message_id: i64,
+    calendar: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO message_calendars (message_id, account_id, calendar) VALUES (?1, ?2, ?3)
+         ON CONFLICT(message_id) DO UPDATE SET account_id = ?2, calendar = ?3",
+        params![message_id, account_id, calendar],
+    )?;
+    Ok(())
+}
+
+/// The calendar a message carries, if it carried one.
+pub fn message_calendar(conn: &Connection, message_id: i64) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT calendar FROM message_calendars WHERE message_id = ?1",
+            params![message_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// The UID of the event a message's invitation left in the calendar. Mail
+/// from before messages kept their calendars has only this: the event names
+/// the last message that changed it.
+pub fn message_meeting(conn: &Connection, message_id: i64) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT ical_uid FROM calendar_events
+             WHERE message_id = ?1 AND deleted = 0
+             ORDER BY id LIMIT 1",
+            params![message_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// The stored iCal UID + sequence (needed to build an RSVP reply).
 pub fn uid_and_sequence(conn: &Connection, event_id: i64) -> Result<Option<(String, i64)>> {
     let mut stmt = conn.prepare("SELECT ical_uid, sequence FROM calendar_events WHERE id = ?1")?;
     let mut rows = stmt.query_map(params![event_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
@@ -1004,7 +1090,10 @@ pub fn recurring_masters(conn: &Connection, end_ms: i64) -> Result<Vec<SyncRow>>
     Ok(rows)
 }
 
-/// Events attached to one message (for the invite card in the thread view).
+/// The events a message's invitation left in the calendar, while they still
+/// name it. The card above a message reads the message's own calendar
+/// instead ([`message_calendar`]), so only tests look events up this way.
+#[cfg(test)]
 pub fn for_message(conn: &Connection, message_id: i64) -> Result<Vec<CalendarEvent>> {
     let mut stmt = conn.prepare(event_select!(
         "WHERE message_id = ?1 AND deleted = 0 ORDER BY starts_at"

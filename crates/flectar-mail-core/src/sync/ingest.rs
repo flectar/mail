@@ -371,6 +371,27 @@ pub(crate) async fn store_calendar_events(
     if messages.is_empty() {
         return Ok(());
     }
+    // Every message keeps its calendar for the card above it, also those
+    // whose calendar stays out of the user's.
+    let kept: Vec<(i64, String)> = messages
+        .iter()
+        .filter_map(|(id, calendars)| {
+            calendars
+                .iter()
+                .find(|calendar| !crate::calendar::parse_ics(calendar).is_empty())
+                .map(|calendar| (*id, calendar.clone()))
+        })
+        .collect();
+    if !kept.is_empty() {
+        ctx.calendar_db
+            .write(move |conn| {
+                for (message_id, calendar) in &kept {
+                    repo::calendar::keep_message_calendar(conn, account_id, *message_id, calendar)?;
+                }
+                Ok(())
+            })
+            .await?;
+    }
     let ids: Vec<i64> = messages.iter().map(|(id, _)| *id).collect();
     let (own, kept_out) = ctx
         .db

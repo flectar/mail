@@ -38,6 +38,39 @@ component DetailField inherits Rectangle {
     }
 }
 
+// The user's answer to an invitation, with the buttons that change it.
+component AnswerField inherits VerticalLayout {
+    in property <string> my-answer;
+    in property <bool> compact;
+    in property <color> label-color;
+    callback answer(string);
+    spacing: 6px;
+
+    Text {
+        text: @tr("MY RESPONSE");
+        color: root.label-color;
+        font-size: TypeScale.caption;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        for choice in [
+            { answer: "ACCEPTED", response: "accepted", label: @tr("Accept") },
+            { answer: "TENTATIVE", response: "tentative", label: @tr("Maybe") },
+            { answer: "DECLINED", response: "declined", label: @tr("Decline") },
+        ] : Button {
+            height: root.compact ? 40px : 32px;
+            width: max(88px, self.content-width);
+            text: choice.label;
+            checkable: true;
+            selected: root.my-answer == choice.answer;
+            clicked => { root.answer(choice.response); }
+        }
+    }
+}
+
 // Display-ready metadata dialog shared by calendar collections and events.
 // Local events expose edit/delete actions; provider data remains read-only,
 // and API identifiers and credentials stay in Rust/the core.
@@ -57,6 +90,12 @@ export component CalendarDetailsDialog inherits Rectangle {
     in property <string> sync;
     in property <string> status;
     in property <string> rsvp;
+    // An invitation the user can answer here, and their answer to it.
+    in property <bool> answerable: false;
+    in property <string> my-answer;
+    // A cancelled event from someone else, which can be taken out of the
+    // calendar.
+    in property <bool> removable: false;
     in property <string> recurrence;
     in property <string> attendees;
     in property <string> description;
@@ -72,6 +111,8 @@ export component CalendarDetailsDialog inherits Rectangle {
     callback open-link(string);
     callback edit-event;
     callback delete-event;
+    callback answer(string);
+    callback remove-event;
 
     visible: root.open;
     background: #20212466;
@@ -182,7 +223,13 @@ export component CalendarDetailsDialog inherits Rectangle {
                 DetailField { label: @tr("ACCESS"); value: root.access; label-color: root.muted-text; value-color: root.title-color; }
                 DetailField { label: @tr("SYNC"); value: root.sync; label-color: root.muted-text; value-color: root.title-color; }
                 DetailField { label: @tr("STATUS"); value: root.status; label-color: root.muted-text; value-color: root.title-color; }
-                DetailField { label: @tr("MY RESPONSE"); value: root.rsvp; label-color: root.muted-text; value-color: root.title-color; }
+                if !root.answerable : DetailField { label: @tr("MY RESPONSE"); value: root.rsvp; label-color: root.muted-text; value-color: root.title-color; }
+                if root.answerable : AnswerField {
+                    my-answer: root.my-answer;
+                    compact: root.compact;
+                    label-color: root.muted-text;
+                    answer(response) => { root.answer(response); }
+                }
                 DetailField { label: @tr("RECURRENCE"); value: root.recurrence; label-color: root.muted-text; value-color: root.title-color; }
                 DetailField { label: @tr("ATTENDEES"); value: root.attendees; multiline: true; label-color: root.muted-text; value-color: root.title-color; }
                 DetailField { label: @tr("DESCRIPTION"); value: root.description; multiline: true; label-color: root.muted-text; value-color: root.title-color; }
@@ -191,7 +238,7 @@ export component CalendarDetailsDialog inherits Rectangle {
 
         Rectangle { x: 0px; y: parent.height - 64px; width: parent.width; height: 1px; background: root.border-subtle; }
         Button {
-            visible: root.join-url != "" && !root.editable;
+            visible: root.join-url != "" && !root.editable && !root.removable;
             x: 24px;
             y: parent.height - 52px;
             width: max(176px, self.content-width);
@@ -209,6 +256,15 @@ export component CalendarDetailsDialog inherits Rectangle {
             text: @tr("Delete");
             destructive: true;
             clicked => { root.delete-event(); }
+        }
+        Button {
+            visible: root.kind == "event" && root.removable;
+            x: 24px;
+            y: parent.height - 52px;
+            width: max(90px, self.content-width);
+            height: 40px;
+            text: @tr("Remove from calendar");
+            clicked => { root.remove-event(); }
         }
         Button {
             visible: root.kind == "event" && root.editable;
