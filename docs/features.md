@@ -322,8 +322,11 @@ out without telling anyone. An invitation that a newer version has replaced
 says so and is answered from the newer one. Invitations in Spam or Trash, and
 from blocked senders, stay out of your calendar, so their card has no answers.
 
+An invitation to one occurrence of a repeating event, such as one meeting of a
+weekly series moved to another day, is answered for that occurrence alone.
 Invitations can also be answered from **My response** in an event's details in
-the calendar.
+the calendar, and for an occurrence of a repeating event Flectar Mail asks
+whether the answer is for **This event** or **All events**.
 
 ## Storage and backups
 
