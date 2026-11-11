@@ -1174,6 +1174,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
         language => language,
     };
     number_format::set_language(selected);
+    spelling::apply_display_language(language_mode);
     if let Err(error) = slint::select_bundled_translation(selected) {
         eprintln!("could not select {selected} translation: {error}");
     }
