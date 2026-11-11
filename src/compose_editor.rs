@@ -146,6 +146,7 @@ impl Default for CosmicComposeEditor {
         if let Some(fonts) = crate::platform::email_fonts() {
             font_system.db_mut().load_fonts_dir(fonts.dir);
         }
+        choose_generic_families(font_system.db_mut());
         let buffer = Buffer::new(
             &mut font_system,
             Metrics::new(FONT_SIZE_LOGICAL, LINE_HEIGHT_LOGICAL),
@@ -940,6 +941,51 @@ impl CosmicComposeEditor {
         } else {
             1
         }
+    }
+}
+
+/// Fonts for serif and monospace text in the editor, best first: those the message names for
+/// its readers, then ones systems ship that look like them.
+const SERIF_FONTS: [&str; 7] = [
+    "Times New Roman",
+    "Times",
+    "Liberation Serif",
+    "Tinos",
+    "Noto Serif",
+    "DejaVu Serif",
+    "Georgia",
+];
+const MONOSPACE_FONTS: [&str; 9] = [
+    "Courier New",
+    "Courier",
+    "Liberation Mono",
+    "Cousine",
+    "Menlo",
+    "Consolas",
+    "Noto Sans Mono",
+    "DejaVu Sans Mono",
+    "Droid Sans Mono",
+];
+
+/// Points the serif and monospace families at the first of their fonts installed. cosmic-text
+/// picks fonts of some Linux systems, which Windows and macOS don't have, and a family without
+/// its font falls back to another kind of type.
+fn choose_generic_families(db: &mut cosmic_text::fontdb::Database) {
+    let installed = |fonts: &[&'static str]| {
+        fonts.iter().copied().find(|font| {
+            db.faces().any(|face| {
+                face.families
+                    .iter()
+                    .any(|(family, _)| family.eq_ignore_ascii_case(font))
+            })
+        })
+    };
+    let (serif, monospace) = (installed(&SERIF_FONTS), installed(&MONOSPACE_FONTS));
+    if let Some(serif) = serif {
+        db.set_serif_family(serif);
+    }
+    if let Some(monospace) = monospace {
+        db.set_monospace_family(monospace);
     }
 }
 
@@ -2409,5 +2455,22 @@ mod tests {
         let accented = "très bien";
         assert!(is_whole_word(accented, &(0..5)));
         assert!(!is_whole_word(accented, &(0..3)));
+    }
+
+    #[test]
+    fn serif_and_monospace_text_use_installed_fonts() {
+        let editor = CosmicComposeEditor::default();
+        let db = editor.font_system.db();
+        for family in [Family::Serif, Family::Monospace] {
+            let query = cosmic_text::fontdb::Query {
+                families: &[family],
+                ..Default::default()
+            };
+            assert!(
+                db.query(&query).is_some(),
+                "no font for {}",
+                db.family_name(&family)
+            );
+        }
     }
 }
