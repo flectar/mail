@@ -10,6 +10,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Frameless window](#frameless-window)
 - [Calendar, contacts, and files](#calendar-contacts-and-files)
 - [Signatures and OpenPGP](#signatures-and-openpgp)
+- [Text formatting](#text-formatting)
 - [Spell check](#spell-check)
 - [Undo](#undo)
 - [Undo send](#undo-send)
@@ -200,6 +201,24 @@ private-key passphrases. Required encryption blocks delivery when recipient keys
 are missing or invalid; protected drafts remain local until Send.
 
 S/MIME and mobile OpenPGP are not currently supported.
+
+## Text formatting
+
+The composer's toolbar sets the font, size and color of text, a highlight
+behind it, and how each paragraph lines up, next to bold, italic, underline,
+strikethrough, lists, quotes, inline code and links. Fonts are sans serif,
+serif or fixed width, and sizes small, normal, large or huge. Text color and
+highlight each offer 64 colors, and **Automatic** or **No highlight** takes a
+color off. **Remove formatting** returns the selection to plain text and keeps
+its links and alignment. From the keyboard, Ctrl+Shift+L, Ctrl+Shift+E and
+Ctrl+Shift+R align paragraphs left, center and right, and Ctrl+\\ removes
+formatting (Command instead of Ctrl on a Mac).
+
+Messages carry the formatting in HTML that mail apps widely support. Sizes
+scale with the reader's own text size, and each font names common
+alternatives in case the reader lacks it. In a dark theme, the composer shows
+dark text colors lighter so they stay readable, and the message keeps the
+colors you chose.
 
 ## Spell check
 
