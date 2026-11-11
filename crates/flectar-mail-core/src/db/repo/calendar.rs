@@ -937,7 +937,6 @@ pub fn get(conn: &Connection, event_id: i64) -> Result<Option<CalendarEvent>> {
     Ok(rows.next().transpose()?)
 }
 
-/// The stored iCal UID + sequence (needed to build an RSVP reply).
 /// Take out of the calendar the invitation a message brought, while it is
 /// still unanswered and only known from mail. Returns how many rows went.
 pub fn forget_unanswered_invitation(conn: &Connection, message_id: i64) -> Result<usize> {
@@ -962,6 +961,7 @@ pub fn ical_raw(conn: &Connection, event_id: i64) -> Result<Option<String>> {
         .flatten())
 }
 
+/// The stored iCal UID + sequence (needed to build an RSVP reply).
 pub fn uid_and_sequence(conn: &Connection, event_id: i64) -> Result<Option<(String, i64)>> {
     let mut stmt = conn.prepare("SELECT ical_uid, sequence FROM calendar_events WHERE id = ?1")?;
     let mut rows = stmt.query_map(params![event_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
