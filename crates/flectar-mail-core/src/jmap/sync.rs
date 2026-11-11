@@ -2839,7 +2839,7 @@ async fn fetch_body(
     let connected = body_session(ctx, config, session).await?;
     let raw = download_message_bounded(connected, &expected_blob).await?;
     let parsed = crate::mime::parse_message(&raw)?;
-    let calendar_events = crate::sync::ingest::calendar_events(&parsed);
+    let calendar_events = crate::sync::ingest::calendar_parts(&parsed);
     let dir = ctx.paths.mail_dir(config.id);
     tokio::fs::create_dir_all(&dir).await?;
     let path = dir.join(format!("{message_id}.jmap.eml"));
@@ -2872,7 +2872,8 @@ async fn fetch_body(
         let _ = tokio::fs::remove_file(path).await;
         return Ok(());
     }
-    crate::sync::ingest::store_calendar_events(ctx, config.id, message_id, calendar_events).await?;
+    crate::sync::ingest::store_calendar_events(ctx, config.id, vec![(message_id, calendar_events)])
+        .await?;
     if let Some(thread_id) = thread_id {
         ctx.bus.emit(CoreEvent::MailUpdated {
             thread_ids: vec![thread_id],

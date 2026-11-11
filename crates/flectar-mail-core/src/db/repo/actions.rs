@@ -239,6 +239,22 @@ pub fn next_send_due_at(conn: &Connection, account_id: i64) -> Result<Option<i64
         .flatten())
 }
 
+/// The messages the actions `ids` act on, each once.
+pub fn message_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<i64>> {
+    let mut statement = conn.prepare("SELECT message_id FROM pending_actions WHERE id = ?1")?;
+    let mut messages = Vec::new();
+    for &id in ids {
+        let message: Option<Option<i64>> =
+            statement.query_row([id], |row| row.get(0)).optional()?;
+        if let Some(Some(message)) = message
+            && !messages.contains(&message)
+        {
+            messages.push(message);
+        }
+    }
+    Ok(messages)
+}
+
 pub fn get(conn: &Connection, id: i64) -> Result<Option<PendingAction>> {
     let mut stmt = conn.prepare(
         "SELECT id, account_id, kind, message_id, thread_id, payload, state,

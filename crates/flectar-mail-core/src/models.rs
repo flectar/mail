@@ -2430,6 +2430,10 @@ pub struct EventAttendee {
     pub name: Option<String>,
     /// NEEDS-ACTION | ACCEPTED | TENTATIVE | DECLINED
     pub partstat: Option<String>,
+    /// When the attendee wrote their newest answer to the user's invitation
+    /// (its DTSTAMP), so an older answer read later doesn't replace it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

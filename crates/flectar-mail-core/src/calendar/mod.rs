@@ -518,7 +518,13 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
                             .and_then(find_join_url)
                             .or_else(|| ev.description.as_deref().and_then(find_join_url));
                     }
-                    if !ev.uid.is_empty() && ev.starts_at_ms != 0 {
+                    // Answers and cancellations may name an event by its
+                    // UID alone (RFC 5546 §3.2); anything else needs a start.
+                    let names_only = matches!(
+                        method.as_deref(),
+                        Some("REPLY" | "CANCEL" | "REFRESH" | "COUNTER" | "DECLINECOUNTER")
+                    );
+                    if !ev.uid.is_empty() && (ev.starts_at_ms != 0 || names_only) {
                         events.push(ev);
                     }
                 }
@@ -796,7 +802,339 @@ pub fn build_cancel_ics(spec: &InviteSpec) -> String {
     })
 }
 
-/// Details for an RSVP reply (METHOD:REPLY).
+/// A content line split into its name, its parameters as written (such as
+/// `CN="Doe, Jane"`) and its value.
+fn raw_parts(line: &str) -> Option<(&str, Vec<&str>, &str)> {
+    let mut quoted = false;
+    let mut colon = None;
+    for (index, character) in line.char_indices() {
+        match character {
+            '"' => quoted = !quoted,
+            ':' if !quoted => {
+                colon = Some(index);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let colon = colon?;
+    let head = &line[..colon];
+    let mut segments = Vec::new();
+    let mut start = 0;
+    quoted = false;
+    for (index, character) in head.char_indices() {
+        match character {
+            '"' => quoted = !quoted,
+            ';' if !quoted => {
+                segments.push(&head[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    segments.push(&head[start..]);
+    let name = segments.remove(0);
+    Some((name, segments, &line[colon + 1..]))
+}
+
+/// Whether `line` is one of the properties `names`.
+fn property_is(line: &str, names: &[&str]) -> bool {
+    raw_parts(line).is_some_and(|(name, _, _)| names.iter().any(|n| name.eq_ignore_ascii_case(n)))
+}
+
+/// One top-level component of a calendar, such as a VEVENT or a VTIMEZONE,
+/// as its unfolded lines with BEGIN and END.
+#[derive(Debug, Clone)]
+struct Component {
+    kind: String,
+    lines: Vec<String>,
+}
+
+impl Component {
+    /// The component's own properties, without those of the components it
+    /// holds (such as a VALARM's).
+    fn own_lines(&self) -> impl Iterator<Item = &str> {
+        let mut depth = 0usize;
+        self.lines.iter().filter_map(move |line| {
+            let upper = line.to_ascii_uppercase();
+            if upper.starts_with("BEGIN:") {
+                depth += 1;
+                None
+            } else if upper.starts_with("END:") {
+                depth = depth.saturating_sub(1);
+                None
+            } else {
+                (depth == 1).then_some(line.as_str())
+            }
+        })
+    }
+}
+
+/// What identifies a VEVENT among the versions of an event, and orders
+/// them (RFC 5546 §2.1.5).
+#[derive(Debug, Clone, Default, PartialEq)]
+struct EventKey {
+    uid: String,
+    recurrence_id_ms: Option<i64>,
+    sequence: i64,
+    dtstamp_ms: Option<i64>,
+}
+
+impl EventKey {
+    /// This version replaces `stored`: a higher SEQUENCE, or the same one
+    /// written no earlier. Re-reading the stored version itself counts, so
+    /// applying a message twice changes nothing.
+    fn supersedes(&self, stored: &EventKey) -> bool {
+        self.sequence > stored.sequence
+            || (self.sequence == stored.sequence
+                && match (self.dtstamp_ms, stored.dtstamp_ms) {
+                    (Some(new), Some(old)) => new >= old,
+                    _ => true,
+                })
+    }
+}
+
+/// A calendar split into its own properties and its top-level components,
+/// so components can be replaced, added or cleaned without rewriting the
+/// rest of it.
+#[derive(Debug, Clone, Default)]
+struct CalendarParts {
+    properties: Vec<String>,
+    components: Vec<Component>,
+}
+
+impl CalendarParts {
+    fn parse(text: &str) -> Self {
+        let mut parts = Self::default();
+        let mut current: Option<Component> = None;
+        let mut depth = 0usize;
+        for line in unfold(text) {
+            let line = line.into_owned();
+            let upper = line.to_ascii_uppercase();
+            if let Some(component) = current.as_mut() {
+                component.lines.push(line);
+                if upper.starts_with("BEGIN:") {
+                    depth += 1;
+                } else if upper.starts_with("END:") {
+                    depth -= 1;
+                    if depth == 0
+                        && let Some(component) = current.take()
+                    {
+                        parts.components.push(component);
+                    }
+                }
+                continue;
+            }
+            if line.trim().is_empty() || upper == "BEGIN:VCALENDAR" || upper == "END:VCALENDAR" {
+                continue;
+            }
+            if let Some(kind) = upper.strip_prefix("BEGIN:") {
+                current = Some(Component {
+                    kind: kind.trim().to_string(),
+                    lines: vec![line],
+                });
+                depth = 1;
+            } else {
+                parts.properties.push(line);
+            }
+        }
+        parts
+    }
+
+    fn render(&self) -> String {
+        let mut out = String::new();
+        push_prop(&mut out, "BEGIN", "VCALENDAR");
+        for line in &self.properties {
+            fold(line, &mut out);
+        }
+        for component in &self.components {
+            for line in &component.lines {
+                fold(line, &mut out);
+            }
+        }
+        push_prop(&mut out, "END", "VCALENDAR");
+        out
+    }
+
+    fn zones(&self) -> HashMap<String, Vec<TzObservance>> {
+        let lines: Vec<Cow<'_, str>> = self
+            .components
+            .iter()
+            .filter(|component| component.kind == "VTIMEZONE")
+            .flat_map(|component| {
+                component
+                    .lines
+                    .iter()
+                    .map(|line| Cow::Borrowed(line.as_str()))
+            })
+            .collect();
+        parse_vtimezones(&lines)
+    }
+
+    fn zone_id(component: &Component) -> Option<String> {
+        component.own_lines().find_map(|line| {
+            let (key, _, value) = split_prop(line)?;
+            (key == "TZID").then(|| value.trim().to_string())
+        })
+    }
+
+    fn event_key(
+        component: &Component,
+        zones: &HashMap<String, Vec<TzObservance>>,
+    ) -> Option<EventKey> {
+        if component.kind != "VEVENT" {
+            return None;
+        }
+        let mut key = EventKey::default();
+        for line in component.own_lines() {
+            let Some((name, params, value)) = split_prop(line) else {
+                continue;
+            };
+            match name.as_str() {
+                "UID" => key.uid = value.trim().to_string(),
+                "RECURRENCE-ID" => {
+                    key.recurrence_id_ms =
+                        resolve_dt(value, param(&params, "TZID"), zones).map(|(ms, _)| ms);
+                }
+                "SEQUENCE" => key.sequence = value.trim().parse().unwrap_or(0),
+                "DTSTAMP" => key.dtstamp_ms = parse_dt(value).map(|(ms, _)| ms),
+                _ => {}
+            }
+        }
+        Some(key)
+    }
+}
+
+/// What an invitation leaves in the calendar: its events, without the
+/// METHOD that made it a message (RFC 4791 §4.1) and without the alarms they
+/// carry, since an organizer's reminders aren't the attendee's (RFC 9671 §4).
+pub(crate) fn stored_form(calendar: &str) -> String {
+    let mut parts = CalendarParts::parse(calendar);
+    parts
+        .properties
+        .retain(|line| !property_is(line, &["METHOD"]));
+    for component in &mut parts.components {
+        if component.kind != "VEVENT" {
+            continue;
+        }
+        let mut kept = Vec::with_capacity(component.lines.len());
+        let mut alarm_depth = 0usize;
+        for line in std::mem::take(&mut component.lines) {
+            let upper = line.to_ascii_uppercase();
+            if alarm_depth > 0 {
+                if upper.starts_with("BEGIN:") {
+                    alarm_depth += 1;
+                } else if upper.starts_with("END:") {
+                    alarm_depth -= 1;
+                }
+                continue;
+            }
+            if upper == "BEGIN:VALARM" {
+                alarm_depth = 1;
+                continue;
+            }
+            kept.push(line);
+        }
+        component.lines = kept;
+    }
+    parts.render()
+}
+
+/// `stored` with the occurrences of `uid` that `update` describes (VEVENTs
+/// with a RECURRENCE-ID): each replaces the stored version of that
+/// occurrence when it is newer, or joins the calendar. With `cancel` they
+/// join as cancelled, which takes those occurrences out of the series.
+/// Returns None when nothing changed. `stored` may be empty.
+pub(crate) fn merge_occurrences(
+    stored: &str,
+    update: &str,
+    uid: &str,
+    cancel: bool,
+) -> Option<String> {
+    let mut merged = CalendarParts::parse(stored);
+    let incoming = CalendarParts::parse(update);
+    let incoming_zones = incoming.zones();
+    let mut changed = false;
+    for component in &incoming.components {
+        let Some(key) = CalendarParts::event_key(component, &incoming_zones) else {
+            continue;
+        };
+        let Some(occurrence) = key.recurrence_id_ms else {
+            continue;
+        };
+        if key.uid != uid {
+            continue;
+        }
+        let mut component = component.clone();
+        if cancel {
+            component
+                .lines
+                .retain(|line| !property_is(line, &["STATUS"]));
+            let end = component.lines.len().saturating_sub(1);
+            component.lines.insert(end, "STATUS:CANCELLED".into());
+            // A cancellation may name the occurrence alone; the stored
+            // occurrence starts where it would have.
+            let has_start = component
+                .own_lines()
+                .any(|line| property_is(line, &["DTSTART"]));
+            let recurrence_id = component
+                .own_lines()
+                .find(|line| property_is(line, &["RECURRENCE-ID"]))
+                .map(str::to_string);
+            if !has_start && let Some(recurrence_id) = recurrence_id {
+                let start = format!("DTSTART{}", &recurrence_id["RECURRENCE-ID".len()..]);
+                component.lines.insert(end, start);
+            }
+        }
+        let stored_zones = merged.zones();
+        let existing = merged.components.iter().position(|stored| {
+            CalendarParts::event_key(stored, &stored_zones).is_some_and(|stored| {
+                stored.uid == uid
+                    && stored
+                        .recurrence_id_ms
+                        .is_some_and(|id| (id - occurrence).abs() < 60_000)
+            })
+        });
+        match existing {
+            Some(index) => {
+                let stored_key = CalendarParts::event_key(&merged.components[index], &stored_zones);
+                if stored_key.is_some_and(|stored| key.supersedes(&stored)) {
+                    merged.components[index] = component;
+                    changed = true;
+                }
+            }
+            None => {
+                merged.components.push(component);
+                changed = true;
+            }
+        }
+    }
+    if !changed {
+        return None;
+    }
+    if merged.properties.is_empty() {
+        merged.properties = incoming
+            .properties
+            .iter()
+            .filter(|line| !property_is(line, &["METHOD"]))
+            .cloned()
+            .collect();
+    }
+    // The zones the occurrences' times refer to come along.
+    for zone in incoming.components.iter().filter(|c| c.kind == "VTIMEZONE") {
+        let id = CalendarParts::zone_id(zone);
+        let known = merged
+            .components
+            .iter()
+            .any(|c| c.kind == "VTIMEZONE" && CalendarParts::zone_id(c) == id);
+        if !known {
+            merged.components.insert(0, zone.clone());
+        }
+    }
+    Some(merged.render())
+}
+
+/// An attendee's answer to an invitation (METHOD:REPLY, RFC 5546 §3.2.3).
 pub struct ReplySpec<'a> {
     pub uid: &'a str,
     pub sequence: i64,

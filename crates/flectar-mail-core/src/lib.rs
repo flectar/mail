@@ -4669,7 +4669,100 @@ impl Core {
         for acc in touched_accounts {
             self.nudge(Some(acc), || SyncCmd::RunActions).await;
         }
+        if matches!(args.kind, ActionKind::Spam | ActionKind::NotSpam) {
+            let ids = action_ids.clone();
+            let moved = self
+                .db
+                .read(move |conn| repo::actions::message_ids(conn, &ids))
+                .await?;
+            self.invitations_follow(moved, args.kind == ActionKind::Spam)
+                .await;
+        }
         Ok(ActionResult { action_ids })
+    }
+
+    /// Invitations follow their mail in and out of Spam. Mail moved there
+    /// takes the invitations it brought, still unanswered, out of the calendar
+    /// (CalConnect's guidance against calendar abuse), and mail moved back
+    /// brings them again. Failing here leaves the move itself done.
+    async fn invitations_follow(&self, message_ids: Vec<i64>, into_spam: bool) {
+        if message_ids.is_empty() {
+            return;
+        }
+        let result = if into_spam {
+            self.forget_invitations(message_ids).await
+        } else {
+            self.reapply_invitations(message_ids).await
+        };
+        if let Err(error) = result {
+            tracing::warn!(%error, into_spam, "calendar: invitations could not follow their mail");
+        }
+    }
+
+    async fn forget_invitations(&self, message_ids: Vec<i64>) -> Result<()> {
+        let owners = self
+            .db
+            .read(move |conn| {
+                let mut owners = Vec::new();
+                for id in message_ids {
+                    if let Some(row) = repo::messages::get_row(conn, id)? {
+                        owners.push((id, row.account_id));
+                    }
+                }
+                Ok(owners)
+            })
+            .await?;
+        let changed = self
+            .calendar_db
+            .write(move |conn| {
+                let mut changed = Vec::new();
+                for (message_id, account_id) in owners {
+                    if repo::calendar::forget_unanswered_invitation(conn, message_id)? > 0
+                        && !changed.contains(&account_id)
+                    {
+                        changed.push(account_id);
+                    }
+                }
+                Ok(changed)
+            })
+            .await?;
+        for account_id in changed {
+            self.bus.emit(CoreEvent::CalendarUpdated { account_id });
+        }
+        Ok(())
+    }
+
+    async fn reapply_invitations(&self, message_ids: Vec<i64>) -> Result<()> {
+        let stored = self
+            .db
+            .read(move |conn| {
+                let mut stored = Vec::new();
+                for id in message_ids {
+                    if let Some(row) = repo::messages::get_row(conn, id)?
+                        && let Some(path) = row.raw_path
+                    {
+                        stored.push((id, row.account_id, path));
+                    }
+                }
+                Ok(stored)
+            })
+            .await?;
+        let ctx = self.sync_ctx();
+        for (message_id, account_id, path) in stored {
+            // Mail whose body isn't here yet brings its invitations when
+            // it is fetched, like any other.
+            let Ok(raw) = file_io::read(&path, MAX_CACHED_MESSAGE_BYTES, "stored message").await
+            else {
+                continue;
+            };
+            let Ok(parsed) = crate::mime::parse_message(&raw) else {
+                continue;
+            };
+            let calendars = sync::ingest::calendar_parts(&parsed);
+            sync::ingest::store_calendar_events(&ctx, account_id, vec![(message_id, calendars)])
+                .await?;
+        }
+        Ok(())
     }
 
     /// Queue a provider-side purge of Trash for one account or all accounts.
@@ -4778,11 +4871,12 @@ impl Core {
     /// is reversed. Unlike [`Core::undo_last`], later actions and sends stay.
     /// False when none of them could be taken back.
     pub async fn undo_actions(&self, action_ids: Vec<i64>) -> Result<bool> {
-        let (undone, threads) = self
+        let (undone, threads, out_of_spam, into_spam) = self
             .db
             .write(move |conn| {
                 let mut undone = false;
                 let mut threads = Vec::new();
+                let (mut out_of_spam, mut into_spam) = (Vec::new(), Vec::new());
                 for id in action_ids {
                     let Some(action) = repo::actions::get(conn, id)? else {
                         continue;
@@ -4798,10 +4892,17 @@ impl Core {
                     {
                         threads.push(thread_id);
                     }
+                    match (action.kind.as_str(), action.message_id) {
+                        ("spam", Some(message_id)) => out_of_spam.push(message_id),
+                        ("not_spam", Some(message_id)) => into_spam.push(message_id),
+                        _ => {}
+                    }
                 }
-                Ok((undone, threads))
+                Ok((undone, threads, out_of_spam, into_spam))
             })
             .await?;
+        self.invitations_follow(out_of_spam, false).await;
+        self.invitations_follow(into_spam, true).await;
         if !threads.is_empty() {
             self.bus.emit(CoreEvent::MailUpdated {
                 thread_ids: threads,
@@ -6243,6 +6344,7 @@ impl Core {
                 email: a.email.clone(),
                 name: a.name.clone(),
                 partstat: Some("NEEDS-ACTION".into()),
+                answered_at: None,
             })
             .collect();
 
@@ -6490,15 +6592,19 @@ impl Core {
         let attendees: Vec<EventAttendee> = args
             .attendees
             .iter()
-            .map(|a| EventAttendee {
-                email: a.email.clone(),
-                name: a.name.clone(),
-                partstat: existing
+            .map(|a| {
+                let previous = existing
                     .attendees
                     .iter()
-                    .find(|old| old.email.eq_ignore_ascii_case(&a.email))
-                    .and_then(|old| old.partstat.clone())
-                    .or_else(|| Some("NEEDS-ACTION".into())),
+                    .find(|old| old.email.eq_ignore_ascii_case(&a.email));
+                EventAttendee {
+                    email: a.email.clone(),
+                    name: a.name.clone(),
+                    partstat: previous
+                        .and_then(|old| old.partstat.clone())
+                        .or_else(|| Some("NEEDS-ACTION".into())),
+                    answered_at: previous.and_then(|old| old.answered_at),
+                }
             })
             .collect();
 
@@ -13089,5 +13195,111 @@ mod unsubscribe_offer_tests {
             .await
             .unwrap();
         assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), None);
+    }
+}
+
+#[cfg(test)]
+mod invitation_tests {
+    use super::*;
+
+    const INVITATION: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:review-1@example.com\r\nSEQUENCE:0\r\nDTSTAMP:20261101T080000Z\r\nDTSTART:20261120T090000Z\r\nDTEND:20261120T100000Z\r\nSUMMARY:Design review\r\nORGANIZER;CN=Alice:mailto:alice@example.com\r\nATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:me@test.dev\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:carol@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    /// An invitation from alice@example.com to me@test.dev in the inbox,
+    /// with its original on disk as after the reader downloaded it, and a
+    /// Junk folder to move it to.
+    async fn invited() -> (Core, tempfile::TempDir, i64) {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let path = temp.path().join("invite.eml");
+        std::fs::write(
+            &path,
+            format!(
+                "From: Alice <alice@example.com>\r\nTo: me@test.dev\r\nSubject: Invitation: Design review\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nYou're invited.\r\n--b\r\nContent-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n\r\n{INVITATION}--b--\r\n"
+            ),
+        )
+        .unwrap();
+        let raw_path = path.to_string_lossy().into_owned();
+        let message_id = core
+            .db
+            .write(move |conn| {
+                db::testutil::seed_account(conn);
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Junk', 'spam')",
+                    [],
+                )?;
+                let (_, id) = db::testutil::seed_message(
+                    conn,
+                    "alice@example.com",
+                    "Invitation: Design review",
+                    false,
+                );
+                conn.execute(
+                    "UPDATE messages SET raw_path = ?2 WHERE id = ?1",
+                    rusqlite::params![id, raw_path],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        sync::ingest::store_calendar_events(
+            &core.sync_ctx(),
+            1,
+            vec![(message_id, vec![INVITATION.into()])],
+        )
+        .await
+        .unwrap();
+        (core, temp, message_id)
+    }
+
+    async fn invitations(core: &Core, message_id: i64) -> Vec<CalendarEvent> {
+        core.events_for_message(message_id).await.unwrap()
+    }
+
+    fn to_spam(message_id: i64) -> PerformActionArgs {
+        PerformActionArgs {
+            kind: ActionKind::Spam,
+            target: ActionTarget::Messages(vec![message_id]),
+            params: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_invitation_follows_its_mail_in_and_out_of_spam() {
+        let (core, _temp, id) = invited().await;
+        assert_eq!(invitations(&core, id).await.len(), 1);
+
+        let moved = core.perform_action(to_spam(id)).await.unwrap();
+        assert!(
+            invitations(&core, id).await.is_empty(),
+            "spam leaves the calendar"
+        );
+        // Read again while in Spam, it stays out.
+        sync::ingest::store_calendar_events(
+            &core.sync_ctx(),
+            1,
+            vec![(id, vec![INVITATION.into()])],
+        )
+        .await
+        .unwrap();
+        assert!(invitations(&core, id).await.is_empty());
+
+        assert!(core.undo_actions(moved.action_ids).await.unwrap());
+        let back = invitations(&core, id).await;
+        assert_eq!(back.len(), 1, "back in the inbox, it's back");
+        assert_eq!(back[0].summary.as_deref(), Some("Design review"));
+    }
+
+    #[tokio::test]
+    async fn an_answered_invitation_stays_when_its_mail_goes_to_spam() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        core.calendar_db
+            .write(move |conn| repo::calendar::set_rsvp(conn, event, "ACCEPTED"))
+            .await
+            .unwrap();
+        core.perform_action(to_spam(id)).await.unwrap();
+        assert_eq!(invitations(&core, id).await.len(), 1);
     }
 }
