@@ -26,7 +26,7 @@ use std::cell::{Cell, RefCell};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// Whether the app has a checker of its own for this platform. A host may bring one too.
 #[cfg(desktop)]
@@ -55,6 +55,10 @@ const SPELLING_SYSTEM: &str = crate::platform::NAME;
 thread_local! {
     static SPELLING: RefCell<Option<Rc<Spelling>>> = const { RefCell::new(None) };
 }
+
+/// The display language the user chose in Settings, such as "es", which is checked first when
+/// they chose no spelling languages. `None` while the app follows the system's language.
+static DISPLAY_LANGUAGE: Mutex<Option<String>> = Mutex::new(None);
 
 /// A language spelling can be checked in.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -271,6 +275,23 @@ pub(crate) fn apply_settings(enabled: bool, languages: Option<Vec<String>>) {
     }
 }
 
+/// The display language as set in Settings: "system", or a code such as "es". Open messages are
+/// checked again when that changes the languages checked by default.
+pub(crate) fn apply_display_language(language: &str) {
+    let display = (language != "system").then(|| language.to_owned());
+    let changed = {
+        let mut current = DISPLAY_LANGUAGE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let changed = *current != display;
+        *current = display;
+        changed
+    };
+    if changed && service().is_some_and(|spelling| spelling.chosen.borrow().is_none()) {
+        crate::composer::spelling_changed();
+    }
+}
+
 /// Show the spelling settings in the main window's settings.
 pub(crate) fn apply_to_window(app: &crate::AppWindow) {
     let Some(spelling) = service() else {
@@ -461,8 +482,8 @@ pub(crate) struct Checked {
     pub(crate) found: Vec<Range<usize>>,
 }
 
-/// The installed languages that are checked: those `chosen`, or the ones matching the system's
-/// languages when the user chose none.
+/// The installed languages that are checked: those `chosen`, or the ones matching the display
+/// language and the system's languages when the user chose none.
 fn active_languages(installed: &[Language], chosen: Option<&[String]>) -> Vec<String> {
     match chosen {
         Some(chosen) => chosen
@@ -474,9 +495,40 @@ fn active_languages(installed: &[Language], chosen: Option<&[String]>) -> Vec<St
     }
 }
 
-/// The installed languages matching the system's languages, as checked when the user chose none.
+/// The installed languages matching the display language and the system's languages, as checked
+/// when the user chose none.
 pub(crate) fn system_languages(installed: &[Language]) -> Vec<String> {
-    default_languages(installed, &sys_locale::get_locales().collect::<Vec<_>>())
+    let display = DISPLAY_LANGUAGE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let locales = default_locales(display.as_deref(), sys_locale::get_locales().collect());
+    default_languages(installed, &locales)
+}
+
+/// The locales spelling starts with: the display language the user chose first, then the
+/// system's. A system locale in the same language goes first in its place, so its region is
+/// kept: English shown on a British system stays British English.
+fn default_locales(display: Option<&str>, mut system: Vec<String>) -> Vec<String> {
+    let Some(display) = display else {
+        return system;
+    };
+    let language = |locale: &str| {
+        locale
+            .split(['-', '_'])
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+    };
+    let wanted = language(display);
+    match system.iter().position(|locale| language(locale) == wanted) {
+        Some(index) => {
+            let same = system.remove(index);
+            system.insert(0, same);
+        }
+        None => system.insert(0, display.to_owned()),
+    }
+    system
 }
 
 /// The installed languages matching the system's, one for each of its languages: the same
@@ -768,6 +820,31 @@ mod tests {
         assert_eq!(defaults(&all, &["fr-FR", "C"]), Vec::<String>::new());
         assert_eq!(defaults(&["ca", "ca_valencia"], &["ca-ES"]), ["ca"]);
         assert_eq!(defaults(&["es"], &["es-MX"]), ["es"]);
+    }
+
+    #[test]
+    fn the_display_language_the_user_chose_comes_first() {
+        let installed = installed(&["en_GB", "en_US", "es_ES", "es_MX", "ru_RU"]);
+        let starting = |display: Option<&str>, system: &[&str]| {
+            let system = system.iter().map(|locale| (*locale).to_owned()).collect();
+            default_languages(&installed, &default_locales(display, system))
+        };
+        // Following the system, only its languages.
+        assert_eq!(starting(None, &["en-US"]), ["en_US"]);
+        // Spanish shown on an English system checks both, Spanish first.
+        assert_eq!(starting(Some("es"), &["en-US"]), ["es_ES", "en_US"]);
+        // English shown on a British system stays British English.
+        assert_eq!(
+            starting(Some("en"), &["es-ES", "en-GB"]),
+            ["en_GB", "es_ES"]
+        );
+        // A display language without a dictionary changes nothing.
+        assert_eq!(starting(Some("zh_Hans"), &["en-US"]), ["en_US"]);
+
+        apply_display_language("es");
+        assert_eq!(*DISPLAY_LANGUAGE.lock().unwrap(), Some("es".to_owned()));
+        apply_display_language("system");
+        assert_eq!(*DISPLAY_LANGUAGE.lock().unwrap(), None);
     }
 
     #[test]
