@@ -3177,9 +3177,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             app.set_sync_status(UiMessage::plain("Calendar storage is unavailable."));
             return;
         };
-        if let Err(error) = runtime_for_calendar_answer
-            .block_on(core.rsvp_event(i64::from(event_id), response.as_str()))
-        {
+        if let Err(error) = runtime_for_calendar_answer.block_on(core.rsvp_event(
+            i64::from(event_id),
+            response.as_str(),
+            None,
+        )) {
             app.set_sync_status(UiMessage::detail("Could not answer: {}", error));
         }
         let today = Local::now().date_naive();

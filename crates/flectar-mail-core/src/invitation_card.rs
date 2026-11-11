@@ -41,8 +41,9 @@ struct Shown {
     ends_at: Option<i64>,
     all_day: bool,
     rrule: Option<String>,
-    /// The message is about one occurrence of a repeating event.
-    occurrence: bool,
+    /// For a message about one occurrence of a repeating event, that
+    /// occurrence's RECURRENCE-ID.
+    recurrence_id: Option<i64>,
     location: Option<String>,
     join_url: Option<String>,
     organizer: Option<Address>,
@@ -72,7 +73,7 @@ impl Shown {
             ends_at: shown.ends_at_ms,
             all_day: shown.all_day,
             rrule: shown.rrule.clone(),
-            occurrence: shown.recurrence_id_ms.is_some(),
+            recurrence_id: shown.recurrence_id_ms,
             location: shown.location.clone(),
             join_url: shown.join_url.clone(),
             organizer: shown.organizer.clone().map(|email| Address {
@@ -122,7 +123,7 @@ impl Shown {
             ends_at: event.ends_at,
             all_day: event.all_day,
             rrule: event.rrule.clone(),
-            occurrence: false,
+            recurrence_id: None,
             location: event.location.clone(),
             join_url: event.join_url.clone(),
             organizer,
@@ -138,7 +139,11 @@ impl Shown {
     /// its first is over, else its own time.
     fn upcoming(&self, now: i64) -> (i64, Option<i64>) {
         let over = self.ends_at.unwrap_or(self.starts_at) <= now;
-        let Some(rrule) = self.rrule.as_deref().filter(|_| over && !self.occurrence) else {
+        let Some(rrule) = self
+            .rrule
+            .as_deref()
+            .filter(|_| over && self.recurrence_id.is_none())
+        else {
             return (self.starts_at, self.ends_at);
         };
         let duration = self.ends_at.map_or(0, |end| end - self.starts_at);
@@ -259,20 +264,40 @@ impl Core {
             }
             (None, _) => false,
         };
-        let my_answer = stored
-            .as_ref()
-            .and_then(|stored| {
-                stored.event.rsvp_status.clone().or_else(|| {
-                    let mine = invited_as.as_deref()?;
-                    stored
-                        .event
-                        .attendees
-                        .iter()
-                        .find(|attendee| attendee.email.eq_ignore_ascii_case(mine))
-                        .and_then(|attendee| attendee.partstat.clone())
+        // An occurrence answered on its own has its own answer, on its own
+        // VEVENT; otherwise the event's answer holds for it.
+        let occurrence_answer = shown.recurrence_id.and_then(|original| {
+            let raw = stored.as_ref()?.ical_raw.as_deref()?;
+            let mine = invited_as.as_deref()?;
+            calendar::parse_ics(raw)
+                .into_iter()
+                .find(|event| {
+                    event
+                        .recurrence_id_ms
+                        .is_some_and(|id| (id - original).abs() < 60_000)
+                })?
+                .attendees
+                .into_iter()
+                .find(|attendee| attendee.email.eq_ignore_ascii_case(mine))?
+                .partstat
+                .filter(|answer| answer != "NEEDS-ACTION")
+        });
+        let my_answer = occurrence_answer.or_else(|| {
+            stored
+                .as_ref()
+                .and_then(|stored| {
+                    stored.event.rsvp_status.clone().or_else(|| {
+                        let mine = invited_as.as_deref()?;
+                        stored
+                            .event
+                            .attendees
+                            .iter()
+                            .find(|attendee| attendee.email.eq_ignore_ascii_case(mine))
+                            .and_then(|attendee| attendee.partstat.clone())
+                    })
                 })
-            })
-            .filter(|answer| answer != "NEEDS-ACTION");
+                .filter(|answer| answer != "NEEDS-ACTION")
+        });
         let cancelled = kind == InvitationKind::Cancel
             || shown.cancelled
             || stored
@@ -301,11 +326,12 @@ impl Core {
             ends_at,
             all_day: shown.all_day,
             repeats: shown.rrule.is_some()
-                || shown.occurrence
+                || shown.recurrence_id.is_some()
                 || stored
                     .as_ref()
                     .is_some_and(|stored| stored.event.rrule.is_some()),
-            occurrence: shown.occurrence,
+            occurrence: shown.recurrence_id.is_some(),
+            recurrence_id: shown.recurrence_id,
             event_id: stored.as_ref().map(|stored| stored.event.id),
             title: shown.title,
             location: shown.location,

@@ -1147,33 +1147,193 @@ pub(crate) fn with_partstat(calendar: &str, attendee: &str, partstat: &str) -> O
         .iter_mut()
         .filter(|component| component.kind == "VEVENT")
     {
-        let mut depth = 0usize;
-        for line in component.lines.iter_mut() {
-            let upper = line.to_ascii_uppercase();
-            if upper.starts_with("BEGIN:") {
-                depth += 1;
-                continue;
-            }
-            if upper.starts_with("END:") {
-                depth = depth.saturating_sub(1);
-                continue;
-            }
-            let listed = depth == 1
-                && raw_parts(line).is_some_and(|(name, _, value)| {
-                    name.eq_ignore_ascii_case("ATTENDEE")
-                        && cal_address(value).eq_ignore_ascii_case(attendee)
-                });
-            if !listed {
-                continue;
-            }
-            let kept = without_params(line, |name| name.eq_ignore_ascii_case("PARTSTAT"));
-            if let Some((head, value)) = split_value(&kept) {
-                *line = format!("{};PARTSTAT={partstat}:{value}", head.trim_end_matches(';'));
-                found = true;
-            }
-        }
+        found |= set_partstat(component, attendee, partstat);
     }
     found.then(|| parts.render())
+}
+
+/// Set `attendee`'s PARTSTAT on their own line of `component`. Whether the
+/// component lists them.
+fn set_partstat(component: &mut Component, attendee: &str, partstat: &str) -> bool {
+    let mut found = false;
+    let mut depth = 0usize;
+    for line in component.lines.iter_mut() {
+        let upper = line.to_ascii_uppercase();
+        if upper.starts_with("BEGIN:") {
+            depth += 1;
+            continue;
+        }
+        if upper.starts_with("END:") {
+            depth = depth.saturating_sub(1);
+            continue;
+        }
+        let listed = depth == 1
+            && raw_parts(line).is_some_and(|(name, _, value)| {
+                name.eq_ignore_ascii_case("ATTENDEE")
+                    && cal_address(value).eq_ignore_ascii_case(attendee)
+            });
+        if !listed {
+            continue;
+        }
+        let kept = without_params(line, |name| name.eq_ignore_ascii_case("PARTSTAT"));
+        if let Some((head, value)) = split_value(&kept) {
+            *line = format!("{};PARTSTAT={partstat}:{value}", head.trim_end_matches(';'));
+            found = true;
+        }
+    }
+    found
+}
+
+/// The occurrence a stored calendar stands for when it has VEVENTs only for
+/// occurrences of its event, not for the event itself: the first of them.
+/// Such is an invitation to some occurrences of a series this calendar
+/// doesn't hold.
+pub(crate) fn stands_for(calendar: &str) -> Option<i64> {
+    let events = parse_ics(calendar);
+    if events.iter().any(|event| event.recurrence_id_ms.is_none()) {
+        return None;
+    }
+    events
+        .iter()
+        .filter_map(|event| event.recurrence_id_ms)
+        .min()
+}
+
+/// When the occurrence `original` names takes place, if the calendar changed
+/// it on its own.
+pub(crate) fn occurrence_start(calendar: &str, original: i64) -> Option<i64> {
+    parse_ics(calendar)
+        .into_iter()
+        .find(|event| {
+            event
+                .recurrence_id_ms
+                .is_some_and(|id| (id - original).abs() < 60_000)
+        })
+        .map(|event| event.starts_at_ms)
+        .filter(|start| *start != 0)
+}
+
+/// What a VEVENT made for one occurrence of a series leaves out of the
+/// series' own: what makes it repeat, and its times.
+const SERIES_ONLY: &[&str] = &[
+    "RRULE",
+    "RDATE",
+    "EXRULE",
+    "EXDATE",
+    "RECURRENCE-ID",
+    "DTSTART",
+    "DTEND",
+    "DURATION",
+    "DTSTAMP",
+];
+
+/// `calendar` with `attendee`'s answer to one occurrence of its repeating
+/// event, the one `original` names (its RECURRENCE-ID), set on that
+/// occurrence's own VEVENT. When the calendar has none, one is made from the
+/// series', with the occurrence's times, as RFC 6638 appendix B.7 shows an
+/// attendee declining one instance. The series and its other occurrences
+/// keep their answers. None when the calendar has neither that occurrence
+/// nor the series, or doesn't list the attendee.
+pub(crate) fn with_occurrence_partstat(
+    calendar: &str,
+    original: i64,
+    attendee: &str,
+    partstat: &str,
+    now_ms: i64,
+) -> Option<String> {
+    let mut parts = CalendarParts::parse(calendar);
+    let zones = parts.zones();
+    let keys: Vec<Option<EventKey>> = parts
+        .components
+        .iter()
+        .map(|component| CalendarParts::event_key(component, &zones))
+        .collect();
+    let names_it = |key: &Option<EventKey>| {
+        key.as_ref()
+            .and_then(|key| key.recurrence_id_ms)
+            .is_some_and(|id| (id - original).abs() < 60_000)
+    };
+    if let Some(index) = keys.iter().position(names_it) {
+        return set_partstat(&mut parts.components[index], attendee, partstat)
+            .then(|| parts.render());
+    }
+    let master = keys.iter().position(|key| {
+        key.as_ref()
+            .is_some_and(|key| key.recurrence_id_ms.is_none())
+    })?;
+    let series = parse_ics(calendar)
+        .into_iter()
+        .find(|event| event.recurrence_id_ms.is_none())?;
+    let source = &parts.components[master];
+    // The occurrence's times are written as the series writes its start: a
+    // date, a floating local time, or else UTC, which RFC 5545 section
+    // 3.8.4.4 allows beside a start in a time zone.
+    let floating = source.own_lines().any(|line| {
+        split_prop(line).is_some_and(|(name, params, value)| {
+            name == "DTSTART"
+                && param(&params, "TZID").is_none()
+                && !value.trim().ends_with('Z')
+                && value.trim().len() > 8
+        })
+    });
+    let stamp = |ms: i64| {
+        if series.all_day {
+            format!(";VALUE=DATE:{}", fmt_utc_date(ms))
+        } else if floating {
+            let local = chrono::Local
+                .timestamp_millis_opt(ms)
+                .earliest()
+                .map(|value| value.format("%Y%m%dT%H%M%S").to_string())
+                .unwrap_or_default();
+            format!(":{local}")
+        } else {
+            format!(":{}", fmt_utc(ms))
+        }
+    };
+    let duration_line = source
+        .own_lines()
+        .find(|line| property_is(line, &["DURATION"]))
+        .map(str::to_string);
+    let mut added = vec![
+        format!("RECURRENCE-ID{}", stamp(original)),
+        format!("DTSTART{}", stamp(original)),
+    ];
+    match (duration_line, series.ends_at_ms) {
+        (Some(line), _) => added.push(line),
+        (None, Some(end)) => added.push(format!(
+            "DTEND{}",
+            stamp(original + (end - series.starts_at_ms))
+        )),
+        (None, None) => {}
+    }
+    added.push(format!("DTSTAMP:{}", fmt_utc(now_ms)));
+    let mut lines = Vec::with_capacity(source.lines.len() + added.len());
+    let mut depth = 0usize;
+    for line in &source.lines {
+        let upper = line.to_ascii_uppercase();
+        let nested = depth > 1 || (depth == 1 && upper.starts_with("BEGIN:"));
+        if upper.starts_with("BEGIN:") {
+            depth += 1;
+        } else if upper.starts_with("END:") {
+            depth = depth.saturating_sub(1);
+        }
+        if !nested && depth == 1 && property_is(line, SERIES_ONLY) {
+            continue;
+        }
+        lines.push(line.clone());
+        if lines.len() == 1 {
+            lines.extend(added.iter().cloned());
+        }
+    }
+    let mut occurrence = Component {
+        kind: "VEVENT".into(),
+        lines,
+    };
+    if !set_partstat(&mut occurrence, attendee, partstat) {
+        return None;
+    }
+    parts.components.insert(master + 1, occurrence);
+    Some(parts.render())
 }
 
 /// Whether the calendar's organizer is marked as scheduled by the client
@@ -1875,5 +2035,113 @@ mod tests {
             "ATTENDEE;CN=Bob;PARTSTAT=ACCEPTED;SENT-BY=\"mailto:assistant@example.com\":mailto:BOB@example.com"
         ));
         assert!(!ics.contains("DTSTART"), "no times it could get wrong");
+    }
+
+    const WEEKLY: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTIMEZONE\r\nTZID:Europe/Madrid\r\nBEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\nBEGIN:DAYLIGHT\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:weekly@example.com\r\nSEQUENCE:1\r\nDTSTAMP:20261101T080000Z\r\nDTSTART;TZID=Europe/Madrid:20261116T100000\r\nDTEND;TZID=Europe/Madrid:20261116T110000\r\nRRULE:FREQ=WEEKLY;COUNT=5\r\nSUMMARY:Weekly\r\nORGANIZER;CN=Alice:mailto:alice@example.com\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:alice@example.com\r\nATTENDEE;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:me@test.dev\r\nBEGIN:VALARM\r\nTRIGGER:-PT15M\r\nACTION:DISPLAY\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    fn answer_of(event: &IcsEvent, email: &str) -> Option<String> {
+        event
+            .attendees
+            .iter()
+            .find(|attendee| attendee.email.eq_ignore_ascii_case(email))
+            .and_then(|attendee| attendee.partstat.clone())
+    }
+
+    #[test]
+    fn one_occurrence_is_answered_on_a_vevent_of_its_own() {
+        // 10:00 in Madrid on 23 November is 09:00 UTC.
+        let second = parse_dt("20261123T090000Z").unwrap().0;
+        let now = parse_dt("20261110T120000Z").unwrap().0;
+        let answered =
+            with_occurrence_partstat(WEEKLY, second, "ME@test.dev", "DECLINED", now).unwrap();
+        let events = parse_ics(&answered);
+        assert_eq!(events.len(), 2);
+        let (series, occurrence) = (&events[0], &events[1]);
+        assert_eq!(series.recurrence_id_ms, None);
+        assert_eq!(
+            answer_of(series, "me@test.dev").as_deref(),
+            Some("ACCEPTED")
+        );
+        assert_eq!(occurrence.recurrence_id_ms, Some(second));
+        assert_eq!(
+            (occurrence.starts_at_ms, occurrence.ends_at_ms),
+            (second, Some(second + 3_600_000))
+        );
+        assert!(occurrence.rrule.is_none());
+        assert_eq!(
+            (occurrence.sequence, occurrence.summary.as_deref()),
+            (1, Some("Weekly"))
+        );
+        assert_eq!(
+            answer_of(occurrence, "me@test.dev").as_deref(),
+            Some("DECLINED")
+        );
+        assert_eq!(
+            answer_of(occurrence, "alice@example.com").as_deref(),
+            Some("ACCEPTED")
+        );
+        for line in [
+            "RECURRENCE-ID:20261123T090000Z",
+            "DTSTART:20261123T090000Z",
+            "DTEND:20261123T100000Z",
+            "DTSTAMP:20261110T120000Z",
+        ] {
+            assert!(answered.contains(line), "{line} in {answered}");
+        }
+        assert_eq!(
+            answered.matches("TRIGGER:-PT15M").count(),
+            2,
+            "its alarm too"
+        );
+
+        // Answering it again changes that VEVENT, adding none.
+        let again =
+            with_occurrence_partstat(&answered, second, "me@test.dev", "TENTATIVE", now).unwrap();
+        let events = parse_ics(&again);
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            answer_of(&events[0], "me@test.dev").as_deref(),
+            Some("ACCEPTED")
+        );
+        assert_eq!(
+            answer_of(&events[1], "me@test.dev").as_deref(),
+            Some("TENTATIVE")
+        );
+        assert_eq!(
+            with_occurrence_partstat(WEEKLY, second, "someone@else.dev", "ACCEPTED", now),
+            None
+        );
+        assert_eq!(occurrence_start(&answered, second), Some(second));
+        assert_eq!(stands_for(&answered), None);
+    }
+
+    #[test]
+    fn an_all_day_occurrence_is_named_by_its_date() {
+        let daily = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:days@example.com\r\nDTSTAMP:20261101T080000Z\r\nDTSTART;VALUE=DATE:20261116\r\nDTEND;VALUE=DATE:20261117\r\nRRULE:FREQ=DAILY;COUNT=3\r\nORGANIZER:mailto:alice@example.com\r\nATTENDEE:mailto:me@test.dev\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let second = parse_dt("20261117").unwrap().0;
+        let answered =
+            with_occurrence_partstat(daily, second, "me@test.dev", "ACCEPTED", 0).unwrap();
+        for line in [
+            "RECURRENCE-ID;VALUE=DATE:20261117",
+            "DTSTART;VALUE=DATE:20261117",
+            "DTEND;VALUE=DATE:20261118",
+            "ATTENDEE;PARTSTAT=ACCEPTED:mailto:me@test.dev",
+        ] {
+            assert!(answered.contains(line), "{line} in {answered}");
+        }
+        assert!(
+            answered.contains("\r\nATTENDEE:mailto:me@test.dev\r\n"),
+            "the series is left as it was"
+        );
+    }
+
+    #[test]
+    fn an_invitation_to_occurrences_alone_stands_for_the_first() {
+        let moved = parse_dt("20261124T090000Z").unwrap().0;
+        let occurrences = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x@example.com\r\nRECURRENCE-ID:20261130T090000Z\r\nDTSTART:20261130T090000Z\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:x@example.com\r\nRECURRENCE-ID:20261123T090000Z\r\nDTSTART:20261124T090000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let first = parse_dt("20261123T090000Z").unwrap().0;
+        assert_eq!(stands_for(occurrences), Some(first));
+        assert_eq!(occurrence_start(occurrences, first), Some(moved));
+        assert_eq!(stands_for(WEEKLY), None);
     }
 }

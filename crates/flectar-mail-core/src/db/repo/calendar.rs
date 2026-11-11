@@ -57,6 +57,7 @@ fn from_row(row: &Row) -> rusqlite::Result<CalendarEvent> {
         status: row.get("status")?,
         method: row.get("method")?,
         invited: false,
+        recurrence_id: None,
     })
 }
 
@@ -923,6 +924,16 @@ pub fn held_series(conn: &Connection, event_id: i64) -> Result<Option<(String, i
         .optional()?)
 }
 
+/// Keep the event's iCalendar text as it now reads, such as with the user's
+/// answer in it. The event isn't sent anywhere for this.
+pub fn set_ical_raw(conn: &Connection, event_id: i64, raw: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE calendar_events SET ical_raw = ?2 WHERE id = ?1",
+        params![event_id, raw],
+    )?;
+    Ok(())
+}
+
 /// Record our RSVP (ACCEPTED | TENTATIVE | DECLINED).
 pub fn set_rsvp(conn: &Connection, event_id: i64, status: &str) -> Result<()> {
     conn.execute(
@@ -970,6 +981,9 @@ pub struct CalendarVersion {
     pub sequence: i64,
     pub dtstamp: Option<i64>,
     pub deleted: bool,
+    /// Its iCalendar text, with any occurrences changed or answered on their
+    /// own.
+    pub ical_raw: Option<String>,
 }
 
 /// The calendar's version of `uid` in the account, if it has one.
@@ -980,16 +994,18 @@ pub fn version(conn: &Connection, account_id: i64, uid: &str) -> Result<Option<C
     let Some(event) = get(conn, id)? else {
         return Ok(None);
     };
-    let (sequence, dtstamp, deleted): (i64, Option<i64>, i64) = conn.query_row(
-        "SELECT sequence, dtstamp, deleted FROM calendar_events WHERE id = ?1",
-        params![id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    )?;
+    let (sequence, dtstamp, deleted, ical_raw): (i64, Option<i64>, i64, Option<String>) = conn
+        .query_row(
+            "SELECT sequence, dtstamp, deleted, ical_raw FROM calendar_events WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
     Ok(Some(CalendarVersion {
         event,
         sequence,
         dtstamp,
         deleted: deleted != 0,
+        ical_raw,
     }))
 }
 
