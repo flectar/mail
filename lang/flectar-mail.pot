@@ -411,8 +411,8 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:223 ui/app.slint:1232 ui/components/composer-fields.slint:89
-#: ui/app.slint:223 ui/app.slint:1232 ui/components/composer-fields.slint:89 ui/components/email-composer.slint:35
+#: ui/app.slint:223 ui/app.slint:1237 ui/components/composer-fields.slint:89
+#: ui/app.slint:223 ui/app.slint:1237 ui/components/composer-fields.slint:89 ui/components/email-composer.slint:35
 msgid "No connected account"
 msgstr ""
 
@@ -1869,7 +1869,7 @@ msgstr ""
 msgid "{} wrote:"
 msgstr ""
 
-#: ui/app.slint:654 ui/components/email-composer.slint:782
+#: ui/app.slint:654 ui/components/email-composer.slint:784
 msgid "Forwarded message"
 msgstr ""
 
@@ -1924,298 +1924,319 @@ msgid "Attachment removed."
 msgstr ""
 
 #: ui/app.slint:666
-msgid "Choose the account this message should be sent from."
+msgid "Insert images in this email"
 msgstr ""
 
 #: ui/app.slint:667
-msgid "Choose a verified sender identity for this message."
+msgid "Images"
 msgstr ""
 
 #: ui/app.slint:668
-msgid "Connect an account before saving or sending mail."
+msgid "Could not add images: {}"
 msgstr ""
 
 #: ui/app.slint:669
-msgid "Message queued for delivery (action {})."
+msgid "{} isn't a PNG, JPEG, GIF or WebP image."
 msgstr ""
 
 #: ui/app.slint:670
-msgid "Sending message…"
+msgid ""
+"Images in the text can take up to 5 MB in all. Attach larger ones as files."
 msgstr ""
 
 #: ui/app.slint:671
-msgid "This message has already been sent."
+msgid "Choose the account this message should be sent from."
 msgstr ""
 
 #: ui/app.slint:672
-msgid "Could not take the message back: {}"
+msgid "Choose a verified sender identity for this message."
 msgstr ""
 
 #: ui/app.slint:673
-msgid "Message sent."
+msgid "Connect an account before saving or sending mail."
 msgstr ""
 
 #: ui/app.slint:674
-msgid "Message was not sent: {} Your draft is preserved."
+msgid "Message queued for delivery (action {})."
 msgstr ""
 
 #: ui/app.slint:675
-msgid "Draft saved locally (#{})."
+msgid "Sending message…"
 msgstr ""
 
 #: ui/app.slint:676
-msgid "Compose failed: {}"
+msgid "This message has already been sent."
 msgstr ""
 
 #: ui/app.slint:677
-msgid "Could not open the message in its own window."
+msgid "Could not take the message back: {}"
 msgstr ""
 
 #: ui/app.slint:678
-msgid "Could not open the message in its own window, so it was saved to Drafts."
+msgid "Message sent."
 msgstr ""
 
 #: ui/app.slint:679
-msgid "Connect an account before managing email templates."
+msgid "Message was not sent: {} Your draft is preserved."
 msgstr ""
 
 #: ui/app.slint:680
-msgid "Could not load email templates: {}"
+msgid "Draft saved locally (#{})."
 msgstr ""
 
 #: ui/app.slint:681
-msgid "Enter a template name."
+msgid "Compose failed: {}"
 msgstr ""
 
 #: ui/app.slint:682
-msgid "Add a subject or message to the template."
+msgid "Could not open the message in its own window."
 msgstr ""
 
 #: ui/app.slint:683
-msgid "Email template saved."
+msgid "Could not open the message in its own window, so it was saved to Drafts."
 msgstr ""
 
 #: ui/app.slint:684
-msgid "Could not save email template: {}"
+msgid "Connect an account before managing email templates."
 msgstr ""
 
 #: ui/app.slint:685
-msgid "Email template deleted."
+msgid "Could not load email templates: {}"
 msgstr ""
 
 #: ui/app.slint:686
-msgid "Could not delete email template: {}"
+msgid "Enter a template name."
 msgstr ""
 
 #: ui/app.slint:687
-msgid "Email template is no longer available."
+msgid "Add a subject or message to the template."
 msgstr ""
 
 #: ui/app.slint:688
-msgid "Email template inserted."
+msgid "Email template saved."
 msgstr ""
 
 #: ui/app.slint:689
-msgid "Email template inserted, but its usage could not be saved: {}"
+msgid "Could not save email template: {}"
 msgstr ""
 
 #: ui/app.slint:690
-msgid "Choose a supported account type and connection security."
+msgid "Email template deleted."
 msgstr ""
 
 #: ui/app.slint:691
-msgid "IMAP port must be between 1 and 65535."
+msgid "Could not delete email template: {}"
 msgstr ""
 
 #: ui/app.slint:692
-msgid "POP3 port must be between 1 and 65535."
+msgid "Email template is no longer available."
 msgstr ""
 
 #: ui/app.slint:693
-msgid "SMTP port must be between 1 and 65535."
+msgid "Email template inserted."
 msgstr ""
 
 #: ui/app.slint:694
-msgid "Local mail data is unavailable. Retry startup."
+msgid "Email template inserted, but its usage could not be saved: {}"
 msgstr ""
 
 #: ui/app.slint:695
-msgid "Discovering JMAP and checking capabilities…"
+msgid "Choose a supported account type and connection security."
 msgstr ""
 
 #: ui/app.slint:696
-msgid "Certificate imported. Connect to verify the server."
+msgid "IMAP port must be between 1 and 65535."
 msgstr ""
 
 #: ui/app.slint:697
-msgid "Could not load account preferences: {}"
+msgid "POP3 port must be between 1 and 65535."
 msgstr ""
 
 #: ui/app.slint:698
+msgid "SMTP port must be between 1 and 65535."
+msgstr ""
+
+#: ui/app.slint:699
+msgid "Local mail data is unavailable. Retry startup."
+msgstr ""
+
+#: ui/app.slint:700
+msgid "Discovering JMAP and checking capabilities…"
+msgstr ""
+
+#: ui/app.slint:701
+msgid "Certificate imported. Connect to verify the server."
+msgstr ""
+
+#: ui/app.slint:702
+msgid "Could not load account preferences: {}"
+msgstr ""
+
+#: ui/app.slint:703
 msgid ""
 "Your edited signature was preserved. Choose No signature to keep it as "
 "message text before inserting another."
 msgstr ""
 
-#: ui/app.slint:699
+#: ui/app.slint:704
 msgid "Certificate import failed: {}"
 msgstr ""
 
-#: ui/app.slint:700
+#: ui/app.slint:705
 msgid "Testing IMAP and SMTP connections…"
 msgstr ""
 
-#: ui/app.slint:701
+#: ui/app.slint:706
 msgid "Testing POP3 and SMTP connections…"
 msgstr ""
 
-#: ui/app.slint:706
+#: ui/app.slint:711
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
 msgstr ""
 
-#: ui/app.slint:707 ui/dialogs/settings-dialog.slint:2194
-#: ui/app.slint:707 ui/dialogs/settings-dialog.slint:2194 ui/dialogs/settings-dialog.slint:2237
-#: ui/app.slint:707 ui/dialogs/settings-dialog.slint:2194 ui/dialogs/settings-dialog.slint:2237 ui/views/onboarding-view.slint:163
-#: ui/app.slint:707 ui/dialogs/settings-dialog.slint:2194 ui/dialogs/settings-dialog.slint:2237 ui/views/onboarding-view.slint:163
+#: ui/app.slint:712 ui/dialogs/settings-dialog.slint:2194
+#: ui/app.slint:712 ui/dialogs/settings-dialog.slint:2194 ui/dialogs/settings-dialog.slint:2237
+#: ui/app.slint:712 ui/dialogs/settings-dialog.slint:2194 ui/dialogs/settings-dialog.slint:2237 ui/views/onboarding-view.slint:163
+#: ui/app.slint:712 ui/dialogs/settings-dialog.slint:2194 ui/dialogs/settings-dialog.slint:2237 ui/views/onboarding-view.slint:163
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
 
-#: ui/app.slint:708
+#: ui/app.slint:713
 msgid "Choose Gmail or Outlook OAuth."
 msgstr ""
 
-#: ui/app.slint:709
+#: ui/app.slint:714
 msgid "Complete sign-in in your browser, or choose Cancel here."
 msgstr ""
 
-#: ui/app.slint:710
+#: ui/app.slint:715
 msgid "Cancelling browser sign-in…"
 msgstr ""
 
-#: ui/app.slint:711
+#: ui/app.slint:716
 msgid "Finishing browser sign-in…"
 msgstr ""
 
-#: ui/app.slint:712
+#: ui/app.slint:717
 msgid "Could not use that browser address: {}"
 msgstr ""
 
-#: ui/app.slint:713
+#: ui/app.slint:718
 msgid "Calendar core is unavailable."
 msgstr ""
 
-#: ui/app.slint:714
+#: ui/app.slint:719
 msgid "Account no longer exists."
 msgstr ""
 
-#: ui/app.slint:715
+#: ui/app.slint:720
 msgid "Authorize calendar access in your browser."
 msgstr ""
 
-#: ui/app.slint:716
+#: ui/app.slint:721
 msgid "OAuth app keys saved."
 msgstr ""
 
-#: ui/app.slint:717
+#: ui/app.slint:722
 msgid "{} OAuth settings saved."
 msgstr ""
 
-#: ui/app.slint:718
+#: ui/app.slint:723
 msgid "OAuth settings failed: {}"
 msgstr ""
 
-#: ui/app.slint:719
+#: ui/app.slint:724
 msgid "Mail refresh failed: {}"
 msgstr ""
 
-#: ui/app.slint:720
+#: ui/app.slint:725
 msgid "Mail filter failed: {}"
 msgstr ""
 
-#: ui/app.slint:721
+#: ui/app.slint:726
 msgid "Mail pagination failed: {}"
 msgstr ""
 
-#: ui/app.slint:722
+#: ui/app.slint:727
 msgid "Could not mark message as read: {}"
 msgstr ""
 
-#: ui/app.slint:723 ui/views/mail-reading-pane.slint:201
-#: ui/app.slint:723 ui/views/mail-reading-pane.slint:201 ui/views/mail-reading-pane.slint:1373
+#: ui/app.slint:728 ui/views/mail-reading-pane.slint:201
+#: ui/app.slint:728 ui/views/mail-reading-pane.slint:201 ui/views/mail-reading-pane.slint:1373
 msgid "Loading message…"
 msgstr ""
 
-#: ui/app.slint:787 ui/components/workspace-navigation.slint:787
-#: ui/app.slint:787 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
-#: ui/app.slint:787 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
+#: ui/app.slint:792 ui/components/workspace-navigation.slint:787
+#: ui/app.slint:792 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
+#: ui/app.slint:792 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1443 ui/app.slint:1456
+#: ui/app.slint:1448 ui/app.slint:1461
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:2384
+#: ui/app.slint:2389
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2384 ui/views/files-view.slint:578
+#: ui/app.slint:2389 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:2388
+#: ui/app.slint:2393
 msgid "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2389
+#: ui/app.slint:2394
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2391
+#: ui/app.slint:2396
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2392
+#: ui/app.slint:2397
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2393 ui/components/calendar.slint:1041
-#: ui/app.slint:2393 ui/components/calendar.slint:1041
+#: ui/app.slint:2398 ui/components/calendar.slint:1041
+#: ui/app.slint:2398 ui/components/calendar.slint:1041
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:2394
+#: ui/app.slint:2399
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2394 ui/views/files-view.slint:660
-#: ui/app.slint:2394 ui/views/files-view.slint:660
+#: ui/app.slint:2399 ui/views/files-view.slint:660
+#: ui/app.slint:2399 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2579
+#: ui/app.slint:2584
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:2585
+#: ui/app.slint:2590
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:2598
+#: ui/app.slint:2603
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:2601
+#: ui/app.slint:2606
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:2606
+#: ui/app.slint:2611
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:2614 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2619 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 
@@ -3040,208 +3061,212 @@ msgstr ""
 msgid "{0}, dark {1}"
 msgstr ""
 
-#: ui/components/composer-actions.slint:357
-#: ui/components/composer-actions.slint:357
+#: ui/components/composer-actions.slint:358
+#: ui/components/composer-actions.slint:358
 msgid "Font"
 msgstr ""
 
-#: ui/components/composer-actions.slint:362
-#: ui/components/composer-actions.slint:362
+#: ui/components/composer-actions.slint:363
+#: ui/components/composer-actions.slint:363
 msgctxt "font"
 msgid "Default"
 msgstr ""
 
-#: ui/components/composer-actions.slint:363
-#: ui/components/composer-actions.slint:363
+#: ui/components/composer-actions.slint:364
+#: ui/components/composer-actions.slint:364
 msgctxt "font"
 msgid "Serif"
 msgstr ""
 
-#: ui/components/composer-actions.slint:364
-#: ui/components/composer-actions.slint:364
+#: ui/components/composer-actions.slint:365
+#: ui/components/composer-actions.slint:365
 msgctxt "font"
 msgid "Fixed width"
 msgstr ""
 
-#: ui/components/composer-actions.slint:376
-#: ui/components/composer-actions.slint:376
+#: ui/components/composer-actions.slint:377
+#: ui/components/composer-actions.slint:377
 msgid "Text size"
 msgstr ""
 
-#: ui/components/composer-actions.slint:381
-#: ui/components/composer-actions.slint:381
+#: ui/components/composer-actions.slint:382
+#: ui/components/composer-actions.slint:382
 msgctxt "text size"
 msgid "Small"
 msgstr ""
 
-#: ui/components/composer-actions.slint:382
-#: ui/components/composer-actions.slint:382
+#: ui/components/composer-actions.slint:383
+#: ui/components/composer-actions.slint:383
 msgctxt "text size"
 msgid "Normal"
 msgstr ""
 
-#: ui/components/composer-actions.slint:383
-#: ui/components/composer-actions.slint:383
+#: ui/components/composer-actions.slint:384
+#: ui/components/composer-actions.slint:384
 msgctxt "text size"
 msgid "Large"
 msgstr ""
 
-#: ui/components/composer-actions.slint:384
-#: ui/components/composer-actions.slint:384
+#: ui/components/composer-actions.slint:385
+#: ui/components/composer-actions.slint:385
 msgctxt "text size"
 msgid "Huge"
 msgstr ""
 
-#: ui/components/composer-actions.slint:390
+#: ui/components/composer-actions.slint:391
 msgid "Bold · Ctrl+B"
 msgstr ""
 
-#: ui/components/composer-actions.slint:391
+#: ui/components/composer-actions.slint:392
 msgid "Italic · Ctrl+I"
 msgstr ""
 
-#: ui/components/composer-actions.slint:392
+#: ui/components/composer-actions.slint:393
 msgid "Underline · Ctrl+U"
 msgstr ""
 
-#: ui/components/composer-actions.slint:393
+#: ui/components/composer-actions.slint:394
 msgid "Strikethrough"
 msgstr ""
 
-#: ui/components/composer-actions.slint:398
+#: ui/components/composer-actions.slint:399
 msgid "Text color"
 msgstr ""
 
-#: ui/components/composer-actions.slint:399
+#: ui/components/composer-actions.slint:400
 msgctxt "text color"
 msgid "Automatic"
 msgstr ""
 
-#: ui/components/composer-actions.slint:413
+#: ui/components/composer-actions.slint:414
 msgid "Highlight"
 msgstr ""
 
-#: ui/components/composer-actions.slint:414
+#: ui/components/composer-actions.slint:415
 msgid "No highlight"
 msgstr ""
 
-#: ui/components/composer-actions.slint:425
+#: ui/components/composer-actions.slint:426
 msgid "Remove formatting · Ctrl+\\"
 msgstr ""
 
-#: ui/components/composer-actions.slint:439
+#: ui/components/composer-actions.slint:440
 msgid "Align"
 msgstr ""
 
-#: ui/components/composer-actions.slint:444
+#: ui/components/composer-actions.slint:445
 msgid "Align left"
 msgstr ""
 
-#: ui/components/composer-actions.slint:445
+#: ui/components/composer-actions.slint:446
 msgid "Align center"
 msgstr ""
 
-#: ui/components/composer-actions.slint:446
+#: ui/components/composer-actions.slint:447
 msgid "Align right"
 msgstr ""
 
-#: ui/components/composer-actions.slint:450
+#: ui/components/composer-actions.slint:451
 msgid "Bulleted list"
 msgstr ""
 
-#: ui/components/composer-actions.slint:451
+#: ui/components/composer-actions.slint:452
 msgid "Numbered list"
 msgstr ""
 
-#: ui/components/composer-actions.slint:452
+#: ui/components/composer-actions.slint:453
 msgid "Quote"
 msgstr ""
 
-#: ui/components/composer-actions.slint:453
+#: ui/components/composer-actions.slint:454
 msgid "Inline code"
 msgstr ""
 
-#: ui/components/composer-actions.slint:454
+#: ui/components/composer-actions.slint:455
 msgid "Add or edit link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:454
+#: ui/components/composer-actions.slint:455
 msgid "Select text to add a link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:458
-#: ui/components/composer-actions.slint:458
-#: ui/components/composer-actions.slint:458
+#: ui/components/composer-actions.slint:456
+msgid "Insert image"
+msgstr ""
+
+#: ui/components/composer-actions.slint:460
+#: ui/components/composer-actions.slint:460
+#: ui/components/composer-actions.slint:460
 msgid "Email templates"
 msgstr ""
 
-#: ui/components/composer-actions.slint:462
+#: ui/components/composer-actions.slint:464
 msgid "Undo · Ctrl+Z"
 msgstr ""
 
-#: ui/components/composer-actions.slint:463
+#: ui/components/composer-actions.slint:465
 msgid "Redo · Ctrl+Shift+Z"
 msgstr ""
 
-#: ui/components/composer-actions.slint:557
+#: ui/components/composer-actions.slint:559
 msgid "Remove attachment"
 msgstr ""
 
-#: ui/components/composer-actions.slint:620
+#: ui/components/composer-actions.slint:622
 msgid "Sending…"
 msgstr ""
 
-#: ui/components/composer-actions.slint:620
+#: ui/components/composer-actions.slint:622
 msgid "Send"
 msgstr ""
 
-#: ui/components/composer-actions.slint:637
-#: ui/components/composer-actions.slint:637
+#: ui/components/composer-actions.slint:639
+#: ui/components/composer-actions.slint:639
 msgid "Attach files"
 msgstr ""
 
-#: ui/components/composer-actions.slint:658
+#: ui/components/composer-actions.slint:660
 msgid "Save draft"
 msgstr ""
 
-#: ui/components/composer-actions.slint:671
-#: ui/components/composer-actions.slint:671
+#: ui/components/composer-actions.slint:673
+#: ui/components/composer-actions.slint:673
 msgid "Discard"
 msgstr ""
 
-#: ui/components/composer-actions.slint:719
+#: ui/components/composer-actions.slint:721
 msgid "Edit link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:719
+#: ui/components/composer-actions.slint:721
 msgid "Add link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:730
+#: ui/components/composer-actions.slint:732
 msgid "The selected text will open this address."
 msgstr ""
 
-#: ui/components/composer-actions.slint:751 ui/views/contacts-view.slint:802
+#: ui/components/composer-actions.slint:753 ui/views/contacts-view.slint:802
 msgid "https://example.com"
 msgstr ""
 
-#: ui/components/composer-actions.slint:787
+#: ui/components/composer-actions.slint:789
 msgid "Remove link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:805
+#: ui/components/composer-actions.slint:807
 msgid "Apply"
 msgstr ""
 
-#: ui/components/composer-actions.slint:845
+#: ui/components/composer-actions.slint:847
 msgid "Discard this draft?"
 msgstr ""
 
-#: ui/components/composer-actions.slint:856
+#: ui/components/composer-actions.slint:858
 msgid "The message and its attachments will be removed from this composer."
 msgstr ""
 
-#: ui/components/composer-actions.slint:867
+#: ui/components/composer-actions.slint:869
 msgid "Keep"
 msgstr ""
 
@@ -3361,97 +3386,97 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
-#: ui/components/email-composer.slint:359
-#: ui/components/email-composer.slint:359
+#: ui/components/email-composer.slint:360
+#: ui/components/email-composer.slint:360
 msgid "From"
 msgstr ""
 
-#: ui/components/email-composer.slint:360
+#: ui/components/email-composer.slint:361
 msgid "Verified sender identity"
 msgstr ""
 
-#: ui/components/email-composer.slint:373
+#: ui/components/email-composer.slint:374
 msgid "Signature"
 msgstr ""
 
-#: ui/components/email-composer.slint:475
+#: ui/components/email-composer.slint:477
 msgid "Write your message…"
 msgstr ""
 
-#: ui/components/email-composer.slint:645
+#: ui/components/email-composer.slint:647
 msgid "No suggestions"
 msgstr ""
 
-#: ui/components/email-composer.slint:649
+#: ui/components/email-composer.slint:651
 msgid "Add to dictionary"
 msgstr ""
 
-#: ui/components/email-composer.slint:653
+#: ui/components/email-composer.slint:655
 msgid "Ignore"
 msgstr ""
 
-#: ui/components/email-composer.slint:659
+#: ui/components/email-composer.slint:661
 msgid "Cut"
 msgstr ""
 
-#: ui/components/email-composer.slint:664
+#: ui/components/email-composer.slint:666
 msgid "Copy"
 msgstr ""
 
-#: ui/components/email-composer.slint:669
+#: ui/components/email-composer.slint:671
 msgid "Paste"
 msgstr ""
 
-#: ui/components/email-composer.slint:674
+#: ui/components/email-composer.slint:676
 msgid "Paste as plain text"
 msgstr ""
 
-#: ui/components/email-composer.slint:679
+#: ui/components/email-composer.slint:681
 msgid "Select all"
 msgstr ""
 
-#: ui/components/email-composer.slint:685
+#: ui/components/email-composer.slint:687
 msgid "Spelling"
 msgstr ""
 
-#: ui/components/email-composer.slint:687
-#: ui/components/email-composer.slint:687
+#: ui/components/email-composer.slint:689
+#: ui/components/email-composer.slint:689
 msgid "Check spelling"
 msgstr ""
 
-#: ui/components/email-composer.slint:701
+#: ui/components/email-composer.slint:703
 msgid "No dictionaries installed"
 msgstr ""
 
-#: ui/components/email-composer.slint:782
+#: ui/components/email-composer.slint:784
 msgid "Quoted text"
 msgstr ""
 
-#: ui/components/email-composer.slint:788
+#: ui/components/email-composer.slint:790
 msgid "Hide the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:788
+#: ui/components/email-composer.slint:790
 msgid "Show the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:799
+#: ui/components/email-composer.slint:801
 msgid "Edit the quoted message as text"
 msgstr ""
 
-#: ui/components/email-composer.slint:810
+#: ui/components/email-composer.slint:812
 msgid "Remove the forwarded message"
 msgstr ""
 
-#: ui/components/email-composer.slint:810
+#: ui/components/email-composer.slint:812
 msgid "Remove the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:841
+#: ui/components/email-composer.slint:843
 msgid "Add the forwarded message back"
 msgstr ""
 
-#: ui/components/email-composer.slint:841
+#: ui/components/email-composer.slint:843
 msgid "Add the quoted text back"
 msgstr ""
 

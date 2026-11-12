@@ -19,6 +19,105 @@ pub(crate) const CODE: u8 = 1 << 4;
 pub(crate) const QUOTE_MARKER: &str = "│ ";
 /// Marks HTML the composer copied, which pastes back as it was.
 const COPIED_MARK: &str = "<!--flectar-mail-composer-->";
+/// Holds an image's place in the text, as in other rich text: its style carries the image.
+pub(crate) const IMAGE_PLACEHOLDER: char = '\u{fffc}';
+/// Images larger than this, in pixels across or down, aren't taken.
+const MAX_IMAGE_SIDE: u32 = 16_384;
+
+/// An image in the text, as the file it goes out as.
+#[derive(Debug)]
+pub(crate) struct InlineImage {
+    /// Tells this image from others, also when two hold the same file.
+    pub(crate) id: u64,
+    pub(crate) data: Arc<[u8]>,
+    pub(crate) mime_type: &'static str,
+    /// Its size in pixels.
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    /// The width it's shown at in CSS pixels, when it isn't its own.
+    pub(crate) shown_width: Option<u32>,
+    /// What it shows, for readers who can't see it.
+    pub(crate) alt: Arc<str>,
+}
+
+impl InlineImage {
+    /// The image a PNG, JPEG, GIF or WebP file holds, or `None` for anything else.
+    pub(crate) fn from_file_bytes(data: Vec<u8>, alt: &str) -> Option<Self> {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        use image::{ImageDecoder, metadata::Orientation};
+        let (mime_type, width, height) = {
+            let reader = image::ImageReader::new(std::io::Cursor::new(&data))
+                .with_guessed_format()
+                .ok()?;
+            let mime_type = match reader.format()? {
+                image::ImageFormat::Png => "image/png",
+                image::ImageFormat::Jpeg => "image/jpeg",
+                image::ImageFormat::Gif => "image/gif",
+                image::ImageFormat::WebP => "image/webp",
+                _ => return None,
+            };
+            let mut decoder = reader.into_decoder().ok()?;
+            let (width, height) = decoder.dimensions();
+            // A photo turned on its side by the camera shows upright, as readers show it.
+            match decoder.orientation() {
+                Ok(
+                    Orientation::Rotate90
+                    | Orientation::Rotate270
+                    | Orientation::Rotate90FlipH
+                    | Orientation::Rotate270FlipH,
+                ) => (mime_type, height, width),
+                _ => (mime_type, width, height),
+            }
+        };
+        if width == 0 || height == 0 || width > MAX_IMAGE_SIDE || height > MAX_IMAGE_SIDE {
+            return None;
+        }
+        Some(Self {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            data: data.into(),
+            mime_type,
+            width,
+            height,
+            shown_width: None,
+            alt: alt.into(),
+        })
+    }
+
+    /// The image a `data:` URI holds, as the composer writes them.
+    pub(crate) fn from_data_uri(uri: &str, alt: &str) -> Option<Self> {
+        use base64::Engine;
+        let (_, encoded) = uri.strip_prefix("data:")?.split_once(";base64,")?;
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .ok()?;
+        Self::from_file_bytes(data, alt)
+    }
+
+    /// Its size as shown, in CSS pixels.
+    pub(crate) fn shown_size(&self) -> (u32, u32) {
+        let width = self.shown_width.unwrap_or(self.width).max(1);
+        let height =
+            (u64::from(self.height) * u64::from(width) / u64::from(self.width.max(1))).max(1);
+        (width, u32::try_from(height).unwrap_or(u32::MAX))
+    }
+
+    /// What plain text shows in its place.
+    fn description(&self) -> String {
+        if self.alt.trim().is_empty() {
+            "[image]".to_owned()
+        } else {
+            format!("[image: {}]", self.alt.trim())
+        }
+    }
+}
+
+impl PartialEq for InlineImage {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.shown_width == other.shown_width && self.alt == other.alt
+    }
+}
+
+impl Eq for InlineImage {}
 
 /// `text` with its quote blocks written as plain-text mail quotes, in lines
 /// that start with `>`, for the plain-text part of a message being sent.
@@ -62,6 +161,8 @@ pub(crate) struct CharacterStyle {
     /// The alignment of the paragraph the character is in, which all of its characters share:
     /// that of its first character after any list or quote marker.
     pub(crate) align: Alignment,
+    /// The image an image placeholder shows.
+    pub(crate) image: Option<Arc<InlineImage>>,
 }
 
 /// A color as `0xRRGGBB`.
@@ -589,6 +690,15 @@ impl RichComposeDocument {
     /// on in the style and alignment of the line above it, as pressing Enter does in a word
     /// processor, but not in its link, and an empty message starts in the default text style.
     fn typing_style_at(&self, cursor: usize) -> CharacterStyle {
+        // What's typed next to an image is text.
+        CharacterStyle {
+            image: None,
+            ..self.typing_style_near(cursor)
+        }
+    }
+
+    /// The style of the text around `cursor`, which typing there follows.
+    fn typing_style_near(&self, cursor: usize) -> CharacterStyle {
         let line_start = self.text[..cursor].rfind('\n').map_or(0, |index| index + 1);
         let line_end = self.text[cursor..]
             .find('\n')
@@ -692,6 +802,44 @@ impl RichComposeDocument {
         }
         let caret = start + text.len();
         Some(self.replace_runs(start..end, &text, &runs, caret))
+    }
+
+    /// Puts `image` in place of the selection, as one undoable edit with the caret after it,
+    /// in the paragraph's alignment and any link the text there has.
+    pub(crate) fn insert_image(&mut self, image: InlineImage) -> ComposeSelection {
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let (start, end) = ordered(anchor, cursor);
+        let style = CharacterStyle {
+            image: Some(Arc::new(image)),
+            ..self.typing_style.clone()
+        };
+        let mut placeholder = [0; 4];
+        let text = IMAGE_PLACEHOLDER.encode_utf8(&mut placeholder);
+        let caret = start + text.len();
+        self.replace_styled(start..end, text, style, caret)
+    }
+
+    /// The images in the text, in order.
+    pub(crate) fn images(&self) -> impl Iterator<Item = &Arc<InlineImage>> {
+        self.styles
+            .iter()
+            .filter_map(|run| run.style.image.as_ref())
+    }
+
+    /// The text as plain text shows it, each image as its description.
+    pub(crate) fn text_with_image_descriptions(&self) -> String {
+        let mut text = String::with_capacity(self.text.len());
+        let mut copied = 0;
+        for (offset, _) in self.text.match_indices(IMAGE_PLACEHOLDER) {
+            if let Some(image) = self.style_at(offset).and_then(|style| style.image.as_ref()) {
+                text.push_str(&self.text[copied..offset]);
+                text.push_str(&image.description());
+                copied = offset + IMAGE_PLACEHOLDER.len_utf8();
+            }
+        }
+        text.push_str(&self.text[copied..]);
+        text
     }
 
     /// The selection as HTML and as plain text, for the clipboard: the HTML pastes back into a
@@ -828,6 +976,7 @@ impl RichComposeDocument {
                             link: style.link.clone(),
                             link_is_auto: style.link_is_auto,
                             align: style.align,
+                            image: style.image.clone(),
                             ..base.clone()
                         };
                     });
@@ -2002,6 +2151,33 @@ fn append_line_html(
     output.push_str("</div>");
 }
 
+/// An image as `<img>`, with its file in a `data:` URI, which goes out as an inline part. Its
+/// size goes in its attributes and in CSS, as some readers take only one, and it shrinks to fit
+/// narrower windows.
+fn append_image_html(output: &mut String, image: &InlineImage) {
+    use base64::Engine;
+    use std::fmt::Write;
+    let (width, height) = image.shown_size();
+    output.push_str("<img src=\"data:");
+    output.push_str(image.mime_type);
+    output.push_str(";base64,");
+    base64::engine::general_purpose::STANDARD.encode_string(&image.data, output);
+    output.push_str("\" alt=\"");
+    for character in image.alt.chars() {
+        append_html_char(output, character);
+    }
+    let _ = write!(
+        output,
+        "\" width=\"{width}\" height=\"{height}\" style=\"{}\">",
+        image_css(width)
+    );
+}
+
+/// The CSS for an image shown `width` pixels across.
+fn image_css(width: u32) -> String {
+    format!("width:{width}px;max-width:100%;height:auto")
+}
+
 fn append_list_item_start(output: &mut String, align: Alignment) {
     match align {
         Alignment::Left => output.push_str("<li>"),
@@ -2085,6 +2261,20 @@ fn append_html_run(
         }
         output.push_str("\">");
     }
+    if let Some(image) = &style.image {
+        for character in text[range].chars() {
+            if character == IMAGE_PLACEHOLDER {
+                append_image_html(output, image);
+            } else {
+                append_html_char(output, character);
+            }
+        }
+        if style.link.is_some() {
+            output.push_str("</a>");
+        }
+        *after_space = false;
+        return;
+    }
     let css = run_css(style);
     if let Some(css) = &css {
         output.push_str("<span style=\"");
@@ -2148,6 +2338,9 @@ enum HtmlToken {
         start: Option<String>,
         style: Option<String>,
         align: Option<String>,
+        src: Option<String>,
+        alt: Option<String>,
+        width: Option<String>,
     },
     End(String),
     Text(String),
@@ -2176,6 +2369,9 @@ impl TokenSink for HtmlTokenSink {
                     start: attribute("start"),
                     style: attribute("style"),
                     align: attribute("align"),
+                    src: attribute("src"),
+                    alt: attribute("alt"),
+                    width: attribute("width"),
                 }
             }
             Token::CharacterTokens(text) => HtmlToken::Text(text.to_string()),
@@ -2299,7 +2495,44 @@ impl HtmlImport {
                 .and_then(|span| span.family)
                 .unwrap_or_default(),
             align: Alignment::default(),
+            image: None,
         }
+    }
+
+    /// An image as `append_image_html` writes it.
+    fn image(
+        &mut self,
+        src: &str,
+        alt: Option<&str>,
+        width: Option<&str>,
+        style: Option<&str>,
+    ) -> Option<()> {
+        let mut image = InlineImage::from_data_uri(src, alt.unwrap_or_default())?;
+        let shown_width = match width {
+            Some(width) => width
+                .trim()
+                .parse::<u32>()
+                .ok()
+                .filter(|width| *width > 0)?,
+            None => image.width,
+        };
+        if style.is_some_and(|style| style.trim() != image_css(shown_width)) {
+            return None;
+        }
+        image.shown_width = (shown_width != image.width).then_some(shown_width);
+        if !self.line_open {
+            self.start_line();
+        }
+        if let Some(space) = self.pending_space.take() {
+            self.push(" ", space);
+        }
+        let style = CharacterStyle {
+            image: Some(Arc::new(image)),
+            ..self.style()
+        };
+        self.push(IMAGE_PLACEHOLDER.encode_utf8(&mut [0; 4]), style);
+        self.line_has_text = true;
+        Some(())
     }
 
     fn push(&mut self, text: &str, style: CharacterStyle) {
@@ -2358,6 +2591,20 @@ impl HtmlImport {
         match token {
             HtmlToken::Text(text) => self.characters(&text),
             HtmlToken::Start {
+                name,
+                src,
+                alt,
+                width,
+                style,
+                align,
+                ..
+            } if name == "img" => {
+                if align.is_some() {
+                    return None;
+                }
+                self.image(&src?, alt.as_deref(), width.as_deref(), style.as_deref())?;
+            }
+            HtmlToken::Start {
                 name, style, align, ..
             } if (style.is_some() || align.is_some())
                 && !matches!(name.as_str(), "span" | "div" | "li") =>
@@ -2370,6 +2617,7 @@ impl HtmlImport {
                 start,
                 style,
                 align,
+                ..
             } => match name.as_str() {
                 "html" | "head" | "body" | "meta" => {}
                 "span" => {
@@ -4305,6 +4553,88 @@ mod tests {
         );
         document.update_selection(3, 3);
         assert!(document.selection_html().is_none());
+    }
+
+    /// A PNG `width` by `height` in one color, as a pasted screenshot might be.
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            width,
+            height,
+            image::Rgba([220, 40, 30, 255]),
+        ))
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+        bytes
+    }
+
+    #[test]
+    fn images_go_out_as_img_tags_and_reopen() {
+        let mut document = RichComposeDocument::default();
+        document.load("Before after", 7, 7);
+        let image = InlineImage::from_file_bytes(png(40, 20), "Q3 \"chart\"").unwrap();
+        assert_eq!(
+            (image.mime_type, image.width, image.height),
+            ("image/png", 40, 20)
+        );
+        document.insert_image(image);
+        assert_eq!(document.text(), "Before \u{fffc}after");
+        let html = document.body_html().unwrap();
+        assert!(
+            html.starts_with("<div>Before <img src=\"data:image/png;base64,"),
+            "{html}"
+        );
+        assert!(
+            html.ends_with(
+                "\" alt=\"Q3 &quot;chart&quot;\" width=\"40\" height=\"20\" \
+                 style=\"width:40px;max-width:100%;height:auto\">after</div>"
+            ),
+            "{html}"
+        );
+        let reopened = reopened(&document);
+        assert_eq!(reopened.text(), document.text());
+        assert_eq!(reopened.body_html().unwrap(), html);
+        let image = reopened.images().next().unwrap();
+        assert_eq!(
+            (image.width, image.height, &*image.alt),
+            (40, 20, "Q3 \"chart\"")
+        );
+
+        // Plain text names the image in its place.
+        assert_eq!(
+            document.text_with_image_descriptions(),
+            "Before [image: Q3 \"chart\"]after"
+        );
+        // Files that aren't images, and images in formats mail doesn't show, aren't taken.
+        assert!(InlineImage::from_file_bytes(b"not an image".to_vec(), "").is_none());
+    }
+
+    #[test]
+    fn text_next_to_an_image_is_text() {
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document.insert_image(InlineImage::from_file_bytes(png(4, 4), "").unwrap());
+        let text = format!("{}x", document.text());
+        let end = text.len() as i32;
+        document.synchronize_key_edit(&text, end, end, "x");
+        assert_eq!(document.style_at(text.len() - 1).unwrap().image, None);
+        assert_eq!(document.images().count(), 1);
+
+        // Removing formatting leaves the image.
+        document.format("bold", &text, 0, end);
+        document.format("clear", &text, 0, end);
+        assert_eq!(document.images().count(), 1);
+
+        // Typing over it takes it out, and undo puts it back.
+        document.update_selection(0, 3);
+        let typed = "yx";
+        document.synchronize_key_edit(typed, 1, 1, "y");
+        assert_eq!(document.images().count(), 0);
+        document.history("undo").unwrap();
+        assert_eq!(document.images().count(), 1);
     }
 
     #[test]
