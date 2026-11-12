@@ -813,7 +813,7 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
     let path = new_original_path(ctx, account_id);
     crate::file_io::write_durable(&path, &raw, "POP3 message").await?;
     drop(raw);
-    let calendar_events = ingest::calendar_events(&parsed);
+    let calendar_events = ingest::calendar_parts(&parsed);
     let path_string = path.to_string_lossy().into_owned();
     let uidl = candidate.uidl.clone();
     let size = candidate.size;
@@ -877,7 +877,7 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
         }
     };
     if let Err(error) =
-        ingest::store_calendar_events(ctx, account_id, message_id, calendar_events).await
+        ingest::store_calendar_events(ctx, account_id, vec![(message_id, calendar_events)]).await
     {
         tracing::warn!(account_id, message_id, %error, "could not record a POP3 message's invitations");
     }

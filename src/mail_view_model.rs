@@ -1874,6 +1874,7 @@ mod tests {
             can_unsubscribe: false,
             can_block: false,
             sender_blocked: false,
+            invitation: None,
             verification_code: None,
             account_uses_labels: false,
             first_attachment: None,

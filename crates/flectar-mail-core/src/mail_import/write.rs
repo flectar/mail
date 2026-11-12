@@ -919,7 +919,7 @@ impl Writer<'_> {
                     if downloaded {
                         importer.learn_contacts(tx, &parsed.headers, &imported)?;
                     }
-                    inserted.push((imported.message_id, ingest::calendar_events(&parsed)));
+                    inserted.push((imported.message_id, ingest::calendar_parts(&parsed)));
                 }
                 let thread_ids = if downloaded {
                     importer.finish(tx)?.0
@@ -944,12 +944,11 @@ impl Writer<'_> {
         self.report.already_present += duplicates.len() as u64;
         self.report.imported += inserted.len() as u64;
         if self.downloaded {
-            for (message_id, events) in inserted {
+            for (message_id, calendars) in inserted {
                 if let Err(error) = ingest::store_calendar_events(
                     &self.core.sync_ctx(),
                     account_id,
-                    message_id,
-                    events,
+                    vec![(message_id, calendars)],
                 )
                 .await
                 {

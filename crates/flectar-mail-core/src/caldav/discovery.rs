@@ -84,6 +84,68 @@ fn response_excerpt(body: &str) -> String {
     crate::http_body::single_line_excerpt(body, MAX_CHARS)
 }
 
+/// How a CalDAV server schedules for the account (RFC 6638): whether it
+/// sends attendees' answers itself, and the addresses it does that for.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Scheduling {
+    pub auto_schedule: bool,
+    /// Lowercase email addresses from the principal's
+    /// calendar-user-address-set.
+    pub addresses: Vec<String>,
+}
+
+impl Scheduling {
+    /// The server tells the organizer when `attendee` changes their answer
+    /// in their own copy.
+    pub fn answers_for(&self, attendee: &str) -> bool {
+        self.auto_schedule
+            && self
+                .addresses
+                .iter()
+                .any(|address| address.eq_ignore_ascii_case(attendee.trim()))
+    }
+}
+
+/// Ask whether the server schedules: `calendar-auto-schedule` in the DAV
+/// header of a calendar's OPTIONS (RFC 6638 §2), and the principal's
+/// calendar-user-address-set (§2.4.1), the addresses it schedules for.
+pub async fn scheduling(
+    t: &dyn Transport,
+    calendar_url: &str,
+    principal_url: Option<&str>,
+) -> Result<Scheduling> {
+    let options = t.request("OPTIONS", calendar_url, None, &[], None).await?;
+    let auto_schedule = options.dav.as_deref().is_some_and(|features| {
+        features.split(',').any(|feature| {
+            feature
+                .trim()
+                .eq_ignore_ascii_case("calendar-auto-schedule")
+        })
+    });
+    let Some(principal_url) = principal_url.filter(|_| auto_schedule) else {
+        return Ok(Scheduling {
+            auto_schedule,
+            addresses: Vec::new(),
+        });
+    };
+    let ms = propfind(t, principal_url, "0", xml::propfind_scheduling()).await?;
+    let addresses = ms
+        .items
+        .iter()
+        .flat_map(|item| &item.calendar_user_addresses)
+        .filter_map(|href| {
+            let href = href.trim();
+            href.get(..7)
+                .filter(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
+                .map(|_| href[7..].trim().to_ascii_lowercase())
+        })
+        .collect();
+    Ok(Scheduling {
+        auto_schedule,
+        addresses,
+    })
+}
+
 /// Full discovery from `base_url`. Connection test = this succeeding with at
 /// least one usable collection.
 pub async fn discover(t: &dyn Transport, base_url: &str) -> Result<Discovery> {
@@ -196,6 +258,7 @@ mod tests {
 
     fn ms(body: &str) -> DavResponse {
         DavResponse {
+            dav: None,
             status: 207,
             etag: None,
             body: body.into(),
@@ -206,6 +269,42 @@ mod tests {
     const HOME: &str = r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/principals/me/</d:href><d:propstat><d:prop><c:calendar-home-set><d:href>/cal/me/</d:href></c:calendar-home-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#;
     const COLLECTIONS: &str = r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/cal/me/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response><d:response><d:href>/cal/me/work/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><d:displayname>Work</d:displayname></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#;
     const NOT_A_CALENDAR: &str = r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#;
+
+    #[tokio::test]
+    async fn asks_whether_the_server_schedules_and_for_whom() {
+        let options = |features: &str| DavResponse {
+            status: 200,
+            dav: Some(features.into()),
+            ..Default::default()
+        };
+        let addresses = r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/principals/me/</d:href><d:propstat><d:prop><c:calendar-user-address-set><d:href>MAILTO:Me@Example.com</d:href><d:href>/principals/me/</d:href></c:calendar-user-address-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#;
+        let calendar = "https://dav.example.com/cal/me/work/";
+        let principal = Some("https://dav.example.com/principals/me/");
+        let t = MockTransport::new(vec![
+            options("1, 2, access-control, calendar-access, calendar-auto-schedule"),
+            ms(addresses),
+        ]);
+        let found = scheduling(&t, calendar, principal).await.unwrap();
+        assert!(found.auto_schedule);
+        assert_eq!(found.addresses, ["me@example.com"]);
+        assert!(found.answers_for("ME@example.com"));
+        assert!(!found.answers_for("alias@example.com"));
+        let seen: Vec<(String, String)> = t
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(method, url, _)| (method.clone(), url.clone()))
+            .collect();
+        assert_eq!(seen[0], ("OPTIONS".to_string(), calendar.to_string()));
+        assert_eq!(seen[1].0, "PROPFIND");
+
+        // A server that doesn't schedule isn't asked for addresses.
+        let t = MockTransport::new(vec![options("1, 2, 3, calendar-access, addressbook")]);
+        let found = scheduling(&t, calendar, principal).await.unwrap();
+        assert_eq!(found, Scheduling::default());
+        assert!(!found.answers_for("me@example.com"));
+    }
 
     #[tokio::test]
     async fn full_discovery_chain() {

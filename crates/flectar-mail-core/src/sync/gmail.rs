@@ -2361,10 +2361,6 @@ async fn store_hydrated_body(
         .any(|attachment| !attachment.is_inline);
     let attachments = body.attachments;
     let calendar_parts = body.calendar_parts;
-    let parsed_calendar_events: Vec<_> = calendar_parts
-        .iter()
-        .flat_map(|ics| crate::calendar::parse_ics(ics))
-        .collect();
     let (local_message_id, thread_id, cached_inline) = ctx
         .db
         .write(move |conn| {
@@ -2485,19 +2481,12 @@ async fn store_hydrated_body(
         })
         .await?;
 
-    if !parsed_calendar_events.is_empty() {
-        ctx.calendar_db
-            .write(move |conn| {
-                let tx = conn.transaction()?;
-                for event in &parsed_calendar_events {
-                    repo::calendar::upsert(&tx, account_id, local_message_id, event)?;
-                }
-                tx.commit()?;
-                Ok(())
-            })
-            .await?;
-        ctx.bus.emit(CoreEvent::CalendarUpdated { account_id });
-    }
+    crate::sync::ingest::store_calendar_events(
+        ctx,
+        account_id,
+        vec![(local_message_id, calendar_parts)],
+    )
+    .await?;
 
     for (attachment_id, bytes) in cached_inline {
         let dir = ctx
