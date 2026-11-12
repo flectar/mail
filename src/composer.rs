@@ -1778,11 +1778,9 @@ impl ComposeSession {
     }
 
     /// Pastes the HTML on the clipboard over the selection, with the formatting the composer
-    /// keeps. False when the clipboard holds none, for the plain text to go in.
+    /// keeps, or else a picture on it. False when the clipboard holds neither, for the plain
+    /// text to go in.
     fn paste_formatted(&self, body: &str, anchor: i32, cursor: i32) -> bool {
-        let Some(html) = crate::reader_clipboard::html() else {
-            return false;
-        };
         let Some(host) = self.host() else {
             return false;
         };
@@ -1794,7 +1792,21 @@ impl ComposeSession {
                 document.update_selection(anchor, cursor);
             }
         }
-        self.paste_html(&host, &html)
+        if let Some(html) = crate::reader_clipboard::html()
+            && self.paste_html(&host, &html)
+        {
+            return true;
+        }
+        // A picture copied on its own, such as a screenshot, goes in as an image.
+        let image = crate::reader_clipboard::image_png()
+            .and_then(|png| crate::rich_compose::InlineImage::from_file_bytes(png, ""));
+        match image {
+            Some(image) => {
+                self.insert_image(image);
+                true
+            }
+            None => false,
+        }
     }
 
     /// Pastes `html` over the selection, unless it holds no text, or more image data than
