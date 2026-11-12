@@ -23,12 +23,19 @@ export component CalendarEvent inherits Rectangle {
     in property <color> title-color;
     in property <color> detail-color;
     in property <bool> compact: false;
+    // An invitation still waiting for the user's answer: outlined.
+    in property <bool> pending: false;
+    // Declined or cancelled: faded, its title struck through.
+    in property <bool> faded: false;
+    // How the event stands, for screen readers.
+    in property <string> state;
     callback clicked;
 
     border-radius: 7px;
-    border-width: 1px;
+    border-width: root.pending ? 1.5px : 1px;
     border-color: root.event-border-color;
     background: event-hit.has-hover ? root.fill-color.brighter(8%) : root.fill-color;
+    opacity: root.faded ? 0.55 : 1;
     clip: true;
 
     Rectangle {
@@ -49,6 +56,13 @@ export component CalendarEvent inherits Rectangle {
         overflow: elide;
         vertical-alignment: center;
     }
+    if root.faded : Rectangle {
+        x: event-title.x;
+        y: event-title.y + event-title.height / 2;
+        width: min(event-title.width, event-title.preferred-width);
+        height: 1px;
+        background: root.title-color;
+    }
     Text {
         visible: !root.compact;
         x: 9px;
@@ -63,6 +77,7 @@ export component CalendarEvent inherits Rectangle {
     event-hit := TouchArea {
         accessible-role: button;
         accessible-label: @tr("View details for {}", root.title);
+        accessible-description: root.state;
         accessible-action-default => { root.clicked(); }
         clicked => { root.clicked(); }
         mouse-cursor: pointer;
@@ -506,6 +521,23 @@ export component FunctionalCalendarView inherits Rectangle {
         root.detail-open = true;
     }
 
+    // An invitation still waiting for the user's answer.
+    pure function pending(event: CalendarEventRow) -> bool {
+        return event.answerable && event.rsvp-status == "";
+    }
+
+    // Declined, or cancelled by its organizer.
+    pure function faded(event: CalendarEventRow) -> bool {
+        return event.rsvp-status == "DECLINED" || event.status == "CANCELLED" || event.status == "cancelled";
+    }
+
+    // How the event stands, as screen readers say it.
+    pure function state(event: CalendarEventRow) -> string {
+        return event.status == "CANCELLED" || event.status == "cancelled" ? @tr("Cancelled")
+            : event.rsvp-status == "DECLINED" ? @tr("Declined")
+            : root.pending(event) ? @tr("Not answered yet") : "";
+    }
+
     pure function answer-label(answer: string) -> string {
         return answer == "ACCEPTED" ? @tr("Accepted")
             : answer == "TENTATIVE" ? @tr("Maybe")
@@ -676,7 +708,10 @@ export component FunctionalCalendarView inherits Rectangle {
                     title: event.title;
                     detail: event.detail;
                     compact: true;
-                    fill-color: event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : (root.dark-mode ? #352518 : #fff1df);
+                    pending: root.pending(event);
+                    faded: root.faded(event);
+                    state: root.state(event);
+                    fill-color: root.pending(event) ? root.surface-color : event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : (root.dark-mode ? #352518 : #fff1df);
                     event-border-color: event.color-index == 0 ? #3478f6 : event.color-index == 1 ? #8b5cf6 : #e87924;
                     title-color: root.title-color;
                     detail-color: root.secondary-color;
@@ -709,7 +744,10 @@ export component FunctionalCalendarView inherits Rectangle {
                     height: max(44px, min(event.duration-minutes, 1440 - event.start-minutes) / 60 * root.hour-height);
                     title: event.title;
                     detail: event.detail;
-                    fill-color: event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : event.color-index == 2 ? (root.dark-mode ? #352518 : #fff1df) : (root.dark-mode ? #173528 : #e7f8ef);
+                    pending: root.pending(event);
+                    faded: root.faded(event);
+                    state: root.state(event);
+                    fill-color: root.pending(event) ? root.surface-color : event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : event.color-index == 2 ? (root.dark-mode ? #352518 : #fff1df) : (root.dark-mode ? #173528 : #e7f8ef);
                     event-border-color: event.color-index == 0 ? #3478f6 : event.color-index == 1 ? #8b5cf6 : event.color-index == 2 ? #e87924 : #26a269;
                     title-color: root.title-color;
                     detail-color: root.secondary-color;
@@ -754,11 +792,16 @@ export component FunctionalCalendarView inherits Rectangle {
                 width: parent.width / 7 - 14px;
                 height: max(20px, chip-title.preferred-height);
                 border-radius: 4px;
-                background: event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : event.color-index == 2 ? (root.dark-mode ? #352518 : #fff1df) : (root.dark-mode ? #173528 : #e7f8ef);
+                border-width: root.pending(event) ? 1px : 0px;
+                border-color: event.color-index == 0 ? #3478f6 : event.color-index == 1 ? #8b5cf6 : event.color-index == 2 ? #e87924 : #26a269;
+                opacity: root.faded(event) ? 0.55 : 1;
+                background: root.pending(event) ? root.surface-color : event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : event.color-index == 2 ? (root.dark-mode ? #352518 : #fff1df) : (root.dark-mode ? #173528 : #e7f8ef);
                 chip-title := Text { x: 6px; width: parent.width - 10px; height: parent.height; text: event.title; color: root.body-color; font-size: TypeScale.caption; font-weight: 600; overflow: elide; vertical-alignment: center; }
+                if root.faded(event) : Rectangle { x: chip-title.x; y: parent.height / 2; width: min(chip-title.width, chip-title.preferred-width); height: 1px; background: root.body-color; }
                 TouchArea {
                     accessible-role: button;
                     accessible-label: @tr("View details for {}", event.title);
+                    accessible-description: root.state(event);
                     accessible-action-default => { root.show-event(event); }
                     clicked => { root.show-event(event); }
                     mouse-cursor: pointer;
@@ -892,15 +935,18 @@ export component FunctionalCalendarView inherits Rectangle {
                     visible: event.iso-date == root.selected-date;
                     height: event.iso-date == root.selected-date ? agenda-detail.y + agenda-detail.height + 10px : 0px;
                     border-radius: 9px;
-                    border-width: 1px;
+                    border-width: root.pending(event) ? 1.5px : 1px;
                     border-color: event.color-index == 0 ? #3478f6 : event.color-index == 1 ? #8b5cf6 : event.color-index == 2 ? #e87924 : #26a269;
-                    background: event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : event.color-index == 2 ? (root.dark-mode ? #352518 : #fff1df) : (root.dark-mode ? #173528 : #e7f8ef);
+                    opacity: root.faded(event) ? 0.55 : 1;
+                    background: root.pending(event) ? root.surface-color : event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : event.color-index == 2 ? (root.dark-mode ? #352518 : #fff1df) : (root.dark-mode ? #173528 : #e7f8ef);
                     Rectangle { x: 0px; width: 4px; height: parent.height; border-radius: 2px; background: parent.border-color; }
                     agenda-title := Text { x: 14px; y: 8px; width: parent.width - 28px; height: max(24px, self.preferred-height); text: event.title; color: root.title-color; font-size: TypeScale.body-large; font-weight: 700; overflow: elide; vertical-alignment: center; }
-                    agenda-detail := Text { x: 14px; y: agenda-title.y + agenda-title.height + 2px; width: parent.width - 28px; height: max(20px, self.preferred-height); text: event.detail; color: root.secondary-color; font-size: TypeScale.secondary; overflow: elide; vertical-alignment: center; }
+                    if root.faded(event) : Rectangle { x: agenda-title.x; y: agenda-title.y + agenda-title.height / 2; width: min(agenda-title.width, agenda-title.preferred-width); height: 1px; background: root.title-color; }
+                    agenda-detail := Text { x: 14px; y: agenda-title.y + agenda-title.height + 2px; width: parent.width - 28px; height: max(20px, self.preferred-height); text: root.state(event) != "" ? root.state(event) + " · " + event.detail : event.detail; color: root.secondary-color; font-size: TypeScale.secondary; overflow: elide; vertical-alignment: center; }
                     TouchArea {
                         accessible-role: button;
                         accessible-label: @tr("View details for {}", event.title);
+                        accessible-description: root.state(event);
                         accessible-action-default => { root.show-event(event); }
                         clicked => { root.show-event(event); }
                         mouse-cursor: pointer;
