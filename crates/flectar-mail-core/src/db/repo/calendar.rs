@@ -1132,6 +1132,10 @@ pub fn upcoming_for_notify(
         "WHERE deleted = 0 AND all_day = 0
            AND COALESCE(status,'') != 'CANCELLED'
            AND COALESCE(rsvp_status,'') != 'DECLINED'
+           -- An invitation known only from mail reminds once answered; the
+           -- caller judges those a calendar server holds.
+           AND NOT (message_id IS NOT NULL AND calendar_id IS NULL AND is_local = 0
+                    AND rsvp_status IS NULL)
            AND (calendar_id IS NULL OR EXISTS (
                 SELECT 1 FROM calendars c WHERE c.id = calendar_events.calendar_id AND c.enabled = 1
            ))
@@ -2034,6 +2038,27 @@ mod tests {
         .unwrap();
         set_rsvp(&c, id2, "DECLINED").unwrap();
         assert!(upcoming_for_notify(&c, 95_000, 10_000).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_invitation_from_mail_reminds_once_answered() {
+        let c = testutil::calendar_conn();
+        let raw = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:spam@example.com\r\nDTSTART:19700101T000140Z\r\nDTEND:19700101T000141Z\r\nSUMMARY:Claim your prize\r\nORGANIZER:mailto:prize@example.com\r\nATTENDEE:mailto:me@test.dev\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let ev = crate::calendar::parse_ics(raw).remove(0);
+        upsert(&c, 1, 42, &ev).unwrap();
+        assert!(
+            upcoming_for_notify(&c, 95_000, 10_000).unwrap().is_empty(),
+            "an unanswered invitation is silent"
+        );
+        let id: i64 = c
+            .query_row(
+                "SELECT id FROM calendar_events WHERE ical_uid = 'spam@example.com'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        set_rsvp(&c, id, "ACCEPTED").unwrap();
+        assert_eq!(upcoming_for_notify(&c, 95_000, 10_000).unwrap().len(), 1);
     }
 
     #[test]
