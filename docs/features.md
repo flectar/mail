@@ -225,6 +225,14 @@ message keeps its formatting exactly. Ctrl+Shift+V (Command-Shift-V on a Mac),
 or **Paste as plain text** in the editor menu, pastes the text alone, in the
 style of the text around it. On phones, text pastes as plain text.
 
+**Insert image** in the toolbar puts pictures in the text at the cursor, and
+pasting a screenshot or a picture copied from another app does the same on
+the desktop. PNG, JPEG, GIF and WebP images show at their own size, or
+smaller to fit the window, and a click selects one. They go out as parts of
+the message that mail apps show in place, and mail read as plain text names
+each one. The images in a message's text can take up to 5 MB in all. Larger
+ones can go as attachments.
+
 Messages carry the formatting in HTML that mail apps widely support. Sizes
 scale with the reader's own text size, and each font names common
 alternatives in case the reader lacks it. In a dark theme, the composer shows
