@@ -268,6 +268,116 @@ fn parse_meeting_copy(body: &str) -> Result<Option<MeetingCopy>> {
     }))
 }
 
+/// The user's copy of one occurrence of the recurring meeting `series`: the
+/// instance whose original start is `original`, its RECURRENCE-ID
+/// (`events.instances` with `originalStart`).
+pub async fn find_occurrence(
+    access_token: &str,
+    calendar_id: &str,
+    series: &MeetingCopy,
+    original: i64,
+    all_day: bool,
+) -> Result<Option<MeetingCopy>> {
+    let mut url = events_url(calendar_id, Some(&series.event_id))?;
+    url.path_segments_mut()
+        .map_err(|_| {
+            CoreError::Other("built-in Google Calendar URL cannot hold path segments".into())
+        })?
+        .push("instances");
+    url.query_pairs_mut()
+        .append_pair("originalStart", &original_start(original, all_day))
+        .append_pair("showDeleted", "false")
+        .append_pair("maxResults", "10");
+    let response = calendar_http_client()?
+        .get(url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(network_error)?;
+    let status = response.status();
+    let body = http_body::text(
+        response,
+        MAX_EVENT_BODY_BYTES,
+        "Google Calendar instances response",
+    )
+    .await?;
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(CoreError::NeedsReauth);
+    }
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !status.is_success() {
+        return Err(answer_error(status.as_u16(), &body));
+    }
+    parse_occurrence(&body, series, original, all_day)
+}
+
+/// An occurrence's original start as `events.instances` takes it: a date for
+/// an all-day event, else RFC 3339.
+fn original_start(original: i64, all_day: bool) -> String {
+    let time = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(original);
+    let format = if all_day {
+        "%Y-%m-%d"
+    } else {
+        "%Y-%m-%dT%H:%M:%SZ"
+    };
+    time.map(|time| time.format(format).to_string())
+        .unwrap_or_default()
+}
+
+fn parse_occurrence(
+    body: &str,
+    series: &MeetingCopy,
+    original: i64,
+    all_day: bool,
+) -> Result<Option<MeetingCopy>> {
+    let value: serde_json::Value = serde_json::from_str(body).map_err(|error| {
+        CoreError::CalDav(format!("Google Calendar instances response: {error}"))
+    })?;
+    let Some(items) = value.get("items").and_then(serde_json::Value::as_array) else {
+        return Ok(None);
+    };
+    let starts_at = |item: &serde_json::Value| -> Option<i64> {
+        let start = item.get("originalStartTime")?;
+        if let Some(time) = start.get("dateTime").and_then(serde_json::Value::as_str) {
+            return Some(
+                chrono::DateTime::parse_from_rfc3339(time)
+                    .ok()?
+                    .timestamp_millis(),
+            );
+        }
+        let date = start.get("date")?.as_str()?;
+        let date = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
+        Some(date.and_hms_opt(0, 0, 0)?.and_utc().timestamp_millis())
+    };
+    let tolerance = if all_day { 1 } else { 60_000 };
+    let Some(item) = items
+        .iter()
+        .find(|item| starts_at(item).is_some_and(|start| (start - original).abs() < tolerance))
+    else {
+        return Ok(None);
+    };
+    let Some(event_id) = item.get("id").and_then(serde_json::Value::as_str) else {
+        return Ok(None);
+    };
+    let self_email = item
+        .get("attendees")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|attendees| {
+            attendees.iter().find(|attendee| {
+                attendee.get("self").and_then(serde_json::Value::as_bool) == Some(true)
+            })
+        })
+        .and_then(|attendee| attendee.get("email")?.as_str())
+        .map(str::to_owned)
+        .or_else(|| series.self_email.clone());
+    Ok(Some(MeetingCopy {
+        event_id: event_id.to_owned(),
+        self_email,
+    }))
+}
+
 /// The `events.patch` body that answers a meeting: the user's own attendee
 /// entry alone, with `attendeesOmitted` so the other attendees stay as they
 /// are.
@@ -438,6 +548,52 @@ fn parse_calendar(value: &serde_json::Value) -> Option<GoogleCalendar> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_occurrence_is_the_instance_with_its_original_start() {
+        let ms = |time: &str| {
+            chrono::DateTime::parse_from_rfc3339(time)
+                .unwrap()
+                .timestamp_millis()
+        };
+        let series = MeetingCopy {
+            event_id: "abc".into(),
+            self_email: Some("me@example.com".into()),
+        };
+        let listed = r#"{"items": [
+            {"id": "abc_20261123T090000Z",
+             "originalStartTime": {"dateTime": "2026-11-23T10:00:00+01:00", "timeZone": "Europe/Madrid"},
+             "attendees": [{"email": "Me@Example.com", "self": true}]}
+        ]}"#;
+        assert_eq!(
+            parse_occurrence(listed, &series, ms("2026-11-23T09:00:00Z"), false).unwrap(),
+            Some(MeetingCopy {
+                event_id: "abc_20261123T090000Z".into(),
+                self_email: Some("Me@Example.com".into()),
+            })
+        );
+        assert_eq!(
+            parse_occurrence(listed, &series, ms("2026-11-30T09:00:00Z"), false).unwrap(),
+            None
+        );
+        let days =
+            r#"{"items": [{"id": "abc_20261117", "originalStartTime": {"date": "2026-11-17"}}]}"#;
+        assert_eq!(
+            parse_occurrence(days, &series, ms("2026-11-17T00:00:00Z"), true).unwrap(),
+            Some(MeetingCopy {
+                event_id: "abc_20261117".into(),
+                self_email: Some("me@example.com".into()),
+            })
+        );
+        assert_eq!(
+            original_start(ms("2026-11-23T09:00:00Z"), false),
+            "2026-11-23T09:00:00Z"
+        );
+        assert_eq!(
+            original_start(ms("2026-11-17T00:00:00Z"), true),
+            "2026-11-17"
+        );
+    }
 
     #[test]
     fn a_meeting_is_answered_on_the_users_own_copy() {

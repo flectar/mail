@@ -239,14 +239,20 @@ pub fn next_send_due_at(conn: &Connection, account_id: i64) -> Result<Option<i64
         .flatten())
 }
 
-/// Cancel the answers to invitations still waiting to reach the server of
-/// event `event_id`. Returns how many there were.
-pub fn cancel_waiting_answers(conn: &Connection, event_id: i64) -> Result<usize> {
+/// Cancel the answers still waiting to reach the server of event
+/// `event_id`, for the same occurrence of it (`occurrence`, a RECURRENCE-ID)
+/// or, with None, for the whole event. Returns how many there were.
+pub fn cancel_waiting_answers(
+    conn: &Connection,
+    event_id: i64,
+    occurrence: Option<i64>,
+) -> Result<usize> {
     Ok(conn.execute(
         "UPDATE pending_actions SET state = 'cancelled'
          WHERE kind = 'cal_answer' AND state = 'pending'
-           AND json_extract(payload, '$.eventId') = ?1",
-        params![event_id],
+           AND json_extract(payload, '$.eventId') = ?1
+           AND json_extract(payload, '$.occurrence') IS ?2",
+        params![event_id, occurrence],
     )?)
 }
 
@@ -510,6 +516,38 @@ pub fn gc(conn: &Connection, older_than_ms: i64) -> Result<()> {
 mod tests {
     use super::*;
     use crate::db::testutil;
+
+    #[test]
+    fn an_answer_gives_way_only_to_one_for_the_same_occurrence() {
+        let conn = testutil::calendar_conn();
+        let answer = |event: i64, occurrence: Option<i64>| {
+            let mut payload = serde_json::json!({ "eventId": event });
+            if let Some(occurrence) = occurrence {
+                payload["occurrence"] = occurrence.into();
+            }
+            enqueue(&conn, 1, "cal_answer", None, None, &payload, None).unwrap()
+        };
+        let (whole, first, second, other) = (
+            answer(7, None),
+            answer(7, Some(100)),
+            answer(7, Some(200)),
+            answer(8, None),
+        );
+        assert_eq!(cancel_waiting_answers(&conn, 7, Some(100)).unwrap(), 1);
+        assert_eq!(cancel_waiting_answers(&conn, 7, None).unwrap(), 1);
+        let state = |id: i64| -> String {
+            conn.query_row(
+                "SELECT state FROM pending_actions WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            [state(whole), state(first), state(second), state(other)],
+            ["cancelled", "cancelled", "pending", "pending"]
+        );
+    }
 
     #[test]
     fn an_action_counts_as_tried_once_it_ended_or_failed_once() {

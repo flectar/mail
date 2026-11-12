@@ -119,9 +119,11 @@ async fn push_row(
 
 /// Answer an invitation in the user's copy on a CalDAV server: the copy as
 /// this app last had it, with only the attendee's PARTSTAT changed, written
-/// over that version (If-Match). A server that schedules (RFC 6638 §3.2.2.3)
-/// then tells the organizer. When the copy changed on the server meanwhile,
-/// the next pull brings it and the answer is tried again.
+/// over that version (If-Match). For one occurrence (`occurrence`, its
+/// RECURRENCE-ID) the answer goes on that occurrence's own VEVENT (RFC 6638
+/// appendix B.7). A server that schedules (RFC 6638 §3.2.2.3) then tells the
+/// organizer. When the copy changed on the server meanwhile, the next pull
+/// brings it and the answer is tried again.
 pub async fn put_partstat(
     db: &Db,
     t: &dyn Transport,
@@ -129,12 +131,22 @@ pub async fn put_partstat(
     calendar: &Calendar,
     attendee: &str,
     partstat: &str,
+    occurrence: Option<i64>,
 ) -> Result<()> {
     let (Some(href), Some(raw)) = (row.caldav_href.as_deref(), row.ical_raw.as_deref()) else {
         return Err(super::err("the server's copy of the event isn't here yet"));
     };
-    let body = crate::calendar::with_partstat(raw, attendee, partstat)
-        .ok_or_else(|| super::err("the server's copy doesn't list the invited address"))?;
+    let body = match occurrence {
+        Some(original) => crate::calendar::with_occurrence_partstat(
+            raw,
+            original,
+            attendee,
+            partstat,
+            crate::models::now_ms(),
+        ),
+        None => crate::calendar::with_partstat(raw, attendee, partstat),
+    }
+    .ok_or_else(|| super::err("the server's copy doesn't list the invited address"))?;
     let url = super::discovery::resolve(&calendar.url, href)?;
     let headers: Vec<(&str, &str)> = match row.etag.as_deref() {
         Some(etag) => vec![("If-Match", etag)],
@@ -845,6 +857,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_answer_to_one_occurrence_goes_on_its_own_vevent() {
+        let (db, _dir) = seed_db().await;
+        let raw = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:inv-4@remote\r\nDTSTART:20261116T090000Z\r\nDTEND:20261116T100000Z\r\nRRULE:FREQ=WEEKLY;COUNT=5\r\nSUMMARY:Weekly\r\nORGANIZER;CN=Alice:mailto:alice@x\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:me@test.dev\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let id = db
+            .write(move |c| {
+                let ev = crate::calendar::parse_ics(raw).remove(0);
+                repo::calendar::upsert_remote(
+                    c,
+                    1,
+                    10,
+                    "/cal/me/work/inv4.ics",
+                    "\"e1\"",
+                    raw,
+                    &ev,
+                )?;
+                c.query_row(
+                    "SELECT id FROM calendar_events WHERE ical_uid = 'inv-4@remote'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(Into::into)
+            })
+            .await
+            .unwrap();
+        let (row, calendar) = db
+            .read(move |c| {
+                Ok((
+                    repo::calendar::sync_row_for(c, id)?.unwrap(),
+                    repo::caldav::get_calendar(c, 10)?.unwrap(),
+                ))
+            })
+            .await
+            .unwrap();
+        let written = DavResponse {
+            status: 204,
+            etag: Some("\"e2\"".into()),
+            ..Default::default()
+        };
+        let t = MockTransport::new(vec![written]);
+        let second = crate::calendar::parse_dt("20261123T090000Z").unwrap().0;
+        put_partstat(
+            &db,
+            &t,
+            &row,
+            &calendar,
+            "me@test.dev",
+            "DECLINED",
+            Some(second),
+        )
+        .await
+        .unwrap();
+
+        let body = t.seen.lock().unwrap()[0].2.clone().unwrap();
+        let events = crate::calendar::parse_ics(&body);
+        assert_eq!(events.len(), 2, "{body}");
+        let answer = |event: &crate::calendar::IcsEvent| event.attendees[0].partstat.clone();
+        assert_eq!(
+            answer(&events[0]).as_deref(),
+            Some("ACCEPTED"),
+            "the series"
+        );
+        assert_eq!(events[1].recurrence_id_ms, Some(second));
+        assert_eq!(answer(&events[1]).as_deref(), Some("DECLINED"));
+    }
+
+    #[tokio::test]
     async fn an_answer_on_the_server_changes_only_the_attendees_participation() {
         let (db, _dir) = seed_db().await;
         let raw = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:inv-3@remote\r\nDTSTART;TZID=Europe/Madrid:20261120T100000\r\nSUMMARY:Review\r\nORGANIZER;CN=Alice:mailto:alice@x\r\nATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:me@test.dev\r\nX-SERVER-PROP:kept\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
@@ -884,7 +962,7 @@ mod tests {
             ..Default::default()
         };
         let t = MockTransport::new(vec![written]);
-        put_partstat(&db, &t, &row, &calendar, "ME@test.dev", "DECLINED")
+        put_partstat(&db, &t, &row, &calendar, "ME@test.dev", "DECLINED", None)
             .await
             .unwrap();
 
@@ -917,9 +995,17 @@ mod tests {
         assert_eq!(stored.etag.as_deref(), Some("\"e2\""));
         assert_eq!(stored.ical_raw.as_deref(), Some(body.as_str()));
         assert!(
-            put_partstat(&db, &t, &row, &calendar, "someone@else.dev", "ACCEPTED")
-                .await
-                .is_err(),
+            put_partstat(
+                &db,
+                &t,
+                &row,
+                &calendar,
+                "someone@else.dev",
+                "ACCEPTED",
+                None
+            )
+            .await
+            .is_err(),
             "an address the copy doesn't list"
         );
     }

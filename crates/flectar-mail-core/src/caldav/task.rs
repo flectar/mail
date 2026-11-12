@@ -50,6 +50,10 @@ pub struct QueuedAnswer {
     pub meeting: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calendar_id: Option<i64>,
+    /// The one occurrence answered, by its RECURRENCE-ID; None answers the
+    /// whole event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -522,8 +526,37 @@ impl Cycle<'_> {
                 let meeting = meeting.ok_or_else(|| {
                     CoreError::Other("the meeting isn't in the Outlook calendar yet".into())
                 })?;
-                crate::graph::answer_event(token, meeting, &answer.partstat, comment, answer.notify)
-                    .await
+                let meeting = match answer.occurrence {
+                    Some(original) => {
+                        let moved_to = row
+                            .ical_raw
+                            .as_deref()
+                            .and_then(|raw| crate::calendar::occurrence_start(raw, original))
+                            .unwrap_or(original);
+                        crate::graph::occurrence_id(
+                            token,
+                            meeting,
+                            original,
+                            moved_to,
+                            row.event.all_day,
+                        )
+                        .await?
+                        .ok_or_else(|| {
+                            CoreError::Other(
+                                "the Outlook calendar doesn't have this occurrence".into(),
+                            )
+                        })?
+                    }
+                    None => meeting.to_owned(),
+                };
+                crate::graph::answer_event(
+                    token,
+                    &meeting,
+                    &answer.partstat,
+                    comment,
+                    answer.notify,
+                )
+                .await
             }
             Session::Dav {
                 google_token: Some(token),
@@ -536,6 +569,20 @@ impl Cycle<'_> {
                     .ok_or_else(|| {
                         CoreError::CalDav("Google Calendar doesn't have this meeting".into())
                     })?;
+                let copy = match answer.occurrence {
+                    Some(original) => crate::googlecal::find_occurrence(
+                        token,
+                        &calendar_id,
+                        &copy,
+                        original,
+                        row.event.all_day,
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        CoreError::CalDav("Google Calendar doesn't have this occurrence".into())
+                    })?,
+                    None => copy,
+                };
                 crate::googlecal::answer_meeting(
                     token,
                     &calendar_id,
@@ -558,6 +605,7 @@ impl Cycle<'_> {
                     &calendar,
                     &answer.attendee,
                     &answer.partstat,
+                    answer.occurrence,
                 )
                 .await
             }

@@ -3169,7 +3169,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let calendar_for_answer = Rc::clone(&calendar_state);
     let runtime_for_calendar_answer = runtime.clone();
     let inbox_for_calendar_answer = Rc::clone(&state);
-    app.on_calendar_answer_event(move |event_id, response| {
+    app.on_calendar_answer_event(move |event_id, response, occurrence| {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
@@ -3177,9 +3177,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             app.set_sync_status(UiMessage::plain("Calendar storage is unavailable."));
             return;
         };
-        if let Err(error) = runtime_for_calendar_answer
-            .block_on(core.rsvp_event(i64::from(event_id), response.as_str()))
-        {
+        // An occurrence of a repeating event comes by its RECURRENCE-ID, or
+        // empty for the whole event.
+        let occurrence = occurrence.parse::<i64>().ok();
+        if let Err(error) = runtime_for_calendar_answer.block_on(core.rsvp_event(
+            i64::from(event_id),
+            response.as_str(),
+            occurrence,
+        )) {
             app.set_sync_status(UiMessage::detail("Could not answer: {}", error));
         }
         let today = Local::now().date_naive();

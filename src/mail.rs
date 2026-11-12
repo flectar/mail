@@ -2163,14 +2163,21 @@ impl CoreMailSource {
             })
     }
 
-    /// Answer an invitation; the core tells its organizer.
-    pub async fn rsvp_event(&self, event_id: i64, response: &str) -> Result<(), String> {
+    /// Answer an invitation, or with `occurrence` (a RECURRENCE-ID) one
+    /// occurrence of it; the core tells its organizer.
+    pub async fn rsvp_event(
+        &self,
+        event_id: i64,
+        response: &str,
+        occurrence: Option<i64>,
+    ) -> Result<(), String> {
         self.core
             .rsvp_event(RsvpEventArgs {
                 event_id,
                 response: response.to_owned(),
                 comment: None,
                 notify: true,
+                occurrence,
             })
             .await
             .map(|_| ())

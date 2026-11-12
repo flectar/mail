@@ -43,6 +43,8 @@ pub(crate) struct LocalCalendarEvent {
     pub(crate) is_local: bool,
     /// The user is among its guests and doesn't organize it.
     pub(crate) invited: bool,
+    /// For one occurrence of a repeating event, its RECURRENCE-ID.
+    pub(crate) recurrence_id: Option<i64>,
 }
 
 impl LocalCalendarEvent {
@@ -274,6 +276,7 @@ pub(crate) fn core_calendar_event(event: CalendarEvent) -> LocalCalendarEvent {
         status: event.status.unwrap_or_default(),
         is_local: event.is_local,
         invited: event.invited,
+        recurrence_id: event.recurrence_id,
     }
 }
 
@@ -666,6 +669,11 @@ fn event_row(
         source: if event.is_local { "local" } else { "provider" }.into(),
         answerable: event.invited && !event.cancelled(),
         removable: !event.is_local && event.cancelled(),
+        recurrence_id: event
+            .recurrence_id
+            .map(|original| original.to_string())
+            .unwrap_or_default()
+            .into(),
     }
 }
 
@@ -889,6 +897,7 @@ mod tests {
             status: String::new(),
             is_local: true,
             invited: false,
+            recurrence_id: None,
         }
     }
 

@@ -366,6 +366,9 @@ export struct CalendarEventRow {
     // A cancelled event from someone else, which the user can take out of
     // their calendar.
     removable: bool,
+    // For one occurrence of a repeating event, its RECURRENCE-ID (ms since
+    // the epoch, as text), else empty.
+    recurrence_id: string,
 }
 
 // A flat model lets ListView virtualize individual events, including busy days.

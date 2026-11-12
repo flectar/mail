@@ -412,8 +412,8 @@ export component FunctionalCalendarView inherits Rectangle {
     callback edit-event(int);
     callback delete-event(int);
     // Answer the invitation with this id: "accepted", "tentative" or
-    // "declined".
-    callback answer-event(int, string);
+    // "declined", and for one occurrence its RECURRENCE-ID (else empty).
+    callback answer-event(int, string, string);
     // Open an event's details when asked from elsewhere, such as the card
     // above an invitation in mail.
     in property <CalendarEventRow> reveal-event;
@@ -443,6 +443,8 @@ export component FunctionalCalendarView inherits Rectangle {
     private property <bool> detail-answerable: false;
     private property <bool> detail-removable: false;
     private property <string> detail-my-answer: "";
+    private property <bool> detail-repeats: false;
+    private property <string> detail-recurrence-id: "";
     private property <bool> delete-confirmation-open: false;
 
     function show-source(source: CalendarSourceRow) {
@@ -471,6 +473,8 @@ export component FunctionalCalendarView inherits Rectangle {
         root.detail-answerable = false;
         root.detail-removable = false;
         root.detail-my-answer = "";
+        root.detail-repeats = false;
+        root.detail-recurrence-id = "";
         root.detail-open = true;
     }
 
@@ -497,6 +501,8 @@ export component FunctionalCalendarView inherits Rectangle {
         root.detail-answerable = event.answerable;
         root.detail-removable = event.removable;
         root.detail-my-answer = event.rsvp-status;
+        root.detail-repeats = event.recurrence != "" && event.recurrence-id != "";
+        root.detail-recurrence-id = event.recurrence-id;
         root.detail-open = true;
     }
 
@@ -956,6 +962,7 @@ export component FunctionalCalendarView inherits Rectangle {
         answerable: root.detail-answerable;
         removable: root.detail-removable;
         my-answer: root.detail-my-answer;
+        repeats: root.detail-repeats;
         accent: root.accent-color;
         accent-soft: root.accent-background;
         border: root.ui-border-color;
@@ -969,9 +976,9 @@ export component FunctionalCalendarView inherits Rectangle {
             root.edit-event(root.detail-event-id);
         }
         delete-event => { root.delete-confirmation-open = true; }
-        answer(response) => {
+        answer(response, whole) => {
             root.detail-my-answer = response == "accepted" ? "ACCEPTED" : response == "tentative" ? "TENTATIVE" : "DECLINED";
-            root.answer-event(root.detail-event-id, response);
+            root.answer-event(root.detail-event-id, response, whole ? "" : root.detail-recurrence-id);
         }
         remove-event => {
             root.detail-open = false;

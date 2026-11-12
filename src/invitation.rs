@@ -108,8 +108,10 @@ impl Controller {
             return;
         }
         ui.set_working(true);
+        // A message about one occurrence answers that occurrence alone.
+        let occurrence = card.recurrence_id;
         self.spawn(
-            async move { core.rsvp_event(event_id, &response).await },
+            async move { core.rsvp_event(event_id, &response, occurrence).await },
             |app, result| {
                 if let Err(error) = result {
                     app.global::<Invitation>().set_working(false);
@@ -406,9 +408,7 @@ fn apply(app: &AppWindow, card: &InvitationCard) {
     ui.set_in_calendar(card.event_id.is_some());
     ui.set_repeats(card.repeats);
     ui.set_occurrence(card.occurrence);
-    // Local mail has no account to answer from. An answer to one occurrence
-    // would reach the organizer as one to the whole series, so a message
-    // about one isn't answered here.
+    // Local mail has no account to answer from.
     let local_mail = app.global::<LocalMailUi>().get_selected();
     ui.set_answerable(
         card.kind == InvitationKind::Request
@@ -417,7 +417,6 @@ fn apply(app: &AppWindow, card: &InvitationCard) {
             && !card.cancelled
             && !card.out_of_date
             && !card.kept_out
-            && !card.occurrence
             && !local_mail,
     );
     // Taking a cancelled occurrence out would take the whole series.

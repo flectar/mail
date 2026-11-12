@@ -2361,6 +2361,10 @@ pub struct CalendarEvent {
     /// to answer. Set by [`crate::Core::list_events`].
     #[serde(default)]
     pub invited: bool,
+    /// For one occurrence of a repeating event, as the calendar lists it: the
+    /// start the series gives it, which names it (its RECURRENCE-ID).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence_id: Option<i64>,
 }
 
 /// How a calendar connection reaches its server. An account holds at most
@@ -2501,6 +2505,8 @@ pub struct InvitationCard {
     pub repeats: bool,
     /// The message is about one occurrence of an event that repeats.
     pub occurrence: bool,
+    /// That occurrence's RECURRENCE-ID, which answers it alone.
+    pub recurrence_id: Option<i64>,
     pub location: Option<String>,
     pub join_url: Option<String>,
     pub organizer: Option<Address>,
@@ -2541,6 +2547,10 @@ pub struct RsvpEventArgs {
     /// calendar server lets that be chosen.
     #[serde(default = "default_true")]
     pub notify: bool,
+    /// Answer one occurrence of a repeating event, the one with this
+    /// RECURRENCE-ID (ms since the epoch, UTC), instead of the whole event.
+    #[serde(default)]
+    pub occurrence: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
