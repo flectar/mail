@@ -6269,13 +6269,13 @@ impl Core {
                 ))
             })
             .await?;
-        let own = self
-            .own_addresses_of(
-                events
-                    .iter()
-                    .chain(masters.iter().map(|master| &master.event)),
-            )
-            .await?;
+        let own = own_addresses_of(
+            &self.db,
+            events
+                .iter()
+                .chain(masters.iter().map(|master| &master.event)),
+        )
+        .await?;
 
         // Expand recurring series into concrete occurrences. Occurrences keep
         // the master's row id (edits/deletes address the whole series in v1);
@@ -6301,85 +6301,14 @@ impl Core {
                 continue; // unsupported rule: the master entry stands alone
             };
             events.retain(|e| e.id != m.event.id);
-            // An occurrence with a VEVENT of its own has its own guest list,
-            // and with it the user's answer to that occurrence alone.
-            let own_guests: Vec<(i64, Vec<EventAttendee>)> = m
-                .ical_raw
-                .as_deref()
-                .map(calendar::parse_ics)
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|event| {
-                    let original = event.recurrence_id_ms?;
-                    let guests = event
-                        .attendees
-                        .into_iter()
-                        .map(|guest| EventAttendee {
-                            email: guest.email,
-                            name: guest.name,
-                            partstat: guest.partstat,
-                            answered_at: None,
-                        })
-                        .collect::<Vec<_>>();
-                    (!guests.is_empty()).then_some((original, guests))
-                })
-                .collect();
+            let guests = occurrence_guests(m.ical_raw.as_deref());
             for occ in occs {
-                let mut e = m.event.clone();
-                e.starts_at = occ.start;
-                e.ends_at = Some(occ.end);
-                e.recurrence_id = Some(occ.original);
-                if let Some((_, guests)) = own_guests
-                    .iter()
-                    .find(|(original, _)| (original - occ.original).abs() < 60_000)
-                {
-                    // An answer to this occurrence alone replaces the
-                    // series' answer for it.
-                    let answer = own
-                        .get(&e.account_id)
-                        .and_then(|own| guests.iter().find(|guest| own.contains(&guest.email)))
-                        .and_then(|guest| guest.partstat.clone())
-                        .filter(|answer| answer != "NEEDS-ACTION");
-                    if answer.is_some() {
-                        e.rsvp_status = answer;
-                    }
-                    e.attendees = guests.clone();
-                }
-                events.push(e);
+                events.push(occurrence_event(&m.event, occ, &guests, &own));
             }
         }
         events.sort_by_key(|e| e.starts_at);
         mark_invitations(&mut events, &own);
         Ok(events)
-    }
-
-    /// The user's own addresses in each account that has events with guests.
-    async fn own_addresses_of<'a>(
-        &self,
-        events: impl Iterator<Item = &'a CalendarEvent>,
-    ) -> Result<HashMap<i64, repo::sender_identities::OwnAddresses>> {
-        let accounts: Vec<i64> = events
-            .filter(|event| !event.attendees.is_empty())
-            .map(|event| event.account_id)
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        if accounts.is_empty() {
-            return Ok(HashMap::new());
-        }
-        self.db
-            .read(move |conn| {
-                accounts
-                    .into_iter()
-                    .map(|account_id| {
-                        Ok((
-                            account_id,
-                            repo::sender_identities::own_addresses(conn, account_id)?,
-                        ))
-                    })
-                    .collect::<Result<HashMap<_, _>>>()
-            })
-            .await
     }
 
     /// Create a meeting. The event lands on the local calendar immediately;
@@ -9910,9 +9839,98 @@ fn store_discovered_calendars(
 
 /// Plain-text body for an outgoing invite email (the ICS carries the real
 /// event; this is what non-calendar clients show).
+/// The user's own addresses in each account that has events with guests.
+pub(crate) async fn own_addresses_of<'a>(
+    db: &Db,
+    events: impl Iterator<Item = &'a CalendarEvent>,
+) -> Result<HashMap<i64, repo::sender_identities::OwnAddresses>> {
+    let accounts: Vec<i64> = events
+        .filter(|event| !event.attendees.is_empty())
+        .map(|event| event.account_id)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if accounts.is_empty() {
+        return Ok(HashMap::new());
+    }
+    db.read(move |conn| {
+        accounts
+            .into_iter()
+            .map(|account_id| {
+                Ok((
+                    account_id,
+                    repo::sender_identities::own_addresses(conn, account_id)?,
+                ))
+            })
+            .collect::<Result<HashMap<_, _>>>()
+    })
+    .await
+}
+
+/// The guest lists of a series' occurrences that have VEVENTs of their own,
+/// by their RECURRENCE-ID.
+pub(crate) fn occurrence_guests(ical_raw: Option<&str>) -> Vec<(i64, Vec<EventAttendee>)> {
+    ical_raw
+        .map(calendar::parse_ics)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|event| {
+            let original = event.recurrence_id_ms?;
+            let guests = event
+                .attendees
+                .into_iter()
+                .map(|guest| EventAttendee {
+                    email: guest.email,
+                    name: guest.name,
+                    partstat: guest.partstat,
+                    answered_at: None,
+                })
+                .collect::<Vec<_>>();
+            (!guests.is_empty()).then_some((original, guests))
+        })
+        .collect()
+}
+
+/// One occurrence of the repeating `series`, with its RECURRENCE-ID. One
+/// with a VEVENT of its own has that VEVENT's guest list, and the user's
+/// answer there, when they gave one, replaces the series' answer for it.
+pub(crate) fn occurrence_event(
+    series: &CalendarEvent,
+    occurrence: caldav::rrule::Occurrence,
+    guests: &[(i64, Vec<EventAttendee>)],
+    own: &HashMap<i64, repo::sender_identities::OwnAddresses>,
+) -> CalendarEvent {
+    let mut event = series.clone();
+    event.starts_at = occurrence.start;
+    event.ends_at = Some(occurrence.end);
+    event.recurrence_id = Some(occurrence.original);
+    if let Some((_, guests)) = guests
+        .iter()
+        .find(|(original, _)| (original - occurrence.original).abs() < 60_000)
+    {
+        let answer = own
+            .get(&event.account_id)
+            .and_then(|own| guests.iter().find(|guest| own.contains(&guest.email)))
+            .and_then(|guest| guest.partstat.clone())
+            .filter(|answer| answer != "NEEDS-ACTION");
+        if answer.is_some() {
+            event.rsvp_status = answer;
+        }
+        event.attendees = guests.clone();
+    }
+    event
+}
+
+/// Whether an event reminds the user before it starts. An invitation does
+/// only once they accept it or answer Maybe: one waiting for an answer may
+/// be calendar spam, and RFC 9671 section 4 has its reminders left out.
+pub(crate) fn reminds(event: &CalendarEvent) -> bool {
+    !event.invited || matches!(event.rsvp_status.as_deref(), Some("ACCEPTED" | "TENTATIVE"))
+}
+
 /// Tell which events are the user's to answer, and fill in their answer
 /// where only the guest list holds it, as on a calendar server's copy.
-fn mark_invitations(
+pub(crate) fn mark_invitations(
     events: &mut [CalendarEvent],
     own: &HashMap<i64, repo::sender_identities::OwnAddresses>,
 ) {
@@ -13963,6 +13981,81 @@ mod invitation_tests {
             .into_iter()
             .find(|event| event.summary.as_deref() == Some(title))
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn only_invitations_the_user_accepted_remind() {
+        let (core, _temp, _) = invited().await;
+        core.calendar_db
+            .write(|conn| {
+                repo::calendar::insert_local(
+                    conn,
+                    1,
+                    None,
+                    "standup@flectar-mail",
+                    "Standup",
+                    None,
+                    None,
+                    None,
+                    "me@test.dev",
+                    &[],
+                    calendar::parse_dt("20261120T080000Z").unwrap().0,
+                    calendar::parse_dt("20261120T083000Z").unwrap().0,
+                    false,
+                )
+                .map(|_| ())
+            })
+            .await
+            .unwrap();
+        let listed = |title: &'static str| {
+            let core = &core;
+            async move {
+                core.list_events(1_795_000_000_000, 1_798_000_000_000)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|event| event.summary.as_deref() == Some(title))
+                    .unwrap()
+            }
+        };
+        assert!(reminds(&listed("Standup").await), "the user's own event");
+        let review = listed("Design review").await;
+        assert!(!reminds(&review), "an invitation waiting for an answer");
+        core.rsvp_event(answer(review.id, "tentative", None))
+            .await
+            .unwrap();
+        assert!(reminds(&listed("Design review").await));
+        core.rsvp_event(answer(review.id, "declined", None))
+            .await
+            .unwrap();
+        assert!(!reminds(&listed("Design review").await));
+
+        // One occurrence declined on its own stays silent while the
+        // accepted series reminds.
+        let id = another(&core, "alice@example.com", &weekly()).await;
+        let event = card(&core, id).await.event_id.unwrap();
+        core.rsvp_event(answer(event, "accepted", None))
+            .await
+            .unwrap();
+        let second = calendar::parse_dt("20261127T090000Z").unwrap().0;
+        core.rsvp_event(RsvpEventArgs {
+            occurrence: Some(second),
+            ..answer(event, "declined", None)
+        })
+        .await
+        .unwrap();
+        let occurrences: Vec<(i64, bool)> = core
+            .list_events(1_795_000_000_000, 1_798_000_000_000)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.summary.as_deref() == Some("Weekly sync"))
+            .map(|event| (event.recurrence_id.unwrap(), reminds(&event)))
+            .collect();
+        assert_eq!(occurrences.len(), 5);
+        for (original, reminding) in occurrences {
+            assert_eq!(reminding, original != second, "{original}");
+        }
     }
 
     #[tokio::test]

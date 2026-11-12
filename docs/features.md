@@ -328,6 +328,11 @@ Invitations can also be answered from **My response** in an event's details in
 the calendar, and for an occurrence of a repeating event Flectar Mail asks
 whether the answer is for **This event** or **All events**.
 
+In the calendar, an invitation waiting for your answer is outlined, and
+declined or cancelled events are faded with their title struck through. An
+invitation reminds you of itself only once you accept it or answer **Maybe**,
+so one you haven't answered, such as calendar spam, stays quiet.
+
 ## Storage and backups
 
 Settings → Storage shows how much space mail, attachments, offline files, and
