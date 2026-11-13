@@ -14,6 +14,11 @@ the upstream source is <https://github.com/slint-ui/slint>. The locally patched
 [`crates/i-slint-backend-winit/LICENSES`](crates/i-slint-backend-winit/LICENSES).
 Its Wayland clipboard backport, source checksum, and removal condition are
 documented in [`patches/slint-winit/README.md`](patches/slint-winit/README.md).
+The locally patched `i-slint-backend-android-activity` 1.18.1 crate likewise
+retains its upstream license texts in
+[`crates/i-slint-backend-android-activity/LICENSES`](crates/i-slint-backend-android-activity/LICENSES),
+and its pointer scroll backport is documented in
+[`patches/slint-android-activity/README.md`](patches/slint-android-activity/README.md).
 
 ## Blitz
 

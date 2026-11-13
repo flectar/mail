@@ -1,0 +1,7 @@
+{
+  "version": "1.18.1",
+  "revision": "372cf0ee5577c3dfec309a45e7b778ba4e81b734",
+  "sha256": "70d538003a566d7312572ac1435be0704934e46a63d55abdabede513f72332cb",
+  "adaptation": "https://github.com/slint-ui/slint/pull/14495",
+  "adaptation_revision": "04fe0cc568e4f1b90fc63f6ee8f66d33423c513d"
+}
