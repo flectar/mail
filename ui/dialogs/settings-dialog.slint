@@ -1,4 +1,5 @@
 import { AccountMailPreferencesPanel } from "../components/account-mail-preferences.slint";
+import { InvitationSettings } from "../invitation-settings.slint";
 import { RendererSettings } from "../renderer-settings.slint";
 import { WindowChrome } from "../window-chrome.slint";
 import { AppIcon } from "../app-icon.slint";
@@ -1493,6 +1494,35 @@ export component SettingsDialog inherits Rectangle {
                                         title-color: root.body-text;
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-undo-send(index); }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: max(root.compact ? 150px : 112px, self.preferred-height);
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding-top: 18px;
+                                    padding-right: 20px;
+                                    padding-bottom: 18px;
+                                    padding-left: 20px;
+                                    spacing: 4px;
+                                    Text { height: max(22px, self.preferred-height); text: @tr("Calendar"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; vertical-alignment: center; wrap: word-wrap; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Add invitations to my calendar");
+                                        description: @tr("People you know are those you've emailed or saved as contacts.");
+                                        choices: [@tr("From everyone"), @tr("Only from people I know"), @tr("Only when I answer")];
+                                        selected-index: InvitationSettings.add == "everyone" ? 0
+                                            : InvitationSettings.add == "answered" ? 2 : 1;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            InvitationSettings.choose(index == 0 ? "everyone" : index == 2 ? "answered" : "known");
+                                        }
                                     }
                                 }
                             }

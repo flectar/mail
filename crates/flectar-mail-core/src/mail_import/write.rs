@@ -949,6 +949,7 @@ impl Writer<'_> {
                     &self.core.sync_ctx(),
                     account_id,
                     vec![(message_id, calendars)],
+                    ingest::Arrival::Imported,
                 )
                 .await
                 {
