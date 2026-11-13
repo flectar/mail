@@ -38,14 +38,19 @@ const FOUND_FILE: &str = "update-check.json";
 /// download, which their release workflow marks, and not the Microsoft
 /// Store's, which shares the setup program's executable.
 pub(crate) fn offered() -> bool {
-    if option_env!("FLECTAR_UPDATE_CHECKS") != Some("github") {
-        return false;
-    }
+    option_env!("FLECTAR_UPDATE_CHECKS") == Some("github") && !from_microsoft_store()
+}
+
+/// This copy came from the Microsoft Store, which updates it.
+fn from_microsoft_store() -> bool {
     #[cfg(target_os = "windows")]
-    if crate::platform::windows_install::package_family_name().is_some() {
-        return false;
+    {
+        crate::platform::windows_install::package_family_name().is_some()
     }
-    true
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
 }
 
 /// What the window shows about updates.

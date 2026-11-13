@@ -2877,8 +2877,13 @@ async fn fetch_body(
         let _ = tokio::fs::remove_file(path).await;
         return Ok(());
     }
-    crate::sync::ingest::store_calendar_events(ctx, config.id, vec![(message_id, calendar_events)])
-        .await?;
+    crate::sync::ingest::store_calendar_events(
+        ctx,
+        config.id,
+        vec![(message_id, calendar_events)],
+        crate::sync::ingest::Arrival::Received,
+    )
+    .await?;
     if let Some(thread_id) = thread_id {
         ctx.bus.emit(CoreEvent::MailUpdated {
             thread_ids: vec![thread_id],

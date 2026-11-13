@@ -447,6 +447,37 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_invitations = Rc::clone(state);
+    let runtime_for_invitations = runtime.clone();
+    app.global::<InvitationSettings>().on_choose(move |choice| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        if flectar_mail_core::models::AddInvitations::parse(&choice).is_none() {
+            return;
+        }
+        let invitations = app.global::<InvitationSettings>();
+        let previous = invitations.get_add();
+        invitations.set_add(choice.clone());
+        let Some(core) = state_for_invitations.borrow().core.clone() else {
+            invitations.set_add(previous);
+            return;
+        };
+        match runtime_for_invitations.block_on(core.set_add_invitations(&choice)) {
+            Ok(()) => {
+                app.set_sync_status(UiMessage::plain("Calendar invitations preference saved."))
+            }
+            Err(error) => {
+                invitations.set_add(previous);
+                app.set_sync_status(UiMessage::detail(
+                    "Could not save the calendar invitations preference: {}",
+                    error,
+                ));
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_custom_theme = Rc::clone(state);
     let runtime_for_custom_theme = runtime.clone();
     app.on_save_custom_theme(
