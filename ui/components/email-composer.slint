@@ -3,7 +3,7 @@ import { SettingsSelectRow } from "settings-components.slint";
 import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow, SpellingLanguage } from "../models.slint";
 import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } from "composer-fields.slint";
-import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerToolbar, DiscardConfirmation, LinkEditor } from "composer-actions.slint";
+import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, LinkEditor } from "composer-actions.slint";
 import { EmailTemplates } from "email-templates.slint";
 import { TypeScale } from "../typography.slint";
 import { IconButton } from "controls.slint";
@@ -42,6 +42,11 @@ export component EmailComposer inherits Rectangle {
     in property <float> editor-caret-x: 0;
     in property <float> editor-caret-y: 0;
     in property <float> editor-caret-height: 18;
+    in property <bool> editor-image-shown: false;
+    in property <float> editor-image-x: 0;
+    in property <float> editor-image-y: 0;
+    in property <float> editor-image-width: 0;
+    in property <float> editor-image-height: 0;
     in property <bool> bold-active: false;
     in property <bool> italic-active: false;
     in property <bool> underline-active: false;
@@ -53,6 +58,9 @@ export component EmailComposer inherits Rectangle {
     in property <string> active-size: "normal";
     in property <string> active-family: "default";
     in property <string> active-align: "left";
+    in property <string> active-image-size: "";
+    in property <string> active-image-alt: "";
+    in property <int> active-image-width: 0;
     in property <bool> can-pop-out: false;
     // "reply" or "forward" when the original goes below the editor.
     in property <string> quote: "";
@@ -138,6 +146,10 @@ export component EmailComposer inherits Rectangle {
     private property <string> link-url: "";
     private property <int> link-selection-start: 0;
     private property <int> link-selection-end: 0;
+    private property <bool> image-alt-open: false;
+    private property <string> image-alt: "";
+    private property <int> image-selection-start: 0;
+    private property <int> image-selection-end: 0;
     private property <bool> caret-visible: true;
     private property <string> pending-key-text: "";
     private property <bool> ime-edit-pending: false;
@@ -215,6 +227,14 @@ export component EmailComposer inherits Rectangle {
         );
         body-input.set-selection-offsets(root.selection-start, root.selection-end);
         body-input.focus();
+    }
+
+    // Asks for the selected image's alt text.
+    function edit-image-alt() {
+        root.image-selection-start = root.selection-start;
+        root.image-selection-end = root.selection-end;
+        root.image-alt = root.active-image-alt;
+        root.image-alt-open = true;
     }
 
     function request-close() {
@@ -655,6 +675,20 @@ export component EmailComposer inherits Rectangle {
                             title: @tr("Ignore");
                             activated => { root.spelling-ignore(); }
                         }
+                        // A selected image's size and alt text, as its bar offers them.
+                        if root.active-image-size != "" && !root.editor-menu-touch : Menu {
+                            title: @tr("Image size");
+                            MenuItem { title: @tr("image size" => "Small"); checkable: true; checked: root.active-image-size == "small"; enabled: root.active-image-width > 160; activated => { root.apply-format("image-size:small"); } }
+                            MenuItem { title: @tr("image size" => "Medium"); checkable: true; checked: root.active-image-size == "medium"; enabled: root.active-image-width > 320; activated => { root.apply-format("image-size:medium"); } }
+                            MenuItem { title: @tr("image size" => "Large"); checkable: true; checked: root.active-image-size == "large"; enabled: root.active-image-width > 640; activated => { root.apply-format("image-size:large"); } }
+                            MenuItem { title: @tr("image size" => "Original size"); checkable: true; checked: root.active-image-size == "original"; activated => { root.apply-format("image-size:original"); } }
+                        }
+                        if root.active-image-size != "" && !root.editor-menu-touch : MenuItem {
+                            title: @tr("Alt text…");
+                            enabled: !root.sending;
+                            activated => { root.edit-image-alt(); }
+                        }
+                        if root.active-image-size != "" && !root.editor-menu-touch : MenuSeparator {}
                         // A tapped word's menu holds only spelling, as phones offer.
                         if root.spelling-word != "" && !root.editor-menu-touch : MenuSeparator {}
                         if !root.editor-menu-touch : MenuItem {
@@ -716,6 +750,8 @@ export component EmailComposer inherits Rectangle {
                                 body-input.focus();
                                 root.editor-menu-position = { x: self.mouse-x, y: self.mouse-y };
                                 root.editor-menu-requested(self.mouse-x / 1px, self.mouse-y / 1px);
+                                // A right click on an image selects it.
+                                body-input.set-selection-offsets(root.selection-start, root.selection-end);
                             }
                             if (event.button == PointerEventButton.left || event.kind == PointerEventKind.move || event.kind == PointerEventKind.cancel) {
                                 if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
@@ -884,6 +920,33 @@ export component EmailComposer inherits Rectangle {
                         && root.caret-visible;
                     background: root.body-color;
                 }
+
+                // Over a selected image's lower left corner, or under an image too small to
+                // hold it, and moved up to stay in view.
+                if root.editor-image-shown && root.active-image-size != "" && !root.sending : ImageBar {
+                    private property <bool> inside: root.editor-image-width * 1px >= self.width + 16px
+                        && root.editor-image-height * 1px >= self.height + 16px;
+                    x: self.inside ? 18px + root.editor-image-x * 1px + 8px
+                        : max(18px, min(18px + root.editor-image-x * 1px, 18px + root.editor-width - self.width));
+                    y: max(
+                        14px + root.editor-image-y * 1px + (self.inside ? 8px : 0px),
+                        min(
+                            14px + (root.editor-image-y + root.editor-image-height) * 1px
+                                + (self.inside ? -self.height - 8px : 6px),
+                            body-scroll.visible-height - body-scroll.content-y - self.height - 8px,
+                            body-scroll.content-height - self.height - 4px,
+                        ),
+                    );
+                    active-size: root.active-image-size;
+                    image-width: root.active-image-width;
+                    body-color: root.body-color;
+                    control-hover-color: root.control-hover-color;
+                    raised-color: root.raised-color;
+                    secondary-color: root.secondary-color;
+                    subtle-border-color: root.subtle-border-color;
+                    apply-format(kind) => { root.apply-format(kind); }
+                    edit-alt => { root.edit-image-alt(); }
+                }
             }
         }
 
@@ -940,6 +1003,33 @@ export component EmailComposer inherits Rectangle {
         discard => {
             root.confirm-discard = false;
             root.close();
+        }
+    }
+
+    ImageAltEditor {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        compact: root.compact;
+        open: root.image-alt-open;
+        alt <=> root.image-alt;
+        background-color: root.background-color;
+        body-color: root.body-color;
+        frame-border-color: root.frame-border-color;
+        muted-color: root.muted-color;
+        title-color: root.title-color;
+        accent-color: root.accent-color;
+        cancel => {
+            root.image-alt-open = false;
+            body-input.set-selection-offsets(root.image-selection-start, root.image-selection-end);
+            body-input.focus();
+        }
+        apply(alt) => {
+            root.image-alt-open = false;
+            root.format-requested("image-alt:" + alt, root.body, root.image-selection-start, root.image-selection-end);
+            body-input.set-selection-offsets(root.selection-start, root.selection-end);
+            body-input.focus();
         }
     }
 

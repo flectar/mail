@@ -4,6 +4,7 @@ import { Button } from "button.slint";
 import { IconButton } from "controls.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
 
 // A color the composer offers, with its name for screen readers.
 struct ComposerSwatch {
@@ -674,6 +675,260 @@ export component ComposerFooter inherits Rectangle {
                 clicked => { root.request-close(); }
             }
 
+}
+
+// A flat labelled button for the image bar, as the toolbar's buttons are flat.
+component BarButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> has-menu: false;
+    in property <color> text-color;
+    in property <color> hover-background;
+    callback clicked;
+
+    height: 32px;
+    width: label.preferred-width + (root.has-menu ? 34px : 20px);
+    border-radius: 6px;
+    border-width: keyboard.focus-visible ? 2px : 0px;
+    border-color: root.text-color;
+    background: area.has-hover ? root.hover-background : transparent;
+    forward-focus: keyboard;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    label := Text {
+        x: 10px;
+        height: parent.height;
+        text: root.text;
+        color: root.text-color;
+        font-size: TypeScale.body;
+        font-weight: 500;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+
+    if root.has-menu : Image {
+        x: label.x + label.preferred-width + 6px;
+        y: (parent.height - self.height) / 2;
+        width: 14px;
+        height: 14px;
+        source: @image-url("../icons/lucide/outline/chevron-down.svg");
+        colorize: root.text-color;
+        accessible-role: none;
+    }
+
+    keyboard := FocusVisibleScope {
+        accessible-role: none;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space { root.clicked(); return accept; }
+            reject
+        }
+    }
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { keyboard.focus(); keyboard.pointer-activated(); root.clicked(); }
+    }
+}
+
+// The controls of a selected image: how wide it shows, its alt text, and taking it out.
+export component ImageBar inherits Rectangle {
+    // "small", "medium", "large", "original", or "custom" for a width of its own.
+    in property <string> active-size;
+    // The image's own width in pixels: it shows at sizes below it.
+    in property <int> image-width;
+    in property <color> body-color;
+    in property <color> control-hover-color;
+    in property <color> raised-color;
+    in property <color> secondary-color;
+    in property <color> subtle-border-color;
+    callback apply-format(string);
+    callback edit-alt();
+
+    width: bar-row.preferred-width;
+    height: 38px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.subtle-border-color;
+    background: root.raised-color;
+    drop-shadow-blur: 10px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: #00000030;
+
+    // Presses on the bar stay off the text under it.
+    TouchArea { }
+
+    bar-row := HorizontalLayout {
+        padding: 3px;
+        spacing: 2px;
+        alignment: start;
+
+        size-menu := ContextMenuArea {
+            width: size-button.width;
+            height: 32px;
+
+            size-button := BarButton {
+                text: @tr("image" => "Size");
+                has-menu: true;
+                text-color: root.body-color;
+                hover-background: root.control-hover-color;
+                clicked => { size-menu.show({ x: 0px, y: self.height + 6px }); }
+            }
+
+            Menu {
+                MenuItem { title: @tr("image size" => "Small"); checkable: true; checked: root.active-size == "small"; enabled: root.image-width > 160; activated => { root.apply-format("image-size:small"); } }
+                MenuItem { title: @tr("image size" => "Medium"); checkable: true; checked: root.active-size == "medium"; enabled: root.image-width > 320; activated => { root.apply-format("image-size:medium"); } }
+                MenuItem { title: @tr("image size" => "Large"); checkable: true; checked: root.active-size == "large"; enabled: root.image-width > 640; activated => { root.apply-format("image-size:large"); } }
+                MenuItem { title: @tr("image size" => "Original size"); checkable: true; checked: root.active-size == "original"; activated => { root.apply-format("image-size:original"); } }
+            }
+        }
+
+        BarButton {
+            text: @tr("Alt text");
+            text-color: root.body-color;
+            hover-background: root.control-hover-color;
+            clicked => { root.edit-alt(); }
+        }
+
+        Rectangle {
+            width: 1px;
+            Rectangle { y: (parent.height - self.height) / 2; width: 1px; height: 18px; background: root.subtle-border-color; }
+        }
+
+        IconButton {
+            icon: @image-url("../icons/lucide/outline/trash.svg");
+            icon-color: root.secondary-color;
+            hover-background: root.control-hover-color;
+            tooltip-text: @tr("Remove image");
+            clicked => { root.apply-format("delete"); }
+        }
+    }
+}
+
+// Asks for a selected image's alt text, the words that stand for it for people who
+// can't see it. Left empty, the image counts as decoration.
+export component ImageAltEditor inherits Rectangle {
+    in property <bool> compact: false;
+    in property <bool> open: false;
+    in-out property <string> alt: "";
+    in property <color> background-color;
+    in property <color> body-color;
+    in property <color> frame-border-color;
+    in property <color> muted-color;
+    in property <color> title-color;
+    in property <color> accent-color;
+    callback cancel();
+    callback apply(string);
+
+    visible: root.open;
+    background: #00000066;
+    z: 6000;
+    TouchArea { }
+
+    changed open => {
+        if (root.open) {
+            alt-input.focus();
+            alt-input.select-all();
+        }
+    }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.compact ? min(380px, parent.width - 32px) : 420px;
+        height: alt-field.y + 124px;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: root.frame-border-color;
+        background: root.background-color;
+
+        alt-heading := Text {
+            x: 20px;
+            y: 18px;
+            width: parent.width - 40px;
+            height: max(24px, self.preferred-height);
+            text: @tr("Alt text");
+            color: root.title-color;
+            font-size: TypeScale.heading-small;
+            font-weight: 700;
+        }
+
+        alt-note := Text {
+            x: 20px;
+            y: alt-heading.y + alt-heading.height + 6px;
+            width: parent.width - 40px;
+            height: max(20px, self.preferred-height);
+            text: @tr("Screen readers read it in place of the image. Leave it empty if the image is only decoration.");
+            color: root.muted-color;
+            font-size: TypeScale.secondary;
+            wrap: word-wrap;
+        }
+
+        alt-field := Rectangle {
+            x: 20px;
+            y: alt-note.y + alt-note.height + 10px;
+            width: parent.width - 40px;
+            height: 38px;
+            border-radius: 7px;
+            border-width: 1px;
+            border-color: alt-input.has-focus ? root.accent-color : root.frame-border-color;
+            background: root.background-color;
+
+            Text {
+                x: 11px;
+                width: parent.width - 22px;
+                height: parent.height;
+                visible: root.alt == "";
+                text: @tr("Describe the image");
+                color: root.muted-color;
+                font-size: TypeScale.body;
+                vertical-alignment: center;
+            }
+
+            alt-input := TextInput {
+                x: 11px;
+                width: parent.width - 22px;
+                height: parent.height;
+                text <=> root.alt;
+                color: root.body-color;
+                selection-background-color: root.accent-color;
+                selection-foreground-color: white;
+                font-size: TypeScale.body;
+                single-line: true;
+                vertical-alignment: center;
+                accessible-label: @tr("Alt text");
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        root.cancel();
+                        return accept;
+                    }
+                    if (event.text == Key.Return) {
+                        root.apply(root.alt);
+                        return accept;
+                    }
+                    reject
+                }
+            }
+        }
+
+        Button {
+            x: alt-apply.x - self.width - 8px;
+            y: alt-apply.y;
+            width: max(78px, self.content-width);
+            height: 34px;
+            text: @tr("Cancel");
+            clicked => { root.cancel(); }
+        }
+
+        alt-apply := Button {
+            x: parent.width - self.width - 20px;
+            y: alt-field.y + 68px;
+            width: max(82px, self.content-width);
+            height: 34px;
+            text: @tr("Apply");
+            primary: true;
+            clicked => { root.apply(root.alt); }
+        }
+    }
 }
 
 export component LinkEditor inherits Rectangle {

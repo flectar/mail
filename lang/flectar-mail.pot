@@ -12,7 +12,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: ui/app-icon.slint:19 ui/components/composer-actions.slint:20
+#: ui/app-icon.slint:19 ui/components/composer-actions.slint:21
 msgid "Orange"
 msgstr ""
 
@@ -25,20 +25,20 @@ msgstr ""
 msgid "Light"
 msgstr ""
 
-#: ui/app-icon.slint:22 ui/components/composer-actions.slint:24
-#: ui/app-icon.slint:22 ui/components/composer-actions.slint:24
+#: ui/app-icon.slint:22 ui/components/composer-actions.slint:25
+#: ui/app-icon.slint:22 ui/components/composer-actions.slint:25
 msgid "Blue"
 msgstr ""
 
-#: ui/app-icon.slint:23 ui/components/composer-actions.slint:22
-#: ui/app-icon.slint:23 ui/components/composer-actions.slint:22 ui/components/theme-editor.slint:639
-#: ui/app-icon.slint:23 ui/components/composer-actions.slint:22 ui/components/theme-editor.slint:639
+#: ui/app-icon.slint:23 ui/components/composer-actions.slint:23
+#: ui/app-icon.slint:23 ui/components/composer-actions.slint:23 ui/components/theme-editor.slint:639
+#: ui/app-icon.slint:23 ui/components/composer-actions.slint:23 ui/components/theme-editor.slint:639
 msgid "Green"
 msgstr ""
 
-#: ui/app-icon.slint:24 ui/components/composer-actions.slint:25
-#: ui/app-icon.slint:24 ui/components/composer-actions.slint:25 ui/components/theme-editor.slint:640
-#: ui/app-icon.slint:24 ui/components/composer-actions.slint:25 ui/components/theme-editor.slint:640
+#: ui/app-icon.slint:24 ui/components/composer-actions.slint:26
+#: ui/app-icon.slint:24 ui/components/composer-actions.slint:26 ui/components/theme-editor.slint:640
+#: ui/app-icon.slint:24 ui/components/composer-actions.slint:26 ui/components/theme-editor.slint:640
 msgid "Purple"
 msgstr ""
 
@@ -1869,7 +1869,7 @@ msgstr ""
 msgid "{} wrote:"
 msgstr ""
 
-#: ui/app.slint:654 ui/components/email-composer.slint:784
+#: ui/app.slint:654 ui/components/email-composer.slint:820
 msgid "Forwarded message"
 msgstr ""
 
@@ -2483,6 +2483,7 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:178
 #: ui/components/account-mail-preferences.slint:178
 #: ui/components/account-mail-preferences.slint:178
+#: ui/components/account-mail-preferences.slint:178
 #: ui/components/account-mail-preferences.slint:178 ui/dialogs/folder-dialog.slint:128
 #: ui/components/account-mail-preferences.slint:178 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126
 #: ui/components/account-mail-preferences.slint:178 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126 ui/dialogs/settings-dialog.slint:2539
@@ -2963,309 +2964,359 @@ msgid "Keep event"
 msgstr ""
 
 #. Color names for screen readers, also in the names of their shades.
-#: ui/components/composer-actions.slint:19
-#: ui/components/composer-actions.slint:19
+#: ui/components/composer-actions.slint:20
+#: ui/components/composer-actions.slint:20
 msgid "Red"
 msgstr ""
 
-#: ui/components/composer-actions.slint:21
+#: ui/components/composer-actions.slint:22
 msgid "Yellow"
 msgstr ""
 
-#: ui/components/composer-actions.slint:23
+#: ui/components/composer-actions.slint:24
 msgid "Cyan"
 msgstr ""
 
-#: ui/components/composer-actions.slint:26
+#: ui/components/composer-actions.slint:27
 msgid "Magenta"
 msgstr ""
 
-#: ui/components/composer-actions.slint:27
+#: ui/components/composer-actions.slint:28
 msgid "Black"
 msgstr ""
 
 #. Grays for screen readers, numbered away from mid gray.
-#: ui/components/composer-actions.slint:32
-#: ui/components/composer-actions.slint:32
-#: ui/components/composer-actions.slint:32
+#: ui/components/composer-actions.slint:33
+#: ui/components/composer-actions.slint:33
+#: ui/components/composer-actions.slint:33
 msgid "Dark gray {0}"
 msgstr ""
 
-#: ui/components/composer-actions.slint:35
+#: ui/components/composer-actions.slint:36
 msgid "Gray"
 msgstr ""
 
-#: ui/components/composer-actions.slint:36
-#: ui/components/composer-actions.slint:36
+#: ui/components/composer-actions.slint:37
+#: ui/components/composer-actions.slint:37
 msgid "Light gray {0}"
 msgstr ""
 
-#: ui/components/composer-actions.slint:38
+#: ui/components/composer-actions.slint:39
 msgid "White"
 msgstr ""
 
 #. A color's tint for screen readers, 3 the lightest.
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
-#: ui/components/composer-actions.slint:48
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
+#: ui/components/composer-actions.slint:49
 msgid "{0}, light {1}"
 msgstr ""
 
 #. A color's shade for screen readers, 3 the darkest.
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
-#: ui/components/composer-actions.slint:73
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
+#: ui/components/composer-actions.slint:74
 msgid "{0}, dark {1}"
 msgstr ""
 
-#: ui/components/composer-actions.slint:358
-#: ui/components/composer-actions.slint:358
+#: ui/components/composer-actions.slint:359
+#: ui/components/composer-actions.slint:359
 msgid "Font"
 msgstr ""
 
-#: ui/components/composer-actions.slint:363
-#: ui/components/composer-actions.slint:363
+#: ui/components/composer-actions.slint:364
+#: ui/components/composer-actions.slint:364
 msgctxt "font"
 msgid "Default"
 msgstr ""
 
-#: ui/components/composer-actions.slint:364
-#: ui/components/composer-actions.slint:364
+#: ui/components/composer-actions.slint:365
+#: ui/components/composer-actions.slint:365
 msgctxt "font"
 msgid "Serif"
 msgstr ""
 
-#: ui/components/composer-actions.slint:365
-#: ui/components/composer-actions.slint:365
+#: ui/components/composer-actions.slint:366
+#: ui/components/composer-actions.slint:366
 msgctxt "font"
 msgid "Fixed width"
 msgstr ""
 
-#: ui/components/composer-actions.slint:377
-#: ui/components/composer-actions.slint:377
+#: ui/components/composer-actions.slint:378
+#: ui/components/composer-actions.slint:378
 msgid "Text size"
 msgstr ""
 
-#: ui/components/composer-actions.slint:382
-#: ui/components/composer-actions.slint:382
+#: ui/components/composer-actions.slint:383
+#: ui/components/composer-actions.slint:383
 msgctxt "text size"
 msgid "Small"
 msgstr ""
 
-#: ui/components/composer-actions.slint:383
-#: ui/components/composer-actions.slint:383
+#: ui/components/composer-actions.slint:384
+#: ui/components/composer-actions.slint:384
 msgctxt "text size"
 msgid "Normal"
 msgstr ""
 
-#: ui/components/composer-actions.slint:384
-#: ui/components/composer-actions.slint:384
+#: ui/components/composer-actions.slint:385
+#: ui/components/composer-actions.slint:385
 msgctxt "text size"
 msgid "Large"
 msgstr ""
 
-#: ui/components/composer-actions.slint:385
-#: ui/components/composer-actions.slint:385
+#: ui/components/composer-actions.slint:386
+#: ui/components/composer-actions.slint:386
 msgctxt "text size"
 msgid "Huge"
 msgstr ""
 
-#: ui/components/composer-actions.slint:391
+#: ui/components/composer-actions.slint:392
 msgid "Bold · Ctrl+B"
 msgstr ""
 
-#: ui/components/composer-actions.slint:392
+#: ui/components/composer-actions.slint:393
 msgid "Italic · Ctrl+I"
 msgstr ""
 
-#: ui/components/composer-actions.slint:393
+#: ui/components/composer-actions.slint:394
 msgid "Underline · Ctrl+U"
 msgstr ""
 
-#: ui/components/composer-actions.slint:394
+#: ui/components/composer-actions.slint:395
 msgid "Strikethrough"
 msgstr ""
 
-#: ui/components/composer-actions.slint:399
+#: ui/components/composer-actions.slint:400
 msgid "Text color"
 msgstr ""
 
-#: ui/components/composer-actions.slint:400
+#: ui/components/composer-actions.slint:401
 msgctxt "text color"
 msgid "Automatic"
 msgstr ""
 
-#: ui/components/composer-actions.slint:414
+#: ui/components/composer-actions.slint:415
 msgid "Highlight"
 msgstr ""
 
-#: ui/components/composer-actions.slint:415
+#: ui/components/composer-actions.slint:416
 msgid "No highlight"
 msgstr ""
 
-#: ui/components/composer-actions.slint:426
+#: ui/components/composer-actions.slint:427
 msgid "Remove formatting · Ctrl+\\"
 msgstr ""
 
-#: ui/components/composer-actions.slint:440
+#: ui/components/composer-actions.slint:441
 msgid "Align"
 msgstr ""
 
-#: ui/components/composer-actions.slint:445
+#: ui/components/composer-actions.slint:446
 msgid "Align left"
 msgstr ""
 
-#: ui/components/composer-actions.slint:446
+#: ui/components/composer-actions.slint:447
 msgid "Align center"
 msgstr ""
 
-#: ui/components/composer-actions.slint:447
+#: ui/components/composer-actions.slint:448
 msgid "Align right"
 msgstr ""
 
-#: ui/components/composer-actions.slint:451
+#: ui/components/composer-actions.slint:452
 msgid "Bulleted list"
 msgstr ""
 
-#: ui/components/composer-actions.slint:452
+#: ui/components/composer-actions.slint:453
 msgid "Numbered list"
 msgstr ""
 
-#: ui/components/composer-actions.slint:453
+#: ui/components/composer-actions.slint:454
 msgid "Quote"
 msgstr ""
 
-#: ui/components/composer-actions.slint:454
+#: ui/components/composer-actions.slint:455
 msgid "Inline code"
 msgstr ""
 
-#: ui/components/composer-actions.slint:455
+#: ui/components/composer-actions.slint:456
 msgid "Add or edit link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:455
+#: ui/components/composer-actions.slint:456
 msgid "Select text to add a link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:456
+#: ui/components/composer-actions.slint:457
 msgid "Insert image"
 msgstr ""
 
-#: ui/components/composer-actions.slint:460
-#: ui/components/composer-actions.slint:460
-#: ui/components/composer-actions.slint:460
+#: ui/components/composer-actions.slint:461
+#: ui/components/composer-actions.slint:461
+#: ui/components/composer-actions.slint:461
 msgid "Email templates"
 msgstr ""
 
-#: ui/components/composer-actions.slint:464
+#: ui/components/composer-actions.slint:465
 msgid "Undo · Ctrl+Z"
 msgstr ""
 
-#: ui/components/composer-actions.slint:465
+#: ui/components/composer-actions.slint:466
 msgid "Redo · Ctrl+Shift+Z"
 msgstr ""
 
-#: ui/components/composer-actions.slint:559
+#: ui/components/composer-actions.slint:560
 msgid "Remove attachment"
 msgstr ""
 
-#: ui/components/composer-actions.slint:622
+#: ui/components/composer-actions.slint:623
 msgid "Sending…"
 msgstr ""
 
-#: ui/components/composer-actions.slint:622
+#: ui/components/composer-actions.slint:623
 msgid "Send"
 msgstr ""
 
-#: ui/components/composer-actions.slint:639
-#: ui/components/composer-actions.slint:639
+#: ui/components/composer-actions.slint:640
+#: ui/components/composer-actions.slint:640
 msgid "Attach files"
 msgstr ""
 
-#: ui/components/composer-actions.slint:660
+#: ui/components/composer-actions.slint:661
 msgid "Save draft"
 msgstr ""
 
-#: ui/components/composer-actions.slint:673
-#: ui/components/composer-actions.slint:673
+#: ui/components/composer-actions.slint:674
+#: ui/components/composer-actions.slint:674
 msgid "Discard"
 msgstr ""
 
-#: ui/components/composer-actions.slint:721
-msgid "Edit link"
+#: ui/components/composer-actions.slint:770
+msgctxt "image"
+msgid "Size"
 msgstr ""
 
-#: ui/components/composer-actions.slint:721
-msgid "Add link"
+#: ui/components/composer-actions.slint:778
+#: ui/components/composer-actions.slint:778
+msgctxt "image size"
+msgid "Small"
 msgstr ""
 
-#: ui/components/composer-actions.slint:732
-msgid "The selected text will open this address."
+#: ui/components/composer-actions.slint:779
+#: ui/components/composer-actions.slint:779
+msgctxt "image size"
+msgid "Medium"
 msgstr ""
 
-#: ui/components/composer-actions.slint:753 ui/views/contacts-view.slint:802
-msgid "https://example.com"
+#: ui/components/composer-actions.slint:780
+#: ui/components/composer-actions.slint:780
+msgctxt "image size"
+msgid "Large"
 msgstr ""
 
-#: ui/components/composer-actions.slint:789
-msgid "Remove link"
+#: ui/components/composer-actions.slint:781
+#: ui/components/composer-actions.slint:781
+msgctxt "image size"
+msgid "Original size"
 msgstr ""
 
-#: ui/components/composer-actions.slint:807
+#: ui/components/composer-actions.slint:786
+#: ui/components/composer-actions.slint:786
+#: ui/components/composer-actions.slint:786
+msgid "Alt text"
+msgstr ""
+
+#: ui/components/composer-actions.slint:801
+msgid "Remove image"
+msgstr ""
+
+#: ui/components/composer-actions.slint:860
+msgid ""
+"Screen readers read it in place of the image. Leave it empty if the image is "
+"only decoration."
+msgstr ""
+
+#: ui/components/composer-actions.slint:881
+msgid "Describe the image"
+msgstr ""
+
+#: ui/components/composer-actions.slint:927
+#: ui/components/composer-actions.slint:927
 msgid "Apply"
 msgstr ""
 
-#: ui/components/composer-actions.slint:847
+#: ui/components/composer-actions.slint:976
+msgid "Edit link"
+msgstr ""
+
+#: ui/components/composer-actions.slint:976
+msgid "Add link"
+msgstr ""
+
+#: ui/components/composer-actions.slint:987
+msgid "The selected text will open this address."
+msgstr ""
+
+#: ui/components/composer-actions.slint:1008 ui/views/contacts-view.slint:802
+msgid "https://example.com"
+msgstr ""
+
+#: ui/components/composer-actions.slint:1044
+msgid "Remove link"
+msgstr ""
+
+#: ui/components/composer-actions.slint:1102
 msgid "Discard this draft?"
 msgstr ""
 
-#: ui/components/composer-actions.slint:858
+#: ui/components/composer-actions.slint:1113
 msgid "The message and its attachments will be removed from this composer."
 msgstr ""
 
-#: ui/components/composer-actions.slint:869
+#: ui/components/composer-actions.slint:1124
 msgid "Keep"
 msgstr ""
 
@@ -3385,97 +3436,105 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
-#: ui/components/email-composer.slint:360
-#: ui/components/email-composer.slint:360
+#: ui/components/email-composer.slint:380
+#: ui/components/email-composer.slint:380
 msgid "From"
 msgstr ""
 
-#: ui/components/email-composer.slint:361
+#: ui/components/email-composer.slint:381
 msgid "Verified sender identity"
 msgstr ""
 
-#: ui/components/email-composer.slint:374
+#: ui/components/email-composer.slint:394
 msgid "Signature"
 msgstr ""
 
-#: ui/components/email-composer.slint:477
+#: ui/components/email-composer.slint:497
 msgid "Write your message…"
 msgstr ""
 
-#: ui/components/email-composer.slint:647
+#: ui/components/email-composer.slint:667
 msgid "No suggestions"
 msgstr ""
 
-#: ui/components/email-composer.slint:651
+#: ui/components/email-composer.slint:671
 msgid "Add to dictionary"
 msgstr ""
 
-#: ui/components/email-composer.slint:655
+#: ui/components/email-composer.slint:675
 msgid "Ignore"
 msgstr ""
 
-#: ui/components/email-composer.slint:661
-msgid "Cut"
-msgstr ""
-
-#: ui/components/email-composer.slint:666
-msgid "Copy"
-msgstr ""
-
-#: ui/components/email-composer.slint:671
-msgid "Paste"
-msgstr ""
-
-#: ui/components/email-composer.slint:676
-msgid "Paste as plain text"
-msgstr ""
-
-#: ui/components/email-composer.slint:681
-msgid "Select all"
+#: ui/components/email-composer.slint:680
+msgid "Image size"
 msgstr ""
 
 #: ui/components/email-composer.slint:687
+msgid "Alt text…"
+msgstr ""
+
+#: ui/components/email-composer.slint:695
+msgid "Cut"
+msgstr ""
+
+#: ui/components/email-composer.slint:700
+msgid "Copy"
+msgstr ""
+
+#: ui/components/email-composer.slint:705
+msgid "Paste"
+msgstr ""
+
+#: ui/components/email-composer.slint:710
+msgid "Paste as plain text"
+msgstr ""
+
+#: ui/components/email-composer.slint:715
+msgid "Select all"
+msgstr ""
+
+#: ui/components/email-composer.slint:721
 msgid "Spelling"
 msgstr ""
 
-#: ui/components/email-composer.slint:689
-#: ui/components/email-composer.slint:689
+#: ui/components/email-composer.slint:723
+#: ui/components/email-composer.slint:723
 msgid "Check spelling"
 msgstr ""
 
-#: ui/components/email-composer.slint:703
+#: ui/components/email-composer.slint:737
 msgid "No dictionaries installed"
 msgstr ""
 
-#: ui/components/email-composer.slint:784
+#: ui/components/email-composer.slint:820
 msgid "Quoted text"
 msgstr ""
 
-#: ui/components/email-composer.slint:790
+#: ui/components/email-composer.slint:826
 msgid "Hide the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:790
+#: ui/components/email-composer.slint:826
 msgid "Show the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:801
+#: ui/components/email-composer.slint:837
 msgid "Edit the quoted message as text"
 msgstr ""
 
-#: ui/components/email-composer.slint:812
+#: ui/components/email-composer.slint:848
 msgid "Remove the forwarded message"
 msgstr ""
 
-#: ui/components/email-composer.slint:812
+#: ui/components/email-composer.slint:848
 msgid "Remove the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:843
+#: ui/components/email-composer.slint:879
 msgid "Add the forwarded message back"
 msgstr ""
 
-#: ui/components/email-composer.slint:843
+#: ui/components/email-composer.slint:879
 msgid "Add the quoted text back"
 msgstr ""
 

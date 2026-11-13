@@ -31,6 +31,12 @@ export global ComposerUi {
     in property <float> editor-caret-x: 0;
     in property <float> editor-caret-y: 0;
     in property <float> editor-caret-height: 18;
+    // Where the selected image shows, when the selection is one image.
+    in property <bool> editor-image-shown: false;
+    in property <float> editor-image-x: 0;
+    in property <float> editor-image-y: 0;
+    in property <float> editor-image-width: 0;
+    in property <float> editor-image-height: 0;
     in property <bool> bold-active: false;
     in property <bool> italic-active: false;
     in property <bool> underline-active: false;
@@ -45,6 +51,11 @@ export global ComposerUi {
     in property <string> active-size: "normal";
     in property <string> active-family: "default";
     in property <string> active-align: "left";
+    // The selected image's size, as "small", "medium", "large", "original" or "custom",
+    // or empty when the selection isn't one image; its alt text, and its own width in pixels.
+    in property <string> active-image-size: "";
+    in property <string> active-image-alt: "";
+    in property <int> active-image-width: 0;
     // On the desktop a message can move into a window of its own.
     in property <bool> can-pop-out: false;
     // "reply" or "forward" while the message carries the original below the
@@ -155,6 +166,11 @@ export component BoundComposer inherits EmailComposer {
     editor-caret-x: ComposerUi.editor-caret-x;
     editor-caret-y: ComposerUi.editor-caret-y;
     editor-caret-height: ComposerUi.editor-caret-height;
+    editor-image-shown: ComposerUi.editor-image-shown;
+    editor-image-x: ComposerUi.editor-image-x;
+    editor-image-y: ComposerUi.editor-image-y;
+    editor-image-width: ComposerUi.editor-image-width;
+    editor-image-height: ComposerUi.editor-image-height;
     bold-active: ComposerUi.bold-active;
     italic-active: ComposerUi.italic-active;
     underline-active: ComposerUi.underline-active;
@@ -166,6 +182,9 @@ export component BoundComposer inherits EmailComposer {
     active-size: ComposerUi.active-size;
     active-family: ComposerUi.active-family;
     active-align: ComposerUi.active-align;
+    active-image-size: ComposerUi.active-image-size;
+    active-image-alt: ComposerUi.active-image-alt;
+    active-image-width: ComposerUi.active-image-width;
     can-pop-out: ComposerUi.can-pop-out;
     quote: ComposerUi.quote;
     quote-left-out: ComposerUi.quote-left-out;

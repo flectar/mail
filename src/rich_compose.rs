@@ -25,7 +25,7 @@ pub(crate) const IMAGE_PLACEHOLDER: char = '\u{fffc}';
 const MAX_IMAGE_SIDE: u32 = 16_384;
 
 /// An image in the text, as the file it goes out as.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct InlineImage {
     /// Tells this image from others, also when two hold the same file.
     pub(crate) id: u64,
@@ -107,6 +107,60 @@ impl InlineImage {
             "[image]".to_owned()
         } else {
             format!("[image: {}]", self.alt.trim())
+        }
+    }
+}
+
+/// The sizes an image can show at. Each changes only how wide it shows: the file stays as it
+/// is, so readers who zoom in still see all of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ImageSize {
+    Small,
+    Medium,
+    Large,
+    Original,
+}
+
+impl ImageSize {
+    pub(crate) const ALL: [Self; 4] = [Self::Small, Self::Medium, Self::Large, Self::Original];
+
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|size| size.name() == name)
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::Large => "large",
+            Self::Original => "original",
+        }
+    }
+
+    /// Its width in CSS pixels. A message's text is often about 600 pixels wide, so large
+    /// fills it, medium takes half, and small a quarter.
+    fn width(self) -> Option<u32> {
+        match self {
+            Self::Small => Some(160),
+            Self::Medium => Some(320),
+            Self::Large => Some(640),
+            Self::Original => None,
+        }
+    }
+
+    /// Whether an image `natural` pixels wide can show smaller at this size. Images never
+    /// grow past their own size.
+    pub(crate) fn fits(self, natural: u32) -> bool {
+        self.width().is_none_or(|width| width < natural)
+    }
+
+    /// The size `image` shows at, when it's one of these.
+    pub(crate) fn of(image: &InlineImage) -> Option<Self> {
+        match image.shown_width {
+            None => Some(Self::Original),
+            Some(width) => Self::ALL
+                .into_iter()
+                .find(|size| size.width() == Some(width)),
         }
     }
 }
@@ -820,6 +874,18 @@ impl RichComposeDocument {
         self.replace_styled(start..end, text, style, caret)
     }
 
+    /// The image the selection holds, when it holds that and nothing else, for its controls.
+    pub(crate) fn selected_image(&self) -> Option<&Arc<InlineImage>> {
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let (start, end) = ordered(anchor, cursor);
+        let mut selected = self.text[start..end].chars();
+        if selected.next() != Some(IMAGE_PLACEHOLDER) || selected.next().is_some() {
+            return None;
+        }
+        self.style_at(start)?.image.as_ref()
+    }
+
     /// The images in the text, in order.
     pub(crate) fn images(&self) -> impl Iterator<Item = &Arc<InlineImage>> {
         self.styles
@@ -961,6 +1027,23 @@ impl RichComposeDocument {
                     self.set_alignment(start, end, align);
                 }
             }
+            Some(("image-size", value)) => {
+                if let Some(size) = ImageSize::from_name(value) {
+                    self.edit_images(start, end, |image| {
+                        if size.fits(image.width) {
+                            image.shown_width = size.width();
+                        }
+                    });
+                }
+            }
+            Some(("image-alt", value)) => {
+                let alt: Arc<str> = value
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .into();
+                self.edit_images(start, end, |image| image.alt = alt.clone());
+            }
             _ => match kind {
                 "bold" => self.toggle_mark(BOLD, start, end),
                 "italic" => self.toggle_mark(ITALIC, start, end),
@@ -981,6 +1064,8 @@ impl RichComposeDocument {
                         };
                     });
                 }
+                // What the selection holds goes, as a selected image's Remove button asks.
+                "delete" if start != end => return self.insert_text(""),
                 "bullet" => return self.toggle_block(BlockKind::Bullet, start, end),
                 "number" => return self.toggle_block(BlockKind::Number, start, end),
                 "quote" => return self.toggle_block(BlockKind::Quote, start, end),
@@ -1314,6 +1399,38 @@ impl RichComposeDocument {
 
     /// Changes the style of the text from `start_byte` to `end_byte` as one undoable edit, or
     /// of what's typed next at a caret.
+    /// Changes the images from `start_byte` to `end_byte` as one undoable edit.
+    fn edit_images(
+        &mut self,
+        start_byte: usize,
+        end_byte: usize,
+        mut edit: impl FnMut(&mut InlineImage),
+    ) {
+        // An edit that changes no image leaves nothing to undo.
+        let changes = self
+            .styles
+            .iter()
+            .filter(|run| run.range.start < end_byte && run.range.end > start_byte)
+            .filter_map(|run| run.style.image.as_ref())
+            .any(|image| {
+                let mut changed = InlineImage::clone(image);
+                edit(&mut changed);
+                changed != **image
+            });
+        if !changes {
+            return;
+        }
+        self.set_text_style(start_byte, end_byte, |style| {
+            if let Some(image) = &style.image {
+                let mut changed = InlineImage::clone(image);
+                edit(&mut changed);
+                if changed != **image {
+                    style.image = Some(Arc::new(changed));
+                }
+            }
+        });
+    }
+
     fn set_text_style(
         &mut self,
         start_byte: usize,
@@ -4610,6 +4727,95 @@ mod tests {
         );
         // Files that aren't images, and images in formats mail doesn't show, aren't taken.
         assert!(InlineImage::from_file_bytes(b"not an image".to_vec(), "").is_none());
+    }
+
+    #[test]
+    fn images_show_at_a_chosen_size_and_carry_alt_text() {
+        let mut document = RichComposeDocument::default();
+        document.load("See ", 4, 4);
+        document.insert_image(InlineImage::from_file_bytes(png(1200, 600), "").unwrap());
+        document.insert_image(InlineImage::from_file_bytes(png(200, 100), "").unwrap());
+        let text = document.text().to_owned();
+        let first = 4..4 + IMAGE_PLACEHOLDER.len_utf8();
+        let second = first.end..text.len();
+
+        // Only a selection of one image has controls.
+        document.update_selection(first.start as i32, first.end as i32);
+        assert_eq!(
+            document.selected_image().map(|image| image.width),
+            Some(1200)
+        );
+        document.update_selection(0, text.len() as i32);
+        assert!(document.selected_image().is_none());
+        document.update_selection(4, 4);
+        assert!(document.selected_image().is_none());
+
+        let selected = |document: &RichComposeDocument, range: &std::ops::Range<usize>| {
+            document
+                .style_at(range.start)
+                .unwrap()
+                .image
+                .clone()
+                .unwrap()
+        };
+        document.format(
+            "image-size:medium",
+            &text,
+            first.start as i32,
+            first.end as i32,
+        );
+        let image = selected(&document, &first);
+        assert_eq!(image.shown_width, Some(320));
+        assert_eq!(ImageSize::of(&image), Some(ImageSize::Medium));
+        let html = document.body_html().unwrap();
+        assert!(
+            html.contains("width=\"320\" height=\"160\" style=\"width:320px;"),
+            "{html}"
+        );
+
+        // A size wider than the image leaves it as it is.
+        document.format(
+            "image-size:large",
+            &text,
+            second.start as i32,
+            second.end as i32,
+        );
+        assert_eq!(selected(&document, &second).shown_width, None);
+        assert!(!ImageSize::Large.fits(200) && ImageSize::Small.fits(200));
+
+        document.format(
+            "image-alt:  Sales   by month ",
+            &text,
+            first.start as i32,
+            first.end as i32,
+        );
+        assert_eq!(&*selected(&document, &first).alt, "Sales by month");
+        assert_eq!(
+            document.text_with_image_descriptions(),
+            "See [image: Sales by month][image]"
+        );
+        // Both reopen as they were.
+        let reopened = reopened(&document);
+        let image = reopened.images().next().unwrap();
+        assert_eq!(
+            (image.shown_width, &*image.alt),
+            (Some(320), "Sales by month")
+        );
+
+        // Each change undoes on its own, and back to its own size.
+        document.history("undo");
+        assert_eq!(&*selected(&document, &first).alt, "");
+        document.history("undo");
+        assert_eq!(selected(&document, &first).shown_width, None);
+        document.history("redo");
+        assert_eq!(selected(&document, &first).shown_width, Some(320));
+        document.format(
+            "image-size:original",
+            &text,
+            first.start as i32,
+            first.end as i32,
+        );
+        assert_eq!(selected(&document, &first).shown_width, None);
     }
 
     #[test]
