@@ -2205,13 +2205,46 @@ pub struct OutgoingMessage<'a> {
 struct InlineImage {
     mime_type: String,
     cid: String,
+    filename: String,
     bytes: Vec<u8>,
+}
+
+/// The media type of an embedded image, lowercased, when it's a plain
+/// `image/<subtype>` that can go in a part's header as it is.
+fn image_media_type(value: &str) -> Option<String> {
+    let value = value.split(';').next()?.trim().to_ascii_lowercase();
+    let subtype = value.strip_prefix("image/")?;
+    let valid = (1..=64).contains(&subtype.len())
+        && subtype
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'+' | b'-'));
+    valid.then_some(value)
+}
+
+/// A file name for the `index`th image of a message, for mail programs that
+/// list inline images or save them.
+fn inline_image_filename(index: usize, mime_type: &str) -> String {
+    let subtype = mime_type.strip_prefix("image/").unwrap_or_default();
+    let extension = match subtype {
+        "jpeg" | "pjpeg" => "jpg",
+        "svg+xml" => "svg",
+        "x-icon" | "vnd.microsoft.icon" => "ico",
+        other if !other.is_empty() && other.bytes().all(|byte| byte.is_ascii_alphanumeric()) => {
+            other
+        }
+        _ => "img",
+    };
+    format!("image{index}.{extension}")
 }
 
 /// Replace `src="data:image/...;base64,..."` with `src="cid:..."` and return
 /// the decoded images. Editors embed pasted screenshots as data URIs, but
-/// many mail clients (Gmail included) strip those - CID parts survive.
-fn extract_data_uri_images(html: &str) -> (std::borrow::Cow<'_, str>, Vec<InlineImage>) {
+/// many mail clients (Gmail included) strip those - CID parts survive. Each
+/// Content-ID is unique and ends in `domain`, as RFC 2392 asks.
+fn extract_data_uri_images<'h>(
+    html: &'h str,
+    domain: &str,
+) -> (std::borrow::Cow<'h, str>, Vec<InlineImage>) {
     use base64::Engine;
     const MARKER: &str = "src=\"data:image/";
 
@@ -2233,13 +2266,15 @@ fn extract_data_uri_images(html: &str) -> (std::borrow::Cow<'_, str>, Vec<Inline
             .strip_prefix("data:")
             .and_then(|u| u.split_once(";base64,"))
             .and_then(|(mime, b64)| {
+                let mime_type = image_media_type(mime)?;
                 base64::engine::general_purpose::STANDARD
                     .decode(b64.trim())
                     .ok()
-                    .map(|bytes| (mime.to_owned(), bytes))
+                    .map(|bytes| (mime_type, bytes))
             });
         if let Some((mime_type, bytes)) = decoded {
-            let cid = format!("img{}.{}", images.len() + 1, rand_token());
+            let index = images.len() + 1;
+            let cid = format!("img{index}.{}@{domain}", rand_token());
             let output = out.get_or_insert_with(String::new);
             output.push_str(&html[copied..source_start]);
             output.push_str("src=\"cid:");
@@ -2247,6 +2282,7 @@ fn extract_data_uri_images(html: &str) -> (std::borrow::Cow<'_, str>, Vec<Inline
             output.push('"');
             copied = source_start + 5 + endq + 1;
             images.push(InlineImage {
+                filename: inline_image_filename(index, &mime_type),
                 mime_type,
                 cid,
                 bytes,
@@ -2261,6 +2297,41 @@ fn extract_data_uri_images(html: &str) -> (std::borrow::Cow<'_, str>, Vec<Inline
         }
         None => (std::borrow::Cow::Borrowed(html), images),
     }
+}
+
+/// The HTML part of a message with the images it shows: on their own, the
+/// HTML, and with images a multipart/related holding the HTML first and then
+/// each image as an inline part (RFC 2387), as mail programs expect.
+fn html_with_images<'a>(
+    html: std::borrow::Cow<'a, str>,
+    images: Vec<InlineImage>,
+) -> mail_builder::mime::MimePart<'a> {
+    use mail_builder::headers::content_type::ContentType;
+    use mail_builder::mime::{BodyPart, MimePart};
+
+    let html = MimePart::new("text/html", BodyPart::Text(html));
+    if images.is_empty() {
+        return html;
+    }
+    let mut parts = Vec::with_capacity(images.len() + 1);
+    parts.push(html);
+    for image in images {
+        parts.push(
+            MimePart::new(
+                ContentType::new(image.mime_type).attribute("name", image.filename.clone()),
+                BodyPart::Binary(std::borrow::Cow::Owned(image.bytes)),
+            )
+            .header(
+                "Content-Disposition",
+                ContentType::new("inline").attribute("filename", image.filename),
+            )
+            .cid(image.cid),
+        );
+    }
+    MimePart::new(
+        ContentType::new("multipart/related").attribute("type", "text/html"),
+        parts,
+    )
 }
 
 struct MessageAttachment<'a> {
@@ -2321,16 +2392,20 @@ fn imip_body<'a>(
         )
         .attachment(calendar.filename),
     );
-    for attachment in attachments {
-        parts.push(
-            MimePart::new(
-                ContentType::new(attachment.mime_type),
-                BodyPart::Binary(attachment.bytes),
-            )
-            .attachment(attachment.filename),
-        );
-    }
+    parts.extend(attachments.into_iter().map(attachment_part));
     MimePart::new("multipart/mixed", parts)
+}
+
+/// An attachment's part, as mail-builder writes those it adds itself.
+fn attachment_part(attachment: MessageAttachment<'_>) -> mail_builder::mime::MimePart<'_> {
+    use mail_builder::headers::content_type::ContentType;
+    use mail_builder::mime::{BodyPart, MimePart};
+
+    MimePart::new(
+        ContentType::new(attachment.mime_type),
+        BodyPart::Binary(attachment.bytes),
+    )
+    .attachment(attachment.filename)
 }
 
 /// Build a raw RFC 5322 message. Returns (message_id, raw_bytes).
@@ -2432,18 +2507,22 @@ fn build_message_with_attachments<'a>(
         ));
     }
 
+    let mut html_body = None;
     if let Some(html) = out.body_html
         && !html.trim().is_empty()
         && calendar.is_none()
     {
-        let (html, inline_images) = extract_data_uri_images(html);
+        let (html, inline_images) = extract_data_uri_images(html, out.message_id_domain);
         other_source_bytes = other_source_bytes.saturating_add(html.len());
-        builder = builder.html_body(html);
-        for img in inline_images {
+        for img in &inline_images {
             binary_output_bytes =
                 binary_output_bytes.saturating_add(encoded_binary_len(img.bytes.len()));
             part_count += 1;
-            builder = builder.inline(img.mime_type, img.cid, img.bytes);
+        }
+        if inline_images.is_empty() {
+            builder = builder.html_body(html);
+        } else {
+            html_body = Some(html_with_images(html, inline_images));
         }
     }
 
@@ -2476,6 +2555,22 @@ fn build_message_with_attachments<'a>(
             .saturating_add(calendar.bytes.len().saturating_mul(2));
         part_count += 3;
         builder = builder.body(imip_body(out, calendar, attachments));
+    } else if let Some(html) = html_body {
+        // The text, and the HTML with its images, as alternatives of one
+        // another, followed by any attachments.
+        use mail_builder::mime::MimePart;
+        let alternative = MimePart::new(
+            "multipart/alternative",
+            vec![MimePart::new("text/plain", out.body_text), html],
+        );
+        builder = builder.body(if attachments.is_empty() {
+            alternative
+        } else {
+            let mut parts = Vec::with_capacity(attachments.len() + 1);
+            parts.push(alternative);
+            parts.extend(attachments.into_iter().map(attachment_part));
+            MimePart::new("multipart/mixed", parts)
+        });
     } else {
         for att in attachments {
             builder = builder.attachment(
@@ -2591,12 +2686,12 @@ mod tests {
     fn image_extraction_preserves_invalid_neighbors_and_unterminated_tail() {
         let invalid = "<img src=\"data:image/png;base64,%%%\">";
         assert!(matches!(
-            extract_data_uri_images(invalid).0,
+            extract_data_uri_images(invalid, "example.com").0,
             std::borrow::Cow::Borrowed(_)
         ));
         let tail = "<img src=\"data:image/png;base64,unterminated";
         let html = format!("é{invalid}<img src=\"data:image/png;base64,AAE=\">{invalid}{tail}");
-        let (rewritten, images) = extract_data_uri_images(&html);
+        let (rewritten, images) = extract_data_uri_images(&html, "example.com");
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].bytes, [0, 1]);
         assert_eq!(
@@ -3414,7 +3509,7 @@ mod tests {
     #[test]
     fn outgoing_html_without_embedded_images_is_borrowed() {
         let html = "<p>é界👩‍🚀</p>".repeat(100_000);
-        let (rewritten, images) = extract_data_uri_images(&html);
+        let (rewritten, images) = extract_data_uri_images(&html, "example.com");
         assert!(matches!(rewritten, std::borrow::Cow::Borrowed(_)));
         assert_eq!(rewritten.as_ptr(), html.as_ptr());
         assert!(images.is_empty());
@@ -3425,14 +3520,14 @@ mod tests {
         use base64::Engine;
         let encoded = base64::engine::general_purpose::STANDARD.encode(vec![7; 1024 * 1024]);
         let html = format!("<img src=\"data:image/png;base64,{encoded}\">");
-        let (rewritten, images) = extract_data_uri_images(&html);
+        let (rewritten, images) = extract_data_uri_images(&html, "example.com");
         let std::borrow::Cow::Owned(rewritten) = rewritten else {
             panic!("image must be rewritten")
         };
         assert_eq!(images[0].bytes.len(), 1024 * 1024);
         assert!(rewritten.capacity() < 1024);
         let invalid = "<img src=\"data:image/png;base64,invalid!\">";
-        let (unchanged, images) = extract_data_uri_images(invalid);
+        let (unchanged, images) = extract_data_uri_images(invalid, "example.com");
         assert!(matches!(unchanged, std::borrow::Cow::Borrowed(_)));
         assert_eq!(unchanged.as_ptr(), invalid.as_ptr());
         assert!(images.is_empty());
@@ -3443,7 +3538,7 @@ mod tests {
         // 1x1 transparent PNG
         let png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
         let html = format!(r#"before <img src="data:image/png;base64,{png_b64}" alt="dot"> after"#);
-        let (rewritten, images) = extract_data_uri_images(&html);
+        let (rewritten, images) = extract_data_uri_images(&html, "example.com");
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].mime_type, "image/png");
         assert!(rewritten.contains(&format!("src=\"cid:{}\"", images[0].cid)));
@@ -3460,9 +3555,110 @@ mod tests {
     }
 
     #[test]
+    fn images_go_with_the_html_they_belong_to() {
+        let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+        let html = format!(
+            r#"<p>Chart <img src="data:image/png;base64,{png}"> and photo <img src="data:image/jpeg;base64,/9j/"></p>"#
+        );
+        for attached in [false, true] {
+            let mut message = outgoing("Chart [image] and photo [image]", Some(&html));
+            if attached {
+                message.attachments.push(OutgoingAttachment {
+                    filename: "notes.pdf".into(),
+                    mime_type: "application/pdf".into(),
+                    bytes: b"%PDF-1.7".to_vec(),
+                });
+            }
+            let (_, raw) = build_message(&message).unwrap();
+            let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+            let types: Vec<String> = parsed
+                .parts
+                .iter()
+                .map(|part| {
+                    let content_type = part.content_type().unwrap();
+                    format!(
+                        "{}/{}",
+                        content_type.ctype(),
+                        content_type.subtype().unwrap_or_default()
+                    )
+                })
+                .collect();
+            let mut expected = vec![
+                "multipart/alternative",
+                "text/plain",
+                "multipart/related",
+                "text/html",
+                "image/png",
+                "image/jpeg",
+            ];
+            if attached {
+                expected.insert(0, "multipart/mixed");
+                expected.push("application/pdf");
+            }
+            assert_eq!(types, expected, "attached: {attached}");
+
+            let related = parsed
+                .parts
+                .iter()
+                .find(|part| part.content_type().unwrap().subtype() == Some("related"))
+                .unwrap();
+            assert_eq!(
+                related.content_type().unwrap().attribute("type"),
+                Some("text/html")
+            );
+            let html = parsed.body_html(0).unwrap();
+            for (index, extension) in [(1, "png"), (2, "jpg")] {
+                let image = parsed
+                    .parts
+                    .iter()
+                    .find(|part| {
+                        part.attachment_name() == Some(format!("image{index}.{extension}").as_str())
+                    })
+                    .unwrap();
+                let cid = image.content_id().unwrap();
+                assert!(cid.starts_with(&format!("img{index}.")), "{cid}");
+                assert!(cid.ends_with("@example.com"), "{cid}");
+                assert!(html.contains(&format!("src=\"cid:{cid}\"")));
+                let disposition = image.content_disposition().unwrap();
+                assert_eq!(disposition.ctype(), "inline");
+                assert_eq!(
+                    disposition.attribute("filename"),
+                    Some(format!("image{index}.{extension}").as_str())
+                );
+            }
+            assert!(!html.contains("data:"));
+            assert_eq!(
+                parsed.body_text(0).unwrap(),
+                "Chart [image] and photo [image]"
+            );
+        }
+    }
+
+    #[test]
+    fn only_plain_image_types_become_parts() {
+        let html = concat!(
+            r#"<img src="data:image/png;charset=x;base64,AAE=">"#,
+            r#"<img src="data:image/svg+xml;base64,PHN2Zy8+">"#,
+            r#"<img src="data:image/png&#13;&#10;X-Evil: 1;base64,AAE=">"#,
+            "<img src=\"data:image/png\r\nX-Evil: 1;base64,AAE=\">",
+            r#"<img src="data:image/;base64,AAE=">"#,
+        );
+        let (rewritten, images) = extract_data_uri_images(html, "example.com");
+        let found: Vec<_> = images
+            .iter()
+            .map(|image| (image.mime_type.as_str(), image.filename.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [("image/png", "image1.png"), ("image/svg+xml", "image2.svg")]
+        );
+        assert_eq!(rewritten.matches("data:image/").count(), 3);
+    }
+
+    #[test]
     fn malformed_data_uri_is_left_alone() {
         let html = r#"<img src="data:image/png;base64,@@notbase64@@">"#;
-        let (rewritten, images) = extract_data_uri_images(html);
+        let (rewritten, images) = extract_data_uri_images(html, "example.com");
         assert!(images.is_empty());
         assert_eq!(rewritten, html);
     }
