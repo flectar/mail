@@ -1408,8 +1408,6 @@ impl RichComposeDocument {
         self.commit_style_edit(start_byte, before);
     }
 
-    /// Changes the style of the text from `start_byte` to `end_byte` as one undoable edit, or
-    /// of what's typed next at a caret.
     /// Changes the images from `start_byte` to `end_byte` as one undoable edit.
     fn edit_images(
         &mut self,
@@ -1442,6 +1440,8 @@ impl RichComposeDocument {
         });
     }
 
+    /// Changes the style of the text from `start_byte` to `end_byte` as one undoable edit, or
+    /// of what's typed next at a caret.
     fn set_text_style(
         &mut self,
         start_byte: usize,
