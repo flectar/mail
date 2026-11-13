@@ -1436,6 +1436,19 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// Which invitations found in mail join the calendar before an answer:
+    /// "everyone", "known" or "answered".
+    pub async fn set_add_invitations(&self, choice: &str) -> Result<(), String> {
+        let choice = flectar_mail_core::models::AddInvitations::parse(choice)
+            .ok_or("Unknown invitations choice")?;
+        let mut settings = self.load_settings().await?;
+        settings.add_invitations = choice;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_custom_theme(&self, custom_theme: CustomTheme) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.custom_theme = custom_theme;
@@ -2161,6 +2174,30 @@ impl CoreMailSource {
                 eprintln!("invitation card for message {message_id} unavailable: {error}");
                 None
             })
+    }
+
+    /// Answer the invitation a message carries, or with `occurrence` one
+    /// occurrence of it, adding it to the calendar when it isn't there yet.
+    pub async fn answer_invitation(
+        &self,
+        message_id: i64,
+        response: &str,
+        occurrence: Option<i64>,
+    ) -> Result<(), String> {
+        self.core
+            .answer_invitation(message_id, response, occurrence)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Add the event a message carries to the calendar without answering it.
+    pub async fn add_invitation(&self, message_id: i64) -> Result<(), String> {
+        self.core
+            .add_invitation(message_id)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     /// Answer an invitation, or with `occurrence` (a RECURRENCE-ID) one

@@ -55,6 +55,7 @@ pub(super) fn install(
         with_controller(|controller| controller.answer(response.to_string()));
     });
     ui.on_remove(|| with_controller(|controller| controller.remove()));
+    ui.on_add(|| with_controller(|controller| controller.add()));
     ui.on_show_in_calendar(|| with_controller(|controller| controller.show_in_calendar()));
     let weak = app.as_weak();
     ui.on_open_link(move |url| {
@@ -96,26 +97,55 @@ impl Controller {
 
     /// Accept, Maybe or Decline.
     fn answer(&self, response: String) {
-        let (Some(app), Some((_, card)), Some(core)) = (self.app.upgrade(), shown(), self.core())
+        let (Some(app), Some((message_id, card)), Some(core)) =
+            (self.app.upgrade(), shown(), self.core())
         else {
             return;
         };
         let ui = app.global::<Invitation>();
-        let Some(event_id) = card.event_id.filter(|_| ui.get_answerable()) else {
-            return;
-        };
-        if ui.get_working() {
+        if !ui.get_answerable() || ui.get_working() {
             return;
         }
         ui.set_working(true);
-        // A message about one occurrence answers that occurrence alone.
+        // A message about one occurrence answers that occurrence alone. One
+        // not in the calendar yet joins it with the answer.
         let occurrence = card.recurrence_id;
         self.spawn(
-            async move { core.rsvp_event(event_id, &response, occurrence).await },
+            async move {
+                core.answer_invitation(message_id, &response, occurrence)
+                    .await
+            },
             |app, result| {
                 if let Err(error) = result {
                     app.global::<Invitation>().set_working(false);
                     crate::undo::tell(&app, UiMessage::detail("Could not answer: {}", error));
+                }
+                with_controller(|controller| controller.reload());
+            },
+        );
+    }
+
+    /// Add an event only shared with the user to their calendar.
+    fn add(&self) {
+        let (Some(app), Some((message_id, _)), Some(core)) =
+            (self.app.upgrade(), shown(), self.core())
+        else {
+            return;
+        };
+        let ui = app.global::<Invitation>();
+        if !ui.get_addable() || ui.get_working() {
+            return;
+        }
+        ui.set_working(true);
+        self.spawn(
+            async move { core.add_invitation(message_id).await },
+            |app, result| {
+                if let Err(error) = result {
+                    app.global::<Invitation>().set_working(false);
+                    crate::undo::tell(
+                        &app,
+                        UiMessage::detail("Could not add the event: {}", error),
+                    );
                 }
                 with_controller(|controller| controller.reload());
             },
@@ -408,16 +438,23 @@ fn apply(app: &AppWindow, card: &InvitationCard) {
     ui.set_in_calendar(card.event_id.is_some());
     ui.set_repeats(card.repeats);
     ui.set_occurrence(card.occurrence);
-    // Local mail has no account to answer from.
+    // Local mail has no account to answer from. An invitation that isn't
+    // in the calendar yet joins it when answered.
     let local_mail = app.global::<LocalMailUi>().get_selected();
-    ui.set_answerable(
-        card.kind == InvitationKind::Request
-            && card.event_id.is_some()
-            && !card.organized
+    let answerable = card.kind == InvitationKind::Request
+        && !card.organized
+        && !card.cancelled
+        && !card.out_of_date
+        && !card.kept_out
+        && !local_mail;
+    ui.set_answerable(answerable);
+    ui.set_held(answerable && card.event_id.is_none());
+    // An event only shared with the user, which they add themselves.
+    ui.set_addable(
+        card.kind == InvitationKind::Publish
+            && card.event_id.is_none()
             && !card.cancelled
-            && !card.out_of_date
-            && !card.kept_out
-            && !local_mail,
+            && !card.kept_out,
     );
     // Taking a cancelled occurrence out would take the whole series.
     ui.set_removable(
