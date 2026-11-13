@@ -32,6 +32,7 @@
 
 # Slint's winit backend resolves through the application lockfiles.
 /crates/i-slint-backend-winit/Cargo.lock
+/crates/i-slint-backend-android-activity/Cargo.lock
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
