@@ -107,7 +107,7 @@ export component InvitationCard inherits Rectangle {
     // replaced, may not be the meeting's.
     private property <bool> joinable: Invitation.join-url != "" && !Invitation.cancelled && !root.answer-kind
         && !Invitation.kept-out && !Invitation.out-of-date;
-    private property <bool> join-below: root.compact && (Invitation.answerable || Invitation.removable);
+    private property <bool> join-below: root.compact && (Invitation.answerable || Invitation.removable || Invitation.addable);
 
     background: AppTheme.control-bg;
     border-radius: LayoutMetrics.corner-radius;
@@ -231,6 +231,10 @@ export component InvitationCard inherits Rectangle {
             icon: @image-url("../icons/lucide/outline/info.svg");
             text: @tr("You aren't on the guest list, so the organizer may not count your answer.");
         }
+        if Invitation.held : CardNote {
+            icon: @image-url("../icons/lucide/outline/calendar.svg");
+            text: @tr("Not in your calendar yet. Answering adds it.");
+        }
         if Invitation.conflict != "" : CardNote {
             icon: @image-url("../icons/lucide/outline/alert.svg");
             tint: AppTheme.body;
@@ -243,7 +247,7 @@ export component InvitationCard inherits Rectangle {
         }
 
         // On a phone the answers fill their row, and Join gets its own.
-        if Invitation.answerable || Invitation.removable || (root.joinable && !root.join-below) : HorizontalLayout {
+        if Invitation.answerable || Invitation.removable || Invitation.addable || (root.joinable && !root.join-below) : HorizontalLayout {
             spacing: 8px;
 
             if Invitation.answerable : AnswerButton { compact: root.compact; answer: "ACCEPTED"; text: @tr("Accept"); }
@@ -258,11 +262,21 @@ export component InvitationCard inherits Rectangle {
                 enabled: !Invitation.working;
                 clicked => { Invitation.remove(); }
             }
+            if Invitation.addable : Button {
+                height: root.compact ? 40px : 32px;
+                preferred-width: max(96px, self.content-width);
+                min-width: self.preferred-width;
+                horizontal-stretch: root.compact ? 1 : 0;
+                text: @tr("Add to calendar");
+                primary: true;
+                enabled: !Invitation.working;
+                clicked => { Invitation.add(); }
+            }
             // On a desktop the buttons keep their widths, and Join goes to
             // the end of a row it shares.
-            if !root.compact && (Invitation.answerable || Invitation.removable) : Rectangle { horizontal-stretch: 1; }
+            if !root.compact && (Invitation.answerable || Invitation.removable || Invitation.addable) : Rectangle { horizontal-stretch: 1; }
             if root.joinable && !root.join-below : JoinButton { compact: root.compact; }
-            if !root.compact && !(Invitation.answerable || Invitation.removable) : Rectangle { horizontal-stretch: 1; }
+            if !root.compact && !(Invitation.answerable || Invitation.removable || Invitation.addable) : Rectangle { horizontal-stretch: 1; }
         }
         if root.joinable && root.join-below : HorizontalLayout {
             JoinButton { compact: root.compact; horizontal-stretch: 1; }

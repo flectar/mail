@@ -1,0 +1,7 @@
+// Which invitations found in mail join the calendar before the user answers
+// them (src/settings_controller.rs).
+export global InvitationSettings {
+    // "everyone", "known" or "answered".
+    in-out property <string> add: "known";
+    callback choose(string);
+}
