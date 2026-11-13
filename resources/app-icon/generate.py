@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Generate and check the alternate app icons offered in Settings, and the
-Microsoft Store package logos.
+"""Generate and check the alternate app icons offered in Settings, the macOS
+icon set and the Microsoft Store package logos.
 
 Every variant is the master icon with its own colors; the default orange icon
 is the master itself and is not generated. Outputs:
 
 - resources/app-icon/variants: masked SVGs and the window, tray and 512 px
   PNGs used on the desktop;
+- resources/app-icon/flectar-mail.iconset: the master icon at every size of
+  the macOS .icns;
 - platform/ios/Assets.xcassets/AppIcon<Name>.appiconset: opaque 1024 px
   alternate icons;
 - platform/android/.../res: adaptive launcher icons for the launcher aliases;
@@ -51,6 +53,44 @@ ICONS = ["orange", *VARIANTS]
 # flectar-mail-window.png and flectar-mail-tray.png; 512 px feeds the Dock and
 # the Linux icon theme.
 RASTERS = (("512", 512), ("window", 256), ("tray", 64))
+
+# Apple's macOS app icon template (the macOS Sequoia production templates in
+# Apple Design Resources) leaves a margin around the rounded square at every
+# size of the .icns, with a black drop shadow at 30% opacity in it. Each
+# canvas size maps to the rounded square's size and the shadow's offset and
+# blur. The Dock and the app switcher show the whole canvas, so an icon
+# without the margin looks larger than other apps' icons.
+MACOS_GRID = {
+    16: (14, None),
+    32: (28, (1, 1)),
+    64: (52, (1.5, 1)),
+    128: (104, (2, 1.5)),
+    256: (206, (3, 3)),
+    512: (412, (5, 5)),
+    1024: (824, (10, 10)),
+}
+MACOS_SHADOW_OPACITY = 77 / 255
+# The template's corners are less round than the master's mask. Along the
+# diagonal, the rounded square's edge is this fraction of its size away from
+# its corner. Shrinking the master's corners to that keeps their curve and
+# matches the template's mask to within half a pixel at 1024 px.
+MACOS_CORNER_INSET = 54.06 / 824
+MACOS_ICONSET = ROOT / "flectar-mail.iconset"
+# The file names iconutil expects, with their canvas sizes.
+ICONSET_FILES = {
+    "icon_16x16.png": 16,
+    "icon_16x16@2x.png": 32,
+    "icon_32x32.png": 32,
+    "icon_32x32@2x.png": 64,
+    "icon_128x128.png": 128,
+    "icon_128x128@2x.png": 256,
+    "icon_256x256.png": 256,
+    "icon_256x256@2x.png": 512,
+    "icon_512x512.png": 512,
+    "icon_512x512@2x.png": 1024,
+}
+SVG_START = '<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">'
+MASK = re.compile(r'(<clipPath id="appleCanvasMask"[^>]*>\s*<path d=")([^"]+)" transform="translate\(([-\d.]+) ([-\d.]+)\)"')
 
 
 
@@ -261,10 +301,77 @@ def expected_text():
 def expected_rasters():
     rasters = {VARIANTS_DIR / f"{name}-{label}.png": (size, 6)
                for name in VARIANTS for label, size in RASTERS}
+    rasters.update({MACOS_ICONSET / file: (size, 6) for file, size in ICONSET_FILES.items()})
     rasters.update({IOS_ASSETS / f"AppIcon{title(name)}.appiconset/AppIcon-1024.png": (1024, 2)
                     for name in VARIANTS})
     rasters.update({WINDOWS_ASSETS / name: (size, 6) for name, (size, _) in windows_logos().items()})
     return rasters
+
+
+def macos_mask(path, offset_x, offset_y, source):
+    """The master's mask with the corners of Apple's macOS icon template."""
+    tokens = re.findall(r"[MCVHZ]|-?(?:\d+\.?\d*|\.\d+)", path)
+    segments = []
+    command = None
+    x = y = 0.0
+    position = 0
+    while position < len(tokens):
+        if tokens[position] in "MCVHZ":
+            command = tokens[position]
+            position += 1
+            if command == "Z":
+                segments.append(("Z", []))
+                continue
+        count = {"M": 2, "C": 6, "V": 1, "H": 1}.get(command)
+        if count is None or position + count > len(tokens):
+            raise ValueError(f"Unexpected mask path in {source}")
+        values = [float(token) for token in tokens[position:position + count]]
+        position += count
+        if command == "V":
+            y = values[0] + offset_y
+            segments.append(("L", [(x, y)]))
+        elif command == "H":
+            x = values[0] + offset_x
+            segments.append(("L", [(x, y)]))
+        else:
+            points = [(values[index] + offset_x, values[index + 1] + offset_y)
+                      for index in range(0, count, 2)]
+            x, y = points[-1]
+            segments.append((command, points))
+    # The bottom right corner's point on the diagonal.
+    corner = max((points[-1] for _, points in segments if points), key=sum)
+    if abs(corner[0] - corner[1]) > 0.01:
+        raise ValueError(f"The mask in {source} no longer has a point on the diagonal")
+    scale = MACOS_CORNER_INSET * 1024 / (1024 - corner[0])
+
+    def place(value):
+        return value * scale if value < 512 else 1024 - (1024 - value) * scale
+
+    return " ".join(command + " ".join(f"{place(px):.3f} {place(py):.3f}" for px, py in points)
+                    for command, points in segments)
+
+
+def macos_svg(svg, canvas, source):
+    """Draw a masked icon on Apple's macOS icon grid at `canvas` pixels."""
+    body, shadow = MACOS_GRID[canvas]
+    opacity = MACOS_SHADOW_OPACITY
+    mask = MASK.search(svg)
+    end = svg.rstrip().rfind("</svg>")
+    if not svg.startswith(SVG_START) or not mask or end < 0:
+        raise ValueError(f"{source} no longer has the 1024-unit <svg> element and appleCanvasMask clip path")
+    path = macos_mask(mask.group(2), float(mask.group(3)), float(mask.group(4)), source)
+    drawing = svg[len(SVG_START):mask.start()] + mask.group(1) + path + '"' + svg[mask.end():end]
+    margin = (canvas - body) // 2
+    group = f'<g transform="translate({margin} {margin}) scale({body / 1024})">{drawing}</g>'
+    if shadow:
+        offset, blur = shadow
+        group = (f'<defs>\n  <filter id="macosShadow" x="0" y="0" width="{canvas}" height="{canvas}" '
+                 'filterUnits="userSpaceOnUse">\n'
+                 f'    <feDropShadow dx="0" dy="{offset:g}" stdDeviation="{blur:g}" flood-color="#000000" '
+                 f'flood-opacity="{opacity:.4f}"/>\n  </filter>\n</defs>\n'
+                 f'<g filter="url(#macosShadow)">{group}</g>')
+    return (f'<svg width="{canvas}" height="{canvas}" viewBox="0 0 {canvas} {canvas}" fill="none" '
+            f'xmlns="http://www.w3.org/2000/svg">\n{group}\n</svg>\n')
 
 
 def scaled_svg(svg, scale, source):
@@ -296,7 +403,7 @@ def main():
     try:
         texts = expected_text()
         rasters = expected_rasters()
-        for directory in (VARIANTS_DIR, WINDOWS_ASSETS):
+        for directory in (VARIANTS_DIR, MACOS_ICONSET, WINDOWS_ASSETS):
             unexpected = {path.name for path in directory.glob("*")} - {
                 path.name for path in [*texts, *rasters] if path.parent == directory}
             if unexpected:
@@ -316,7 +423,7 @@ def main():
                 if (width, height, actual) != (size, size, color):
                     raise ValueError(f"{path.relative_to(PROJECT)} is {width}x{height} "
                                      f"(color type {actual}), expected {size}x{size} (color type {color})")
-            print(f"Checked {len(VARIANTS)} icon variants and the Store logos: "
+            print(f"Checked {len(VARIANTS)} icon variants, the macOS icon set and the Store logos: "
                   f"{len(texts)} files and {len(rasters)} rasters")
             return 0
         for path, text in texts.items():
@@ -339,13 +446,18 @@ def main():
                 rasterize(svg, png, 1024)
                 opaque_rgb(png)
             masked = (ROOT / "flectar-mail-masked.svg").read_text(encoding="utf-8")
+            MACOS_ICONSET.mkdir(exist_ok=True)
+            for file, size in ICONSET_FILES.items():
+                svg = Path(directory) / f"macos-{file}.svg"
+                svg.write_text(macos_svg(masked, size, "flectar-mail-masked.svg"), encoding="utf-8")
+                rasterize(svg, MACOS_ICONSET / file, size)
             WINDOWS_ASSETS.mkdir(parents=True, exist_ok=True)
             for name, (size, scale) in windows_logos().items():
                 svg = Path(directory) / f"windows-{scale}.svg"
                 svg.write_text(scaled_svg(masked, scale, "flectar-mail-masked.svg"), encoding="utf-8")
                 rasterize(svg, WINDOWS_ASSETS / name, size)
         check_declarations()
-        print(f"Generated {len(VARIANTS)} icon variants and the Store logos: "
+        print(f"Generated {len(VARIANTS)} icon variants, the macOS icon set and the Store logos: "
               f"{len(texts)} files and {len(rasters)} rasters")
         return 0
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
