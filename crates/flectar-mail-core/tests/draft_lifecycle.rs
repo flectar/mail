@@ -83,6 +83,46 @@ async fn saved_draft_can_be_reloaded_without_losing_editable_fields() {
 }
 
 #[tokio::test]
+async fn a_draft_saved_on_another_device_reopens_with_its_images() {
+    let (tmp, core) = setup().await;
+    let draft_id = core.save_draft(args(None)).await.unwrap();
+    // Synced from the server: the HTML names the image by Content-ID, and the
+    // image is an inline part of the message.
+    let image = tmp.path().join("image1.png");
+    std::fs::write(&image, b"\x89PNG\r\n\x1a\n").unwrap();
+    let image = image.to_string_lossy().into_owned();
+    core.db
+        .write(move |conn| {
+            conn.execute(
+                "UPDATE message_bodies SET html_body = ?2 WHERE message_id = ?1",
+                rusqlite::params![
+                    draft_id,
+                    r#"<p>Chart <img src="cid:img1.abc@example.com" width="8"></p>"#
+                ],
+            )?;
+            conn.execute(
+                "INSERT INTO attachments
+                   (message_id, part_id, filename, mime_type, size, content_id, is_inline, file_path)
+                 VALUES (?1, '2', 'image1.png', 'image/png', 8, '<img1.abc@example.com>', 1, ?2)",
+                rusqlite::params![draft_id, image],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let loaded = core.get_draft(draft_id).await.unwrap();
+    let html = loaded.body_html.unwrap();
+    assert!(
+        html.contains(r#"src="data:image/png;base64,iVBORw0KGgo=""#),
+        "{html}"
+    );
+    assert!(!html.contains("cid:"), "{html}");
+    // The image is part of the text, not an attachment.
+    assert!(loaded.attachments.is_empty());
+}
+
+#[tokio::test]
 async fn drafts_accept_only_verified_sender_identities_and_store_provider_metadata() {
     let (_tmp, core) = setup().await;
     // Seed the primary row just as account discovery does, then model one

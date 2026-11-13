@@ -5496,6 +5496,13 @@ impl Core {
                 mime_type: None,
             });
         }
+        // A draft saved on another device arrives with its images as inline
+        // parts, which its HTML names by Content-ID. They go back into the
+        // HTML as embedded data, as the composer keeps them, and a save
+        // stores them that way.
+        if let Some(html) = draft.body_html.take() {
+            draft.body_html = Some(self.inline_cid_images(draft_id, html).await);
+        }
         Ok(draft)
     }
 
