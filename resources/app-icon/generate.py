@@ -5,8 +5,8 @@ icon set and the Microsoft Store package logos.
 Every variant is the master icon with its own colors; the default orange icon
 is the master itself and is not generated. Outputs:
 
-- resources/app-icon/variants: masked SVGs and the window, tray and 512 px
-  PNGs used on the desktop;
+- resources/app-icon/variants: masked SVGs, the window, tray and 512 px PNGs
+  used on the desktop, and 512 px renderings for the macOS Dock;
 - resources/app-icon/flectar-mail.iconset: the master icon at every size of
   the macOS .icns;
 - platform/ios/Assets.xcassets/AppIcon<Name>.appiconset: opaque 1024 px
@@ -89,6 +89,14 @@ ICONSET_FILES = {
     "icon_512x512.png": 512,
     "icon_512x512@2x.png": 1024,
 }
+# macOS 26 keeps the grid but draws the rounded square with the corners of the
+# master's mask and a softer shadow, with this offset, blur and opacity at
+# 1024 px, measured from the system's own rendering of Apple's icons and this
+# one. It shows an icon set at run time as it is, so the Dock icons for
+# macOS 26 carry that shape and shadow themselves.
+MACOS_26_SHADOW = (8, 15, 64 / 255)
+# The size of the icons the app shows in the Dock at run time.
+MACOS_DOCK = 512
 SVG_START = '<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">'
 MASK = re.compile(r'(<clipPath id="appleCanvasMask"[^>]*>\s*<path d=")([^"]+)" transform="translate\(([-\d.]+) ([-\d.]+)\)"')
 
@@ -301,6 +309,8 @@ def expected_text():
 def expected_rasters():
     rasters = {VARIANTS_DIR / f"{name}-{label}.png": (size, 6)
                for name in VARIANTS for label, size in RASTERS}
+    rasters.update({VARIANTS_DIR / f"{name}-macos{suffix}.png": (MACOS_DOCK, 6)
+                    for name in VARIANTS for suffix in ("", "-26")})
     rasters.update({MACOS_ICONSET / file: (size, 6) for file, size in ICONSET_FILES.items()})
     rasters.update({IOS_ASSETS / f"AppIcon{title(name)}.appiconset/AppIcon-1024.png": (1024, 2)
                     for name in VARIANTS})
@@ -351,16 +361,22 @@ def macos_mask(path, offset_x, offset_y, source):
                     for command, points in segments)
 
 
-def macos_svg(svg, canvas, source):
-    """Draw a masked icon on Apple's macOS icon grid at `canvas` pixels."""
+def macos_svg(svg, canvas, source, macos_26=False):
+    """Draw a masked icon on Apple's macOS icon grid at `canvas` pixels, as
+    macOS 26 draws it when `macos_26` is set."""
     body, shadow = MACOS_GRID[canvas]
     opacity = MACOS_SHADOW_OPACITY
     mask = MASK.search(svg)
     end = svg.rstrip().rfind("</svg>")
     if not svg.startswith(SVG_START) or not mask or end < 0:
         raise ValueError(f"{source} no longer has the 1024-unit <svg> element and appleCanvasMask clip path")
-    path = macos_mask(mask.group(2), float(mask.group(3)), float(mask.group(4)), source)
-    drawing = svg[len(SVG_START):mask.start()] + mask.group(1) + path + '"' + svg[mask.end():end]
+    drawing = svg[len(SVG_START):end]
+    if macos_26:
+        offset, blur, opacity = MACOS_26_SHADOW
+        shadow = (offset * canvas / 1024, blur * canvas / 1024)
+    else:
+        path = macos_mask(mask.group(2), float(mask.group(3)), float(mask.group(4)), source)
+        drawing = svg[len(SVG_START):mask.start()] + mask.group(1) + path + '"' + svg[mask.end():end]
     margin = (canvas - body) // 2
     group = f'<g transform="translate({margin} {margin}) scale({body / 1024})">{drawing}</g>'
     if shadow:
@@ -446,11 +462,17 @@ def main():
                 rasterize(svg, png, 1024)
                 opaque_rgb(png)
             masked = (ROOT / "flectar-mail-masked.svg").read_text(encoding="utf-8")
+            macos = {MACOS_ICONSET / file: (masked, size, "flectar-mail-masked.svg", False)
+                     for file, size in ICONSET_FILES.items()}
+            for name in VARIANTS:
+                icon = (VARIANTS_DIR / f"{name}.svg").read_text(encoding="utf-8")
+                macos[VARIANTS_DIR / f"{name}-macos.png"] = (icon, MACOS_DOCK, f"{name}.svg", False)
+                macos[VARIANTS_DIR / f"{name}-macos-26.png"] = (icon, MACOS_DOCK, f"{name}.svg", True)
             MACOS_ICONSET.mkdir(exist_ok=True)
-            for file, size in ICONSET_FILES.items():
-                svg = Path(directory) / f"macos-{file}.svg"
-                svg.write_text(macos_svg(masked, size, "flectar-mail-masked.svg"), encoding="utf-8")
-                rasterize(svg, MACOS_ICONSET / file, size)
+            for png, (icon, size, source, macos_26) in macos.items():
+                svg = Path(directory) / f"macos-{png.parent.name}-{png.name}.svg"
+                svg.write_text(macos_svg(icon, size, source, macos_26), encoding="utf-8")
+                rasterize(svg, png, size)
             WINDOWS_ASSETS.mkdir(parents=True, exist_ok=True)
             for name, (size, scale) in windows_logos().items():
                 svg = Path(directory) / f"windows-{scale}.svg"

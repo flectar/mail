@@ -91,9 +91,9 @@ pub(crate) fn attach_tray(app: &AppWindow, tray: &FlectarTray) {
     TRAY.with(|slot| *slot.borrow_mut() = Some(tray.as_weak()));
 }
 
-/// The 512 px rendering of a non-default icon, for the Dock and the Linux
-/// icon theme. The default icon is the installed one.
-#[cfg(any(target_os = "macos", all(linux_desktop, not(feature = "flatpak"))))]
+/// The 512 px rendering of a non-default icon, for the Linux icon theme. The
+/// default icon is the installed one.
+#[cfg(all(linux_desktop, not(feature = "flatpak")))]
 fn png_512(icon: models::AppIcon) -> Option<&'static [u8]> {
     match icon {
         models::AppIcon::Orange => None,
@@ -128,6 +128,41 @@ mod dock {
         static SHOWN: Cell<AppIcon> = const { Cell::new(AppIcon::Orange) };
     }
 
+    /// The rendering of a non-default icon for the Dock, on the same grid as
+    /// the bundle's icon. macOS 26 draws app icons with rounder corners and a
+    /// softer shadow but shows an icon set at run time as it is, so it gets a
+    /// rendering of its own. The default icon is the bundle's.
+    fn rendering(icon: AppIcon) -> Option<&'static [u8]> {
+        let [before_26, since_26]: [&'static [u8]; 2] = match icon {
+            AppIcon::Orange => return None,
+            AppIcon::Graphite => [
+                include_bytes!("../resources/app-icon/variants/graphite-macos.png"),
+                include_bytes!("../resources/app-icon/variants/graphite-macos-26.png"),
+            ],
+            AppIcon::Light => [
+                include_bytes!("../resources/app-icon/variants/light-macos.png"),
+                include_bytes!("../resources/app-icon/variants/light-macos-26.png"),
+            ],
+            AppIcon::Blue => [
+                include_bytes!("../resources/app-icon/variants/blue-macos.png"),
+                include_bytes!("../resources/app-icon/variants/blue-macos-26.png"),
+            ],
+            AppIcon::Green => [
+                include_bytes!("../resources/app-icon/variants/green-macos.png"),
+                include_bytes!("../resources/app-icon/variants/green-macos-26.png"),
+            ],
+            AppIcon::Purple => [
+                include_bytes!("../resources/app-icon/variants/purple-macos.png"),
+                include_bytes!("../resources/app-icon/variants/purple-macos-26.png"),
+            ],
+        };
+        Some(if objc2::available!(macos = 26.0) {
+            since_26
+        } else {
+            before_26
+        })
+    }
+
     pub(super) fn show(icon: AppIcon) {
         let Some(main_thread) = MainThreadMarker::new() else {
             return;
@@ -135,7 +170,7 @@ mod dock {
         if SHOWN.get() == icon {
             return;
         }
-        let image = match super::png_512(icon) {
+        let image = match rendering(icon) {
             Some(png) => match NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(png)) {
                 Some(image) => Some(image),
                 None => {
