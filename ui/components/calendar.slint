@@ -64,7 +64,8 @@ export component CalendarEvent inherits Rectangle {
         background: root.title-color;
     }
     Text {
-        visible: !root.compact;
+        // A short event shows its title alone when the time doesn't fit.
+        visible: !root.compact && self.y + self.height <= root.height - 2px;
         x: 9px;
         y: event-title.y + event-title.height + 2px;
         width: parent.width - 15px;
@@ -142,6 +143,7 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
             color: root.title-color;
             font-size: TypeScale.body-large;
             font-weight: 700;
+            overflow: elide;
             vertical-alignment: center;
         }
 
