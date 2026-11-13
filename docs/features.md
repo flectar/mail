@@ -175,6 +175,11 @@ To temporarily show the sender's original colors, use the contrast icon between
 Find and Reader mode in the desktop message toolbar, or choose **Show original
 colors** from the message's three-dot menu on any screen size.
 
+Turn on **Reduce motion** in Settings → General → Interface, or leave it on
+System to follow Animation effects on Windows, Reduce motion on macOS, or the
+desktop's reduced motion setting on Linux. Panels, rows and dialogs then appear
+at once instead of sliding or growing, and only fades remain.
+
 ## Frameless window
 
 Flectar Mail replaces the system title bar with window controls in the toolbar
