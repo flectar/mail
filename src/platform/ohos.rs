@@ -3,7 +3,13 @@
 //! what the shared application needs at runtime.
 
 use flectar_mail_core::models::AppIcon;
-use std::{path::PathBuf, sync::OnceLock};
+use std::{
+    path::PathBuf,
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 static PDFIUM_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
 
@@ -95,3 +101,20 @@ pub fn configure_email_fonts(fonts: super::EmailFonts) {
 pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
     EMAIL_FONTS.get()
 }
+
+/// The animation reduction setting, as the page last reported it.
+static REDUCE_MOTION: AtomicBool = AtomicBool::new(false);
+
+/// The page reports animation reduction, from the accessibility settings of
+/// API 23 and later, when it shows and whenever the setting changes.
+pub fn set_reduce_motion(reduced: bool) {
+    REDUCE_MOTION.store(reduced, Ordering::Relaxed);
+    crate::motion::system_changed();
+}
+
+pub(crate) fn reduce_motion() -> bool {
+    REDUCE_MOTION.load(Ordering::Relaxed)
+}
+
+/// Changes arrive through `set_reduce_motion`.
+pub(crate) fn watch_reduce_motion() {}
