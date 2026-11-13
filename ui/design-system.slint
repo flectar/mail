@@ -55,6 +55,7 @@ export global MotionSettings {
     out property <bool> reduced: root.preference == "on" || (root.preference == "system" && root.system-reduced);
     // Whether things may move as they change.
     out property <bool> movement: root.enabled && !root.reduced;
+    callback choose(string);
 }
 
 // Mail actions and their matching sidebar destinations share one semantic

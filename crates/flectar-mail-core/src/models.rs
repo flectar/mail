@@ -1783,6 +1783,36 @@ impl MessageAppearance {
     }
 }
 
+/// Whether the interface reduces motion (#231): as the operating system asks,
+/// or always, or never.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReduceMotion {
+    #[default]
+    System,
+    On,
+    Off,
+}
+
+impl ReduceMotion {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::On => "on",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "system" => Some(Self::System),
+            "on" => Some(Self::On),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
+}
+
 /// Which invitations found in mail join the calendar before the user answers
 /// them (#228). Answering one, or adding it from its card, always does.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1904,6 +1934,9 @@ pub struct Settings {
     pub theme: String,
     #[serde(default)]
     pub message_appearance: MessageAppearance,
+    /// Whether the interface reduces motion.
+    #[serde(default)]
+    pub reduce_motion: ReduceMotion,
     /// Named application palette: "default" | "teal" | "green" | "purple" | "custom".
     #[serde(default = "default_theme_preset")]
     pub theme_preset: String,
@@ -2266,6 +2299,7 @@ impl Default for Settings {
         Settings {
             theme: "system".into(),
             message_appearance: MessageAppearance::default(),
+            reduce_motion: ReduceMotion::default(),
             theme_preset: default_theme_preset(),
             custom_theme: CustomTheme::default(),
             show_avatars: true,
@@ -2735,6 +2769,10 @@ mod tests {
         assert_eq!(s.ai_base_url, crate::ai::DEFAULT_BASE_URL);
         assert!(s.show_avatars);
         assert_eq!(s.message_appearance, MessageAppearance::System);
+        assert_eq!(s.reduce_motion, ReduceMotion::System);
+        for motion in [ReduceMotion::System, ReduceMotion::On, ReduceMotion::Off] {
+            assert_eq!(ReduceMotion::parse(motion.as_str()), Some(motion));
+        }
         // Settings saved before the choice existed take the safe default.
         assert_eq!(s.add_invitations, AddInvitations::Known);
         for adding in [

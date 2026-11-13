@@ -1436,6 +1436,17 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_reduce_motion(&self, preference: &str) -> Result<(), String> {
+        let preference = flectar_mail_core::models::ReduceMotion::parse(preference)
+            .ok_or("Unknown reduce motion preference")?;
+        let mut settings = self.load_settings().await?;
+        settings.reduce_motion = preference;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     /// Which invitations found in mail join the calendar before an answer:
     /// "everyone", "known" or "answered".
     pub async fn set_add_invitations(&self, choice: &str) -> Result<(), String> {
