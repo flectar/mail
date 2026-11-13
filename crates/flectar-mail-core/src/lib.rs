@@ -20,6 +20,7 @@ pub mod graph;
 pub mod graphcal;
 mod http_body;
 pub mod imap;
+mod invitation_card;
 pub mod jmap;
 pub mod mail_import;
 pub mod mail_security;
@@ -2444,6 +2445,10 @@ impl Core {
                     rusqlite::params![account_id],
                 )?;
                 tx.execute(
+                    "DELETE FROM message_calendars WHERE account_id = ?1",
+                    rusqlite::params![account_id],
+                )?;
+                tx.execute(
                     "DELETE FROM calendars WHERE account_id = ?1",
                     rusqlite::params![account_id],
                 )?;
@@ -2460,14 +2465,16 @@ impl Core {
     /// Recreate the old same-database `ON DELETE SET NULL` behavior for mail
     /// invite links now that calendar data has its own SQLite file. Calendar
     /// rows remain useful after their source message is deleted, so detach the
-    /// optional reference rather than deleting the event.
+    /// optional reference rather than deleting the event. The calendar a
+    /// deleted message carried goes with it.
     async fn detach_orphaned_calendar_message_links(&self) -> Result<usize> {
         let referenced_message_ids = self
             .calendar_db
             .read(|conn| {
                 let mut statement = conn.prepare(
-                    "SELECT DISTINCT message_id FROM calendar_events
-                     WHERE message_id IS NOT NULL ORDER BY message_id",
+                    "SELECT message_id FROM calendar_events WHERE message_id IS NOT NULL
+                     UNION SELECT message_id FROM message_calendars
+                     ORDER BY message_id",
                 )?;
                 Ok(statement
                     .query_map([], |row| row.get::<_, i64>(0))?
@@ -2518,6 +2525,10 @@ impl Core {
                 for message_id in orphaned {
                     tx.execute(
                         "UPDATE calendar_events SET message_id = NULL WHERE message_id = ?1",
+                        rusqlite::params![message_id],
+                    )?;
+                    tx.execute(
+                        "DELETE FROM message_calendars WHERE message_id = ?1",
                         rusqlite::params![message_id],
                     )?;
                 }
@@ -2641,7 +2652,8 @@ impl Core {
                     "SELECT account_id FROM calendar_events WHERE account_id != 0
                      UNION SELECT account_id FROM calendars WHERE account_id != 0
                      UNION SELECT account_id FROM calendar_connections WHERE account_id != 0
-                     UNION SELECT account_id FROM pending_actions WHERE account_id != 0",
+                     UNION SELECT account_id FROM pending_actions WHERE account_id != 0
+                     UNION SELECT account_id FROM message_calendars WHERE account_id != 0",
                 )?;
                 Ok(statement
                     .query_map([], |row| row.get::<_, i64>(0))?
@@ -2854,6 +2866,7 @@ impl Core {
                 conn.execute_batch(
                     "DELETE FROM pending_actions;
                      DELETE FROM calendar_events;
+                     DELETE FROM message_calendars;
                      DELETE FROM calendars;
                      DELETE FROM calendar_connections;",
                 )?;
@@ -3048,11 +3061,16 @@ impl Core {
                     |row| row.get(0),
                 )?;
                 let mut statement = conn.prepare(
-                    "SELECT file_path, filename FROM draft_attachments WHERE draft_id = ?1",
+                    "SELECT file_path, filename, mime_type
+                     FROM draft_attachments WHERE draft_id = ?1",
                 )?;
                 let staged = statement
                     .query_map([draft_id], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 Ok((detail, serde_json::from_str::<Vec<Address>>(&bcc)?, staged))
@@ -3064,7 +3082,7 @@ impl Core {
             .ok();
         let mut attachments = Vec::new();
         let mut budget = MAX_DRAFT_ATTACHMENT_BYTES;
-        for (path, filename) in staged {
+        for (path, filename, mime_type) in staged {
             let path = tokio::fs::canonicalize(&path).await?;
             if !staging_root
                 .as_ref()
@@ -3077,7 +3095,8 @@ impl Core {
             let bytes = crate::file_io::read(&path, budget, "draft attachment").await?;
             budget -= bytes.len();
             attachments.push(crate::mime::OutgoingAttachment {
-                mime_type: crate::queue::mime_guess_from_name(&filename),
+                mime_type: mime_type
+                    .unwrap_or_else(|| crate::queue::mime_guess_from_name(&filename)),
                 filename,
                 bytes,
             });
@@ -4669,7 +4688,100 @@ impl Core {
         for acc in touched_accounts {
             self.nudge(Some(acc), || SyncCmd::RunActions).await;
         }
+        if matches!(args.kind, ActionKind::Spam | ActionKind::NotSpam) {
+            let ids = action_ids.clone();
+            let moved = self
+                .db
+                .read(move |conn| repo::actions::message_ids(conn, &ids))
+                .await?;
+            self.invitations_follow(moved, args.kind == ActionKind::Spam)
+                .await;
+        }
         Ok(ActionResult { action_ids })
+    }
+
+    /// Invitations follow their mail in and out of Spam. Mail moved there
+    /// takes the invitations it brought, still unanswered, out of the calendar
+    /// (CalConnect's guidance against calendar abuse), and mail moved back
+    /// brings them again. Failing here leaves the move itself done.
+    async fn invitations_follow(&self, message_ids: Vec<i64>, into_spam: bool) {
+        if message_ids.is_empty() {
+            return;
+        }
+        let result = if into_spam {
+            self.forget_invitations(message_ids).await
+        } else {
+            self.reapply_invitations(message_ids).await
+        };
+        if let Err(error) = result {
+            tracing::warn!(%error, into_spam, "calendar: invitations could not follow their mail");
+        }
+    }
+
+    async fn forget_invitations(&self, message_ids: Vec<i64>) -> Result<()> {
+        let owners = self
+            .db
+            .read(move |conn| {
+                let mut owners = Vec::new();
+                for id in message_ids {
+                    if let Some(row) = repo::messages::get_row(conn, id)? {
+                        owners.push((id, row.account_id));
+                    }
+                }
+                Ok(owners)
+            })
+            .await?;
+        let changed = self
+            .calendar_db
+            .write(move |conn| {
+                let mut changed = Vec::new();
+                for (message_id, account_id) in owners {
+                    if repo::calendar::forget_unanswered_invitation(conn, message_id)? > 0
+                        && !changed.contains(&account_id)
+                    {
+                        changed.push(account_id);
+                    }
+                }
+                Ok(changed)
+            })
+            .await?;
+        for account_id in changed {
+            self.bus.emit(CoreEvent::CalendarUpdated { account_id });
+        }
+        Ok(())
+    }
+
+    async fn reapply_invitations(&self, message_ids: Vec<i64>) -> Result<()> {
+        let stored = self
+            .db
+            .read(move |conn| {
+                let mut stored = Vec::new();
+                for id in message_ids {
+                    if let Some(row) = repo::messages::get_row(conn, id)?
+                        && let Some(path) = row.raw_path
+                    {
+                        stored.push((id, row.account_id, path));
+                    }
+                }
+                Ok(stored)
+            })
+            .await?;
+        let ctx = self.sync_ctx();
+        for (message_id, account_id, path) in stored {
+            // Mail whose body isn't here yet brings its invitations when
+            // it is fetched, like any other.
+            let Ok(raw) = file_io::read(&path, MAX_CACHED_MESSAGE_BYTES, "stored message").await
+            else {
+                continue;
+            };
+            let Ok(parsed) = crate::mime::parse_message(&raw) else {
+                continue;
+            };
+            let calendars = sync::ingest::calendar_parts(&parsed);
+            sync::ingest::store_calendar_events(&ctx, account_id, vec![(message_id, calendars)])
+                .await?;
+        }
+        Ok(())
     }
 
     /// Queue a provider-side purge of Trash for one account or all accounts.
@@ -4778,11 +4890,12 @@ impl Core {
     /// is reversed. Unlike [`Core::undo_last`], later actions and sends stay.
     /// False when none of them could be taken back.
     pub async fn undo_actions(&self, action_ids: Vec<i64>) -> Result<bool> {
-        let (undone, threads) = self
+        let (undone, threads, out_of_spam, into_spam) = self
             .db
             .write(move |conn| {
                 let mut undone = false;
                 let mut threads = Vec::new();
+                let (mut out_of_spam, mut into_spam) = (Vec::new(), Vec::new());
                 for id in action_ids {
                     let Some(action) = repo::actions::get(conn, id)? else {
                         continue;
@@ -4798,10 +4911,17 @@ impl Core {
                     {
                         threads.push(thread_id);
                     }
+                    match (action.kind.as_str(), action.message_id) {
+                        ("spam", Some(message_id)) => out_of_spam.push(message_id),
+                        ("not_spam", Some(message_id)) => into_spam.push(message_id),
+                        _ => {}
+                    }
                 }
-                Ok((undone, threads))
+                Ok((undone, threads, out_of_spam, into_spam))
             })
             .await?;
+        self.invitations_follow(out_of_spam, false).await;
+        self.invitations_follow(into_spam, true).await;
         if !threads.is_empty() {
             self.bus.emit(CoreEvent::MailUpdated {
                 thread_ids: threads,
@@ -5024,6 +5144,7 @@ impl Core {
             staged.push(crate::models::DraftAttachmentIn {
                 file_path,
                 filename: att.filename.clone(),
+                mime_type: att.mime_type.clone(),
             });
         }
         let retained_paths: HashSet<String> = staged
@@ -5192,8 +5313,9 @@ impl Core {
                 )?;
                 for att in &staged {
                     tx.execute(
-                        "INSERT INTO draft_attachments (draft_id, file_path, filename) VALUES (?1,?2,?3)",
-                        rusqlite::params![draft_id, att.file_path, att.filename],
+                        "INSERT INTO draft_attachments (draft_id, file_path, filename, mime_type)
+                         VALUES (?1, ?2, ?3, ?4)",
+                        rusqlite::params![draft_id, att.file_path, att.filename, att.mime_type],
                     )?;
                 }
                 tx.execute(
@@ -5328,7 +5450,7 @@ impl Core {
                 }
 
                 let mut stmt = conn.prepare(
-                    "SELECT file_path, filename
+                    "SELECT file_path, filename, mime_type
                      FROM draft_attachments WHERE draft_id = ?1 ORDER BY id",
                 )?;
                 draft.0.attachments = stmt
@@ -5336,6 +5458,7 @@ impl Core {
                         Ok(crate::models::DraftAttachmentIn {
                             file_path: row.get(0)?,
                             filename: row.get(1)?,
+                            mime_type: row.get(2)?,
                         })
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -5370,6 +5493,7 @@ impl Core {
                 } else {
                     crate::mime::decode_encoded_words(&filename)
                 },
+                mime_type: None,
             });
         }
         Ok(draft)
@@ -6145,6 +6269,13 @@ impl Core {
                 ))
             })
             .await?;
+        let own = own_addresses_of(
+            &self.db,
+            events
+                .iter()
+                .chain(masters.iter().map(|master| &master.event)),
+        )
+        .await?;
 
         // Expand recurring series into concrete occurrences. Occurrences keep
         // the master's row id (edits/deletes address the whole series in v1);
@@ -6170,22 +6301,14 @@ impl Core {
                 continue; // unsupported rule: the master entry stands alone
             };
             events.retain(|e| e.id != m.event.id);
+            let guests = occurrence_guests(m.ical_raw.as_deref());
             for occ in occs {
-                let mut e = m.event.clone();
-                e.starts_at = occ.start;
-                e.ends_at = Some(occ.end);
-                events.push(e);
+                events.push(occurrence_event(&m.event, occ, &guests, &own));
             }
         }
         events.sort_by_key(|e| e.starts_at);
+        mark_invitations(&mut events, &own);
         Ok(events)
-    }
-
-    /// Invite events carried by one message (the thread invite card).
-    pub async fn events_for_message(&self, message_id: i64) -> Result<Vec<CalendarEvent>> {
-        self.calendar_db
-            .read(move |conn| repo::calendar::for_message(conn, message_id))
-            .await
     }
 
     /// Create a meeting. The event lands on the local calendar immediately;
@@ -6243,6 +6366,7 @@ impl Core {
                 email: a.email.clone(),
                 name: a.name.clone(),
                 partstat: Some("NEEDS-ACTION".into()),
+                answered_at: None,
             })
             .collect();
 
@@ -6297,13 +6421,16 @@ impl Core {
                 dtstamp_ms: now_ms(),
             });
             let body_text = invite_body_text(&args);
-            self.send_calendar_mail(
+            self.send_calendar_mail(CalendarMail {
                 account_id,
-                args.attendees.clone(),
-                format!("Invitation: {}", args.summary.trim()),
+                from: None,
+                to: args.attendees.clone(),
+                subject: format!("Invitation: {}", args.summary.trim()),
                 body_text,
-                &ics,
-            )
+                ics: &ics,
+                method: "REQUEST",
+                in_reply_to: None,
+            })
             .await?;
         }
 
@@ -6381,8 +6508,10 @@ impl Core {
         .map(|_| ())
     }
 
-    /// Answer an invite: store our response and email an ICS METHOD:REPLY to
-    /// the organizer (the standard-compliant path every calendar understands).
+    /// Answer an invitation. The organizer hears of it once ([`AnswerRoute`]):
+    /// from the calendar server holding the event, or by a METHOD:REPLY email
+    /// for an event this app only knows from mail, or that its server keeps
+    /// without telling anyone.
     pub async fn rsvp_event(&self, args: RsvpEventArgs) -> Result<CalendarEvent> {
         let partstat = match args.response.as_str() {
             "accepted" => "ACCEPTED",
@@ -6391,72 +6520,181 @@ impl Core {
             _ => return Err(CoreError::Other("invalid RSVP response".into())),
         };
         let event_id = args.event_id;
-        let (ev, uid_seq) = self
+        let (row, held_by, held_series, scheduling, default) = self
             .calendar_db
             .read(move |conn| {
+                let row = repo::calendar::sync_row_for(conn, event_id)?
+                    .ok_or_else(|| CoreError::NotFound("event".into()))?;
+                // The calendar holding the server's copy, when there is one,
+                // or the series Exchange holds for an invitation from mail.
+                let held_series = repo::calendar::held_series(conn, event_id)?;
+                let held_in = row
+                    .event
+                    .calendar_id
+                    .filter(|_| row.caldav_href.is_some())
+                    .or(held_series.as_ref().map(|(_, calendar_id)| *calendar_id));
+                let held_by = match held_in {
+                    Some(id) => repo::caldav::get_calendar(conn, id)?,
+                    None => None,
+                };
+                let scheduling = match &held_by {
+                    Some(calendar) => repo::caldav::scheduling(conn, calendar.connection_id)?
+                        .map(|(scheduling, _)| scheduling),
+                    None => None,
+                };
+                let default = repo::caldav::default_calendar(conn, row.event.account_id)?;
+                Ok((row, held_by, held_series, scheduling, default))
+            })
+            .await?;
+        let (uid, sequence, invitation) = (row.ical_uid, row.sequence, row.ical_raw);
+        let ev = row.event;
+        // One occurrence answered on its own: the one asked for in a series,
+        // or the one an invitation to that occurrence alone stands for.
+        let occurrence = match (&ev.rrule, args.occurrence) {
+            (Some(_), occurrence) => occurrence,
+            (None, _) => invitation.as_deref().and_then(calendar::stands_for),
+        };
+        // A series keeps its own answer when one occurrence is answered.
+        let one_of_series = ev.rrule.is_some() && occurrence.is_some();
+
+        let account_id = ev.account_id;
+        let (account, identities) = self
+            .db
+            .read(move |conn| {
                 Ok((
-                    repo::calendar::get(conn, event_id)?,
-                    repo::calendar::uid_and_sequence(conn, event_id)?,
+                    repo::accounts::get(conn, account_id)?,
+                    repo::sender_identities::list(conn, account_id)?,
                 ))
             })
             .await?;
-        let ev = ev.ok_or_else(|| CoreError::NotFound("event".into()))?;
-        let (uid, sequence) = uid_seq.ok_or_else(|| CoreError::NotFound("event".into()))?;
+        let account = account.ok_or_else(|| CoreError::NotFound("account".into()))?;
 
-        let account_id = ev.account_id;
-        let account = self
-            .db
-            .read(move |conn| repo::accounts::get(conn, account_id))
-            .await?
-            .ok_or_else(|| CoreError::NotFound("account".into()))?;
-
+        let answering = Answering::of(&account, &identities, &ev.attendees);
+        let route = AnswerRoute::of(
+            held_by.as_ref(),
+            scheduling.as_ref(),
+            invitation
+                .as_deref()
+                .is_some_and(calendar::client_schedules),
+            &answering.attendee.email,
+            default.as_ref(),
+            partstat,
+        );
         // Reply goes to the organizer; without one there is nobody to notify,
         // but we still record the response locally.
-        if let Some(organizer) = ev.organizer.clone().filter(|o| !o.is_empty()) {
-            let me = Address {
-                name: account.display_name.clone(),
-                email: account.email.clone(),
-            };
+        if let Some(organizer) = ev.organizer.clone().filter(|o| !o.is_empty())
+            && args.notify
+            && route.mails()
+        {
             let ics = calendar::build_reply_ics(&calendar::ReplySpec {
+                invitation: invitation.as_deref(),
                 uid: &uid,
+                recurrence_id_ms: occurrence,
+                all_day: ev.all_day,
                 sequence,
                 summary: ev.summary.as_deref(),
+                organizer: &organizer,
+                attendee: &answering.attendee,
+                sent_by: answering.sent_by.as_deref(),
                 partstat,
-                organizer_email: &organizer,
-                attendee: &me,
-                starts_at_ms: ev.starts_at,
-                ends_at_ms: ev.ends_at,
+                comment: args.comment.as_deref(),
                 dtstamp_ms: now_ms(),
             });
-            let verb = match partstat {
-                "ACCEPTED" => "Accepted",
-                "TENTATIVE" => "Tentative",
-                _ => "Declined",
+            let (verb, answered) = match partstat {
+                "ACCEPTED" => ("Accepted", "accepted"),
+                "TENTATIVE" => ("Tentative", "tentatively accepted"),
+                _ => ("Declined", "declined"),
             };
             let title = ev.summary.clone().unwrap_or_else(|| "(no title)".into());
-            self.send_calendar_mail(
+            let who = answering
+                .attendee
+                .name
+                .clone()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| answering.attendee.email.clone());
+            let mut body_text = format!("{who} has {answered} your invitation to {title}.");
+            if let Some(comment) = args
+                .comment
+                .as_deref()
+                .map(str::trim)
+                .filter(|c| !c.is_empty())
+            {
+                body_text.push_str("\n\n");
+                body_text.push_str(comment);
+            }
+            self.send_calendar_mail(CalendarMail {
                 account_id,
-                vec![Address {
+                from: Some(answering.from),
+                to: vec![Address {
                     name: None,
                     email: organizer,
                 }],
-                format!("{verb}: {title}"),
-                format!(
-                    "{} has responded {} to: {title}",
-                    account.email,
-                    verb.to_lowercase()
-                ),
-                &ics,
-            )
+                subject: format!("{verb}: {title}"),
+                body_text,
+                ics: &ics,
+                method: "REPLY",
+                in_reply_to: ev.message_id,
+            })
             .await?;
         }
 
+        let answer = caldav::task::QueuedAnswer {
+            event_id,
+            partstat: partstat.to_string(),
+            attendee: answering.attendee.email.clone(),
+            comment: args.comment.clone(),
+            notify: args.notify,
+            meeting: held_series.as_ref().map(|(meeting, _)| meeting.clone()),
+            calendar_id: held_series.as_ref().map(|(_, calendar_id)| *calendar_id),
+            occurrence,
+        };
+        let payload = serde_json::to_value(&answer)?;
+        // The stored calendar says it too: on the occurrence's own VEVENT for
+        // one occurrence of a series, else on every VEVENT, so occurrences
+        // with VEVENTs of their own follow the series.
+        let attendee = answering.attendee.email.clone();
+        let answered = invitation.as_deref().and_then(|raw| {
+            if one_of_series {
+                calendar::with_occurrence_partstat(raw, occurrence?, &attendee, partstat, now_ms())
+            } else {
+                calendar::with_partstat(raw, &attendee, partstat)
+            }
+        });
         self.calendar_db
-            .write(move |conn| repo::calendar::set_rsvp(conn, event_id, partstat))
+            .write(move |conn| {
+                if !one_of_series {
+                    repo::calendar::set_rsvp(conn, event_id, partstat)?;
+                }
+                if let Some(answered) = &answered {
+                    repo::calendar::set_ical_raw(conn, event_id, answered)?;
+                }
+                // An answer still waiting gives way to this one, so the
+                // organizer isn't told twice.
+                repo::actions::cancel_waiting_answers(conn, event_id, occurrence)?;
+                if route.reaches_server() {
+                    repo::actions::enqueue(
+                        conn,
+                        account_id,
+                        caldav::task::ANSWER_KIND,
+                        None,
+                        None,
+                        &payload,
+                        None,
+                    )?;
+                }
+                Ok(())
+            })
             .await?;
-        // CalDAV-backed invites also sync the PARTSTAT change to the server.
-        self.enqueue_cal_push(event_id, ev.account_id, "cal_put")
-            .await?;
+        match route {
+            AnswerRoute::Server | AnswerRoute::ServerAndMail => {
+                self.nudge_cal(Some(account_id)).await;
+            }
+            AnswerRoute::Mail { store: true } => {
+                self.enqueue_cal_push(event_id, account_id, "cal_put")
+                    .await?;
+            }
+            AnswerRoute::Mail { store: false } => {}
+        }
         self.calendar_db
             .read(move |conn| repo::calendar::get(conn, event_id))
             .await?
@@ -6490,15 +6728,19 @@ impl Core {
         let attendees: Vec<EventAttendee> = args
             .attendees
             .iter()
-            .map(|a| EventAttendee {
-                email: a.email.clone(),
-                name: a.name.clone(),
-                partstat: existing
+            .map(|a| {
+                let previous = existing
                     .attendees
                     .iter()
-                    .find(|old| old.email.eq_ignore_ascii_case(&a.email))
-                    .and_then(|old| old.partstat.clone())
-                    .or_else(|| Some("NEEDS-ACTION".into())),
+                    .find(|old| old.email.eq_ignore_ascii_case(&a.email));
+                EventAttendee {
+                    email: a.email.clone(),
+                    name: a.name.clone(),
+                    partstat: previous
+                        .and_then(|old| old.partstat.clone())
+                        .or_else(|| Some("NEEDS-ACTION".into())),
+                    answered_at: previous.and_then(|old| old.answered_at),
+                }
             })
             .collect();
 
@@ -6551,13 +6793,16 @@ impl Core {
                 all_day: args.all_day,
                 attendees: args.attendees.clone(),
             });
-            self.send_calendar_mail(
+            self.send_calendar_mail(CalendarMail {
                 account_id,
-                args.attendees.clone(),
-                format!("Updated invitation: {}", args.summary.trim()),
-                body,
-                &ics,
-            )
+                from: None,
+                to: args.attendees.clone(),
+                subject: format!("Updated invitation: {}", args.summary.trim()),
+                body_text: body,
+                ics: &ics,
+                method: "REQUEST",
+                in_reply_to: None,
+            })
             .await?;
         }
 
@@ -6617,13 +6862,16 @@ impl Core {
                 ends_at_ms: ev.ends_at.unwrap_or(ev.starts_at + 1_800_000),
                 dtstamp_ms: now_ms(),
             });
-            self.send_calendar_mail(
+            self.send_calendar_mail(CalendarMail {
                 account_id,
+                from: None,
                 to,
-                format!("Cancelled: {title}"),
-                format!("{title} has been cancelled."),
-                &ics,
-            )
+                subject: format!("Cancelled: {title}"),
+                body_text: format!("{title} has been cancelled."),
+                ics: &ics,
+                method: "CANCEL",
+                in_reply_to: None,
+            })
             .await?;
         }
 
@@ -7242,16 +7490,20 @@ impl Core {
         Ok(())
     }
 
-    /// Draft + queue an email carrying an ICS part, through the normal send
-    /// pipeline. The ICS is staged like an attachment.
-    async fn send_calendar_mail(
-        &self,
-        account_id: i64,
-        to: Vec<Address>,
-        subject: String,
-        body_text: String,
-        ics: &str,
-    ) -> Result<()> {
+    /// Draft + queue a calendar email through the normal send pipeline. The
+    /// ICS is staged like an attachment, typed so that it goes out as an
+    /// iMIP message (RFC 6047).
+    async fn send_calendar_mail(&self, mail: CalendarMail<'_>) -> Result<()> {
+        let CalendarMail {
+            account_id,
+            from,
+            to,
+            subject,
+            body_text,
+            ics,
+            method,
+            in_reply_to,
+        } = mail;
         let tmp_dir = self.paths.temp_dir();
         tokio::fs::create_dir_all(&tmp_dir).await?;
         let tmp_path = tmp_dir.join(format!("invite-{}.ics", crate::mime::rand_token()));
@@ -7261,19 +7513,25 @@ impl Core {
             .save_draft(SaveDraftArgs {
                 draft_id: None,
                 account_id,
-                from: None,
+                from,
                 to,
                 cc: Vec::new(),
                 bcc: Vec::new(),
                 subject,
                 body_text,
                 body_html: None,
-                mode: "new".into(),
-                in_reply_to_message_id: None,
+                mode: if in_reply_to.is_some() {
+                    "reply"
+                } else {
+                    "new"
+                }
+                .into(),
+                in_reply_to_message_id: in_reply_to,
                 in_reply_to_header: None,
                 attachments: vec![DraftAttachmentIn {
                     file_path: tmp_path.to_string_lossy().into_owned(),
                     filename: "invite.ics".into(),
+                    mime_type: Some(format!("text/calendar; method={method}; charset=UTF-8")),
                 }],
             })
             .await?;
@@ -9581,6 +9839,126 @@ fn store_discovered_calendars(
 
 /// Plain-text body for an outgoing invite email (the ICS carries the real
 /// event; this is what non-calendar clients show).
+/// The user's own addresses in each account that has events with guests.
+pub(crate) async fn own_addresses_of<'a>(
+    db: &Db,
+    events: impl Iterator<Item = &'a CalendarEvent>,
+) -> Result<HashMap<i64, repo::sender_identities::OwnAddresses>> {
+    let accounts: Vec<i64> = events
+        .filter(|event| !event.attendees.is_empty())
+        .map(|event| event.account_id)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if accounts.is_empty() {
+        return Ok(HashMap::new());
+    }
+    db.read(move |conn| {
+        accounts
+            .into_iter()
+            .map(|account_id| {
+                Ok((
+                    account_id,
+                    repo::sender_identities::own_addresses(conn, account_id)?,
+                ))
+            })
+            .collect::<Result<HashMap<_, _>>>()
+    })
+    .await
+}
+
+/// The guest lists of a series' occurrences that have VEVENTs of their own,
+/// by their RECURRENCE-ID.
+pub(crate) fn occurrence_guests(ical_raw: Option<&str>) -> Vec<(i64, Vec<EventAttendee>)> {
+    ical_raw
+        .map(calendar::parse_ics)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|event| {
+            let original = event.recurrence_id_ms?;
+            let guests = event
+                .attendees
+                .into_iter()
+                .map(|guest| EventAttendee {
+                    email: guest.email,
+                    name: guest.name,
+                    partstat: guest.partstat,
+                    answered_at: None,
+                })
+                .collect::<Vec<_>>();
+            (!guests.is_empty()).then_some((original, guests))
+        })
+        .collect()
+}
+
+/// One occurrence of the repeating `series`, with its RECURRENCE-ID. One
+/// with a VEVENT of its own has that VEVENT's guest list, and the user's
+/// answer there, when they gave one, replaces the series' answer for it.
+pub(crate) fn occurrence_event(
+    series: &CalendarEvent,
+    occurrence: caldav::rrule::Occurrence,
+    guests: &[(i64, Vec<EventAttendee>)],
+    own: &HashMap<i64, repo::sender_identities::OwnAddresses>,
+) -> CalendarEvent {
+    let mut event = series.clone();
+    event.starts_at = occurrence.start;
+    event.ends_at = Some(occurrence.end);
+    event.recurrence_id = Some(occurrence.original);
+    if let Some((_, guests)) = guests
+        .iter()
+        .find(|(original, _)| (original - occurrence.original).abs() < 60_000)
+    {
+        let answer = own
+            .get(&event.account_id)
+            .and_then(|own| guests.iter().find(|guest| own.contains(&guest.email)))
+            .and_then(|guest| guest.partstat.clone())
+            .filter(|answer| answer != "NEEDS-ACTION");
+        if answer.is_some() {
+            event.rsvp_status = answer;
+        }
+        event.attendees = guests.clone();
+    }
+    event
+}
+
+/// Whether an event reminds the user before it starts. An invitation does
+/// only once they accept it or answer Maybe: one waiting for an answer may
+/// be calendar spam, and RFC 9671 section 4 has its reminders left out.
+pub(crate) fn reminds(event: &CalendarEvent) -> bool {
+    !event.invited || matches!(event.rsvp_status.as_deref(), Some("ACCEPTED" | "TENTATIVE"))
+}
+
+/// Tell which events are the user's to answer, and fill in their answer
+/// where only the guest list holds it, as on a calendar server's copy.
+pub(crate) fn mark_invitations(
+    events: &mut [CalendarEvent],
+    own: &HashMap<i64, repo::sender_identities::OwnAddresses>,
+) {
+    for event in events {
+        let Some(own) = own.get(&event.account_id) else {
+            continue;
+        };
+        let organized = event
+            .organizer
+            .as_deref()
+            .is_some_and(|organizer| own.contains(organizer));
+        let Some(mine) = event
+            .attendees
+            .iter()
+            .find(|attendee| own.contains(&attendee.email))
+        else {
+            continue;
+        };
+        event.invited = !organized && !event.is_local;
+        if event.invited && event.rsvp_status.is_none() {
+            event.rsvp_status = mine
+                .partstat
+                .clone()
+                .filter(|answer| answer != "NEEDS-ACTION");
+        }
+    }
+}
+
 fn invite_body_text(args: &CreateEventArgs) -> String {
     use chrono::TimeZone;
     let fmt = |ms: i64| {
@@ -9687,6 +10065,151 @@ fn thread_in_inbox(tx: &rusqlite::Transaction, thread_id: i64) -> Result<bool> {
         rusqlite::params![thread_id],
         |row| row.get(0),
     )?)
+}
+
+/// One calendar email: an invitation, its update or cancellation, or an
+/// answer to one.
+struct CalendarMail<'a> {
+    account_id: i64,
+    /// The identity to send from; None sends from the account's default.
+    from: Option<Address>,
+    to: Vec<Address>,
+    subject: String,
+    body_text: String,
+    /// The iCalendar object, and its METHOD.
+    ics: &'a str,
+    method: &'a str,
+    /// The message this one answers, whose conversation it joins.
+    in_reply_to: Option<i64>,
+}
+
+/// Who tells an invitation's organizer of an answer: the calendar server
+/// holding the event or this app's mail, never both, since each would send
+/// its own reply (RFC 6638 §7.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnswerRoute {
+    /// The server holding the event: Exchange or Google, which answer
+    /// through their own APIs, or a CalDAV server that schedules for the
+    /// invited address.
+    Server,
+    /// The server stores the answer but tells no one, so it goes by mail too.
+    ServerAndMail,
+    /// Mail alone, for an event known only from mail. With `store`, a copy
+    /// goes to the account's CalDAV calendar, marked as answered by mail.
+    Mail { store: bool },
+}
+
+impl AnswerRoute {
+    /// `held_by` is the calendar holding the server's copy of the event, if
+    /// any; `scheduling` what its server said of scheduling; `client_schedules`
+    /// whether that copy is marked as answered by the client. `default` is
+    /// the account's default calendar, which new copies go to.
+    fn of(
+        held_by: Option<&Calendar>,
+        scheduling: Option<&caldav::discovery::Scheduling>,
+        client_schedules: bool,
+        attendee: &str,
+        default: Option<&Calendar>,
+        partstat: &str,
+    ) -> Self {
+        match held_by.map(|calendar| calendar.kind) {
+            Some(CalendarConnectionKind::Microsoft | CalendarConnectionKind::Google) => {
+                Self::Server
+            }
+            Some(CalendarConnectionKind::Generic) => {
+                if !client_schedules
+                    && scheduling.is_some_and(|scheduling| scheduling.answers_for(attendee))
+                {
+                    Self::Server
+                } else {
+                    Self::ServerAndMail
+                }
+            }
+            None => Self::Mail {
+                store: partstat != "DECLINED"
+                    && default.is_some_and(|calendar| {
+                        calendar.kind == CalendarConnectionKind::Generic
+                            && calendar.enabled
+                            && !calendar.read_only
+                    }),
+            },
+        }
+    }
+
+    fn mails(self) -> bool {
+        !matches!(self, Self::Server)
+    }
+
+    fn reaches_server(self) -> bool {
+        matches!(self, Self::Server | Self::ServerAndMail)
+    }
+}
+
+/// Who answers an invitation in an account.
+struct Answering {
+    /// The invited address answering, as the invitation lists it.
+    attendee: Address,
+    /// The identity the answer is sent from.
+    from: Address,
+    /// The sending address when it isn't the invited one (RFC 5546 §2.1.3).
+    sent_by: Option<String>,
+}
+
+impl Answering {
+    /// Answer as the account's identity the invitation was sent to, chosen as
+    /// for a reply to mail sent to the attendees. An account the invitation
+    /// doesn't list answers as itself, a guest the organizer may add (RFC 5546
+    /// §3.2.2.6).
+    fn of(account: &Account, identities: &[SenderIdentity], attendees: &[EventAttendee]) -> Self {
+        let listed: Vec<Address> = attendees
+            .iter()
+            .map(|attendee| Address {
+                name: attendee.name.clone(),
+                email: attendee.email.clone(),
+            })
+            .collect();
+        let primary = Address {
+            name: account.display_name.clone(),
+            email: account.email.clone(),
+        };
+        let Some(from_email) = sender_identities::reply_sender(identities, listed.iter()) else {
+            return Self {
+                attendee: primary.clone(),
+                from: primary,
+                sent_by: None,
+            };
+        };
+        // The entry the identity answers for: its own address, or the one a
+        // wildcard or subaddress identity covers.
+        let attendee = listed
+            .iter()
+            .find(|attendee| attendee.email.eq_ignore_ascii_case(&from_email))
+            .or_else(|| {
+                listed
+                    .iter()
+                    .find(|attendee| sender_identities::is_own_address(identities, &attendee.email))
+            })
+            .cloned()
+            .unwrap_or_else(|| Address {
+                name: None,
+                email: from_email.clone(),
+            });
+        let name = identities
+            .iter()
+            .find(|identity| identity.email.eq_ignore_ascii_case(&from_email))
+            .and_then(|identity| identity.display_name.clone())
+            .or_else(|| account.display_name.clone());
+        let sent_by =
+            (!from_email.eq_ignore_ascii_case(&attendee.email)).then(|| from_email.clone());
+        Self {
+            attendee,
+            from: Address {
+                name,
+                email: from_email,
+            },
+            sent_by,
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -11464,6 +11987,7 @@ mod draft_staging_tests {
             attachments: vec![DraftAttachmentIn {
                 file_path: source.to_string_lossy().into_owned(),
                 filename: filename.into(),
+                mime_type: None,
             }],
         }
     }
@@ -12311,6 +12835,11 @@ mod local_data_reset_tests {
                      VALUES (1, 'event-1', 1000, 1)",
                     [],
                 )?;
+                conn.execute(
+                    "INSERT INTO message_calendars (message_id, account_id, calendar)
+                     VALUES (1, 1, 'BEGIN:VCALENDAR')",
+                    [],
+                )?;
                 Ok(())
             })
             .await
@@ -12344,11 +12873,12 @@ mod local_data_reset_tests {
         let calendar_count = core
             .calendar_db
             .read(|conn| {
-                Ok(
-                    conn.query_row("SELECT COUNT(*) FROM calendar_events", [], |row| {
-                        row.get::<_, i64>(0)
-                    })?,
-                )
+                Ok(conn.query_row(
+                    "SELECT (SELECT COUNT(*) FROM calendar_events)
+                          + (SELECT COUNT(*) FROM message_calendars)",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?)
             })
             .await
             .unwrap();
@@ -12384,6 +12914,11 @@ mod local_data_reset_tests {
                             (99, 'legacy-orphan', 1000, 1)",
                     [],
                 )?;
+                conn.execute(
+                    "INSERT INTO message_calendars (message_id, account_id, calendar)
+                     VALUES (1, 1, 'BEGIN:VCALENDAR'), (2, 98, 'BEGIN:VCALENDAR')",
+                    [],
+                )?;
                 Ok(())
             })
             .await
@@ -12410,11 +12945,12 @@ mod local_data_reset_tests {
         let calendar_events = core
             .calendar_db
             .read(|conn| {
-                Ok(
-                    conn.query_row("SELECT COUNT(*) FROM calendar_events", [], |row| {
-                        row.get::<_, i64>(0)
-                    })?,
-                )
+                Ok(conn.query_row(
+                    "SELECT (SELECT COUNT(*) FROM calendar_events)
+                          + (SELECT COUNT(*) FROM message_calendars)",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?)
             })
             .await
             .unwrap();
@@ -12453,6 +12989,11 @@ mod local_data_reset_tests {
                             (1, ?2, 'linked-missing', 2000, 1)",
                     rusqlite::params![existing_message_id, missing_message_id],
                 )?;
+                conn.execute(
+                    "INSERT INTO message_calendars (message_id, account_id, calendar)
+                     VALUES (?1, 1, 'BEGIN:VCALENDAR'), (?2, 1, 'BEGIN:VCALENDAR')",
+                    rusqlite::params![existing_message_id, missing_message_id],
+                )?;
                 Ok(())
             })
             .await
@@ -12484,6 +13025,18 @@ mod local_data_reset_tests {
                 ("linked-missing".to_owned(), None),
             ]
         );
+        let kept = core
+            .calendar_db
+            .read(|conn| {
+                let mut statement =
+                    conn.prepare("SELECT message_id FROM message_calendars ORDER BY message_id")?;
+                Ok(statement
+                    .query_map([], |row| row.get::<_, i64>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(kept, vec![existing_message_id]);
     }
 }
 
@@ -13089,5 +13642,961 @@ mod unsubscribe_offer_tests {
             .await
             .unwrap();
         assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), None);
+    }
+}
+
+#[cfg(test)]
+mod invitation_tests {
+    use super::*;
+
+    const INVITATION: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:review-1@example.com\r\nSEQUENCE:0\r\nDTSTAMP:20261101T080000Z\r\nDTSTART:20261120T090000Z\r\nDTEND:20261120T100000Z\r\nSUMMARY:Design review\r\nORGANIZER;CN=Alice:mailto:alice@example.com\r\nATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:me@test.dev\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:carol@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    /// An invitation from alice@example.com to me@test.dev in the inbox,
+    /// with its original on disk as after the reader downloaded it, and a
+    /// Junk folder to move it to.
+    async fn invited() -> (Core, tempfile::TempDir, i64) {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let path = temp.path().join("invite.eml");
+        std::fs::write(
+            &path,
+            format!(
+                "From: Alice <alice@example.com>\r\nTo: me@test.dev\r\nSubject: Invitation: Design review\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nYou're invited.\r\n--b\r\nContent-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n\r\n{INVITATION}--b--\r\n"
+            ),
+        )
+        .unwrap();
+        let raw_path = path.to_string_lossy().into_owned();
+        let message_id = core
+            .db
+            .write(move |conn| {
+                db::testutil::seed_account(conn);
+                // As every account has: its own address as an identity.
+                let account = repo::accounts::get_config(conn, 1)?.unwrap();
+                repo::sender_identities::ensure_primary(conn, &account)?;
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Junk', 'spam')",
+                    [],
+                )?;
+                let (_, id) = db::testutil::seed_message(
+                    conn,
+                    "alice@example.com",
+                    "Invitation: Design review",
+                    false,
+                );
+                conn.execute(
+                    "UPDATE messages SET raw_path = ?2 WHERE id = ?1",
+                    rusqlite::params![id, raw_path],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        sync::ingest::store_calendar_events(
+            &core.sync_ctx(),
+            1,
+            vec![(message_id, vec![INVITATION.into()])],
+        )
+        .await
+        .unwrap();
+        (core, temp, message_id)
+    }
+
+    async fn invitations(core: &Core, message_id: i64) -> Vec<CalendarEvent> {
+        core.calendar_db
+            .read(move |conn| repo::calendar::for_message(conn, message_id))
+            .await
+            .unwrap()
+    }
+
+    fn to_spam(message_id: i64) -> PerformActionArgs {
+        PerformActionArgs {
+            kind: ActionKind::Spam,
+            target: ActionTarget::Messages(vec![message_id]),
+            params: None,
+        }
+    }
+
+    /// Another message in the inbox carrying `calendar`, read like the first.
+    async fn another(core: &Core, from: &str, calendar: &str) -> i64 {
+        let from = from.to_string();
+        let id = core
+            .db
+            .write(move |conn| Ok(db::testutil::seed_message(conn, &from, "Invitation", false).1))
+            .await
+            .unwrap();
+        sync::ingest::store_calendar_events(&core.sync_ctx(), 1, vec![(id, vec![calendar.into()])])
+            .await
+            .unwrap();
+        id
+    }
+
+    async fn card(core: &Core, message_id: i64) -> InvitationCard {
+        core.invitation_card(message_id).await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_card_shows_the_invitation_its_clashes_and_the_answer() {
+        let (core, _temp, id) = invited().await;
+        core.calendar_db
+            .write(|conn| {
+                repo::calendar::insert_local(
+                    conn,
+                    1,
+                    None,
+                    "standup@flectar-mail",
+                    "Standup",
+                    None,
+                    None,
+                    None,
+                    "me@test.dev",
+                    &[],
+                    calendar::parse_dt("20261120T093000Z").unwrap().0,
+                    calendar::parse_dt("20261120T103000Z").unwrap().0,
+                    false,
+                )
+                .map(|_| ())
+            })
+            .await
+            .unwrap();
+        let shown = card(&core, id).await;
+        assert_eq!(shown.kind, InvitationKind::Request);
+        assert_eq!(shown.title.as_deref(), Some("Design review"));
+        assert_eq!(
+            shown.organizer,
+            Some(Address {
+                name: Some("Alice".into()),
+                email: "alice@example.com".into()
+            })
+        );
+        assert_eq!(shown.invited_as.as_deref(), Some("me@test.dev"));
+        assert_eq!(shown.attendees.len(), 2);
+        assert_eq!(shown.conflicts, ["Standup"]);
+        assert_eq!(shown.my_answer, None);
+        assert!(!shown.out_of_date && !shown.cancelled && !shown.kept_out && !shown.organized);
+        let event = shown.event_id.unwrap();
+
+        core.rsvp_event(answer(event, "accepted", None))
+            .await
+            .unwrap();
+        assert_eq!(card(&core, id).await.my_answer.as_deref(), Some("ACCEPTED"));
+        assert!(core.invitation_card(9_999).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn an_older_version_is_out_of_date_and_a_cancellation_says_so() {
+        let (core, _temp, id) = invited().await;
+        let moved = INVITATION
+            .replace("SEQUENCE:0", "SEQUENCE:1")
+            .replace("20261120T090000Z", "20261121T090000Z");
+        let update = another(&core, "alice@example.com", &moved).await;
+        assert!(card(&core, id).await.out_of_date);
+        assert!(!card(&core, update).await.out_of_date);
+
+        let cancel = INVITATION
+            .replace("METHOD:REQUEST", "METHOD:CANCEL")
+            .replace("SEQUENCE:0", "SEQUENCE:2");
+        let cancelled = another(&core, "alice@example.com", &cancel).await;
+        let shown = card(&core, cancelled).await;
+        assert_eq!(shown.kind, InvitationKind::Cancel);
+        assert!(shown.cancelled && !shown.out_of_date);
+        assert!(shown.event_id.is_some(), "still there to remove");
+        assert!(card(&core, update).await.cancelled);
+    }
+
+    #[tokio::test]
+    async fn an_answer_to_my_invitation_and_mail_in_spam() {
+        let (core, _temp, id) = invited().await;
+        let reply = "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:mine@flectar-mail\r\nSEQUENCE:0\r\nDTSTAMP:20261101T100000Z\r\nDTSTART:20261125T090000Z\r\nSUMMARY:Planning\r\nORGANIZER:mailto:me@test.dev\r\nATTENDEE;CN=Bob;PARTSTAT=DECLINED:mailto:bob@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let answered = another(&core, "bob@example.com", reply).await;
+        let shown = card(&core, answered).await;
+        assert_eq!(shown.kind, InvitationKind::Reply);
+        assert!(shown.organized);
+        let answer = shown.answer.unwrap();
+        assert_eq!(
+            (answer.email.as_str(), answer.partstat.as_deref()),
+            ("bob@example.com", Some("DECLINED"))
+        );
+
+        core.perform_action(to_spam(id)).await.unwrap();
+        let shown = card(&core, id).await;
+        assert!(shown.kept_out);
+        assert_eq!(shown.event_id, None, "its event left the calendar");
+    }
+
+    #[tokio::test]
+    async fn an_answer_without_the_details_shows_the_calendars() {
+        let (core, _temp, _) = invited().await;
+        let (start, end) = (1_800_000_000_000, 1_800_003_600_000);
+        core.calendar_db
+            .write(move |conn| {
+                repo::calendar::insert_local(
+                    conn,
+                    1,
+                    None,
+                    "planning@flectar-mail",
+                    "Planning",
+                    Some("Room 9"),
+                    None,
+                    None,
+                    "me@test.dev",
+                    &[],
+                    start,
+                    end,
+                    false,
+                )
+                .map(|_| ())
+            })
+            .await
+            .unwrap();
+        // RFC 5546 section 3.2.3 asks an answer for little beyond who answers.
+        let reply = "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:planning@flectar-mail\r\nDTSTAMP:20261101T100000Z\r\nORGANIZER:mailto:me@test.dev\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:bob@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let id = another(&core, "bob@example.com", reply).await;
+        let shown = card(&core, id).await;
+        assert_eq!(shown.kind, InvitationKind::Reply);
+        assert!(shown.organized);
+        assert_eq!(shown.title.as_deref(), Some("Planning"));
+        assert_eq!(shown.location.as_deref(), Some("Room 9"));
+        assert_eq!((shown.starts_at, shown.ends_at), (start, Some(end)));
+    }
+
+    #[tokio::test]
+    async fn mail_from_before_kept_calendars_shows_the_event_it_left() {
+        let (core, _temp, _) = invited().await;
+        let id = core
+            .db
+            .write(|conn| {
+                Ok(
+                    db::testutil::seed_message(conn, "bob@example.com", "Invitation: Retro", false)
+                        .1,
+                )
+            })
+            .await
+            .unwrap();
+        // As invitations were stored before: the event, naming the message.
+        core.calendar_db
+            .write(move |conn| {
+                conn.execute(
+                    "INSERT INTO calendar_events
+                     (account_id, message_id, ical_uid, method, summary, organizer,
+                      attendees_json, sequence, starts_at, ends_at, all_day)
+                     VALUES (1, ?1, 'retro@example.com', 'REQUEST', 'Retro', 'bob@example.com',
+                             ?2, 3, 1800000000000, 1800003600000, 0)",
+                    rusqlite::params![
+                        id,
+                        r#"[{"email":"bob@example.com","name":"Bob","partstat":"ACCEPTED"},{"email":"me@test.dev","partstat":"NEEDS-ACTION"}]"#
+                    ],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let shown = card(&core, id).await;
+        assert_eq!(shown.kind, InvitationKind::Request);
+        assert_eq!(shown.title.as_deref(), Some("Retro"));
+        assert_eq!(
+            shown.organizer,
+            Some(Address {
+                name: Some("Bob".into()),
+                email: "bob@example.com".into()
+            })
+        );
+        assert_eq!(shown.invited_as.as_deref(), Some("me@test.dev"));
+        assert_eq!(
+            (shown.starts_at, shown.ends_at),
+            (1_800_000_000_000, Some(1_800_003_600_000))
+        );
+        assert!(!shown.out_of_date && shown.my_answer.is_none());
+
+        core.rsvp_event(answer(shown.event_id.unwrap(), "declined", None))
+            .await
+            .unwrap();
+        assert_eq!(card(&core, id).await.my_answer.as_deref(), Some("DECLINED"));
+    }
+
+    #[tokio::test]
+    async fn a_series_that_began_shows_its_next_occurrence() {
+        let (core, _temp, _) = invited().await;
+        let weekly = INVITATION
+            .replace("UID:review-1@example.com", "UID:weekly@example.com")
+            .replace("DTSTART:20261120T090000Z", "DTSTART:20200106T090000Z")
+            .replace(
+                "DTEND:20261120T100000Z",
+                "DTEND:20200106T100000Z\r\nRRULE:FREQ=WEEKLY",
+            );
+        let id = another(&core, "alice@example.com", &weekly).await;
+        let shown = card(&core, id).await;
+        let week = 7 * 24 * 60 * 60_000;
+        let first = 1_578_301_200_000; // 2020-01-06T09:00:00Z
+        assert!(shown.repeats && !shown.occurrence);
+        assert!(shown.starts_at > now_ms() - week && shown.starts_at <= now_ms() + week);
+        assert_eq!((shown.starts_at - first) % week, 0);
+        assert_eq!(shown.ends_at, Some(shown.starts_at + 60 * 60_000));
+    }
+
+    #[tokio::test]
+    async fn listed_invitations_are_the_users_to_answer() {
+        let (core, _temp, _) = invited().await;
+        // A calendar server's copy, whose guest list holds the answer.
+        core.calendar_db
+            .write(|conn| {
+                conn.execute(
+                    "INSERT INTO calendar_events
+                     (account_id, ical_uid, summary, organizer, attendees_json,
+                      starts_at, ends_at, all_day, is_local)
+                     VALUES (1, 'copy@example.com', 'Copy', 'dave@example.com', ?1,
+                             1800000000000, 1800003600000, 0, 0)",
+                    rusqlite::params![r#"[{"email":"me@test.dev","partstat":"ACCEPTED"}]"#],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let events = core.list_events(0, 2_000_000_000_000).await.unwrap();
+        let listed = |title: &str| {
+            events
+                .iter()
+                .find(|event| event.summary.as_deref() == Some(title))
+                .unwrap()
+                .clone()
+        };
+        let review = listed("Design review");
+        assert!(review.invited && review.rsvp_status.is_none());
+        let copy = listed("Copy");
+        assert!(copy.invited);
+        assert_eq!(copy.rsvp_status.as_deref(), Some("ACCEPTED"));
+
+        core.rsvp_event(answer(review.id, "tentative", None))
+            .await
+            .unwrap();
+        let review = listed_after(&core, "Design review").await;
+        assert_eq!(review.rsvp_status.as_deref(), Some("TENTATIVE"));
+    }
+
+    async fn listed_after(core: &Core, title: &str) -> CalendarEvent {
+        core.list_events(0, 2_000_000_000_000)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|event| event.summary.as_deref() == Some(title))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn only_invitations_the_user_accepted_remind() {
+        let (core, _temp, _) = invited().await;
+        core.calendar_db
+            .write(|conn| {
+                repo::calendar::insert_local(
+                    conn,
+                    1,
+                    None,
+                    "standup@flectar-mail",
+                    "Standup",
+                    None,
+                    None,
+                    None,
+                    "me@test.dev",
+                    &[],
+                    calendar::parse_dt("20261120T080000Z").unwrap().0,
+                    calendar::parse_dt("20261120T083000Z").unwrap().0,
+                    false,
+                )
+                .map(|_| ())
+            })
+            .await
+            .unwrap();
+        let listed = |title: &'static str| {
+            let core = &core;
+            async move {
+                core.list_events(1_795_000_000_000, 1_798_000_000_000)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|event| event.summary.as_deref() == Some(title))
+                    .unwrap()
+            }
+        };
+        assert!(reminds(&listed("Standup").await), "the user's own event");
+        let review = listed("Design review").await;
+        assert!(!reminds(&review), "an invitation waiting for an answer");
+        core.rsvp_event(answer(review.id, "tentative", None))
+            .await
+            .unwrap();
+        assert!(reminds(&listed("Design review").await));
+        core.rsvp_event(answer(review.id, "declined", None))
+            .await
+            .unwrap();
+        assert!(!reminds(&listed("Design review").await));
+
+        // One occurrence declined on its own stays silent while the
+        // accepted series reminds.
+        let id = another(&core, "alice@example.com", &weekly()).await;
+        let event = card(&core, id).await.event_id.unwrap();
+        core.rsvp_event(answer(event, "accepted", None))
+            .await
+            .unwrap();
+        let second = calendar::parse_dt("20261127T090000Z").unwrap().0;
+        core.rsvp_event(RsvpEventArgs {
+            occurrence: Some(second),
+            ..answer(event, "declined", None)
+        })
+        .await
+        .unwrap();
+        let occurrences: Vec<(i64, bool)> = core
+            .list_events(1_795_000_000_000, 1_798_000_000_000)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.summary.as_deref() == Some("Weekly sync"))
+            .map(|event| (event.recurrence_id.unwrap(), reminds(&event)))
+            .collect();
+        assert_eq!(occurrences.len(), 5);
+        for (original, reminding) in occurrences {
+            assert_eq!(reminding, original != second, "{original}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_invitation_follows_its_mail_in_and_out_of_spam() {
+        let (core, _temp, id) = invited().await;
+        assert_eq!(invitations(&core, id).await.len(), 1);
+
+        let moved = core.perform_action(to_spam(id)).await.unwrap();
+        assert!(
+            invitations(&core, id).await.is_empty(),
+            "spam leaves the calendar"
+        );
+        // Read again while in Spam, it stays out.
+        sync::ingest::store_calendar_events(
+            &core.sync_ctx(),
+            1,
+            vec![(id, vec![INVITATION.into()])],
+        )
+        .await
+        .unwrap();
+        assert!(invitations(&core, id).await.is_empty());
+
+        assert!(core.undo_actions(moved.action_ids).await.unwrap());
+        let back = invitations(&core, id).await;
+        assert_eq!(back.len(), 1, "back in the inbox, it's back");
+        assert_eq!(back[0].summary.as_deref(), Some("Design review"));
+    }
+
+    #[tokio::test]
+    async fn an_answered_invitation_stays_when_its_mail_goes_to_spam() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        core.calendar_db
+            .write(move |conn| repo::calendar::set_rsvp(conn, event, "ACCEPTED"))
+            .await
+            .unwrap();
+        core.perform_action(to_spam(id)).await.unwrap();
+        assert_eq!(invitations(&core, id).await.len(), 1);
+    }
+
+    /// The server's copy of the invitation's event, in a calendar of a
+    /// connection of `kind`.
+    async fn held_by(core: &Core, event: i64, kind: CalendarConnectionKind) {
+        core.calendar_db
+            .write(move |conn| {
+                conn.execute(
+                    "INSERT INTO calendar_connections (id, account_id, kind, base_url)
+                     VALUES (5, 1, ?1, 'https://dav.example.com/')",
+                    [kind.as_str()],
+                )?;
+                conn.execute(
+                    "INSERT INTO calendars (id, account_id, connection_id, url, enabled)
+                     VALUES (50, 1, 5, 'https://dav.example.com/cal/', 1)",
+                    [],
+                )?;
+                conn.execute(
+                    "UPDATE calendar_events
+                     SET calendar_id = 50, caldav_href = 'meeting-1', etag = 'e1'
+                     WHERE id = ?1",
+                    [event],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    async fn drafts(core: &Core) -> i64 {
+        core.db
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT COUNT(*) FROM messages WHERE is_draft = 1",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// Answers queued for a calendar server: their states and payloads.
+    async fn queued_answers(core: &Core) -> Vec<(String, serde_json::Value)> {
+        core.calendar_db
+            .read(|conn| {
+                let mut statement = conn.prepare(
+                    "SELECT state, payload FROM pending_actions
+                     WHERE kind = 'cal_answer' ORDER BY id",
+                )?;
+                let rows = statement
+                    .query_map([], |row| Ok((row.get(0)?, row.get::<_, String>(1)?)))?
+                    .collect::<rusqlite::Result<Vec<(String, String)>>>()?;
+                Ok(rows
+                    .into_iter()
+                    .map(|(state, payload)| (state, serde_json::from_str(&payload).unwrap()))
+                    .collect())
+            })
+            .await
+            .unwrap()
+    }
+
+    /// The calendars the answers emailed so far carry, oldest first.
+    async fn sent_answers(core: &Core) -> Vec<String> {
+        let drafts: Vec<i64> = core
+            .db
+            .read(|conn| {
+                let mut statement =
+                    conn.prepare("SELECT id FROM messages WHERE is_draft = 1 ORDER BY id")?;
+                Ok(statement
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<Vec<i64>>>()?)
+            })
+            .await
+            .unwrap();
+        let mut calendars = Vec::new();
+        for draft in drafts {
+            let raw = core.draft_message(draft).await.unwrap();
+            calendars.extend(crate::mime::parse_message(&raw).unwrap().calendar_parts);
+        }
+        calendars
+    }
+
+    /// A weekly series of five Friday meetings from 20 November 2026.
+    fn weekly() -> String {
+        INVITATION
+            .replace("UID:review-1@example.com", "UID:weekly-1@example.com")
+            .replace(
+                "DTEND:20261120T100000Z",
+                "DTEND:20261120T100000Z\r\nRRULE:FREQ=WEEKLY;COUNT=5",
+            )
+            .replace("SUMMARY:Design review", "SUMMARY:Weekly sync")
+    }
+
+    /// The second of them, 27 November, changed on its own to 13:00.
+    const MOVED: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:weekly-1@example.com\r\nRECURRENCE-ID:20261127T090000Z\r\nSEQUENCE:1\r\nDTSTAMP:20261102T080000Z\r\nDTSTART:20261127T130000Z\r\nDTEND:20261127T140000Z\r\nSUMMARY:Weekly sync, moved\r\nORGANIZER;CN=Alice:mailto:alice@example.com\r\nATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:me@test.dev\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    /// The weekly series' answers, by occurrence.
+    async fn weekly_answers(core: &Core) -> Vec<(i64, Option<String>)> {
+        core.list_events(1_795_000_000_000, 1_798_000_000_000)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|event| {
+                event
+                    .summary
+                    .as_deref()
+                    .is_some_and(|title| title.starts_with("Weekly sync"))
+            })
+            .map(|event| (event.recurrence_id.unwrap_or_default(), event.rsvp_status))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn one_occurrence_is_answered_and_the_series_keeps_its_answer() {
+        let (core, _temp, _) = invited().await;
+        let id = another(&core, "alice@example.com", &weekly()).await;
+        let event = card(&core, id).await.event_id.unwrap();
+        let second = calendar::parse_dt("20261127T090000Z").unwrap().0;
+        core.rsvp_event(RsvpEventArgs {
+            occurrence: Some(second),
+            ..answer(event, "declined", None)
+        })
+        .await
+        .unwrap();
+        let reply = sent_answers(&core).await.pop().unwrap();
+        for line in [
+            "RECURRENCE-ID:20261127T090000Z",
+            "ATTENDEE;PARTSTAT=DECLINED:mailto:me@test.dev",
+        ] {
+            assert!(reply.contains(line), "{line} in {reply}");
+        }
+        let answers = weekly_answers(&core).await;
+        assert_eq!(answers.len(), 5);
+        for (original, answer) in &answers {
+            let expected = (*original == second).then_some("DECLINED");
+            assert_eq!(answer.as_deref(), expected, "{original}");
+        }
+        assert_eq!(
+            card(&core, id).await.my_answer,
+            None,
+            "the series isn't answered"
+        );
+
+        // Answering the whole series answers that occurrence too.
+        core.rsvp_event(answer(event, "accepted", None))
+            .await
+            .unwrap();
+        let reply = sent_answers(&core).await.pop().unwrap();
+        assert!(!reply.contains("RECURRENCE-ID"), "{reply}");
+        assert!(
+            weekly_answers(&core)
+                .await
+                .iter()
+                .all(|(_, answer)| answer.as_deref() == Some("ACCEPTED"))
+        );
+        assert_eq!(card(&core, id).await.my_answer.as_deref(), Some("ACCEPTED"));
+    }
+
+    #[tokio::test]
+    async fn an_occurrence_changed_on_its_own_is_answered_for_itself() {
+        let (core, _temp, _) = invited().await;
+        let series = another(&core, "alice@example.com", &weekly()).await;
+        let update = another(&core, "alice@example.com", MOVED).await;
+        let shown = card(&core, update).await;
+        let second = calendar::parse_dt("20261127T090000Z").unwrap().0;
+        assert!(shown.occurrence);
+        assert_eq!(shown.recurrence_id, Some(second));
+        assert_eq!(
+            shown.starts_at,
+            calendar::parse_dt("20261127T130000Z").unwrap().0
+        );
+        core.rsvp_event(RsvpEventArgs {
+            occurrence: shown.recurrence_id,
+            ..answer(shown.event_id.unwrap(), "tentative", None)
+        })
+        .await
+        .unwrap();
+        let reply = sent_answers(&core).await.pop().unwrap();
+        for line in ["RECURRENCE-ID:20261127T090000Z", "DTSTART:20261127T130000Z"] {
+            assert!(reply.contains(line), "{line} in {reply}");
+        }
+        assert_eq!(
+            card(&core, update).await.my_answer.as_deref(),
+            Some("TENTATIVE")
+        );
+        assert_eq!(card(&core, series).await.my_answer, None);
+    }
+
+    #[tokio::test]
+    async fn an_invitation_to_one_occurrence_alone_is_answered_for_it() {
+        let (core, _temp, _) = invited().await;
+        let id = another(&core, "alice@example.com", MOVED).await;
+        let shown = card(&core, id).await;
+        assert!(shown.occurrence);
+        // An answer from the calendar, which doesn't say which occurrence,
+        // still answers only the one this event stands for.
+        core.rsvp_event(answer(shown.event_id.unwrap(), "accepted", None))
+            .await
+            .unwrap();
+        let reply = sent_answers(&core).await.pop().unwrap();
+        assert!(reply.contains("RECURRENCE-ID:20261127T090000Z"), "{reply}");
+        assert_eq!(card(&core, id).await.my_answer.as_deref(), Some("ACCEPTED"));
+    }
+
+    fn answer(event_id: i64, response: &str, comment: Option<&str>) -> RsvpEventArgs {
+        RsvpEventArgs {
+            event_id,
+            response: response.into(),
+            comment: comment.map(Into::into),
+            notify: true,
+            occurrence: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_invitation_in_exchange_is_answered_there_alone() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        held_by(&core, event, CalendarConnectionKind::Microsoft).await;
+
+        core.rsvp_event(answer(event, "tentative", Some("Maybe")))
+            .await
+            .unwrap();
+        assert_eq!(drafts(&core).await, 0, "Exchange tells the organizer");
+        assert_eq!(
+            queued_answers(&core).await,
+            [(
+                "pending".to_string(),
+                serde_json::json!({
+                    "eventId": event,
+                    "partstat": "TENTATIVE",
+                    "attendee": "me@test.dev",
+                    "comment": "Maybe",
+                    "notify": true
+                })
+            )]
+        );
+
+        // A change of mind replaces the answer still waiting.
+        core.rsvp_event(answer(event, "declined", None))
+            .await
+            .unwrap();
+        let states: Vec<String> = queued_answers(&core)
+            .await
+            .into_iter()
+            .map(|(state, _)| state)
+            .collect();
+        assert_eq!(states, ["cancelled", "pending"]);
+    }
+
+    #[tokio::test]
+    async fn an_invitation_whose_series_exchange_holds_is_answered_there() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        core.calendar_db
+            .write(|conn| {
+                conn.execute(
+                    "INSERT INTO calendar_connections (id, account_id, kind, base_url)
+                     VALUES (5, 1, 'microsoft', 'https://graph.microsoft.com/')",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO calendars (id, account_id, connection_id, url, enabled)
+                     VALUES (50, 1, 5, 'outlook-calendar', 1)",
+                    [],
+                )?;
+                let occurrence = calendar::IcsEvent {
+                    uid: "occ-1".into(),
+                    summary: Some("Design review".into()),
+                    starts_at_ms: 1_000,
+                    ends_at_ms: Some(2_000),
+                    ..Default::default()
+                };
+                repo::calendar::upsert_remote(conn, 1, 50, "occ-1", "", "", &occurrence)?;
+                repo::calendar::set_series_master(
+                    conn,
+                    50,
+                    "occ-1",
+                    "master-1",
+                    "review-1@example.com",
+                )
+            })
+            .await
+            .unwrap();
+
+        core.rsvp_event(answer(event, "accepted", None))
+            .await
+            .unwrap();
+        assert_eq!(drafts(&core).await, 0, "Exchange tells the organizer");
+        let queued = queued_answers(&core).await;
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].1["meeting"], "master-1");
+        assert_eq!(queued[0].1["calendarId"], 50);
+    }
+
+    #[tokio::test]
+    async fn a_caldav_server_that_does_not_schedule_keeps_the_answer_and_mail_tells() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        held_by(&core, event, CalendarConnectionKind::Generic).await;
+        core.rsvp_event(answer(event, "accepted", None))
+            .await
+            .unwrap();
+        assert_eq!(drafts(&core).await, 1);
+        assert_eq!(queued_answers(&core).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_answer_kept_quiet_sends_no_mail() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        let answered = core
+            .rsvp_event(RsvpEventArgs {
+                notify: false,
+                ..answer(event, "declined", None)
+            })
+            .await
+            .unwrap();
+        assert_eq!(answered.rsvp_status.as_deref(), Some("DECLINED"));
+        assert_eq!(drafts(&core).await, 0);
+        assert!(queued_answers(&core).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_answer_goes_to_the_organizer_as_an_imip_reply() {
+        let (core, _temp, id) = invited().await;
+        let event = invitations(&core, id).await[0].id;
+        let answered = core
+            .rsvp_event(answer(event, "accepted", Some("See you there")))
+            .await
+            .unwrap();
+        assert_eq!(answered.rsvp_status.as_deref(), Some("ACCEPTED"));
+
+        let (draft, thread, to) = core
+            .db
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT id, thread_id, to_json FROM messages WHERE is_draft = 1",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )?)
+            })
+            .await
+            .unwrap();
+        let invitation_thread = core
+            .db
+            .read(move |conn| Ok(repo::messages::get_row(conn, id)?.unwrap().thread_id))
+            .await
+            .unwrap();
+        assert_eq!(
+            Some(thread),
+            invitation_thread,
+            "the answer joins the invitation"
+        );
+        assert!(to.contains("alice@example.com"));
+
+        let (_, in_reply_to) = core
+            .db
+            .read(move |conn| repo::messages::draft_reply_headers(conn, draft))
+            .await
+            .unwrap();
+        assert_eq!(in_reply_to.as_deref(), Some("mid-1"));
+        let raw = core.draft_message(draft).await.unwrap();
+        let parsed = crate::mime::parse_message(&raw).unwrap();
+        assert_eq!(parsed.calendar_parts.len(), 1);
+        let reply = &parsed.calendar_parts[0];
+        let lines: Vec<&str> = reply
+            .lines()
+            .map(|line| line.trim_end_matches('\r'))
+            .collect();
+        for line in [
+            "METHOD:REPLY",
+            "UID:review-1@example.com",
+            "DTSTART:20261120T090000Z",
+            "ATTENDEE;PARTSTAT=ACCEPTED:mailto:me@test.dev",
+            "COMMENT:See you there",
+        ] {
+            assert!(lines.contains(&line), "{line} missing from:\n{reply}");
+        }
+        assert!(!reply.contains("carol@example.com"), "only my own answer");
+        assert!(
+            parsed
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("accepted your invitation to Design review")),
+            "{:?}",
+            parsed.text
+        );
+    }
+}
+
+#[cfg(test)]
+mod answer_route_tests {
+    use super::*;
+    use caldav::discovery::Scheduling;
+
+    fn calendar(kind: CalendarConnectionKind) -> Calendar {
+        Calendar {
+            id: 10,
+            account_id: 1,
+            connection_id: 1,
+            kind,
+            url: "https://dav.example.com/cal/me/work/".into(),
+            display_name: None,
+            color: None,
+            read_only: false,
+            enabled: true,
+            is_default: true,
+            last_synced_at: None,
+        }
+    }
+
+    fn scheduling(addresses: &[&str]) -> Scheduling {
+        Scheduling {
+            auto_schedule: true,
+            addresses: addresses.iter().map(|a| a.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn exactly_one_party_tells_the_organizer() {
+        let route = |held_by: Option<Calendar>, scheduling: Option<Scheduling>, client: bool| {
+            AnswerRoute::of(
+                held_by.as_ref(),
+                scheduling.as_ref(),
+                client,
+                "Me@Example.com",
+                None,
+                "ACCEPTED",
+            )
+        };
+        use CalendarConnectionKind::*;
+        assert_eq!(
+            route(Some(calendar(Microsoft)), None, false),
+            AnswerRoute::Server
+        );
+        assert_eq!(
+            route(Some(calendar(Google)), None, false),
+            AnswerRoute::Server
+        );
+        let scheduled = || Some(scheduling(&["me@example.com"]));
+        assert_eq!(
+            route(Some(calendar(Generic)), scheduled(), false),
+            AnswerRoute::Server
+        );
+        // A server that doesn't schedule, or not for this address, or whose
+        // copy is marked as answered by the client, stores the answer only.
+        for (scheduling, client) in [
+            (None, false),
+            (Some(Scheduling::default()), false),
+            (Some(scheduling(&["alias@example.com"])), false),
+            (scheduled(), true),
+        ] {
+            assert_eq!(
+                route(Some(calendar(Generic)), scheduling, client),
+                AnswerRoute::ServerAndMail
+            );
+        }
+        assert!(!AnswerRoute::Server.mails());
+        assert!(AnswerRoute::ServerAndMail.mails() && AnswerRoute::ServerAndMail.reaches_server());
+    }
+
+    #[test]
+    fn an_invitation_known_from_mail_is_kept_only_on_a_caldav_server() {
+        use CalendarConnectionKind::*;
+        let route = |default: Option<Calendar>, partstat: &str| {
+            AnswerRoute::of(
+                None,
+                None,
+                false,
+                "me@example.com",
+                default.as_ref(),
+                partstat,
+            )
+        };
+        assert_eq!(route(None, "ACCEPTED"), AnswerRoute::Mail { store: false });
+        assert_eq!(
+            route(Some(calendar(Generic)), "ACCEPTED"),
+            AnswerRoute::Mail { store: true }
+        );
+        assert_eq!(
+            route(Some(calendar(Generic)), "DECLINED"),
+            AnswerRoute::Mail { store: false },
+            "nothing to keep"
+        );
+        for provider in [Google, Microsoft] {
+            assert_eq!(
+                route(Some(calendar(provider)), "ACCEPTED"),
+                AnswerRoute::Mail { store: false }
+            );
+        }
+        let mut read_only = calendar(Generic);
+        read_only.read_only = true;
+        assert_eq!(
+            route(Some(read_only), "TENTATIVE"),
+            AnswerRoute::Mail { store: false }
+        );
     }
 }

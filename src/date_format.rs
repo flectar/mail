@@ -225,6 +225,17 @@ impl DateFormats {
     }
 
     /// A weekday name, counting from Monday.
+    /// A month's name on its own, or its abbreviation, such as on a date
+    /// tile.
+    pub(crate) fn month(&self, month0: u32, abbreviated: bool) -> &str {
+        let names = if abbreviated {
+            &self.abbreviated_months
+        } else {
+            &self.standalone_months
+        };
+        &names[month0 as usize % 12]
+    }
+
     pub(crate) fn weekday(&self, days_from_monday: u32, abbreviated: bool) -> &str {
         let names = if abbreviated {
             &self.abbreviated_weekdays

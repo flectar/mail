@@ -275,6 +275,115 @@ pub async fn delete_calendar_event(access_token: &str, event_id: &str) -> Result
     }
 }
 
+/// The Graph action that answers a meeting with an iCalendar participation
+/// status.
+fn answer_action(partstat: &str) -> Result<&'static str> {
+    match partstat {
+        "ACCEPTED" => Ok("accept"),
+        "TENTATIVE" => Ok("tentativelyAccept"),
+        "DECLINED" => Ok("decline"),
+        other => Err(CoreError::Other(format!("no meeting answer is {other}"))),
+    }
+}
+
+/// The body of an answer: whether Exchange tells the organizer, and the
+/// note that goes with it.
+fn answer_body(comment: Option<&str>, send_response: bool) -> serde_json::Value {
+    let mut body = serde_json::json!({ "sendResponse": send_response });
+    if let Some(comment) = comment.map(str::trim).filter(|comment| !comment.is_empty()) {
+        body["comment"] = comment.into();
+    }
+    body
+}
+
+/// Answer a meeting the user is invited to: `POST /me/events/{id}/accept`,
+/// `tentativelyAccept` or `decline`. With `send_response` Exchange sends the
+/// organizer the answer and its comment.
+pub async fn answer_event(
+    access_token: &str,
+    event_id: &str,
+    partstat: &str,
+    comment: Option<&str>,
+    send_response: bool,
+) -> Result<()> {
+    let action = answer_action(partstat)?;
+    let url = graph_resource_url(&["me", "events", event_id, action])?;
+    let body = answer_body(comment, send_response);
+    let (status, text) = request_raw(
+        reqwest::Method::POST,
+        access_token,
+        url.as_str(),
+        Some(&body),
+    )
+    .await?;
+    if (200..300).contains(&status) {
+        Ok(())
+    } else {
+        Err(CoreError::Network(format!(
+            "graph {action} failed ({status}): {}",
+            response_excerpt(&text)
+        )))
+    }
+}
+
+/// The id of one occurrence of the meeting series `series_id` in the user's
+/// calendar: the one whose original start is `original`, its RECURRENCE-ID.
+/// Exchange lists occurrences by when they take place, so the range asked
+/// for covers both the original start and `moved_to`, where an occurrence
+/// changed on its own takes place now.
+pub async fn occurrence_id(
+    access_token: &str,
+    series_id: &str,
+    original: i64,
+    moved_to: i64,
+    all_day: bool,
+) -> Result<Option<String>> {
+    const DAY_MS: i64 = 24 * 60 * 60_000;
+    let mut url = graph_resource_url(&["me", "events", series_id, "instances"])?;
+    url.query_pairs_mut()
+        .append_pair("startDateTime", &utc_time(original.min(moved_to) - DAY_MS))
+        .append_pair("endDateTime", &utc_time(original.max(moved_to) + DAY_MS))
+        .append_pair("$select", "id,originalStart,start")
+        .append_pair("$top", "100");
+    let page = request_json(reqwest::Method::GET, access_token, url.as_str(), None).await?;
+    Ok(occurrence_in(&page, original, all_day))
+}
+
+/// A time as Graph takes it in a range: RFC 3339, in UTC.
+fn utc_time(ms: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .map(|time| time.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+        .unwrap_or_default()
+}
+
+/// The occurrence in a page of `instances` whose original start is
+/// `original`. Exchange gives an all-day occurrence's original start as the
+/// start of its day where the event was made, up to 14 hours from the UTC
+/// day an all-day RECURRENCE-ID names, so the nearest one counts, and on a
+/// tie the one still on that day.
+fn occurrence_in(page: &serde_json::Value, original: i64, all_day: bool) -> Option<String> {
+    let tolerance = if all_day { 14 * 60 * 60_000 } else { 60_000 };
+    let day = utc_time(original).get(..10).map(str::to_owned);
+    page.get("value")?
+        .as_array()?
+        .iter()
+        .filter_map(|event| {
+            let start = event.get("originalStart")?.as_str()?;
+            let start = chrono::DateTime::parse_from_rfc3339(start)
+                .ok()?
+                .timestamp_millis();
+            let distance = (start - original).abs();
+            let on_the_day = event
+                .pointer("/start/dateTime")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|time| Some(time.get(..10).unwrap_or_default()) == day.as_deref());
+            let id = event.get("id")?.as_str()?;
+            (distance < tolerance).then(|| (distance, !on_the_day, id.to_owned()))
+        })
+        .min()
+        .map(|(_, _, id)| id)
+}
+
 /// One calendar from `GET /me/calendars`.
 pub struct GraphCalendar {
     pub id: String,
@@ -547,6 +656,65 @@ fn graph_datetime(ms: i64, all_day: bool) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ms(time: &str) -> i64 {
+        chrono::DateTime::parse_from_rfc3339(time)
+            .unwrap()
+            .timestamp_millis()
+    }
+
+    #[test]
+    fn one_occurrence_is_found_by_its_original_start() {
+        let page = serde_json::json!({ "value": [
+            { "id": "occ-1", "originalStart": "2026-11-16T09:00:00Z",
+              "start": { "dateTime": "2026-11-16T10:00:00.0000000", "timeZone": "Romance Standard Time" } },
+            { "id": "occ-2", "originalStart": "2026-11-23T09:00:00Z",
+              "start": { "dateTime": "2026-11-24T10:00:00.0000000", "timeZone": "Romance Standard Time" } }
+        ]});
+        assert_eq!(
+            occurrence_in(&page, ms("2026-11-23T09:00:00Z"), false).as_deref(),
+            Some("occ-2")
+        );
+        assert_eq!(
+            occurrence_in(&page, ms("2026-11-23T09:30:00Z"), false),
+            None
+        );
+        // All day, made twelve hours ahead of UTC: each day starts at noon
+        // UTC the day before, as near the next day's date as its own.
+        let days = serde_json::json!({ "value": [
+            { "id": "day-1", "originalStart": "2026-11-15T12:00:00Z",
+              "start": { "dateTime": "2026-11-16T00:00:00.0000000", "timeZone": "New Zealand Standard Time" } },
+            { "id": "day-2", "originalStart": "2026-11-16T12:00:00Z",
+              "start": { "dateTime": "2026-11-17T00:00:00.0000000", "timeZone": "New Zealand Standard Time" } }
+        ]});
+        assert_eq!(
+            occurrence_in(&days, ms("2026-11-16T00:00:00Z"), true).as_deref(),
+            Some("day-1")
+        );
+        assert_eq!(utc_time(ms("2026-11-23T09:00:00Z")), "2026-11-23T09:00:00Z");
+    }
+
+    #[test]
+    fn a_meeting_is_answered_with_its_own_graph_action() {
+        assert_eq!(answer_action("ACCEPTED").unwrap(), "accept");
+        assert_eq!(answer_action("TENTATIVE").unwrap(), "tentativelyAccept");
+        assert_eq!(answer_action("DECLINED").unwrap(), "decline");
+        assert!(answer_action("NEEDS-ACTION").is_err());
+        assert_eq!(
+            answer_body(Some(" Running late "), true),
+            serde_json::json!({ "sendResponse": true, "comment": "Running late" })
+        );
+        assert_eq!(
+            answer_body(Some("  "), false),
+            serde_json::json!({ "sendResponse": false })
+        );
+        assert_eq!(
+            graph_resource_url(&["me", "events", "AAMk/AD1=", "accept"])
+                .unwrap()
+                .as_str(),
+            "https://graph.microsoft.com/v1.0/me/events/AAMk%2FAD1=/accept"
+        );
+    }
 
     #[test]
     fn parses_delta_event_fields() {

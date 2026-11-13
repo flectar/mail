@@ -62,6 +62,7 @@ async fn saved_draft_can_be_reloaded_without_losing_editable_fields() {
         .save_draft(args(Some(DraftAttachmentIn {
             file_path: source.to_string_lossy().into_owned(),
             filename: "notes.txt".into(),
+            mime_type: None,
         })))
         .await
         .unwrap();

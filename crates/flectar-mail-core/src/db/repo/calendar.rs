@@ -1,4 +1,5 @@
 use crate::calendar::IcsEvent;
+use crate::db::repo::sender_identities::OwnAddresses;
 use crate::error::Result;
 use crate::models::{CalendarEvent, EventAttendee, UpdateEventArgs};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -55,6 +56,8 @@ fn from_row(row: &Row) -> rusqlite::Result<CalendarEvent> {
         all_day: row.get::<_, i64>("all_day")? != 0,
         status: row.get("status")?,
         method: row.get("method")?,
+        invited: false,
+        recurrence_id: None,
     })
 }
 
@@ -93,6 +96,7 @@ fn attendees_json(ev: &IcsEvent) -> Result<Option<String>> {
             email: a.email.clone(),
             name: a.name.clone(),
             partstat: a.partstat.clone(),
+            answered_at: None,
         })
         .collect();
     Ok(Some(serde_json::to_string(&list)?))
@@ -123,66 +127,118 @@ fn preferred_mail_row(conn: &Connection, account_id: i64, uid: &str) -> Result<O
     .map_err(Into::into)
 }
 
-/// Upsert by iCal UID (mail-invite path). CANCEL marks the stored event
-/// cancelled - or stores a cancelled tombstone row when the UID is unknown,
-/// because archive backfill and body re-decode parse messages out of send
-/// order and the matching REQUEST may only arrive later. REQUEST replaces the
-/// details only when its SEQUENCE is not older than the stored one, and never
-/// revives a CANCELLED event without a strictly newer SEQUENCE. Our own RSVP
-/// state, the is_local flag, and CalDAV sync bookkeeping survive updates.
-pub fn upsert(conn: &Connection, account_id: i64, message_id: i64, ev: &IcsEvent) -> Result<()> {
-    if ev.method.as_deref() == Some("CANCEL") {
-        if let Some(id) = preferred_mail_row(conn, account_id, &ev.uid)? {
-            // A stale cancellation must not override a newer REQUEST.
-            conn.execute(
-                "UPDATE calendar_events
-                 SET status = 'CANCELLED', method = 'CANCEL', sequence = ?2
-                 WHERE id = ?1 AND ?2 >= sequence",
-                params![id, ev.sequence],
-            )?;
-        } else {
-            conn.execute(
-                "INSERT INTO calendar_events
-                    (account_id, message_id, ical_uid, method, summary, location, organizer,
-                     description, attendees_json, join_url, sequence, rrule, tzid,
-                     starts_at, ends_at, all_day, status)
-                 VALUES (?1,?2,?3,'CANCEL',?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,'CANCELLED')",
-                params![
-                    account_id,
-                    message_id,
-                    ev.uid,
-                    ev.summary,
-                    ev.location,
-                    ev.organizer,
-                    ev.description,
-                    attendees_json(ev)?,
-                    ev.join_url,
-                    ev.sequence,
-                    ev.rrule,
-                    ev.tzid,
-                    ev.starts_at_ms,
-                    ev.ends_at_ms,
-                    ev.all_day as i64,
-                ],
-            )?;
+/// Apply the iTIP message a mail carries (its text/calendar part) to the
+/// account's calendar, by the rules of RFC 5546:
+///
+/// - A REQUEST, a PUBLISH or a calendar without METHOD describes the event.
+///   It replaces the stored details when it is newer (SEQUENCE, then
+///   DTSTAMP), and never revives a CANCELLED event without a strictly newer
+///   SEQUENCE. One describing only some occurrences (RECURRENCE-ID) changes
+///   just those.
+/// - A CANCEL from the event's organizer cancels it, or only the occurrences
+///   it names. One for an event not seen yet is kept as a cancelled
+///   tombstone, because archive backfill and body re-decode parse messages
+///   out of send order and the REQUEST may only arrive later.
+/// - A REPLY is an attendee's answer to an event the user organizes. It
+///   updates that attendee's status, and never creates or changes the event.
+/// - COUNTER, REFRESH and DECLINECOUNTER are the organizer's to act on.
+/// - An invitation the user sent, such as its copy in Sent, changes nothing:
+///   their event is the one they created.
+///
+/// Our own RSVP state, the is_local flag, and CalDAV sync bookkeeping survive
+/// updates. `own` holds the account's addresses.
+pub fn apply_invitation(
+    conn: &Connection,
+    account_id: i64,
+    message_id: i64,
+    calendar: &str,
+    own: &OwnAddresses,
+) -> Result<()> {
+    let events = crate::calendar::parse_ics(calendar);
+    let mut uids: Vec<&str> = Vec::new();
+    for event in &events {
+        if !uids.contains(&event.uid.as_str()) {
+            uids.push(&event.uid);
         }
+    }
+    for uid in uids {
+        let versions: Vec<&IcsEvent> = events.iter().filter(|event| event.uid == uid).collect();
+        let invitation = Invitation {
+            account_id,
+            message_id,
+            calendar,
+            uid,
+            versions: &versions,
+        };
+        match versions[0].method.as_deref() {
+            Some("REPLY") => {
+                for reply in &versions {
+                    apply_reply(conn, account_id, reply, own)?;
+                }
+            }
+            Some("COUNTER" | "REFRESH" | "DECLINECOUNTER") => {}
+            Some("CANCEL") => apply_cancel(conn, &invitation)?,
+            _ => {
+                apply_request(conn, &invitation, own)?;
+                join_held_series(conn, account_id, uid)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// One event of an iTIP message, with every version of it the message
+/// carries: the whole event, or some of its occurrences.
+struct Invitation<'a> {
+    account_id: i64,
+    message_id: i64,
+    calendar: &'a str,
+    uid: &'a str,
+    versions: &'a [&'a IcsEvent],
+}
+
+impl Invitation<'_> {
+    fn whole(&self) -> Option<&IcsEvent> {
+        self.versions
+            .iter()
+            .find(|event| event.recurrence_id_ms.is_none())
+            .copied()
+    }
+}
+
+fn apply_request(conn: &Connection, invitation: &Invitation, own: &OwnAddresses) -> Result<()> {
+    let organized_here = invitation.versions.iter().any(|event| {
+        event
+            .organizer
+            .as_deref()
+            .is_some_and(|organizer| own.contains(organizer))
+    });
+    if organized_here {
         return Ok(());
     }
-    let existing = preferred_mail_row(conn, account_id, &ev.uid)?;
+    let raw = crate::calendar::stored_form(invitation.calendar);
+    let existing = preferred_mail_row(conn, invitation.account_id, invitation.uid)?;
+    let Some(ev) = invitation.whole() else {
+        return apply_occurrences(conn, invitation, &raw, existing, false);
+    };
     let attendee_json = attendees_json(ev)?;
     if let Some(id) = existing {
+        // A provider's copy keeps its server's iCalendar text.
         conn.execute(
             "UPDATE calendar_events SET
                 message_id = ?2, method = ?3, summary = ?4, location = ?5,
                 organizer = ?6, description = ?7, attendees_json = ?8,
                 join_url = ?9, sequence = ?10, rrule = ?11, tzid = ?12,
-                starts_at = ?13, ends_at = ?14, all_day = ?15, status = ?16
+                starts_at = ?13, ends_at = ?14, all_day = ?15, status = ?16,
+                dtstamp = ?17,
+                ical_raw = CASE WHEN calendar_id IS NULL THEN ?18 ELSE ical_raw END
              WHERE id = ?1 AND dirty = 0
                AND (?10 > sequence
-                    OR (?10 = sequence AND COALESCE(status, '') != 'CANCELLED'))",
+                    OR (?10 = sequence AND COALESCE(status, '') != 'CANCELLED'
+                        AND (?17 IS NULL OR dtstamp IS NULL OR ?17 >= dtstamp)))",
             params![
                 id,
-                message_id,
+                invitation.message_id,
                 ev.method,
                 ev.summary,
                 ev.location,
@@ -197,35 +253,317 @@ pub fn upsert(conn: &Connection, account_id: i64, message_id: i64, ev: &IcsEvent
                 ev.ends_at_ms,
                 ev.all_day as i64,
                 ev.status,
+                ev.dtstamp_ms,
+                raw,
             ],
         )?;
     } else {
-        conn.execute(
-            "INSERT INTO calendar_events
-                (account_id, message_id, ical_uid, method, summary, location, organizer,
-                 description, attendees_json, join_url, sequence, rrule, tzid,
-                 starts_at, ends_at, all_day, status)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
-            params![
-                account_id,
-                message_id,
-                ev.uid,
-                ev.method,
-                ev.summary,
-                ev.location,
-                ev.organizer,
-                ev.description,
-                attendee_json,
-                ev.join_url,
-                ev.sequence,
-                ev.rrule,
-                ev.tzid,
-                ev.starts_at_ms,
-                ev.ends_at_ms,
-                ev.all_day as i64,
-                ev.status,
-            ],
+        insert_invitation(conn, invitation, ev, ev.sequence, ev.dtstamp_ms, &raw)?;
+    }
+    Ok(())
+}
+
+/// Store a mail invitation the calendar doesn't have yet.
+fn insert_invitation(
+    conn: &Connection,
+    invitation: &Invitation,
+    ev: &IcsEvent,
+    sequence: i64,
+    dtstamp: Option<i64>,
+    raw: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO calendar_events
+            (account_id, message_id, ical_uid, method, summary, location, organizer,
+             description, attendees_json, join_url, sequence, rrule, tzid,
+             starts_at, ends_at, all_day, status, dtstamp, ical_raw)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
+        params![
+            invitation.account_id,
+            invitation.message_id,
+            invitation.uid,
+            ev.method,
+            ev.summary,
+            ev.location,
+            ev.organizer,
+            ev.description,
+            attendees_json(ev)?,
+            ev.join_url,
+            sequence,
+            ev.rrule,
+            ev.tzid,
+            ev.starts_at_ms,
+            ev.ends_at_ms,
+            ev.all_day as i64,
+            ev.status,
+            dtstamp,
+            raw,
+        ],
+    )?;
+    Ok(())
+}
+
+fn apply_cancel(conn: &Connection, invitation: &Invitation) -> Result<()> {
+    let existing = preferred_mail_row(conn, invitation.account_id, invitation.uid)?;
+    if let Some(id) = existing {
+        // Only the event's organizer cancels it (RFC 6047 §3).
+        let stored: Option<String> = conn.query_row(
+            "SELECT organizer FROM calendar_events WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
         )?;
+        let sender = invitation
+            .versions
+            .iter()
+            .find_map(|event| event.organizer.as_deref());
+        if let (Some(stored), Some(sender)) = (stored.as_deref(), sender)
+            && !stored.eq_ignore_ascii_case(sender)
+        {
+            return Ok(());
+        }
+    }
+    let Some(ev) = invitation.whole() else {
+        let raw = crate::calendar::stored_form(invitation.calendar);
+        return apply_occurrences(conn, invitation, &raw, existing, true);
+    };
+    match existing {
+        // A stale cancellation must not override a newer REQUEST.
+        Some(id) => {
+            conn.execute(
+                "UPDATE calendar_events
+                 SET status = 'CANCELLED', method = 'CANCEL', sequence = ?2,
+                     dtstamp = COALESCE(?3, dtstamp)
+                 WHERE id = ?1
+                   AND (?2 > sequence
+                        OR (?2 = sequence
+                            AND (?3 IS NULL OR dtstamp IS NULL OR ?3 >= dtstamp)))",
+                params![id, ev.sequence, ev.dtstamp_ms],
+            )?;
+        }
+        None if ev.starts_at_ms != 0 => {
+            let mut tombstone = ev.clone();
+            tombstone.method = Some("CANCEL".into());
+            tombstone.status = Some("CANCELLED".into());
+            insert_invitation(
+                conn,
+                invitation,
+                &tombstone,
+                ev.sequence,
+                ev.dtstamp_ms,
+                &crate::calendar::stored_form(invitation.calendar),
+            )?;
+        }
+        None => {}
+    }
+    Ok(())
+}
+
+/// What applying occurrences needs to know of the stored event.
+struct StoredInvitation {
+    calendar_id: Option<i64>,
+    dirty: bool,
+    ical_raw: Option<String>,
+    rrule: Option<String>,
+    starts_at: i64,
+}
+
+/// Occurrences of an event changed or cancelled on their own (RECURRENCE-ID).
+/// They are merged into the stored copy of a mail invitation, so the series
+/// keeps its other occurrences. A provider's copy is left to its server.
+/// Without any stored copy, an invitation to occurrences alone shows the
+/// first of them as an event of its own, until one for the whole event.
+fn apply_occurrences(
+    conn: &Connection,
+    invitation: &Invitation,
+    raw: &str,
+    existing: Option<i64>,
+    cancel: bool,
+) -> Result<()> {
+    let Some(id) = existing else {
+        let first = invitation
+            .versions
+            .iter()
+            .filter(|event| event.starts_at_ms != 0)
+            .min_by_key(|event| event.starts_at_ms);
+        if let Some(first) = first
+            && !cancel
+        {
+            let mut single = (*first).clone();
+            single.rrule = None;
+            // Any version of the whole event replaces this stand-in.
+            insert_invitation(conn, invitation, &single, 0, None, raw)?;
+        }
+        return Ok(());
+    };
+    let stored = conn
+        .query_row(
+            "SELECT calendar_id, dirty, ical_raw, rrule, starts_at
+             FROM calendar_events WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(StoredInvitation {
+                    calendar_id: row.get(0)?,
+                    dirty: row.get::<_, i64>(1)? != 0,
+                    ical_raw: row.get(2)?,
+                    rrule: row.get(3)?,
+                    starts_at: row.get(4)?,
+                })
+            },
+        )
+        .optional()?;
+    let Some(StoredInvitation {
+        calendar_id,
+        dirty,
+        ical_raw: stored,
+        rrule,
+        starts_at,
+    }) = stored
+    else {
+        return Ok(());
+    };
+    if calendar_id.is_some() || dirty {
+        return Ok(());
+    }
+    if rrule.is_none() {
+        // An event that doesn't repeat is its own only occurrence, named by
+        // its start, or by the occurrence a stand-in stands for.
+        let stand_in = stored
+            .as_deref()
+            .map(crate::calendar::parse_ics)
+            .unwrap_or_default()
+            .into_iter()
+            .find_map(|event| event.recurrence_id_ms);
+        let names_it = |event: &&&IcsEvent| {
+            event.recurrence_id_ms.is_some_and(|occurrence| {
+                [Some(starts_at), stand_in]
+                    .into_iter()
+                    .flatten()
+                    .any(|start| (occurrence - start).abs() < 60_000)
+            })
+        };
+        let Some(version) = invitation.versions.iter().find(names_it) else {
+            return Ok(());
+        };
+        if cancel {
+            conn.execute(
+                "UPDATE calendar_events SET status = 'CANCELLED', method = 'CANCEL'
+                 WHERE id = ?1",
+                params![id],
+            )?;
+        } else if stand_in.is_some()
+            && let Some(merged) = crate::calendar::merge_occurrences(
+                stored.as_deref().unwrap_or_default(),
+                raw,
+                invitation.uid,
+                false,
+            )
+        {
+            // A newer version of the one occurrence the invitation is for.
+            conn.execute(
+                "UPDATE calendar_events SET
+                    message_id = ?2, summary = ?3, location = ?4, organizer = ?5,
+                    description = ?6, attendees_json = ?7, join_url = ?8,
+                    starts_at = ?9, ends_at = ?10, all_day = ?11, status = ?12,
+                    ical_raw = ?13
+                 WHERE id = ?1",
+                params![
+                    id,
+                    invitation.message_id,
+                    version.summary,
+                    version.location,
+                    version.organizer,
+                    version.description,
+                    attendees_json(version)?,
+                    version.join_url,
+                    version.starts_at_ms,
+                    version.ends_at_ms,
+                    version.all_day as i64,
+                    version.status,
+                    merged,
+                ],
+            )?;
+        }
+        return Ok(());
+    }
+    let merged = crate::calendar::merge_occurrences(
+        stored.as_deref().unwrap_or_default(),
+        raw,
+        invitation.uid,
+        cancel,
+    );
+    if let Some(merged) = merged {
+        conn.execute(
+            "UPDATE calendar_events SET ical_raw = ?2, message_id = ?3 WHERE id = ?1",
+            params![id, merged, invitation.message_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// An attendee's answer to an event the user organizes: their status in it
+/// follows the newest answer heard from them, so an older one read later
+/// can't undo it (RFC 5546 §2.1.5). Answers to an earlier version of the
+/// event, or for single occurrences, change nothing.
+fn apply_reply(
+    conn: &Connection,
+    account_id: i64,
+    reply: &IcsEvent,
+    own: &OwnAddresses,
+) -> Result<()> {
+    if reply.recurrence_id_ms.is_some() {
+        return Ok(());
+    }
+    let mut statement = conn.prepare(
+        "SELECT id, sequence, attendees_json, organizer, is_local
+         FROM calendar_events
+         WHERE account_id = ?1 AND ical_uid = ?2 AND deleted = 0",
+    )?;
+    let rows = statement
+        .query_map(params![account_id, reply.uid], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, i64>(4)? != 0,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    for (id, sequence, attendees, organizer, is_local) in rows {
+        let organizes = is_local || organizer.as_deref().is_some_and(|o| own.contains(o));
+        let Some(attendees) = attendees.filter(|_| organizes && reply.sequence >= sequence) else {
+            continue;
+        };
+        let mut attendees: Vec<EventAttendee> = serde_json::from_str(&attendees)?;
+        let mut changed = false;
+        for answer in &reply.attendees {
+            let Some(partstat) = answer.partstat.as_deref() else {
+                continue;
+            };
+            let Some(entry) = attendees
+                .iter_mut()
+                .find(|entry| entry.email.eq_ignore_ascii_case(&answer.email))
+            else {
+                continue;
+            };
+            let newer = match (reply.dtstamp_ms, entry.answered_at) {
+                (Some(new), Some(old)) => new >= old,
+                (None, Some(_)) => false,
+                (_, None) => true,
+            };
+            if newer {
+                entry.partstat = Some(partstat.to_string());
+                entry.answered_at = reply.dtstamp_ms.or(entry.answered_at);
+                changed = true;
+            }
+        }
+        if changed {
+            conn.execute(
+                "UPDATE calendar_events SET attendees_json = ?2 WHERE id = ?1",
+                params![id, attendees_to_json(&attendees)?],
+            )?;
+        }
     }
     Ok(())
 }
@@ -528,16 +866,70 @@ pub fn delete_by_href(conn: &Connection, calendar_id: i64, href: &str) -> Result
 
 /// Record which (unstored) series master an occurrence/exception row belongs
 /// to, so a later series-wide deletion can find it via `delete_by_href`.
+/// Record that the occurrence `href` belongs to Exchange's series
+/// `series_master_id`, known by `series_uid`, the UID its invitation
+/// carried. An invitation to that series known from mail is then the
+/// series Exchange holds: it is answered there and shown from there.
 pub fn set_series_master(
     conn: &Connection,
     calendar_id: i64,
     href: &str,
     series_master_id: &str,
+    series_uid: &str,
 ) -> Result<()> {
     conn.execute(
-        "UPDATE calendar_events SET series_master_id = ?3
+        "UPDATE calendar_events SET series_master_id = ?3, series_uid = ?4
          WHERE calendar_id = ?1 AND caldav_href = ?2",
-        params![calendar_id, href, series_master_id],
+        params![calendar_id, href, series_master_id, series_uid],
+    )?;
+    conn.execute(
+        "UPDATE calendar_events SET series_master_id = ?3
+         WHERE calendar_id IS NULL AND message_id IS NOT NULL AND ical_uid = ?2
+           AND account_id = (SELECT account_id FROM calendars WHERE id = ?1)",
+        params![calendar_id, series_uid, series_master_id],
+    )?;
+    Ok(())
+}
+
+/// Tie an invitation known from mail to the series Exchange already holds
+/// for it, if any (see [`set_series_master`]).
+fn join_held_series(conn: &Connection, account_id: i64, uid: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE calendar_events SET series_master_id = (
+             SELECT held.series_master_id FROM calendar_events held
+             WHERE held.account_id = ?1 AND held.series_uid = ?2
+               AND held.calendar_id IS NOT NULL AND held.series_master_id IS NOT NULL
+             LIMIT 1)
+         WHERE account_id = ?1 AND ical_uid = ?2 AND calendar_id IS NULL
+           AND message_id IS NOT NULL AND series_master_id IS NULL",
+        params![account_id, uid],
+    )?;
+    Ok(())
+}
+
+/// For an invitation known from mail whose series Exchange holds: that
+/// series' Graph id, and a calendar holding its occurrences.
+pub fn held_series(conn: &Connection, event_id: i64) -> Result<Option<(String, i64)>> {
+    Ok(conn
+        .query_row(
+            "SELECT mail.series_master_id, held.calendar_id
+             FROM calendar_events mail
+             JOIN calendar_events held ON held.series_master_id = mail.series_master_id
+                  AND held.account_id = mail.account_id AND held.calendar_id IS NOT NULL
+             WHERE mail.id = ?1 AND mail.calendar_id IS NULL
+             LIMIT 1",
+            params![event_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
+}
+
+/// Keep the event's iCalendar text as it now reads, such as with the user's
+/// answer in it. The event isn't sent anywhere for this.
+pub fn set_ical_raw(conn: &Connection, event_id: i64, raw: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE calendar_events SET ical_raw = ?2 WHERE id = ?1",
+        params![event_id, raw],
     )?;
     Ok(())
 }
@@ -557,6 +949,120 @@ pub fn get(conn: &Connection, event_id: i64) -> Result<Option<CalendarEvent>> {
     Ok(rows.next().transpose()?)
 }
 
+/// Take out of the calendar the invitation a message brought, while it is
+/// still unanswered and only known from mail. Returns how many rows went.
+pub fn forget_unanswered_invitation(conn: &Connection, message_id: i64) -> Result<usize> {
+    Ok(conn.execute(
+        "DELETE FROM calendar_events
+         WHERE message_id = ?1 AND calendar_id IS NULL AND is_local = 0 AND dirty = 0
+           AND COALESCE(rsvp_status, 'NEEDS-ACTION') = 'NEEDS-ACTION'",
+        params![message_id],
+    )?)
+}
+
+/// The event's iCalendar object as last received: a calendar server's copy,
+/// or the invitation that brought it by mail.
+pub fn ical_raw(conn: &Connection, event_id: i64) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT ical_raw FROM calendar_events WHERE id = ?1",
+            params![event_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// The user's calendar's version of an event: the row an invitation for it
+/// updates, with what tells two versions apart.
+#[derive(Debug, Clone)]
+pub struct CalendarVersion {
+    pub event: CalendarEvent,
+    pub sequence: i64,
+    pub dtstamp: Option<i64>,
+    pub deleted: bool,
+    /// Its iCalendar text, with any occurrences changed or answered on their
+    /// own.
+    pub ical_raw: Option<String>,
+}
+
+/// The calendar's version of `uid` in the account, if it has one.
+pub fn version(conn: &Connection, account_id: i64, uid: &str) -> Result<Option<CalendarVersion>> {
+    let Some(id) = preferred_mail_row(conn, account_id, uid)? else {
+        return Ok(None);
+    };
+    let Some(event) = get(conn, id)? else {
+        return Ok(None);
+    };
+    let (sequence, dtstamp, deleted, ical_raw): (i64, Option<i64>, i64, Option<String>) = conn
+        .query_row(
+            "SELECT sequence, dtstamp, deleted, ical_raw FROM calendar_events WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+    Ok(Some(CalendarVersion {
+        event,
+        sequence,
+        dtstamp,
+        deleted: deleted != 0,
+        ical_raw,
+    }))
+}
+
+/// The rows that are the meeting `uid` in the account: its own, and the
+/// occurrences Exchange keeps of it (see [`set_series_master`]).
+pub fn meeting_rows(conn: &Connection, account_id: i64, uid: &str) -> Result<Vec<i64>> {
+    let mut statement = conn.prepare(
+        "SELECT id FROM calendar_events
+         WHERE account_id = ?1 AND (ical_uid = ?2 OR series_uid = ?2)",
+    )?;
+    let rows = statement
+        .query_map(params![account_id, uid], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Keep the calendar a message carries, for the card shown above it.
+pub fn keep_message_calendar(
+    conn: &Connection,
+    account_id: i64,
+    message_id: i64,
+    calendar: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO message_calendars (message_id, account_id, calendar) VALUES (?1, ?2, ?3)
+         ON CONFLICT(message_id) DO UPDATE SET account_id = ?2, calendar = ?3",
+        params![message_id, account_id, calendar],
+    )?;
+    Ok(())
+}
+
+/// The calendar a message carries, if it carried one.
+pub fn message_calendar(conn: &Connection, message_id: i64) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT calendar FROM message_calendars WHERE message_id = ?1",
+            params![message_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// The UID of the event a message's invitation left in the calendar. Mail
+/// from before messages kept their calendars has only this: the event names
+/// the last message that changed it.
+pub fn message_meeting(conn: &Connection, message_id: i64) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT ical_uid FROM calendar_events
+             WHERE message_id = ?1 AND deleted = 0
+             ORDER BY id LIMIT 1",
+            params![message_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
 /// The stored iCal UID + sequence (needed to build an RSVP reply).
 pub fn uid_and_sequence(conn: &Connection, event_id: i64) -> Result<Option<(String, i64)>> {
     let mut stmt = conn.prepare("SELECT ical_uid, sequence FROM calendar_events WHERE id = ?1")?;
@@ -570,6 +1076,9 @@ pub fn list_range(conn: &Connection, start_ms: i64, end_ms: i64) -> Result<Vec<C
            AND (calendar_id IS NULL OR EXISTS (
                 SELECT 1 FROM calendars c WHERE c.id = calendar_events.calendar_id AND c.enabled = 1
            ))
+           -- An invitation known from mail whose series Exchange holds shows
+           -- from there.
+           AND (calendar_id IS NOT NULL OR message_id IS NULL OR series_master_id IS NULL)
          ORDER BY starts_at ASC, id ASC"
     ))?;
     let rows = stmt
@@ -586,6 +1095,9 @@ pub fn recurring_masters(conn: &Connection, end_ms: i64) -> Result<Vec<SyncRow>>
            AND (calendar_id IS NULL OR EXISTS (
                 SELECT 1 FROM calendars c WHERE c.id = calendar_events.calendar_id AND c.enabled = 1
            ))
+           -- An invitation known from mail whose series Exchange holds shows
+           -- from there.
+           AND (calendar_id IS NOT NULL OR message_id IS NULL OR series_master_id IS NULL)
          ORDER BY starts_at ASC, id ASC"
     ))?;
     let rows = stmt
@@ -594,7 +1106,10 @@ pub fn recurring_masters(conn: &Connection, end_ms: i64) -> Result<Vec<SyncRow>>
     Ok(rows)
 }
 
-/// Events attached to one message (for the invite card in the thread view).
+/// The events a message's invitation left in the calendar, while they still
+/// name it. The card above a message reads the message's own calendar
+/// instead ([`message_calendar`]), so only tests look events up this way.
+#[cfg(test)]
 pub fn for_message(conn: &Connection, message_id: i64) -> Result<Vec<CalendarEvent>> {
     let mut stmt = conn.prepare(event_select!(
         "WHERE message_id = ?1 AND deleted = 0 ORDER BY starts_at"
@@ -617,9 +1132,16 @@ pub fn upcoming_for_notify(
         "WHERE deleted = 0 AND all_day = 0
            AND COALESCE(status,'') != 'CANCELLED'
            AND COALESCE(rsvp_status,'') != 'DECLINED'
+           -- An invitation known only from mail reminds once answered; the
+           -- caller judges those a calendar server holds.
+           AND NOT (message_id IS NOT NULL AND calendar_id IS NULL AND is_local = 0
+                    AND rsvp_status IS NULL)
            AND (calendar_id IS NULL OR EXISTS (
                 SELECT 1 FROM calendars c WHERE c.id = calendar_events.calendar_id AND c.enabled = 1
            ))
+           -- An invitation known from mail whose series Exchange holds shows
+           -- from there.
+           AND (calendar_id IS NOT NULL OR message_id IS NULL OR series_master_id IS NULL)
            AND starts_at > ?1 AND starts_at <= ?1 + ?2
            AND (notified_at IS NULL OR notified_at < starts_at)
          ORDER BY starts_at LIMIT 20"
@@ -645,6 +1167,68 @@ mod tests {
     use crate::db::testutil;
     use crate::models::Address;
 
+    /// The calendar an event's fields describe, as a mail would carry it.
+    fn ics(ev: &IcsEvent) -> String {
+        use crate::calendar::fmt_utc;
+        let mut out = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n");
+        if let Some(method) = &ev.method {
+            out.push_str(&format!("METHOD:{method}\r\n"));
+        }
+        out.push_str(&format!(
+            "BEGIN:VEVENT\r\nUID:{}\r\nSEQUENCE:{}\r\n",
+            ev.uid, ev.sequence
+        ));
+        if ev.starts_at_ms != 0 {
+            out.push_str(&format!("DTSTART:{}\r\n", fmt_utc(ev.starts_at_ms)));
+        }
+        let times = [
+            ("DTEND", ev.ends_at_ms),
+            ("DTSTAMP", ev.dtstamp_ms),
+            ("RECURRENCE-ID", ev.recurrence_id_ms),
+        ];
+        for (name, value) in times {
+            if let Some(value) = value {
+                out.push_str(&format!("{name}:{}\r\n", fmt_utc(value)));
+            }
+        }
+        let texts = [
+            ("SUMMARY", &ev.summary),
+            ("DESCRIPTION", &ev.description),
+            ("LOCATION", &ev.location),
+            ("STATUS", &ev.status),
+            ("URL", &ev.join_url),
+            ("RRULE", &ev.rrule),
+        ];
+        for (name, value) in texts {
+            if let Some(value) = value {
+                out.push_str(&format!("{name}:{value}\r\n"));
+            }
+        }
+        if let Some(organizer) = &ev.organizer {
+            out.push_str(&format!("ORGANIZER:mailto:{organizer}\r\n"));
+        }
+        for attendee in &ev.attendees {
+            out.push_str("ATTENDEE");
+            if let Some(name) = &attendee.name {
+                out.push_str(&format!(";CN={name}"));
+            }
+            if let Some(partstat) = &attendee.partstat {
+                out.push_str(&format!(";PARTSTAT={partstat}"));
+            }
+            out.push_str(&format!(":mailto:{}\r\n", attendee.email));
+        }
+        out.push_str("END:VEVENT\r\nEND:VCALENDAR\r\n");
+        out
+    }
+
+    /// Apply the invitation an event's fields describe, in an account whose
+    /// own address is me@test.dev.
+    fn upsert(c: &Connection, account_id: i64, message_id: i64, ev: &IcsEvent) -> Result<()> {
+        let mut own = OwnAddresses::default();
+        own.insert("me@test.dev".into());
+        apply_invitation(c, account_id, message_id, &ics(ev), &own)
+    }
+
     fn sample_ics_event() -> IcsEvent {
         IcsEvent {
             uid: "evt-1@test".into(),
@@ -656,6 +1240,7 @@ mod tests {
                 email: "me@test.dev".into(),
                 name: Some("Me".into()),
                 partstat: Some("NEEDS-ACTION".into()),
+                ..Default::default()
             }],
             join_url: Some("https://meet.google.com/x".into()),
             sequence: 1,
@@ -707,6 +1292,261 @@ mod tests {
         assert_eq!(ev2.summary.as_deref(), Some("Sync v2"));
         assert_eq!(ev2.rsvp_status.as_deref(), Some("ACCEPTED"));
         assert_eq!(uid_and_sequence(&c, ev.id).unwrap().unwrap().1, 1);
+    }
+
+    fn own() -> OwnAddresses {
+        let mut own = OwnAddresses::default();
+        own.insert("me@test.dev".into());
+        own
+    }
+
+    fn apply(c: &Connection, message_id: i64, calendar: &str) {
+        apply_invitation(c, 1, message_id, calendar, &own()).unwrap();
+    }
+
+    fn count(c: &Connection) -> i64 {
+        c.query_row("SELECT COUNT(*) FROM calendar_events", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn an_answer_updates_only_that_attendee_of_my_event() {
+        let c = testutil::calendar_conn();
+        let attendees = [EventAttendee {
+            email: "bob@test.dev".into(),
+            name: Some("Bob".into()),
+            partstat: Some("NEEDS-ACTION".into()),
+            answered_at: None,
+        }];
+        let id = insert_local(
+            &c,
+            1,
+            None,
+            "mine@flectar-mail",
+            "Planning",
+            None,
+            None,
+            None,
+            "me@test.dev",
+            &attendees,
+            5_000,
+            6_000,
+            false,
+        )
+        .unwrap();
+        let reply = |partstat: &str, dtstamp: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:mine@flectar-mail\r\nSEQUENCE:0\r\nDTSTAMP:{dtstamp}\r\nSUMMARY:Bob's copy\r\nORGANIZER:mailto:me@test.dev\r\nATTENDEE;PARTSTAT={partstat}:mailto:BOB@test.dev\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            )
+        };
+        let status = |c: &Connection| get(c, id).unwrap().unwrap().attendees[0].partstat.clone();
+
+        apply(&c, 50, &reply("ACCEPTED", "20261101T100000Z"));
+        assert_eq!(status(&c).as_deref(), Some("ACCEPTED"));
+        // An older answer read later doesn't undo the newer one.
+        apply(&c, 51, &reply("DECLINED", "20261101T090000Z"));
+        assert_eq!(status(&c).as_deref(), Some("ACCEPTED"));
+        apply(&c, 52, &reply("TENTATIVE", "20261102T090000Z"));
+        assert_eq!(status(&c).as_deref(), Some("TENTATIVE"));
+
+        let ev = get(&c, id).unwrap().unwrap();
+        assert_eq!(
+            ev.summary.as_deref(),
+            Some("Planning"),
+            "the event stays mine"
+        );
+        assert_eq!(ev.message_id, None);
+        assert_eq!(count(&c), 1, "an answer never creates an event");
+    }
+
+    #[test]
+    fn invitations_i_sent_and_proposals_change_nothing() {
+        let c = testutil::calendar_conn();
+        let mine = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:sent-1\r\nDTSTART:20261110T090000Z\r\nORGANIZER:mailto:ME@test.dev\r\nATTENDEE:mailto:bob@test.dev\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        apply(&c, 60, mine);
+        let counter = mine.replace("METHOD:REQUEST", "METHOD:COUNTER");
+        apply(&c, 61, &counter);
+        let answer_for_someone_else = mine.replace("METHOD:REQUEST", "METHOD:REPLY");
+        apply(&c, 62, &answer_for_someone_else);
+        assert_eq!(count(&c), 0);
+    }
+
+    #[test]
+    fn the_later_of_two_versions_with_one_sequence_wins() {
+        let c = testutil::calendar_conn();
+        let version = |summary: &str, dtstamp: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:evt-7\r\nSEQUENCE:1\r\nDTSTAMP:{dtstamp}\r\nDTSTART:20261110T090000Z\r\nSUMMARY:{summary}\r\nORGANIZER:mailto:alice@test.dev\r\nATTENDEE:mailto:me@test.dev\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            )
+        };
+        apply(&c, 70, &version("Room 2", "20261101T100000Z"));
+        apply(&c, 71, &version("Room 1", "20261101T090000Z"));
+        let ev = &for_message(&c, 70).unwrap()[0];
+        assert_eq!(ev.summary.as_deref(), Some("Room 2"));
+        apply(&c, 72, &version("Room 3", "20261101T110000Z"));
+        let ev = get(&c, ev.id).unwrap().unwrap();
+        assert_eq!(ev.summary.as_deref(), Some("Room 3"));
+        assert_eq!(ev.message_id, Some(72));
+    }
+
+    const SERIES: &str = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:weekly@test\r\nSEQUENCE:0\r\nDTSTAMP:20261101T080000Z\r\nDTSTART:20261102T090000Z\r\nDTEND:20261102T100000Z\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\nSUMMARY:Weekly\r\nORGANIZER:mailto:alice@test.dev\r\nATTENDEE:mailto:me@test.dev\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT30M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    fn occurrence_starts(c: &Connection, id: i64) -> Vec<i64> {
+        let row = sync_row_for(c, id).unwrap().unwrap();
+        crate::caldav::rrule::expand(
+            row.event.rrule.as_deref().unwrap(),
+            row.event.starts_at,
+            3_600_000,
+            false,
+            row.ical_raw.as_deref(),
+            0,
+            i64::MAX / 2,
+        )
+        .unwrap()
+        .into_iter()
+        .map(|occurrence| occurrence.start)
+        .collect()
+    }
+
+    fn at(utc: &str) -> i64 {
+        crate::calendar::parse_dt(utc).unwrap().0
+    }
+
+    #[test]
+    fn a_changed_or_cancelled_occurrence_leaves_the_rest_of_the_series() {
+        let c = testutil::calendar_conn();
+        apply(&c, 80, SERIES);
+        let id = for_message(&c, 80).unwrap()[0].id;
+        assert!(
+            !ical_raw(&c, id).unwrap().unwrap().contains("VALARM"),
+            "the organizer's reminders aren't the attendee's"
+        );
+
+        // The second week moves to the afternoon.
+        let moved = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:weekly@test\r\nRECURRENCE-ID:20261109T090000Z\r\nSEQUENCE:1\r\nDTSTAMP:20261103T080000Z\r\nDTSTART:20261109T150000Z\r\nDTEND:20261109T160000Z\r\nSUMMARY:Weekly (moved)\r\nORGANIZER:mailto:alice@test.dev\r\nATTENDEE:mailto:me@test.dev\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        apply(&c, 81, moved);
+        // The third week is cancelled, by the organizer only.
+        let cancel = "BEGIN:VCALENDAR\r\nMETHOD:CANCEL\r\nBEGIN:VEVENT\r\nUID:weekly@test\r\nRECURRENCE-ID:20261116T090000Z\r\nSEQUENCE:1\r\nDTSTAMP:20261104T080000Z\r\nORGANIZER:mailto:alice@test.dev\r\nATTENDEE:mailto:me@test.dev\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        apply(&c, 82, &cancel.replace("alice@", "mallory@"));
+        assert_eq!(occurrence_starts(&c, id).len(), 4);
+        apply(&c, 83, cancel);
+
+        let ev = get(&c, id).unwrap().unwrap();
+        assert_eq!(ev.summary.as_deref(), Some("Weekly"), "the series stays");
+        assert_ne!(ev.status.as_deref(), Some("CANCELLED"));
+        assert_eq!(
+            occurrence_starts(&c, id),
+            vec![
+                at("20261102T090000Z"),
+                at("20261109T150000Z"),
+                at("20261123T090000Z")
+            ]
+        );
+        // Reading the move again, or an older version of it, changes nothing.
+        let raw = ical_raw(&c, id).unwrap();
+        apply(&c, 81, moved);
+        apply(&c, 84, &moved.replace("SEQUENCE:1", "SEQUENCE:0"));
+        assert_eq!(ical_raw(&c, id).unwrap(), raw);
+    }
+
+    /// Exchange's occurrences of the SERIES meeting, as Graph sync stores
+    /// them: each by its own Graph id, tied to the series' Graph id.
+    fn exchange_occurrences(c: &Connection, calendar: i64) {
+        for (href, start) in [
+            ("occ-1", at("20261102T090000Z")),
+            ("occ-2", at("20261109T090000Z")),
+        ] {
+            let ev = IcsEvent {
+                uid: href.into(),
+                summary: Some("Weekly".into()),
+                starts_at_ms: start,
+                ends_at_ms: Some(start + 3_600_000),
+                ..Default::default()
+            };
+            upsert_remote(c, 1, calendar, href, "\"e\"", "", &ev).unwrap();
+            set_series_master(c, calendar, href, "master-1", "weekly@test").unwrap();
+        }
+    }
+
+    fn shown(c: &Connection) -> Vec<i64> {
+        list_range(c, 0, i64::MAX / 2)
+            .unwrap()
+            .iter()
+            .map(|event| event.id)
+            .collect()
+    }
+
+    #[test]
+    fn a_recurring_meeting_exchange_holds_shows_from_there_alone() {
+        let c = testutil::calendar_conn();
+        let calendar = seed_calendar(&c);
+        exchange_occurrences(&c, calendar);
+        apply(&c, 80, SERIES);
+        let mail = for_message(&c, 80).unwrap()[0].id;
+        assert_eq!(shown(&c).len(), 2, "Exchange's two occurrences");
+        assert!(!shown(&c).contains(&mail));
+        assert!(
+            recurring_masters(&c, i64::MAX / 2)
+                .unwrap()
+                .iter()
+                .all(|master| master.event.id != mail),
+            "nor expanded from mail"
+        );
+        assert_eq!(
+            held_series(&c, mail).unwrap(),
+            Some(("master-1".into(), calendar))
+        );
+    }
+
+    #[test]
+    fn an_invitation_read_first_joins_its_series_when_exchange_syncs() {
+        let c = testutil::calendar_conn();
+        let calendar = seed_calendar(&c);
+        apply(&c, 80, SERIES);
+        let mail = for_message(&c, 80).unwrap()[0].id;
+        assert!(shown(&c).contains(&mail));
+        assert_eq!(held_series(&c, mail).unwrap(), None);
+        exchange_occurrences(&c, calendar);
+        assert!(!shown(&c).contains(&mail));
+        assert_eq!(
+            held_series(&c, mail).unwrap(),
+            Some(("master-1".into(), calendar))
+        );
+    }
+
+    #[test]
+    fn an_invitation_to_one_occurrence_follows_that_occurrence() {
+        let c = testutil::calendar_conn();
+        let version = |sequence: i64, start: &str, method: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nMETHOD:{method}\r\nBEGIN:VEVENT\r\nUID:weekly@test\r\nRECURRENCE-ID:20261109T090000Z\r\nSEQUENCE:{sequence}\r\nDTSTART:{start}\r\nDTEND:20261109T170000Z\r\nSUMMARY:Weekly, this once\r\nORGANIZER:mailto:alice@test.dev\r\nATTENDEE:mailto:me@test.dev\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            )
+        };
+        apply(&c, 90, &version(1, "20261109T090000Z", "REQUEST"));
+        let id = for_message(&c, 90).unwrap()[0].id;
+        let start = |c: &Connection| get(c, id).unwrap().unwrap().starts_at;
+        assert_eq!(start(&c), at("20261109T090000Z"));
+        assert!(get(&c, id).unwrap().unwrap().rrule.is_none());
+
+        apply(&c, 91, &version(2, "20261109T150000Z", "REQUEST"));
+        assert_eq!(start(&c), at("20261109T150000Z"), "moved");
+        apply(&c, 92, &version(1, "20261109T110000Z", "REQUEST"));
+        assert_eq!(
+            start(&c),
+            at("20261109T150000Z"),
+            "an older version changes nothing"
+        );
+
+        apply(&c, 93, &version(3, "20261109T150000Z", "CANCEL"));
+        let ev = get(&c, id).unwrap().unwrap();
+        assert_eq!(ev.status.as_deref(), Some("CANCELLED"));
+        assert_eq!(count(&c), 1);
+
+        // The whole series, invited to later, replaces the stand-in.
+        apply(&c, 94, &SERIES.replace("SEQUENCE:0", "SEQUENCE:4"));
+        let ev = get(&c, id).unwrap().unwrap();
+        assert_eq!(ev.rrule.as_deref(), Some("FREQ=WEEKLY;COUNT=4"));
+        assert_eq!(count(&c), 1);
     }
 
     #[test]
@@ -826,6 +1666,7 @@ mod tests {
             email: "bob@test.dev".into(),
             name: None,
             partstat: Some("NEEDS-ACTION".into()),
+            answered_at: None,
         }];
         update_local_fields(&c, &args, &atts).unwrap();
         let rows = dirty_rows(&c, 1).unwrap();
@@ -985,8 +1826,8 @@ mod tests {
         let mut day2 = sample_ics_event();
         day2.uid = "occ-2@graph".into();
         upsert_remote(&c, 1, cal, "occ-2", "\"e1\"", "", &day2).unwrap();
-        set_series_master(&c, cal, "occ-1", "series-master-1").unwrap();
-        set_series_master(&c, cal, "occ-2", "series-master-1").unwrap();
+        set_series_master(&c, cal, "occ-1", "series-master-1", "series-1@test").unwrap();
+        set_series_master(&c, cal, "occ-2", "series-master-1", "series-1@test").unwrap();
 
         assert_eq!(list_range(&c, 0, i64::MAX / 2).unwrap().len(), 2);
 
@@ -1197,6 +2038,27 @@ mod tests {
         .unwrap();
         set_rsvp(&c, id2, "DECLINED").unwrap();
         assert!(upcoming_for_notify(&c, 95_000, 10_000).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_invitation_from_mail_reminds_once_answered() {
+        let c = testutil::calendar_conn();
+        let raw = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:spam@example.com\r\nDTSTART:19700101T000140Z\r\nDTEND:19700101T000141Z\r\nSUMMARY:Claim your prize\r\nORGANIZER:mailto:prize@example.com\r\nATTENDEE:mailto:me@test.dev\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let ev = crate::calendar::parse_ics(raw).remove(0);
+        upsert(&c, 1, 42, &ev).unwrap();
+        assert!(
+            upcoming_for_notify(&c, 95_000, 10_000).unwrap().is_empty(),
+            "an unanswered invitation is silent"
+        );
+        let id: i64 = c
+            .query_row(
+                "SELECT id FROM calendar_events WHERE ical_uid = 'spam@example.com'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        set_rsvp(&c, id, "ACCEPTED").unwrap();
+        assert_eq!(upcoming_for_notify(&c, 95_000, 10_000).unwrap().len(), 1);
     }
 
     #[test]

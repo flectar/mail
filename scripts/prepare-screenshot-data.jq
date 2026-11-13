@@ -81,6 +81,8 @@ def favicon_path(address):
     | .carddav_url = (.carddav_url // "")
     | .carddav_username = (.carddav_username // "")
   )
+| .calendar_events |= map(.answerable = (.answerable // false) | .removable = (.removable // false) | .recurrence_id = (.recurrence_id // ""))
+| .calendar_agenda_rows |= map(if .event then .event.answerable = (.event.answerable // false) | .event.removable = (.event.removable // false) | .event.recurrence_id = (.event.recurrence_id // "") else . end)
 | .mail_profiles = [
     {"id": "work", "name": "Work", "color": "#8b5cf6", "account_count": 1},
     {"id": "support", "name": "Support", "color": "#ea580c", "account_count": 1}

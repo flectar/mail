@@ -16,6 +16,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Undo send](#undo-send)
 - [Unsubscribing](#unsubscribing)
 - [Blocking senders](#blocking-senders)
+- [Calendar invitations](#calendar-invitations)
 - [Storage and backups](#storage-and-backups)
 - [Importing accounts and mail](#importing-accounts-and-mail)
 - [HTML rendering](#html-rendering)
@@ -319,6 +320,38 @@ mail in the inbox until Flectar Mail checks for mail.
 
 **Unblock sender** in the same menu, or **Unblock** in Settings → Contacts →
 Blocked senders, stops it. Mail already in Spam stays there.
+
+## Calendar invitations
+
+A message with an invitation shows a card above it with the event's day and
+time, where it takes place, who organizes it, and how many guests have accepted.
+It also says when the event clashes with others in your calendar. **Accept**,
+**Maybe** and **Decline** answer it, and your answer stays selected, so another
+click changes it. **Join** opens an online meeting, and the calendar button
+opens the event in the calendar.
+
+Your answer reaches the organizer once, from wherever the event is kept.
+Microsoft and Google calendars answer through their own service, a CalDAV
+server that schedules for your address tells the organizer itself, and
+otherwise Flectar Mail emails a reply from the address the invitation was sent
+to.
+
+The card also shows updates, cancellations, and answers to your own
+invitations. A cancelled event offers **Remove from calendar**, which takes it
+out without telling anyone. An invitation that a newer version has replaced
+says so and is answered from the newer one. Invitations in Spam or Trash, and
+from blocked senders, stay out of your calendar, so their card has no answers.
+
+An invitation to one occurrence of a repeating event, such as one meeting of a
+weekly series moved to another day, is answered for that occurrence alone.
+Invitations can also be answered from **My response** in an event's details in
+the calendar, and for an occurrence of a repeating event Flectar Mail asks
+whether the answer is for **This event** or **All events**.
+
+In the calendar, an invitation waiting for your answer is outlined, and
+declined or cancelled events are faded with their title struck through. An
+invitation reminds you of itself only once you accept it or answer **Maybe**,
+so one you haven't answered, such as calendar spam, stays quiet.
 
 ## Storage and backups
 
