@@ -1940,8 +1940,7 @@ msgid "{} isn't a PNG, JPEG, GIF or WebP image."
 msgstr ""
 
 #: ui/app.slint:670
-msgid ""
-"Images in the text can take up to 5 MB in all. Attach larger ones as files."
+msgid "Images and attachments can take up to 25 MB in all."
 msgstr ""
 
 #: ui/app.slint:671

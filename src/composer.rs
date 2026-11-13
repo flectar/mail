@@ -1813,26 +1813,30 @@ impl ComposeSession {
         }
     }
 
-    /// Pastes `html` over the selection, unless it holds no text, or more image data than
-    /// the text of a message carries. Returns whether it went in.
+    /// Pastes `html` over the selection, unless it holds no text, or images that would take the
+    /// message's images and attachments past what a message carries. Returns whether it went in.
     fn paste_html(&self, host: &HostRef, html: &str) -> bool {
         {
+            let files = self
+                .files
+                .borrow()
+                .iter()
+                .map(|file| file.size)
+                .sum::<u64>();
             let mut document = self.document.borrow_mut();
-            let held = |document: &RichComposeDocument| -> usize {
-                document.images().map(|image| image.data.len()).sum()
+            let carried = |document: &RichComposeDocument| -> u64 {
+                files.saturating_add(image_bytes(document))
             };
-            let before = held(&document);
+            let before = carried(&document);
             let Some(mut selection) = document.paste_html(html) else {
                 return false;
             };
-            if held(&document) > before.max(MAX_INLINE_IMAGE_BYTES) {
+            if carried(&document) > before.max(MAX_COMPOSE_ATTACHMENT_BYTES) {
                 if let Some(undone) = document.history("undo") {
                     selection = undone;
                 }
                 host.ui().set_notice(
-                    UiMessage::plain(
-                        "Images in the text can take up to 5 MB in all. Attach larger ones as files.",
-                    ),
+                    UiMessage::plain("Images and attachments can take up to 25 MB in all."),
                     true,
                 );
             }
@@ -2095,7 +2099,11 @@ impl ComposeSession {
                 return;
             }
             let mut files = session.files.borrow_mut();
-            let mut total_size = files.iter().map(|file| file.size).sum::<u64>();
+            let mut total_size = files
+                .iter()
+                .map(|file| file.size)
+                .sum::<u64>()
+                .saturating_add(image_bytes(&session.document.borrow()));
             let mut added = 0usize;
             let mut skipped = 0usize;
             for document in documents {
@@ -2199,7 +2207,7 @@ impl ComposeSession {
                 let name = document.name().unwrap_or_default();
                 let image = std::fs::metadata(document.path())
                     .ok()
-                    .filter(|metadata| metadata.len() <= MAX_INLINE_IMAGE_BYTES as u64)
+                    .filter(|metadata| metadata.len() <= MAX_COMPOSE_ATTACHMENT_BYTES)
                     .and_then(|_| std::fs::read(document.path()).ok())
                     .map(|bytes| crate::rich_compose::InlineImage::from_file_bytes(bytes, ""));
                 match image {
@@ -2214,9 +2222,7 @@ impl ComposeSession {
                     ),
                     None => {
                         ui.set_notice(
-                            UiMessage::plain(
-                                "Images in the text can take up to 5 MB in all. Attach larger ones as files.",
-                            ),
+                            UiMessage::plain("Images and attachments can take up to 25 MB in all."),
                             true,
                         );
                         break;
@@ -2226,22 +2232,27 @@ impl ComposeSession {
         });
     }
 
-    /// Puts an image in the text at the caret, unless the text's images would grow past what
-    /// a message carries in its text. Returns whether it went in.
+    /// Puts an image in the text at the caret, unless it would take the message's images and
+    /// attachments past what a message carries. Returns whether it went in.
     fn insert_image(&self, image: crate::rich_compose::InlineImage) -> bool {
         let Some(host) = self.host() else {
             return false;
         };
         let fits = {
-            let document = self.document.borrow();
-            let held: usize = document.images().map(|image| image.data.len()).sum();
-            held.saturating_add(image.data.len()) <= MAX_INLINE_IMAGE_BYTES
+            let files = self
+                .files
+                .borrow()
+                .iter()
+                .map(|file| file.size)
+                .sum::<u64>();
+            files
+                .saturating_add(image_bytes(&self.document.borrow()))
+                .saturating_add(image.data.len() as u64)
+                <= MAX_COMPOSE_ATTACHMENT_BYTES
         };
         if !fits {
             host.ui().set_notice(
-                UiMessage::plain(
-                    "Images in the text can take up to 5 MB in all. Attach larger ones as files.",
-                ),
+                UiMessage::plain("Images and attachments can take up to 25 MB in all."),
                 true,
             );
             return false;
@@ -2316,7 +2327,11 @@ impl ComposeSession {
                 return;
             };
             let mut files = session.files.borrow_mut();
-            let mut total_size = files.iter().map(|file| file.size).sum::<u64>();
+            let mut total_size = files
+                .iter()
+                .map(|file| file.size)
+                .sum::<u64>()
+                .saturating_add(image_bytes(&session.document.borrow()));
             let mut failure = None;
             let mut too_large = false;
             for file in fetched.unwrap_or_else(|error| vec![Err(error)]) {
@@ -2988,8 +3003,10 @@ impl ComposeSession {
 
 type FetchedFiles = Vec<Result<(PathBuf, String, u64), String>>;
 
-/// How much image data the text of a message holds, which goes out in its HTML body.
-const MAX_INLINE_IMAGE_BYTES: usize = 5 * 1024 * 1024;
+/// The size of the images in a message's text, which count with its attachments.
+fn image_bytes(document: &RichComposeDocument) -> u64 {
+    document.images().map(|image| image.data.len() as u64).sum()
+}
 
 #[cfg(all(test, desktop))]
 mod tests {
