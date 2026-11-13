@@ -12,6 +12,9 @@ use chrono::{Datelike, NaiveDateTime, Timelike, Utc};
 use flectar_mail_core::models::{InvitationCard, InvitationKind};
 use std::future::Future;
 
+/// How many guests the card names before "and N more".
+const NAMED_GUESTS: usize = 3;
+
 struct Controller {
     app: slint::Weak<AppWindow>,
     state: Rc<RefCell<InboxState>>,
@@ -415,13 +418,40 @@ fn apply(app: &AppWindow, card: &InvitationCard) {
             .unwrap_or_default()
             .into(),
     );
-    let guests = if from_guest { 0 } else { card.attendees.len() };
+    // The other guests by name. The organizer is named above, and the user
+    // knows they are invited.
+    let organizer = card
+        .organizer
+        .as_ref()
+        .map(|organizer| organizer.email.as_str());
+    let others: Vec<String> = card
+        .attendees
+        .iter()
+        .filter(|_| !from_guest)
+        .filter(|guest| {
+            !organizer.is_some_and(|organizer| organizer.eq_ignore_ascii_case(&guest.email))
+                && !card
+                    .invited_as
+                    .as_deref()
+                    .is_some_and(|me| me.eq_ignore_ascii_case(&guest.email))
+        })
+        .map(|guest| named(guest.name.as_deref(), &guest.email))
+        .collect();
+    ui.set_guest_names(
+        others
+            .iter()
+            .take(NAMED_GUESTS)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ")
+            .into(),
+    );
+    ui.set_more_guests(i32::try_from(others.len().saturating_sub(NAMED_GUESTS)).unwrap_or(0));
     let accepted = card
         .attendees
         .iter()
         .filter(|guest| guest.partstat.as_deref() == Some("ACCEPTED"))
         .count();
-    ui.set_guests(i32::try_from(guests).unwrap_or(i32::MAX));
     ui.set_accepted(if from_guest {
         0
     } else {
