@@ -1361,7 +1361,8 @@ impl RichComposeDocument {
     }
 
     /// Loads `text` formatted with `styles` as a reopened message: nothing
-    /// to undo, and the caret at its end.
+    /// to undo, and the caret at its end. What's written next keeps the
+    /// default text style.
     fn reopen(&mut self, text: String, styles: Vec<ComposeStyleRun>) -> ComposeSelection {
         let revision = self.revision.wrapping_add(1);
         *self = Self {
@@ -1369,6 +1370,7 @@ impl RichComposeDocument {
             styles,
             revision,
             text_changes_since: revision,
+            base: std::mem::take(&mut self.base),
             ..Self::default()
         };
         self.auto_link_urls();
@@ -4849,6 +4851,26 @@ mod tests {
         assert_eq!(shown(&document), Some(MIN_IMAGE_WIDTH));
         document.history("undo");
         assert_eq!(shown(&document), None);
+    }
+
+    #[test]
+    fn reopened_messages_keep_the_default_text_style() {
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Serif, TextSize::Large);
+        document.load("Hello", 5, 5);
+        document.format("bold", "Hello", 0, 5);
+        let html = document.body_html().unwrap();
+
+        let mut reopened = RichComposeDocument::default();
+        reopened.set_base_style(FontFamily::Serif, TextSize::Large);
+        reopened.load_html(&html, "Hello").unwrap();
+        // Remove formatting goes back to it.
+        reopened.format("clear", "Hello", 0, 5);
+        let style = reopened.style_at(0).unwrap();
+        assert_eq!(
+            (style.family, style.size, style.marks),
+            (FontFamily::Serif, TextSize::Large, 0)
+        );
     }
 
     #[test]
