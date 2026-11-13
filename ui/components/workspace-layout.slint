@@ -26,7 +26,7 @@ export component WorkspaceFrame inherits Rectangle {
     private property <float> reveal-progress: MotionSettings.enabled ? root.animated-reveal-progress : 1;
     private property <bool> reveal-pending: true;
 
-    x: root.base-x + (1 - root.reveal-progress) * 14px;
+    x: root.base-x + (MotionSettings.movement ? (1 - root.reveal-progress) * 14px : 0px);
     y: 0px;
     width: max(0px, root.available-width - root.base-x);
     height: max(0px, root.available-height - (root.compact && root.reserve-compact-navigation ? LayoutMetrics.compact-navigation-height : 0px));
@@ -44,8 +44,8 @@ export component WorkspaceFrame inherits Rectangle {
             root.animated-reveal-progress = 1;
         }
     }
-    animate x { duration: 240ms; easing: spring(0); enabled: MotionSettings.enabled; }
-    animate height { duration: 220ms; easing: spring(0); enabled: MotionSettings.enabled; }
+    animate x { duration: 240ms; easing: spring(0); enabled: MotionSettings.movement; }
+    animate height { duration: 220ms; easing: spring(0); enabled: MotionSettings.movement; }
     animate opacity { duration: 180ms; easing: ease-out; enabled: MotionSettings.enabled; }
 
     @children
@@ -107,7 +107,7 @@ export component CollapsibleWorkspaceSidebar inherits WorkspaceSidebarSurface {
     width: root.animated-width;
     clip: true;
 
-    animate animated-width { duration: 220ms; easing: spring(0); }
+    animate animated-width { duration: 220ms; easing: spring(0); enabled: MotionSettings.movement; }
 }
 
 // A one-pixel divider with a larger, invisible interaction target. The

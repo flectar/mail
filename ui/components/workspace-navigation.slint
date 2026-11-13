@@ -42,7 +42,7 @@ component ProductRailItem inherits Rectangle {
             source: root.active ? root.filled-icon : root.outline-icon;
             colorize: root.active ? root.accent-color : root.muted-color;
             animate colorize { duration: 140ms; easing: ease-out; }
-            animate width, height { duration: 180ms; easing: spring(0.12); }
+            animate width, height { duration: 180ms; easing: spring(0.12); enabled: MotionSettings.movement; }
             image-fit: contain;
             accessible-role: none;
         }
@@ -203,7 +203,7 @@ component CompactProductNavItem inherits Rectangle {
             source: root.active ? root.filled-icon : root.outline-icon;
             colorize: root.active ? root.accent-color : root.muted-color;
             animate colorize { duration: 140ms; easing: ease-out; }
-            animate width, height { duration: 180ms; easing: spring(0.12); }
+            animate width, height { duration: 180ms; easing: spring(0.12); enabled: MotionSettings.movement; }
             image-fit: contain;
             accessible-role: none;
         }
@@ -492,7 +492,7 @@ component TabItem inherits Rectangle {
         width: parent.width;
         height: parent.height;
         animate x {
-            duration: MotionSettings.enabled && root.reordering && !hit.dragging ? 160ms : 0ms;
+            duration: MotionSettings.movement && root.reordering && !hit.dragging ? 160ms : 0ms;
             easing: ease-out;
         }
 

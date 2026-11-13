@@ -5,6 +5,7 @@ import { IconButton } from "controls.slint";
 import { ModeButton, RecipientRow } from "composer-controls.slint";
 import { ComposerContactMenu } from "composer-contact-menu.slint";
 import { TypeScale } from "../typography.slint";
+import { MotionSettings } from "../design-system.slint";
 import { WindowControlsClearance } from "../window-chrome.slint";
 
 // What a composer is for: its heading, and its window's title.
@@ -159,7 +160,7 @@ export component ComposerFromRow inherits Rectangle {
                     image-fit: contain;
                     transform-rotation: account-popup.is-open ? 180deg : 0deg;
                     accessible-role: none;
-                    animate transform-rotation { duration: 120ms; }
+                    animate transform-rotation { duration: 120ms; enabled: MotionSettings.movement; }
                 }
 
                 account-focus := FocusScope {

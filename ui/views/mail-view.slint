@@ -1,6 +1,6 @@
 import { HorizontalBox } from "std-widgets.slint";
 import { EmailLink, EmailRow, EmailTile, EmailReader, MailProfileRow, SidebarRow, MailLabelRow, MailListEntry, ThreadMessageRow } from "../models.slint";
-import { LayoutMetrics } from "../design-system.slint";
+import { LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { MailSidebar } from "../components/sidebar.slint";
 import { WorkspacePaneResizeHandle } from "../components/workspace-layout.slint";
 import { MailListPane } from "mail-list-pane.slint";
@@ -21,7 +21,7 @@ export component MailView inherits FocusScope {
     in property <length> available-width: 0px;
     // Keep the animated geometry outside conditionally instantiated sidebars.
     private property <length> desktop-sidebar-width: root.mail_sidebar_collapsed ? 0px : LayoutMetrics.sidebar-width;
-    animate desktop-sidebar-width { duration: 220ms; easing: spring(0); }
+    animate desktop-sidebar-width { duration: 220ms; easing: spring(0); enabled: MotionSettings.movement; }
     in property <string> layout-mode: "default";
     in-out property <length> list-pane-width: LayoutMetrics.list-pane-width;
     callback list-pane-width-committed(length);
@@ -615,7 +615,7 @@ export component MailView inherits FocusScope {
                 width: root.single-pane-content-width;
                 height: parent.height;
                 opacity: root.compact-page == "list" ? 1 : 0;
-                animate x { duration: 260ms; easing: spring(0); }
+                animate x { duration: 260ms; easing: spring(0); enabled: MotionSettings.movement; }
                 animate opacity { duration: 170ms; easing: ease-out; }
                 compact: root.compact;
                 single-pane-navigation: root.compact;
@@ -695,7 +695,7 @@ export component MailView inherits FocusScope {
                 width: root.single-pane-content-width;
                 height: parent.height;
                 opacity: root.compact-page == "message" ? 1 : 0;
-                animate x { duration: 260ms; easing: spring(0); }
+                animate x { duration: 260ms; easing: spring(0); enabled: MotionSettings.movement; }
                 animate opacity { duration: 170ms; easing: ease-out; }
                 compact: root.compact;
                 window-width: self.width;
@@ -808,9 +808,9 @@ export component MailView inherits FocusScope {
                 drop-shadow-blur: root.folders-open ? 24px : 0px;
                 drop-shadow-offset-x: 6px;
                 drop-shadow-color: #00000035;
-                animate x { duration: 260ms; easing: spring(0.08); }
+                animate x { duration: 260ms; easing: spring(0.08); enabled: MotionSettings.movement; }
                 animate opacity { duration: 180ms; easing: ease-out; }
-                animate drop-shadow-blur { duration: 180ms; easing: ease-out; }
+                animate drop-shadow-blur { duration: 180ms; easing: ease-out; enabled: MotionSettings.movement; }
                 touch-mode: true;
                 show-profiles: true;
                 profiles: root.mail_profiles;

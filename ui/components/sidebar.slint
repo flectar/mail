@@ -325,7 +325,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                 for entry in root.rows: Rectangle {
                     private property <bool> reveal-ready: !entry.reveal_row;
                     width: max(0px, mailbox-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
-                    height: !entry.show_row || (entry.reveal_row && !self.reveal-ready && MotionSettings.enabled) ? 0px
+                    height: !entry.show_row || (entry.reveal_row && !self.reveal-ready && MotionSettings.movement) ? 0px
                         : entry.kind == SidebarRowKind.unified-heading ? 21px
                         : entry.kind == SidebarRowKind.accounts-heading ? 25px
                         : entry.kind == SidebarRowKind.account ? (entry.mailbox.detail == "" ? 35px : root.account-row-height)
@@ -334,11 +334,11 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         : 31px;
                     background: transparent;
                     clip: true;
-                    animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.enabled; }
+                    animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.movement; }
 
                     Timer {
                         interval: 16ms;
-                        running: entry.reveal_row && !parent.reveal-ready && MotionSettings.enabled;
+                        running: entry.reveal_row && !parent.reveal-ready && MotionSettings.movement;
                         triggered => { parent.reveal-ready = true; }
                     }
 

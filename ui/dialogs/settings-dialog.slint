@@ -28,7 +28,7 @@ import { TabsUi } from "../components/workspace-navigation.slint";
 import { AccountProfilePicker, ProfileColorChoice, ProfileMemberChoice, ProfilePalette } from "../components/profile-controls.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
 import { TypeScale } from "../typography.slint";
-import { AppTheme, LayoutMetrics, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MotionSettings, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
 import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/workspace-layout.slint";
 import { TabSwitcherButton } from "../components/tab-overview.slint";
 import { LocalMailUi } from "../local-mail.slint";
@@ -805,7 +805,7 @@ export component SettingsDialog inherits Rectangle {
         if section == "Notifications" && SystemNotifications.availability == "" { return false; }
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads") + " " + @tr("sending undo send delay take back")
+            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads reduce motion animation accessibility") + " " + @tr("sending undo send delay take back")
                 + " " + @tr("spelling spell check dictionary misspelled words")
                 + " " + @tr("writing default text style font typeface text size")
             : section == "Accounts"
@@ -1286,6 +1286,20 @@ export component SettingsDialog inherits Rectangle {
                                         toggled(checked) => { WindowChrome.choose(checked); }
                                     }
                                     if WindowChrome.available : Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Reduce motion");
+                                        description: @tr("Show changes at once instead of sliding or growing.");
+                                        choices: [@tr("System"), @tr("On"), @tr("Off")];
+                                        selected-index: MotionSettings.preference == "on" ? 1
+                                            : MotionSettings.preference == "off" ? 2 : 0;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            MotionSettings.choose(index == 1 ? "on" : index == 2 ? "off" : "system");
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
                                     Text { height: max(20px, self.preferred-height); text: @tr("Workspace layout"); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; }
                                     HorizontalBox {
                                         padding: 0px;
@@ -3272,9 +3286,9 @@ export component SettingsDialog inherits Rectangle {
                 drop-shadow-blur: root.compact-nav-open ? 24px : 0px;
                 drop-shadow-offset-x: 6px;
                 drop-shadow-color: #00000035;
-                animate x { duration: 260ms; easing: spring(0.08); }
+                animate x { duration: 260ms; easing: spring(0.08); enabled: MotionSettings.movement; }
                 animate opacity { duration: 180ms; easing: ease-out; }
-                animate drop-shadow-blur { duration: 180ms; easing: ease-out; }
+                animate drop-shadow-blur { duration: 180ms; easing: ease-out; enabled: MotionSettings.movement; }
                 VerticalBox {
                     padding-top: 18px;
                     padding-right: 12px;
