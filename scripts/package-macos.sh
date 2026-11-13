@@ -48,22 +48,10 @@ python3 "$project_dir/scripts/stage-pdfium.py" \
   --licenses-destination "$app_dir/Contents/Resources/Licenses/PDFium"
 chmod 0755 "$app_dir/Contents/Frameworks/libpdfium.dylib"
 
-icon_source="$project_dir/resources/app-icon/flectar-mail-masked.png"
-iconset_dir="$output_dir/FlectarMail.iconset"
-rm -rf "$iconset_dir"
-mkdir -p "$iconset_dir"
-sips -z 16 16 "$icon_source" --out "$iconset_dir/icon_16x16.png" >/dev/null
-sips -z 32 32 "$icon_source" --out "$iconset_dir/icon_16x16@2x.png" >/dev/null
-sips -z 32 32 "$icon_source" --out "$iconset_dir/icon_32x32.png" >/dev/null
-sips -z 64 64 "$icon_source" --out "$iconset_dir/icon_32x32@2x.png" >/dev/null
-sips -z 128 128 "$icon_source" --out "$iconset_dir/icon_128x128.png" >/dev/null
-sips -z 256 256 "$icon_source" --out "$iconset_dir/icon_128x128@2x.png" >/dev/null
-sips -z 256 256 "$icon_source" --out "$iconset_dir/icon_256x256.png" >/dev/null
-sips -z 512 512 "$icon_source" --out "$iconset_dir/icon_256x256@2x.png" >/dev/null
-sips -z 512 512 "$icon_source" --out "$iconset_dir/icon_512x512.png" >/dev/null
-cp "$icon_source" "$iconset_dir/icon_512x512@2x.png"
-iconutil -c icns "$iconset_dir" -o "$app_dir/Contents/Resources/FlectarMail.icns"
-rm -rf "$iconset_dir"
+# Every size follows Apple's macOS icon grid (resources/app-icon/generate.py),
+# so the Dock shows the icon at the size of other apps' icons.
+iconutil -c icns "$project_dir/resources/app-icon/flectar-mail.iconset" \
+  -o "$app_dir/Contents/Resources/FlectarMail.icns"
 
 cp "$project_dir/LICENSE" "$app_dir/Contents/Resources/Licenses/Flectar Mail/LICENSE"
 cp -R "$project_dir/LICENSES" "$app_dir/Contents/Resources/Licenses/Flectar Mail/LICENSES"
