@@ -740,9 +740,14 @@ impl Composers {
                     document.load_html_start(own, &saved.text)
                 })
             });
+            // HTML another app wrote opens with the formatting and images pasting keeps.
             if split.is_none()
                 && saved
-                    .and_then(|saved| document.load_html(&saved.html, &saved.text))
+                    .and_then(|saved| {
+                        document
+                            .load_html(&saved.html, &saved.text)
+                            .or_else(|| document.load_foreign_html(&saved.html))
+                    })
                     .is_none()
             {
                 document.load(&prepared.body, 0, 0);
