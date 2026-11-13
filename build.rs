@@ -30,6 +30,7 @@ fn main() {
             .file("platform/ios/WebAuthentication.m")
             .file("platform/ios/MemoryPressure.m")
             .file("platform/ios/BackgroundChecks.m")
+            .file("platform/ios/ReduceMotion.m")
             .flag("-fobjc-arc")
             .compile("flectar_documents");
         println!("cargo:rustc-link-lib=framework=UIKit");
@@ -47,6 +48,7 @@ fn main() {
         println!("cargo:rerun-if-changed=platform/ios/WebAuthentication.m");
         println!("cargo:rerun-if-changed=platform/ios/MemoryPressure.m");
         println!("cargo:rerun-if-changed=platform/ios/BackgroundChecks.m");
+        println!("cargo:rerun-if-changed=platform/ios/ReduceMotion.m");
     }
     if std::env::var_os("CARGO_CFG_TARGET_OS").as_deref() == Some(std::ffi::OsStr::new("windows")) {
         winresource::WindowsResource::new()

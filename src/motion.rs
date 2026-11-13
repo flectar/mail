@@ -1,21 +1,29 @@
 //! The operating system's request to reduce motion (#231). While the Reduce
 //! motion setting is System, `MotionSettings.system-reduced` follows Windows'
-//! animation effects, macOS' Reduce motion, or on Linux the desktop portal's
-//! reduced motion and GNOME's animations switch.
+//! animation effects, macOS' Reduce motion, the desktop portal's reduced
+//! motion or GNOME's animations switch on Linux, Android's Remove animations,
+//! iOS' Reduce Motion, and HarmonyOS' animation reduction.
 
-use crate::AppWindow;
-#[cfg(any(target_os = "windows", target_os = "macos", linux_desktop))]
-use crate::MotionSettings;
-#[cfg(any(target_os = "windows", target_os = "macos", linux_desktop))]
+use crate::{AppWindow, MotionSettings};
 use slint::ComponentHandle;
+#[cfg(any(target_os = "windows", mobile))]
+use std::cell::RefCell;
+
+#[cfg(any(target_os = "windows", mobile))]
+thread_local! {
+    /// The window to update when the system reports a change later.
+    static APP: RefCell<Option<slint::Weak<AppWindow>>> = const { RefCell::new(None) };
+}
 
 /// Read the system setting now and follow its changes.
 pub(crate) fn watch(app: &AppWindow, runtime: &tokio::runtime::Handle) {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", mobile))]
     {
-        windows::APP.with_borrow_mut(|weak| *weak = Some(app.as_weak()));
-        publish(app, windows::reduced());
+        APP.with_borrow_mut(|weak| *weak = Some(app.as_weak()));
+        publish(app, system_reduced());
     }
+    #[cfg(mobile)]
+    crate::platform::watch_reduce_motion();
     #[cfg(target_os = "macos")]
     {
         publish(app, macos::reduced());
@@ -26,9 +34,27 @@ pub(crate) fn watch(app: &AppWindow, runtime: &tokio::runtime::Handle) {
     let _ = (app, runtime);
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos", linux_desktop))]
 fn publish(app: &AppWindow, reduced: bool) {
     app.global::<MotionSettings>().set_system_reduced(reduced);
+}
+
+#[cfg(target_os = "windows")]
+fn system_reduced() -> bool {
+    windows::reduced()
+}
+
+#[cfg(mobile)]
+fn system_reduced() -> bool {
+    crate::platform::reduce_motion()
+}
+
+/// Read the setting again and update the interface. UI thread only.
+#[cfg(any(target_os = "windows", mobile))]
+fn refresh() {
+    let app = APP.with_borrow(|weak| weak.as_ref().and_then(slint::Weak::upgrade));
+    if let Some(app) = app {
+        publish(&app, system_reduced());
+    }
 }
 
 /// Windows tells every top-level window when its animation setting changes,
@@ -36,25 +62,21 @@ fn publish(app: &AppWindow, reduced: bool) {
 #[cfg(target_os = "windows")]
 pub(crate) fn system_changed() {
     // The window procedure is mid-dispatch, so update the interface after it.
-    slint::Timer::single_shot(std::time::Duration::ZERO, || {
-        let app = windows::APP.with_borrow(|weak| weak.as_ref().and_then(slint::Weak::upgrade));
-        if let Some(app) = app {
-            publish(&app, windows::reduced());
-        }
-    });
+    slint::Timer::single_shot(std::time::Duration::ZERO, refresh);
+}
+
+/// The phone reported a change, or the app came back to the front, where the
+/// user may have changed it in the system settings. Any thread may call it.
+#[cfg(mobile)]
+pub(crate) fn system_changed() {
+    let _ = slint::invoke_from_event_loop(refresh);
 }
 
 #[cfg(target_os = "windows")]
 mod windows {
-    use crate::AppWindow;
-    use std::cell::RefCell;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SPI_GETCLIENTAREAANIMATION, SystemParametersInfoW,
     };
-
-    thread_local! {
-        pub(super) static APP: RefCell<Option<slint::Weak<AppWindow>>> = const { RefCell::new(None) };
-    }
 
     /// Settings > Accessibility > Visual effects > Animation effects is off.
     pub(super) fn reduced() -> bool {
