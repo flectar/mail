@@ -43,6 +43,7 @@ mod mail_work;
 mod mailto_links;
 mod memory;
 mod message_appearance;
+mod motion;
 mod move_picker;
 mod notifications;
 /// What Android asks of the app without its window.
@@ -1829,6 +1830,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_workspace_list_pane_width(width as f32);
     }
     window_chrome::register(&app, &runtime);
+    motion::watch(&app, &runtime);
     app_icon::apply(&app, startup_presentation.app_icon);
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     app.on_settings_search_matches(|haystack, query| {
