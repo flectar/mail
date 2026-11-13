@@ -448,6 +448,13 @@ pub(super) fn restore_account_backup(
             {
                 settings.message_appearance = preference;
             }
+            if let Some(size) = preferences
+                .get("interfaceTextSize")
+                .and_then(|value| value.as_str())
+                .and_then(flectar_mail_core::models::InterfaceTextSize::parse)
+            {
+                settings.interface_text_size = size;
+            }
             if let Some(preference) = preferences
                 .get("reduceMotion")
                 .and_then(|value| value.as_str())
@@ -665,6 +672,7 @@ pub(super) fn restore_account_backup(
         .set_preference(settings.message_appearance.as_str().into());
     app.global::<crate::MotionSettings>()
         .set_preference(settings.reduce_motion.as_str().into());
+    crate::text_size::apply(app, settings.interface_text_size);
     app.set_show_avatars(settings.show_avatars);
     app.set_show_tabs(settings.show_tabs);
     crate::spelling::apply_settings(
@@ -1346,6 +1354,7 @@ pub(super) fn register_data_management_callbacks(
                     "theme": settings.theme,
                     "messageAppearance": settings.message_appearance,
                     "reduceMotion": settings.reduce_motion,
+                    "interfaceTextSize": settings.interface_text_size,
                     "showAvatars": settings.show_avatars,
                     "showTabs": settings.show_tabs,
                     "conversationView": settings.conversation_view,
@@ -1669,6 +1678,7 @@ pub(super) fn register_data_management_callbacks(
                         .set_preference("system".into());
                     app.global::<crate::MotionSettings>()
                         .set_preference("system".into());
+                    crate::text_size::apply(&app, Default::default());
                     app.set_monochrome_sidebar_icons(false);
                     crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);

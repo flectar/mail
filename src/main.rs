@@ -90,6 +90,7 @@ mod single_instance;
 mod startup;
 mod startup_metrics;
 mod tabs;
+mod text_size;
 mod theme;
 mod ui_dispatch;
 mod ui_message;

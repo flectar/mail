@@ -22,8 +22,9 @@ import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slin
 import "../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf";
 
 import { Palette } from "std-widgets.slint";
-import { TypeScale } from "typography.slint";
+import { InterfaceText, TypeScale } from "typography.slint";
 export { AppTheme, MotionSettings, ThemeUtilities } from "design-system.slint";
+export { InterfaceText } from "typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings } from "design-system.slint";
 import { Button } from "components/button.slint";
 import { LoadingSkeletonBlock } from "components/loading-skeleton.slint";
@@ -314,6 +315,9 @@ export global I18n {
         if (key == "Reduce motion preference saved.") { return @tr("Reduce motion preference saved."); }
         if (key == "Reduce motion updated for this session.") { return @tr("Reduce motion updated for this session."); }
         if (key == "Could not save the reduce motion preference: {}") { return @tr("Could not save the reduce motion preference: {}", argument); }
+        if (key == "Interface text size saved.") { return @tr("Interface text size saved."); }
+        if (key == "Interface text size updated for this session.") { return @tr("Interface text size updated for this session."); }
+        if (key == "Could not save the interface text size: {}") { return @tr("Could not save the interface text size: {}", argument); }
         if (key == "Could not save theme: {}") { return @tr("Could not save theme: {}", argument); }
         if (key == "Theme palette updated for this session.") { return @tr("Theme palette updated for this session."); }
         if (key == "Theme palette saved.") { return @tr("Theme palette saved."); }
@@ -803,6 +807,13 @@ export component AppWindow inherits Window {
     no-frame: WindowChrome.integrated && WindowChrome.platform == "linux";
     resize-border-width: root.client-frame ? 6px : 0px;
     default-font-family: "Google Sans Flex";
+    // The interface text size (src/text_size.rs). At zero the window uses the
+    // system's text size and follows it as it changes, which every rem size
+    // and standard widget scales with.
+    in-out property <length> interface-text-size: 0px;
+    default-font-size: root.interface-text-size;
+    // The text size that rem sizes resolve to, the system's at zero.
+    out property <length> base-text-size: 1rem;
     preferred-width: 1320px;
     preferred-height: 800px;
     min-width: 320px;
