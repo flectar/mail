@@ -3615,7 +3615,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         let animate = section_toggle_app
             .upgrade()
-            .is_some_and(|app| app.global::<MotionSettings>().get_enabled());
+            .is_some_and(|app| app.global::<MotionSettings>().get_movement());
         refresh_sidebar_with_motion(&section_toggle_state, animate);
     });
 
@@ -3636,7 +3636,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         let animate = folder_toggle_app
             .upgrade()
-            .is_some_and(|app| app.global::<MotionSettings>().get_enabled());
+            .is_some_and(|app| app.global::<MotionSettings>().get_movement());
         refresh_sidebar_with_motion(&folder_toggle_state, animate);
     });
 
@@ -5743,7 +5743,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         if !header_exists {
             return;
         }
-        let motion_enabled = app.global::<MotionSettings>().get_enabled();
+        let motion_enabled = app.global::<MotionSettings>().get_movement();
         let generation = {
             let mut state = state_for_mail_group.borrow_mut();
             let (generation, _) = state.mail_groups.toggle(&key);

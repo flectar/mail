@@ -24,7 +24,7 @@ import "../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,RON
 import { Palette } from "std-widgets.slint";
 import { TypeScale } from "typography.slint";
 export { AppTheme, MotionSettings, ThemeUtilities } from "design-system.slint";
-import { AppTheme, LayoutMetrics } from "design-system.slint";
+import { AppTheme, LayoutMetrics, MotionSettings } from "design-system.slint";
 import { Button } from "components/button.slint";
 import { LoadingSkeletonBlock } from "components/loading-skeleton.slint";
 import { AccountRow, CalendarAgendaRow, CalendarAgendaFilterRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, ContactSyncState, ContactValueRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailListEntry, MailProfileRow, ProfileMemberRow, SidebarRow, MailLabelRow, StorageUsageRow, ThreadMessageRow } from "models.slint";
@@ -2029,7 +2029,7 @@ export component AppWindow inherits Window {
             height: root.compact-primary-nav-height;
             opacity: root.compact-primary-nav-visible ? 1 : 0;
             interactive: root.compact-primary-nav-visible;
-            animate y { duration: 240ms; easing: spring(0); }
+            animate y { duration: 240ms; easing: spring(0); enabled: MotionSettings.movement; }
             animate opacity { duration: 160ms; easing: ease-out; }
             active-view <=> root.active_view;
             settings-active: root.settings_open;

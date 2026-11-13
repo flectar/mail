@@ -28,7 +28,7 @@ import { TabsUi } from "../components/workspace-navigation.slint";
 import { AccountProfilePicker, ProfileColorChoice, ProfileMemberChoice, ProfilePalette } from "../components/profile-controls.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
 import { TypeScale } from "../typography.slint";
-import { AppTheme, LayoutMetrics, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MotionSettings, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
 import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/workspace-layout.slint";
 import { TabSwitcherButton } from "../components/tab-overview.slint";
 import { LocalMailUi } from "../local-mail.slint";
@@ -3272,9 +3272,9 @@ export component SettingsDialog inherits Rectangle {
                 drop-shadow-blur: root.compact-nav-open ? 24px : 0px;
                 drop-shadow-offset-x: 6px;
                 drop-shadow-color: #00000035;
-                animate x { duration: 260ms; easing: spring(0.08); }
+                animate x { duration: 260ms; easing: spring(0.08); enabled: MotionSettings.movement; }
                 animate opacity { duration: 180ms; easing: ease-out; }
-                animate drop-shadow-blur { duration: 180ms; easing: ease-out; }
+                animate drop-shadow-blur { duration: 180ms; easing: ease-out; enabled: MotionSettings.movement; }
                 VerticalBox {
                     padding-top: 18px;
                     padding-right: 12px;

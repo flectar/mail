@@ -1754,7 +1754,7 @@ mod interaction_tests {
             }
             let animate = motion_for_click
                 .upgrade()
-                .is_some_and(|app| app.global::<MotionSettings>().get_enabled());
+                .is_some_and(|app| app.global::<MotionSettings>().get_movement());
             animation_for_click.reconcile(
                 &model_for_click,
                 make_sidebar_rows(

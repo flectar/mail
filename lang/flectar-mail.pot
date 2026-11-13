@@ -411,8 +411,8 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:224 ui/app.slint:1241 ui/components/composer-fields.slint:89
-#: ui/app.slint:224 ui/app.slint:1241 ui/components/composer-fields.slint:89 ui/components/email-composer.slint:35
+#: ui/app.slint:224 ui/app.slint:1241 ui/components/composer-fields.slint:90
+#: ui/app.slint:224 ui/app.slint:1241 ui/components/composer-fields.slint:90 ui/components/email-composer.slint:35
 msgid "No connected account"
 msgstr ""
 
@@ -422,7 +422,7 @@ msgid_plural "{n} interactions"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:228 ui/components/composer-fields.slint:18
+#: ui/app.slint:228 ui/components/composer-fields.slint:19
 msgid "New message"
 msgstr ""
 
@@ -3333,77 +3333,77 @@ msgstr ""
 msgid "Keep"
 msgstr ""
 
-#: ui/components/composer-fields.slint:13 ui/views/mail-reading-pane.slint:342
-#: ui/components/composer-fields.slint:13 ui/views/mail-reading-pane.slint:342 ui/views/mail-reading-pane.slint:388
-#: ui/components/composer-fields.slint:13 ui/views/mail-reading-pane.slint:342 ui/views/mail-reading-pane.slint:388 ui/views/mail-reading-pane.slint:782
-#: ui/components/composer-fields.slint:13 ui/views/mail-reading-pane.slint:342 ui/views/mail-reading-pane.slint:388 ui/views/mail-reading-pane.slint:782
+#: ui/components/composer-fields.slint:14 ui/views/mail-reading-pane.slint:342
+#: ui/components/composer-fields.slint:14 ui/views/mail-reading-pane.slint:342 ui/views/mail-reading-pane.slint:388
+#: ui/components/composer-fields.slint:14 ui/views/mail-reading-pane.slint:342 ui/views/mail-reading-pane.slint:388 ui/views/mail-reading-pane.slint:782
+#: ui/components/composer-fields.slint:14 ui/views/mail-reading-pane.slint:342 ui/views/mail-reading-pane.slint:388 ui/views/mail-reading-pane.slint:782
 msgid "Reply"
 msgstr ""
 
-#: ui/components/composer-fields.slint:14 ui/views/mail-reading-pane.slint:343
-#: ui/components/composer-fields.slint:14 ui/views/mail-reading-pane.slint:343 ui/views/mail-reading-pane.slint:389
-#: ui/components/composer-fields.slint:14 ui/views/mail-reading-pane.slint:343 ui/views/mail-reading-pane.slint:389 ui/views/mail-reading-pane.slint:791
-#: ui/components/composer-fields.slint:14 ui/views/mail-reading-pane.slint:343 ui/views/mail-reading-pane.slint:389 ui/views/mail-reading-pane.slint:791
+#: ui/components/composer-fields.slint:15 ui/views/mail-reading-pane.slint:343
+#: ui/components/composer-fields.slint:15 ui/views/mail-reading-pane.slint:343 ui/views/mail-reading-pane.slint:389
+#: ui/components/composer-fields.slint:15 ui/views/mail-reading-pane.slint:343 ui/views/mail-reading-pane.slint:389 ui/views/mail-reading-pane.slint:791
+#: ui/components/composer-fields.slint:15 ui/views/mail-reading-pane.slint:343 ui/views/mail-reading-pane.slint:389 ui/views/mail-reading-pane.slint:791
 msgid "Reply all"
 msgstr ""
 
-#: ui/components/composer-fields.slint:15 ui/views/mail-reading-pane.slint:344
-#: ui/components/composer-fields.slint:15 ui/views/mail-reading-pane.slint:344 ui/views/mail-reading-pane.slint:390
-#: ui/components/composer-fields.slint:15 ui/views/mail-reading-pane.slint:344 ui/views/mail-reading-pane.slint:390 ui/views/mail-reading-pane.slint:800
-#: ui/components/composer-fields.slint:15 ui/views/mail-reading-pane.slint:344 ui/views/mail-reading-pane.slint:390 ui/views/mail-reading-pane.slint:800
+#: ui/components/composer-fields.slint:16 ui/views/mail-reading-pane.slint:344
+#: ui/components/composer-fields.slint:16 ui/views/mail-reading-pane.slint:344 ui/views/mail-reading-pane.slint:390
+#: ui/components/composer-fields.slint:16 ui/views/mail-reading-pane.slint:344 ui/views/mail-reading-pane.slint:390 ui/views/mail-reading-pane.slint:800
+#: ui/components/composer-fields.slint:16 ui/views/mail-reading-pane.slint:344 ui/views/mail-reading-pane.slint:390 ui/views/mail-reading-pane.slint:800
 msgid "Forward"
 msgstr ""
 
-#: ui/components/composer-fields.slint:16
+#: ui/components/composer-fields.slint:17
 msgid "Edit draft"
 msgstr ""
 
-#: ui/components/composer-fields.slint:17 ui/views/mail-reading-pane.slint:345
-#: ui/components/composer-fields.slint:17 ui/views/mail-reading-pane.slint:345 ui/views/mail-reading-pane.slint:391
-#: ui/components/composer-fields.slint:17 ui/views/mail-reading-pane.slint:345 ui/views/mail-reading-pane.slint:391
+#: ui/components/composer-fields.slint:18 ui/views/mail-reading-pane.slint:345
+#: ui/components/composer-fields.slint:18 ui/views/mail-reading-pane.slint:345 ui/views/mail-reading-pane.slint:391
+#: ui/components/composer-fields.slint:18 ui/views/mail-reading-pane.slint:345 ui/views/mail-reading-pane.slint:391
 msgid "Edit as new"
 msgstr ""
 
-#: ui/components/composer-fields.slint:69
+#: ui/components/composer-fields.slint:70
 msgid "Open in a new window"
 msgstr ""
 
-#: ui/components/composer-fields.slint:123 ui/views/files-view.slint:701
+#: ui/components/composer-fields.slint:124 ui/views/files-view.slint:701
 msgid "Account"
 msgstr ""
 
-#: ui/components/composer-fields.slint:363
-#: ui/components/composer-fields.slint:363
+#: ui/components/composer-fields.slint:364
+#: ui/components/composer-fields.slint:364
 msgid "To"
 msgstr ""
 
-#: ui/components/composer-fields.slint:364
+#: ui/components/composer-fields.slint:365
 msgid "name@example.com · separate with commas"
 msgstr ""
 
-#: ui/components/composer-fields.slint:390
-#: ui/components/composer-fields.slint:390
+#: ui/components/composer-fields.slint:391
+#: ui/components/composer-fields.slint:391
 msgid "Cc"
 msgstr ""
 
-#: ui/components/composer-fields.slint:391
+#: ui/components/composer-fields.slint:392
 msgid "Carbon copy"
 msgstr ""
 
-#: ui/components/composer-fields.slint:401
-#: ui/components/composer-fields.slint:401
+#: ui/components/composer-fields.slint:402
+#: ui/components/composer-fields.slint:402
 msgid "Bcc"
 msgstr ""
 
-#: ui/components/composer-fields.slint:402
+#: ui/components/composer-fields.slint:403
 msgid "Blind carbon copy"
 msgstr ""
 
-#: ui/components/composer-fields.slint:490
+#: ui/components/composer-fields.slint:491
 msgid "Subject"
 msgstr ""
 
-#: ui/components/composer-fields.slint:502
+#: ui/components/composer-fields.slint:503
 msgid "What is this email about?"
 msgstr ""
 
