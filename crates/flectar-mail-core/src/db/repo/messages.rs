@@ -389,6 +389,32 @@ pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> 
 
 /// A message given a UID is linked to the server and no longer waits to be
 /// matched with its copy there.
+/// Of `ids`, the messages from people the user knows: someone they have
+/// written to or keep in their address book, when the receiving server
+/// confirmed the sender (its Authentication-Results), since a From address
+/// alone is easy to forge.
+pub fn from_known_senders(
+    conn: &Connection,
+    ids: &[i64],
+) -> Result<std::collections::HashSet<i64>> {
+    let mut statement = conn.prepare(
+        "SELECT m.sender_verification != ''
+             AND (EXISTS (SELECT 1 FROM contacts c
+                          WHERE c.email = m.from_addr COLLATE NOCASE AND c.send_count > 0)
+                  OR EXISTS (SELECT 1 FROM contact_values v
+                             WHERE v.kind = 'EMAIL' AND v.value = m.from_addr COLLATE NOCASE))
+         FROM messages m WHERE m.id = ?1",
+    )?;
+    let mut known = std::collections::HashSet::new();
+    for &id in ids {
+        let yes: Option<bool> = statement.query_row([id], |row| row.get(0)).optional()?;
+        if yes == Some(true) {
+            known.insert(id);
+        }
+    }
+    Ok(known)
+}
+
 /// Of `ids`, the messages whose invitations stay out of the calendar: mail
 /// in Spam or Trash, as a folder or a label, and mail from a blocked sender.
 pub fn kept_from_calendar(
