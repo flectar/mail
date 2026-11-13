@@ -1459,6 +1459,12 @@ impl ComposeSession {
             }
         });
         let weak = self.reference();
+        ui.on_insert_images(move || {
+            if let Some(session) = weak.upgrade() {
+                session.pick_images();
+            }
+        });
+        let weak = self.reference();
         ui.on_remove_attachment(move |index| {
             if let Some(session) = weak.upgrade() {
                 session.remove_attachment(index);
@@ -1772,11 +1778,9 @@ impl ComposeSession {
     }
 
     /// Pastes the HTML on the clipboard over the selection, with the formatting the composer
-    /// keeps. False when the clipboard holds none, for the plain text to go in.
+    /// keeps, or else a picture on it. False when the clipboard holds neither, for the plain
+    /// text to go in.
     fn paste_formatted(&self, body: &str, anchor: i32, cursor: i32) -> bool {
-        let Some(html) = crate::reader_clipboard::html() else {
-            return false;
-        };
         let Some(host) = self.host() else {
             return false;
         };
@@ -1787,9 +1791,47 @@ impl ComposeSession {
             } else {
                 document.update_selection(anchor, cursor);
             }
-            let Some(selection) = document.paste_html(&html) else {
+        }
+        if let Some(html) = crate::reader_clipboard::html()
+            && self.paste_html(&host, &html)
+        {
+            return true;
+        }
+        // A picture copied on its own, such as a screenshot, goes in as an image.
+        let image = crate::reader_clipboard::image_png()
+            .and_then(|png| crate::rich_compose::InlineImage::from_file_bytes(png, ""));
+        match image {
+            Some(image) => {
+                self.insert_image(image);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Pastes `html` over the selection, unless it holds no text, or more image data than
+    /// the text of a message carries. Returns whether it went in.
+    fn paste_html(&self, host: &HostRef, html: &str) -> bool {
+        {
+            let mut document = self.document.borrow_mut();
+            let held = |document: &RichComposeDocument| -> usize {
+                document.images().map(|image| image.data.len()).sum()
+            };
+            let before = held(&document);
+            let Some(mut selection) = document.paste_html(html) else {
                 return false;
             };
+            if held(&document) > before.max(MAX_INLINE_IMAGE_BYTES) {
+                if let Some(undone) = document.history("undo") {
+                    selection = undone;
+                }
+                host.ui().set_notice(
+                    UiMessage::plain(
+                        "Images in the text can take up to 5 MB in all. Attach larger ones as files.",
+                    ),
+                    true,
+                );
+            }
             apply_rich_compose(
                 &host.view(),
                 &document,
@@ -2105,6 +2147,105 @@ impl ComposeSession {
         });
     }
 
+    /// Opens a picker for images to put in the text at the caret.
+    fn pick_images(self: &Rc<Self>) {
+        let Some(composers) = self.composers() else {
+            return;
+        };
+        let Some(app) = composers.app.upgrade() else {
+            return;
+        };
+        if self.picking.replace(true) {
+            return;
+        }
+        let mut dialog = documents::DocumentDialog::titled(translated(
+            &app,
+            &UiMessage::plain("Insert images in this email"),
+        ));
+        dialog.filter = Some((
+            translated(&app, &UiMessage::plain("Images")).into(),
+            &["png", "jpg", "jpeg", "gif", "webp"],
+        ));
+        let request = composers
+            .documents
+            .import_many(MAX_COMPOSE_ATTACHMENT_FILES, dialog);
+        let weak = Rc::downgrade(self);
+        let picked_in = self.generation.get();
+        documents::run_request(&composers.runtime, request, move |imported| {
+            let Some(session) = weak.upgrade() else {
+                return;
+            };
+            session.picking.set(false);
+            if session.generation.get() != picked_in {
+                return;
+            }
+            let Some(host) = session.host() else {
+                return;
+            };
+            let ui = host.ui();
+            let documents = match imported {
+                Ok(documents) => documents,
+                Err(error) => {
+                    tracing::warn!(%error, "compose image picker failed");
+                    ui.set_notice(UiMessage::detail("Could not add images: {}", error), true);
+                    return;
+                }
+            };
+            for document in documents {
+                let name = document.name().unwrap_or_default();
+                let image = std::fs::metadata(document.path())
+                    .ok()
+                    .filter(|metadata| metadata.len() <= MAX_INLINE_IMAGE_BYTES as u64)
+                    .and_then(|_| std::fs::read(document.path()).ok())
+                    .map(|bytes| crate::rich_compose::InlineImage::from_file_bytes(bytes, ""));
+                match image {
+                    Some(Some(image)) => {
+                        if !session.insert_image(image) {
+                            break;
+                        }
+                    }
+                    Some(None) => ui.set_notice(
+                        UiMessage::detail("{} isn't a PNG, JPEG, GIF or WebP image.", name),
+                        true,
+                    ),
+                    None => {
+                        ui.set_notice(
+                            UiMessage::plain(
+                                "Images in the text can take up to 5 MB in all. Attach larger ones as files.",
+                            ),
+                            true,
+                        );
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    /// Puts an image in the text at the caret, unless the text's images would grow past what
+    /// a message carries in its text. Returns whether it went in.
+    fn insert_image(&self, image: crate::rich_compose::InlineImage) -> bool {
+        let Some(host) = self.host() else {
+            return false;
+        };
+        let fits = {
+            let document = self.document.borrow();
+            let held: usize = document.images().map(|image| image.data.len()).sum();
+            held.saturating_add(image.data.len()) <= MAX_INLINE_IMAGE_BYTES
+        };
+        if !fits {
+            host.ui().set_notice(
+                UiMessage::plain(
+                    "Images in the text can take up to 5 MB in all. Attach larger ones as files.",
+                ),
+                true,
+            );
+            return false;
+        }
+        self.edit(|document| document.insert_image(image));
+        true
+    }
+
     fn remove_attachment(&self, index: i32) {
         let Some(host) = self.host() else {
             return;
@@ -2308,19 +2449,23 @@ impl ComposeSession {
                 mime_type: None,
             })
             .collect::<Vec<_>>();
-        let body_html = {
+        let (body_html, described) = {
             let mut document = self.document.borrow_mut();
             if document.text() != body {
                 document.synchronize(body, body.len() as i32, body.len() as i32);
             }
             // Blank lines at the end give way to the one above the quote, in
             // both parts, so a reopened draft finds where the quote starts.
-            if self.quote.borrow().is_some() {
+            let html = if self.quote.borrow().is_some() {
                 document.body_html_above_quote()
             } else {
                 document.body_html()
-            }
+            };
+            // Mail read as plain text names each image in its place. A draft keeps the
+            // placeholders, which the HTML's images reopen into.
+            (html, send.then(|| document.text_with_image_descriptions()))
         };
+        let body = described.as_deref().unwrap_or(body);
         // The original goes below what the user wrote, in both parts.
         let (body, body_html) = match self.quote.borrow().as_ref() {
             Some(quote) => {
@@ -2838,6 +2983,9 @@ impl ComposeSession {
 }
 
 type FetchedFiles = Vec<Result<(PathBuf, String, u64), String>>;
+
+/// How much image data the text of a message holds, which goes out in its HTML body.
+const MAX_INLINE_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 
 #[cfg(all(test, desktop))]
 mod tests {

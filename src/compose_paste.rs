@@ -9,8 +9,8 @@
 //! colors, highlights and alignment.
 
 use crate::rich_compose::{
-    Alignment, BOLD, CODE, CharacterStyle, ComposeStyleRun, FontFamily, ITALIC, QUOTE_MARKER, Rgb,
-    STRIKE, TextSize, UNDERLINE,
+    Alignment, BOLD, CODE, CharacterStyle, ComposeStyleRun, FontFamily, IMAGE_PLACEHOLDER, ITALIC,
+    InlineImage, QUOTE_MARKER, Rgb, STRIKE, TextSize, UNDERLINE,
 };
 use html5ever::tokenizer::{
     BufferQueue, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, states::RawKind,
@@ -167,6 +167,8 @@ impl Default for Look {
 #[derive(Clone, Debug, PartialEq)]
 enum Piece {
     Text(Look),
+    /// An image the HTML holds, with the link and alignment where it is.
+    Image(Arc<InlineImage>, Look),
     /// A list or quote marker, which readers show in their usual text.
     Marker(Alignment),
     LineEnd(Alignment),
@@ -286,9 +288,26 @@ impl Reader {
                 self.request_breaks(1);
                 return;
             }
-            // Images wait for the composer to hold them; the rest hold no text.
-            "img" | "wbr" | "meta" | "link" | "input" | "col" | "area" | "base" | "embed"
-            | "param" | "source" | "track" | "basefont" => return,
+            // Images whose file the HTML holds come along. Others are on the web, and wait.
+            "img" => {
+                let look = self.look();
+                if self.copying && !look.hidden && !self.in_conditional {
+                    let image = attribute("src").and_then(|src| {
+                        InlineImage::from_data_uri(src.trim(), attribute("alt").unwrap_or_default())
+                    });
+                    if let Some(mut image) = image {
+                        image.shown_width = attribute("width")
+                            .and_then(|width| width.trim().parse::<u32>().ok())
+                            .filter(|width| *width > 0 && *width != image.width);
+                        let mut placeholder = [0; 4];
+                        let text = IMAGE_PLACEHOLDER.encode_utf8(&mut placeholder);
+                        self.write_piece(text, Piece::Image(Arc::new(image), look.clone()), &look);
+                    }
+                }
+                return;
+            }
+            "wbr" | "meta" | "link" | "input" | "col" | "area" | "base" | "embed" | "param"
+            | "source" | "track" | "basefont" => return,
             _ => {}
         }
 
@@ -506,6 +525,11 @@ impl Reader {
 
     /// Writes `text`, after the line breaks, marker and space that come before it.
     fn write(&mut self, text: &str, look: &Look) {
+        self.write_piece(text, Piece::Text(look.clone()), look);
+    }
+
+    /// Writes a piece in `look`, after the line breaks, marker and space that come before it.
+    fn write_piece(&mut self, text: &str, piece: Piece, look: &Look) {
         if self.pending_breaks > 0 {
             if !self.text.is_empty() {
                 if self.line_has_text {
@@ -537,7 +561,7 @@ impl Reader {
             self.push(" ", Piece::Text(look.clone()));
             self.pending_space = false;
         }
-        self.push(text, Piece::Text(look.clone()));
+        self.push(text, piece);
         self.line_has_text = true;
         if self.quotes > 0 {
             self.quote_has_text = true;
@@ -634,6 +658,12 @@ impl Reader {
                         align,
                         ..base.clone()
                     },
+                    Piece::Image(image, look) => CharacterStyle {
+                        link: look.link,
+                        align: look.align,
+                        image: Some(image),
+                        ..CharacterStyle::default()
+                    },
                     Piece::Text(look) => {
                         let highlight = look.highlight.filter(|highlight| {
                             let luminance = luminance(*highlight);
@@ -675,6 +705,7 @@ impl Reader {
                             size,
                             family,
                             align: look.align,
+                            image: None,
                         }
                     }
                 };
@@ -1283,6 +1314,26 @@ mod tests {
         );
         assert_eq!(style(&pasted, "tinted").highlight, Some(0xff_f2_cc));
         assert_eq!(style(&pasted, "card").highlight, None);
+    }
+
+    #[test]
+    fn images_whose_file_the_html_holds_come_along() {
+        use base64::Engine;
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::new(8, 6))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let data = base64::engine::general_purpose::STANDARD.encode(&png);
+        let pasted = paste(&format!(
+            "<p>See <img src=\"data:image/png;base64,{data}\" alt=\"Chart\" width=\"4\"> \
+             and <img src=\"https://example.com/remote.png\" alt=\"Remote\">.</p>"
+        ));
+        assert_eq!(pasted.0, "See \u{fffc} and .");
+        let image = style(&pasted, "\u{fffc}").image.clone().unwrap();
+        assert_eq!(
+            (image.width, image.height, image.shown_width, &*image.alt),
+            (8, 6, Some(4), "Chart")
+        );
     }
 
     #[test]

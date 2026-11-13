@@ -102,6 +102,7 @@ export component EmailComposer inherits Rectangle {
     callback back-requested;
     callback submit(bool);
     callback pick-attachments;
+    callback insert-images;
     callback remove-attachment(int);
     callback format-requested(string, string, int, int);
     callback paste-requested(string, int, int) -> bool;
@@ -436,6 +437,7 @@ export component EmailComposer inherits Rectangle {
             link-active: root.active-link-url != "";
             can-link: root.selection-start != root.selection-end;
             apply-format(kind) => { root.apply-format(kind); }
+            insert-image => { root.insert-images(); }
             open-templates => { root.templates-open = true; }
             undo => {
                 root.history-requested("undo");

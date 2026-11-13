@@ -123,6 +123,9 @@
     "info.svg": {
       "source": "info"
     },
+    "insert-image.svg": {
+      "source": "image-plus"
+    },
     "italic.svg": {
       "source": "italic"
     },
@@ -448,6 +451,10 @@
     "history": {
       "path": "sources/history.svg",
       "sha256": "fa003df2e3e870987f85934a1428e2db2aaa0ebfa9eea22955595b6795d25c4c"
+    },
+    "image-plus": {
+      "path": "sources/image-plus.svg",
+      "sha256": "b8a7081285364f81220606430707969e47b983a544d39225bc7ade6155fdc9c0"
     },
     "inbox": {
       "path": "sources/inbox.svg",

@@ -91,6 +91,8 @@ export global ComposerUi {
     callback pop-out();
     callback save(int, string, string, string, string, string, bool);
     callback pick-attachments();
+    // Opens a picker for images to put in the text at the caret.
+    callback insert-images();
     callback remove-attachment(int);
     callback format(string, string, int, int);
     // Pastes the clipboard's HTML over the selection of the body given, with its
@@ -207,6 +209,7 @@ export component BoundComposer inherits EmailComposer {
         );
     }
     pick-attachments => { ComposerUi.pick-attachments(); }
+    insert-images => { ComposerUi.insert-images(); }
     remove-attachment(index) => { ComposerUi.remove-attachment(index); }
     format-requested(kind, body, anchor, cursor) => { ComposerUi.format(kind, body, anchor, cursor); }
     paste-requested(body, anchor, cursor) => { return ComposerUi.paste-formatted(body, anchor, cursor); }
