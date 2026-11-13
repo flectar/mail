@@ -3731,98 +3731,102 @@ msgid "Event from {}"
 msgstr ""
 
 #: ui/components/invitation-card.slint:97
-msgid "One guest"
-msgid_plural "{n} guests"
-msgstr[0] ""
-msgstr[1] ""
+msgid "With {}"
+msgstr ""
 
 #: ui/components/invitation-card.slint:98
-msgid "One guest, {} accepted"
-msgid_plural "{n} guests, {} accepted"
+msgid "With {} and one more"
+msgid_plural "With {} and {n} more"
 msgstr[0] ""
 msgstr[1] ""
 
 #: ui/components/invitation-card.slint:100
+msgid "One accepted"
+msgid_plural "{n} accepted"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/components/invitation-card.slint:102
 msgid "This occurrence"
 msgstr ""
 
-#: ui/components/invitation-card.slint:100
+#: ui/components/invitation-card.slint:102
 msgid "Repeats"
 msgstr ""
 
-#: ui/components/invitation-card.slint:101
+#: ui/components/invitation-card.slint:103
 msgid "{} · This occurrence"
 msgstr ""
 
-#: ui/components/invitation-card.slint:102
+#: ui/components/invitation-card.slint:104
 msgid "{} · Repeats"
 msgstr ""
 
-#: ui/components/invitation-card.slint:103
+#: ui/components/invitation-card.slint:105
 msgid "You accepted"
 msgstr ""
 
-#: ui/components/invitation-card.slint:105
+#: ui/components/invitation-card.slint:107
 msgid "You declined"
 msgstr ""
 
-#: ui/components/invitation-card.slint:210
+#: ui/components/invitation-card.slint:213
 msgid "Show in calendar"
 msgstr ""
 
-#: ui/components/invitation-card.slint:218
+#: ui/components/invitation-card.slint:221
 msgid ""
 "Invitations in Spam or Trash, and from blocked senders, stay out of your "
 "calendar."
 msgstr ""
 
-#: ui/components/invitation-card.slint:222
+#: ui/components/invitation-card.slint:225
 msgid "{} has answered again since."
 msgstr ""
 
-#: ui/components/invitation-card.slint:223
+#: ui/components/invitation-card.slint:226
 msgid "Your calendar has a newer version of this event."
 msgstr ""
 
-#: ui/components/invitation-card.slint:228
+#: ui/components/invitation-card.slint:231
 msgid "This event has since been cancelled."
 msgstr ""
 
-#: ui/components/invitation-card.slint:232
+#: ui/components/invitation-card.slint:235
 msgid ""
 "You aren't on the guest list, so the organizer may not count your answer."
 msgstr ""
 
-#: ui/components/invitation-card.slint:236
+#: ui/components/invitation-card.slint:239
 msgid "Not in your calendar yet. Answering adds it."
 msgstr ""
 
-#: ui/components/invitation-card.slint:241
+#: ui/components/invitation-card.slint:244
 msgid "At the same time as {}"
 msgstr ""
 
-#: ui/components/invitation-card.slint:242
+#: ui/components/invitation-card.slint:245
 msgid "At the same time as {} and one other event"
 msgid_plural "At the same time as {} and {n} other events"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/components/invitation-card.slint:253
-#: ui/components/invitation-card.slint:253
+#: ui/components/invitation-card.slint:256
+#: ui/components/invitation-card.slint:256
 msgid "Accept"
 msgstr ""
 
-#: ui/components/invitation-card.slint:255
-#: ui/components/invitation-card.slint:255
+#: ui/components/invitation-card.slint:258
+#: ui/components/invitation-card.slint:258
 msgid "Decline"
 msgstr ""
 
-#: ui/components/invitation-card.slint:261
-#: ui/components/invitation-card.slint:261
+#: ui/components/invitation-card.slint:264
+#: ui/components/invitation-card.slint:264
 msgid "Remove from calendar"
 msgstr ""
 
-#: ui/components/invitation-card.slint:270
+#: ui/components/invitation-card.slint:273
 msgid "Add to calendar"
 msgstr ""
 
