@@ -336,6 +336,15 @@ server that schedules for your address tells the organizer itself, and
 otherwise Flectar Mail emails a reply from the address the invitation was sent
 to.
 
+**Add invitations to my calendar** in Settings → General decides which
+invitations join your calendar as they arrive: **From everyone**, **Only from
+people I know** (the default), or **Only when I answer**. People you know are
+those you've emailed or saved as contacts, when your mail server confirms the
+message really comes from them, since a sender's address alone is easy to forge.
+Any other invitation waits in its message, and answering it adds it. An event
+only shared with you, rather than an invitation, has **Add to calendar**, and
+invitations in imported mail wait for an answer too.
+
 The card also shows updates, cancellations, and answers to your own
 invitations. A cancelled event offers **Remove from calendar**, which takes it
 out without telling anyone. An invitation that a newer version has replaced

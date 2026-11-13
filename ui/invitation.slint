@@ -48,12 +48,18 @@ export global Invitation {
     // A cancelled event still in the calendar, which the card can take
     // out of it.
     in property <bool> removable;
+    // An invitation not in the calendar yet, which answering adds.
+    in property <bool> held;
+    // An event only shared with the user, not in their calendar yet.
+    in property <bool> addable;
     // An answer or a removal is on its way.
     in property <bool> working;
     // Answer: "accepted", "tentative" or "declined".
     callback answer(string);
     // Take the cancelled event out of the calendar.
     callback remove();
+    // Add the shared event to the calendar.
+    callback add();
     callback open-link(string);
     callback show-in-calendar();
 }
