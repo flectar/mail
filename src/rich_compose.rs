@@ -17,6 +17,8 @@ pub(crate) const STRIKE: u8 = 1 << 3;
 pub(crate) const CODE: u8 = 1 << 4;
 /// What starts each line of a quote block in the document's text.
 pub(crate) const QUOTE_MARKER: &str = "│ ";
+/// Marks HTML the composer copied, which pastes back as it was.
+const COPIED_MARK: &str = "<!--flectar-mail-composer-->";
 
 /// `text` with its quote blocks written as plain-text mail quotes, in lines
 /// that start with `>`, for the plain-text part of a message being sent.
@@ -49,7 +51,8 @@ const MAX_TYPING_GROUP_BYTES: usize = 64;
 pub(crate) struct CharacterStyle {
     pub(crate) marks: u8,
     pub(crate) link: Option<Arc<str>>,
-    link_is_auto: bool,
+    /// The link was made from a web address typed in the text, and follows it as it's edited.
+    pub(crate) link_is_auto: bool,
     /// The text color, or none for the reader's own.
     pub(crate) color: Option<Rgb>,
     /// The color behind the text.
@@ -87,7 +90,7 @@ impl TextSize {
         }
     }
 
-    fn from_name(name: &str) -> Option<Self> {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|size| size.name() == name)
     }
 
@@ -140,7 +143,7 @@ impl FontFamily {
         }
     }
 
-    fn from_name(name: &str) -> Option<Self> {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|family| family.name() == name)
     }
 
@@ -326,6 +329,9 @@ pub struct RichComposeDocument {
     styles: Vec<ComposeStyleRun>,
     typing_style: CharacterStyle,
     typing_override: Option<usize>,
+    /// The font and size of the default text style from Settings, which an empty message starts
+    /// in and removing formatting returns to.
+    base: CharacterStyle,
     selection: (i32, i32),
     undo: VecDeque<EditTransaction>,
     redo: VecDeque<EditTransaction>,
@@ -354,6 +360,22 @@ impl RichComposeDocument {
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Sets the default text style's font and size. What's typed into an empty message starts
+    /// in it.
+    pub(crate) fn set_base_style(&mut self, family: FontFamily, size: TextSize) {
+        self.base = CharacterStyle {
+            family,
+            size,
+            ..CharacterStyle::default()
+        };
+        if self.text.is_empty() {
+            self.typing_style = CharacterStyle {
+                align: self.typing_style.align,
+                ..self.base.clone()
+            };
+        }
     }
 
     pub fn selection(&self) -> ComposeSelection {
@@ -511,8 +533,17 @@ impl RichComposeDocument {
                 std::slice::from_ref(&inserted),
             );
             let before = self.take_snapshot();
+            let marker_len = effective_text.len().saturating_sub(new_text.len());
             self.styles = styles;
             self.text = effective_text.into_owned();
+            if marker_len > 0 {
+                // The marker of a list item that Enter continues, which readers show in their
+                // usual text, as markers the toolbar adds come in.
+                let marker_end = valid_offset(&self.text, cursor);
+                self.edit_styles(marker_end - marker_len, marker_end, |style| {
+                    *style = CharacterStyle::default();
+                });
+            }
             self.auto_link_urls();
             self.normalize_alignment(start..new_end);
             self.bump_revision();
@@ -541,27 +572,7 @@ impl RichComposeDocument {
         self.selection = (to_i32(anchor), to_i32(cursor));
 
         if anchor == cursor && self.typing_override != Some(cursor) {
-            self.typing_style = if self.text[..cursor]
-                .char_indices()
-                .next_back()
-                .is_some_and(|(_, character)| character != '\n')
-            {
-                self.style_at(cursor.saturating_sub(1))
-                    .cloned()
-                    .unwrap_or_default()
-            } else if let Some(style) = self.style_at(cursor) {
-                style.clone()
-            } else {
-                // A new last line goes on in the alignment of the paragraph above it, as
-                // pressing Enter does in a word processor.
-                CharacterStyle {
-                    align: cursor
-                        .checked_sub(1)
-                        .and_then(|before| self.style_at(before))
-                        .map_or_else(Alignment::default, |style| style.align),
-                    ..CharacterStyle::default()
-                }
-            };
+            self.typing_style = self.typing_style_at(cursor);
             self.typing_override = None;
         } else if anchor != cursor {
             self.typing_override = None;
@@ -571,6 +582,39 @@ impl RichComposeDocument {
             start: to_i32(anchor),
             end: to_i32(cursor),
         }
+    }
+
+    /// The style of what's typed at `cursor`: that of the text before it, or at the start of a
+    /// line, list item or quote, of the text after it, past the marker. An empty last line goes
+    /// on in the style and alignment of the line above it, as pressing Enter does in a word
+    /// processor, but not in its link, and an empty message starts in the default text style.
+    fn typing_style_at(&self, cursor: usize) -> CharacterStyle {
+        let line_start = self.text[..cursor].rfind('\n').map_or(0, |index| index + 1);
+        let line_end = self.text[cursor..]
+            .find('\n')
+            .map_or(self.text.len(), |index| cursor + index);
+        let content_start = line_start
+            + block_prefix_text(&self.text[line_start..line_end]).map_or(0, |(_, bytes)| bytes);
+        if cursor > content_start {
+            return self
+                .style_at(cursor - 1)
+                .cloned()
+                .unwrap_or_else(|| self.base.clone());
+        }
+        if let Some(style) = self.style_at(content_start) {
+            return style.clone();
+        }
+        line_start
+            .checked_sub(1)
+            .and_then(|line_end_above| self.style_at(line_end_above))
+            .map_or_else(
+                || self.base.clone(),
+                |style| CharacterStyle {
+                    link: None,
+                    link_is_auto: false,
+                    ..style.clone()
+                },
+            )
     }
 
     pub fn insert_text(&mut self, value: &str) -> ComposeSelection {
@@ -616,6 +660,69 @@ impl RichComposeDocument {
         self.replace_styled(range, text, CharacterStyle::default(), caret)
     }
 
+    /// Pastes HTML from the clipboard over the selection, as one undoable edit with the caret
+    /// after it: text copied from a message being written as it was, and HTML from elsewhere
+    /// with the formatting `compose_paste` keeps. `None` when it holds no text, for the plain
+    /// text to go in instead.
+    pub fn paste_html(&mut self, html: &str) -> Option<ComposeSelection> {
+        let (mut text, mut runs) = if html.contains(COPIED_MARK) {
+            import_body_html(html)
+        } else {
+            crate::compose_paste::styled_text(html, &self.base)
+        }
+        .filter(|(text, _)| !text.trim().is_empty())?;
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let (start, end) = ordered(anchor, cursor);
+        // A list or quote marker belongs at the start of a line.
+        let line_start = self.text[..start].rfind('\n').map_or(0, |index| index + 1);
+        let first_line = &text[..text.find('\n').unwrap_or(text.len())];
+        if start != line_start
+            && let Some((_, marker)) = block_prefix_text(first_line)
+        {
+            text.drain(..marker);
+            runs.retain_mut(|run| {
+                run.range =
+                    run.range.start.saturating_sub(marker)..run.range.end.saturating_sub(marker);
+                !run.range.is_empty()
+            });
+        }
+        if text.is_empty() {
+            return None;
+        }
+        let caret = start + text.len();
+        Some(self.replace_runs(start..end, &text, &runs, caret))
+    }
+
+    /// The selection as HTML and as plain text, for the clipboard: the HTML pastes back into a
+    /// message as it was, and other apps read either.
+    pub fn selection_html(&self) -> Option<(String, String)> {
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let (start, end) = ordered(anchor, cursor);
+        if start == end {
+            return None;
+        }
+        let part = RichComposeDocument {
+            text: self.text[start..end].to_owned(),
+            styles: self
+                .styles
+                .iter()
+                .filter(|run| run.range.start < end && run.range.end > start)
+                .map(|run| ComposeStyleRun {
+                    range: run.range.start.max(start) - start..run.range.end.min(end) - start,
+                    style: run.style.clone(),
+                })
+                .collect(),
+            ..Self::default()
+        };
+        let html = part.body_html()?;
+        Some((
+            format!("{COPIED_MARK}{html}"),
+            with_plain_text_quotes(&part.text),
+        ))
+    }
+
     /// Replaces the word at `range` with `text` in the word's formatting, as one undoable
     /// edit, with the caret after it: a spelling correction.
     pub fn replace_word(&mut self, range: Range<usize>, text: &str) -> ComposeSelection {
@@ -635,12 +742,19 @@ impl RichComposeDocument {
             range: 0..text.len(),
             style,
         };
-        let styles = replaced_style_runs(
-            &self.styles,
-            range.start,
-            range.end,
-            std::slice::from_ref(&inserted),
-        );
+        self.replace_runs(range, text, std::slice::from_ref(&inserted), caret)
+    }
+
+    /// Replaces `range` with `text` in the styles of `runs`, which cover it, as one undoable
+    /// edit, and puts the caret at `caret`.
+    fn replace_runs(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        runs: &[ComposeStyleRun],
+        caret: usize,
+    ) -> ComposeSelection {
+        let styles = replaced_style_runs(&self.styles, range.start, range.end, runs);
         let mut replaced = String::with_capacity(self.text.len() - range.len() + text.len());
         replaced.push_str(&self.text[..range.start]);
         replaced.push_str(text);
@@ -705,16 +819,19 @@ impl RichComposeDocument {
                 "underline" => self.toggle_mark(UNDERLINE, start, end),
                 "strike" => self.toggle_mark(STRIKE, start, end),
                 "code" => self.toggle_mark(CODE, start, end),
-                // Plain text again, as Remove formatting leaves it in other composers: links and
-                // paragraphs' alignment stay.
-                "clear" => self.set_text_style(start, end, |style| {
-                    *style = CharacterStyle {
-                        link: style.link.clone(),
-                        link_is_auto: style.link_is_auto,
-                        align: style.align,
-                        ..CharacterStyle::default()
-                    };
-                }),
+                // Back to the default text style, as Remove formatting leaves text in other
+                // composers: links and paragraphs' alignment stay.
+                "clear" => {
+                    let base = self.base.clone();
+                    self.set_text_style(start, end, |style| {
+                        *style = CharacterStyle {
+                            link: style.link.clone(),
+                            link_is_auto: style.link_is_auto,
+                            align: style.align,
+                            ..base.clone()
+                        };
+                    });
+                }
                 "bullet" => return self.toggle_block(BlockKind::Bullet, start, end),
                 "number" => return self.toggle_block(BlockKind::Number, start, end),
                 "quote" => return self.toggle_block(BlockKind::Quote, start, end),
@@ -4004,6 +4121,190 @@ mod tests {
         document.format("color:#cc0000", text, 0, 2);
         document.update_selection(0, 5);
         assert_eq!(document.active_marks().color, None);
+    }
+
+    #[test]
+    fn messages_start_in_the_default_text_style() {
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Serif, TextSize::Large);
+        document.load("", 0, 0);
+        assert_eq!(document.active_marks().family, Some(FontFamily::Serif));
+        document.synchronize_key_edit("Hi", 2, 2, "i");
+        assert_eq!(
+            document.body_html().unwrap(),
+            "<div><span style=\"font-size:x-large;font-family:Times New Roman, Times, serif\">Hi</span></div>"
+        );
+
+        // Text a new message opens with, such as a signature, starts in it too.
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Monospace, TextSize::Normal);
+        document.load("\n\n-- \nAlex", 0, 0);
+        assert!(
+            document
+                .styles
+                .iter()
+                .all(|run| run.style.family == FontFamily::Monospace)
+        );
+        assert_eq!(document.active_marks().family, Some(FontFamily::Monospace));
+    }
+
+    #[test]
+    fn removing_formatting_returns_to_the_default_text_style() {
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Monospace, TextSize::Small);
+        document.load("abc", 3, 3);
+        for command in ["bold", "color:#cc0000", "size:huge", "family:serif"] {
+            document.format(command, "abc", 0, 3);
+        }
+        document.format("clear", "abc", 0, 3);
+        let [run] = &document.styles[..] else {
+            panic!("one run expected, got {:?}", document.styles);
+        };
+        assert_eq!(run.style, document.base);
+    }
+
+    #[test]
+    fn enter_at_the_end_goes_on_in_the_text_style_but_not_its_link() {
+        let mut document = RichComposeDocument::default();
+        document.load("Big", 3, 3);
+        document.format("size:huge", "Big", 0, 3);
+        document.format("color:#cc0000", "Big", 0, 3);
+        document.update_selection(3, 3);
+        document.synchronize_key_edit("Big\n", 4, 4, "\n");
+        document.synchronize_key_edit("Big\nx", 5, 5, "x");
+        let x = document.style_at(4).unwrap();
+        assert_eq!((x.size, x.color), (TextSize::Huge, Some(0xcc0000)));
+
+        let text = "See https://example.com";
+        let mut document = RichComposeDocument::default();
+        document.load(text, text.len() as i32, text.len() as i32);
+        assert!(document.style_at(text.len() - 1).unwrap().link.is_some());
+        let entered = format!("{text}\n");
+        let end = entered.len() as i32;
+        document.synchronize_key_edit(&entered, end, end, "\n");
+        assert_eq!(document.typing_style().link, None);
+    }
+
+    #[test]
+    fn list_items_type_in_their_text_style_after_plain_markers() {
+        let text = "• Big";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let content = text.find("Big").unwrap();
+        document.format("size:huge", text, content as i32, text.len() as i32);
+        // Right after the marker, typing goes on in the item's text.
+        document.update_selection(content as i32, content as i32);
+        assert_eq!(document.active_marks().size, Some(TextSize::Huge));
+
+        // Enter continues the list. The new marker is plain, as readers show markers, and
+        // what's typed after it goes on in the item's style.
+        let end = text.len() as i32;
+        document.update_selection(end, end);
+        document.synchronize_key_edit("• Big\n", end + 1, end + 1, "\n");
+        assert_eq!(document.text(), "• Big\n• ");
+        let marker = document.text().rfind('•').unwrap();
+        assert_eq!(document.style_at(marker).unwrap().size, TextSize::Normal);
+        assert_eq!(document.active_marks().size, Some(TextSize::Huge));
+        let typed = format!("{}x", document.text());
+        let caret = typed.len() as i32;
+        document.synchronize_key_edit(&typed, caret, caret, "x");
+        assert_eq!(
+            document.style_at(typed.len() - 1).unwrap().size,
+            TextSize::Huge
+        );
+        assert_eq!(
+            document.body_html().unwrap(),
+            "<ul><li><span style=\"font-size:xx-large\">Big</span></li>\
+             <li><span style=\"font-size:xx-large\">x</span></li></ul>"
+        );
+    }
+
+    #[test]
+    fn pasting_html_replaces_the_selection_as_one_undoable_edit() {
+        let mut document = RichComposeDocument::default();
+        document.load("Hello world", 0, 0);
+        document.update_selection(6, 11);
+        let selection = document
+            .paste_html("<b>there</b> <span style=\"color:#cc0000\">friend</span>")
+            .unwrap();
+        assert_eq!(document.text(), "Hello there friend");
+        assert_eq!(selection, ComposeSelection { start: 18, end: 18 });
+        assert_eq!(document.style_at(6).unwrap().marks, BOLD);
+        assert_eq!(document.style_at(12).unwrap().color, Some(0xcc0000));
+        assert_eq!(document.style_at(0).unwrap().marks, 0);
+        document.history("undo").unwrap();
+        assert_eq!(document.text(), "Hello world");
+        // HTML without text leaves the plain text to paste.
+        assert!(
+            document
+                .paste_html("<img src=\"https://example.com/a.png\">")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn html_from_other_apps_pastes_as_a_browser_shows_it() {
+        // Markup laid out on lines of its own, which only the composer's own copies aren't.
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document
+            .paste_html("<div>\n  Hello\n  <b>there</b>\n</div>\n<div>again</div>")
+            .unwrap();
+        assert_eq!(document.text(), "Hello there\nagain");
+        assert_eq!(document.style_at(6).unwrap().marks, BOLD);
+    }
+
+    #[test]
+    fn a_pasted_list_marker_stays_only_where_a_line_starts() {
+        let list = "<ul><li>first</li><li>second</li></ul>";
+        let mut document = RichComposeDocument::default();
+        document.load("Items: ", 7, 7);
+        document.paste_html(list).unwrap();
+        assert_eq!(document.text(), "Items: first\n• second");
+
+        let mut document = RichComposeDocument::default();
+        document.load("Items:\n", 7, 7);
+        document.paste_html(list).unwrap();
+        assert_eq!(document.text(), "Items:\n• first\n• second");
+    }
+
+    #[test]
+    fn copied_text_pastes_back_as_it_was() {
+        let text = "Title\nRed huge words\n• item\nEnd";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let at = |word: &str| {
+            let start = text.find(word).unwrap();
+            (start as i32, (start + word.len()) as i32)
+        };
+        let (start, end) = at("Title");
+        document.format("align:center", text, start, end);
+        let (start, end) = at("Red huge words");
+        document.format("color:#cc0000", text, start, end);
+        document.format("size:huge", text, start, end);
+        let (start, end) = at("item");
+        document.format("bold", text, start, end);
+        document.update_selection(0, text.len() as i32);
+        let (html, plain) = document.selection_html().unwrap();
+        assert_eq!(plain, text);
+
+        let mut pasted = RichComposeDocument::default();
+        pasted.load("", 0, 0);
+        pasted.paste_html(&html).unwrap();
+        assert_eq!(pasted.text(), text);
+        assert_eq!(pasted.styles, document.styles);
+
+        // Part of a line copies as just that part.
+        let (start, end) = at("huge words");
+        document.update_selection(start, end);
+        let (html, plain) = document.selection_html().unwrap();
+        assert_eq!(plain, "huge words");
+        assert_eq!(
+            html,
+            "<!--flectar-mail-composer--><div><span style=\"color:#cc0000;font-size:xx-large\">huge words</span></div>"
+        );
+        document.update_selection(3, 3);
+        assert!(document.selection_html().is_none());
     }
 
     #[test]

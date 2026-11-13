@@ -211,10 +211,19 @@ strikethrough, lists, quotes, inline code and links. The font is **Default**,
 which names none so that each reader sees their own, as with plain text, or
 serif or fixed width. Sizes are small, normal, large or huge. Text color and
 highlight each offer 64 colors, and **Automatic** or **No highlight** takes a
-color off. **Remove formatting** returns the selection to plain text and keeps
-its links and alignment. From the keyboard, Ctrl+Shift+L, Ctrl+Shift+E and
-Ctrl+Shift+R align paragraphs left, center and right, and Ctrl+\\ removes
-formatting (Command instead of Ctrl on a Mac).
+color off. New messages, replies and forwards start in the font and size set in
+Settings → General, under Writing. **Remove formatting** returns the selection
+to that style and keeps its links and alignment. From the keyboard,
+Ctrl+Shift+L, Ctrl+Shift+E and Ctrl+Shift+R align paragraphs left, center and
+right, and Ctrl+\\ removes formatting (Command instead of Ctrl on a Mac).
+
+Text pasted from web pages, documents and other messages keeps the formatting
+the composer has: bold and the other marks, links, lists, quotes, headings,
+colors and highlights. Its usual font, size and color give way to the message's,
+as do backgrounds that only belonged to the page. Copying and pasting within a
+message keeps its formatting exactly. Ctrl+Shift+V (Command-Shift-V on a Mac),
+or **Paste as plain text** in the editor menu, pastes the text alone, in the
+style of the text around it. On phones, text pastes as plain text.
 
 Messages carry the formatting in HTML that mail apps widely support. Sizes
 scale with the reader's own text size, and each font names common

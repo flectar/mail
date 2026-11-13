@@ -1954,6 +1954,12 @@ pub struct Settings {
     #[serde(default = "default_calendar_week_start")]
     pub calendar_week_start: String,
     pub undo_send_seconds: i64,
+    /// The font and size new messages start in: "default", which names none, "serif" or
+    /// "monospace", and "small", "normal", "large" or "huge".
+    #[serde(default = "default_compose_font")]
+    pub compose_font: String,
+    #[serde(default = "default_compose_text_size")]
+    pub compose_text_size: String,
     #[serde(default)]
     pub load_remote_images: bool,
     /// Mark unread conversations as read when the user opens them.
@@ -2222,6 +2228,12 @@ pub fn normalized_workspace_list_pane_width(width: i64) -> i64 {
 fn default_window_frame() -> String {
     "integrated".into()
 }
+fn default_compose_font() -> String {
+    "default".into()
+}
+fn default_compose_text_size() -> String {
+    "normal".into()
+}
 
 /// Unknown values, including those written by newer versions, fall back to
 /// the platform frame so a window can never start without any controls.
@@ -2269,6 +2281,8 @@ impl Default for Settings {
             time_format: TimeFormat::default(),
             calendar_week_start: default_calendar_week_start(),
             undo_send_seconds: 10,
+            compose_font: default_compose_font(),
+            compose_text_size: default_compose_text_size(),
             load_remote_images: false,
             mark_read_on_open: true,
             download_directory: String::new(),

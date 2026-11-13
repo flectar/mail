@@ -13,6 +13,7 @@ pub use browser::ExternalUrlOpener;
 mod calendar;
 mod compose_controller;
 mod compose_editor;
+mod compose_paste;
 mod compose_quote;
 mod composer;
 mod contacts;
