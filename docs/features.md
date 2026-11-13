@@ -181,6 +181,10 @@ the desktop's reduced motion setting on Linux, Remove animations on Android, or
 animation reduction on HarmonyOS. Panels, rows and dialogs then appear at once
 instead of sliding or growing, and only fades remain.
 
+**Interface text size**, in the same place, makes the text in menus, lists and
+settings smaller or larger, from 90% to 150% of your device's text size. Message
+zoom and the text size of new messages stay separate.
+
 ## Frameless window
 
 Flectar Mail replaces the system title bar with window controls in the toolbar
