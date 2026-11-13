@@ -5,6 +5,298 @@ import { IconButton } from "controls.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 
+// A color the composer offers, with its name for screen readers.
+struct ComposerSwatch {
+    value: string,
+    color: color,
+    name: string,
+}
+
+// The colors offered for text and its highlight, eight to a row: grays, bright colors, then
+// three tints and three shades of each, the palette webmail composers offer.
+global ComposerPalette {
+    // Color names for screen readers, also in the names of their shades.
+    out property <string> red: @tr("Red");
+    out property <string> orange: @tr("Orange");
+    out property <string> yellow: @tr("Yellow");
+    out property <string> green: @tr("Green");
+    out property <string> cyan: @tr("Cyan");
+    out property <string> blue: @tr("Blue");
+    out property <string> purple: @tr("Purple");
+    out property <string> magenta: @tr("Magenta");
+    out property <string> black: @tr("Black");
+
+    out property <[ComposerSwatch]> swatches: [
+        { value: "#000000", color: #000000, name: root.black },
+        // Grays for screen readers, numbered away from mid gray.
+        { value: "#444444", color: #444444, name: @tr("Dark gray {0}", 4) },
+        { value: "#666666", color: #666666, name: @tr("Dark gray {0}", 3) },
+        { value: "#999999", color: #999999, name: @tr("Dark gray {0}", 2) },
+        { value: "#cccccc", color: #cccccc, name: @tr("Gray") },
+        { value: "#eeeeee", color: #eeeeee, name: @tr("Light gray {0}", 2) },
+        { value: "#f3f3f3", color: #f3f3f3, name: @tr("Light gray {0}", 3) },
+        { value: "#ffffff", color: #ffffff, name: @tr("White") },
+        { value: "#ff0000", color: #ff0000, name: root.red },
+        { value: "#ff9900", color: #ff9900, name: root.orange },
+        { value: "#ffff00", color: #ffff00, name: root.yellow },
+        { value: "#00ff00", color: #00ff00, name: root.green },
+        { value: "#00ffff", color: #00ffff, name: root.cyan },
+        { value: "#0000ff", color: #0000ff, name: root.blue },
+        { value: "#9900ff", color: #9900ff, name: root.purple },
+        { value: "#ff00ff", color: #ff00ff, name: root.magenta },
+        // A color's tint for screen readers, 3 the lightest.
+        { value: "#f4cccc", color: #f4cccc, name: @tr("{0}, light {1}", root.red, 3) },
+        { value: "#fce5cd", color: #fce5cd, name: @tr("{0}, light {1}", root.orange, 3) },
+        { value: "#fff2cc", color: #fff2cc, name: @tr("{0}, light {1}", root.yellow, 3) },
+        { value: "#d9ead3", color: #d9ead3, name: @tr("{0}, light {1}", root.green, 3) },
+        { value: "#d0e0e3", color: #d0e0e3, name: @tr("{0}, light {1}", root.cyan, 3) },
+        { value: "#cfe2f3", color: #cfe2f3, name: @tr("{0}, light {1}", root.blue, 3) },
+        { value: "#d9d2e9", color: #d9d2e9, name: @tr("{0}, light {1}", root.purple, 3) },
+        { value: "#ead1dc", color: #ead1dc, name: @tr("{0}, light {1}", root.magenta, 3) },
+        { value: "#ea9999", color: #ea9999, name: @tr("{0}, light {1}", root.red, 2) },
+        { value: "#f9cb9c", color: #f9cb9c, name: @tr("{0}, light {1}", root.orange, 2) },
+        { value: "#ffe599", color: #ffe599, name: @tr("{0}, light {1}", root.yellow, 2) },
+        { value: "#b6d7a8", color: #b6d7a8, name: @tr("{0}, light {1}", root.green, 2) },
+        { value: "#a2c4c9", color: #a2c4c9, name: @tr("{0}, light {1}", root.cyan, 2) },
+        { value: "#9fc5e8", color: #9fc5e8, name: @tr("{0}, light {1}", root.blue, 2) },
+        { value: "#b4a7d6", color: #b4a7d6, name: @tr("{0}, light {1}", root.purple, 2) },
+        { value: "#d5a6bd", color: #d5a6bd, name: @tr("{0}, light {1}", root.magenta, 2) },
+        { value: "#e06666", color: #e06666, name: @tr("{0}, light {1}", root.red, 1) },
+        { value: "#f6b26b", color: #f6b26b, name: @tr("{0}, light {1}", root.orange, 1) },
+        { value: "#ffd966", color: #ffd966, name: @tr("{0}, light {1}", root.yellow, 1) },
+        { value: "#93c47d", color: #93c47d, name: @tr("{0}, light {1}", root.green, 1) },
+        { value: "#76a5af", color: #76a5af, name: @tr("{0}, light {1}", root.cyan, 1) },
+        { value: "#6fa8dc", color: #6fa8dc, name: @tr("{0}, light {1}", root.blue, 1) },
+        { value: "#8e7cc3", color: #8e7cc3, name: @tr("{0}, light {1}", root.purple, 1) },
+        { value: "#c27ba0", color: #c27ba0, name: @tr("{0}, light {1}", root.magenta, 1) },
+        // A color's shade for screen readers, 3 the darkest.
+        { value: "#cc0000", color: #cc0000, name: @tr("{0}, dark {1}", root.red, 1) },
+        { value: "#e69138", color: #e69138, name: @tr("{0}, dark {1}", root.orange, 1) },
+        { value: "#f1c232", color: #f1c232, name: @tr("{0}, dark {1}", root.yellow, 1) },
+        { value: "#6aa84f", color: #6aa84f, name: @tr("{0}, dark {1}", root.green, 1) },
+        { value: "#45818e", color: #45818e, name: @tr("{0}, dark {1}", root.cyan, 1) },
+        { value: "#3d85c6", color: #3d85c6, name: @tr("{0}, dark {1}", root.blue, 1) },
+        { value: "#674ea7", color: #674ea7, name: @tr("{0}, dark {1}", root.purple, 1) },
+        { value: "#a64d79", color: #a64d79, name: @tr("{0}, dark {1}", root.magenta, 1) },
+        { value: "#990000", color: #990000, name: @tr("{0}, dark {1}", root.red, 2) },
+        { value: "#b45f06", color: #b45f06, name: @tr("{0}, dark {1}", root.orange, 2) },
+        { value: "#bf9000", color: #bf9000, name: @tr("{0}, dark {1}", root.yellow, 2) },
+        { value: "#38761d", color: #38761d, name: @tr("{0}, dark {1}", root.green, 2) },
+        { value: "#134f5c", color: #134f5c, name: @tr("{0}, dark {1}", root.cyan, 2) },
+        { value: "#0b5394", color: #0b5394, name: @tr("{0}, dark {1}", root.blue, 2) },
+        { value: "#351c75", color: #351c75, name: @tr("{0}, dark {1}", root.purple, 2) },
+        { value: "#741b47", color: #741b47, name: @tr("{0}, dark {1}", root.magenta, 2) },
+        { value: "#660000", color: #660000, name: @tr("{0}, dark {1}", root.red, 3) },
+        { value: "#783f04", color: #783f04, name: @tr("{0}, dark {1}", root.orange, 3) },
+        { value: "#7f6000", color: #7f6000, name: @tr("{0}, dark {1}", root.yellow, 3) },
+        { value: "#274e13", color: #274e13, name: @tr("{0}, dark {1}", root.green, 3) },
+        { value: "#0c343d", color: #0c343d, name: @tr("{0}, dark {1}", root.cyan, 3) },
+        { value: "#073763", color: #073763, name: @tr("{0}, dark {1}", root.blue, 3) },
+        { value: "#20124d", color: #20124d, name: @tr("{0}, dark {1}", root.purple, 3) },
+        { value: "#4c1130", color: #4c1130, name: @tr("{0}, dark {1}", root.magenta, 3) }
+    ];
+}
+
+// A toolbar button that opens a palette of colors for text or its highlight. `current` is
+// the color the selection shares, as "#rrggbb", "none", or "" when it mixes several.
+component ColorPicker inherits Rectangle {
+    in property <bool> compact: false;
+    in property <image> icon;
+    in property <string> tooltip-text;
+    // The first choice, which takes the color off.
+    in property <string> none-title;
+    in property <string> current;
+    in property <color> accent-color;
+    in property <color> body-color;
+    in property <color> control-hover-color;
+    in property <color> raised-color;
+    in property <color> secondary-color;
+    in property <color> subtle-border-color;
+    callback chosen(string);
+
+    private property <length> swatch: root.compact ? 30px : 20px;
+    private property <length> gap: root.compact ? 4px : 3px;
+    // Grays and bright colors stand apart from the tints and shades under them.
+    private property <length> group-gap: root.compact ? 10px : 8px;
+    private property <length> inset: root.compact ? 12px : 10px;
+    private property <length> none-height: root.compact ? LayoutMetrics.touch-target : 30px;
+    private property <length> grid-width: 8 * root.swatch + 7 * root.gap;
+    private property <length> grid-height: 8 * root.swatch + 5 * root.gap + 2 * root.group-gap;
+    // The choice the keyboard is on, once arrow keys moved it: -1 for the first, then the
+    // swatches in order.
+    private property <int> highlighted: -1;
+    private property <bool> keyboard-used: false;
+    private property <bool> open: palette-popup.is-open;
+
+    width: 32px;
+    height: 32px;
+
+    function swatch-y(index: int) -> length {
+        let row = floor(index / 8);
+        if row == 0 { return 0px; }
+        if row == 1 { return root.swatch + root.group-gap; }
+        2 * (root.swatch + root.group-gap) + (row - 2) * (root.swatch + root.gap)
+    }
+
+    function choose(value: string) {
+        palette-popup.close();
+        root.chosen(value);
+    }
+
+    function move-highlight(step: int) {
+        if !root.keyboard-used {
+            root.keyboard-used = true;
+            return;
+        }
+        if root.highlighted + step < -1 {
+            root.highlighted = -1;
+        } else if root.highlighted + step < ComposerPalette.swatches.length {
+            root.highlighted += step;
+        }
+    }
+
+    trigger := IconButton {
+        icon: root.icon;
+        icon-color: root.secondary-color;
+        hover-background: root.control-hover-color;
+        active-background: root.control-hover-color;
+        active: root.open;
+        tooltip-text: root.tooltip-text;
+        clicked => {
+            if root.open {
+                palette-popup.close();
+            } else {
+                root.highlighted = -1;
+                root.keyboard-used = false;
+                palette-popup.show();
+            }
+        }
+    }
+
+    palette-popup := PopupWindow {
+        x: 0px;
+        y: root.height + 4px;
+        width: root.grid-width + 2 * root.inset;
+        height: root.none-height + root.grid-height + 2 * root.inset + 6px;
+        close-policy: close-on-click-outside;
+        forward-focus: palette-keys;
+
+        Rectangle {
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: root.subtle-border-color;
+            background: root.raised-color;
+            drop-shadow-blur: 18px;
+            drop-shadow-offset-y: 5px;
+            drop-shadow-color: #0000002e;
+            accessible-role: groupbox;
+            accessible-label: root.tooltip-text;
+            accessible-item-count: ComposerPalette.swatches.length + 1;
+
+            palette-keys := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.RightArrow { root.move-highlight(1); return accept; }
+                    if event.text == Key.LeftArrow { root.move-highlight(-1); return accept; }
+                    if event.text == Key.DownArrow { root.move-highlight(root.highlighted < 0 ? 1 : 8); return accept; }
+                    if event.text == Key.UpArrow { root.move-highlight(root.highlighted < 8 ? -1 - root.highlighted : -8); return accept; }
+                    if (event.text == Key.Return || event.text == Key.Space) && root.keyboard-used {
+                        root.choose(root.highlighted < 0 ? "none" : ComposerPalette.swatches[root.highlighted].value);
+                        return accept;
+                    }
+                    if event.text == Key.Escape {
+                        palette-popup.close();
+                        trigger.focus();
+                        return accept;
+                    }
+                    if event.text == Key.Tab {
+                        palette-popup.close();
+                        trigger.focus();
+                        return reject;
+                    }
+                    reject
+                }
+            }
+
+            Rectangle {
+                x: root.inset - 4px;
+                y: root.inset - 4px;
+                width: root.grid-width + 8px;
+                height: root.none-height;
+                border-radius: 5px;
+                background: (root.keyboard-used && root.highlighted == -1) || none-hit.has-hover ? root.control-hover-color : transparent;
+
+                Text {
+                    x: 6px;
+                    width: parent.width - 34px;
+                    height: parent.height;
+                    text: root.none-title;
+                    color: root.body-color;
+                    font-size: TypeScale.body;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                if root.current == "none" : Image {
+                    x: parent.width - 6px - self.width;
+                    y: (parent.height - self.height) / 2;
+                    width: LayoutMetrics.icon-size;
+                    height: LayoutMetrics.icon-size;
+                    source: @image-url("../icons/lucide/outline/check.svg");
+                    colorize: root.accent-color;
+                    accessible-role: none;
+                }
+
+                none-hit := TouchArea {
+                    accessible-role: radio-button;
+                    accessible-label: root.none-title;
+                    accessible-checked: root.current == "none";
+                    accessible-item-index: 0;
+                    accessible-action-default => { root.choose("none"); }
+                    clicked => { root.choose("none"); }
+                    mouse-cursor: pointer;
+                }
+            }
+
+            for swatch[index] in ComposerPalette.swatches : Rectangle {
+                x: root.inset + mod(index, 8) * (root.swatch + root.gap);
+                y: root.inset + root.none-height + 6px + root.swatch-y(index);
+                width: root.swatch;
+                height: root.swatch;
+
+                // The color the selection has, and the one the pointer or keyboard is on.
+                Rectangle {
+                    x: -3px;
+                    y: -3px;
+                    width: parent.width + 6px;
+                    height: parent.height + 6px;
+                    border-radius: 5px;
+                    border-width: 2px;
+                    border-color: swatch.value == root.current ? root.accent-color
+                        : (root.keyboard-used && index == root.highlighted) || swatch-hit.has-hover ? root.secondary-color
+                        : transparent;
+                }
+
+                Rectangle {
+                    border-radius: 3px;
+                    border-width: 1px;
+                    border-color: root.subtle-border-color;
+                    background: swatch.color;
+                }
+
+                swatch-hit := TouchArea {
+                    accessible-role: radio-button;
+                    accessible-label: swatch.name;
+                    accessible-checked: swatch.value == root.current;
+                    accessible-item-index: index + 1;
+                    accessible-action-default => { root.choose(swatch.value); }
+                    clicked => { root.choose(swatch.value); }
+                    mouse-cursor: pointer;
+                }
+            }
+        }
+    }
+}
+
 export component ComposerToolbar inherits Rectangle {
     in property <bool> compact: false;
     in property <color> accent-background;
@@ -14,11 +306,17 @@ export component ComposerToolbar inherits Rectangle {
     in property <color> raised-color;
     in property <color> secondary-color;
     in property <color> subtle-border-color;
+    in property <color> body-color;
     in property <bool> bold-active: false;
     in property <bool> italic-active: false;
     in property <bool> underline-active: false;
     in property <bool> strike-active: false;
     in property <bool> code-active: false;
+    in property <string> active-color: "none";
+    in property <string> active-highlight: "none";
+    in property <string> active-size: "normal";
+    in property <string> active-family: "default";
+    in property <string> active-align: "left";
     in property <bool> link-active: false;
     in property <bool> can-link: false;
     callback apply-format(string);
@@ -48,12 +346,106 @@ export component ComposerToolbar inherits Rectangle {
             height: 32px;
             spacing: 2px;
 
+            font-menu := ContextMenuArea {
+                width: 32px;
+                height: 32px;
+
+                IconButton {
+                    icon: @image-url("../icons/lucide/outline/font.svg");
+                    icon-color: root.secondary-color;
+                    hover-background: root.control-hover-color;
+                    tooltip-text: @tr("Font");
+                    clicked => { font-menu.show({ x: 0px, y: parent.height + 4px }); }
+                }
+
+                Menu {
+                    MenuItem { title: @tr("font" => "Default"); checkable: true; checked: root.active-family == "default"; activated => { root.apply-format("family:default"); } }
+                    MenuItem { title: @tr("font" => "Serif"); checkable: true; checked: root.active-family == "serif"; activated => { root.apply-format("family:serif"); } }
+                    MenuItem { title: @tr("font" => "Fixed width"); checkable: true; checked: root.active-family == "monospace"; activated => { root.apply-format("family:monospace"); } }
+                }
+            }
+
+            size-menu := ContextMenuArea {
+                width: 32px;
+                height: 32px;
+
+                IconButton {
+                    icon: @image-url("../icons/lucide/outline/text-size.svg");
+                    icon-color: root.secondary-color;
+                    hover-background: root.control-hover-color;
+                    tooltip-text: @tr("Text size");
+                    clicked => { size-menu.show({ x: 0px, y: parent.height + 4px }); }
+                }
+
+                Menu {
+                    MenuItem { title: @tr("text size" => "Small"); checkable: true; checked: root.active-size == "small"; activated => { root.apply-format("size:small"); } }
+                    MenuItem { title: @tr("text size" => "Normal"); checkable: true; checked: root.active-size == "normal"; activated => { root.apply-format("size:normal"); } }
+                    MenuItem { title: @tr("text size" => "Large"); checkable: true; checked: root.active-size == "large"; activated => { root.apply-format("size:large"); } }
+                    MenuItem { title: @tr("text size" => "Huge"); checkable: true; checked: root.active-size == "huge"; activated => { root.apply-format("size:huge"); } }
+                }
+            }
+
+            Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
+
             IconButton { icon: root.bold-active ? @image-url("../icons/lucide/filled/bold.svg") : @image-url("../icons/lucide/outline/bold.svg"); icon-color: root.bold-active ? root.accent-color : root.secondary-color; active: root.bold-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Bold · Ctrl+B"); clicked => { root.apply-format("bold"); } }
             IconButton { icon: root.italic-active ? @image-url("../icons/lucide/filled/italic.svg") : @image-url("../icons/lucide/outline/italic.svg"); icon-color: root.italic-active ? root.accent-color : root.secondary-color; active: root.italic-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Italic · Ctrl+I"); clicked => { root.apply-format("italic"); } }
             IconButton { icon: root.underline-active ? @image-url("../icons/lucide/filled/typography.svg") : @image-url("../icons/lucide/outline/typography.svg"); icon-color: root.underline-active ? root.accent-color : root.secondary-color; active: root.underline-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Underline · Ctrl+U"); clicked => { root.apply-format("underline"); } }
             IconButton { icon: root.strike-active ? @image-url("../icons/lucide/filled/strikethrough.svg") : @image-url("../icons/lucide/outline/strikethrough.svg"); icon-color: root.strike-active ? root.accent-color : root.secondary-color; active: root.strike-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Strikethrough"); clicked => { root.apply-format("strike"); } }
 
+            ColorPicker {
+                compact: root.compact;
+                icon: @image-url("../icons/lucide/outline/text-color.svg");
+                tooltip-text: @tr("Text color");
+                none-title: @tr("text color" => "Automatic");
+                current: root.active-color;
+                accent-color: root.accent-color;
+                body-color: root.body-color;
+                control-hover-color: root.control-hover-color;
+                raised-color: root.raised-color;
+                secondary-color: root.secondary-color;
+                subtle-border-color: root.subtle-border-color;
+                chosen(value) => { root.apply-format("color:" + value); }
+            }
+
+            ColorPicker {
+                compact: root.compact;
+                icon: @image-url("../icons/lucide/outline/highlight.svg");
+                tooltip-text: @tr("Highlight");
+                none-title: @tr("No highlight");
+                current: root.active-highlight;
+                accent-color: root.accent-color;
+                body-color: root.body-color;
+                control-hover-color: root.control-hover-color;
+                raised-color: root.raised-color;
+                secondary-color: root.secondary-color;
+                subtle-border-color: root.subtle-border-color;
+                chosen(value) => { root.apply-format("highlight:" + value); }
+            }
+
+            IconButton { icon: @image-url("../icons/lucide/outline/remove-formatting.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Remove formatting · Ctrl+\\"); clicked => { root.apply-format("clear"); } }
+
             Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
+
+            align-menu := ContextMenuArea {
+                width: 32px;
+                height: 32px;
+
+                IconButton {
+                    icon: root.active-align == "center" ? @image-url("../icons/lucide/outline/align-center.svg")
+                        : root.active-align == "right" ? @image-url("../icons/lucide/outline/align-right.svg")
+                        : @image-url("../icons/lucide/outline/align-left.svg");
+                    icon-color: root.secondary-color;
+                    hover-background: root.control-hover-color;
+                    tooltip-text: @tr("Align");
+                    clicked => { align-menu.show({ x: 0px, y: parent.height + 4px }); }
+                }
+
+                Menu {
+                    MenuItem { title: @tr("Align left"); checkable: true; checked: root.active-align == "left"; activated => { root.apply-format("align:left"); } }
+                    MenuItem { title: @tr("Align center"); checkable: true; checked: root.active-align == "center"; activated => { root.apply-format("align:center"); } }
+                    MenuItem { title: @tr("Align right"); checkable: true; checked: root.active-align == "right"; activated => { root.apply-format("align:right"); } }
+                }
+            }
 
             IconButton { icon: @image-url("../icons/lucide/outline/list-unordered.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Bulleted list"); clicked => { root.apply-format("bullet"); } }
             IconButton { icon: @image-url("../icons/lucide/outline/list-ordered.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Numbered list"); clicked => { root.apply-format("number"); } }

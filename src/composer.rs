@@ -459,6 +459,11 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_strike_active(from.get_strike_active());
     to.set_code_active(from.get_code_active());
     to.set_active_link_url(from.get_active_link_url());
+    to.set_active_color(from.get_active_color());
+    to.set_active_highlight(from.get_active_highlight());
+    to.set_active_size(from.get_active_size());
+    to.set_active_family(from.get_active_family());
+    to.set_active_align(from.get_active_align());
     to.set_quote(from.get_quote());
     to.set_quote_left_out(from.get_quote_left_out());
     to.set_quote_text(from.get_quote_text());
