@@ -187,6 +187,9 @@ export component CalendarAgenda inherits Rectangle {
                 height: 68px;
                 private property <length> inset: root.compact ? 16px : LayoutMetrics.content-inset;
                 private property <bool> cancelled: row.event.status == "CANCELLED" || row.event.status == "cancelled";
+                private property <bool> declined: row.event.rsvp-status == "DECLINED";
+                // An invitation still waiting for the user's answer.
+                private property <bool> pending: row.event.answerable && row.event.rsvp-status == "";
                 background: row.kind == "event" && (event-hit.has-hover || (agenda-keyboard.focus-visible && root.keyboard-key == row.key)) ? AppTheme.muted-control-bg : transparent;
                 border-width: row.kind == "event" && agenda-keyboard.focus-visible && root.keyboard-key == row.key ? 2px : 0px;
                 border-color: AppTheme.accent;
@@ -226,15 +229,26 @@ export component CalendarAgenda inherits Rectangle {
                         agenda-start := Text { text: row.time-label; color: AppTheme.body; font-size: TypeScale.secondary; font-weight: 600; overflow: elide; }
                         agenda-end := Text { text: row.end-label; color: AppTheme.muted; font-size: TypeScale.caption; }
                     }
-                    Rectangle { width: 3px; height: 36px; border-radius: 2px; background: CalendarAgendaStyle.color(row.event.color-index); opacity: agenda-row.cancelled ? 0.5 : 1; }
+                    Rectangle {
+                        width: 3px;
+                        height: 36px;
+                        border-radius: 2px;
+                        // Hollow while it waits for an answer.
+                        border-width: agenda-row.pending ? 1px : 0px;
+                        border-color: CalendarAgendaStyle.color(row.event.color-index);
+                        background: agenda-row.pending ? transparent : CalendarAgendaStyle.color(row.event.color-index);
+                        opacity: agenda-row.cancelled || agenda-row.declined ? 0.5 : 1;
+                    }
                     VerticalBox {
                         horizontal-stretch: 1;
                         padding: 0px;
                         spacing: 3px;
-                        Text { text: row.event.title; color: agenda-row.cancelled ? AppTheme.muted : AppTheme.heading; font-size: TypeScale.body; font-weight: 600; overflow: elide; }
+                        Text { text: row.event.title; color: agenda-row.cancelled || agenda-row.declined ? AppTheme.muted : AppTheme.heading; font-size: TypeScale.body; font-weight: 600; overflow: elide; }
                         Text { text: root.compact ? (row.event.calendar != "" ? row.event.calendar : @tr("Local calendar")) + (row.event.location != "" ? " · " + row.event.location : "") : row.event.location != "" ? row.event.location : row.event.account; color: AppTheme.secondary; font-size: TypeScale.caption; overflow: elide; }
                     }
                     if agenda-row.cancelled: Text { text: @tr("Cancelled"); color: AppTheme.muted; font-size: TypeScale.caption; }
+                    if !agenda-row.cancelled && agenda-row.declined: Text { text: @tr("Declined"); color: AppTheme.muted; font-size: TypeScale.caption; }
+                    if !agenda-row.cancelled && agenda-row.pending: Text { text: @tr("Not answered yet"); color: AppTheme.secondary; font-size: TypeScale.caption; }
                     if !root.compact: Rectangle {
                         width: min(160px, max(80px, agenda-list.visible-width / 5));
                         height: 26px;

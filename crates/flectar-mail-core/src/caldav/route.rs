@@ -10,7 +10,7 @@ use rusqlite::Connection;
 use crate::db::repo;
 use crate::db::repo::calendar::SyncRow;
 use crate::error::Result;
-use crate::models::Calendar;
+use crate::models::{Calendar, CalendarConnectionKind};
 
 /// A pending change and the calendar it goes to.
 #[derive(Debug, Clone)]
@@ -65,6 +65,15 @@ pub fn pending(conn: &Connection, account_id: i64) -> Result<Routes> {
             continue;
         }
         if let Some(calendar) = destination(&row, &calendars, default.as_ref()) {
+            // A new copy of an invitation goes to a CalDAV server as it is.
+            // Created in Google or Exchange it would be a new meeting that the
+            // user organizes, and Exchange would invite everyone to it.
+            if !row.event.is_local
+                && row.caldav_href.is_none()
+                && calendar.kind != CalendarConnectionKind::Generic
+            {
+                continue;
+            }
             routes
                 .pushes
                 .entry(calendar.connection_id)
@@ -113,6 +122,46 @@ mod tests {
             .collect();
         out.sort();
         out
+    }
+
+    #[test]
+    fn a_new_invitation_copy_goes_only_to_a_caldav_server() {
+        let c = testutil::calendar_conn();
+        let google = add_connection(&c, 1, CalendarConnectionKind::Google);
+        let exchange = add_connection(&c, 1, CalendarConnectionKind::Microsoft);
+        let caldav = add_connection(&c, 1, CalendarConnectionKind::Generic);
+        let primary =
+            repo::caldav::upsert_calendar(&c, &google, "https://g/primary/", None, None, false)
+                .unwrap();
+        let outlook =
+            repo::caldav::upsert_calendar(&c, &exchange, "ms-calendar-1", None, None, false)
+                .unwrap();
+        let work = repo::caldav::upsert_calendar(&c, &caldav, "https://d/work/", None, None, false)
+            .unwrap();
+        repo::caldav::set_default_calendar(&c, 1, primary).unwrap();
+        // Invitations from mail: not created here, not on a server yet.
+        insert(&c, "invite-default", None, None, 1, 0);
+        insert(&c, "invite-outlook", Some(outlook), None, 1, 0);
+        insert(&c, "invite-work", Some(work), None, 1, 0);
+        // An event the user made, and an invitation already on Google.
+        insert(&c, "mine", None, None, 1, 0);
+        c.execute(
+            "UPDATE calendar_events SET is_local = 1 WHERE ical_uid = 'mine'",
+            [],
+        )
+        .unwrap();
+        insert(&c, "on-google", Some(primary), Some("/primary/g.ics"), 1, 0);
+
+        let routes = pending(&c, 1).unwrap();
+        assert_eq!(
+            routed(&routes, google.id),
+            vec![("mine".into(), primary), ("on-google".into(), primary)]
+        );
+        assert!(routed(&routes, exchange.id).is_empty());
+        assert_eq!(
+            routed(&routes, caldav.id),
+            vec![("invite-work".into(), work)]
+        );
     }
 
     #[test]

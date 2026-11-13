@@ -4442,15 +4442,10 @@ async fn persist_selective_batch(
     if contents.is_empty() {
         return Ok(0);
     }
-    let calendar_events: Vec<(i64, crate::calendar::IcsEvent)> = contents
+    let calendar_events: Vec<(i64, Vec<String>)> = contents
         .iter()
-        .flat_map(|content| {
-            content.calendar_parts.iter().flat_map(move |ics| {
-                crate::calendar::parse_ics(ics)
-                    .into_iter()
-                    .map(move |event| (content.message_id, event))
-            })
-        })
+        .filter(|content| !content.calendar_parts.is_empty())
+        .map(|content| (content.message_id, content.calendar_parts.clone()))
         .collect();
     let (thread_ids, count) = ctx
         .db
@@ -4499,19 +4494,7 @@ async fn persist_selective_batch(
             Ok((thread_ids, count))
         })
         .await?;
-    if !calendar_events.is_empty() {
-        ctx.calendar_db
-            .write(move |conn| {
-                let tx = conn.transaction()?;
-                for (message_id, event) in &calendar_events {
-                    repo::calendar::upsert(&tx, account_id, *message_id, event)?;
-                }
-                tx.commit()?;
-                Ok(())
-            })
-            .await?;
-        ctx.bus.emit(CoreEvent::CalendarUpdated { account_id });
-    }
+    super::ingest::store_calendar_events(ctx, account_id, calendar_events).await?;
     if !thread_ids.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
     }
@@ -4540,7 +4523,7 @@ async fn persist_body(
     let path_str = path.to_string_lossy().to_string();
 
     let parsed = crate::mime::parse_message(raw)?;
-    let calendar_events = super::ingest::calendar_events(&parsed);
+    let calendar_events = super::ingest::calendar_parts(&parsed);
     let (persisted, thread_id) = ctx
         .db
         .write(move |conn| {
@@ -4571,7 +4554,8 @@ async fn persist_body(
         let _ = tokio::fs::remove_file(&path).await;
         return Ok(());
     }
-    super::ingest::store_calendar_events(ctx, config.id, message_id, calendar_events).await?;
+    super::ingest::store_calendar_events(ctx, config.id, vec![(message_id, calendar_events)])
+        .await?;
     if let Some(tid) = thread_id {
         ctx.bus.emit(CoreEvent::MailUpdated {
             thread_ids: vec![tid],

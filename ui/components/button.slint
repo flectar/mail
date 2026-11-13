@@ -13,6 +13,9 @@ export component Button inherits Rectangle {
     in property <bool> primary: false;
     in property <bool> destructive: false;
     in property <bool> selected: false;
+    // A button that is on or off, such as one of a set of choices: it
+    // reads as checked while selected.
+    in property <bool> checkable: false;
     in property <bool> enabled: true;
     // A button that fills a fixed-width column may elide a label that does
     // not fit there; other buttons are given room for the whole label.
@@ -44,6 +47,8 @@ export component Button inherits Rectangle {
     animate background { duration: 120ms; easing: ease-out; }
     accessible-role: button;
     accessible-label: root.text;
+    accessible-checkable: root.checkable;
+    accessible-checked: root.checkable && root.selected;
     accessible-action-default => {
         if root.enabled {
             root.clicked();

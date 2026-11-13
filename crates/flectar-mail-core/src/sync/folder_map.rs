@@ -75,10 +75,8 @@ pub fn should_sync(folder: &RemoteFolder, role: Option<&str>) -> bool {
     let full = folder.name.to_lowercase();
     // Gmail: skip label-folders without roles to avoid duplicate downloads;
     // everything lives in All Mail + INBOX + special folders.
-    if (full.starts_with("[gmail]") || full.starts_with("[google mail]")) && role.is_none() {
-        return false;
-    }
-    true
+    let gmail_label = full.starts_with("[gmail]") || full.starts_with("[google mail]");
+    !(gmail_label && role.is_none())
 }
 
 /// Project the mailbox operations that LIST can determine without issuing an

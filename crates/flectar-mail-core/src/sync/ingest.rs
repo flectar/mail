@@ -4,7 +4,6 @@
 //! keeps its own rules for recognizing a message it already has.
 
 use super::engine::SyncCtx;
-use crate::calendar::IcsEvent;
 use crate::db::repo::{self, messages::NewMessage, sender_identities::OwnAddresses};
 use crate::error::Result;
 use crate::events::CoreEvent;
@@ -349,30 +348,71 @@ pub(crate) fn store_body(
     repo::search::index_message(conn, message_id)
 }
 
-/// The meeting invitations a message carries.
-pub(crate) fn calendar_events(parsed: &ParsedBody) -> Vec<IcsEvent> {
-    parsed
-        .calendar_parts
-        .iter()
-        .flat_map(|ics| crate::calendar::parse_ics(ics))
-        .collect()
+/// The calendars a message carries: its text/calendar parts, such as a
+/// meeting invitation or an answer to one.
+pub(crate) fn calendar_parts(parsed: &ParsedBody) -> Vec<String> {
+    parsed.calendar_parts.clone()
 }
 
-/// Record a stored message's invitations in the calendar.
+/// Apply the calendars of stored messages to the account's calendar, by the
+/// rules of [`repo::calendar::apply_invitation`]. Mail in Spam or Trash and
+/// mail from a blocked sender never changes the calendar: RFC 9671 §5 has
+/// calendar data in spam left alone, and invitations are how calendar spam
+/// arrives.
 pub(crate) async fn store_calendar_events(
     ctx: &SyncCtx,
     account_id: i64,
-    message_id: i64,
-    events: Vec<IcsEvent>,
+    messages: Vec<(i64, Vec<String>)>,
 ) -> Result<()> {
-    if events.is_empty() {
+    let mut messages: Vec<(i64, Vec<String>)> = messages
+        .into_iter()
+        .filter(|(_, calendars)| !calendars.is_empty())
+        .collect();
+    if messages.is_empty() {
+        return Ok(());
+    }
+    // Every message keeps its calendar for the card above it, also those
+    // whose calendar stays out of the user's.
+    let kept: Vec<(i64, String)> = messages
+        .iter()
+        .filter_map(|(id, calendars)| {
+            calendars
+                .iter()
+                .find(|calendar| !crate::calendar::parse_ics(calendar).is_empty())
+                .map(|calendar| (*id, calendar.clone()))
+        })
+        .collect();
+    if !kept.is_empty() {
+        ctx.calendar_db
+            .write(move |conn| {
+                for (message_id, calendar) in &kept {
+                    repo::calendar::keep_message_calendar(conn, account_id, *message_id, calendar)?;
+                }
+                Ok(())
+            })
+            .await?;
+    }
+    let ids: Vec<i64> = messages.iter().map(|(id, _)| *id).collect();
+    let (own, kept_out) = ctx
+        .db
+        .read(move |conn| {
+            Ok((
+                repo::sender_identities::own_addresses(conn, account_id)?,
+                repo::messages::kept_from_calendar(conn, &ids)?,
+            ))
+        })
+        .await?;
+    messages.retain(|(id, _)| !kept_out.contains(id));
+    if messages.is_empty() {
         return Ok(());
     }
     ctx.calendar_db
         .write(move |conn| {
             let tx = conn.transaction()?;
-            for event in &events {
-                repo::calendar::upsert(&tx, account_id, message_id, event)?;
+            for (message_id, calendars) in &messages {
+                for calendar in calendars {
+                    repo::calendar::apply_invitation(&tx, account_id, *message_id, calendar, &own)?;
+                }
             }
             tx.commit()?;
             Ok(())

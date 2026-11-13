@@ -22,6 +22,8 @@ import { Shortcuts } from "../shortcuts.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { Unsubscribe } from "../unsubscribe.slint";
 import { BlockSender } from "../block-sender.slint";
+import { Invitation } from "../invitation.slint";
+import { InvitationCard } from "../components/invitation-card.slint";
 
 component ReaderControl inherits ToolbarIconButton {
     tooltip-above: true;
@@ -1348,6 +1350,17 @@ export component MailReadingPane inherits FocusScope {
                                             text: @tr("Unsubscribe");
                                             accessible-id: "message-unsubscribe";
                                             clicked => { Unsubscribe.start(); }
+                                        }
+                                    }
+                                    // A calendar the message carries (#228), above the
+                                    // message as Outlook, Apple Mail and Gmail put theirs.
+                                    if Invitation.available : Rectangle {
+                                        height: invitation-card.preferred-height + 8px;
+                                        invitation-card := InvitationCard {
+                                            x: 0px;
+                                            y: 4px;
+                                            width: min(parent.width, 600px);
+                                            compact: root.compact;
                                         }
                                     }
                                     if EmailReader.failed-images > 0 && !root.remote-images-blocked && !root.text_mode && !root.source_mode && !EmailReader.reader-mode : HorizontalBox {

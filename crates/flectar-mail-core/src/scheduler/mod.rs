@@ -103,11 +103,18 @@ pub fn spawn(
                 .unwrap_or(0);
             if lead_min > 0 && calendar_db.is_open() {
                 let lead_ms = lead_min * 60_000;
-                if let Ok(due) = calendar_db
+                if let Ok(mut due) = calendar_db
                     .read(move |conn| repo::calendar::upcoming_for_notify(conn, now, lead_ms))
                     .await
                 {
-                    for ev in due {
+                    // An invitation not yet accepted stays silent. It isn't
+                    // marked notified, so accepting it in time still brings
+                    // its reminder.
+                    let own = crate::own_addresses_of(&db, due.iter())
+                        .await
+                        .unwrap_or_default();
+                    crate::mark_invitations(&mut due, &own);
+                    for ev in due.into_iter().filter(crate::reminds) {
                         let event_id = ev.id;
                         let occurrence_start = ev.starts_at;
                         let _ = calendar_db
@@ -126,13 +133,14 @@ pub fn spawn(
                     .read(move |conn| repo::calendar::recurring_masters(conn, now + lead_ms))
                     .await
                 {
+                    let own = crate::own_addresses_of(&db, masters.iter().map(|m| &m.event))
+                        .await
+                        .unwrap_or_default();
                     for m in masters {
-                        // Same gates as upcoming_for_notify: cancelled series
-                        // (incl. CANCEL tombstones) and declined invites are
-                        // silent.
-                        if m.event.status.as_deref() == Some("CANCELLED")
-                            || m.event.rsvp_status.as_deref() == Some("DECLINED")
-                        {
+                        // A cancelled series (incl. CANCEL tombstones) is
+                        // silent. Answers count per occurrence, below: one
+                        // occurrence of a declined series may be accepted.
+                        if m.event.status.as_deref() == Some("CANCELLED") {
                             continue;
                         }
                         let Some(rrule) = m.event.rrule.clone() else {
@@ -155,6 +163,18 @@ pub fn spawn(
                             continue;
                         };
                         let Some(next) = occs.first().copied() else {
+                            continue;
+                        };
+                        // That occurrence as the calendar shows it, with any
+                        // answer given to it alone.
+                        let mut ev = vec![crate::occurrence_event(
+                            &m.event,
+                            next,
+                            &crate::occurrence_guests(m.ical_raw.as_deref()),
+                            &own,
+                        )];
+                        crate::mark_invitations(&mut ev, &own);
+                        let Some(ev) = ev.pop().filter(crate::reminds) else {
                             continue;
                         };
                         // Gate: skip when this occurrence was already notified,
@@ -182,9 +202,6 @@ pub fn spawn(
                                 repo::calendar::set_notified(conn, event_id, next.start)
                             })
                             .await;
-                        let mut ev = m.event.clone();
-                        ev.starts_at = next.start;
-                        ev.ends_at = Some(next.end);
                         bus.emit(CoreEvent::EventReminder {
                             event: Box::new(ev),
                             occurrence_start: next.start,

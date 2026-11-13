@@ -2305,6 +2305,7 @@ impl ComposeSession {
             .map(|file| DraftAttachmentIn {
                 file_path: file.path.to_string_lossy().into_owned(),
                 filename: file.filename.clone(),
+                mime_type: None,
             })
             .collect::<Vec<_>>();
         let body_html = {
