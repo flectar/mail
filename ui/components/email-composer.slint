@@ -26,6 +26,7 @@ export component EmailComposer inherits Rectangle {
     in-out property <string> subject;
     in-out property <string> body;
     in property <bool> sending: false;
+    in property <bool> drop-hint: false;
     in property <[AccountRow]> accounts: [];
     in-out property <int> selected-account-id: -1;
     in property <[ComposeContact]> contact-suggestions: [];
@@ -1019,6 +1020,48 @@ export component EmailComposer inherits Rectangle {
         discard => {
             root.confirm-discard = false;
             root.close();
+        }
+    }
+
+    // Where files dragged from elsewhere go: pictures in the text, other files attached.
+    if root.drop-hint : Rectangle {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        height: parent.height - 16px;
+        z: 5000;
+        border-radius: 12px;
+        border-width: 2px;
+        border-color: root.accent-color;
+        background: root.background-color.with-alpha(0.92);
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 8px;
+            padding: 24px;
+
+            Image {
+                height: 32px;
+                source: @image-url("../icons/lucide/outline/paperclip.svg");
+                colorize: root.accent-color;
+                image-fit: contain;
+                accessible-role: none;
+            }
+            Text {
+                text: @tr("Drop to add to your message");
+                color: root.title-color;
+                font-size: TypeScale.heading-small;
+                font-weight: 700;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            Text {
+                text: @tr("Pictures go in the text, and other files are attached.");
+                color: root.muted-color;
+                font-size: TypeScale.secondary;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
         }
     }
 
