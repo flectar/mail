@@ -467,6 +467,7 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_active_image_size(from.get_active_image_size());
     to.set_active_image_alt(from.get_active_image_alt());
     to.set_active_image_width(from.get_active_image_width());
+    to.set_active_image_shown_width(from.get_active_image_shown_width());
     to.set_quote(from.get_quote());
     to.set_quote_left_out(from.get_quote_left_out());
     to.set_quote_text(from.get_quote_text());

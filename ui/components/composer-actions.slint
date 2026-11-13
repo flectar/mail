@@ -804,6 +804,96 @@ export component ImageBar inherits Rectangle {
     }
 }
 
+// A handle on each corner of a selected image, to drag it to the width wanted. While one
+// moves, an outline shows the size the image will have from the opposite corner, and the
+// image takes that width when the drag ends. Images keep their shape and never grow past
+// their own width.
+export component ImageResizeFrame inherits Rectangle {
+    // The width and height the image shows at in the editor.
+    in property <length> image-width;
+    in property <length> image-height;
+    // Its width as shown and its own width, in CSS pixels.
+    in property <int> shown-css-width;
+    in property <int> natural-width;
+    // The widest it can show in the editor.
+    in property <length> room;
+    in property <color> accent-color;
+    in property <color> handle-color;
+    callback resized(int);
+
+    private property <bool> dragging: false;
+    private property <bool> drag-right: true;
+    private property <bool> drag-bottom: true;
+    private property <length> outline-width: root.image-width;
+    private property <float> aspect: root.image-height / max(1px, root.image-width);
+    // CSS pixels for each pixel of the editor, at the size shown.
+    private property <float> css-scale: root.shown-css-width / max(1, root.image-width / 1px);
+    private property <length> narrowest: 16px / max(0.01, root.css-scale);
+    private property <length> widest: min(root.room, root.natural-width * 1px / max(0.01, root.css-scale));
+
+    width: root.image-width;
+    height: root.image-height;
+
+    if root.dragging : Rectangle {
+        x: root.drag-right ? 0px : root.image-width - root.outline-width;
+        y: root.drag-bottom ? 0px : root.image-height - root.outline-width * root.aspect;
+        width: root.outline-width;
+        height: root.outline-width * root.aspect;
+        border-width: 2px;
+        border-color: root.accent-color;
+        background: root.accent-color.with-alpha(0.12);
+    }
+
+    for corner in [
+        { right: false, bottom: false },
+        { right: true, bottom: false },
+        { right: false, bottom: true },
+        { right: true, bottom: true },
+    ] : Rectangle {
+        x: (corner.right ? root.image-width : 0px) - 6px;
+        y: (corner.bottom ? root.image-height : 0px) - 6px;
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+        border-width: 2px;
+        border-color: root.accent-color;
+        background: root.handle-color;
+        accessible-role: none;
+
+        TouchArea {
+            x: -8px;
+            y: -8px;
+            width: 28px;
+            height: 28px;
+            mouse-cursor: corner.right == corner.bottom ? nwse-resize : nesw-resize;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                    root.drag-right = corner.right;
+                    root.drag-bottom = corner.bottom;
+                    root.outline-width = root.image-width;
+                    root.dragging = true;
+                } else if (event.kind == PointerEventKind.up && root.dragging) {
+                    root.dragging = false;
+                    if (abs(root.outline-width - root.image-width) >= 1px) {
+                        root.resized(round(root.outline-width / 1px * root.css-scale));
+                    }
+                } else if (event.kind == PointerEventKind.cancel) {
+                    root.dragging = false;
+                }
+            }
+            moved => {
+                if (root.dragging) {
+                    root.outline-width = clamp(
+                        root.image-width + (corner.right ? 1 : -1) * (self.mouse-x - self.pressed-x),
+                        min(root.narrowest, root.widest),
+                        root.widest,
+                    );
+                }
+            }
+        }
+    }
+}
+
 // Asks for a selected image's alt text, the words that stand for it for people who
 // can't see it. Left empty, the image counts as decoration.
 export component ImageAltEditor inherits Rectangle {

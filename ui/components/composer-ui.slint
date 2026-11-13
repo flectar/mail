@@ -56,6 +56,8 @@ export global ComposerUi {
     in property <string> active-image-size: "";
     in property <string> active-image-alt: "";
     in property <int> active-image-width: 0;
+    // The width it shows at, in CSS pixels.
+    in property <int> active-image-shown-width: 0;
     // On the desktop a message can move into a window of its own.
     in property <bool> can-pop-out: false;
     // "reply" or "forward" while the message carries the original below the
@@ -185,6 +187,7 @@ export component BoundComposer inherits EmailComposer {
     active-image-size: ComposerUi.active-image-size;
     active-image-alt: ComposerUi.active-image-alt;
     active-image-width: ComposerUi.active-image-width;
+    active-image-shown-width: ComposerUi.active-image-shown-width;
     can-pop-out: ComposerUi.can-pop-out;
     quote: ComposerUi.quote;
     quote-left-out: ComposerUi.quote-left-out;
