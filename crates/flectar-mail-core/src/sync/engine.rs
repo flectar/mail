@@ -4494,7 +4494,13 @@ async fn persist_selective_batch(
             Ok((thread_ids, count))
         })
         .await?;
-    super::ingest::store_calendar_events(ctx, account_id, calendar_events).await?;
+    super::ingest::store_calendar_events(
+        ctx,
+        account_id,
+        calendar_events,
+        super::ingest::Arrival::Received,
+    )
+    .await?;
     if !thread_ids.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
     }
@@ -4554,8 +4560,13 @@ async fn persist_body(
         let _ = tokio::fs::remove_file(&path).await;
         return Ok(());
     }
-    super::ingest::store_calendar_events(ctx, config.id, vec![(message_id, calendar_events)])
-        .await?;
+    super::ingest::store_calendar_events(
+        ctx,
+        config.id,
+        vec![(message_id, calendar_events)],
+        super::ingest::Arrival::Received,
+    )
+    .await?;
     if let Some(tid) = thread_id {
         ctx.bus.emit(CoreEvent::MailUpdated {
             thread_ids: vec![tid],

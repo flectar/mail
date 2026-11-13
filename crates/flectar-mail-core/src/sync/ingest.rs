@@ -4,11 +4,13 @@
 //! keeps its own rules for recognizing a message it already has.
 
 use super::engine::SyncCtx;
-use crate::db::repo::{self, messages::NewMessage, sender_identities::OwnAddresses};
+use crate::db::repo::{
+    self, calendar::NewEvents, messages::NewMessage, sender_identities::OwnAddresses,
+};
 use crate::error::Result;
 use crate::events::CoreEvent;
 use crate::mime::{ParsedBody, ParsedHeaders};
-use crate::models::{Settings, now_ms, roles};
+use crate::models::{AddInvitations, Settings, now_ms, roles};
 use rusqlite::Connection;
 
 /// A message older than this never triggers a new-mail notification, even if
@@ -354,15 +356,27 @@ pub(crate) fn calendar_parts(parsed: &ParsedBody) -> Vec<String> {
     parsed.calendar_parts.clone()
 }
 
+/// How the messages came to the account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Arrival {
+    /// They arrived, or the user moved them back from Spam.
+    Received,
+    /// They were imported from saved mail: an archive's invitations join the
+    /// calendar only once answered.
+    Imported,
+}
+
 /// Apply the calendars of stored messages to the account's calendar, by the
 /// rules of [`repo::calendar::apply_invitation`]. Mail in Spam or Trash and
 /// mail from a blocked sender never changes the calendar: RFC 9671 §5 has
 /// calendar data in spam left alone, and invitations are how calendar spam
-/// arrives.
+/// arrives. Which new invitations join the calendar before an answer
+/// follows the user's setting ([`AddInvitations`]).
 pub(crate) async fn store_calendar_events(
     ctx: &SyncCtx,
     account_id: i64,
     messages: Vec<(i64, Vec<String>)>,
+    arrival: Arrival,
 ) -> Result<()> {
     let mut messages: Vec<(i64, Vec<String>)> = messages
         .into_iter()
@@ -393,12 +407,19 @@ pub(crate) async fn store_calendar_events(
             .await?;
     }
     let ids: Vec<i64> = messages.iter().map(|(id, _)| *id).collect();
-    let (own, kept_out) = ctx
+    let (own, kept_out, adding, known) = ctx
         .db
         .read(move |conn| {
+            let adding = repo::settings::get(conn)?.add_invitations;
+            let known = match adding {
+                AddInvitations::Known => repo::messages::from_known_senders(conn, &ids)?,
+                _ => Default::default(),
+            };
             Ok((
                 repo::sender_identities::own_addresses(conn, account_id)?,
                 repo::messages::kept_from_calendar(conn, &ids)?,
+                adding,
+                known,
             ))
         })
         .await?;
@@ -406,12 +427,25 @@ pub(crate) async fn store_calendar_events(
     if messages.is_empty() {
         return Ok(());
     }
+    let new_events = move |message_id: i64| match (arrival, adding) {
+        (Arrival::Imported, _) | (_, AddInvitations::Answered) => NewEvents::Hold,
+        (_, AddInvitations::Everyone) => NewEvents::Invited,
+        (_, AddInvitations::Known) if known.contains(&message_id) => NewEvents::Invited,
+        (_, AddInvitations::Known) => NewEvents::Hold,
+    };
     ctx.calendar_db
         .write(move |conn| {
             let tx = conn.transaction()?;
             for (message_id, calendars) in &messages {
                 for calendar in calendars {
-                    repo::calendar::apply_invitation(&tx, account_id, *message_id, calendar, &own)?;
+                    repo::calendar::apply_invitation(
+                        &tx,
+                        account_id,
+                        *message_id,
+                        calendar,
+                        &own,
+                        new_events(*message_id),
+                    )?;
                 }
             }
             tx.commit()?;

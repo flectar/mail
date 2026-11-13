@@ -4,9 +4,12 @@
 //! Apple Mail, Gmail and Thunderbird do above theirs.
 
 use crate::db::repo;
-use crate::db::repo::calendar::CalendarVersion;
-use crate::error::Result;
-use crate::models::{Address, EventAttendee, InvitationCard, InvitationKind, now_ms};
+use crate::db::repo::calendar::{CalendarVersion, NewEvents};
+use crate::error::{CoreError, Result};
+use crate::events::CoreEvent;
+use crate::models::{
+    Address, CalendarEvent, EventAttendee, InvitationCard, InvitationKind, RsvpEventArgs, now_ms,
+};
 use crate::{Core, caldav, calendar};
 
 /// How far ahead the next occurrence of a repeating event is looked for.
@@ -164,6 +167,88 @@ impl Shown {
 }
 
 impl Core {
+    /// The event of the invitation a message carries, in the user's
+    /// calendar: added to it first when the calendar doesn't have it, as for
+    /// an invitation held until answered (`AddInvitations`) or an event
+    /// only shared with the user. An event they removed from the calendar
+    /// before comes back.
+    pub async fn add_invitation(&self, message_id: i64) -> Result<i64> {
+        let text = self
+            .calendar_db
+            .read(move |conn| repo::calendar::message_calendar(conn, message_id))
+            .await?
+            .ok_or_else(|| CoreError::NotFound("invitation".into()))?;
+        let uid = calendar::parse_ics(&text)
+            .first()
+            .map(|event| event.uid.clone())
+            .ok_or_else(|| CoreError::NotFound("invitation".into()))?;
+        let (account_id, own) = self
+            .db
+            .read(move |conn| {
+                let row = repo::messages::get_row(conn, message_id)?
+                    .ok_or_else(|| CoreError::NotFound("message".into()))?;
+                // Calendar data in Spam, in Trash or from a blocked sender
+                // stays out of the calendar (RFC 9671 section 5).
+                if repo::messages::kept_from_calendar(conn, &[message_id])?.contains(&message_id) {
+                    return Err(CoreError::Other(
+                        "move the message out of Spam or Trash first".into(),
+                    ));
+                }
+                Ok((
+                    row.account_id,
+                    repo::sender_identities::own_addresses(conn, row.account_id)?,
+                ))
+            })
+            .await?;
+        let event_id = self
+            .calendar_db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                if let Some(removed) = repo::calendar::version(&tx, account_id, &uid)?
+                    .filter(|stored| stored.deleted && stored.event.calendar_id.is_none())
+                {
+                    repo::calendar::hard_delete(&tx, removed.event.id)?;
+                }
+                repo::calendar::apply_invitation(
+                    &tx,
+                    account_id,
+                    message_id,
+                    &text,
+                    &own,
+                    NewEvents::Add,
+                )?;
+                let added = repo::calendar::version(&tx, account_id, &uid)?
+                    .filter(|stored| !stored.deleted)
+                    .map(|stored| stored.event.id);
+                tx.commit()?;
+                Ok(added)
+            })
+            .await?
+            .ok_or_else(|| CoreError::Other("this message has no event to add".into()))?;
+        self.bus.emit(CoreEvent::CalendarUpdated { account_id });
+        Ok(event_id)
+    }
+
+    /// Answer the invitation a message carries, or with `occurrence` one
+    /// occurrence of it, adding it to the calendar first when it isn't
+    /// there.
+    pub async fn answer_invitation(
+        &self,
+        message_id: i64,
+        response: &str,
+        occurrence: Option<i64>,
+    ) -> Result<CalendarEvent> {
+        let event_id = self.add_invitation(message_id).await?;
+        self.rsvp_event(RsvpEventArgs {
+            event_id,
+            response: response.to_owned(),
+            comment: None,
+            notify: true,
+            occurrence,
+        })
+        .await
+    }
+
     /// The card above a message that carries a calendar, or None for a
     /// message without one.
     pub async fn invitation_card(&self, message_id: i64) -> Result<Option<InvitationCard>> {

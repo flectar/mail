@@ -4809,8 +4809,13 @@ impl Core {
                 continue;
             };
             let calendars = sync::ingest::calendar_parts(&parsed);
-            sync::ingest::store_calendar_events(&ctx, account_id, vec![(message_id, calendars)])
-                .await?;
+            sync::ingest::store_calendar_events(
+                &ctx,
+                account_id,
+                vec![(message_id, calendars)],
+                sync::ingest::Arrival::Received,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -13730,6 +13735,15 @@ mod invitation_tests {
                 // As every account has: its own address as an identity.
                 let account = repo::accounts::get_config(conn, 1)?.unwrap();
                 repo::sender_identities::ensure_primary(conn, &account)?;
+                // Invitations join the calendar as they arrive; the setting
+                // has tests of its own.
+                repo::settings::set(
+                    conn,
+                    &Settings {
+                        add_invitations: AddInvitations::Everyone,
+                        ..repo::settings::get(conn)?
+                    },
+                )?;
                 conn.execute(
                     "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Junk', 'spam')",
                     [],
@@ -13752,6 +13766,7 @@ mod invitation_tests {
             &core.sync_ctx(),
             1,
             vec![(message_id, vec![INVITATION.into()])],
+            sync::ingest::Arrival::Received,
         )
         .await
         .unwrap();
@@ -13781,9 +13796,14 @@ mod invitation_tests {
             .write(move |conn| Ok(db::testutil::seed_message(conn, &from, "Invitation", false).1))
             .await
             .unwrap();
-        sync::ingest::store_calendar_events(&core.sync_ctx(), 1, vec![(id, vec![calendar.into()])])
-            .await
-            .unwrap();
+        sync::ingest::store_calendar_events(
+            &core.sync_ctx(),
+            1,
+            vec![(id, vec![calendar.into()])],
+            sync::ingest::Arrival::Received,
+        )
+        .await
+        .unwrap();
         id
     }
 
@@ -14113,6 +14133,240 @@ mod invitation_tests {
         }
     }
 
+    /// Choose which invitations join the calendar before an answer.
+    async fn add_invitations(core: &Core, adding: AddInvitations) {
+        core.db
+            .write(move |conn| {
+                repo::settings::set(
+                    conn,
+                    &Settings {
+                        add_invitations: adding,
+                        ..repo::settings::get(conn)?
+                    },
+                )
+            })
+            .await
+            .unwrap();
+    }
+
+    /// A message from `from` with `calendar` arriving, its sender confirmed
+    /// by the receiving server or not.
+    async fn arriving(core: &Core, from: &str, calendar: &str, confirmed: bool) -> i64 {
+        let from = from.to_string();
+        let id = core
+            .db
+            .write(move |conn| {
+                let id = db::testutil::seed_message(conn, &from, "Invitation", false).1;
+                if confirmed {
+                    conn.execute(
+                        "UPDATE messages SET sender_verification = 'domain' WHERE id = ?1",
+                        [id],
+                    )?;
+                }
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        sync::ingest::store_calendar_events(
+            &core.sync_ctx(),
+            1,
+            vec![(id, vec![calendar.into()])],
+            sync::ingest::Arrival::Received,
+        )
+        .await
+        .unwrap();
+        id
+    }
+
+    /// An invitation from `organizer` to the user, with its own UID.
+    fn invitation_from(organizer: &str, uid: &str) -> String {
+        INVITATION
+            .replace("UID:review-1@example.com", &format!("UID:{uid}"))
+            .replace(
+                "ORGANIZER;CN=Alice:mailto:alice@example.com",
+                &format!("ORGANIZER:mailto:{organizer}"),
+            )
+    }
+
+    async fn in_calendar(core: &Core, message_id: i64) -> bool {
+        card(core, message_id).await.event_id.is_some()
+    }
+
+    #[tokio::test]
+    async fn invitations_join_the_calendar_as_the_setting_says() {
+        let (core, _temp, _) = invited().await;
+        core.db
+            .write(|conn| {
+                conn.execute(
+                    "INSERT INTO contacts (email, send_count) VALUES ('Written@Example.com', 2)",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO contact_entries (document, name, email, phone, company,
+                       job_title, website, birthday, postal_address, notes, tags, folded)
+                     VALUES ('', 'Saved', 'saved@example.com', '', '', '', '', '', '', '', '', '')",
+                    [],
+                )?;
+                let entry = conn.last_insert_rowid();
+                conn.execute(
+                    "INSERT INTO contact_values (contact_id, line, kind, value, label, preference)
+                     VALUES (?1, 1, 'EMAIL', 'saved@example.com', '', 0)",
+                    [entry],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        add_invitations(&core, AddInvitations::Known).await;
+        let stranger = invitation_from("stranger@example.com", "a@example.com");
+        assert!(
+            !in_calendar(
+                &core,
+                arriving(&core, "stranger@example.com", &stranger, true).await
+            )
+            .await
+        );
+        let written = invitation_from("written@example.com", "b@example.com");
+        assert!(
+            !in_calendar(
+                &core,
+                arriving(&core, "written@example.com", &written, false).await
+            )
+            .await,
+            "a From address alone can be forged"
+        );
+        let written = invitation_from("written@example.com", "c@example.com");
+        assert!(
+            in_calendar(
+                &core,
+                arriving(&core, "written@example.com", &written, true).await
+            )
+            .await
+        );
+        let saved = invitation_from("saved@example.com", "d@example.com");
+        assert!(
+            in_calendar(
+                &core,
+                arriving(&core, "saved@example.com", &saved, true).await
+            )
+            .await
+        );
+
+        add_invitations(&core, AddInvitations::Answered).await;
+        let written = invitation_from("written@example.com", "e@example.com");
+        assert!(
+            !in_calendar(
+                &core,
+                arriving(&core, "written@example.com", &written, true).await
+            )
+            .await
+        );
+
+        add_invitations(&core, AddInvitations::Everyone).await;
+        let stranger = invitation_from("stranger@example.com", "f@example.com");
+        assert!(
+            in_calendar(
+                &core,
+                arriving(&core, "stranger@example.com", &stranger, false).await
+            )
+            .await
+        );
+        // Shared with the user, or forwarded to them, rather than an
+        // invitation to them.
+        let shared = invitation_from("stranger@example.com", "g@example.com")
+            .replace("METHOD:REQUEST", "METHOD:PUBLISH");
+        assert!(
+            !in_calendar(
+                &core,
+                arriving(&core, "stranger@example.com", &shared, true).await
+            )
+            .await
+        );
+        let forwarded = invitation_from("stranger@example.com", "h@example.com")
+            .replace("mailto:me@test.dev", "mailto:someone@example.com");
+        assert!(
+            !in_calendar(
+                &core,
+                arriving(&core, "stranger@example.com", &forwarded, true).await
+            )
+            .await
+        );
+        // An archive brought in waits for an answer too.
+        let id = core
+            .db
+            .write(|conn| {
+                Ok(db::testutil::seed_message(conn, "written@example.com", "Old", false).1)
+            })
+            .await
+            .unwrap();
+        sync::ingest::store_calendar_events(
+            &core.sync_ctx(),
+            1,
+            vec![(
+                id,
+                vec![invitation_from("written@example.com", "i@example.com")],
+            )],
+            sync::ingest::Arrival::Imported,
+        )
+        .await
+        .unwrap();
+        assert!(!in_calendar(&core, id).await);
+    }
+
+    #[tokio::test]
+    async fn a_held_invitation_joins_the_calendar_when_answered_and_follows_updates() {
+        let (core, _temp, _) = invited().await;
+        add_invitations(&core, AddInvitations::Answered).await;
+        let calendar = invitation_from("bob@example.com", "held@example.com");
+        let id = arriving(&core, "bob@example.com", &calendar, true).await;
+        assert!(!in_calendar(&core, id).await);
+        // Its cancellation, while it waits, leaves nothing in the calendar.
+        let early_cancel = calendar
+            .replace("METHOD:REQUEST", "METHOD:CANCEL")
+            .replace("UID:held@example.com", "UID:other@example.com");
+        let cancel = arriving(&core, "bob@example.com", &early_cancel, true).await;
+        assert!(!in_calendar(&core, cancel).await);
+
+        let answered = core.answer_invitation(id, "accepted", None).await.unwrap();
+        assert_eq!(answered.rsvp_status.as_deref(), Some("ACCEPTED"));
+        assert!(in_calendar(&core, id).await);
+        assert_eq!(card(&core, id).await.my_answer.as_deref(), Some("ACCEPTED"));
+        assert!(
+            sent_answers(&core)
+                .await
+                .pop()
+                .unwrap()
+                .contains("PARTSTAT=ACCEPTED"),
+            "the organizer hears of it"
+        );
+        // An update for an event in the calendar applies whatever the setting.
+        let moved = calendar
+            .replace("SEQUENCE:0", "SEQUENCE:1")
+            .replace("20261120T090000Z", "20261122T090000Z");
+        let update = arriving(&core, "bob@example.com", &moved, false).await;
+        assert_eq!(
+            card(&core, update).await.starts_at,
+            calendar::parse_dt("20261122T090000Z").unwrap().0
+        );
+        assert!(!card(&core, update).await.out_of_date);
+    }
+
+    #[tokio::test]
+    async fn a_shared_event_is_added_without_an_answer() {
+        let (core, _temp, _) = invited().await;
+        let shared = invitation_from("bob@example.com", "shared@example.com")
+            .replace("METHOD:REQUEST", "METHOD:PUBLISH");
+        let id = arriving(&core, "bob@example.com", &shared, true).await;
+        assert_eq!(card(&core, id).await.kind, InvitationKind::Publish);
+        assert!(!in_calendar(&core, id).await);
+        let event = core.add_invitation(id).await.unwrap();
+        assert_eq!(card(&core, id).await.event_id, Some(event));
+        assert_eq!(drafts(&core).await, 0, "nobody is told");
+        // Adding it again finds it.
+        assert_eq!(core.add_invitation(id).await.unwrap(), event);
+    }
+
     #[tokio::test]
     async fn an_invitation_follows_its_mail_in_and_out_of_spam() {
         let (core, _temp, id) = invited().await;
@@ -14128,6 +14382,7 @@ mod invitation_tests {
             &core.sync_ctx(),
             1,
             vec![(id, vec![INVITATION.into()])],
+            sync::ingest::Arrival::Received,
         )
         .await
         .unwrap();
