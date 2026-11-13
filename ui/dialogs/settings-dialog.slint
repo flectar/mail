@@ -27,7 +27,7 @@ import { KeyboardKeys } from "../components/kbd.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { AccountProfilePicker, ProfileColorChoice, ProfileMemberChoice, ProfilePalette } from "../components/profile-controls.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
-import { TypeScale } from "../typography.slint";
+import { InterfaceText, TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
 import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/workspace-layout.slint";
 import { TabSwitcherButton } from "../components/tab-overview.slint";
@@ -805,7 +805,7 @@ export component SettingsDialog inherits Rectangle {
         if section == "Notifications" && SystemNotifications.availability == "" { return false; }
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads reduce motion animation accessibility") + " " + @tr("sending undo send delay take back")
+            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads reduce motion animation accessibility text size font") + " " + @tr("sending undo send delay take back")
                 + " " + @tr("spelling spell check dictionary misspelled words")
                 + " " + @tr("writing default text style font typeface text size")
             : section == "Accounts"
@@ -1297,6 +1297,23 @@ export component SettingsDialog inherits Rectangle {
                                         description-color: root.faint-text;
                                         selected(index, value) => {
                                             MotionSettings.choose(index == 1 ? "on" : index == 2 ? "off" : "system");
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Interface text size");
+                                        description: @tr("Text in menus, lists and settings. Message zoom stays separate.");
+                                        choices: [@tr("Smaller"), @tr("Default"), @tr("Large"), @tr("Larger"), @tr("Largest")];
+                                        selected-index: InterfaceText.size == "smaller" ? 0
+                                            : InterfaceText.size == "large" ? 2
+                                            : InterfaceText.size == "larger" ? 3
+                                            : InterfaceText.size == "largest" ? 4 : 1;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            InterfaceText.choose(index == 0 ? "smaller" : index == 2 ? "large"
+                                                : index == 3 ? "larger" : index == 4 ? "largest" : "default");
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }

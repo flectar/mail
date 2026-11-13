@@ -54,6 +54,10 @@ fn refresh() {
     let app = APP.with_borrow(|weak| weak.as_ref().and_then(slint::Weak::upgrade));
     if let Some(app) = app {
         publish(&app, system_reduced());
+        // Phones report coming back to the front here too, when the system's
+        // text size may have changed as well.
+        #[cfg(mobile)]
+        crate::text_size::refresh(&app);
     }
 }
 
