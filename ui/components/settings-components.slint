@@ -248,6 +248,8 @@ export component SettingsLinkRow inherits Rectangle {
     in property <string> description;
     in property <image> icon;
     in property <bool> colorize-icon: true;
+    // External rows show the open-in-new arrow; action rows omit it.
+    in property <bool> external-link: true;
     in property <color> accent;
     in property <color> body-text;
     in property <color> muted-text;
@@ -286,6 +288,7 @@ export component SettingsLinkRow inherits Rectangle {
         link-description := Text { height: max(16px, self.preferred-height); text: root.description; color: root.muted-text; font-size: TypeScale.caption; overflow: elide; }
     }
     Image {
+        visible: root.external-link;
         x: parent.width - 27px;
         y: (parent.height - self.height) / 2;
         width: 16px;

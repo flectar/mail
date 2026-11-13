@@ -55,6 +55,8 @@ pub use notifications::{
     NewMailNotification, NotificationHost, Response, Route, parse_payload, payload, respond,
 };
 mod number_format;
+mod privacy_consent;
+pub use privacy_consent::PrivacyConsent;
 mod oauth_browser;
 #[cfg(test)]
 mod on_screen_surface_tests;
@@ -1449,6 +1451,9 @@ pub struct PlatformContext {
     /// has none. Desktop builds leave it empty: `run` creates the platform's
     /// own once this process owns the profile.
     pub notifications: Option<Arc<dyn NotificationHost>>,
+    /// Host hook for withdrawing a first-use privacy consent, when the host
+    /// stores one.
+    pub privacy_consent: PrivacyConsent,
     /// The system's spell checker, where the app has none of its own for the
     /// platform: Android's. `None` elsewhere.
     pub spelling: Option<Arc<dyn SpellingHost>>,
@@ -1467,6 +1472,7 @@ impl PlatformContext {
             paths,
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
+            privacy_consent: PrivacyConsent::default(),
             spelling: None,
             documents: documents::default_provider(),
             credentials,
@@ -1489,6 +1495,7 @@ impl PlatformContext {
             paths: Self::app_private_paths(data_root, cache_dir),
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
+            privacy_consent: PrivacyConsent::default(),
             spelling: None,
             documents,
             credentials,
@@ -1830,6 +1837,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     window_chrome::register(&app, &runtime);
     app_icon::apply(&app, startup_presentation.app_icon);
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
+    let privacy_consent = platform.privacy_consent.clone();
+    app.set_privacy_consent_withdrawable(privacy_consent.is_supported());
+    app.on_withdraw_privacy_consent(move || {
+        if let Err(error) = privacy_consent.withdraw() {
+            eprintln!("could not withdraw privacy consent: {error}");
+        }
+    });
     app.on_settings_search_matches(|haystack, query| {
         let query = query.to_string().trim().to_lowercase();
         query.is_empty() || haystack.to_string().to_lowercase().contains(&query)
