@@ -230,8 +230,8 @@ pasting a screenshot or a picture copied from another app does the same on
 the desktop. PNG, JPEG, GIF and WebP images show at their own size, or
 smaller to fit the window, and a click selects one. They go out as parts of
 the message that mail apps show in place, and mail read as plain text names
-each one. The images in a message's text can take up to 5 MB in all. Larger
-ones can go as attachments.
+each one. Images and attachments can take up to 25 MB in all, the size most
+mail servers accept.
 
 Messages carry the formatting in HTML that mail apps widely support. Sizes
 scale with the reader's own text size, and each font names common
