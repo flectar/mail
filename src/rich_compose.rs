@@ -23,6 +23,8 @@ const COPIED_MARK: &str = "<!--flectar-mail-composer-->";
 pub(crate) const IMAGE_PLACEHOLDER: char = '\u{fffc}';
 /// Images larger than this, in pixels across or down, aren't taken.
 const MAX_IMAGE_SIDE: u32 = 16_384;
+/// The narrowest an image can be made to show, in CSS pixels.
+const MIN_IMAGE_WIDTH: u32 = 16;
 
 /// An image in the text, as the file it goes out as.
 #[derive(Clone, Debug)]
@@ -1033,6 +1035,15 @@ impl RichComposeDocument {
                         if size.fits(image.width) {
                             image.shown_width = size.width();
                         }
+                    });
+                }
+            }
+            // A width from dragging the image's corner, in CSS pixels.
+            Some(("image-width", value)) => {
+                if let Ok(width) = value.trim().parse::<u32>() {
+                    self.edit_images(start, end, |image| {
+                        image.shown_width =
+                            (width < image.width).then_some(width.max(MIN_IMAGE_WIDTH));
                     });
                 }
             }
@@ -4816,6 +4827,28 @@ mod tests {
             first.end as i32,
         );
         assert_eq!(selected(&document, &first).shown_width, None);
+    }
+
+    #[test]
+    fn dragging_an_image_corner_gives_it_a_width_of_its_own() {
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document.insert_image(InlineImage::from_file_bytes(png(1000, 500), "").unwrap());
+        let text = document.text().to_owned();
+        let end = text.len() as i32;
+        let shown = |document: &RichComposeDocument| document.images().next().unwrap().shown_width;
+        document.format("image-width:437", &text, 0, end);
+        assert_eq!(shown(&document), Some(437));
+        assert_eq!(ImageSize::of(document.images().next().unwrap()), None);
+        // Never past its own width, and never too small to find again.
+        document.format("image-width:1400", &text, 0, end);
+        assert_eq!(shown(&document), None);
+        document.format("image-width:3", &text, 0, end);
+        assert_eq!(shown(&document), Some(MIN_IMAGE_WIDTH));
+        document.format("image-width:wide", &text, 0, end);
+        assert_eq!(shown(&document), Some(MIN_IMAGE_WIDTH));
+        document.history("undo");
+        assert_eq!(shown(&document), None);
     }
 
     #[test]

@@ -3,7 +3,7 @@ import { SettingsSelectRow } from "settings-components.slint";
 import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow, SpellingLanguage } from "../models.slint";
 import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } from "composer-fields.slint";
-import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, LinkEditor } from "composer-actions.slint";
+import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, ImageResizeFrame, LinkEditor } from "composer-actions.slint";
 import { EmailTemplates } from "email-templates.slint";
 import { TypeScale } from "../typography.slint";
 import { IconButton } from "controls.slint";
@@ -61,6 +61,7 @@ export component EmailComposer inherits Rectangle {
     in property <string> active-image-size: "";
     in property <string> active-image-alt: "";
     in property <int> active-image-width: 0;
+    in property <int> active-image-shown-width: 0;
     in property <bool> can-pop-out: false;
     // "reply" or "forward" when the original goes below the editor.
     in property <string> quote: "";
@@ -919,6 +920,21 @@ export component EmailComposer inherits Rectangle {
                         && body-input.anchor-position-byte-offset == body-input.cursor-position_byte_offset
                         && root.caret-visible;
                     background: root.body-color;
+                }
+
+                // Corner handles where a pointer drags them. Phones scroll the message by
+                // dragging, so there a selected image's size menu sizes it.
+                if root.editor-image-shown && root.active-image-size != "" && !root.sending && !root.compact : ImageResizeFrame {
+                    x: 18px + root.editor-image-x * 1px;
+                    y: 14px + root.editor-image-y * 1px;
+                    image-width: root.editor-image-width * 1px;
+                    image-height: root.editor-image-height * 1px;
+                    shown-css-width: root.active-image-shown-width;
+                    natural-width: root.active-image-width;
+                    room: root.editor-width - root.editor-image-x * 1px;
+                    accent-color: root.accent-color;
+                    handle-color: root.background-color;
+                    resized(width) => { root.apply-format("image-width:" + width); }
                 }
 
                 // Over a selected image's lower left corner, or under an image too small to
