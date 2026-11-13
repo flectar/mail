@@ -146,13 +146,16 @@ fn preferred_mail_row(conn: &Connection, account_id: i64, uid: &str) -> Result<O
 ///   their event is the one they created.
 ///
 /// Our own RSVP state, the is_local flag, and CalDAV sync bookkeeping survive
-/// updates. `own` holds the account's addresses.
+/// updates. `own` holds the account's addresses, and `new` says whether an
+/// event the calendar doesn't have yet joins it: updates and cancellations
+/// of events it has always apply.
 pub fn apply_invitation(
     conn: &Connection,
     account_id: i64,
     message_id: i64,
     calendar: &str,
     own: &OwnAddresses,
+    new: NewEvents,
 ) -> Result<()> {
     let events = crate::calendar::parse_ics(calendar);
     let mut uids: Vec<&str> = Vec::new();
@@ -163,12 +166,28 @@ pub fn apply_invitation(
     }
     for uid in uids {
         let versions: Vec<&IcsEvent> = events.iter().filter(|event| event.uid == uid).collect();
+        let listed = versions.iter().any(|event| {
+            event
+                .attendees
+                .iter()
+                .any(|attendee| own.contains(&attendee.email))
+        });
+        // Scheduling, not just shared: an invitation, or its cancellation.
+        let invites = matches!(
+            versions[0].method.as_deref(),
+            Some("REQUEST" | "ADD" | "CANCEL")
+        );
         let invitation = Invitation {
             account_id,
             message_id,
             calendar,
             uid,
             versions: &versions,
+            adds_new: match new {
+                NewEvents::Add => true,
+                NewEvents::Invited => listed && invites,
+                NewEvents::Hold => false,
+            },
         };
         match versions[0].method.as_deref() {
             Some("REPLY") => {
@@ -187,6 +206,19 @@ pub fn apply_invitation(
     Ok(())
 }
 
+/// Whether an event the calendar doesn't have yet joins it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NewEvents {
+    /// It joins: the user answered the invitation or asked to add the event.
+    Add,
+    /// It joins when it invites the user: a REQUEST (or ADD) with them among
+    /// its guests. An event only shared (PUBLISH), or an invitation
+    /// forwarded to them, waits until they add or answer it.
+    Invited,
+    /// It waits until the user answers or adds it.
+    Hold,
+}
+
 /// One event of an iTIP message, with every version of it the message
 /// carries: the whole event, or some of its occurrences.
 struct Invitation<'a> {
@@ -195,6 +227,8 @@ struct Invitation<'a> {
     calendar: &'a str,
     uid: &'a str,
     versions: &'a [&'a IcsEvent],
+    /// It may join the calendar if the calendar doesn't have it.
+    adds_new: bool,
 }
 
 impl Invitation<'_> {
@@ -257,7 +291,7 @@ fn apply_request(conn: &Connection, invitation: &Invitation, own: &OwnAddresses)
                 raw,
             ],
         )?;
-    } else {
+    } else if invitation.adds_new {
         insert_invitation(conn, invitation, ev, ev.sequence, ev.dtstamp_ms, &raw)?;
     }
     Ok(())
@@ -340,7 +374,9 @@ fn apply_cancel(conn: &Connection, invitation: &Invitation) -> Result<()> {
                 params![id, ev.sequence, ev.dtstamp_ms],
             )?;
         }
-        None if ev.starts_at_ms != 0 => {
+        // A cancelled event that would have waited for an answer stays out
+        // of the calendar too.
+        None if ev.starts_at_ms != 0 && invitation.adds_new => {
             let mut tombstone = ev.clone();
             tombstone.method = Some("CANCEL".into());
             tombstone.status = Some("CANCELLED".into());
@@ -387,6 +423,7 @@ fn apply_occurrences(
             .min_by_key(|event| event.starts_at_ms);
         if let Some(first) = first
             && !cancel
+            && invitation.adds_new
         {
             let mut single = (*first).clone();
             single.rrule = None;
@@ -1226,7 +1263,7 @@ mod tests {
     fn upsert(c: &Connection, account_id: i64, message_id: i64, ev: &IcsEvent) -> Result<()> {
         let mut own = OwnAddresses::default();
         own.insert("me@test.dev".into());
-        apply_invitation(c, account_id, message_id, &ics(ev), &own)
+        apply_invitation(c, account_id, message_id, &ics(ev), &own, NewEvents::Add)
     }
 
     fn sample_ics_event() -> IcsEvent {
@@ -1301,7 +1338,7 @@ mod tests {
     }
 
     fn apply(c: &Connection, message_id: i64, calendar: &str) {
-        apply_invitation(c, 1, message_id, calendar, &own()).unwrap();
+        apply_invitation(c, 1, message_id, calendar, &own(), NewEvents::Add).unwrap();
     }
 
     fn count(c: &Connection) -> i64 {
