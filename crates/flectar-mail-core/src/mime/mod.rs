@@ -2237,6 +2237,36 @@ fn inline_image_filename(index: usize, mime_type: &str) -> String {
     format!("image{index}.{extension}")
 }
 
+/// How much of an HTML body its embedded `data:` images take.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct EmbeddedImages {
+    /// The bytes of the `data:` addresses in the HTML.
+    pub(crate) source_bytes: usize,
+    /// The size of the images they hold, once decoded.
+    pub(crate) image_bytes: usize,
+}
+
+/// Measures the `src="data:image/...;base64,..."` images of `html` without
+/// decoding them.
+pub(crate) fn embedded_images(html: &str) -> EmbeddedImages {
+    const MARKER: &str = "src=\"data:image/";
+    let mut found = EmbeddedImages::default();
+    let mut rest = html;
+    while let Some(pos) = rest.find(MARKER) {
+        let after = &rest[pos + 5..];
+        let Some(end) = after.find('"') else {
+            break;
+        };
+        let uri = &after[..end];
+        if let Some((_, data)) = uri.split_once(";base64,") {
+            found.source_bytes = found.source_bytes.saturating_add(uri.len());
+            found.image_bytes = found.image_bytes.saturating_add(data.trim().len() / 4 * 3);
+        }
+        rest = &after[end + 1..];
+    }
+    found
+}
+
 /// Replace `src="data:image/...;base64,..."` with `src="cid:..."` and return
 /// the decoded images. Editors embed pasted screenshots as data URIs, but
 /// many mail clients (Gmail included) strip those - CID parts survive. Each
@@ -3632,6 +3662,23 @@ mod tests {
                 "Chart [image] and photo [image]"
             );
         }
+    }
+
+    #[test]
+    fn embedded_images_are_measured_without_decoding() {
+        let html = concat!(
+            r#"<p>a <img src="data:image/png;base64,AAAAAAAA"> b "#,
+            r#"<img src="https://example.com/x.png"> <img src="data:image/gif;base64,AAAA"></p>"#,
+        );
+        assert_eq!(
+            embedded_images(html),
+            EmbeddedImages {
+                source_bytes: "data:image/png;base64,AAAAAAAA".len()
+                    + "data:image/gif;base64,AAAA".len(),
+                image_bytes: 9,
+            }
+        );
+        assert_eq!(embedded_images("<p>none</p>"), EmbeddedImages::default());
     }
 
     #[test]
