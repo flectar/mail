@@ -65,6 +65,29 @@ const MAX_INLINE_CID_BYTES_PER_IMAGE: usize = 8 * 1024 * 1024;
 const MAX_INLINE_CID_BYTES_PER_MESSAGE: usize = 16 * 1024 * 1024;
 const MAX_INLINE_CID_BYTES_PER_THREAD: usize = 32 * 1024 * 1024;
 const MAX_INLINE_CID_IMAGES_PER_MESSAGE: usize = 32;
+
+/// How much of a message's inline images go into its HTML at most.
+#[derive(Clone, Copy)]
+struct InlineImageLimits {
+    image: usize,
+    message: usize,
+    images: usize,
+}
+
+impl InlineImageLimits {
+    /// For reading mail.
+    const READER: Self = Self {
+        image: MAX_INLINE_CID_BYTES_PER_IMAGE,
+        message: MAX_INLINE_CID_BYTES_PER_MESSAGE,
+        images: MAX_INLINE_CID_IMAGES_PER_MESSAGE,
+    };
+    /// For a draft to edit, which holds as much as it can send.
+    const DRAFT: Self = Self {
+        image: MAX_DRAFT_ATTACHMENT_BYTES,
+        message: MAX_DRAFT_ATTACHMENT_BYTES,
+        images: MAX_INLINE_CID_IMAGES_PER_MESSAGE,
+    };
+}
 const MAX_DRAFT_ATTACHMENTS: usize = 32;
 const MAX_DRAFT_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 const MAX_DRAFT_BODY_BYTES: usize = 8 * 1024 * 1024;
@@ -3572,7 +3595,10 @@ impl Core {
                     .await
                     .remove(&message_id)
             } else {
-                Some(self.inline_cid_images(message_id, html).await)
+                Some(
+                    self.inline_cid_images(message_id, html, InlineImageLimits::READER)
+                        .await,
+                )
             };
         }
         Ok(detail)
@@ -3901,7 +3927,12 @@ impl Core {
     /// from its inline attachments so embedded images render in the native
     /// HTML renderer. No-op when the body has no cid: references. On any
     /// failure the original HTML is returned unchanged.
-    async fn inline_cid_images(&self, message_id: i64, html: String) -> String {
+    async fn inline_cid_images(
+        &self,
+        message_id: i64,
+        html: String,
+        limits: InlineImageLimits,
+    ) -> String {
         if !html.contains("cid:") {
             return html;
         }
@@ -3936,9 +3967,9 @@ impl Core {
             _ => return html,
         };
         let mut fetched = Vec::new();
-        let mut remaining = MAX_INLINE_CID_BYTES_PER_MESSAGE;
+        let mut remaining = limits.message;
         for (attachment_id, content_id, mime, declared_size, file_path) in atts {
-            if fetched.len() == MAX_INLINE_CID_IMAGES_PER_MESSAGE || remaining == 0 {
+            if fetched.len() == limits.images || remaining == 0 {
                 break;
             }
             let normalized = crate::mime::normalize_cid(&content_id);
@@ -3949,7 +3980,7 @@ impl Core {
             {
                 continue;
             }
-            let max_bytes = MAX_INLINE_CID_BYTES_PER_IMAGE.min(remaining);
+            let max_bytes = limits.image.min(remaining);
             let declared_size = declared_size.and_then(|size| usize::try_from(size).ok());
             if declared_size.is_some_and(|size| size > max_bytes)
                 || (file_path.is_none() && declared_size.is_none())
@@ -5060,14 +5091,28 @@ impl Core {
                 "a draft can contain at most {MAX_DRAFT_ATTACHMENTS} attachments"
             )));
         }
+        // Images in the HTML go out as parts of their own, so they count with
+        // the attachments rather than the text.
+        let embedded = args
+            .body_html
+            .as_deref()
+            .map(crate::mime::embedded_images)
+            .unwrap_or_default();
         let body_bytes = args
             .body_text
             .len()
-            .saturating_add(args.body_html.as_ref().map_or(0, String::len));
+            .saturating_add(args.body_html.as_ref().map_or(0, String::len))
+            .saturating_sub(embedded.source_bytes);
         if body_bytes > MAX_DRAFT_BODY_BYTES {
             return Err(CoreError::Other(format!(
                 "draft body exceeds the {} MiB safety limit",
                 MAX_DRAFT_BODY_BYTES / (1024 * 1024)
+            )));
+        }
+        if embedded.image_bytes > MAX_DRAFT_ATTACHMENT_BYTES {
+            return Err(CoreError::Other(format!(
+                "a draft's images and attachments can take at most {} MiB",
+                MAX_DRAFT_ATTACHMENT_BYTES / (1024 * 1024)
             )));
         }
         // A save replaces the open draft, in place while it is still this
@@ -5122,7 +5167,7 @@ impl Core {
         let mut staged: Vec<crate::models::DraftAttachmentIn> =
             Vec::with_capacity(args.attachments.len());
         let mut created_paths: Vec<String> = Vec::new();
-        let mut staged_bytes = 0usize;
+        let mut staged_bytes = embedded.image_bytes;
         for att in &args.attachments {
             let remaining = MAX_DRAFT_ATTACHMENT_BYTES.saturating_sub(staged_bytes);
             let staged_attachment = stage_draft_attachment(
@@ -5506,7 +5551,10 @@ impl Core {
         // HTML as embedded data, as the composer keeps them, and a save
         // stores them that way.
         if let Some(html) = draft.body_html.take() {
-            draft.body_html = Some(self.inline_cid_images(draft_id, html).await);
+            draft.body_html = Some(
+                self.inline_cid_images(draft_id, html, InlineImageLimits::DRAFT)
+                    .await,
+            );
         }
         Ok(draft)
     }

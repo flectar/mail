@@ -123,6 +123,49 @@ async fn a_draft_saved_on_another_device_reopens_with_its_images() {
 }
 
 #[tokio::test]
+async fn images_in_the_text_count_with_the_attachments() {
+    use base64::Engine;
+    let (tmp, core) = setup().await;
+    let image = |bytes: usize| {
+        let data = base64::engine::general_purpose::STANDARD.encode(vec![0u8; bytes]);
+        format!(r#"<p>Photo <img src="data:image/png;base64,{data}"></p>"#)
+    };
+    // 9 MiB of images: more than the text may take, well within what images
+    // and attachments share.
+    let mut draft = args(None);
+    draft.body_html = Some(image(9 * 1024 * 1024));
+    let draft_id = core.save_draft(draft).await.unwrap();
+
+    // With a 17 MiB attachment the two pass 25 MiB.
+    let source = tmp.path().join("archive.bin");
+    std::fs::write(&source, vec![0u8; 17 * 1024 * 1024]).unwrap();
+    let mut draft = args(Some(DraftAttachmentIn {
+        file_path: source.to_string_lossy().into_owned(),
+        filename: "archive.bin".into(),
+        mime_type: None,
+    }));
+    draft.draft_id = Some(draft_id);
+    draft.body_html = Some(image(9 * 1024 * 1024));
+    assert!(core.save_draft(draft).await.is_err());
+
+    // Images alone past 25 MiB.
+    let mut draft = args(None);
+    draft.draft_id = Some(draft_id);
+    draft.body_html = Some(image(26 * 1024 * 1024));
+    assert!(core.save_draft(draft).await.is_err());
+
+    // The text keeps its own limit.
+    let mut draft = args(None);
+    draft.draft_id = Some(draft_id);
+    draft.body_text = "x".repeat(9 * 1024 * 1024);
+    assert!(core.save_draft(draft).await.is_err());
+
+    let loaded = core.get_draft(draft_id).await.unwrap();
+    assert_eq!(loaded.body_html, Some(image(9 * 1024 * 1024)));
+    assert!(loaded.attachments.is_empty());
+}
+
+#[tokio::test]
 async fn drafts_accept_only_verified_sender_identities_and_store_provider_metadata() {
     let (_tmp, core) = setup().await;
     // Seed the primary row just as account discovery does, then model one
