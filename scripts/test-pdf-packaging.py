@@ -187,8 +187,7 @@ class PackagingTests(unittest.TestCase):
                 output.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(SCRIPTS.parent / name, output)
             shutil.copytree(SCRIPTS.parent / "LICENSES", root / "LICENSES")
-            (root / "resources/app-icon").mkdir(parents=True)
-            (root / "resources/app-icon/flectar-mail-masked.png").write_bytes(b"png")
+            (root / "resources/app-icon/flectar-mail.iconset").mkdir(parents=True)
             (root / "Cargo.toml").write_text('[package]\nversion = "0.1.0-alpha.5"\n')
             (root / "target/release").mkdir(parents=True)
             shutil.copyfile("/bin/true", root / "target/release/flectar-mail")
@@ -219,8 +218,10 @@ class PackagingTests(unittest.TestCase):
                 path.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + contents)
                 path.chmod(0o755)
 
-            executable("sips", 'output="${@: -1}"\nmkdir -p "$(dirname "$output")"\n: > "$output"\n')
-            executable("iconutil", 'output="${@: -1}"\n: > "$output"\n')
+            executable(
+                "iconutil",
+                'test "$1 $2" = "-c icns"\ntest -d "$3"\noutput="${@: -1}"\n: > "$output"\n',
+            )
             executable("plutil", 'test "$1" = -lint\ntest -f "$2"\n')
             executable(
                 "codesign",
@@ -262,6 +263,7 @@ class PackagingTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     app = output_dir / "Flectar Mail.app/Contents"
                     self.assertTrue((app / "Frameworks/libpdfium.dylib").is_file())
+                    self.assertTrue((app / "Resources/FlectarMail.icns").is_file())
                     self.assertTrue((app / "Resources/Licenses/PDFium/build.json").is_file())
                     self.assertFalse((app / "MacOS/libpdfium.dylib").exists())
                     self.assertTrue(
