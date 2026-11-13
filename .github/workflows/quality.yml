@@ -255,10 +255,17 @@ jobs:
       - name: Keep the Objective-C bridges linkable
         if: matrix.name == 'iOS'
         run: |
+          shopt -s nullglob
           archive=""
-          for candidate in target/aarch64-apple-ios/debug/build/flectar-mail-*/out/libflectar_documents.a; do
+          # Cargo 1.100 keeps a build script's output in build/<package>/<hash>,
+          # earlier versions in build/<package>-<hash>.
+          for candidate in target/aarch64-apple-ios/debug/build/flectar-mail{-*,/*}/out/libflectar_documents.a; do
             if [[ -z "$archive" || "$candidate" -nt "$archive" ]]; then archive="$candidate"; fi
           done
+          if [[ -z "$archive" ]]; then
+            echo "::error::The iOS lint left no libflectar_documents.a to check."
+            exit 1
+          fi
           undefined="$(nm -u "$archive")"
           if grep -E '___is(Platform|OS)VersionAtLeast' <<<"$undefined"; then
             echo "::error::Use a runtime check instead of @available in platform/ios; rustc doesn't link compiler-rt."

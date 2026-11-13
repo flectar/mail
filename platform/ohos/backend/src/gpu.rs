@@ -66,10 +66,7 @@ impl HasDisplayHandle for SurfaceHandle {
 /// falls back to the software renderer automatically when the surface cannot
 /// be attached.
 pub fn requested() -> bool {
-    if std::env::var_os("FLECTAR_OHOS_SOFTWARE").is_some_and(|value| !value.is_empty()) {
-        return false;
-    }
-    true
+    !std::env::var_os("FLECTAR_OHOS_SOFTWARE").is_some_and(|value| !value.is_empty())
 }
 
 /// Create the suspended renderer (no surface yet).
