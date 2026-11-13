@@ -858,8 +858,12 @@ impl Composers {
                 document.load_html_start(own, &draft.body_text)
             });
             if split.is_none() && document.load_html(html, &draft.body_text).is_none() {
-                let cursor = i32::try_from(draft.body_text.len()).unwrap_or(i32::MAX);
-                document.load(&draft.body_text, cursor, cursor);
+                // Images the HTML no longer holds leave no mark in the text.
+                let text = draft
+                    .body_text
+                    .replace(crate::rich_compose::IMAGE_PLACEHOLDER, "");
+                let cursor = i32::try_from(text.len()).unwrap_or(i32::MAX);
+                document.load(&text, cursor, cursor);
             }
             split
         };
