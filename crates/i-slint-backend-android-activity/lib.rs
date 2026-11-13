@@ -10,6 +10,9 @@
 #![cfg_attr(slint_nightly_test, warn(non_exhaustive_omitted_patterns))]
 
 mod androidwindowadapter;
+// jni's bind_java_type! expands to AtomicBool::fetch_update, which Rust 1.100
+// deprecates. Cargo caps lints only for crates from the registry.
+#[allow(deprecated)]
 mod javahelper;
 mod vsync;
 
