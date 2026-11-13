@@ -876,8 +876,13 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
             return Err(error);
         }
     };
-    if let Err(error) =
-        ingest::store_calendar_events(ctx, account_id, vec![(message_id, calendar_events)]).await
+    if let Err(error) = ingest::store_calendar_events(
+        ctx,
+        account_id,
+        vec![(message_id, calendar_events)],
+        ingest::Arrival::Received,
+    )
+    .await
     {
         tracing::warn!(account_id, message_id, %error, "could not record a POP3 message's invitations");
     }

@@ -2485,6 +2485,7 @@ async fn store_hydrated_body(
         ctx,
         account_id,
         vec![(local_message_id, calendar_parts)],
+        crate::sync::ingest::Arrival::Received,
     )
     .await?;
 

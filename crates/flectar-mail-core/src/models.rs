@@ -1783,6 +1783,41 @@ impl MessageAppearance {
     }
 }
 
+/// Which invitations found in mail join the calendar before the user answers
+/// them (#228). Answering one, or adding it from its card, always does.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AddInvitations {
+    /// Every invitation to the user.
+    Everyone,
+    /// Invitations from people the user has written to or keeps as a
+    /// contact, when their mail server confirms who sent them. RFC 9671
+    /// section 4 asks for calendar data from known senders only.
+    #[default]
+    Known,
+    /// None: an invitation joins the calendar once the user answers it.
+    Answered,
+}
+
+impl AddInvitations {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Everyone => "everyone",
+            Self::Known => "known",
+            Self::Answered => "answered",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "everyone" => Some(Self::Everyone),
+            "known" => Some(Self::Known),
+            "answered" => Some(Self::Answered),
+            _ => None,
+        }
+    }
+}
+
 /// How times of day are written: with the clock the user's region prefers,
 /// or always with a 12- or 24-hour clock.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1986,6 +2021,9 @@ pub struct Settings {
     /// Minutes before a meeting to fire a desktop reminder; 0 disables.
     #[serde(default = "default_notify_lead")]
     pub meeting_notify_lead_minutes: i64,
+    /// Which invitations found in mail join the calendar before an answer.
+    #[serde(default)]
+    pub add_invitations: AddInvitations,
     /// Desktop notification on new mail.
     #[serde(default = "default_true")]
     pub notifications_enabled: bool,
@@ -2266,6 +2304,7 @@ impl Default for Settings {
             voice_profile: String::new(),
             voice_learned_at: 0,
             meeting_notify_lead_minutes: 10,
+            add_invitations: AddInvitations::default(),
             notifications_enabled: true,
             sync_interval_minutes: default_sync_interval_minutes(),
             sound_enabled: true,
@@ -2696,6 +2735,15 @@ mod tests {
         assert_eq!(s.ai_base_url, crate::ai::DEFAULT_BASE_URL);
         assert!(s.show_avatars);
         assert_eq!(s.message_appearance, MessageAppearance::System);
+        // Settings saved before the choice existed take the safe default.
+        assert_eq!(s.add_invitations, AddInvitations::Known);
+        for adding in [
+            AddInvitations::Everyone,
+            AddInvitations::Known,
+            AddInvitations::Answered,
+        ] {
+            assert_eq!(AddInvitations::parse(adding.as_str()), Some(adding));
+        }
         assert_eq!(s.app_icon, AppIcon::Orange);
         assert!(s.group_mail_by_date);
         assert!(s.show_tabs);
