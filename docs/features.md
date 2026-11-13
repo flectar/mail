@@ -237,7 +237,8 @@ A selected image gets a bar of its own. **Size** makes it small, medium or large
 or its own size again, and only changes how wide it shows, so the file goes
 out as it is. **Alt text** gives the words screen readers read in its place,
 and left empty it marks the image as decoration. Right-clicking an image
-offers both in the editor menu.
+offers both in the editor menu. On the desktop, dragging a corner of a
+selected image sizes it too, up to its own width.
 
 Messages carry the formatting in HTML that mail apps widely support. Sizes
 scale with the reader's own text size, and each font names common
