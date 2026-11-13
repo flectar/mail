@@ -443,6 +443,12 @@ pub(super) fn apply_rendered_compose_editor(ui: &ComposerUi<'_>, rendered: Rende
     ui.set_editor_caret_x(rendered.caret_x);
     ui.set_editor_caret_y(rendered.caret_y);
     ui.set_editor_caret_height(rendered.caret_height);
+    let [x, y, width, height] = rendered.image_box.unwrap_or_default();
+    ui.set_editor_image_shown(rendered.image_box.is_some());
+    ui.set_editor_image_x(x);
+    ui.set_editor_image_y(y);
+    ui.set_editor_image_width(width);
+    ui.set_editor_image_height(height);
     if let Some(started) = started {
         eprintln!(
             "compose Slint model update: {:.2}ms tiles={tile_count} replaced_model={replaced_model}",
@@ -486,6 +492,16 @@ pub(super) fn apply_rich_compose_state(
     ui.set_active_size(active.size.map_or("", |size| size.name()).into());
     ui.set_active_family(active.family.map_or("", |family| family.name()).into());
     ui.set_active_align(active.align.name().into());
+    let image = document.selected_image();
+    ui.set_active_image_size(
+        match image {
+            Some(image) => rich_compose::ImageSize::of(image).map_or("custom", |size| size.name()),
+            None => "",
+        }
+        .into(),
+    );
+    ui.set_active_image_alt(image.map_or("", |image| &*image.alt).into());
+    ui.set_active_image_width(image.map_or(0, |image| image.width.min(i32::MAX as u32) as i32));
 }
 
 /// A color the selection shares as the toolbar shows it: `#rrggbb`, `none` when it has none,

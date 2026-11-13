@@ -233,6 +233,12 @@ the message that mail apps show in place, and mail read as plain text names
 each one. Images and attachments can take up to 25 MB in all, the size most
 mail servers accept.
 
+A selected image gets a bar of its own. **Size** makes it small, medium or large,
+or its own size again, and only changes how wide it shows, so the file goes
+out as it is. **Alt text** gives the words screen readers read in its place,
+and left empty it marks the image as decoration. Right-clicking an image
+offers both in the editor menu.
+
 Messages carry the formatting in HTML that mail apps widely support. Sizes
 scale with the reader's own text size, and each font names common
 alternatives in case the reader lacks it. In a dark theme, the composer shows

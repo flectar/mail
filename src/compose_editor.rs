@@ -63,6 +63,9 @@ pub struct RenderedComposeEditor {
     pub caret_x: f32,
     pub caret_y: f32,
     pub caret_height: f32,
+    /// Where the selected image shows, when the selection is one image: its left, top,
+    /// width and height.
+    pub image_box: Option<[f32; 4]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -264,6 +267,28 @@ impl CosmicComposeEditor {
             .cloned()
     }
 
+    /// The selection of the image at a point of the editor, in logical pixels, as last
+    /// rendered.
+    pub fn image_selection_at(
+        &self,
+        x: f32,
+        y: f32,
+        scale_factor: f32,
+    ) -> Option<ComposeSelection> {
+        let scale_factor = scale_factor.max(1.0);
+        let (line, image) = self.image_at(x * scale_factor, y * scale_factor)?;
+        let offset = |index| {
+            self.visual_to_document_offset(cursor_to_global(
+                &self.visual_text,
+                Cursor::new(line, index),
+            ))
+        };
+        Some(ComposeSelection {
+            start: offset(image.start),
+            end: offset(image.end),
+        })
+    }
+
     /// The underlined word at a point of the editor, in logical pixels, as last rendered.
     pub fn misspelling_at(&self, x: f32, y: f32, scale_factor: f32) -> Option<Range<usize>> {
         self.squiggle_at(x, y, scale_factor)
@@ -412,12 +437,16 @@ impl CosmicComposeEditor {
             );
         }
 
+        let image_box = document
+            .selected_image()
+            .and_then(|_| self.image_box(selection, scale_factor));
         let rendered = RenderedComposeEditor {
             tiles: self.tiles.values().cloned().collect(),
             content_height: self.content_height_physical / scale_factor,
             caret_x,
             caret_y,
             caret_height,
+            image_box,
         };
         if let Some(timing_start) = timing_start {
             let tile_bytes = self
@@ -1061,6 +1090,38 @@ impl CosmicComposeEditor {
             }
         }
         Image::from_rgba8_premultiplied(pixels)
+    }
+
+    /// Where the image that starts the selection shows, in logical pixels, as the tiles paint
+    /// it: on the bottom of its line.
+    fn image_box(&self, selection: ComposeSelection, scale_factor: f32) -> Option<[f32; 4]> {
+        if !self.layout_preedit_text.is_empty() {
+            return None;
+        }
+        let cursor = global_to_cursor(&self.visual_text, selection.start.min(selection.end));
+        self.editor.with_buffer(|buffer| {
+            buffer
+                .layout_runs()
+                .filter(|run| run.line_i == cursor.line)
+                .find_map(|run| {
+                    let glyph = run
+                        .glyphs
+                        .iter()
+                        .find(|glyph| glyph.metadata & IMAGE != 0 && glyph.start == cursor.index)?;
+                    let image = self.layout_images.get(glyph.metadata & 0xff_ff_ff)?;
+                    let width = glyph.w.round().max(1.0);
+                    let height = (width * image.height as f32 / image.width.max(1) as f32)
+                        .round()
+                        .max(1.0);
+                    let top = (run.line_top + run.line_height - height).round();
+                    Some([
+                        glyph.x.round() / scale_factor,
+                        top / scale_factor,
+                        width / scale_factor,
+                        height / scale_factor,
+                    ])
+                })
+        })
     }
 
     /// The image under a point of the layout, in physical pixels: its line, and its place in
