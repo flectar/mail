@@ -2,12 +2,37 @@ import { abilityAccessCtrl, common, ConfigurationConstant, PermissionRequestResu
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { fileIo, fileUri, picker, statfs } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
+import { i18n } from '@kit.LocalizationKit';
 import { notificationManager } from '@kit.NotificationKit';
+import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 
 const LOG_TAG = 'FlectarOhos';
+const PRIVACY_STORE = 'flectar_ohos';
+const PRIVACY_KEY = 'privacy_accepted';
+const CONSENT_THEME_KEY = 'consent_theme';
+// Lucide outline paths (ISC), drawn through Shape/Path so their stroke follows
+// the active Flectar theme instead of a baked-in SVG color.
+const CONSENT_SHIELD_PATH = 'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z';
+const CONSENT_X_PATH = 'M18 6 L6 18 M6 6 L18 18';
+const CONSENT_CHECK_PATH = 'M20 6 L9 17 L5 12';
+
+interface ConsentTheme {
+  dark: boolean;
+  page_bg: string;
+  surface: string;
+  title: string;
+  body: string;
+  secondary: string;
+  border: string;
+  border_subtle: string;
+  accent: string;
+  accent_soft: string;
+  primary: string;
+}
+
 // The XComponent, as both its native id and its component id.
 const SURFACE_ID = 'flectar_mail_surface';
 // One document is copied for the Files pane, whose transfers stop here.
@@ -28,6 +53,9 @@ interface FlectarBridge {
   hideIme: () => void;
   requestPasteboard: () => void;
   notify: (sender: string, subject: string, threadId: number, messageId: number) => void;
+  withdrawPrivacyConsent: () => void;
+  setAppPreferredLanguage: (language: string) => void;
+  setConsentTheme: (themeJson: string) => void;
 }
 
 interface ImeCursor {
@@ -81,6 +109,13 @@ struct Index {
   private pendingImeCursor: ImeCursor | undefined = undefined;
   private imeCursorRetries: number = 0;
   private appliedColorMode: number = -2;
+  @State private privacyChecked: boolean = false;
+  @State private privacyAccepted: boolean = false;
+  @State private consentTheme: ConsentTheme | undefined = undefined;
+  // Snapshot writes are asynchronous; serialize them so a slower earlier
+  // write cannot land after the newer theme and win on the next cold start.
+  private consentThemeWriteInFlight: boolean = false;
+  private pendingConsentTheme: string = '';
   private pasteboardPermissionRequested: boolean = false;
   private systemPasteboard: pasteboard.SystemPasteboard | undefined = undefined;
   private clipboardUpdateHandler: () => void = (): void => {
@@ -88,6 +123,7 @@ struct Index {
   };
   aboutToAppear(): void {
     this.probeResources();
+    this.loadPrivacyConsent();
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       AppStorage.setOrCreate('flectarColorMode', context.config.colorMode ?? -1);
@@ -150,29 +186,533 @@ struct Index {
   }
 
   build(): void {
+    if (!this.privacyChecked) {
+      Column() {
+        LoadingProgress()
+          .width(48)
+          .height(48)
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor('#FFFFFF')
+    } else if (!this.privacyAccepted) {
+      this.privacyConsentView()
+    } else {
+      Column() {
+        XComponent({
+          id: SURFACE_ID,
+          type: XComponentType.SURFACE,
+          libraryname: 'flectar_mail_ohos',
+        })
+          .id(SURFACE_ID)
+          .width('100%')
+          .height('100%')
+          // Maximizing, restoring and split screen lay the surface out again.
+          .onAreaChange((): void => {
+            this.applyImeCursor();
+          })
+          .focusable(true)
+          .defaultFocus(true)
+          .onLoad((context?: object): void => {
+            if (context) {
+              this.installBridge(context);
+            }
+          })
+      }
+      .width('100%')
+      .height('100%')
+    }
+  }
+
+  private consentDarkMode(): boolean {
+    return this.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+  }
+
+  // The shared window owns the effective theme, including custom presets.
+  // Startup hands it over as a JSON snapshot so this page can paint the gate
+  // before the native runtime exists; while the runtime is up, theme changes
+  // replace the snapshot and are persisted for the next gate.
+  private consentThemeColor(value: string | undefined, fallback: string): string {
+    return value !== undefined && value.length > 0 ? value : fallback;
+  }
+
+  private consentPageBackground(): string {
+    return this.consentThemeColor(this.consentTheme?.page_bg,
+      this.consentDarkMode() ? '#111213' : '#f2f2f0');
+  }
+
+  private consentSurface(): string {
+    return this.consentThemeColor(this.consentTheme?.surface,
+      this.consentDarkMode() ? '#18191a' : '#ffffff');
+  }
+
+  private consentTextColor(): string {
+    return this.consentThemeColor(this.consentTheme?.title,
+      this.consentDarkMode() ? '#f3f3f2' : '#202120');
+  }
+
+  private consentSecondaryColor(): string {
+    return this.consentThemeColor(this.consentTheme?.secondary,
+      this.consentDarkMode() ? '#a0a19e' : '#72736f');
+  }
+
+  private consentBorderColor(): string {
+    return this.consentThemeColor(this.consentTheme?.border,
+      this.consentDarkMode() ? '#292a2b' : '#d9d9d6');
+  }
+
+  private consentBorderSubtleColor(): string {
+    return this.consentThemeColor(this.consentTheme?.border_subtle,
+      this.consentDarkMode() ? '#232425' : '#e6e6e2');
+  }
+
+  private consentAccent(): string {
+    return this.consentThemeColor(this.consentTheme?.accent,
+      this.consentDarkMode() ? '#5ca3ff' : '#0969da');
+  }
+
+  private consentAccentSoft(): string {
+    return this.consentThemeColor(this.consentTheme?.accent_soft,
+      this.consentDarkMode() ? '#26364a' : '#dcecff');
+  }
+
+  private consentPrimary(): string {
+    return this.consentThemeColor(this.consentTheme?.primary, '#0969da');
+  }
+
+  private consentLinearChannel(value: number): number {
+    return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+  }
+
+  // Match the shared button's WCAG-based foreground choice so custom palettes
+  // keep the label readable instead of assuming a fixed white.
+  private consentOnPrimary(): string {
+    const primary = this.consentPrimary();
+    const hex = primary.startsWith('#') ? primary.substring(1) : primary;
+    if (hex.length !== 6) {
+      return '#ffffff';
+    }
+    const red = parseInt(hex.substring(0, 2), 16) / 255;
+    const green = parseInt(hex.substring(2, 4), 16) / 255;
+    const blue = parseInt(hex.substring(4, 6), 16) / 255;
+    if (Number.isNaN(red) || Number.isNaN(green) || Number.isNaN(blue)) {
+      return '#ffffff';
+    }
+    const luminance = 0.2126 * this.consentLinearChannel(red) +
+      0.7152 * this.consentLinearChannel(green) +
+      0.0722 * this.consentLinearChannel(blue);
+    return 1.05 / (luminance + 0.05) >= 4.5 ? '#ffffff' : '#000000';
+  }
+
+  @Builder
+  consentShieldIcon(): void {
+    Shape() {
+      Path({ width: 24, height: 24, commands: CONSENT_SHIELD_PATH })
+        .fill(Color.Transparent)
+        .stroke(this.consentAccent())
+        .strokeWidth(2)
+        .strokeLineCap(LineCapStyle.Round)
+        .strokeLineJoin(LineJoinStyle.Round)
+    }
+    .viewPort({ x: 0, y: 0, width: 24, height: 24 })
+    .width(18)
+    .height(18)
+  }
+
+  @Builder
+  consentDeclineIcon(): void {
+    Shape() {
+      Path({ width: 24, height: 24, commands: CONSENT_X_PATH })
+        .fill(Color.Transparent)
+        .stroke(this.consentSecondaryColor())
+        .strokeWidth(2)
+        .strokeLineCap(LineCapStyle.Round)
+        .strokeLineJoin(LineJoinStyle.Round)
+    }
+    .viewPort({ x: 0, y: 0, width: 24, height: 24 })
+    .width(18)
+    .height(18)
+  }
+
+  @Builder
+  consentAgreeIcon(): void {
+    Shape() {
+      Path({ width: 24, height: 24, commands: CONSENT_CHECK_PATH })
+        .fill(Color.Transparent)
+        .stroke(this.consentOnPrimary())
+        .strokeWidth(2)
+        .strokeLineCap(LineCapStyle.Round)
+        .strokeLineJoin(LineJoinStyle.Round)
+    }
+    .viewPort({ x: 0, y: 0, width: 24, height: 24 })
+    .width(18)
+    .height(18)
+  }
+
+  @Builder
+  consentBulletIcon(): void {
+    Shape() {
+      Path({ width: 24, height: 24, commands: CONSENT_CHECK_PATH })
+        .fill(Color.Transparent)
+        .stroke(this.consentAccent())
+        .strokeWidth(2)
+        .strokeLineCap(LineCapStyle.Round)
+        .strokeLineJoin(LineJoinStyle.Round)
+    }
+    .viewPort({ x: 0, y: 0, width: 24, height: 24 })
+    .width(14)
+    .height(14)
+  }
+
+  // A compact summary card is easier to scan than a paragraph and mirrors the
+  // structure used by AppGallery email clients for first-run privacy consent.
+  @Builder
+  consentBullet(text: ResourceStr): void {
+    Row({ space: 12 }) {
+      Stack() {
+        this.consentBulletIcon()
+      }
+      .width(24)
+      .height(24)
+      .borderRadius(12)
+      .backgroundColor(this.consentAccentSoft())
+
+      Text(text)
+        .fontSize(14)
+        .lineHeight(21)
+        .fontColor(this.consentSecondaryColor())
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Top)
+  }
+
+  // The consent screen gates the XComponent: no native module (and therefore
+  // no account or mail processing) starts before the user agrees.
+  @Builder
+  privacyConsentView(): void {
     Column() {
-      XComponent({
-        id: SURFACE_ID,
-        type: XComponentType.SURFACE,
-        libraryname: 'flectar_mail_ohos',
-      })
-        .id(SURFACE_ID)
-        .width('100%')
-        .height('100%')
-        // Maximizing, restoring and split screen lay the surface out again.
-        .onAreaChange((): void => {
-          this.applyImeCursor();
-        })
-        .focusable(true)
-        .defaultFocus(true)
-        .onLoad((context?: object): void => {
-          if (context) {
-            this.installBridge(context);
+      Scroll() {
+        Row() {
+          Column({ space: 0 }) {
+            Image($r('app.media.app_icon'))
+              .width(76)
+              .height(76)
+              .borderRadius(18)
+              .margin({ bottom: 18 })
+
+            Text($r('app.string.privacy_consent_title'))
+              .fontSize(28)
+              .fontWeight(700)
+              .fontColor(this.consentTextColor())
+              .textAlign(TextAlign.Center)
+              .width('100%')
+
+            Text($r('app.string.privacy_consent_intro'))
+              .fontSize(15)
+              .lineHeight(23)
+              .fontColor(this.consentSecondaryColor())
+              .textAlign(TextAlign.Center)
+              .width('100%')
+              .margin({ top: 8, bottom: 24 })
+
+            Column({ space: 14 }) {
+              this.consentBullet($r('app.string.privacy_consent_bullet_local'))
+              this.consentBullet($r('app.string.privacy_consent_bullet_clipboard'))
+              this.consentBullet($r('app.string.privacy_consent_bullet_withdraw'))
+            }
+            .width('100%')
+            .padding(20)
+            .backgroundColor(this.consentSurface())
+            .borderRadius(12)
+            .borderWidth(1)
+            .borderColor(this.consentBorderSubtleColor())
+
+            Row({ space: 8 }) {
+              Button() {
+                Row({ space: 6 }) {
+                  this.consentShieldIcon()
+                  Text($r('app.string.privacy_consent_view_policy'))
+                    .fontSize(13)
+                    .fontWeight(500)
+                    .fontColor(this.consentAccent())
+                    .textAlign(TextAlign.Center)
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
+                .width('100%')
+                .justifyContent(FlexAlign.Center)
+              }
+              .layoutWeight(1)
+              .height(52)
+              .padding({ left: 8, right: 8 })
+              .type(ButtonType.Normal)
+              .backgroundColor(this.consentAccentSoft())
+              .borderRadius(8)
+              .onClick((): void => {
+                this.openPrivacyPolicy();
+              })
+
+              Button() {
+                Row({ space: 6 }) {
+                  this.consentDeclineIcon()
+                  Text($r('app.string.privacy_consent_decline'))
+                    .fontSize(13)
+                    .fontWeight(500)
+                    .fontColor(this.consentSecondaryColor())
+                    .textAlign(TextAlign.Center)
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
+                .width('100%')
+                .justifyContent(FlexAlign.Center)
+              }
+              .layoutWeight(1)
+              .height(52)
+              .padding({ left: 8, right: 8 })
+              .type(ButtonType.Normal)
+              .backgroundColor(this.consentSurface())
+              .borderRadius(8)
+              .borderWidth(1)
+              .borderColor(this.consentBorderColor())
+              .onClick((): void => {
+                this.declinePrivacy();
+              })
+
+              Button() {
+                Row({ space: 6 }) {
+                  this.consentAgreeIcon()
+                  Text($r('app.string.privacy_consent_agree'))
+                    .fontSize(13)
+                    .fontWeight(600)
+                    .fontColor(this.consentOnPrimary())
+                    .textAlign(TextAlign.Center)
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
+                .width('100%')
+                .justifyContent(FlexAlign.Center)
+              }
+              .layoutWeight(1)
+              .height(52)
+              .padding({ left: 8, right: 8 })
+              .type(ButtonType.Normal)
+              .backgroundColor(this.consentPrimary())
+              .borderRadius(8)
+              .onClick((): void => {
+                this.acceptPrivacy();
+              })
+            }
+            .width('100%')
+            .margin({ top: 20 })
           }
-        })
+          .width('100%')
+          .constraintSize({ maxWidth: 560 })
+          .alignItems(HorizontalAlign.Center)
+          .padding({ left: 24, right: 24, top: 36, bottom: 28 })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(this.consentPageBackground())
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  private privacyLanguage(): string {
+    try {
+      const language = i18n.System.getSystemLanguage().toLowerCase();
+      if (language.startsWith('zh')) {
+        return 'zh_Hans';
+      }
+      if (language.startsWith('tr')) {
+        return 'tr';
+      }
+      if (language.startsWith('es')) {
+        return 'es';
+      }
+      if (language.startsWith('ru')) {
+        return 'ru';
+      }
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'could not read the system language: %{public}s',
+        (error as BusinessError).message);
+    }
+    return 'en';
+  }
+
+  private privacyPolicyUrl(): string {
+    const language = this.privacyLanguage();
+    if (language === 'zh_Hans') {
+      return 'https://flectar.com/zh-hans/mail/privacy/';
+    }
+    if (language === 'tr') {
+      return 'https://flectar.com/tr/mail/privacy/';
+    }
+    if (language === 'es') {
+      return 'https://flectar.com/es/mail/privacy/';
+    }
+    if (language === 'ru') {
+      return 'https://flectar.com/ru/mail/privacy/';
+    }
+    return 'https://flectar.com/mail/privacy/';
+  }
+
+  private openPrivacyPolicy(): void {
+    this.openUrl(this.privacyPolicyUrl());
+  }
+
+  private async loadConsentTheme(): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      const themeJson = (await store.get(CONSENT_THEME_KEY, '')) as string;
+      if (themeJson.length > 0) {
+        this.consentTheme = JSON.parse(themeJson) as ConsentTheme;
+      }
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'consent theme unavailable: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  private updateConsentTheme(themeJson: string): void {
+    try {
+      this.consentTheme = JSON.parse(themeJson) as ConsentTheme;
+      this.pendingConsentTheme = themeJson;
+      this.flushConsentTheme();
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'consent theme is invalid: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  private async flushConsentTheme(): Promise<void> {
+    if (this.consentThemeWriteInFlight) {
+      return;
+    }
+    this.consentThemeWriteInFlight = true;
+    while (this.pendingConsentTheme.length > 0) {
+      const themeJson = this.pendingConsentTheme;
+      this.pendingConsentTheme = '';
+      await this.persistConsentTheme(themeJson);
+    }
+    this.consentThemeWriteInFlight = false;
+  }
+
+  private async persistConsentTheme(themeJson: string): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      await store.put(CONSENT_THEME_KEY, themeJson);
+      await store.flush();
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'consent theme could not be stored: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  private async loadPrivacyConsent(): Promise<void> {
+    await this.loadConsentTheme();
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      this.privacyAccepted = (await store.get(PRIVACY_KEY, false)) as boolean;
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'privacy preferences unavailable: %{public}s',
+        (error as BusinessError).message);
+      this.privacyAccepted = false;
+    } finally {
+      this.privacyChecked = true;
+      if (this.privacyAccepted) {
+        this.requestNotificationPermission();
+      }
+    }
+  }
+
+  // Ask for notification permission only after privacy consent. EntryAbility
+  // deliberately does not request it on page load.
+  private requestNotificationPermission(): void {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      notificationManager.isNotificationEnabled()
+        .then((enabled: boolean): void => {
+          if (enabled) {
+            return;
+          }
+          notificationManager.requestEnableNotification(context)
+            .then((): void => {
+              hilog.info(0x0000, LOG_TAG, 'notification permission granted');
+            })
+            .catch((error: BusinessError): void => {
+              hilog.error(0x0000, LOG_TAG,
+                'notification permission not granted: %{public}d %{public}s',
+                error.code, error.message);
+            });
+        })
+        .catch((error: BusinessError): void => {
+          hilog.error(0x0000, LOG_TAG,
+            'isNotificationEnabled failed: %{public}d %{public}s', error.code, error.message);
+        });
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'notification permission request failed: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  private async acceptPrivacy(): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      await store.put(PRIVACY_KEY, true);
+      await store.flush();
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'privacy consent could not be stored: %{public}s',
+        (error as BusinessError).message);
+    }
+    this.privacyAccepted = true;
+    this.requestNotificationPermission();
+  }
+
+  // Keep ArkTS resource loading aligned with the Slint language setting. The
+  // preferred language is applied by the system on the next cold start, which
+  // is also when the consent screen is rebuilt.
+  private updateAppPreferredLanguage(language: string): void {
+    try {
+      i18n.System.setAppPreferredLanguage(language);
+      hilog.info(0x0000, LOG_TAG, 'app preferred language set: %{public}s', language);
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'could not set app preferred language: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  private async withdrawPrivacy(): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      await store.put(PRIVACY_KEY, false);
+      await store.flush();
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'privacy consent could not be withdrawn: %{public}s',
+        (error as BusinessError).message);
+    }
+    this.privacyAccepted = false;
+    this.declinePrivacy();
+  }
+
+  private declinePrivacy(): void {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    context.terminateSelf().catch((error: BusinessError): void => {
+      hilog.error(0x0000, LOG_TAG, 'could not stop after declining privacy: %{public}s',
+        error.message);
+    });
   }
 
   // Diagnostic: resolves the app's own resources once per launch, so a hap
@@ -232,6 +772,15 @@ struct Index {
       },
       notify: (sender: string, subject: string, threadId: number, messageId: number): void => {
         this.notify(sender, subject, threadId, messageId);
+      },
+      withdrawPrivacyConsent: (): void => {
+        this.withdrawPrivacy();
+      },
+      setAppPreferredLanguage: (language: string): void => {
+        this.updateAppPreferredLanguage(language);
+      },
+      setConsentTheme: (themeJson: string): void => {
+        this.updateConsentTheme(themeJson);
       },
     });
     this.applySystemColorScheme(this.colorMode);

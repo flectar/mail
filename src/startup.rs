@@ -926,6 +926,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     theme.set_custom_dark_surface(stored_color(&custom.dark_surface, "#18191A"));
     theme.set_custom_dark_text(stored_color(&custom.dark_text, "#F3F3F2"));
     theme.set_custom_dark_border(stored_color(&custom.dark_border, "#3A3B3C"));
+    crate::theme::sync_consent_theme(app);
 }
 
 #[cfg(test)]

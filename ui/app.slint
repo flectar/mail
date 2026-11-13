@@ -897,6 +897,7 @@ export component AppWindow inherits Window {
     callback export_database_snapshot();
     callback export_device_mail(int);
     callback delete_all_data();
+    callback withdraw_privacy_consent();
     callback load_storage_usage();
     callback cancel_storage_usage();
     callback open_email_link(string);
@@ -1160,6 +1161,8 @@ export component AppWindow inherits Window {
         TabsUi.navigated();
     }
     in-out property <string> settings_tab: "General";
+    // Set by the host when first-use consent can be withdrawn from About.
+    in property <bool> privacy_consent_withdrawable: false;
     changed settings_tab => { TabsUi.navigated(); }
     // The active tab saves where the mail view is once it settles.
     changed selected_scope => { TabsUi.navigated(); }
@@ -2087,6 +2090,7 @@ export component AppWindow inherits Window {
             width: parent.width;
             height: parent.height;
             connected_accounts: root.connected_accounts;
+            privacy-consent-withdrawable: root.privacy_consent_withdrawable;
             has_device_mail: root.has_device_mail;
             mail_export_running: root.mail_export_running;
             mail_export_status: I18n.ui-message(root.mail-export-message.key, root.mail-export-message.argument, root.mail-export-message.second_argument, root.mail-export-message.third_argument);
@@ -2297,6 +2301,7 @@ export component AppWindow inherits Window {
             export_database_snapshot => { root.export_database_snapshot(); }
             export_device_mail(account-id) => { root.export_device_mail(account-id); }
             delete_all_data => { root.delete_all_data(); }
+            withdraw_privacy_consent => { root.withdraw_privacy_consent(); }
             load_storage_usage => { root.load_storage_usage(); }
             open-link(url) => { root.open_email_link(url); }
         }

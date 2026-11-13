@@ -314,6 +314,13 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
         flectar_mail::PlatformContext::app_private(internal, cache, documents, credentials, oauth);
     platform.external_urls = flectar_mail::ExternalUrlOpener::new(bridge::open_url);
     platform.notifications = Some(Arc::new(PageNotifications));
+    platform.privacy_consent = flectar_mail::PrivacyConsent::new(bridge::withdraw_privacy_consent);
+    flectar_mail::install_language_handler(|language| {
+        let _ = bridge::set_app_language(language);
+    });
+    flectar_mail::install_theme_handler(|theme| {
+        let _ = bridge::set_consent_theme(theme);
+    });
     // Mail content and the composer fall back to the same system faces as the
     // Slint UI the backend set up.
     flectar_mail::platform::configure_email_fonts(flectar_mail::platform::EmailFonts {

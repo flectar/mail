@@ -1,13 +1,60 @@
 {
   "string": [
-    { "name": "module_desc", "value": "Flectar Mail for HarmonyOS" },
-    { "name": "EntryAbility_desc", "value": "Flectar Mail for HarmonyOS" },
-    { "name": "EntryAbility_label", "value": "Flectar Mail for HarmonyOS" },
+    {
+      "name": "module_desc",
+      "value": "Flectar Mail for HarmonyOS"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Flectar Mail for HarmonyOS"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Flectar Mail for HarmonyOS"
+    },
     {
       "name": "pasteboard_permission_reason",
       "value": "Used to paste the copied text into the message body, subject and recipient fields."
     },
-    { "name": "notification_new_mail", "value": "New mail" },
-    { "name": "notification_no_subject", "value": "(No subject)" }
+    {
+      "name": "notification_new_mail",
+      "value": "New mail"
+    },
+    {
+      "name": "notification_no_subject",
+      "value": "(No subject)"
+    },
+    {
+      "name": "privacy_consent_title",
+      "value": "Privacy Policy"
+    },
+    {
+      "name": "privacy_consent_intro",
+      "value": "Flectar Mail processes your mail on this device. Review how your data is handled before continuing."
+    },
+    {
+      "name": "privacy_consent_bullet_local",
+      "value": "Mail, attachments, contacts and calendars stay on this device."
+    },
+    {
+      "name": "privacy_consent_bullet_clipboard",
+      "value": "The clipboard is read only when you paste."
+    },
+    {
+      "name": "privacy_consent_bullet_withdraw",
+      "value": "You can withdraw consent in Settings → About."
+    },
+    {
+      "name": "privacy_consent_view_policy",
+      "value": "View privacy policy"
+    },
+    {
+      "name": "privacy_consent_agree",
+      "value": "Agree and continue"
+    },
+    {
+      "name": "privacy_consent_decline",
+      "value": "Decline"
+    }
   ]
 }

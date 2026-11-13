@@ -1,0 +1,36 @@
+{
+  "string": [
+    {
+      "name": "privacy_consent_title",
+      "value": "Política de privacidad"
+    },
+    {
+      "name": "privacy_consent_intro",
+      "value": "Flectar Mail procesa tu correo en este dispositivo. Revisa cómo se tratan tus datos antes de continuar."
+    },
+    {
+      "name": "privacy_consent_bullet_local",
+      "value": "El correo, los archivos adjuntos, los contactos y los calendarios permanecen en este dispositivo."
+    },
+    {
+      "name": "privacy_consent_bullet_clipboard",
+      "value": "El portapapeles se lee solo cuando pegas."
+    },
+    {
+      "name": "privacy_consent_bullet_withdraw",
+      "value": "Puedes retirar el consentimiento en Ajustes → Acerca de."
+    },
+    {
+      "name": "privacy_consent_view_policy",
+      "value": "Ver la política de privacidad"
+    },
+    {
+      "name": "privacy_consent_agree",
+      "value": "Aceptar y continuar"
+    },
+    {
+      "name": "privacy_consent_decline",
+      "value": "Rechazar"
+    }
+  ]
+}

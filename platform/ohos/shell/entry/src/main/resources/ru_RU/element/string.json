@@ -1,0 +1,36 @@
+{
+  "string": [
+    {
+      "name": "privacy_consent_title",
+      "value": "Политика конфиденциальности"
+    },
+    {
+      "name": "privacy_consent_intro",
+      "value": "Flectar Mail обрабатывает вашу почту на этом устройстве. Перед продолжением ознакомьтесь с тем, как обрабатываются ваши данные."
+    },
+    {
+      "name": "privacy_consent_bullet_local",
+      "value": "Почта, вложения, контакты и календари остаются на этом устройстве."
+    },
+    {
+      "name": "privacy_consent_bullet_clipboard",
+      "value": "Буфер обмена читается только при вставке."
+    },
+    {
+      "name": "privacy_consent_bullet_withdraw",
+      "value": "Согласие можно отозвать в разделе «Настройки → О программе»."
+    },
+    {
+      "name": "privacy_consent_view_policy",
+      "value": "Просмотреть политику конфиденциальности"
+    },
+    {
+      "name": "privacy_consent_agree",
+      "value": "Принять и продолжить"
+    },
+    {
+      "name": "privacy_consent_decline",
+      "value": "Отклонить"
+    }
+  ]
+}
