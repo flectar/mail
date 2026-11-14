@@ -13,6 +13,8 @@ const QUALITY: u8 = 85;
 const MAX_PROGRESSIVE_PIXELS: u64 = 24_000_000;
 /// The most a read for shrinking can hold: under twice the shrunk side on both sides, in color.
 const MAX_DECODED_BYTES: usize = 48 * 1024 * 1024;
+/// The most a read for showing can hold, as the image crate allows by default.
+const MAX_SHOWN_BYTES: usize = 512 * 1024 * 1024;
 /// Files larger than this aren't read to shrink.
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -80,6 +82,17 @@ pub(crate) fn shrink(data: &[u8]) -> Option<Vec<u8>> {
     }
     picture.write_with_encoder(encoder).ok()?;
     (shrunk.len() < data.len()).then_some(shrunk)
+}
+
+/// A JPEG's picture, upright, to show at `width` by `height`. `None` for one this doesn't read,
+/// such as a CMYK JPEG, which the image crate may.
+pub(crate) fn read_jpeg(data: &[u8], width: u32, height: u32) -> Option<DynamicImage> {
+    let mut decoder = jpeg_decoder::Decoder::new(data);
+    let mut picture = read_scaled(&mut decoder, width.max(height), MAX_SHOWN_BYTES)?;
+    if let Some(orientation) = decoder.exif_data().and_then(exif_orientation) {
+        picture.apply_orientation(orientation);
+    }
+    Some(picture)
 }
 
 /// The JPEG `decoder` reads, at a half, a quarter or an eighth of its size while its longest
@@ -265,6 +278,20 @@ mod tests {
         assert!(!is_red(upright.get_pixel(20, 20)));
         // Nothing would turn it again, and where it was taken isn't sent.
         assert!(decoder.exif_data().is_none());
+    }
+
+    #[test]
+    fn photos_are_read_upright_at_little_more_than_the_size_they_show() {
+        let original = with_exif(&jpeg(&picture(1800, 900), 90, None), &tiff(6));
+        // A quarter of it is still larger than it shows; an eighth would be smaller.
+        let shown = read_jpeg(&original, 200, 400).unwrap().into_rgb8();
+        assert_eq!(shown.dimensions(), (225, 450));
+        assert!(is_red(shown.get_pixel(215, 10)));
+        assert!(!is_red(shown.get_pixel(10, 10)));
+        // Shown larger than half of it, all of it is read.
+        let whole = read_jpeg(&original, 600, 1000).unwrap();
+        assert_eq!((whole.width(), whole.height()), (900, 1800));
+        assert!(read_jpeg(b"not a photo", 10, 10).is_none());
     }
 
     #[test]
