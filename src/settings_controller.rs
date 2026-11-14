@@ -755,6 +755,35 @@ pub(super) fn register_settings_preference_callbacks(
         }
     });
 
+    // Density and preview lines shape the same rows, so they save together.
+    let app_weak = app.as_weak();
+    let state_for_rows = Rc::clone(state);
+    let runtime_for_rows = runtime.clone();
+    app.on_save_list_rows(move || {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let density = if app.get_mail_compact_rows() {
+            flectar_mail_core::models::ListDensity::Compact
+        } else {
+            flectar_mail_core::models::ListDensity::Comfortable
+        };
+        let preview_lines = u8::try_from(app.get_mail_preview_lines().clamp(0, 3)).unwrap_or(1);
+        let Some(core) = state_for_rows.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Message list preference updated for this session.",
+            ));
+            return;
+        };
+        match runtime_for_rows.block_on(core.set_list_rows(density, preview_lines)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Message list preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save message list preference: {}",
+                error,
+            )),
+        }
+    });
+
     let app_weak = app.as_weak();
     let state_for_spelling = Rc::clone(state);
     let runtime_for_spelling = runtime.clone();

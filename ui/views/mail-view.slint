@@ -57,6 +57,8 @@ export component MailView inherits FocusScope {
     in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
     in property <bool> mail_oldest_first: false;
+    in property <bool> mail_compact_rows: false;
+    in property <int> mail_preview_lines: 1;
     in property <string> selected_sender: "";
     in property <string> selected_address: "";
     in property <string> selected_subject: "";
@@ -410,6 +412,8 @@ export component MailView inherits FocusScope {
                 search_query <=> root.search_query;
                 search_filter: root.search_filter;
                 oldest_first: root.mail_oldest_first;
+                compact-rows: root.mail_compact_rows;
+                preview-lines: root.mail_preview_lines;
                 sync_in_progress: root.sync_in_progress;
                 account-problem: root.account_problem;
                 can_load_more: root.can_load_more;
@@ -656,6 +660,8 @@ export component MailView inherits FocusScope {
                 search_query <=> root.search_query;
                 search_filter: root.search_filter;
                 oldest_first: root.mail_oldest_first;
+                compact-rows: root.mail_compact_rows;
+                preview-lines: root.mail_preview_lines;
                 sync_in_progress: root.sync_in_progress;
                 account-problem: root.account_problem;
                 can_load_more: root.can_load_more;
