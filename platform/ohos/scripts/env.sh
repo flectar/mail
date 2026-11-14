@@ -16,6 +16,13 @@ OHOS_SDK_ROOT="${OHOS_SDK_ROOT%/}"
 OHOS_SDK_NATIVE="${OHOS_SDK_NATIVE:-$HOME/.harmonybrew/opt/ohos-sdk-native}"
 export OHOS_SDK_ROOT OHOS_SDK_NATIVE
 
+# The login environment may still name an older SDK package in these legacy
+# variables. Keep them on the same package as OHOS_SDK_ROOT so tools that read
+# them directly cannot mix headers or sysroots across an SDK upgrade.
+export OHOS_SDK="$OHOS_SDK_ROOT/native"
+export OHOS_SYSROOT="$OHOS_SDK_ROOT/native/sysroot"
+export OHOS_CXX_INC="$OHOS_SDK_ROOT/native/llvm/include/libcxx-ohos/include/c++/v1"
+
 case ":$LD_LIBRARY_PATH:" in
     *":$OHOS_SDK_ROOT/native/llvm/lib:"*) ;;
     *) LD_LIBRARY_PATH="$OHOS_SDK_ROOT/native/llvm/lib:$LD_LIBRARY_PATH" ;;
