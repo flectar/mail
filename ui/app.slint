@@ -360,6 +360,9 @@ export global I18n {
         if (key == "Conversation view updated for this session.") { return @tr("Conversation view updated for this session."); }
         if (key == "Conversation view preference saved.") { return @tr("Conversation view preference saved."); }
         if (key == "Could not save conversation view preference: {}") { return @tr("Could not save conversation view preference: {}", argument); }
+        if (key == "Message list preference updated for this session.") { return @tr("Message list preference updated for this session."); }
+        if (key == "Message list preference saved.") { return @tr("Message list preference saved."); }
+        if (key == "Could not save message list preference: {}") { return @tr("Could not save message list preference: {}", argument); }
         if (key == "Could not save the order of this list: {}") { return @tr("Could not save the order of this list: {}", argument); }
         if (key == "Profile changes require local mail data.") { return @tr("Profile changes require local mail data."); }
         if (key == "Profile saved.") { return @tr("Profile saved."); }
@@ -905,6 +908,7 @@ export component AppWindow inherits Window {
     callback save_undo_send(int);
     callback save_compose_text_style(string, string);
     callback save_mark_read(string);
+    callback save_list_rows();
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
@@ -1116,6 +1120,10 @@ export component AppWindow inherits Window {
     in property <string> search_filter: "All mail";
     // The mail list shows its oldest mail first.
     in property <bool> mail_oldest_first: false;
+    // Tighter mail list rows, and how many lines of each message's text
+    // they show (0 to 3).
+    in-out property <bool> mail_compact_rows: false;
+    in-out property <int> mail_preview_lines: 1;
     in property <string> selected_sender: "";
     in property <string> selected_address: "";
     in property <string> selected_subject: "";
@@ -1758,6 +1766,8 @@ export component AppWindow inherits Window {
             search_query <=> root.search_query;
             search_filter: root.search_filter;
             mail_oldest_first: root.mail_oldest_first;
+            mail_compact_rows: root.mail_compact_rows;
+            mail_preview_lines: root.mail_preview_lines;
             selected_sender: root.selected_sender;
             selected_address: root.selected_address;
             selected_subject: root.selected_subject;
@@ -2197,6 +2207,8 @@ export component AppWindow inherits Window {
             sign-in-account <=> root.settings-sign-in-account;
             theme_mode <=> root.theme_mode;
             show_avatars <=> root.show_avatars;
+            compact_rows <=> root.mail_compact_rows;
+            preview_lines <=> root.mail_preview_lines;
             show_tabs <=> root.show_tabs;
             spelling_available: root.spelling_available;
             spelling_enabled <=> root.spelling_enabled;
@@ -2294,6 +2306,7 @@ export component AppWindow inherits Window {
                 );
             }
             save_avatar_visibility(enabled) => { root.save_avatar_visibility(enabled); }
+            save_list_rows => { root.save_list_rows(); }
             save_show_tabs(enabled) => { root.save_show_tabs(enabled); }
             save_spelling_enabled(enabled) => { root.save_spelling_enabled(enabled); }
             prepare_profile_members(profile-id, account-id) => {

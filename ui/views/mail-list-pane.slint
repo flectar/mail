@@ -377,6 +377,10 @@ export component MailListPane inherits FocusScope {
     in property <bool> preview-on-navigation: !root.compact;
     in property <bool> show-avatars: true;
     in property <bool> dense: false;
+    // Tighter rows, and how many lines of each message's text they show:
+    // none puts the chips beside the subject, more wraps the text.
+    in property <bool> compact-rows: false;
+    in property <int> preview-lines: 1;
     in property <bool> loading: false;
     in property <[EmailRow]> emails: [];
     in property <[MailListEntry]> list_entries: [];
@@ -449,8 +453,16 @@ export component MailListPane inherits FocusScope {
     private property <length> sender-line: max(22px, sender-line-probe.preferred-height);
     private property <length> subject-line: max(22px, subject-line-probe.preferred-height);
     private property <length> detail-line: max(20px, detail-line-probe.preferred-height);
+    private property <length> row-top: root.compact-rows ? 4px : 8px;
+    private property <length> line-gap: root.compact-rows ? 2px : 5px;
+    private property <length> row-bottom: root.compact-rows ? 8px : 14px;
+    private property <length> preview-height: max(0, root.preview-lines) * root.detail-line;
+    // Without a preview, the chips and account share the subject's line.
+    private property <bool> inline-detail: !root.dense && root.preview-lines <= 0;
+    private property <length> avatar-size: root.dense ? 28px : root.compact-rows ? 32px : 38px;
     private property <length> message-row-height: root.dense ? 44px
-        : 32px + root.sender-line + root.subject-line + root.detail-line;
+        : root.row-top + root.sender-line + root.line-gap + root.subject-line
+            + (root.inline-detail ? 0px : root.line-gap + root.preview-height) + root.row-bottom;
     private property <length> group-row-height: root.compact ? 44px : 40px;
     // A label shows only with room for the start of its name, and its gap.
     private property <length> label-least-width: label-probe.least-width + 4px;
@@ -996,12 +1008,13 @@ export component MailListPane inherits FocusScope {
                                 private property <bool> shows-attachment: mail-data.attachment_total > 0
                                     && detail.width >= (mail-row.shows-code ? code-chip.natural-width + 4px : 0px)
                                         + attachment-chip.least-width + 4px;
-                                // Labels follow, one beside a chip, while each keeps room for
-                                // the start of its name; "+N" (26px) counts the rest.
+                                // Labels follow, one beside a chip or the subject, while each
+                                // keeps room for the start of its name; "+N" (26px) counts the
+                                // rest.
                                 private property <length> label-room: detail.width
                                     - (mail-row.shows-code ? code-chip.natural-width + 4px : 0px)
                                     - (mail-row.shows-attachment ? attachment-chip.preferred-width + 4px : 0px);
-                                private property <int> label-limit: !root.dense && !mail-row.shows-code && !mail-row.shows-attachment
+                                private property <int> label-limit: !root.dense && !root.inline-detail && !mail-row.shows-code && !mail-row.shows-attachment
                                     && mail-row.label-room >= 2 * root.label-least-width + (mail-data.labels.length > 2 ? 26px : 0px) ? 2
                                     : mail-row.label-room >= root.label-least-width + (mail-data.labels.length > 1 ? 26px : 0px) ? 1
                                     : 0;
@@ -1084,8 +1097,8 @@ export component MailListPane inherits FocusScope {
                                 Avatar {
                                     visible: !entry.is_header && root.show-avatars;
                                     x: 14px;
-                                    y: root.dense ? 8px : 12px;
-                                    size: root.dense ? 28px : 38px;
+                                    y: root.dense ? 8px : root.row-top + 4px;
+                                    size: root.avatar-size;
                                     source: root.dense ? mail-data.favicon_small : mail-data.favicon;
                                     has-source: mail-data.has_favicon;
                                     fallback: mail-data.initials;
@@ -1174,15 +1187,23 @@ export component MailListPane inherits FocusScope {
                                                 // Dense rows keep everything on one line: the account
                                                 // comes before the indicators, thread count and time,
                                                 // and the subject and preview end before it.
-                                                property <length> dense-account-x: (sender-indicators.width > 0px ? sender-indicators.x
-                                                    : mail-data.message_count > 1 ? thread-count.x : sender-time.x) - 54px;
+                                                // Where the sender line's indicators, thread count and
+                                                // time begin.
+                                                property <length> line-one-end: sender-indicators.width > 0px ? sender-indicators.x
+                                                    : mail-data.message_count > 1 ? thread-count.x : sender-time.x;
+                                                property <length> dense-account-x: self.line-one-end - 54px;
+                                                property <length> dense-subject-x: min(190px, sender-time.x);
+                                                property <length> dense-subject-width: min(260px, max(0px, self.dense-account-x - self.dense-subject-x - 2px));
+                                                property <length> dense-detail-x: self.dense-subject-x + self.dense-subject-width + 12px;
+                                                // Beside the subject, the chips take at most this much.
+                                                property <length> inline-detail-width: max(0px, self.width * 0.45);
                                                 visible: !entry.is_header;
-                                                x: root.show-avatars ? (root.dense ? 52px : 64px) : 14px;
-                                                y: root.dense ? 0px : 8px;
+                                                x: root.show-avatars ? (root.dense ? 52px : 26px + root.avatar-size) : 14px;
+                                                y: root.dense ? 0px : root.row-top;
                                                 // The row already ends before the scrollbar
                                                 // gutter, so only its 12px padding remains.
                                                 width: max(0px, parent.width - self.x - 12px);
-                                                height: root.message-row-height - (root.dense ? 0px : 16px);
+                                                height: root.message-row-height - (root.dense ? 0px : 2 * root.row-top);
 
                                                 sender-time := Text {
                                                     x: parent.width - self.width;
@@ -1261,6 +1282,8 @@ export component MailListPane inherits FocusScope {
                                                     x: 0px;
                                                     y: 0px;
                                                     width: root.dense ? min(170px, max(0px, parent.width - 190px))
+                                                        : root.inline-detail && account-label.text != ""
+                                                            ? max(0px, account-label.x - 8px)
                                                         : mail-data.message_count > 1
                                                             ? max(0px, (sender-indicators.width > 0px ? sender-indicators.x : thread-count.x) - 8px)
                                                         : mail-data.has_attachments || mail-data.has_replied
@@ -1286,9 +1309,12 @@ export component MailListPane inherits FocusScope {
                                                     background: root.accent;
                                                 }
                                                 subject-label := Text {
-                                                    x: root.dense ? min(190px, sender-time.x) : 0px;
-                                                    y: root.dense ? 0px : root.sender-line + 5px;
-                                                    width: root.dense ? min(260px, max(0px, message-content.dense-account-x - self.x - 2px)) : parent.width;
+                                                    x: root.dense ? message-content.dense-subject-x : 0px;
+                                                    y: root.dense ? 0px : root.sender-line + root.line-gap;
+                                                    width: root.dense ? message-content.dense-subject-width
+                                                        : root.inline-detail
+                                                            ? max(0px, parent.width - detail-row.preferred-width - (detail-row.preferred-width > 0px ? 8px : 0px))
+                                                        : parent.width;
                                                     height: root.dense ? 44px : root.subject-line;
                                                     text: mail-data.subject == "" ? @tr("(No subject)") : mail-data.subject;
                                                     color: root.body-text;
@@ -1297,12 +1323,14 @@ export component MailListPane inherits FocusScope {
                                                     overflow: elide;
                                                     vertical-alignment: center;
                                                 }
+                                                // Without a preview, the account moves up beside the
+                                                // time, and the subject and chips get the line below.
                                                 account-label := Text {
                                                     visible: !root.dense;
-                                                    x: parent.width - 88px;
-                                                    y: root.sender-line + root.subject-line + 10px;
-                                                    width: 88px;
-                                                    height: root.detail-line;
+                                                    x: root.inline-detail ? message-content.line-one-end - 8px - self.width : parent.width - 88px;
+                                                    y: root.inline-detail ? 0px : root.sender-line + root.subject-line + 2 * root.line-gap;
+                                                    width: root.inline-detail ? min(88px, self.preferred-width) : 88px;
+                                                    height: root.inline-detail ? root.sender-line : root.detail-line;
                                                     text: mail-row.account-name;
                                                     color: root.muted-text;
                                                     font-size: TypeScale.caption;
@@ -1342,18 +1370,28 @@ export component MailListPane inherits FocusScope {
                                                 }
                                                 // A line too narrow for its chips cuts them off rather
                                                 // than drawing over the account.
+                                                // Beside the subject, the chips end the line and the
+                                                // subject takes the rest.
                                                 detail := Rectangle {
-                                                    x: root.dense ? subject-label.x + subject-label.width + 12px : 0px;
-                                                    y: root.dense ? 0px : root.sender-line + root.subject-line + 10px;
-                                                    width: root.dense ? max(0px, message-content.dense-account-x - self.x - 12px) : max(0px, parent.width - 98px);
-                                                    height: root.dense ? 44px : root.detail-line;
+                                                    x: root.dense ? message-content.dense-detail-x
+                                                        : root.inline-detail ? parent.width - message-content.inline-detail-width
+                                                        : 0px;
+                                                    y: root.dense ? 0px
+                                                        : root.inline-detail ? subject-label.y
+                                                        : root.sender-line + root.subject-line + 2 * root.line-gap;
+                                                    width: root.dense ? max(0px, message-content.dense-account-x - message-content.dense-detail-x - 12px)
+                                                        : root.inline-detail ? message-content.inline-detail-width
+                                                        : max(0px, parent.width - 98px);
+                                                    height: root.dense ? 44px : root.inline-detail ? root.subject-line : root.preview-height;
                                                     clip: true;
 
                                                     // Each item carries its own gap, so labels past the
-                                                    // limit take no room.
-                                                    HorizontalLayout {
+                                                    // limit take no room. Chips keep to the first line of
+                                                    // a longer preview.
+                                                    detail-row := HorizontalLayout {
+                                                        alignment: root.inline-detail ? end : stretch;
                                                         spacing: 0px;
-                                                        cross-axis-alignment: center;
+                                                        cross-axis-alignment: root.preview-lines > 1 && !root.dense ? start : center;
 
                                                         HorizontalLayout {
                                                             padding-right: mail-row.shows-code ? 4px : 0px;
@@ -1455,13 +1493,16 @@ export component MailListPane inherits FocusScope {
                                                             // so it gives up all its room first and stays
                                                             // out of a gap too narrow for a word.
                                                             min-width: 0px;
-                                                            visible: self.width >= 4 * self.font-size;
+                                                            max-width: root.preview-lines > 0 ? 100000px : 0px;
+                                                            visible: root.preview-lines > 0 && self.width >= 4 * self.font-size;
                                                             horizontal-stretch: 1;
-                                                            text: mail-data.preview;
+                                                            height: root.dense ? 44px : root.preview-height;
+                                                            text: root.preview-lines > 0 ? mail-data.preview : "";
                                                             color: root.faint-text;
                                                             font-size: TypeScale.secondary;
+                                                            wrap: root.preview-lines > 1 && !root.dense ? word-wrap : no-wrap;
                                                             overflow: elide;
-                                                            vertical-alignment: center;
+                                                            vertical-alignment: root.preview-lines > 1 && !root.dense ? top : center;
                                                         }
                                                     }
                                                 }
