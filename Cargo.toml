@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/flectar-mail-core", "crates/flectar-spell", "crates/renderer-probe"]
-exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/parley", "crates/parley_emoji", "crates/spellbook"]
+exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/parley", "crates/parley_emoji", "crates/smithay-clipboard", "crates/spellbook"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -19,6 +19,9 @@ blitz-paint = { path = "crates/blitz-paint" }
 parley = { path = "crates/parley" }
 # Remove when Slint releases its Wayland clipboard fix; see patches/slint-winit/README.md.
 i-slint-backend-winit = { path = "crates/i-slint-backend-winit" }
+# Files dropped on a Wayland window come through the clipboard's data device,
+# as patches/smithay-clipboard/README.md explains.
+smithay-clipboard = { path = "crates/smithay-clipboard" }
 
 [package]
 name = "flectar-mail"

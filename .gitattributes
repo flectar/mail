@@ -1,3 +1,4 @@
 # Preserve upstream formatting and collapse the vendored source in reviews.
 crates/i-slint-backend-winit/** linguist-vendored -whitespace
 crates/i-slint-backend-android-activity/** linguist-vendored -whitespace
+crates/smithay-clipboard/** linguist-vendored -whitespace
