@@ -2158,6 +2158,56 @@ impl<'de> Deserialize<'de> for AppIcon {
     }
 }
 
+/// When an unread message the user opens counts as read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MarkRead {
+    /// As it opens.
+    #[default]
+    Immediately,
+    /// Once it has stayed open for two seconds.
+    AfterTwoSeconds,
+    /// Once it has stayed open for five seconds.
+    AfterFiveSeconds,
+    /// Only when the user marks it.
+    Never,
+}
+
+impl MarkRead {
+    pub const ALL: [Self; 4] = [
+        Self::Immediately,
+        Self::AfterTwoSeconds,
+        Self::AfterFiveSeconds,
+        Self::Never,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Immediately => "immediately",
+            Self::AfterTwoSeconds => "afterTwoSeconds",
+            Self::AfterFiveSeconds => "afterFiveSeconds",
+            Self::Never => "never",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|choice| choice.as_str() == value)
+    }
+
+    /// How long an opened message stays open before it counts as read, or
+    /// `None` when opening never marks it.
+    pub fn delay(self) -> Option<std::time::Duration> {
+        match self {
+            Self::Immediately => Some(std::time::Duration::ZERO),
+            Self::AfterTwoSeconds => Some(std::time::Duration::from_secs(2)),
+            Self::AfterFiveSeconds => Some(std::time::Duration::from_secs(5)),
+            Self::Never => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -2231,9 +2281,9 @@ pub struct Settings {
     pub compose_text_size: String,
     #[serde(default)]
     pub load_remote_images: bool,
-    /// Mark unread conversations as read when the user opens them.
-    #[serde(default = "default_true")]
-    pub mark_read_on_open: bool,
+    /// When an unread message the user opens counts as read.
+    #[serde(default)]
+    pub mark_read: MarkRead,
     /// Directory desktop save dialogs open in. An empty value follows the
     /// platform default. The path is deliberately not validated when stored:
     /// a saved location can be unavailable later, such as an unmounted network
@@ -2556,7 +2606,7 @@ impl Default for Settings {
             compose_font: default_compose_font(),
             compose_text_size: default_compose_text_size(),
             load_remote_images: false,
-            mark_read_on_open: true,
+            mark_read: MarkRead::Immediately,
             download_directory: String::new(),
             ai_base_url: default_ai_base_url(),
             ai_model_instant: default_ai_model(),
@@ -2992,6 +3042,26 @@ mod tests {
             assert_eq!(AuthKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(AuthKind::parse("token"), None);
+    }
+
+    #[test]
+    fn mark_read_choices_keep_their_names_and_waits() {
+        use std::time::Duration;
+        for choice in MarkRead::ALL {
+            assert_eq!(MarkRead::parse(choice.as_str()), Some(choice));
+            assert_eq!(serde_json::to_value(choice).unwrap(), choice.as_str());
+        }
+        assert_eq!(MarkRead::parse("sometimes"), None);
+        assert_eq!(MarkRead::Immediately.delay(), Some(Duration::ZERO));
+        assert_eq!(
+            MarkRead::AfterTwoSeconds.delay(),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            MarkRead::AfterFiveSeconds.delay(),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(MarkRead::Never.delay(), None);
     }
 
     #[test]

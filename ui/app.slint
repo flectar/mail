@@ -894,7 +894,7 @@ export component AppWindow inherits Window {
     callback save_sync_interval(int);
     callback save_undo_send(int);
     callback save_compose_text_style(string, string);
-    callback save_mark_read_on_open(bool);
+    callback save_mark_read(string);
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
@@ -1247,7 +1247,7 @@ export component AppWindow inherits Window {
     // The font and size new messages start in.
     in-out property <string> compose_font: "default";
     in-out property <string> compose_text_size: "normal";
-    in-out property <bool> mark_read_on_open: true;
+    in-out property <string> mark_read: "immediately";
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
     in-out property <bool> contact_suggest_all_accounts: false;
@@ -2194,7 +2194,7 @@ export component AppWindow inherits Window {
             undo_send_seconds <=> root.undo_send_seconds;
             compose_font <=> root.compose_font;
             compose_text_size <=> root.compose_text_size;
-            mark_read_on_open <=> root.mark_read_on_open;
+            mark_read <=> root.mark_read;
             collect_outgoing_contacts <=> root.collect_outgoing_contacts;
             collect_incoming_contacts <=> root.collect_incoming_contacts;
             contact_suggest_all_accounts <=> root.contact_suggest_all_accounts;
@@ -2299,7 +2299,7 @@ export component AppWindow inherits Window {
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
             save_undo_send(seconds) => { root.save_undo_send(seconds); }
             save_compose_text_style(font, size) => { root.save_compose_text_style(font, size); }
-            save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
+            save_mark_read(choice) => { root.save_mark_read(choice); }
             save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }
             save_conversation_view(enabled) => { root.save_conversation_view(enabled); }
             save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest) => {

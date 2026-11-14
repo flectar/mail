@@ -233,20 +233,25 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
-    let state_for_read_on_open = Rc::clone(state);
-    let runtime_for_read_on_open = runtime.clone();
-    app.on_save_mark_read_on_open(move |enabled| {
+    let state_for_mark_read = Rc::clone(state);
+    let runtime_for_mark_read = runtime.clone();
+    app.on_save_mark_read(move |choice| {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        state_for_read_on_open.borrow_mut().mark_read_on_open = enabled;
-        let Some(core) = state_for_read_on_open.borrow().core.clone() else {
+        let Some(choice) = flectar_mail_core::models::MarkRead::parse(&choice) else {
+            return;
+        };
+        state_for_mark_read.borrow_mut().mark_read = choice;
+        // A wait that started under the old choice ends with it.
+        crate::read_marking::cancel();
+        let Some(core) = state_for_mark_read.borrow().core.clone() else {
             app.set_sync_status(UiMessage::plain(
                 "Message-opening preference updated for this session.",
             ));
             return;
         };
-        match runtime_for_read_on_open.block_on(core.set_mark_read_on_open(enabled)) {
+        match runtime_for_mark_read.block_on(core.set_mark_read(choice)) {
             Ok(()) => app.set_sync_status(UiMessage::plain("Message-opening preference saved.")),
             Err(error) => app.set_sync_status(UiMessage::detail(
                 "Could not save message-opening preference: {}",
