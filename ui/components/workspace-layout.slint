@@ -316,6 +316,10 @@ export component WorkspaceSearchToolbar inherits Rectangle {
     in property <image> leading-icon;
     in property <string> leading-tooltip: "";
     in property <string> leading-accessible-id: "";
+    // A dot on the leading button for something behind it that needs a look,
+    // such as an account whose checks fail while the sidebar is hidden.
+    in property <bool> leading-badge: false;
+    in property <string> leading-badge-description;
     in property <[WorkspaceSearchFilter]> filters: [];
     in property <bool> filter-active: false;
     in property <string> filter-tooltip;
@@ -363,7 +367,19 @@ export component WorkspaceSearchToolbar inherits Rectangle {
             active-background: AppTheme.accent-soft;
             tooltip-text: root.leading-tooltip;
             accessible-id: root.leading-accessible-id;
+            accessible-description: root.leading-badge ? root.leading-badge-description : "";
             clicked => { root.leading-clicked(); }
+
+            if root.leading-badge : Rectangle {
+                x: parent.width - self.width - 3px;
+                y: 3px;
+                width: 10px;
+                height: 10px;
+                border-radius: 5px;
+                border-width: 2px;
+                border-color: AppTheme.surface;
+                background: AppTheme.destructive;
+            }
         }
 
         search-field := Rectangle {

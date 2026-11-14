@@ -1,6 +1,10 @@
 import { SidebarRowSurface, SidebarStyle } from "sidebar-row.slint";
-import { MailDragApi } from "../models.slint";
+import { AccountProblem, AccountStatus, MailDragApi } from "../models.slint";
+import { AccountStatusPanel, AccountStatusText } from "account-status.slint";
+import { ActivitySpinner } from "activity-spinner.slint";
 import { Avatar } from "avatar.slint";
+import { IconButton } from "controls.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
 component SidebarIcon {
@@ -320,14 +324,29 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     // An account's heading offers that account's actions on right-click.
     in property <bool> account-menu: false;
     in property <bool> can-check-mail: true;
+    // An account's checks: a spinner while one runs, and a button that
+    // explains a problem that stops them.
+    in property <AccountStatus> status;
+    in property <bool> touch-mode: false;
     // Headers and children share the same icon and text columns. The leading
     // gutter belongs to disclosure controls, not to an extra icon indent.
     private property <length> icon-left: root.left-padding + SidebarStyle.icon-left - 4px;
     private property <length> label-left: root.icon-left + SidebarStyle.label-offset;
-    private property <length> trailing: root.count == "" ? 8px : count-badge.width + 12px;
+    private property <bool> marked: root.status.marked && root.status.problem != AccountProblem.none;
+    private property <length> status-width: !(root.status.checking || root.marked) ? 0px
+        : root.touch-mode ? LayoutMetrics.touch-target : 24px;
+    private property <length> status-x: (root.count == "" ? root.width - 4px : count-badge.x - 2px) - root.status-width;
+    private property <length> trailing: (root.count == "" ? 8px : count-badge.width + 12px) + root.status-width;
+    private property <string> problem-title: AccountStatusText.problem(root.status.problem);
+    private property <bool> status-from-keyboard: false;
+    private property <string> last-checked: AccountStatusText.last-checked(root.status.checked_day, root.status.checked_at);
+    // The menu's first line.
+    private property <string> status-line: root.status.checking ? @tr("Checking for new mail…")
+        : root.problem-title != "" ? root.problem-title : root.last-checked;
     callback toggled(bool);
     callback check-mail();
     callback account-settings();
+    callback sign-in();
 
     height: root.folder-row-style ? 28px : root.detail == "" ? 32px : 7px + max(20px, header-label.preferred-height) + header-detail.height;
     idle-background: root.sidebar-background;
@@ -405,6 +424,20 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
         width: parent.width;
         height: parent.height;
         Menu {
+            // How the account's checks are going, then its last complete
+            // check when a problem stops them.
+            if root.status-line != "" : MenuItem {
+                title: root.status-line;
+                enabled: false;
+            }
+
+            if root.problem-title != "" && !root.status.checking && root.last-checked != "" : MenuItem {
+                title: root.last-checked;
+                enabled: false;
+            }
+
+            if root.status-line != "" : MenuSeparator {}
+
             MenuItem {
                 title: @tr("Check for new mail");
                 enabled: root.can-check-mail;
@@ -422,6 +455,7 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
             menu-enabled: heading-menu.enabled;
             accessible-role: button;
             accessible-label: root.label;
+            accessible-description: root.status-line;
             accessible-expanded: root.open;
             accessible-action-default => {
                 root.toggled(!root.open);
@@ -431,6 +465,74 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
             }
             open-menu(position) => { heading-menu.show(position); }
             mouse-cursor: pointer;
+        }
+    }
+
+    if root.status.checking : ActivitySpinner {
+        x: root.status-x + (root.status-width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        color: root.muted-color;
+    }
+
+    // Above the row's own pointer area, so it takes its clicks.
+    if root.marked && !root.status.checking : IconButton {
+        x: root.status-x;
+        y: (parent.height - self.height) / 2;
+        width: root.status-width;
+        height: min(root.status-width, parent.height);
+        icon: @image-url("../icons/lucide/outline/alert-circle.svg");
+        icon-size: 16px;
+        icon-color: AppTheme.destructive;
+        hover-background: AppTheme.muted-control-bg;
+        tooltip-text: root.problem-title;
+        clicked => {
+            root.status-from-keyboard = self.focus-visible;
+            status-popup.show();
+        }
+    }
+
+    status-popup := PopupWindow {
+        x: 4px;
+        y: root.height + 2px;
+        // On a desktop it may reach over the message list; in a phone drawer
+        // it stays inside the drawer.
+        width: root.touch-mode ? root.width - 8px : max(300px, root.width - 8px);
+        height: status-panel.preferred-height;
+        close-policy: close-on-click-outside;
+        forward-focus: popup-keys;
+        // Opened from the keyboard, focus goes on to the fixing action.
+        init => {
+            if root.status-from-keyboard {
+                status-panel.focus-action();
+            }
+        }
+
+        popup-keys := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    status-popup.close();
+                    return accept;
+                }
+                reject
+            }
+
+            status-panel := AccountStatusPanel {
+                status: root.status;
+                can-check-mail: root.can-check-mail;
+                touch: root.touch-mode;
+                check-mail => {
+                    status-popup.close();
+                    root.check-mail();
+                }
+                sign-in => {
+                    status-popup.close();
+                    root.sign-in();
+                }
+                account-settings => {
+                    status-popup.close();
+                    root.account-settings();
+                }
+            }
         }
     }
 }

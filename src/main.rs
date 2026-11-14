@@ -1,5 +1,6 @@
 mod account_controller;
 mod account_mail_preferences;
+mod account_status;
 mod app_icon;
 #[cfg(test)]
 mod account_removal_tests;
@@ -64,6 +65,7 @@ pub mod pdf_preview;
 mod photo_shrink;
 pub mod platform;
 mod preview_controls;
+mod read_receipts;
 mod reader_clipboard;
 #[cfg(test)]
 mod reader_validation;
@@ -415,6 +417,8 @@ struct ProfileAvatarUpdate {
 }
 
 struct SyncUpdate {
+    /// The accounts checked, or every account.
+    accounts: Option<Vec<i64>>,
     result: Result<(), String>,
     metadata: Option<mail::MailMetadata>,
 }
@@ -699,6 +703,8 @@ struct InboxState {
     favicon_generation: u64,
     favicon_tx: UiSender<FaviconUpdate>,
     connected_accounts: Vec<Account>,
+    /// How each account's checks are going, for its sidebar heading.
+    account_activity: account_status::AccountActivity,
     account_configs: Vec<AccountConfig>,
     /// Mail imported into folders on this device, which belongs to no
     /// account.
@@ -1256,6 +1262,7 @@ impl InboxState {
             favicon_generation: 0,
             favicon_tx,
             connected_accounts: Vec::new(),
+            account_activity: account_status::AccountActivity::default(),
             account_configs: Vec::new(),
             local_mail: None,
             local_mail_reloads: 0,
@@ -4054,10 +4061,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 });
             }
         }
-        if !pending.account_states.is_empty()
+        if !(pending.account_states.is_empty() && pending.caught_up.is_empty())
             && let Some(app) = mail_update_app.upgrade()
         {
-            apply_account_states(&app, &mail_update_state, &pending.account_states);
+            apply_account_states(
+                &app,
+                &mail_update_state,
+                &pending.account_states,
+                &pending.caught_up,
+            );
         }
         if let Some(error) = pending.action_error
             && let Some(app) = mail_update_app.upgrade()
@@ -5625,6 +5637,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 }
                 Err(error) => app.set_sync_status(UiMessage::detail("Sync failed: {}", error)),
             }
+            // The failures this check ended in show on their accounts at once.
+            account_status::checked_on_request(&app, &sync_state, update.accounts.as_deref());
         }
     });
 
@@ -5666,7 +5680,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 } else {
                     None
                 };
-                let _ = sync_tx.send(SyncUpdate { result, metadata }).await;
+                let _ = sync_tx
+                    .send(SyncUpdate {
+                        accounts,
+                        result,
+                        metadata,
+                    })
+                    .await;
             });
         })
     };
@@ -6152,6 +6172,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     mailto_links::install(&app, composers);
     undo::install(&app, &state, &runtime);
     unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
+    read_receipts::install(&app, &state, &runtime);
     block_sender::install(&app, &state, &runtime);
     invitation::install(&app, &state, &calendar_state, &runtime);
     #[cfg(target_os = "macos")]

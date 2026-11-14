@@ -1,0 +1,194 @@
+import { Button } from "components/button.slint";
+import { LayoutMetrics } from "design-system.slint";
+import { TypeScale } from "typography.slint";
+
+// A read receipt that came back for a message the user sent.
+export struct ReturnedReceipt {
+    // What it says happened: "read", "deleted", or "received" when the
+    // message was handled without being shown.
+    kind: string,
+    // The recipient's name, or their address.
+    name: string,
+    // When: a time today, otherwise a day.
+    time: string,
+}
+
+// Read receipts (RFC 8098, src/read_receipts.rs): the open message's
+// request, when Settings → General says to ask, and for a message the user
+// sent, the receipts that came back.
+export global ReadReceipts {
+    // Settings → General: what to do when a message asks for a read
+    // receipt, "never", "ask" or "always".
+    in-out property <string> policy: "never";
+    callback choose(string);
+    // The open message asks for a read receipt and nothing has answered it.
+    in property <bool> available;
+    // Who asked: the sender's name, or their address.
+    in property <string> sender;
+    // Where the receipt would go, when that isn't the sender's own address.
+    in property <string> address;
+    callback send();
+    callback ignore();
+    // The receipts that came back for the open message, earliest first: all
+    // of them, or the first two of a longer list.
+    in property <[ReturnedReceipt]> returned;
+    // How many more came back than `returned` holds.
+    in property <int> more-returned;
+    callback show-all-returned();
+}
+
+// Above the message, like the mailing list's way out: who asked, and the
+// two answers. Neither is preselected, since saying nothing is as fine as
+// sending one.
+export component ReceiptRequestBar {
+    in property <bool> compact;
+    in property <color> text-color;
+    private property <string> message: ReadReceipts.address == ""
+        ? @tr("{} asked to be notified when you read this message.", ReadReceipts.sender)
+        : @tr("{} asked to be notified at {} when you read this message.", ReadReceipts.sender, ReadReceipts.address);
+    private property <length> button-height: root.compact ? 36px : 26px;
+    private property <length> buttons-width: ignore.width + send.width + 8px;
+    private property <length> text-left: LayoutMetrics.icon-size + 8px;
+    // One line with the answers beside it where it fits, as on a desktop;
+    // otherwise the text wraps and the answers go under it.
+    private property <bool> inline: label-probe.preferred-width <= root.width - root.text-left - root.buttons-width - 8px;
+
+    accessible-role: groupbox;
+    accessible-label: root.message;
+    height: root.inline
+        ? (root.compact ? 44px : 32px)
+        : 4px + max(LayoutMetrics.icon-size, label.preferred-height) + 8px + root.button-height + 4px;
+
+    label-probe := Text {
+        visible: false;
+        text: root.message;
+        font-size: TypeScale.body;
+    }
+
+    Image {
+        x: 0px;
+        y: root.inline ? (parent.height - self.height) / 2 : 4px + (min(label.preferred-height, 20px) - self.height) / 2;
+        width: LayoutMetrics.icon-size;
+        height: LayoutMetrics.icon-size;
+        source: @image-url("icons/lucide/outline/mail-check.svg");
+        colorize: root.text-color;
+        image-fit: contain;
+        accessible-role: none;
+    }
+
+    label := Text {
+        x: root.text-left;
+        y: root.inline ? 0px : 4px;
+        width: root.inline ? parent.width - self.x - root.buttons-width - 8px : parent.width - self.x;
+        height: root.inline ? parent.height : self.preferred-height;
+        text: root.message;
+        color: root.text-color;
+        font-size: TypeScale.body;
+        vertical-alignment: root.inline ? center : top;
+        wrap: root.inline ? no-wrap : word-wrap;
+        overflow: elide;
+    }
+
+    ignore := Button {
+        x: root.inline ? parent.width - root.buttons-width : root.text-left;
+        y: root.inline ? (parent.height - self.height) / 2 : label.y + max(LayoutMetrics.icon-size, label.height) + 8px;
+        width: max(80px, self.content-width);
+        height: root.button-height;
+        text: @tr("Ignore");
+        clicked => { ReadReceipts.ignore(); }
+    }
+
+    send := Button {
+        x: root.inline ? parent.width - self.width : ignore.x + ignore.width + 8px;
+        y: ignore.y;
+        width: max(110px, self.content-width);
+        height: root.button-height;
+        text: @tr("Send receipt");
+        clicked => { ReadReceipts.send(); }
+    }
+}
+
+// At the end of a message the user sent, after its attachments: what each
+// read receipt that came back says, one line each with its time, as
+// Outlook's tracking lists them.
+export component ReturnedReceiptList inherits VerticalLayout {
+    in property <bool> compact;
+    in property <color> heading-color;
+    in property <color> text-color;
+    in property <color> secondary-color;
+    // The reader sizes its document from these, as it does attachments.
+    in property <length> heading-line: 20px;
+    in property <length> row-height: 26px;
+    in property <length> button-height: 26px;
+
+    padding-top: 8px;
+    accessible-role: list;
+    accessible-label: @tr("Read receipts");
+
+    Text {
+        height: root.heading-line;
+        text: @tr("Read receipts");
+        color: root.heading-color;
+        font-weight: 600;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+
+    for receipt in ReadReceipts.returned : HorizontalLayout {
+        private property <string> label: receipt.kind == "read"
+            ? @tr("Read by {}", receipt.name)
+            : receipt.kind == "deleted"
+                ? @tr("Deleted by {}", receipt.name)
+                : @tr("Received by {}", receipt.name);
+        height: root.row-height;
+        spacing: 8px;
+        accessible-role: list-item;
+        accessible-label: self.label + ", " + receipt.time;
+
+        Rectangle {
+            width: LayoutMetrics.icon-size;
+            Image {
+                y: (parent.height - self.height) / 2;
+                width: LayoutMetrics.icon-size;
+                height: LayoutMetrics.icon-size;
+                source: receipt.kind == "read"
+                    ? @image-url("icons/lucide/outline/mail-check.svg")
+                    : receipt.kind == "deleted"
+                        ? @image-url("icons/lucide/outline/trash.svg")
+                        : @image-url("icons/lucide/outline/mail.svg");
+                colorize: root.secondary-color;
+                image-fit: contain;
+                accessible-role: none;
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: parent.label;
+            color: root.text-color;
+            font-size: TypeScale.body;
+            vertical-alignment: center;
+            overflow: elide;
+            accessible-role: none;
+        }
+        Text {
+            text: receipt.time;
+            color: root.secondary-color;
+            font-size: TypeScale.secondary;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+    }
+
+    if ReadReceipts.more-returned > 0 : HorizontalLayout {
+        padding-left: LayoutMetrics.icon-size + 8px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        alignment: start;
+        Button {
+            width: self.content-width;
+            height: root.button-height;
+            text: @tr("Show one more receipt" | "Show {n} more receipts" % ReadReceipts.more-returned);
+            clicked => { ReadReceipts.show-all-returned(); }
+        }
+    }
+}

@@ -42,6 +42,8 @@ fn uidnext_is_used_only_when_it_is_a_consistent_high_watermark() {
             uid_validity: Some(7),
             uid_next: Some(101),
             exists: 2,
+            creates_keywords: false,
+            permanent_keywords: Vec::new(),
         }),
         Some(100)
     );
@@ -50,6 +52,8 @@ fn uidnext_is_used_only_when_it_is_a_consistent_high_watermark() {
             uid_validity: Some(7),
             uid_next: Some(2),
             exists: 2,
+            creates_keywords: false,
+            permanent_keywords: Vec::new(),
         }),
         None
     );
@@ -58,6 +62,8 @@ fn uidnext_is_used_only_when_it_is_a_consistent_high_watermark() {
             uid_validity: Some(7),
             uid_next: None,
             exists: 2,
+            creates_keywords: false,
+            permanent_keywords: Vec::new(),
         }),
         None
     );
@@ -264,6 +270,9 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
                     list_id: None,
                     sender_addr: None,
                     sender_verification: SenderVerification::None,
+                    receipt_to: Vec::new(),
+                    receipt_confirm: false,
+                    receipt_handled: false,
                 },
                 thread_id,
             )?;
@@ -910,6 +919,11 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
     let mut expected = removed_threads.clone();
     expected.sort_unstable();
     assert_eq!(thread_ids, expected);
+    // The Inbox pass caught up, which the app shows as the last check.
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        CoreEvent::AccountCaughtUp { account_id: caught_up, .. } if caught_up == account_id
+    ));
     ctx.db
         .read(move |conn| {
             assert!(repo::messages::by_folder_uid(conn, folder_id, 42)?.is_none());
@@ -959,6 +973,10 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
     assert!(matches!(
         events.try_recv().unwrap(),
         CoreEvent::MailUpdated { .. }
+    ));
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        CoreEvent::AccountCaughtUp { .. }
     ));
     assert!(
         events.try_recv().is_err(),
@@ -1498,6 +1516,9 @@ fn seed_unread(
             list_id: None,
             sender_addr: None,
             sender_verification: SenderVerification::None,
+            receipt_to: Vec::new(),
+            receipt_confirm: false,
+            receipt_handled: false,
         },
         thread_id,
     )?;

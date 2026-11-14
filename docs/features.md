@@ -4,6 +4,7 @@ A closer look at what the [README](../README.md) summarizes.
 
 - [Conversation threads](#conversation-threads)
 - [Tabs](#tabs)
+- [Checking for mail](#checking-for-mail)
 - [New-mail notifications](#new-mail-notifications)
 - [Profiles and account colors](#profiles-and-account-colors)
 - [Appearance](#appearance)
@@ -16,6 +17,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Undo send](#undo-send)
 - [Unsubscribing](#unsubscribing)
 - [Blocking senders](#blocking-senders)
+- [Read receipts](#read-receipts)
 - [Calendar invitations](#calendar-invitations)
 - [Storage and backups](#storage-and-backups)
 - [Importing accounts and mail](#importing-accounts-and-mail)
@@ -79,6 +81,29 @@ Settings → General.
   <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-tabs-light.png">
   <img src="../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail with tabs for several conversations, the calendar, contacts, and files">
 </picture>
+
+## Checking for mail
+
+Flectar Mail checks every account for new mail on its own: as soon as the
+server announces new mail, where it can, and otherwise every 5 minutes, or as
+often as **Check for new mail** in Settings → General says. To check now, press
+F5 for the accounts the mail view shows, or Shift+F5 or the refresh button
+beside the search field for every account. An account's menu in the sidebar
+(right-click, or hold a finger on it on a phone) checks just that account.
+
+While a check runs for more than a moment, a small spinner turns beside the
+account's name in the sidebar; it holds still while motion is reduced. When the
+server doesn't accept an account's sign-in, or its checks keep failing for a
+minute, a red marker takes its place. Click or tap the marker to see why, with
+**Try again** to check right away, or **Sign in again** when the sign-in needs
+renewing. After a check you asked for, the marker shows at once. Flectar Mail
+keeps trying a failing account on its own, and the marker goes away with the
+next check that works. When the sidebar is hidden, as on a phone, a red dot on
+the folders button says an account has a problem.
+
+The account's menu also tells when it last checked mail, and so does its card
+in Settings → Accounts, together with the account's state and the server's own
+words about a failure.
 
 ## New-mail notifications
 
@@ -376,6 +401,32 @@ mail in the inbox until Flectar Mail checks for mail.
 
 **Unblock sender** in the same menu, or **Unblock** in Settings → Contacts →
 Blocked senders, stops it. Mail already in Spam stays there.
+
+## Read receipts
+
+Some senders ask to be notified when you read their message. Flectar Mail sends
+no such read receipt unless you choose otherwise with **Read receipts** in
+Settings → General. **Never send**, the default, leaves the requests
+unanswered. **Ask each time** shows the request above the message, with **Send
+receipt** and **Ignore**. **Always send** sends one when you open the message,
+but still asks first when a request looks unusual: the receipt would go
+somewhere other than where the message came from, or to several addresses, or
+the receiving server couldn't confirm who sent the message. Mail in Spam,
+mailing lists and other automated mail, and your drafts and sent mail never
+get one.
+
+A receipt says only that the message was shown on your screen, as the
+standard puts it (RFC 8098). Sending one or ignoring the request answers it for
+good, and IMAP and JMAP servers usually keep that answer, so your other devices
+don't ask again.
+
+When a receipt comes back for a message you sent, the message lists it under
+**Read receipts** at its end, after any attachments, with when it was sent:
+**Read by** when your message was shown, **Deleted by** when it was deleted,
+read or not, and **Received by** when the recipient's mail program handled it
+without showing it, such as with a rule. A long list shows the first two
+receipts and a button for the rest. Deleting a receipt keeps what it said on
+your message.
 
 ## Calendar invitations
 

@@ -13,6 +13,8 @@ import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, CalendarConnectionRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
 import { AccountCalendars } from "../components/account-calendars.slint";
+import { AccountStatusText } from "../components/account-status.slint";
+import { ReadReceipts } from "../read-receipts.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
@@ -484,6 +486,9 @@ export component SettingsDialog inherits Rectangle {
     in property <color> title-color;
     in-out property <bool> settings_open: false;
     in-out property <string> settings_tab: "General";
+    // An account to sign in again as soon as its card shows, as the sidebar's
+    // Sign in again asks.
+    in-out property <int> sign-in-account: -1;
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
     in-out property <bool> show_tabs: true;
@@ -670,6 +675,13 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> flectar-services-available: false;
     callback start_flectar_sign_in();
 
+    private property <[string]> read-receipt-options: [
+        @tr("Never send"),
+        @tr("Ask each time"),
+        @tr("Always send"),
+    ];
+    private property <int> read-receipt-index: ReadReceipts.policy == "always" ? 2
+        : ReadReceipts.policy == "ask" ? 1 : 0;
     private property <[string]> sync-interval-options: [
         @tr("Every minute"),
         @tr("Every 5 minutes"),
@@ -1461,6 +1473,19 @@ export component SettingsDialog inherits Rectangle {
                                                 root.mark_read_on_open = self.checked;
                                                 root.save_mark_read_on_open(self.checked);
                                             }
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Read receipts");
+                                        description: @tr("When a sender asks to be notified that you read their message. Always send still asks when a request looks unusual.");
+                                        choices: root.read-receipt-options;
+                                        selected-index: root.read-receipt-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            ReadReceipts.choose(index == 2 ? "always" : index == 1 ? "ask" : "never");
                                         }
                                     }
                                 }
@@ -2308,6 +2333,15 @@ export component SettingsDialog inherits Rectangle {
                                 submit-redirect(address) => { root.submit_oauth_redirect(address); }
                             }
                             for account[account-index] in root.connected_accounts : drop-target := DropArea {
+                                private property <bool> signing-in: account.id == root.sign-in-account;
+                                init => { self.sign-in-requested(); }
+                                changed signing-in => { self.sign-in-requested(); }
+                                function sign-in-requested() {
+                                    if self.signing-in {
+                                        root.sign-in-account = -1;
+                                        root.edit-account(account);
+                                    }
+                                }
                                 private property <length> divider-y: account.sync_error != "" ? sync-error.y + sync-error.height + 4px : account-header.height;
                                 private property <bool> has-sent-copy: account.provider != "gmail" && account.mail_protocol == "imap";
                                 private property <bool> has-server-copies: account.mail_protocol == "pop3";
@@ -2339,7 +2373,9 @@ export component SettingsDialog inherits Rectangle {
                                         x: 0px;
                                         y: 0px;
                                         width: parent.width;
-                                        height: (account.sync_error != "" ? 27px : root.compact ? 41px : 37px) + account-name.height + account-email.height + account-state.height;
+                                        height: (account.sync_error != "" ? 27px : root.compact ? 41px : 37px) + account-name.height + account-email.height + account-state.height
+                                            // Last checked, a caption line like the state.
+                                            + (account.checked_at != "" ? account-state.height + 2px : 0px);
                                         padding-left: 14px;
                                         padding-right: 16px;
                                         spacing: 12px;
@@ -2381,7 +2417,8 @@ export component SettingsDialog inherits Rectangle {
                                             spacing: 2px;
                                             account-name := Text { height: max(19px, self.preferred-height); text: account.name; color: root.heading; font-size: TypeScale.body-large; font-weight: 700; overflow: elide; }
                                             account-email := Text { height: max(16px, self.preferred-height); text: account.email; color: root.secondary-text; font-size: TypeScale.caption; overflow: elide; }
-                                            account-state := Text { height: max(16px, self.preferred-height); text: account.status == "offline" ? @tr("Offline · retrying automatically") : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Syncing…") : account.status == "idle" ? (account.mail_protocol == "gmail" ? @tr("Connected · Gmail") : account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : account.mail_protocol == "pop3" ? (drop-target.unencrypted ? @tr("Connected without encryption · POP3 + SMTP") : @tr("Connected · POP3 + SMTP")) : drop-target.unencrypted ? @tr("Connected without encryption · IMAP + SMTP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : account.status == "idle" && drop-target.unencrypted ? AppTheme.destructive : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                                            account-state := Text { height: max(16px, self.preferred-height); text: account.status == "offline" ? @tr("Couldn't check mail · Retrying automatically") : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Checking for new mail…") : account.status == "idle" ? (account.mail_protocol == "gmail" ? @tr("Connected · Gmail") : account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : account.mail_protocol == "pop3" ? (drop-target.unencrypted ? @tr("Connected without encryption · POP3 + SMTP") : @tr("Connected · POP3 + SMTP")) : drop-target.unencrypted ? @tr("Connected without encryption · IMAP + SMTP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : account.status == "idle" && drop-target.unencrypted ? AppTheme.destructive : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                                            if account.checked_at != "" : Text { height: max(16px, self.preferred-height); text: AccountStatusText.last-checked(account.checked_day, account.checked_at); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                                         }
                                         AccountActions {
                                             edit-label: account.provider == "generic" ? @tr("Edit") : @tr("Reconnect");

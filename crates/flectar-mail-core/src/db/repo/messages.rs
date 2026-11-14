@@ -39,6 +39,13 @@ pub struct NewMessage {
     /// transmitting domain aligns with From:.
     pub sender_addr: Option<String>,
     pub sender_verification: SenderVerification,
+    /// Where a read receipt was asked to go (see mime::ParsedHeaders);
+    /// empty when the message asks for none.
+    pub receipt_to: Vec<Address>,
+    /// RFC 8098 section 2.1 wants the user's confirmation first.
+    pub receipt_confirm: bool,
+    /// A receipt was already sent or declined ($MDNSent, RFC 3503).
+    pub receipt_handled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -343,8 +350,8 @@ pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> 
             subject, from_name, from_addr, to_json, cc_json, bcc_json, date, internal_date,
             is_read, is_starred, is_draft, is_outgoing, is_automated, has_attachments, size, snippet,
             list_unsubscribe, list_unsubscribe_post, sender_addr, sender_verification,
-            verification_code, list_id)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29)",
+            verification_code, list_id, receipt_to, receipt_confirm, receipt_handled)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)",
         params![
             m.account_id,
             thread_id,
@@ -375,6 +382,11 @@ pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> 
             m.sender_verification.as_str(),
             verification_code,
             m.list_id,
+            (!m.receipt_to.is_empty())
+                .then(|| serde_json::to_string(&m.receipt_to))
+                .transpose()?,
+            m.receipt_confirm as i64,
+            m.receipt_handled as i64,
         ],
     )?;
     let id = conn.last_insert_rowid();
@@ -385,6 +397,16 @@ pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> 
         )?;
     }
     Ok(id)
+}
+
+/// Record that the message's read receipt was sent or declined. Returns
+/// whether that's news; the mark is never taken back (RFC 3503).
+pub fn mark_receipt_handled(conn: &Connection, id: i64) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE messages SET receipt_handled = 1
+         WHERE id = ?1 AND receipt_to IS NOT NULL AND receipt_handled = 0",
+        params![id],
+    )? != 0)
 }
 
 /// A message given a UID is linked to the server and no longer waits to be
@@ -1251,7 +1273,65 @@ fn detail_from_row(row: &rusqlite::Row) -> rusqlite::Result<MessageDetail> {
         send_error: row.get("send_error")?,
         in_spam: row.get("in_spam")?,
         sender_blocked: row.get("sender_blocked")?,
+        receipt_request: receipt_request_from_row(row)?,
+        returned_receipts: Vec::new(),
     })
+}
+
+/// The read receipt a message row asks for, when one may be sent. Requests
+/// to the account's own addresses are left out later, by
+/// [`drop_own_receipt_requests`].
+fn receipt_request_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<ReceiptRequest>> {
+    let Some(to) = row.get::<_, Option<String>>("receipt_to")? else {
+        return Ok(None);
+    };
+    let answerable = row.get::<_, i64>("receipt_handled")? == 0
+        && row.get::<_, i64>("is_outgoing")? == 0
+        && row.get::<_, i64>("is_draft")? == 0
+        && !row.get::<_, bool>("in_spam")?
+        // Lists, newsletters, robots and reports: a receipt would only tell a
+        // mass sender, or no one, that the address reads its mail.
+        && row.get::<_, i64>("is_automated")? == 0;
+    if !answerable {
+        return Ok(None);
+    }
+    let to = parse_addrs(&to, 0)?;
+    if to.is_empty() {
+        return Ok(None);
+    }
+    let verified = SenderVerification::from_storage(&row.get::<_, String>("sender_verification")?)
+        != SenderVerification::None;
+    Ok(Some(ReceiptRequest {
+        to,
+        needs_confirmation: row.get::<_, i64>("receipt_confirm")? != 0 || !verified,
+    }))
+}
+
+/// Leave out read receipt requests that would go to the account's own
+/// addresses: there's no one to tell.
+fn drop_own_receipt_requests(conn: &Connection, details: &mut [MessageDetail]) -> Result<()> {
+    use std::collections::hash_map::Entry;
+    let mut own = std::collections::HashMap::new();
+    for detail in details {
+        let Some(request) = &detail.receipt_request else {
+            continue;
+        };
+        let addresses = match own.entry(detail.account_id) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(super::sender_identities::own_addresses(
+                conn,
+                detail.account_id,
+            )?),
+        };
+        if request
+            .to
+            .iter()
+            .any(|address| addresses.contains(&address.email))
+        {
+            detail.receipt_request = None;
+        }
+    }
+    Ok(())
 }
 
 /// Correlated-subquery columns that annotate a draft with the state of its
@@ -1285,7 +1365,9 @@ const DETAIL_MESSAGE_COLS: &str = "
     m.is_outgoing AS is_outgoing, m.snippet AS snippet, m.body_state AS body_state,
     m.local_body_note AS local_body_note, m.list_unsubscribe AS list_unsubscribe,
     m.list_unsubscribe_post AS list_unsubscribe_post, m.sender_addr AS sender_addr,
-    m.sender_verification AS sender_verification,
+    m.sender_verification AS sender_verification, m.is_automated AS is_automated,
+    m.receipt_to AS receipt_to, m.receipt_confirm AS receipt_confirm,
+    m.receipt_handled AS receipt_handled,
     EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = 'spam')
         OR EXISTS (SELECT 1 FROM message_folders mf JOIN folders f ON f.id = mf.folder_id
                    WHERE mf.message_id = m.id AND f.role = 'spam') AS in_spam,
@@ -1361,6 +1443,8 @@ pub fn detail(conn: &Connection, id: i64) -> Result<MessageDetail> {
     for a in atts {
         detail.attachments.push(a?);
     }
+    drop_own_receipt_requests(conn, std::slice::from_mut(&mut detail))?;
+    super::returned_receipts::attach(conn, std::slice::from_mut(&mut detail))?;
     Ok(detail)
 }
 
@@ -1425,6 +1509,8 @@ pub fn list_for_thread(conn: &Connection, thread_id: i64) -> Result<Vec<MessageD
             m.attachments = atts;
         }
     }
+    drop_own_receipt_requests(conn, &mut out)?;
+    super::returned_receipts::attach(conn, &mut out)?;
     Ok(out)
 }
 
@@ -1439,9 +1525,12 @@ pub fn list_outline_for_thread(conn: &Connection, thread_id: i64) -> Result<Vec<
          ORDER BY m.date ASC, m.id ASC"
     );
     let mut stmt = conn.prepare(&sql)?;
-    Ok(stmt
+    let mut out = stmt
         .query_map(params![thread_id], detail_from_row)?
-        .collect::<rusqlite::Result<Vec<_>>>()?)
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop_own_receipt_requests(conn, &mut out)?;
+    super::returned_receipts::attach(conn, &mut out)?;
+    Ok(out)
 }
 
 /// All (id, uid) pairs currently mapped in a folder - used for expunge reconciliation.
@@ -1734,6 +1823,9 @@ mod tests {
             list_id: None,
             sender_addr: None,
             sender_verification: SenderVerification::None,
+            receipt_to: Vec::new(),
+            receipt_confirm: false,
+            receipt_handled: false,
         }
     }
 

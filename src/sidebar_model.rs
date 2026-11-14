@@ -186,6 +186,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         count,
         color,
         has_custom_color,
+        status,
     } = &a.mailbox;
     let other = &b.mailbox;
     a.key == b.key
@@ -216,6 +217,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         && *count == other.count
         && *color == other.color
         && *has_custom_color == other.has_custom_color
+        && *status == other.status
         && (!has_avatar || *avatar_image == other.avatar_image)
 }
 
@@ -257,7 +259,7 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
     let query = state.folder_filter.trim();
     let filtering = !query.is_empty();
     let no_collapsed_folders = HashSet::new();
-    let mailboxes = make_mailbox_rows(
+    let mut mailboxes = make_mailbox_rows(
         &state.mailboxes,
         &state.profile_avatar_images,
         &state.labels,
@@ -267,6 +269,12 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
             &state.collapsed_folder_ids
         },
     );
+    let statuses = crate::account_status::statuses(&state);
+    for mailbox in mailboxes.iter_mut().filter(|mailbox| mailbox.is_account) {
+        if let Some(status) = statuses.get(&mailbox.account_id) {
+            mailbox.status = status.clone();
+        }
+    }
     let account_names = mailboxes
         .iter()
         .filter(|mailbox| mailbox.is_account)

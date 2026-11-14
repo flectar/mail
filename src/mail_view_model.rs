@@ -1649,6 +1649,8 @@ pub(super) fn make_mailbox_rows(
                 .into(),
                 color: custom_color.unwrap_or_default(),
                 has_custom_color: custom_color.is_some(),
+                // The sidebar sets each account's status.
+                status: AccountStatus::default(),
             }
         })
         .collect()
@@ -1875,6 +1877,8 @@ mod tests {
             can_block: false,
             sender_blocked: false,
             invitation: None,
+            receipt: None,
+            returned_receipts: Vec::new(),
             verification_code: None,
             account_uses_labels: false,
             first_attachment: None,

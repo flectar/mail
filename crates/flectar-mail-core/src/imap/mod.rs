@@ -855,6 +855,22 @@ pub struct SelectedFolder {
     pub uid_validity: Option<i64>,
     pub uid_next: Option<i64>,
     pub exists: u32,
+    /// PERMANENTFLAGS lists `\*`: any new keyword is kept.
+    pub creates_keywords: bool,
+    /// The keywords PERMANENTFLAGS lists by name.
+    pub permanent_keywords: Vec<String>,
+}
+
+impl SelectedFolder {
+    /// Whether the mailbox keeps `keyword` for good, so setting it isn't
+    /// just for this session (RFC 3501 PERMANENTFLAGS).
+    pub fn keeps_keyword(&self, keyword: &str) -> bool {
+        self.creates_keywords
+            || self
+                .permanent_keywords
+                .iter()
+                .any(|kept| kept.eq_ignore_ascii_case(keyword))
+    }
 }
 
 pub async fn select(session: &mut Session, folder: &str) -> Result<SelectedFolder> {
@@ -867,6 +883,18 @@ async fn select_inner(session: &mut Session, folder: &str) -> Result<SelectedFol
         uid_validity: mb.uid_validity.map(|v| v as i64),
         uid_next: mb.uid_next.map(|v| v as i64),
         exists: mb.exists,
+        creates_keywords: mb
+            .permanent_flags
+            .iter()
+            .any(|flag| matches!(flag, async_imap::types::Flag::MayCreate)),
+        permanent_keywords: mb
+            .permanent_flags
+            .iter()
+            .filter_map(|flag| match flag {
+                async_imap::types::Flag::Custom(name) => Some(name.to_string()),
+                _ => None,
+            })
+            .collect(),
     })
 }
 
@@ -878,6 +906,8 @@ pub struct FetchedFlags {
     pub deleted: bool,
     /// Custom IMAP keywords (used to round-trip user labels).
     pub keywords: Vec<String>,
+    /// `$MDNSent`: a read receipt was sent or declined.
+    pub mdn_sent: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -904,14 +934,21 @@ fn flags_of(fetch: &async_imap::types::Fetch) -> FetchedFlags {
             async_imap::types::Flag::Flagged => f.flagged = true,
             async_imap::types::Flag::Draft => f.draft = true,
             async_imap::types::Flag::Deleted => f.deleted = true,
-            async_imap::types::Flag::Custom(name) => f.keywords.push(name.to_string()),
+            async_imap::types::Flag::Custom(name) => {
+                // RFC 3503: a read receipt was sent or declined.
+                f.mdn_sent |= name.eq_ignore_ascii_case(MDN_SENT);
+                f.keywords.push(name.to_string());
+            }
             _ => {}
         }
     }
     f
 }
 
-const HEADER_FIELDS: &str = "BODY.PEEK[HEADER.FIELDS (MESSAGE-ID X-FLECTAR-SUBMISSION-ID IN-REPLY-TO REFERENCES SUBJECT FROM TO CC BCC DATE LIST-ID LIST-UNSUBSCRIBE LIST-UNSUBSCRIBE-POST PRECEDENCE AUTO-SUBMITTED AUTHENTICATION-RESULTS)]";
+/// The keyword recording that a read receipt was sent or declined (RFC 3503).
+pub const MDN_SENT: &str = "$MDNSent";
+
+const HEADER_FIELDS: &str = "BODY.PEEK[HEADER.FIELDS (MESSAGE-ID X-FLECTAR-SUBMISSION-ID IN-REPLY-TO REFERENCES SUBJECT FROM TO CC BCC DATE LIST-ID LIST-UNSUBSCRIBE LIST-UNSUBSCRIBE-POST PRECEDENCE AUTO-SUBMITTED AUTHENTICATION-RESULTS RETURN-PATH DISPOSITION-NOTIFICATION-TO DISPOSITION-NOTIFICATION-OPTIONS)]";
 
 /// Fetch envelope headers + flags for a UID set (e.g. "100:200" or "5,7,9").
 pub async fn fetch_headers(session: &mut Session, uid_set: &str) -> Result<Vec<FetchedHeader>> {

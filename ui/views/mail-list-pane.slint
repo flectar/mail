@@ -357,6 +357,8 @@ export component MailListPane inherits FocusScope {
     in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
     in property <bool> sync_in_progress: false;
+    // An account's checks fail, as its sidebar heading shows.
+    in property <bool> account-problem: false;
     in property <bool> can_load_more: false;
     in property <bool> loading_more: false;
     // Only the pane on screen scrolls back for a shown tab; both exist.
@@ -715,6 +717,9 @@ export component MailListPane inherits FocusScope {
                                 : @image-url("../icons/lucide/outline/sidebar-collapse.svg");
                             leading-tooltip: root.mail_sidebar_collapsed ? @tr("Show folders") : @tr("Hide folders");
                             leading-accessible-id: "mail-folders-button";
+                            // The sidebar's account problems, while it is hidden.
+                            leading-badge: root.account-problem && (root.single-pane-navigation || root.mail_sidebar_collapsed);
+                            leading-badge-description: @tr("An account can't check mail");
                             text <=> root.search_query;
                             placeholder-text: @tr("Search mail");
                             filters: [

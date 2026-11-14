@@ -62,7 +62,10 @@ const METADATA_HEADERS: &[&str] = &[
     "Authentication-Results",
     "Bcc",
     "Cc",
+    "Content-Type",
     "Date",
+    "Disposition-Notification-Options",
+    "Disposition-Notification-To",
     "From",
     "In-Reply-To",
     "List-Id",
@@ -395,6 +398,14 @@ impl GmailApi {
         Err(CoreError::NeedsReauth)
     }
 
+    async fn message_full(&self, message_id: &str) -> Result<Value> {
+        self.get_json(&format!(
+            "{GMAIL_API}/messages/{}?format=full",
+            urlencode(message_id)
+        ))
+        .await
+    }
+
     async fn thread(&self, thread_id: &str, full: bool) -> Result<Value> {
         let mut url = format!(
             "{GMAIL_API}/threads/{}?format={}",
@@ -684,6 +695,18 @@ impl GmailApi {
             self.delete_json(&format!("{GMAIL_API}/drafts/{}", urlencode(draft_id)))
                 .await,
         )
+    }
+
+    /// Send a message as it is, in `thread_id`'s Gmail thread.
+    async fn send_raw(&self, raw: &[u8], thread_id: Option<&str>) -> Result<Value> {
+        self.post_json(
+            &format!("{GMAIL_API}/messages/send"),
+            &json!({
+                "raw": URL_SAFE_NO_PAD.encode(raw),
+                "threadId": thread_id,
+            }),
+        )
+        .await
     }
 
     async fn send_draft(&self, draft_id: &str) -> Result<Value> {
@@ -1677,6 +1700,8 @@ struct StoreOutcome {
     touched_threads: Vec<i64>,
     /// Threads that queued a new-mail notification.
     fresh_threads: Vec<i64>,
+    /// New read receipts that came back, by provider id, to read now.
+    receipts: Vec<String>,
 }
 
 async fn store_resources(
@@ -1899,6 +1924,11 @@ async fn store_resources(
                         list_id: resource.headers.list_id.clone(),
                         sender_addr: resource.headers.via.clone(),
                         sender_verification: resource.headers.sender_verification,
+                        receipt_to: resource.headers.receipt_to.clone(),
+                        receipt_confirm: resource.headers.receipt_confirm,
+                        // Gmail keeps no keywords for it; this device
+                        // records the answer.
+                        receipt_handled: false,
                     };
                     let id = repo::messages::insert(&tx, &message, thread_id)?;
                     tx.execute(
@@ -1954,6 +1984,11 @@ async fn store_resources(
 
                 if !outcome.touched_threads.contains(&thread_id) {
                     outcome.touched_threads.push(thread_id);
+                }
+                // A read receipt that came back is read now, so what it
+                // reports shows on the sent message (RFC 8098).
+                if inserted && !is_outgoing && resource.headers.disposition_report {
+                    outcome.receipts.push(resource.provider_id.clone());
                 }
                 // One notification per conversation in this batch, for mail
                 // that reached the Inbox after the cutoff.
@@ -2253,6 +2288,8 @@ struct HydratedBody {
     html: Option<String>,
     calendar_parts: Vec<String>,
     attachments: Vec<HydratedAttachment>,
+    /// The message is a read receipt that came back.
+    disposition_report: Option<crate::mime::DispositionReport>,
 }
 
 async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody> {
@@ -2283,6 +2320,11 @@ async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody>
             }
             continue;
         }
+        if hydrated.disposition_report.is_none()
+            && crate::mime::is_disposition_report_part(&spec.mime_type)
+        {
+            hydrated.disposition_report = returned_receipt(resource, &bytes);
+        }
         let has_provider_attachment = spec.provider_attachment_id.is_some();
         hydrated.attachments.push(HydratedAttachment {
             part_id: spec.part_id,
@@ -2311,6 +2353,27 @@ async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody>
             .map(|text| format!("<pre>{}</pre>", escape_html(text)));
     }
     Ok(hydrated)
+}
+
+/// The read receipt a message is, from its report part: when the message is
+/// a multipart/report (RFC 6522), and not one forwarded inside another.
+fn returned_receipt(resource: &Value, report: &[u8]) -> Option<crate::mime::DispositionReport> {
+    let payload = resource.get("payload")?;
+    if !payload
+        .get("mimeType")
+        .and_then(Value::as_str)
+        .is_some_and(|mime_type| mime_type.eq_ignore_ascii_case("multipart/report"))
+    {
+        return None;
+    }
+    let headers = parse_resource(resource).ok()?.headers;
+    let in_reply_to = part_headers(payload).remove("in-reply-to");
+    crate::mime::disposition_report(
+        report,
+        in_reply_to.as_deref(),
+        headers.from.as_ref(),
+        headers.date_ms,
+    )
 }
 
 fn decode_text_part(bytes: &[u8], charset: Option<&str>) -> String {
@@ -2345,12 +2408,14 @@ fn escape_html(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// Store a hydrated message, and return the threads that changed: its own,
+/// and those holding the message a read receipt it is reports on.
 async fn store_hydrated_body(
     ctx: &SyncCtx,
     config: &AccountConfig,
     provider_message_id: String,
     body: HydratedBody,
-) -> Result<Option<i64>> {
+) -> Result<Vec<i64>> {
     let account_id = config.id;
     let text = body.text.clone();
     let html = body.html.clone();
@@ -2361,7 +2426,8 @@ async fn store_hydrated_body(
         .any(|attachment| !attachment.is_inline);
     let attachments = body.attachments;
     let calendar_parts = body.calendar_parts;
-    let (local_message_id, thread_id, cached_inline) = ctx
+    let disposition_report = body.disposition_report;
+    let (local_message_id, thread_ids, cached_inline) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
@@ -2471,13 +2537,22 @@ async fn store_hydrated_body(
             }
 
             repo::search::index_message(&tx, local_message_id)?;
-            let thread_id =
-                repo::messages::get_row(&tx, local_message_id)?.and_then(|row| row.thread_id);
-            if let Some(thread_id) = thread_id {
+            let mut thread_ids = match &disposition_report {
+                Some(report) => {
+                    crate::sync::ingest::record_returned_receipt(&tx, local_message_id, report)?
+                }
+                None => Vec::new(),
+            };
+            if let Some(thread_id) =
+                repo::messages::get_row(&tx, local_message_id)?.and_then(|row| row.thread_id)
+            {
                 repo::threads::recompute(&tx, thread_id)?;
+                if !thread_ids.contains(&thread_id) {
+                    thread_ids.push(thread_id);
+                }
             }
             tx.commit()?;
-            Ok((local_message_id, thread_id, cached_inline))
+            Ok((local_message_id, thread_ids, cached_inline))
         })
         .await?;
 
@@ -2508,7 +2583,43 @@ async fn store_hydrated_body(
             })
             .await?;
     }
-    Ok(thread_id)
+    Ok(thread_ids)
+}
+
+/// Read new read receipts whole, so what they report shows on the sent
+/// message without anyone opening them. Gmail sends bodies only on request.
+async fn hydrate_receipts(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    api: &GmailApi,
+    receipts: Vec<String>,
+) {
+    let mut touched = Vec::<i64>::new();
+    for provider_message_id in receipts {
+        let stored = async {
+            let resource = api.message_full(&provider_message_id).await?;
+            let body = hydrate_parts(api, &resource).await?;
+            store_hydrated_body(ctx, config, provider_message_id.clone(), body).await
+        }
+        .await;
+        match stored {
+            Ok(thread_ids) => {
+                for thread_id in thread_ids {
+                    if !touched.contains(&thread_id) {
+                        touched.push(thread_id);
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(account_id = config.id, %error, "could not read a read receipt");
+            }
+        }
+    }
+    if !touched.is_empty() {
+        ctx.bus.emit(CoreEvent::MailUpdated {
+            thread_ids: touched,
+        });
+    }
 }
 
 async fn hydrate_thread(
@@ -2528,18 +2639,24 @@ async fn hydrate_thread(
             "Gmail thread returned more than {MAX_MESSAGES_PER_THREAD} messages"
         )));
     }
-    let outcome = store_resources(ctx, config, &resources, None, true, false, None).await?;
+    let mut touched = store_resources(ctx, config, &resources, None, true, false, None)
+        .await?
+        .touched_threads;
     for resource in resources {
         let provider_message_id = required_string(&resource, "id")?.to_owned();
         let body = hydrate_parts(api, &resource).await?;
-        store_hydrated_body(ctx, config, provider_message_id, body).await?;
+        for thread_id in store_hydrated_body(ctx, config, provider_message_id, body).await? {
+            if !touched.contains(&thread_id) {
+                touched.push(thread_id);
+            }
+        }
     }
-    if !outcome.touched_threads.is_empty() {
+    if !touched.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated {
-            thread_ids: outcome.touched_threads.clone(),
+            thread_ids: touched.clone(),
         });
     }
-    Ok(outcome.touched_threads)
+    Ok(touched)
 }
 
 /// `live_since` is the receipt time from which new mail counts as arriving
@@ -2612,6 +2729,7 @@ async fn sync_once(
                 thread_ids: outcome.fresh_threads,
             });
         }
+        hydrate_receipts(ctx, config, api, outcome.receipts).await;
         ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
             account_id,
             folder: "Gmail".into(),
@@ -2726,6 +2844,7 @@ async fn sync_once(
             store_resources(ctx, config, &resources, None, true, true, Some(live_since)).await?;
         touched.extend(outcome.touched_threads);
         fresh_threads.extend(outcome.fresh_threads);
+        hydrate_receipts(ctx, config, api, outcome.receipts).await;
     }
     for thread_id in removed {
         touched.extend(remove_provider_thread(ctx, account_id, thread_id).await?);
@@ -3383,6 +3502,24 @@ async fn apply_action(
             return super::finish_permanent_delete(ctx, action.message_id).await;
         }
         "snooze" | "unsnooze" => return Ok(()),
+        // Gmail keeps no mark for an answered request; this device recorded
+        // it. Gmail files what it sends in Sent, as it does every message.
+        "read_receipt" => {
+            let (Some(message_id), true) = (
+                action.message_id,
+                action.payload["send"].as_bool() == Some(true),
+            ) else {
+                return Ok(());
+            };
+            let user_agreed = action.payload["userAgreed"].as_bool().unwrap_or(false);
+            if let Some(receipt) =
+                crate::read_receipts::prepare(ctx, config.id, message_id, user_agreed).await?
+            {
+                api.send_raw(&receipt.raw, receipt.gm_thread.as_deref())
+                    .await?;
+            }
+            return Ok(());
+        }
         "save_draft" => {
             let draft_id = action.payload["draftId"]
                 .as_i64()
@@ -4129,8 +4266,8 @@ async fn fetch_attachment(ctx: &SyncCtx, api: &GmailApi, attachment_id: i64) -> 
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
+    /// A Gmail account 1 with Inbox, Sent, Spam, Archive and All Mail.
+    pub(super) async fn gmail_account() -> (tempfile::TempDir, SyncCtx, AccountConfig) {
         let dir = tempfile::tempdir().unwrap();
         let credentials: crate::accounts::credentials::CredentialStoreHandle = std::sync::Arc::new(
             crate::accounts::credentials::DevelopmentFileCredentialStore::new(
@@ -4157,14 +4294,25 @@ mod tests {
                      INSERT INTO folders (id, account_id, path, role) VALUES
                        (2, 1, '[Gmail]/Spam', 'spam'),
                        (3, 1, 'Archive', 'archive'),
-                       (4, 1, '[Gmail]/All Mail', 'all');
+                       (4, 1, '[Gmail]/All Mail', 'all'),
+                       (5, 1, '[Gmail]/Sent Mail', 'sent');
                      INSERT INTO gmail_labels (account_id, provider_id, name, folder_id) VALUES
                        (1, 'INBOX', 'INBOX', 1),
-                       (1, 'SPAM', 'SPAM', 2);",
+                       (1, 'SPAM', 'SPAM', 2),
+                       (1, 'SENT', 'SENT', 5);",
                 )?;
-                repo::blocked::block(conn, "ads@shop.test", 0)?;
                 Ok(repo::accounts::get_config(conn, 1)?.unwrap())
             })
+            .await
+            .unwrap();
+        (dir, ctx, config)
+    }
+
+    #[tokio::test]
+    async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
+        let (_dir, ctx, config) = gmail_account().await;
+        ctx.db
+            .write(|conn| repo::blocked::block(conn, "ads@shop.test", 0))
             .await
             .unwrap();
         let now = now_ms();
@@ -4417,5 +4565,124 @@ mod tests {
     fn arbitrary_local_colors_are_not_sent_to_gmail() {
         assert_eq!(gmail_palette_color("#4a86e8"), Some("#4a86e8"));
         assert_eq!(gmail_palette_color("#123456"), None);
+    }
+}
+
+#[cfg(test)]
+mod returned_receipt_tests {
+    use super::tests::gmail_account;
+    use super::*;
+
+    fn receipt_resource(id: &str, labels: &[&str], full: bool) -> Value {
+        let data = |text: &str| URL_SAFE_NO_PAD.encode(text);
+        let mut payload = json!({
+            "mimeType": "multipart/report",
+            "headers": [
+                {"name": "From", "value": "Ana Ruiz <ana@example.com>"},
+                {"name": "To", "value": "me@test.dev"},
+                {"name": "Subject", "value": "Read: Plan"},
+                {"name": "Date", "value": "Tue, 01 Sep 2026 12:30:00 +0000"},
+                {"name": "Message-ID", "value": format!("<{id}@example.com>")},
+                {"name": "Content-Type",
+                 "value": "multipart/report; report-type=disposition-notification; boundary=b"},
+            ]
+        });
+        if full {
+            payload["parts"] = json!([
+                {"partId": "0", "mimeType": "text/plain", "filename": "",
+                 "body": {"size": 9, "data": data("Displayed")}},
+                {"partId": "1", "mimeType": "message/disposition-notification", "filename": "",
+                 "body": {"size": 120, "data": data(
+                    "Final-Recipient: rfc822; ana@example.com\r\n\
+                     Original-Message-ID: <plan@example.org>\r\n\
+                     Disposition: manual-action/MDN-sent-manually; displayed\r\n")}},
+            ]);
+        }
+        json!({
+            "id": id, "threadId": format!("thread-{id}"),
+            "labelIds": labels, "internalDate": "1788265800000",
+            "sizeEstimate": 400, "snippet": "Displayed",
+            "payload": payload,
+        })
+    }
+
+    #[tokio::test]
+    async fn new_receipts_are_read_as_they_arrive() {
+        let (_dir, ctx, config) = gmail_account().await;
+        let mut ordinary = receipt_resource("note", &["INBOX"], false);
+        ordinary["payload"]["headers"][5]["value"] = json!("text/plain");
+        let resources = [
+            receipt_resource("receipt", &["INBOX", "UNREAD"], false),
+            ordinary,
+            // The receipt this account sent, in Sent.
+            receipt_resource("answer", &["SENT"], false),
+        ];
+        let outcome = store_resources(&ctx, &config, &resources, None, false, true, None)
+            .await
+            .unwrap();
+        assert_eq!(outcome.receipts, vec!["receipt".to_owned()]);
+        // Only once.
+        let outcome = store_resources(&ctx, &config, &resources, None, false, true, None)
+            .await
+            .unwrap();
+        assert!(outcome.receipts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_hydrated_receipt_shows_on_the_sent_message() {
+        let (_dir, ctx, config) = gmail_account().await;
+        let sent_thread = ctx
+            .db
+            .write(|conn| {
+                conn.execute_batch(
+                    r#"INSERT INTO threads (id, account_id, subject_norm, unread_count, last_message_at)
+                           VALUES (70, 1, 'plan', 0, 1000);
+                       INSERT INTO messages (thread_id, account_id, folder_id, message_id, subject,
+                           to_json, date, is_outgoing)
+                           VALUES (70, 1, 5, 'plan@example.org', 'Plan',
+                                   '[{"name":"Ana Ruiz","email":"ana@example.com"}]', 1000, 1);"#,
+                )?;
+                Ok(70_i64)
+            })
+            .await
+            .unwrap();
+        let resource = receipt_resource("receipt", &["INBOX"], true);
+        store_resources(
+            &ctx,
+            &config,
+            std::slice::from_ref(&resource),
+            None,
+            false,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        let api = GmailApi::new(ctx.clone(), config.clone()).unwrap();
+        let body = hydrate_parts(&api, &resource).await.unwrap();
+        assert!(body.disposition_report.is_some());
+        let threads = store_hydrated_body(&ctx, &config, "receipt".into(), body)
+            .await
+            .unwrap();
+        assert!(threads.contains(&sent_thread), "{threads:?}");
+        let receipts = ctx
+            .db
+            .read(|conn| {
+                let id: i64 = conn.query_row(
+                    "SELECT id FROM messages WHERE message_id = 'plan@example.org'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                Ok(repo::messages::detail(conn, id)?.returned_receipts)
+            })
+            .await
+            .unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].recipient.name.as_deref(), Some("Ana Ruiz"));
+        assert_eq!(
+            receipts[0].disposition,
+            crate::models::Disposition::Displayed
+        );
+        assert_eq!(receipts[0].reported_at, 1_788_265_800_000);
     }
 }

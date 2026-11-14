@@ -11,7 +11,7 @@ use crate::error::Result;
 use crate::events::CoreEvent;
 use crate::mime::{ParsedBody, ParsedHeaders};
 use crate::models::{AddInvitations, Settings, now_ms, roles};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 /// A message older than this never triggers a new-mail notification, even if
 /// it lands unread, so old mail that a server replays as new stays silent.
@@ -42,6 +42,9 @@ pub(crate) struct Delivery<'a> {
     pub draft: bool,
     pub has_attachments: bool,
     pub size: Option<i64>,
+    /// The server says a read receipt was already sent or declined
+    /// ($MDNSent), or the mail is imported and was answered long ago.
+    pub receipt_handled: bool,
 }
 
 /// A message row created by [`Importer::insert`].
@@ -146,6 +149,9 @@ impl Importer {
             list_id: headers.list_id.clone(),
             sender_addr: headers.via.clone(),
             sender_verification: headers.sender_verification,
+            receipt_to: headers.receipt_to.clone(),
+            receipt_confirm: headers.receipt_confirm,
+            receipt_handled: delivery.receipt_handled,
         };
         let message_id = repo::messages::insert(conn, &message, thread_id)?;
         if !self.thread_ids.contains(&thread_id) {
@@ -303,13 +309,15 @@ pub(crate) fn parse_or_text(raw: &[u8]) -> ParsedBody {
 }
 
 /// Store a parsed full message: its text and sanitized HTML, the raw file,
-/// attachments, sender verification, list fields, and the search index.
+/// attachments, sender verification, list fields, the search index, and what
+/// a read receipt reports. Returns the threads holding the message such a
+/// receipt is about, which now show it.
 pub(crate) fn store_body(
     conn: &Connection,
     message_id: i64,
     raw_path: &str,
     parsed: &ParsedBody,
-) -> Result<()> {
+) -> Result<Vec<i64>> {
     repo::messages::store_body(
         conn,
         message_id,
@@ -347,7 +355,32 @@ pub(crate) fn store_body(
         })
         .collect();
     repo::messages::replace_attachments(conn, message_id, &attachments)?;
-    repo::search::index_message(conn, message_id)
+    repo::search::index_message(conn, message_id)?;
+    match &parsed.disposition_report {
+        Some(report) => record_returned_receipt(conn, message_id, report),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Keep what a read receipt that came back reports, and return the threads
+/// that show it. A receipt the account sent itself, such as the copy Gmail
+/// files in Sent, reports on someone else's message.
+pub(crate) fn record_returned_receipt(
+    conn: &Connection,
+    message_id: i64,
+    report: &crate::mime::DispositionReport,
+) -> Result<Vec<i64>> {
+    let receipt = conn
+        .query_row(
+            "SELECT account_id, date FROM messages WHERE id = ?1 AND is_outgoing = 0",
+            [message_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?;
+    match receipt {
+        Some((account_id, date)) => repo::returned_receipts::record(conn, account_id, report, date),
+        None => Ok(Vec::new()),
+    }
 }
 
 /// The calendars a message carries: its text/calendar parts, such as a
@@ -483,5 +516,57 @@ mod tests {
         assert!(chime_worthy(false, "alice@example.com"));
         assert!(!chime_worthy(true, "digest@example.com"));
         assert!(!chime_worthy(false, "notifications@example.com"));
+    }
+
+    #[test]
+    fn a_stored_receipt_is_kept_unless_the_account_sent_it() {
+        use crate::db::testutil;
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let (_, received) = testutil::seed_message(&conn, "ana@example.com", "Read: Plan", true);
+        let (_, sent) = testutil::seed_message(&conn, "me@test.dev", "Read: Plan", true);
+        conn.execute("UPDATE messages SET is_outgoing = 1 WHERE id = ?1", [sent])
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO threads (id, account_id, subject_norm, unread_count, last_message_at)
+                 VALUES (50, 1, 'plan', 0, 1000);
+             INSERT INTO messages (thread_id, account_id, folder_id, message_id, subject, date,
+                 is_outgoing)
+                 VALUES (50, 1, 1, 'plan@example.org', 'Plan', 1000, 1);",
+        )
+        .unwrap();
+        let receipt = crate::mime::parse_message(
+            b"From: Ana <ana@example.com>\r\n\
+              Date: Tue, 01 Sep 2026 12:30:00 +0000\r\n\
+              Content-Type: multipart/report; report-type=disposition-notification; boundary=b\r\n\
+              \r\n\
+              --b\r\n\
+              Content-Type: message/disposition-notification\r\n\
+              \r\n\
+              Final-Recipient: rfc822; ana@example.com\r\n\
+              Original-Message-ID: <plan@example.org>\r\n\
+              Disposition: manual-action/MDN-sent-manually; displayed\r\n\
+              --b--\r\n",
+        )
+        .unwrap();
+        assert!(receipt.disposition_report.is_some());
+        // One the account sent reports on someone else's message.
+        assert!(
+            super::store_body(&conn, sent, "/sent.eml", &receipt)
+                .unwrap()
+                .is_empty()
+        );
+        let count = |conn: &rusqlite::Connection| -> i64 {
+            conn.query_row("SELECT count(*) FROM returned_receipts", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(count(&conn), 0);
+        assert_eq!(
+            super::store_body(&conn, received, "/received.eml", &receipt).unwrap(),
+            vec![50]
+        );
+        assert_eq!(count(&conn), 1);
     }
 }

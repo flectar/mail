@@ -898,7 +898,48 @@ fn header_properties() -> Vec<EmailProperty> {
         EmailProperty::Header(Header::as_text("List-Id", false)),
         EmailProperty::Header(Header::as_text("Precedence", false)),
     ]
+    .into_iter()
+    .chain(RECEIPT_HEADERS.map(|name| EmailProperty::Header(Header::as_raw(name, true))))
+    .collect()
 }
+
+/// The fields a read receipt request is read from (RFC 8098 section 2),
+/// fetched raw so the MIME parser reads them as it does IMAP's.
+const RECEIPT_HEADERS: [&str; 3] = [
+    "Return-Path",
+    "Disposition-Notification-To",
+    "Disposition-Notification-Options",
+];
+
+/// Where the message asks a read receipt to go, and whether RFC 8098
+/// section 2.1 wants the user's confirmation first.
+fn receipt_request(email: &Email) -> (Vec<Address>, bool) {
+    let mut block = String::new();
+    for name in RECEIPT_HEADERS {
+        let values = match email.header(&Header::as_raw(name, true)) {
+            Some(HeaderValue::AsTextAll(values)) => values.clone(),
+            Some(HeaderValue::AsText(value)) => vec![value.clone()],
+            _ => Vec::new(),
+        };
+        for value in values {
+            // A raw value starts after the colon, folding included.
+            block.push_str(name);
+            block.push(':');
+            block.push_str(&value);
+            block.push_str("\r\n");
+        }
+    }
+    if block.is_empty() {
+        return (Vec::new(), false);
+    }
+    block.push_str("\r\n");
+    crate::mime::parse_header_block(block.as_bytes())
+        .map(|headers| (headers.receipt_to, headers.receipt_confirm))
+        .unwrap_or_default()
+}
+
+/// RFC 9007 and the IANA keyword registry spell it in lowercase for JMAP.
+const MDN_SENT: &str = "$mdnsent";
 
 fn header_text<'a>(email: &'a Email, name: &str) -> Option<&'a str> {
     match email.header(&Header::as_text(name, false)) {
@@ -1196,6 +1237,7 @@ async fn persist_emails(
                     .collect::<Vec<_>>();
                 let is_read = keywords.iter().any(|value| value == "$seen");
                 let is_starred = keywords.iter().any(|value| value == "$flagged");
+                let receipt_answered = keywords.iter().any(|value| value == MDN_SENT);
                 let is_draft = keywords.iter().any(|value| value == "$draft")
                     || primary_folder.role.as_deref() == Some(roles::DRAFTS);
                 let is_outgoing = primary_folder.role.as_deref() == Some(roles::SENT);
@@ -1338,6 +1380,10 @@ async fn persist_emails(
                         &remote_id,
                         blob_id.as_deref(),
                     )?;
+                    // Another device sent or declined the read receipt.
+                    if receipt_answered {
+                        repo::messages::mark_receipt_handled(&tx, local_id)?;
+                    }
                     if let Some(old_thread_id) = old_thread_id
                         && old_thread_id != thread_id
                     {
@@ -1355,6 +1401,7 @@ async fn persist_emails(
                         .as_ref()
                         .map(|sender| sender.email.to_ascii_lowercase())
                         .unwrap_or_default();
+                    let (receipt_to, receipt_confirm) = receipt_request(&email);
                     let new = NewMessage {
                         account_id,
                         folder_id: primary_folder.id,
@@ -1383,6 +1430,9 @@ async fn persist_emails(
                         list_id: header_text(&email, "List-Id").and_then(crate::mime::list_id),
                         sender_addr: None,
                         sender_verification: crate::models::SenderVerification::None,
+                        receipt_to,
+                        receipt_confirm,
+                        receipt_handled: receipt_answered,
                     };
                     local_id = repo::messages::insert(&tx, &new, thread_id)?;
                     repo::messages::set_jmap_remote(
@@ -1964,6 +2014,19 @@ async fn execute_action(
             )
             .await
         }
+        // RFC 9007 spells it in lowercase; a receipt goes after the mark,
+        // as RFC 3503 asks of IMAP.
+        "read_receipt" => {
+            if let Some(remote_id) = linked_or_retry(&remote_id)? {
+                apply_message_mutation(
+                    ctx,
+                    action.message_id,
+                    c.email_set_keyword(remote_id, MDN_SENT, true).await,
+                )
+                .await?;
+            }
+            send_read_receipt(ctx, config, c, action).await
+        }
         "add_label" | "remove_label" => {
             let Some(remote_id) = linked_or_retry(&remote_id)? else {
                 return Ok(());
@@ -2487,34 +2550,7 @@ async fn send_action(
             .db
             .read(move |conn| Ok(repo::messages::detail(conn, draft_id)?.from.email))
             .await?;
-        let mut identity_request = c.request();
-        identity_request.get_identity().account_id(&c.account_id);
-        let identities = c
-            .send_single::<IdentityGetResponse>(identity_request)
-            .await
-            .map_err(client::map_error)?
-            .take_list();
-        // RFC 8621 §6: an exact identity is more specific than `*@domain`.
-        let identity_id = identities
-            .iter()
-            .filter(|identity| {
-                identity
-                    .email()
-                    .is_some_and(|email| identity_matches(email, &sender_email))
-            })
-            .min_by_key(|identity| {
-                identity
-                    .email()
-                    .is_some_and(|email| email.starts_with("*@"))
-            })
-            .and_then(|identity| identity.id())
-            .ok_or_else(|| {
-                CoreError::Jmap(format!(
-                    "server has no JMAP sending identity for {}",
-                    sender_email
-                ))
-            })?
-            .to_owned();
+        let identity_id = sending_identity(c, &sender_email).await?;
         let (request, create_id) =
             submission_request(c, &remote_email, identity_id, sent_mailbox.clone());
         let mut response = c
@@ -2654,6 +2690,113 @@ async fn ensure_role_mailbox(
         })
         .await?;
     Ok(remote)
+}
+
+/// The server's sending identity for `sender_email`.
+async fn sending_identity(c: &ConnectedClient, sender_email: &str) -> Result<String> {
+    let mut identity_request = c.request();
+    identity_request.get_identity().account_id(&c.account_id);
+    let identities = c
+        .send_single::<IdentityGetResponse>(identity_request)
+        .await
+        .map_err(client::map_error)?
+        .take_list();
+    // RFC 8621 §6: an exact identity is more specific than `*@domain`.
+    identities
+        .iter()
+        .filter(|identity| {
+            identity
+                .email()
+                .is_some_and(|email| identity_matches(email, sender_email))
+        })
+        .min_by_key(|identity| {
+            identity
+                .email()
+                .is_some_and(|email| email.starts_with("*@"))
+        })
+        .and_then(|identity| identity.id())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            CoreError::Jmap(format!(
+                "server has no JMAP sending identity for {sender_email}"
+            ))
+        })
+}
+
+/// Send an agreed read receipt as an Email the server submits and then
+/// destroys, so no copy of it stays in Sent.
+async fn send_read_receipt(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    action: &repo::actions::PendingAction,
+) -> Result<()> {
+    if !action.payload["send"].as_bool().unwrap_or(false) {
+        return Ok(());
+    }
+    let Some(message_id) = action.message_id else {
+        return Ok(());
+    };
+    if !c.supports_submission {
+        return Err(CoreError::Jmap(
+            "server does not advertise JMAP EmailSubmission".into(),
+        ));
+    }
+    let user_agreed = action.payload["userAgreed"].as_bool().unwrap_or(false);
+    let Some(receipt) =
+        crate::read_receipts::prepare(ctx, config.id, message_id, user_agreed).await?
+    else {
+        return Ok(());
+    };
+    let identity_id = sending_identity(c, &receipt.from.email).await?;
+    let sent_mailbox =
+        ensure_role_mailbox(ctx, config.id, c, roles::SENT, "Sent", Role::Sent).await?;
+    let mut uploaded = c
+        .upload(receipt.raw, "message/rfc822")
+        .await
+        .map_err(client::map_error)?;
+    let mut request = c.request();
+    let import = request
+        .import_email()
+        .account_id(&c.account_id)
+        .email(uploaded.take_blob_id())
+        .mailbox_ids([sent_mailbox])
+        .keywords(["$seen"])
+        .received_at(now_ms() / 1000);
+    let create_id = import.create_id();
+    let email_id = c
+        .send_single::<EmailImportResponse>(request)
+        .await
+        .map_err(client::map_error)?
+        .created(&create_id)
+        .map_err(client::map_error)?
+        .id()
+        .ok_or_else(|| CoreError::Jmap("Email/import returned no id".into()))?
+        .to_owned();
+    let mut request = c.request();
+    let set = request.set_email_submission().account_id(&c.account_id);
+    let create_id = set
+        .create()
+        .email_id(&email_id)
+        .identity_id(identity_id)
+        .create_id()
+        .unwrap_or_else(|| "c0".into());
+    set.arguments().on_success_destroy_email(&create_id);
+    let submitted = c
+        .send_single::<EmailSubmissionSetResponse>(request)
+        .await
+        .map_err(map_submission_error)
+        .and_then(|mut response| {
+            response
+                .created(&create_id)
+                .map(drop)
+                .map_err(map_submission_error)
+        });
+    if submitted.is_err() {
+        // Nothing went out: leave no unsent receipt in Sent.
+        destroy_email_if_present(c, &email_id).await?;
+    }
+    submitted
 }
 
 fn submission_request<'a>(
@@ -2852,7 +2995,7 @@ async fn fetch_body(
     let path_string = path.to_string_lossy().into_owned();
     let guarded_remote = remote_id.clone();
     let guarded_blob = expected_blob.clone();
-    let (persisted, thread_id) = ctx
+    let (persisted, thread_ids) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
@@ -2862,15 +3005,18 @@ async fn fetch_body(
                     && current.jmap_blob_id.as_deref() == Some(&guarded_blob)
             });
             if !valid {
-                return Ok((false, None));
+                return Ok((false, Vec::new()));
             }
-            crate::sync::ingest::store_body(&tx, message_id, &path_string, &parsed)?;
-            let thread_id = current.and_then(|row| row.thread_id);
-            if let Some(thread_id) = thread_id {
+            let mut thread_ids =
+                crate::sync::ingest::store_body(&tx, message_id, &path_string, &parsed)?;
+            if let Some(thread_id) = current.and_then(|row| row.thread_id) {
                 repo::threads::recompute(&tx, thread_id)?;
+                if !thread_ids.contains(&thread_id) {
+                    thread_ids.push(thread_id);
+                }
             }
             tx.commit()?;
-            Ok((true, thread_id))
+            Ok((true, thread_ids))
         })
         .await?;
     if !persisted {
@@ -2884,10 +3030,8 @@ async fn fetch_body(
         crate::sync::ingest::Arrival::Received,
     )
     .await?;
-    if let Some(thread_id) = thread_id {
-        ctx.bus.emit(CoreEvent::MailUpdated {
-            thread_ids: vec![thread_id],
-        });
+    if !thread_ids.is_empty() {
+        ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
     }
     Ok(())
 }

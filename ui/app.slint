@@ -4,6 +4,7 @@ import { MailAttachments } from "models.slint";
 import { AttachmentPreviewDialog } from "dialogs/attachment-preview-dialog.slint";
 export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
+export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
 export { RendererSettings } from "renderer-settings.slint";
 export { WindowChrome } from "window-chrome.slint";
 export { AppIcon, AppIconVariant } from "app-icon.slint";
@@ -528,6 +529,9 @@ export global I18n {
         if (key == "Could not add the event: {}") { return @tr("Could not add the event: {}", argument); }
         if (key == "Calendar invitations preference saved.") { return @tr("Calendar invitations preference saved."); }
         if (key == "Could not save the calendar invitations preference: {}") { return @tr("Could not save the calendar invitations preference: {}", argument); }
+        if (key == "Read receipt preference saved.") { return @tr("Read receipt preference saved."); }
+        if (key == "Could not save the read receipt preference: {}") { return @tr("Could not save the read receipt preference: {}", argument); }
+        if (key == "Could not answer the read receipt request: {}") { return @tr("Could not answer the read receipt request: {}", argument); }
         if (key == "Use YYYY-MM-DD for the date and a time such as {}.") { return @tr("Use YYYY-MM-DD for the date and a time such as {}.", argument); }
         if (key == "Event duration must be a number of minutes.") { return @tr("Event duration must be a number of minutes."); }
         if (key == "Add a title and choose a duration from 15 to 1440 minutes.") { return @tr("Add a title and choose a duration from 15 to 1440 minutes."); }
@@ -1120,6 +1124,8 @@ export component AppWindow inherits Window {
     in property <LocalizedMessage> sync-message;
     property <string> sync_status: I18n.ui-message(root.sync-message.key, root.sync-message.argument, root.sync-message.second_argument, root.sync-message.third_argument);
     in property <bool> sync_in_progress: false;
+    // Rust: an account's sidebar heading shows a problem.
+    in property <bool> account_problem: false;
     in property <[EmailTile]> email_tiles: [];
     in property <[EmailLink]> email_links: [];
     // The renderer reports the total laid-out content height while retaining
@@ -1186,6 +1192,8 @@ export component AppWindow inherits Window {
         TabsUi.navigated();
     }
     in-out property <string> settings_tab: "General";
+    // An account the sidebar asked to sign in again, until Settings shows it.
+    private property <int> settings-sign-in-account: -1;
     changed settings_tab => { TabsUi.navigated(); }
     // The active tab saves where the mail view is once it settles.
     changed selected_scope => { TabsUi.navigated(); }
@@ -1749,6 +1757,7 @@ export component AppWindow inherits Window {
             clipboard_request: root.clipboard_request;
             clipboard_request_id: root.clipboard_request_id;
             sync_in_progress: root.sync_in_progress;
+            account_problem: root.account_problem;
             can_load_more: root.can_load_more;
             loading_more: root.mail_loading_more;
             list_content_revision: root.mail_list_revision;
@@ -1770,6 +1779,7 @@ export component AppWindow inherits Window {
             email-scroll-y <=> root.email-scroll-y;
             settings_open <=> root.settings_open;
             settings_tab <=> root.settings_tab;
+            settings_sign_in_account <=> root.settings-sign-in-account;
             accent: root.accent;
             accent-soft: root.accent-soft;
             avatar-bg: root.avatar-bg;
@@ -2159,6 +2169,7 @@ export component AppWindow inherits Window {
             title-color: root.title-color;
             settings_open <=> root.settings_open;
             settings_tab <=> root.settings_tab;
+            sign-in-account <=> root.settings-sign-in-account;
             theme_mode <=> root.theme_mode;
             show_avatars <=> root.show_avatars;
             show_tabs <=> root.show_tabs;

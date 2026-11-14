@@ -29,6 +29,32 @@ export global MailDragApi {
     callback drop-on-mailbox(data-transfer, string, int, int) -> bool;
 }
 
+// What stops an account's mail checks.
+export enum AccountProblem {
+    none,
+    // The server turned the sign-in down; signing in again fixes it.
+    sign-in,
+    // A check failed, and the app keeps trying again on its own.
+    failed,
+}
+
+// How an account's mail checks are going, as its sidebar heading shows it.
+export struct AccountStatus {
+    // A check has been running for a moment.
+    checking: bool,
+    problem: AccountProblem,
+    // The heading shows the problem: at once after a check someone asked
+    // for, otherwise once it has lasted, so a dropped connection that comes
+    // straight back marks nothing.
+    marked: bool,
+    // The server's or the network's own account of the failure.
+    reason: string,
+    // When a check last brought the Inbox up to date, for
+    // AccountStatusText.last-checked.
+    checked_day: int,
+    checked_at: string,
+}
+
 export struct MailboxRow {
     account_id: int,
     folder_id: int,
@@ -53,6 +79,8 @@ export struct MailboxRow {
     count: string,
     color: color,
     has_custom_color: bool,
+    // Account rows only.
+    status: AccountStatus,
 }
 
 // Provider labels and local auto-categories share one presentation model.
@@ -239,6 +267,10 @@ export struct AccountRow {
     mail_protocol: string,
     status: string,
     sync_error: string,
+    // When a check last brought the Inbox up to date, for
+    // AccountStatusText.last-checked.
+    checked_day: int,
+    checked_at: string,
     initials: string,
     avatar: image,
     avatar_small: image,

@@ -540,6 +540,11 @@ pub struct Account {
     /// said.
     #[serde(default)]
     pub server_keeps_mail_days: Option<u32>,
+    /// When the last check that brought the Inbox up to date started, in
+    /// milliseconds since the epoch: the account last checked for new mail
+    /// then. `None` before its first complete check.
+    #[serde(default)]
+    pub caught_up_at: Option<i64>,
 }
 
 /// Mail imported into folders that exist only on this device. It belongs to
@@ -1090,6 +1095,88 @@ pub struct MessageDetail {
     pub in_spam: bool,
     /// Its sender is blocked: their mail goes to Spam.
     pub sender_blocked: bool,
+    /// The read receipt it asks for, when one may be sent and nothing has
+    /// answered it yet.
+    pub receipt_request: Option<ReceiptRequest>,
+    /// For a message one sent, the read receipts that came back for it,
+    /// earliest first.
+    pub returned_receipts: Vec<ReturnedReceipt>,
+}
+
+/// A read receipt a received message asks for (RFC 8098), which this client
+/// may send. Mail in Spam, drafts, sent and automated mail, and requests that
+/// go back to the account's own addresses, ask for none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptRequest {
+    /// Where the receipt would go.
+    pub to: Vec<Address>,
+    /// It may only go with the user's agreement: RFC 8098 section 2.1 wants
+    /// it for this request, or the receiving server didn't authenticate the
+    /// sender (section 6.1).
+    pub needs_confirmation: bool,
+}
+
+/// What a read receipt that came back says happened to the message (RFC 8098
+/// section 3.2.6.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Disposition {
+    /// Shown to someone reading the recipient's mailbox, which doesn't mean
+    /// it was read or understood.
+    Displayed,
+    /// Deleted, seen or not.
+    Deleted,
+    /// Printed, faxed or forwarded without being shown.
+    Dispatched,
+    /// Handled by rules or a server without being shown.
+    Processed,
+}
+
+impl Disposition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Displayed => "displayed",
+            Self::Deleted => "deleted",
+            Self::Dispatched => "dispatched",
+            Self::Processed => "processed",
+        }
+    }
+
+    /// A disposition type, in any case. The types RFC 3798 also had,
+    /// "denied" and "failed", say nothing happened to the message.
+    pub fn parse(value: &str) -> Option<Self> {
+        [
+            Self::Displayed,
+            Self::Deleted,
+            Self::Dispatched,
+            Self::Processed,
+        ]
+        .into_iter()
+        .find(|disposition| value.eq_ignore_ascii_case(disposition.as_str()))
+    }
+}
+
+/// A read receipt that came back for a message one sent: whom it's from and
+/// what it says happened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReturnedReceipt {
+    /// The recipient, named as the message addressed them where it did.
+    pub recipient: Address,
+    pub disposition: Disposition,
+    /// When the receipt was written, in milliseconds since the Unix epoch.
+    pub reported_at: i64,
+}
+
+/// How a read receipt request is answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceiptAnswer {
+    /// Send it: the user agreed to this one, or Settings says to always
+    /// send and the request needs no confirmation.
+    Send { user_agreed: bool },
+    /// Don't send one, and don't ask again.
+    Decline,
 }
 
 /// A sender whose mail goes to Spam.
@@ -1813,6 +1900,38 @@ impl ReduceMotion {
     }
 }
 
+/// What to do when a message asks for a read receipt (RFC 8098). The
+/// standard wants none sent without the user's consent by default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReadReceiptPolicy {
+    #[default]
+    Never,
+    /// Ask above the message.
+    Ask,
+    /// Send them, except where RFC 8098 wants the user asked first.
+    Always,
+}
+
+impl ReadReceiptPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::Ask => "ask",
+            Self::Always => "always",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "never" => Some(Self::Never),
+            "ask" => Some(Self::Ask),
+            "always" => Some(Self::Always),
+            _ => None,
+        }
+    }
+}
+
 /// The interface's text size (#231), as a step on the system's own text size.
 /// Message zoom and the composer's text size stay separate.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1987,6 +2106,9 @@ pub struct Settings {
     /// The interface's text size.
     #[serde(default)]
     pub interface_text_size: InterfaceTextSize,
+    /// What to do when a message asks for a read receipt.
+    #[serde(default)]
+    pub read_receipts: ReadReceiptPolicy,
     /// Named application palette: "default" | "teal" | "green" | "purple" | "custom".
     #[serde(default = "default_theme_preset")]
     pub theme_preset: String,
@@ -2351,6 +2473,7 @@ impl Default for Settings {
             message_appearance: MessageAppearance::default(),
             reduce_motion: ReduceMotion::default(),
             interface_text_size: InterfaceTextSize::default(),
+            read_receipts: ReadReceiptPolicy::default(),
             theme_preset: default_theme_preset(),
             custom_theme: CustomTheme::default(),
             show_avatars: true,
