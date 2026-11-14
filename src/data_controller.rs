@@ -500,11 +500,8 @@ pub(super) fn restore_account_backup(
             {
                 settings.load_remote_images = enabled;
             }
-            if let Some(enabled) = preferences
-                .get("markReadOnOpen")
-                .and_then(|value| value.as_bool())
-            {
-                settings.mark_read_on_open = enabled;
+            if let Some(choice) = exported_mark_read(preferences) {
+                settings.mark_read = choice;
             }
             if let Some(enabled) = preferences
                 .get("collectOutgoingContacts")
@@ -710,12 +707,12 @@ pub(super) fn restore_account_backup(
     app.set_undo_send_seconds(i32::try_from(settings.undo_send_seconds.clamp(0, 30)).unwrap_or(10));
     app.set_compose_font(settings.compose_font.as_str().into());
     app.set_compose_text_size(settings.compose_text_size.as_str().into());
-    app.set_mark_read_on_open(settings.mark_read_on_open);
+    app.set_mark_read(settings.mark_read.as_str().into());
     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
     app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
     app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
     app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
-    state.borrow_mut().mark_read_on_open = settings.mark_read_on_open;
+    state.borrow_mut().mark_read = settings.mark_read;
     app.set_remote_images_enabled(settings.load_remote_images && cfg!(feature = "remote-content"));
     app.set_close_to_tray(settings.close_to_tray && !cfg!(mobile));
     Ok(restore)
@@ -1376,7 +1373,7 @@ pub(super) fn register_data_management_callbacks(
                     "timeFormat": settings.time_format,
                     "calendarWeekStart": settings.calendar_week_start,
                     "loadRemoteImages": settings.load_remote_images,
-                    "markReadOnOpen": settings.mark_read_on_open,
+                    "markRead": settings.mark_read.as_str(),
                     "collectOutgoingContacts": settings.collect_outgoing_contacts,
                     "collectIncomingContacts": settings.collect_incoming_contacts,
                     "contactSuggestAllAccounts": settings.contact_suggest_all_accounts,
@@ -1650,7 +1647,7 @@ pub(super) fn register_data_management_callbacks(
                         state.selected_id = None;
                         state.rendered_id = None;
                         state.using_core = true;
-                        state.mark_read_on_open = true;
+                        state.mark_read = flectar_mail_core::models::MarkRead::Immediately;
                     }
                     refresh_connected_accounts(&app, &data_reset_state);
                     let _ = render_current(&app, &data_reset_state, &data_reset_runtime);
@@ -1717,7 +1714,7 @@ pub(super) fn register_data_management_callbacks(
                     app.set_undo_send_seconds(10);
                     app.set_compose_font("default".into());
                     app.set_compose_text_size("normal".into());
-                    app.set_mark_read_on_open(true);
+                    app.set_mark_read("immediately".into());
                     app.set_remote_images_enabled(false);
                     app.set_close_to_tray(false);
                     crate::window_chrome::apply_preference(
@@ -1763,9 +1760,51 @@ pub(super) fn register_data_management_callbacks(
     });
 }
 
+/// When a backup says opened messages count as read. Backups made before
+/// the delay choices say only on or off.
+fn exported_mark_read(
+    preferences: &serde_json::Value,
+) -> Option<flectar_mail_core::models::MarkRead> {
+    use flectar_mail_core::models::MarkRead;
+    match preferences.get("markRead") {
+        Some(choice) => choice.as_str().and_then(MarkRead::parse),
+        None => preferences
+            .get("markReadOnOpen")
+            .and_then(|value| value.as_bool())
+            .map(|on| {
+                if on {
+                    MarkRead::Immediately
+                } else {
+                    MarkRead::Never
+                }
+            }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backups_old_and_new_say_when_messages_count_as_read() {
+        use flectar_mail_core::models::MarkRead;
+        let read = |json: &str| exported_mark_read(&serde_json::from_str(json).unwrap());
+        assert_eq!(
+            read(r#"{"markRead":"afterFiveSeconds"}"#),
+            Some(MarkRead::AfterFiveSeconds)
+        );
+        assert_eq!(read(r#"{"markReadOnOpen":false}"#), Some(MarkRead::Never));
+        assert_eq!(
+            read(r#"{"markReadOnOpen":true}"#),
+            Some(MarkRead::Immediately)
+        );
+        // A choice this version doesn't know changes nothing.
+        assert_eq!(
+            read(r#"{"markRead":"sometimes","markReadOnOpen":false}"#),
+            None
+        );
+        assert_eq!(read("{}"), None);
+    }
 
     #[test]
     fn storage_scan_lifetime_follows_settings_visibility() {

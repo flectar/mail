@@ -515,7 +515,9 @@ export component SettingsDialog inherits Rectangle {
     // The font and size new messages start in.
     in-out property <string> compose_font: "default";
     in-out property <string> compose_text_size: "normal";
-    in-out property <bool> mark_read_on_open: true;
+    // When an opened unread message counts as read: "immediately",
+    // "afterTwoSeconds", "afterFiveSeconds" or "never".
+    in-out property <string> mark_read: "immediately";
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
     in-out property <bool> contact_suggest_all_accounts: false;
@@ -632,7 +634,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_sync_interval(int);
     callback save_undo_send(int);
     callback save_compose_text_style(string, string);
-    callback save_mark_read_on_open(bool);
+    callback save_mark_read(string);
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
@@ -675,6 +677,16 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> flectar-services-available: false;
     callback start_flectar_sign_in();
 
+    private property <[string]> mark-read-options: [
+        @tr("Immediately"),
+        @tr("After 2 seconds"),
+        @tr("After 5 seconds"),
+        @tr("Never"),
+    ];
+    private property <[string]> mark-read-values: ["immediately", "afterTwoSeconds", "afterFiveSeconds", "never"];
+    private property <int> mark-read-index: root.mark_read == "never" ? 3
+        : root.mark_read == "afterFiveSeconds" ? 2
+        : root.mark_read == "afterTwoSeconds" ? 1 : 0;
     private property <[string]> read-receipt-options: [
         @tr("Never send"),
         @tr("Ask each time"),
@@ -1457,22 +1469,17 @@ export component SettingsDialog inherits Rectangle {
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }
-                                    HorizontalBox {
-                                        height: (root.compact ? 16px : 13px) + mark-read-title.height + mark-read-description.height;
-                                        spacing: 16px;
-                                        VerticalBox {
-                                            horizontal-stretch: 1;
-                                            min-width: 0px;
-                                            spacing: 3px;
-                                            mark-read-title := Text { height: max(18px, self.preferred-height); text: @tr("Mark messages as read when opened"); color: root.body-text; font-size: TypeScale.body; font-weight: 600; overflow: elide; }
-                                            mark-read-description := Text { height: max(root.compact ? 34px : 17px, self.preferred-height); text: @tr("Turn this off to keep unread status until you change it manually."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
-                                        }
-                                        Switch {
-                                            checked: root.mark_read_on_open;
-                                            toggled => {
-                                                root.mark_read_on_open = self.checked;
-                                                root.save_mark_read_on_open(self.checked);
-                                            }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Mark messages as read");
+                                        description: @tr("When an unread message you open counts as read. With a delay, messages you only pass over stay unread. Never leaves them for you to mark.");
+                                        choices: root.mark-read-options;
+                                        selected-index: root.mark-read-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            root.mark_read = root.mark-read-values[index];
+                                            root.save_mark_read(root.mark_read);
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }

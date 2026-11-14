@@ -65,6 +65,7 @@ pub mod pdf_preview;
 mod photo_shrink;
 pub mod platform;
 mod preview_controls;
+mod read_marking;
 mod read_receipts;
 mod reader_clipboard;
 #[cfg(test)]
@@ -727,7 +728,8 @@ struct InboxState {
     profile_avatar_tx: UiSender<ProfileAvatarUpdate>,
     remote_images_enabled: bool,
     remote_images_override_id: Option<i32>,
-    mark_read_on_open: bool,
+    /// When an opened unread message counts as read.
+    mark_read: flectar_mail_core::models::MarkRead,
     /// Whether the mail list shows conversations or each message on its own.
     grouping: MailGrouping,
     warm_start_cache: WarmStartCacheWriter,
@@ -1279,7 +1281,7 @@ impl InboxState {
             profile_avatar_tx,
             remote_images_enabled,
             remote_images_override_id: None,
-            mark_read_on_open: true,
+            mark_read: flectar_mail_core::models::MarkRead::Immediately,
             grouping: MailGrouping::Conversations,
             warm_start_cache,
         }
@@ -4524,9 +4526,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         state.local_mail = local_mail;
                         state.set_scope(scope);
                         state.remote_images_enabled = allow_remote_images;
-                        state.mark_read_on_open = settings
+                        state.mark_read = settings
                             .as_ref()
-                            .is_none_or(|settings| settings.mark_read_on_open);
+                            .map(|settings| settings.mark_read)
+                            .unwrap_or_default();
                         state.grouping = core.grouping();
                         state.favicon_loader = if allow_remote_images {
                             match FaviconLoader::new(&startup_paths_for_ui.cache_dir) {
@@ -7198,12 +7201,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        // Opening another message ends the wait for the one before, which
+        // stays unread.
+        read_marking::cancel();
         let read_target = {
             let state = state_for_selection.borrow();
             state
-                .core
-                .clone()
-                .filter(|_| state.mark_read_on_open && state.using_core)
+                .mark_read
+                .delay()
+                .filter(|_| state.using_core)
+                .zip(state.core.clone())
                 .zip(
                     state
                         .messages
@@ -7219,15 +7226,39 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 return;
             }
         };
-        if let Some((core, target)) = read_target
-            && ui_dispatch::enqueue_once(&mark_read_tx, &pending_reads, target, (core, target))
-                .is_err()
-        {
-            app.set_render_status(UiMessage::detail(
-                "Could not mark message as read: {}",
-                "read queue is busy; reopen the message to retry",
-            ));
+        let Some(((delay, core), target)) = read_target else {
+            return;
+        };
+        let mark = {
+            let app = app.as_weak();
+            let mark_read_tx = mark_read_tx.clone();
+            let pending_reads = Rc::clone(&pending_reads);
+            move || {
+                if ui_dispatch::enqueue_once(&mark_read_tx, &pending_reads, target, (core, target))
+                    .is_err()
+                    && let Some(app) = app.upgrade()
+                {
+                    app.set_render_status(UiMessage::detail(
+                        "Could not mark message as read: {}",
+                        "read queue is busy; reopen the message to retry",
+                    ));
+                }
+            }
+        };
+        if delay.is_zero() {
+            mark();
+            return;
         }
+        // Only a message still open when the wait ends counts as read.
+        let state = Rc::downgrade(&state_for_selection);
+        read_marking::after(delay, move || {
+            if state
+                .upgrade()
+                .is_some_and(|state| state.borrow().selected_id == Some(id))
+            {
+                mark();
+            }
+        });
     });
 
     let app_weak = app.as_weak();
