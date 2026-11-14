@@ -30,6 +30,10 @@ Replies stay grouped in chronological order, with the active message expanded
 inside the reading pane. To list, open and act on every message on its own, turn
 off **Conversation view** in Settings → General.
 
+Opening an unread message marks it read. **Mark messages as read** in Settings →
+General can wait 2 or 5 seconds instead, so messages you only pass over, such
+as with the arrow keys, stay unread. **Never** leaves marking to you.
+
 | Keys | Action |
 | --- | --- |
 | **Up/Down** | Move between messages |
