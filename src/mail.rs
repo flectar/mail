@@ -1363,9 +1363,12 @@ impl CoreMailSource {
             .map_err(|e| e.to_string())
     }
 
-    pub async fn set_mark_read_on_open(&self, enabled: bool) -> Result<(), String> {
+    pub async fn set_mark_read(
+        &self,
+        choice: flectar_mail_core::models::MarkRead,
+    ) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
-        settings.mark_read_on_open = enabled;
+        settings.mark_read = choice;
         self.core
             .set_settings(settings)
             .await

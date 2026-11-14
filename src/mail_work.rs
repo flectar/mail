@@ -65,6 +65,11 @@ impl Operation {
         }
     }
 
+    /// Whether it marks mail read or unread by hand.
+    fn sets_read_state(&self) -> bool {
+        matches!(self, Self::Action(action) if action == "mark_read" || action == "mark_unread")
+    }
+
     fn queues_permanent_deletion(&self) -> bool {
         match self {
             Self::EmptyTrash(_) => true,
@@ -459,6 +464,14 @@ pub(super) fn enqueue(
     }
     if operations.len() > 10_000 {
         return Err("select at most 10000 messages per action".into());
+    }
+    // Marking by hand settles the read state: a wait for the open message
+    // mustn't change it afterwards.
+    if operations
+        .iter()
+        .any(|(_, _, operation)| operation.sets_read_state())
+    {
+        crate::read_marking::cancel();
     }
     let mut state = state.borrow_mut();
     let work = state

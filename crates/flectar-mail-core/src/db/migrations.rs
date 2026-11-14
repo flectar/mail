@@ -53,6 +53,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/034_blocked_senders.sql")),
     Migration::Plain(include_str!("migrations/035_read_receipts.sql")),
     Migration::Plain(include_str!("migrations/036_returned_receipts.sql")),
+    Migration::Plain(include_str!("migrations/037_mark_read.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -513,6 +514,48 @@ mod tests {
         conn.execute("UPDATE messages SET body_state = 'cached' WHERE id = 1", [])
             .unwrap();
         assert_eq!(queued(&conn), 0);
+    }
+
+    #[test]
+    fn mark_read_upgrade_keeps_the_choice() {
+        for (stored, expected) in [
+            ("false", crate::models::MarkRead::Never),
+            ("true", crate::models::MarkRead::Immediately),
+        ] {
+            let mut conn = staged(36);
+            conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES ('settings', ?1)",
+                [format!(
+                    "{{\"theme\":\"snow\",\"undoSendSeconds\":20,\"loadRemoteImages\":true,\"markReadOnOpen\":{stored}}}"
+                )],
+            )
+            .unwrap();
+            run(&mut conn).unwrap();
+            let value: String = conn
+                .query_row(
+                    "SELECT value FROM app_settings WHERE key = 'settings'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(!value.contains("markReadOnOpen"), "{value}");
+            let settings = super::super::repo::settings::get(&conn).unwrap();
+            assert_eq!(settings.mark_read, expected);
+            assert_eq!(settings.theme, "snow");
+        }
+        // Settings that never stored it keep the default.
+        let mut conn = staged(36);
+        conn.execute(
+            "INSERT INTO app_settings (key, value)
+             VALUES ('settings', '{\"theme\":\"snow\",\"undoSendSeconds\":20,\"loadRemoteImages\":true}')",
+            [],
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        assert_eq!(
+            super::super::repo::settings::get(&conn).unwrap().mark_read,
+            crate::models::MarkRead::Immediately
+        );
     }
 
     #[test]
