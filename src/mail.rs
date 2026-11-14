@@ -2806,7 +2806,7 @@ fn parse_recipients(value: &str) -> Result<Vec<Address>, String> {
         .collect()
 }
 
-fn parse_address(value: &str) -> Result<Address, String> {
+pub(crate) fn parse_address(value: &str) -> Result<Address, String> {
     let (name, email) = value
         .rsplit_once('<')
         .and_then(|(name, email)| email.strip_suffix('>').map(|email| (Some(name), email)))
