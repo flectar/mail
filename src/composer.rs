@@ -2714,9 +2714,10 @@ impl ComposeSession {
             let html = document.body_html_with(self.quote.borrow().is_some(), |image| {
                 self.photos.shrunk(image)
             });
-            // Mail read as plain text names each image in its place. A draft keeps the
-            // placeholders, which the HTML's images reopen into.
-            (html, send.then(|| document.text_with_image_descriptions()))
+            // Mail read as plain text has each link's address and each image's name in
+            // its place. A draft keeps the placeholders, which the HTML's images reopen
+            // into.
+            (html, send.then(|| document.plain_text()))
         };
         let body = described.as_deref().unwrap_or(body);
         // The original goes below what the user wrote, in both parts.

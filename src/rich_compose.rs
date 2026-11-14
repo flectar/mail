@@ -996,6 +996,12 @@ impl RichComposeDocument {
             .filter_map(|run| run.style.image.as_ref())
     }
 
+    /// The text as mail read as plain text gets it: each link followed by its address where its
+    /// text doesn't show it, and each picture named in its place.
+    pub(crate) fn plain_text(&self) -> String {
+        plain_text_of(&self.text, &self.styles, true, 0).0
+    }
+
     /// The text as plain text shows it, each image as its description.
     pub(crate) fn text_with_image_descriptions(&self) -> String {
         let mut text = String::with_capacity(self.text.len());
@@ -3053,6 +3059,98 @@ fn signature_runs(html: &str, base: &CharacterStyle) -> Option<(String, Vec<Comp
         .filter(|(text, _)| !text.is_empty())
 }
 
+/// `text`, styled by `runs`, as plain text: each link followed by its address in angle brackets
+/// where its text doesn't show it, as mail apps write links in plain text, and each picture as
+/// its description, or as its alt text alone when `described` is false. Also where `offset` in
+/// `text` lands in it.
+fn plain_text_of(
+    text: &str,
+    runs: &[ComposeStyleRun],
+    described: bool,
+    offset: usize,
+) -> (String, usize) {
+    let mut plain = String::with_capacity(text.len());
+    let mut mapped = None;
+    let mut copy = |plain: &mut String, range: Range<usize>| {
+        if mapped.is_none() && (range.start..=range.end).contains(&offset) {
+            mapped = Some(plain.len() + offset - range.start);
+        }
+        plain.push_str(&text[range]);
+    };
+    let mut at = 0;
+    // Where the link being written started in `text`.
+    let mut link_start = 0;
+    for (index, run) in runs.iter().enumerate() {
+        let range = run.range.start.max(at)..run.range.end.min(text.len());
+        if range.start > at {
+            copy(&mut plain, at..range.start);
+        }
+        if range.is_empty() {
+            continue;
+        }
+        let continues_link = index > 0
+            && runs[index - 1].range.end == range.start
+            && runs[index - 1].style.link.is_some()
+            && runs[index - 1].style.link == run.style.link;
+        if !continues_link {
+            link_start = range.start;
+        }
+        match &run.style.image {
+            Some(image) => {
+                for (local, character) in text[range.clone()].char_indices() {
+                    if character == IMAGE_PLACEHOLDER {
+                        copy(&mut plain, range.start + local..range.start + local);
+                        if described {
+                            plain.push_str(&image.description());
+                        } else {
+                            plain.push_str(image.alt.trim());
+                        }
+                    } else {
+                        let start = range.start + local;
+                        copy(&mut plain, start..start + character.len_utf8());
+                    }
+                }
+            }
+            None => copy(&mut plain, range.clone()),
+        }
+        at = range.end;
+        // A link's address follows its last run.
+        if let Some(url) = &run.style.link {
+            let ends_link = runs.get(index + 1).is_none_or(|next| {
+                next.range.start != range.end || next.style.link.as_ref() != Some(url)
+            });
+            if ends_link && !shows_address(&text[link_start..range.end], url) {
+                plain.push_str(" <");
+                plain.push_str(url);
+                plain.push('>');
+            }
+        }
+    }
+    if at < text.len() {
+        copy(&mut plain, at..text.len());
+    }
+    let mapped = mapped.unwrap_or(plain.len());
+    (plain, mapped)
+}
+
+/// Whether a link's `text` already shows its `address`, as a typed address does.
+fn shows_address(text: &str, address: &str) -> bool {
+    fn bare(value: &str) -> &str {
+        let value = value.trim();
+        let value = ["mailto:", "https://", "http://"]
+            .iter()
+            .find_map(|scheme| {
+                value
+                    .get(..scheme.len())
+                    .filter(|start| start.eq_ignore_ascii_case(scheme))
+                    .map(|_| &value[scheme.len()..])
+            })
+            .unwrap_or(value);
+        value.strip_suffix('/').unwrap_or(value)
+    }
+    bare(text).eq_ignore_ascii_case(bare(address))
+}
+
 /// What a signature's HTML reads as, pictures named in their places, for its preview.
 pub(crate) fn signature_preview(html: &str) -> String {
     let mut document = RichComposeDocument::default();
@@ -4912,6 +5010,33 @@ mod tests {
         );
         // Files that aren't images, and images in formats mail doesn't show, aren't taken.
         assert!(InlineImage::from_file_bytes(b"not an image".to_vec(), "").is_none());
+    }
+
+    #[test]
+    fn plain_text_writes_out_link_addresses_and_names_pictures() {
+        let text = "See the plan, write to ana@example.org or go to example.org/a.";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let at = |part: &str| {
+            let start = text.find(part).unwrap() as i32;
+            (start, start + part.len() as i32)
+        };
+        let (start, end) = at("the plan");
+        document.set_link("https://example.org/plan", text, start, end);
+        let (start, end) = at("ana@example.org");
+        document.set_link("mailto:ana@example.org", text, start, end);
+        let (start, end) = at("example.org/a");
+        document.set_link("https://example.org/a/", text, start, end);
+        // A link partly bold is still one link.
+        let (start, _) = at("plan");
+        document.format("bold", text, start, start + 4);
+        document.update_selection(0, 0);
+        document.insert_image(InlineImage::from_file_bytes(png(4, 4), "Map").unwrap());
+        assert_eq!(
+            document.plain_text(),
+            "[image: Map]See the plan <https://example.org/plan>, write to ana@example.org or \
+             go to example.org/a."
+        );
     }
 
     #[test]
