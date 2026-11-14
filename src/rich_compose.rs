@@ -500,6 +500,8 @@ pub struct RichComposeDocument {
     text_changes: VecDeque<TextChange>,
     /// Positions in the text from this revision on can be followed through `text_changes`.
     text_changes_since: u64,
+    /// The revision when it was last opened or saved, to tell whether it changed since.
+    saved_revision: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -519,6 +521,27 @@ impl RichComposeDocument {
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Takes the text and formatting as they are for what was last opened or saved.
+    pub(crate) fn mark_saved(&mut self) {
+        self.saved_revision = self.revision;
+    }
+
+    /// Whether the text or its formatting changed since it was last opened or saved.
+    pub(crate) fn changed_since_saved(&self) -> bool {
+        self.revision != self.saved_revision
+    }
+
+    /// Opens a signature's HTML to write, the composer's own as it was and other HTML with
+    /// the formatting pasting keeps, with nothing to undo.
+    pub(crate) fn load_signature_html(&mut self, html: &str) -> ComposeSelection {
+        let selection = match signature_runs(html, &self.base) {
+            Some((text, styles)) => self.reopen(text, styles),
+            None => self.load("", 0, 0),
+        };
+        self.mark_saved();
+        selection
     }
 
     /// Sets the default text style's font and size. What's typed into an empty message starts
@@ -880,12 +903,25 @@ impl RichComposeDocument {
                     at..at
                 }
             };
-        let signature = html.and_then(|html| {
-            import_body_html(html)
-                .or_else(|| crate::compose_paste::styled_text(html, &self.base))
-                .map(|(text, runs)| trimmed_runs(text, runs))
-                .filter(|(text, _)| !text.is_empty())
-        });
+        let signature =
+            html.and_then(|html| signature_runs(html, &self.base))
+                .map(|(text, runs)| {
+                    // A signature takes the message's font and size where it names none, as mail
+                    // apps' signatures match the default message font.
+                    let runs = runs
+                        .into_iter()
+                        .map(|mut run| {
+                            if run.style.family == FontFamily::Default {
+                                run.style.family = self.base.family;
+                            }
+                            if run.style.size == TextSize::Normal {
+                                run.style.size = self.base.size;
+                            }
+                            run
+                        })
+                        .collect::<Vec<_>>();
+                    (text, runs)
+                });
         let mut block = String::new();
         let mut runs = Vec::new();
         if let Some((text, signature_runs)) = signature {
@@ -2980,6 +3016,23 @@ impl HtmlImport {
     }
 }
 
+/// A signature's text and formatting: the composer's own HTML as it wrote it, and other HTML
+/// with the formatting pasting keeps, without the blank space around it. `None` when it holds
+/// no text.
+fn signature_runs(html: &str, base: &CharacterStyle) -> Option<(String, Vec<ComposeStyleRun>)> {
+    import_body_html(html)
+        .or_else(|| crate::compose_paste::styled_text(html, base))
+        .map(|(text, runs)| trimmed_runs(text, runs))
+        .filter(|(text, _)| !text.is_empty())
+}
+
+/// What a signature's HTML reads as, pictures named in their places, for its preview.
+pub(crate) fn signature_preview(html: &str) -> String {
+    let mut document = RichComposeDocument::default();
+    document.load_signature_html(html);
+    document.text_with_image_descriptions()
+}
+
 /// `text` without the blank space around it, and `runs` cut to what's left.
 fn trimmed_runs(text: String, runs: Vec<ComposeStyleRun>) -> (String, Vec<ComposeStyleRun>) {
     let start = text.len() - text.trim_start().len();
@@ -5046,6 +5099,48 @@ mod tests {
         assert_eq!((document.text(), none), ("Hello", None));
         document.history("undo");
         assert_eq!(document.text(), format!("Hello{swapped}"));
+    }
+
+    #[test]
+    fn signatures_open_to_write_and_preview_with_their_pictures() {
+        // Written in the composer, plain unless formatted.
+        let mut written = RichComposeDocument::default();
+        written.load("Zoë Ortiz\n", 0, 0);
+        written.format("color:#0b5394", "Zoë Ortiz\n", 0, "Zoë Ortiz".len() as i32);
+        let end = written.text().len() as i32;
+        written.update_selection(end, end);
+        written.insert_image(InlineImage::from_file_bytes(png(60, 20), "Logo").unwrap());
+        let html = written.body_html().unwrap();
+
+        let mut editor = RichComposeDocument::default();
+        editor.load_signature_html(&html);
+        assert_eq!(editor.text(), "Zoë Ortiz\n\u{fffc}");
+        assert!(!editor.changed_since_saved());
+        assert!(editor.history("undo").is_none());
+        editor.format("bold", "Zoë Ortiz\n\u{fffc}", 0, 3);
+        assert!(editor.changed_since_saved());
+        editor.mark_saved();
+        assert!(!editor.changed_since_saved());
+
+        assert_eq!(signature_preview(&html), "Zoë Ortiz\n[image: Logo]");
+        assert_eq!(
+            signature_preview("<div>Pat Lee<br>Support</div>"),
+            "Pat Lee\nSupport"
+        );
+        assert_eq!(signature_preview("<div> </div>"), "");
+
+        // In a message, plain text takes the message's font and size, and set ones stay.
+        let mut message = RichComposeDocument::default();
+        message.set_base_style(FontFamily::Serif, TextSize::Large);
+        message.load("", 0, 0);
+        let (_, block) = message.replace_signature(None, 0, Some(&html));
+        assert!(block.is_some());
+        let name = message.text().find("Zoë").unwrap();
+        let style = message.style_at(name).unwrap();
+        assert_eq!(
+            (style.family, style.size, style.color),
+            (FontFamily::Serif, TextSize::Large, Some(0x0b5394))
+        );
     }
 
     #[test]

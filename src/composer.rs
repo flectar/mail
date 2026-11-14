@@ -6,7 +6,7 @@
 use super::*;
 use crate::rich_compose::{EditMark, EditState};
 use flectar_mail_core::models::{
-    Address, AttachmentMeta, SaveDraftArgs, SenderIdentity, Signature,
+    Address, AttachmentMeta, SaveDraftArgs, SenderIdentity, Settings, Signature,
 };
 use slint::SharedString;
 #[cfg(desktop)]
@@ -87,6 +87,8 @@ pub(super) struct ComposeSession {
     /// edited it, and the signatures of its sending account.
     signature: RefCell<Option<String>>,
     signatures: RefCell<Vec<Signature>>,
+    /// The signature this composer writes, in place of a message.
+    signature_target: RefCell<Option<SignatureTarget>>,
     /// Bumped for each sending-account change; older results are dropped.
     preferences_generation: Cell<u64>,
     spelling: MessageSpelling,
@@ -264,6 +266,11 @@ pub(super) fn install(
 }
 
 /// The composers, once installed.
+/// Opens a signature, or a new one when `signature` is `None`, in a composer to write.
+pub(super) fn edit_signature(app: &AppWindow, account_id: i64, signature: Option<Signature>) {
+    with_composers(|composers| composers.edit_signature(app, account_id, signature));
+}
+
 /// Files dragged over the main window, for its open message to show where they'll go.
 #[cfg(desktop)]
 pub(super) fn files_hovered(hovering: bool) {
@@ -363,7 +370,11 @@ pub(super) fn save_open_messages() {
     with_composers(|composers| {
         let sessions = composers.sessions.borrow().clone();
         for session in sessions {
-            if session.disposed.get() || session.send_action.get().is_some() {
+            // A signature being written isn't a message, and has no draft.
+            if session.disposed.get()
+                || session.send_action.get().is_some()
+                || session.signature_target.borrow().is_some()
+            {
                 continue;
             }
             let Some(host) = session.host() else {
@@ -582,10 +593,15 @@ impl Composers {
             }
             previous.dispose();
         }
+        self.start_session(app, Host::Main(app.as_weak()))
+    }
+
+    /// A new, empty composer in `host`.
+    fn start_session(self: &Rc<Self>, app: &AppWindow, host: Host) -> Option<Rc<ComposeSession>> {
         let session = Rc::new_cyclic(|this| ComposeSession {
             this: this.clone(),
             composers: Rc::downgrade(self),
-            host: RefCell::new(Host::Main(app.as_weak())),
+            host: RefCell::new(host),
             host_id: Cell::new(0),
             files: RefCell::default(),
             generation: Cell::new(0),
@@ -604,6 +620,7 @@ impl Composers {
             dropped: RefCell::default(),
             signature: RefCell::default(),
             signatures: RefCell::default(),
+            signature_target: RefCell::default(),
             preferences_generation: Cell::new(0),
             spelling: MessageSpelling::default(),
             disposed: Cell::new(false),
@@ -617,7 +634,7 @@ impl Composers {
         );
         let host = session.host()?;
         let ui = host.ui();
-        ui.set_can_pop_out(self.pop_out);
+        ui.set_can_pop_out(self.pop_out && matches!(host, HostRef::Main(_)));
         ui.set_accounts(app.get_connected_accounts());
         ui.set_account_id(app.get_compose_account_id());
         ui.set_from_label(app.get_compose_from_label());
@@ -625,6 +642,34 @@ impl Composers {
         session.clear_fields(&host);
         self.sessions.borrow_mut().push(Rc::clone(&session));
         Some(session)
+    }
+
+    /// Opens a signature to write in a composer of its own: on the desktop in a window beside
+    /// Settings and any message being written, and on phones in place of Settings.
+    fn edit_signature(
+        self: &Rc<Self>,
+        app: &AppWindow,
+        account_id: i64,
+        signature: Option<Signature>,
+    ) {
+        let session = if self.pop_out {
+            let Some(host) = new_window(app) else {
+                return;
+            };
+            self.start_session(app, host)
+        } else {
+            // Phones show one composer, which a message being written keeps.
+            if self.in_app().is_some() {
+                app.global::<AccountMailPreferences>()
+                    .set_status("Close the message you're writing to edit a signature.".into());
+                return;
+            }
+            app.set_settings_open(false);
+            self.open(app)
+        };
+        if let Some(session) = session {
+            session.start_signature(account_id, signature, !self.pop_out);
+        }
     }
 
     /// A new message to `to`, which may be empty. A message the main window
@@ -1196,12 +1241,15 @@ impl ComposeSession {
         };
         let ui = host.ui();
         ui.set_mode(mode.into());
-        let preferences = host.preferences();
-        preferences.invoke_composer_reset();
-        if let Some(sender_email) = sender_email {
-            preferences.set_composer_sender_email(sender_email.into());
+        // A signature has no sender, and no signature of its own to insert.
+        if mode != "signature" {
+            let preferences = host.preferences();
+            preferences.invoke_composer_reset();
+            if let Some(sender_email) = sender_email {
+                preferences.set_composer_sender_email(sender_email.into());
+            }
+            preferences.invoke_composer_account_changed(ui.get_account_id());
         }
-        preferences.invoke_composer_account_changed(ui.get_account_id());
         self.editor.borrow_mut().reset();
         {
             let document = self.document.borrow();
@@ -1427,6 +1475,7 @@ impl ComposeSession {
         *self.left_out_quote.borrow_mut() = None;
         *self.edited_quote.borrow_mut() = None;
         *self.signature.borrow_mut() = None;
+        *self.signature_target.borrow_mut() = None;
         if let Some(host) = self.host() {
             match &host {
                 HostRef::Main(_) => {
@@ -1495,6 +1544,12 @@ impl ComposeSession {
         ui.on_close(move || {
             if let Some(session) = weak.upgrade() {
                 session.close();
+            }
+        });
+        let weak = self.reference();
+        ui.on_save_signature(move || {
+            if let Some(session) = weak.upgrade() {
+                session.save_signature();
             }
         });
         let weak = self.reference();
@@ -1716,7 +1771,19 @@ impl ComposeSession {
         if self.send_action.get().is_some() {
             return;
         }
+        let back_to_settings = self
+            .signature_target
+            .borrow()
+            .as_ref()
+            .is_some_and(|target| target.return_to_settings);
         self.dispose();
+        if back_to_settings
+            && let Some(app) = self
+                .composers()
+                .and_then(|composers| composers.app.upgrade())
+        {
+            app.set_settings_open(true);
+        }
         if let Some(app) = self
             .composers()
             .and_then(|composers| composers.app.upgrade())
@@ -2166,6 +2233,13 @@ impl ComposeSession {
             return;
         };
         let ui = host.ui();
+        if self.signature_target.borrow().is_some() {
+            ui.set_notice(
+                UiMessage::plain("A signature can hold pictures, but not attachments."),
+                true,
+            );
+            return;
+        }
         let mut files = self.files.borrow_mut();
         let mut total_size = files
             .iter()
@@ -3086,6 +3160,160 @@ impl ComposeSession {
         preferences.set_composer_sender_email(identity.email);
     }
 
+    /// Starts writing `signature`, or a new one, for `account_id`: its name where a message
+    /// has its subject, and its text in the editor in the formatting it was saved with.
+    fn start_signature(
+        self: &Rc<Self>,
+        account_id: i64,
+        signature: Option<Signature>,
+        return_to_settings: bool,
+    ) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        let name = signature
+            .as_ref()
+            .map(|signature| signature.name.clone())
+            .unwrap_or_default();
+        *self.signature_target.borrow_mut() = Some(SignatureTarget {
+            account_id,
+            id: signature
+                .as_ref()
+                .map(|signature| signature.id.clone())
+                .unwrap_or_default(),
+            return_to_settings,
+        });
+        ui.set_account_id(i32::try_from(account_id).unwrap_or_default());
+        ui.set_subject(name.as_str().into());
+        ui.set_signature_saved_name(name.into());
+        {
+            let mut document = self.document.borrow_mut();
+            // Plain text names no font, so a signature takes each message's own.
+            document.set_base_style(
+                crate::rich_compose::FontFamily::Default,
+                crate::rich_compose::TextSize::Normal,
+            );
+            match &signature {
+                Some(signature) => {
+                    document.load_signature_html(&signature.html);
+                }
+                None => {
+                    document.load("", 0, 0);
+                    document.mark_saved();
+                }
+            }
+        }
+        self.show("signature", None);
+        #[cfg(desktop)]
+        if let HostRef::Window(handle) = &host {
+            self.watch_window(handle);
+            if let Err(error) = handle.show() {
+                ui.set_notice(
+                    UiMessage::detail("Could not open composer: {}", error),
+                    true,
+                );
+            }
+        }
+    }
+
+    /// Saves the signature being written to Settings, and closes it once saved.
+    fn save_signature(self: &Rc<Self>) {
+        let Some(target) = self.signature_target.borrow().clone() else {
+            return;
+        };
+        let (Some(host), Some(composers)) = (self.host(), self.composers()) else {
+            return;
+        };
+        let ui = host.ui();
+        if ui.get_sending() {
+            return;
+        }
+        let name = ui.get_subject().trim().to_owned();
+        if name.is_empty() {
+            ui.set_notice(UiMessage::plain("Give the signature a name."), true);
+            return;
+        }
+        let html = {
+            let body = ui.get_body();
+            let mut document = self.document.borrow_mut();
+            if document.text() != body.as_str() {
+                let end = i32::try_from(body.len()).unwrap_or(i32::MAX);
+                document.synchronize(&body, end, end);
+            }
+            document.body_html().unwrap_or_default()
+        };
+        let Some(core) = composers
+            .state
+            .borrow()
+            .core
+            .as_ref()
+            .map(CoreMailSource::account_preferences_core)
+        else {
+            return;
+        };
+        let signature = Signature {
+            id: target.id,
+            account_id: target.account_id,
+            name,
+            html,
+        };
+        // Saving holds the composer, as sending does, so it saves once.
+        ui.set_sending(true);
+        let task = composers.runtime.spawn(async move {
+            let saved = core
+                .save_signature(signature)
+                .await
+                .map_err(|error| error.to_string())?;
+            let settings = core
+                .get_settings()
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>((saved, settings))
+        });
+        let session = self.reference();
+        let spawned = slint::spawn_local(async move {
+            let result = task.await.unwrap_or_else(|error| Err(error.to_string()));
+            let Some(session) = session.upgrade() else {
+                return;
+            };
+            match result {
+                Ok((saved, settings)) => session.signature_saved(&saved, &settings),
+                Err(error) => {
+                    if let Some(host) = session.host() {
+                        let ui = host.ui();
+                        ui.set_sending(false);
+                        ui.set_notice(
+                            UiMessage::detail("Could not save the signature: {}", error),
+                            true,
+                        );
+                    }
+                }
+            }
+        });
+        if let Err(error) = spawned {
+            ui.set_sending(false);
+            ui.set_notice(
+                UiMessage::detail("Could not save the signature: {}", error),
+                true,
+            );
+        }
+    }
+
+    /// The signature was saved: Settings shows it, and its composer closes.
+    fn signature_saved(self: &Rc<Self>, saved: &Signature, settings: &Settings) {
+        if let Some(host) = self.host() {
+            host.ui().set_sending(false);
+        }
+        if let Some(app) = self
+            .composers()
+            .and_then(|composers| composers.app.upgrade())
+        {
+            account_mail_preferences::signature_saved(&app, saved, settings);
+        }
+        self.close();
+    }
+
     /// Only replace the exact unedited block this composer inserted. User
     /// edits are never discarded when switching identity or signature.
     fn choose_signature(&self, index: i32) {
@@ -3138,6 +3366,15 @@ impl ComposeSession {
 }
 
 type FetchedFiles = Vec<Result<(PathBuf, String, u64), String>>;
+
+/// The signature a composer writes: its account, its id, empty for a new one, and whether
+/// Settings comes back when it closes, as on phones, where the composer took its place.
+#[derive(Clone, Debug)]
+struct SignatureTarget {
+    account_id: i64,
+    id: String,
+    return_to_settings: bool,
+}
 
 /// A file to attach: where it is, the name it goes out with, and the copy that keeps it
 /// readable, when the host made one.

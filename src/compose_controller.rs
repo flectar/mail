@@ -502,6 +502,7 @@ pub(super) fn apply_rich_compose_state(
     );
     ui.set_active_image_alt(image.map_or("", |image| &*image.alt).into());
     ui.set_active_image_width(image.map_or(0, |image| image.width.min(i32::MAX as u32) as i32));
+    ui.set_signature_edited(document.changed_since_saved());
     ui.set_active_image_shown_width(
         image.map_or(0, |image| image.shown_size().0.min(i32::MAX as u32) as i32),
     );

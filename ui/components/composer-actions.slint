@@ -320,6 +320,8 @@ export component ComposerToolbar inherits Rectangle {
     in property <string> active-align: "left";
     in property <bool> link-active: false;
     in property <bool> can-link: false;
+    // Templates are messages to start from, which signatures don't have.
+    in property <bool> templates-shown: true;
     callback apply-format(string);
     callback insert-image();
     callback open-templates();
@@ -456,9 +458,9 @@ export component ComposerToolbar inherits Rectangle {
             IconButton { icon: root.link-active ? @image-url("../icons/lucide/filled/link.svg") : @image-url("../icons/lucide/outline/link.svg"); icon-color: root.link-active ? root.accent-color : root.secondary-color; active: root.link-active; active-background: root.accent-background; interactive: root.can-link; hover-background: root.control-hover-color; tooltip-text: root.can-link ? @tr("Add or edit link") : @tr("Select text to add a link"); clicked => { root.apply-format("link"); } }
             IconButton { icon: @image-url("../icons/lucide/outline/insert-image.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Insert image"); clicked => { root.insert-image(); } }
 
-            Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
+            if root.templates-shown : Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
-            IconButton { icon: @image-url("../icons/lucide/outline/book.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
+            if root.templates-shown : IconButton { icon: @image-url("../icons/lucide/outline/book.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
 
             Rectangle { horizontal-stretch: 1; }
 
@@ -595,6 +597,9 @@ export component ComposerFooter inherits Rectangle {
     in property <bool> can-send: false;
     in property <bool> has-content: false;
     in property <bool> sending: false;
+    // A signature saves to Settings or is left, with nothing to send or attach.
+    in property <bool> signature: false;
+    callback save-signature();
     in property <color> control-hover-color;
     in property <color> muted-color;
     in property <color> raised-color;
@@ -615,7 +620,28 @@ export component ComposerFooter inherits Rectangle {
                 background: root.subtle-border-color;
             }
 
+            if root.signature : Button {
+                x: root.compact ? 8px : 12px;
+                y: 10px;
+                width: max(root.compact ? 96px : 106px, self.content-width);
+                height: 34px;
+                text: @tr("Save signature");
+                primary: true;
+                enabled: !root.sending;
+                clicked => { root.save-signature(); }
+            }
+
+            if root.signature : Button {
+                x: parent.width - (root.compact ? 8px : 12px) - self.width;
+                y: 11px;
+                width: max(root.compact ? 88px : 96px, self.content-width);
+                height: 32px;
+                text: @tr("Cancel");
+                clicked => { root.request-close(); }
+            }
+
             send-button := Button {
+                visible: !root.signature;
                 x: root.compact ? 8px : 12px;
                 y: 10px;
                 width: max(root.compact ? 96px : 106px, self.content-width);
@@ -629,7 +655,7 @@ export component ComposerFooter inherits Rectangle {
             }
 
             attach-button := IconButton {
-                visible: root.attachment-picker-supported;
+                visible: root.attachment-picker-supported && !root.signature;
                 x: send-button.x + send-button.width + (root.compact ? 4px : 8px);
                 y: root.compact ? 5px : 11px;
                 width: root.compact ? 44px : 32px;
@@ -642,7 +668,7 @@ export component ComposerFooter inherits Rectangle {
             }
 
             Text {
-                visible: !root.compact && root.attachment-picker-supported;
+                visible: !root.compact && root.attachment-picker-supported && !root.signature;
                 x: attach-button.x + attach-button.width + 8px;
                 width: max(0px, save-draft.x - self.x - 42px);
                 height: parent.height;
@@ -654,6 +680,7 @@ export component ComposerFooter inherits Rectangle {
             }
 
             save-draft := Button {
+                visible: !root.signature;
                 x: parent.width - (root.compact ? 54px : 90px) - self.width;
                 y: 11px;
                 width: max(root.compact ? 104px : 112px, self.content-width);
@@ -664,6 +691,7 @@ export component ComposerFooter inherits Rectangle {
             }
 
             IconButton {
+                visible: !root.signature;
                 x: parent.width - (root.compact ? 48px : 78px);
                 y: root.compact ? 5px : 11px;
                 width: root.compact ? 44px : 32px;
@@ -1160,6 +1188,7 @@ export component LinkEditor inherits Rectangle {
 export component DiscardConfirmation inherits Rectangle {
     in property <bool> compact: false;
     in property <bool> open: false;
+    in property <bool> signature: false;
     in property <color> background-color;
     in property <color> frame-border-color;
     in property <color> secondary-color;
@@ -1189,7 +1218,7 @@ export component DiscardConfirmation inherits Rectangle {
                 y: 20px;
                 width: parent.width - 40px;
                 height: max(24px, self.preferred-height);
-                text: @tr("Discard this draft?");
+                text: root.signature ? @tr("Discard changes to this signature?") : @tr("Discard this draft?");
                 color: root.title-color;
                 font-size: TypeScale.heading-small;
                 font-weight: 700;
@@ -1200,7 +1229,7 @@ export component DiscardConfirmation inherits Rectangle {
                 y: discard-heading.y + discard-heading.height + 7px;
                 width: parent.width - 40px;
                 height: max(38px, self.preferred-height);
-                text: @tr("The message and its attachments will be removed from this composer.");
+                text: root.signature ? @tr("What you changed since it was last saved won't be kept.") : @tr("The message and its attachments will be removed from this composer.");
                 color: root.secondary-color;
                 font-size: TypeScale.secondary;
                 wrap: word-wrap;
