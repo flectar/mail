@@ -688,6 +688,30 @@ fn list_messages_sql(
     )
 }
 
+/// The unread messages this device keeps that a mail list shows, newest
+/// first.
+pub fn unread_message_ids(conn: &Connection, args: &ListArgs) -> Result<Vec<i64>> {
+    let (where_sql, bind) = build_filter(args, MailGrouping::Messages, false);
+    let filter = if where_sql.is_empty() {
+        "WHERE m.is_read = 0".to_owned()
+    } else {
+        format!("{where_sql} AND m.is_read = 0")
+    };
+    let sql = format!(
+        "SELECT m.id FROM messages m
+         JOIN threads t ON t.id = m.thread_id
+         JOIN accounts a ON a.id = m.account_id
+         LEFT JOIN snoozes s ON s.thread_id = m.thread_id
+         {filter}
+         ORDER BY m.date DESC, m.id DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = bind.iter().map(|b| b.as_ref()).collect();
+    Ok(stmt
+        .query_map(params_ref.as_slice(), |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 /// Query-plan details for the message list, including its cursor and filter.
 pub fn list_messages_query_plan(
     conn: &Connection,

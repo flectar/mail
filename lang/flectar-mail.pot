@@ -411,8 +411,8 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:226 ui/app.slint:1268 ui/components/composer-fields.slint:91
-#: ui/app.slint:226 ui/app.slint:1268 ui/components/composer-fields.slint:91 ui/components/email-composer.slint:50
+#: ui/app.slint:226 ui/app.slint:1271 ui/components/composer-fields.slint:91
+#: ui/app.slint:226 ui/app.slint:1271 ui/components/composer-fields.slint:91 ui/components/email-composer.slint:50
 msgid "No connected account"
 msgstr ""
 
@@ -494,11 +494,11 @@ msgstr ""
 msgid "Last contacted {}"
 msgstr ""
 
-#: ui/app.slint:252 ui/app.slint:551
+#: ui/app.slint:252 ui/app.slint:552
 msgid "Loading local data…"
 msgstr ""
 
-#: ui/app.slint:253 ui/app.slint:552
+#: ui/app.slint:253 ui/app.slint:553
 msgid "Local data ready."
 msgstr ""
 
@@ -1412,899 +1412,915 @@ msgid "Could not answer the read receipt request: {}"
 msgstr ""
 
 #: ui/app.slint:535
-msgid "Use YYYY-MM-DD for the date and a time such as {}."
+msgid "Could not mark all as read: {}"
 msgstr ""
 
 #: ui/app.slint:536
-msgid "Event duration must be a number of minutes."
+msgid "Use YYYY-MM-DD for the date and a time such as {}."
 msgstr ""
 
 #: ui/app.slint:537
-msgid "Add a title and choose a duration from 15 to 1440 minutes."
+msgid "Event duration must be a number of minutes."
 msgstr ""
 
 #: ui/app.slint:538
-msgid "That local time does not exist in the current time zone."
+msgid "Add a title and choose a duration from 15 to 1440 minutes."
 msgstr ""
 
 #: ui/app.slint:539
-msgid "Could not save event: {}"
+msgid "That local time does not exist in the current time zone."
 msgstr ""
 
 #: ui/app.slint:540
-msgid "Event saved, but refresh failed: {}"
+msgid "Could not save event: {}"
 msgstr ""
 
 #: ui/app.slint:541
+msgid "Event saved, but refresh failed: {}"
+msgstr ""
+
+#: ui/app.slint:542
 msgid "Event saved. Provider sync will run when enabled."
 msgstr ""
 
-#: ui/app.slint:546
+#: ui/app.slint:547
 msgid "Email resource render failed: {}"
 msgstr ""
 
-#: ui/app.slint:547
+#: ui/app.slint:548
 msgid "Message refresh failed: {}"
 msgstr ""
 
-#: ui/app.slint:548
+#: ui/app.slint:549
 msgid "Message load failed: {}"
 msgstr ""
 
-#: ui/app.slint:549
+#: ui/app.slint:550
 msgid ""
 "Your local mailbox could not be opened. No account operation was started. "
 "Retry, or copy the diagnostics for support."
 msgstr ""
 
-#: ui/app.slint:550
+#: ui/app.slint:551
 msgid "Local storage startup failed."
 msgstr ""
 
-#: ui/app.slint:557
+#: ui/app.slint:558
 msgid "Could not identify the dragged account."
 msgstr ""
 
-#: ui/app.slint:558
+#: ui/app.slint:559
 msgid "Account ordering requires local mail data."
 msgstr ""
 
-#: ui/app.slint:559
+#: ui/app.slint:560
 msgid "Could not find the account to reorder."
 msgstr ""
 
-#: ui/app.slint:560
+#: ui/app.slint:561
 msgid "Saving account order…"
 msgstr ""
 
-#: ui/app.slint:561
+#: ui/app.slint:562
 msgid "Sent copy settings require local mail data."
 msgstr ""
 
-#: ui/app.slint:562
+#: ui/app.slint:563
 msgid "Updating Sent copy settings…"
 msgstr ""
 
-#: ui/app.slint:563
+#: ui/app.slint:564
 msgid "Sent copy settings updated."
 msgstr ""
 
-#: ui/app.slint:564
+#: ui/app.slint:565
 msgid "Could not update Sent copy settings: {}"
 msgstr ""
 
-#: ui/app.slint:565
+#: ui/app.slint:566
 msgid "Server mail settings require local mail data."
 msgstr ""
 
-#: ui/app.slint:566
+#: ui/app.slint:567
 msgid "Updating server mail settings…"
 msgstr ""
 
-#: ui/app.slint:567
+#: ui/app.slint:568
 msgid "Server mail settings updated."
 msgstr ""
 
-#: ui/app.slint:568
+#: ui/app.slint:569
 msgid "Could not update server mail settings: {}"
 msgstr ""
 
-#: ui/app.slint:569
+#: ui/app.slint:570
 msgid "Mail history requires local mail data."
 msgstr ""
 
-#: ui/app.slint:570
+#: ui/app.slint:571
 msgid "Updating mail history…"
 msgstr ""
 
-#: ui/app.slint:571
+#: ui/app.slint:572
 msgid "Remote images are unavailable in this minimal build."
 msgstr ""
 
-#: ui/app.slint:572
+#: ui/app.slint:573
 msgid "Could not save remote-image setting: {}"
 msgstr ""
 
-#: ui/app.slint:573
+#: ui/app.slint:574
 msgid "Remote sender icons unavailable: {}"
 msgstr ""
 
-#: ui/app.slint:574
+#: ui/app.slint:575
 msgid "Remote images unavailable: {}"
 msgstr ""
 
-#: ui/app.slint:575
+#: ui/app.slint:576
 msgid "Remote body images and sender favicons enabled."
 msgstr ""
 
-#: ui/app.slint:576
+#: ui/app.slint:577
 msgid "Remote images blocked."
 msgstr ""
 
-#: ui/app.slint:577
+#: ui/app.slint:578
 msgid "Could not refresh message images: {}"
 msgstr ""
 
-#: ui/app.slint:578
+#: ui/app.slint:579
 msgid "Remote-image loading is disabled."
 msgstr ""
 
-#: ui/app.slint:579
+#: ui/app.slint:580
 msgid "Could not load message images: {}"
 msgstr ""
 
-#: ui/app.slint:580
+#: ui/app.slint:581
 msgid "Sync finished, refresh failed: {}"
 msgstr ""
 
-#: ui/app.slint:581
+#: ui/app.slint:582
 msgid "Sync complete."
 msgstr ""
 
-#: ui/app.slint:582
+#: ui/app.slint:583
 msgid "Sync failed: {}"
 msgstr ""
 
-#: ui/app.slint:583
+#: ui/app.slint:584
 msgid "Local mail data is unavailable; preview data is read-only."
 msgstr ""
 
-#: ui/app.slint:584
+#: ui/app.slint:585
 msgid "Synchronizing accounts…"
 msgstr ""
 
-#: ui/app.slint:589
+#: ui/app.slint:590
 msgid "Message action completed."
 msgstr ""
 
-#: ui/app.slint:590
+#: ui/app.slint:591
 msgid ""
 "Permanent deletion queued. Mail will disappear after the server confirms."
 msgstr ""
 
-#: ui/app.slint:591
+#: ui/app.slint:592
 msgid "Message action failed: {}"
 msgstr ""
 
-#: ui/app.slint:592
+#: ui/app.slint:593
 msgid "Message action failed: message is no longer available"
 msgstr ""
 
-#: ui/app.slint:593
+#: ui/app.slint:594
 msgid "Label added."
 msgstr ""
 
-#: ui/app.slint:594
+#: ui/app.slint:595
 msgid "Label removed."
 msgstr ""
 
-#: ui/app.slint:595
+#: ui/app.slint:596
 msgid "Label created and added."
 msgstr ""
 
-#: ui/app.slint:596
+#: ui/app.slint:597
 msgid "Label created."
 msgstr ""
 
-#: ui/app.slint:597
+#: ui/app.slint:598
 msgid "Label updated."
 msgstr ""
 
-#: ui/app.slint:598
+#: ui/app.slint:599
 msgid "Label deleted."
 msgstr ""
 
-#: ui/app.slint:599
+#: ui/app.slint:600
 msgid "No other folder to move this mail to."
 msgstr ""
 
-#: ui/app.slint:600
+#: ui/app.slint:601
 msgid "Could not move mail: {}"
 msgstr ""
 
-#: ui/app.slint:601
+#: ui/app.slint:602
 msgid "No folder to copy this mail to."
 msgstr ""
 
-#: ui/app.slint:602
+#: ui/app.slint:603
 msgid "Attaching the original's files…"
 msgstr ""
 
-#: ui/app.slint:603
+#: ui/app.slint:604
 msgid "Could not attach the original's files: {}"
 msgstr ""
 
-#: ui/app.slint:604
+#: ui/app.slint:605
 msgid "Some of the original's files are over the 25 MB limit for attachments."
 msgstr ""
 
-#: ui/app.slint:605
+#: ui/app.slint:606
 msgid "Could not copy mail: {}"
 msgstr ""
 
-#: ui/app.slint:606
+#: ui/app.slint:607
 msgid "Moving mail to the other account…"
 msgstr ""
 
-#: ui/app.slint:607
+#: ui/app.slint:608
 msgid "Copying mail to the other account…"
 msgstr ""
 
-#: ui/app.slint:608
+#: ui/app.slint:609
 msgid "Conversation archived."
 msgid_plural "{0} conversations archived."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:609
+#: ui/app.slint:610
 msgid "Message archived."
 msgid_plural "{0} messages archived."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:610
+#: ui/app.slint:611
 msgid "Conversation moved to Trash."
 msgid_plural "{0} conversations moved to Trash."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:611
+#: ui/app.slint:612
 msgid "Message moved to Trash."
 msgid_plural "{0} messages moved to Trash."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:612
+#: ui/app.slint:613
 msgid "Conversation marked as spam."
 msgid_plural "{0} conversations marked as spam."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:613
+#: ui/app.slint:614
 msgid "Message marked as spam."
 msgid_plural "{0} messages marked as spam."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:614
+#: ui/app.slint:615
 msgid "Conversation moved."
 msgid_plural "{0} conversations moved."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:615
+#: ui/app.slint:616
 msgid "Message moved."
 msgid_plural "{0} messages moved."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:616
+#: ui/app.slint:617
 msgid "Conversation marked as read."
 msgid_plural "{0} conversations marked as read."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:617
+#: ui/app.slint:618
 msgid "Message marked as read."
 msgid_plural "{0} messages marked as read."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:618
+#: ui/app.slint:619
 msgid "Conversation marked as unread."
 msgid_plural "{0} conversations marked as unread."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:619
+#: ui/app.slint:620
 msgid "Message marked as unread."
 msgid_plural "{0} messages marked as unread."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:620
+#: ui/app.slint:621
 msgid "Conversation starred."
 msgid_plural "{0} conversations starred."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:621
+#: ui/app.slint:622
 msgid "Message starred."
 msgid_plural "{0} messages starred."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:622
+#: ui/app.slint:623
 msgid "Conversation unstarred."
 msgid_plural "{0} conversations unstarred."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:623
+#: ui/app.slint:624
 msgid "Message unstarred."
 msgid_plural "{0} messages unstarred."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:624
+#: ui/app.slint:625
 msgid "This can no longer be undone."
 msgstr ""
 
-#: ui/app.slint:625
+#: ui/app.slint:626
 msgid "Could not undo: {}"
 msgstr ""
 
-#: ui/app.slint:626
+#: ui/app.slint:627
 msgid "This message names no way to unsubscribe."
 msgstr ""
 
-#: ui/app.slint:627
+#: ui/app.slint:628
 msgid "Could not unsubscribe: {}"
 msgstr ""
 
-#: ui/app.slint:628
+#: ui/app.slint:629
 msgid "Unsubscribed from {}."
 msgstr ""
 
-#: ui/app.slint:629
+#: ui/app.slint:630
 msgid "Unsubscribe request sent to {}."
 msgstr ""
 
-#: ui/app.slint:630
+#: ui/app.slint:631
 msgid "Blocked {}."
 msgstr ""
 
-#: ui/app.slint:631
+#: ui/app.slint:632
 msgid "Unblocked {}."
 msgstr ""
 
-#: ui/app.slint:632
+#: ui/app.slint:633
 msgid "Could not block: {}"
 msgstr ""
 
-#: ui/app.slint:633
+#: ui/app.slint:634
 msgid "Could not unblock: {}"
 msgstr ""
 
-#: ui/app.slint:634
+#: ui/app.slint:635
 msgid "Moved one message to the other account."
 msgid_plural "Moved {0} messages to the other account."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:635
+#: ui/app.slint:636
 msgid "Copied one message to the other account."
 msgid_plural "Copied {0} messages to the other account."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:636
+#: ui/app.slint:637
 msgid "Moved or copied one message to the other account."
 msgid_plural "Moved or copied {0} messages to the other account."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:637
+#: ui/app.slint:638
 msgid "The other account had that message already."
 msgid_plural "The other account had those {0} messages already."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:638
+#: ui/app.slint:639
 msgid "Could not move or copy one message: {1}"
 msgid_plural "Could not move or copy {0} messages: {1}"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:639
+#: ui/app.slint:640
 msgid "Could not update label: {}"
 msgstr ""
 
-#: ui/app.slint:640
+#: ui/app.slint:641
 msgid "Could not save label: {}"
 msgstr ""
 
-#: ui/app.slint:641
+#: ui/app.slint:642
 msgid "Could not delete label: {}"
 msgstr ""
 
-#: ui/app.slint:642
+#: ui/app.slint:643
 msgid "Folder created."
 msgstr ""
 
-#: ui/app.slint:643
+#: ui/app.slint:644
 msgid "Folder renamed."
 msgstr ""
 
-#: ui/app.slint:644
+#: ui/app.slint:645
 msgid "Folder deleted."
 msgstr ""
 
-#: ui/app.slint:645
+#: ui/app.slint:646
 msgid "Could not create folder: {}"
 msgstr ""
 
-#: ui/app.slint:646
+#: ui/app.slint:647
 msgid "Could not rename folder: {}"
 msgstr ""
 
-#: ui/app.slint:647
+#: ui/app.slint:648
 msgid "Could not delete folder: {}"
 msgstr ""
 
-#: ui/app.slint:648
+#: ui/app.slint:649
 msgid "Could not close preview: {}"
 msgstr ""
 
-#: ui/app.slint:649
+#: ui/app.slint:650
 msgid "Opened the system print view."
 msgstr ""
 
-#: ui/app.slint:650
+#: ui/app.slint:651
 msgid "Could not print message: {}"
 msgstr ""
 
-#: ui/app.slint:651
+#: ui/app.slint:652
 msgid "Opened the message in your browser."
 msgstr ""
 
-#: ui/app.slint:652
+#: ui/app.slint:653
 msgid "Could not open message in browser: {}"
 msgstr ""
 
-#: ui/app.slint:653
+#: ui/app.slint:654
 msgid "Connect an account before replying or forwarding."
 msgstr ""
 
-#: ui/app.slint:654
+#: ui/app.slint:655
 msgid "Choose a message first."
 msgstr ""
 
-#: ui/app.slint:655
+#: ui/app.slint:656
 msgid "Only drafts can be reopened for editing."
 msgstr ""
 
-#: ui/app.slint:656
+#: ui/app.slint:657
 msgid "Could not open draft: {}"
 msgstr ""
 
-#: ui/app.slint:657
+#: ui/app.slint:658
 msgid "Could not open draft: invalid account identifier"
 msgstr ""
 
-#: ui/app.slint:658
+#: ui/app.slint:659
 msgid "Connected account"
 msgstr ""
 
-#: ui/app.slint:659
+#: ui/app.slint:660
 msgid "Could not open composer: {}"
 msgstr ""
 
-#: ui/app.slint:660
+#: ui/app.slint:661
 msgid "Add an account to send mail."
 msgstr ""
 
-#: ui/app.slint:661 ui/components/sidebar.slint:587
-#: ui/app.slint:661 ui/components/sidebar.slint:587 ui/views/mail-list-pane.slint:941
+#: ui/app.slint:662 ui/components/sidebar.slint:601
+#: ui/app.slint:662 ui/components/sidebar.slint:601 ui/views/mail-list-pane.slint:941
 msgid "On this device"
 msgstr ""
 
-#: ui/app.slint:662
+#: ui/app.slint:663
 msgid "Could not open composer: invalid account identifier"
 msgstr ""
 
 #. Reply and forward quotation headers, written into the draft.
-#: ui/app.slint:668
+#: ui/app.slint:669
 msgid "On {}, {} wrote:"
 msgstr ""
 
-#: ui/app.slint:669
+#: ui/app.slint:670
 msgid "{} wrote:"
 msgstr ""
 
-#: ui/app.slint:670 ui/components/email-composer.slint:853
+#: ui/app.slint:671 ui/components/email-composer.slint:853
 msgid "Forwarded message"
-msgstr ""
-
-#: ui/app.slint:671
-msgctxt "forwarded message header"
-msgid "From: {}"
 msgstr ""
 
 #: ui/app.slint:672
 msgctxt "forwarded message header"
-msgid "Date: {}"
+msgid "From: {}"
 msgstr ""
 
 #: ui/app.slint:673
 msgctxt "forwarded message header"
-msgid "Subject: {}"
+msgid "Date: {}"
 msgstr ""
 
 #: ui/app.slint:674
 msgctxt "forwarded message header"
-msgid "To: {}"
+msgid "Subject: {}"
 msgstr ""
 
 #: ui/app.slint:675
-msgid "Attach files to this email"
+msgctxt "forwarded message header"
+msgid "To: {}"
 msgstr ""
 
 #: ui/app.slint:676
-msgid "Could not add attachments: {}"
+msgid "Attach files to this email"
 msgstr ""
 
 #: ui/app.slint:677
-msgid "Could not show the quoted message: {}"
+msgid "Could not add attachments: {}"
 msgstr ""
 
 #: ui/app.slint:678
-msgid "Added 1 attachment."
+msgid "Could not show the quoted message: {}"
 msgstr ""
 
 #: ui/app.slint:679
-msgid "Added {} attachments."
+msgid "Added 1 attachment."
 msgstr ""
 
 #: ui/app.slint:680
+msgid "Added {} attachments."
+msgstr ""
+
+#: ui/app.slint:681
 msgid ""
 "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB "
 "total limit)."
 msgstr ""
 
-#: ui/app.slint:681
+#: ui/app.slint:682
 msgid "Attachment removed."
 msgstr ""
 
-#: ui/app.slint:682
+#: ui/app.slint:683
 msgid "Insert images in this email"
 msgstr ""
 
-#: ui/app.slint:683
+#: ui/app.slint:684
 msgid "Images"
 msgstr ""
 
-#: ui/app.slint:684
+#: ui/app.slint:685
 msgid "Could not add images: {}"
 msgstr ""
 
-#: ui/app.slint:685
+#: ui/app.slint:686
 msgid "{} isn't a PNG, JPEG, GIF or WebP image."
 msgstr ""
 
-#: ui/app.slint:686
+#: ui/app.slint:687
 msgid "Images and attachments can take up to 25 MB in all."
 msgstr ""
 
-#: ui/app.slint:687
+#: ui/app.slint:688
 msgid "At full size, the photos would take the message over 25 MB."
 msgstr ""
 
-#: ui/app.slint:688
+#: ui/app.slint:689
 msgid "Formatting and pictures removed. Undo restores them."
 msgstr ""
 
-#: ui/app.slint:689
+#: ui/app.slint:690
 msgid "Give the signature a name."
 msgstr ""
 
-#: ui/app.slint:690
+#: ui/app.slint:691
 msgid "A signature can hold pictures, but not attachments."
 msgstr ""
 
-#: ui/app.slint:691
+#: ui/app.slint:692
 msgid "Choose the account this message should be sent from."
 msgstr ""
 
-#: ui/app.slint:692
+#: ui/app.slint:693
 msgid "Choose a verified sender identity for this message."
 msgstr ""
 
-#: ui/app.slint:693
+#: ui/app.slint:694
 msgid "Connect an account before saving or sending mail."
 msgstr ""
 
-#: ui/app.slint:694
+#: ui/app.slint:695
 msgid "Message queued for delivery (action {})."
 msgstr ""
 
-#: ui/app.slint:695
+#: ui/app.slint:696
 msgid "Sending message…"
 msgstr ""
 
-#: ui/app.slint:696
+#: ui/app.slint:697
 msgid "This message has already been sent."
 msgstr ""
 
-#: ui/app.slint:697
+#: ui/app.slint:698
 msgid "Could not take the message back: {}"
 msgstr ""
 
-#: ui/app.slint:698
+#: ui/app.slint:699
 msgid "Message sent."
 msgstr ""
 
-#: ui/app.slint:699
+#: ui/app.slint:700
 msgid "Message was not sent: {} Your draft is preserved."
 msgstr ""
 
-#: ui/app.slint:700
+#: ui/app.slint:701
 msgid "Draft saved locally (#{})."
 msgstr ""
 
-#: ui/app.slint:701
+#: ui/app.slint:702
 msgid "Compose failed: {}"
 msgstr ""
 
-#: ui/app.slint:702
+#: ui/app.slint:703
 msgid "Could not open the message in its own window."
 msgstr ""
 
-#: ui/app.slint:703
+#: ui/app.slint:704
 msgid "Could not open the message in its own window, so it was saved to Drafts."
 msgstr ""
 
-#: ui/app.slint:704
+#: ui/app.slint:705
 msgid "Connect an account before managing email templates."
 msgstr ""
 
-#: ui/app.slint:705
+#: ui/app.slint:706
 msgid "Could not load email templates: {}"
 msgstr ""
 
-#: ui/app.slint:706
+#: ui/app.slint:707
 msgid "Enter a template name."
 msgstr ""
 
-#: ui/app.slint:707
+#: ui/app.slint:708
 msgid "Add a subject or message to the template."
 msgstr ""
 
-#: ui/app.slint:708
+#: ui/app.slint:709
 msgid "Email template saved."
 msgstr ""
 
-#: ui/app.slint:709
+#: ui/app.slint:710
 msgid "Could not save email template: {}"
 msgstr ""
 
-#: ui/app.slint:710
+#: ui/app.slint:711
 msgid "Email template deleted."
 msgstr ""
 
-#: ui/app.slint:711
+#: ui/app.slint:712
 msgid "Could not delete email template: {}"
 msgstr ""
 
-#: ui/app.slint:712
+#: ui/app.slint:713
 msgid "Email template is no longer available."
 msgstr ""
 
-#: ui/app.slint:713
+#: ui/app.slint:714
 msgid "Email template inserted."
 msgstr ""
 
-#: ui/app.slint:714
+#: ui/app.slint:715
 msgid "Email template inserted, but its usage could not be saved: {}"
 msgstr ""
 
-#: ui/app.slint:715
+#: ui/app.slint:716
 msgid "Choose a supported account type and connection security."
 msgstr ""
 
-#: ui/app.slint:716
+#: ui/app.slint:717
 msgid "IMAP port must be between 1 and 65535."
 msgstr ""
 
-#: ui/app.slint:717
+#: ui/app.slint:718
 msgid "POP3 port must be between 1 and 65535."
 msgstr ""
 
-#: ui/app.slint:718
+#: ui/app.slint:719
 msgid "SMTP port must be between 1 and 65535."
 msgstr ""
 
-#: ui/app.slint:719
+#: ui/app.slint:720
 msgid "Local mail data is unavailable. Retry startup."
 msgstr ""
 
-#: ui/app.slint:720
+#: ui/app.slint:721
 msgid "Discovering JMAP and checking capabilities…"
 msgstr ""
 
-#: ui/app.slint:721
+#: ui/app.slint:722
 msgid "Certificate imported. Connect to verify the server."
 msgstr ""
 
-#: ui/app.slint:722
+#: ui/app.slint:723
 msgid "Could not load account preferences: {}"
 msgstr ""
 
-#: ui/app.slint:723
+#: ui/app.slint:724
 msgid ""
 "Your edited signature was preserved. Choose No signature to keep it as "
 "message text before inserting another."
 msgstr ""
 
-#: ui/app.slint:724
+#: ui/app.slint:725
 msgid "Certificate import failed: {}"
 msgstr ""
 
-#: ui/app.slint:725
+#: ui/app.slint:726
 msgid "Testing IMAP and SMTP connections…"
 msgstr ""
 
-#: ui/app.slint:726
+#: ui/app.slint:727
 msgid "Testing POP3 and SMTP connections…"
 msgstr ""
 
-#: ui/app.slint:731
+#: ui/app.slint:732
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
 msgstr ""
 
-#: ui/app.slint:732 ui/dialogs/settings-dialog.slint:2287
-#: ui/app.slint:732 ui/dialogs/settings-dialog.slint:2287 ui/dialogs/settings-dialog.slint:2330
-#: ui/app.slint:732 ui/dialogs/settings-dialog.slint:2287 ui/dialogs/settings-dialog.slint:2330 ui/views/onboarding-view.slint:163
-#: ui/app.slint:732 ui/dialogs/settings-dialog.slint:2287 ui/dialogs/settings-dialog.slint:2330 ui/views/onboarding-view.slint:163
+#: ui/app.slint:733 ui/dialogs/settings-dialog.slint:2287
+#: ui/app.slint:733 ui/dialogs/settings-dialog.slint:2287 ui/dialogs/settings-dialog.slint:2330
+#: ui/app.slint:733 ui/dialogs/settings-dialog.slint:2287 ui/dialogs/settings-dialog.slint:2330 ui/views/onboarding-view.slint:163
+#: ui/app.slint:733 ui/dialogs/settings-dialog.slint:2287 ui/dialogs/settings-dialog.slint:2330 ui/views/onboarding-view.slint:163
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
 
-#: ui/app.slint:733
+#: ui/app.slint:734
 msgid "Choose Gmail or Outlook OAuth."
 msgstr ""
 
-#: ui/app.slint:734
+#: ui/app.slint:735
 msgid "Complete sign-in in your browser, or choose Cancel here."
 msgstr ""
 
-#: ui/app.slint:735
+#: ui/app.slint:736
 msgid "Cancelling browser sign-in…"
 msgstr ""
 
-#: ui/app.slint:736
+#: ui/app.slint:737
 msgid "Finishing browser sign-in…"
 msgstr ""
 
-#: ui/app.slint:737
+#: ui/app.slint:738
 msgid "Could not use that browser address: {}"
 msgstr ""
 
-#: ui/app.slint:738
+#: ui/app.slint:739
 msgid "Calendar core is unavailable."
 msgstr ""
 
-#: ui/app.slint:739
+#: ui/app.slint:740
 msgid "Account no longer exists."
 msgstr ""
 
-#: ui/app.slint:740
+#: ui/app.slint:741
 msgid "Authorize calendar access in your browser."
 msgstr ""
 
-#: ui/app.slint:741
+#: ui/app.slint:742
 msgid "OAuth app keys saved."
 msgstr ""
 
-#: ui/app.slint:742
+#: ui/app.slint:743
 msgid "{} OAuth settings saved."
 msgstr ""
 
-#: ui/app.slint:743
+#: ui/app.slint:744
 msgid "OAuth settings failed: {}"
 msgstr ""
 
-#: ui/app.slint:744
+#: ui/app.slint:745
 msgid "Mail refresh failed: {}"
 msgstr ""
 
-#: ui/app.slint:745
+#: ui/app.slint:746
 msgid "Mail filter failed: {}"
 msgstr ""
 
-#: ui/app.slint:746
+#: ui/app.slint:747
 msgid "Mail pagination failed: {}"
 msgstr ""
 
-#: ui/app.slint:747
+#: ui/app.slint:748
 msgid "Could not mark message as read: {}"
 msgstr ""
 
-#: ui/app.slint:748 ui/views/mail-reading-pane.slint:202
-#: ui/app.slint:748 ui/views/mail-reading-pane.slint:202 ui/views/mail-reading-pane.slint:1392
+#: ui/app.slint:749 ui/views/mail-reading-pane.slint:202
+#: ui/app.slint:749 ui/views/mail-reading-pane.slint:202 ui/views/mail-reading-pane.slint:1392
 msgid "Loading message…"
 msgstr ""
 
-#: ui/app.slint:812 ui/components/workspace-navigation.slint:787
-#: ui/app.slint:812 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
-#: ui/app.slint:812 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
+#: ui/app.slint:813 ui/components/workspace-navigation.slint:787
+#: ui/app.slint:813 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
+#: ui/app.slint:813 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1479 ui/app.slint:1492
+#: ui/app.slint:1486 ui/app.slint:1499
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:2423
+#: ui/app.slint:2435
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2423 ui/views/files-view.slint:578
+#: ui/app.slint:2435 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:2427
+#: ui/app.slint:2439
 msgid "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2428
+#: ui/app.slint:2440
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2430
+#: ui/app.slint:2442
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2431
+#: ui/app.slint:2443
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2432 ui/components/calendar.slint:1043
-#: ui/app.slint:2432 ui/components/calendar.slint:1043
+#: ui/app.slint:2444 ui/app.slint:2470 ui/components/calendar.slint:1043
+#: ui/app.slint:2444 ui/app.slint:2470 ui/components/calendar.slint:1043
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:2433
+#: ui/app.slint:2445
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2433 ui/views/files-view.slint:660
-#: ui/app.slint:2433 ui/views/files-view.slint:660
+#: ui/app.slint:2445 ui/views/files-view.slint:660
+#: ui/app.slint:2445 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2618
+#: ui/app.slint:2467
+msgid "Mark all as read?"
+msgstr ""
+
+#: ui/app.slint:2469
+msgid "All unread messages in {} will be marked as read."
+msgstr ""
+
+#: ui/app.slint:2471
+msgid "Mark all as read"
+msgstr ""
+
+#: ui/app.slint:2652
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:2624
+#: ui/app.slint:2658
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:2637
+#: ui/app.slint:2671
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:2640
+#: ui/app.slint:2674
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:2645
+#: ui/app.slint:2679
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:2653 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2687 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 
@@ -3580,7 +3596,7 @@ msgstr ""
 msgid "What is this email about?"
 msgstr ""
 
-#: ui/components/confirmation-dialog.slint:13
+#: ui/components/confirmation-dialog.slint:14
 msgid "Confirm"
 msgstr ""
 
@@ -4271,69 +4287,73 @@ msgstr ""
 msgid "{}, {}"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:215
+#: ui/components/sidebar-controls.slint:219
+msgid "Mark all as read…"
+msgstr ""
+
+#: ui/components/sidebar-controls.slint:224
 msgid "New subfolder"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:220 ui/dialogs/folder-dialog.slint:29
-#: ui/components/sidebar-controls.slint:220 ui/dialogs/folder-dialog.slint:29
+#: ui/components/sidebar-controls.slint:229 ui/dialogs/folder-dialog.slint:29
+#: ui/components/sidebar-controls.slint:229 ui/dialogs/folder-dialog.slint:29
 msgid "Rename folder"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:225
+#: ui/components/sidebar-controls.slint:234
 msgid "Delete folder"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:230
-#: ui/components/sidebar-controls.slint:230
+#: ui/components/sidebar-controls.slint:239
+#: ui/components/sidebar-controls.slint:239
 msgid "Empty Trash…"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:234
+#: ui/components/sidebar-controls.slint:243
 msgid "New nested label"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:238
+#: ui/components/sidebar-controls.slint:247
 msgid "Rename global label"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:238
+#: ui/components/sidebar-controls.slint:247
 msgid "Rename label in {}"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:242
+#: ui/components/sidebar-controls.slint:251
 msgid "Delete global label"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:242
+#: ui/components/sidebar-controls.slint:251
 msgid "Delete label from {}"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:268
+#: ui/components/sidebar-controls.slint:277
 msgid "Collapse label"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:268
+#: ui/components/sidebar-controls.slint:277
 msgid "Expand label"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:269
+#: ui/components/sidebar-controls.slint:278
 msgid "Collapse folder"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:269
+#: ui/components/sidebar-controls.slint:278
 msgid "Expand folder"
 msgstr ""
 
 #. The menu's first line.
-#: ui/components/sidebar-controls.slint:344
-#: ui/components/sidebar-controls.slint:344
+#: ui/components/sidebar-controls.slint:353
+#: ui/components/sidebar-controls.slint:353
 msgid "Checking for new mail…"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:442
-#: ui/components/sidebar-controls.slint:442 ui/dialogs/settings-dialog.slint:2911
-#: ui/components/sidebar-controls.slint:442 ui/dialogs/settings-dialog.slint:2911
+#: ui/components/sidebar-controls.slint:451
+#: ui/components/sidebar-controls.slint:451 ui/dialogs/settings-dialog.slint:2911
+#: ui/components/sidebar-controls.slint:451 ui/dialogs/settings-dialog.slint:2911
 msgid "Check for new mail"
 msgstr ""
 
@@ -4353,81 +4373,81 @@ msgstr ""
 msgid "Hide until the next version"
 msgstr ""
 
-#: ui/components/sidebar.slint:186 ui/views/mail-list-pane.slint:1547
+#: ui/components/sidebar.slint:188 ui/views/mail-list-pane.slint:1547
 msgid "New email"
 msgstr ""
 
-#: ui/components/sidebar.slint:186
+#: ui/components/sidebar.slint:188
 msgid "Add an account"
 msgstr ""
 
-#: ui/components/sidebar.slint:240 ui/components/sidebar.slint:249
-#: ui/components/sidebar.slint:240 ui/components/sidebar.slint:249 ui/components/sidebar.slint:269
+#: ui/components/sidebar.slint:242 ui/components/sidebar.slint:251
+#: ui/components/sidebar.slint:242 ui/components/sidebar.slint:251 ui/components/sidebar.slint:271
 msgid "Find folder or label"
 msgstr ""
 
-#: ui/components/sidebar.slint:286
+#: ui/components/sidebar.slint:288
 msgid "Clear folder filter"
 msgstr ""
 
-#: ui/components/sidebar.slint:302
+#: ui/components/sidebar.slint:304
 msgid "Add account"
 msgstr ""
 
-#: ui/components/sidebar.slint:351
+#: ui/components/sidebar.slint:353
 msgid "ALL ACCOUNTS"
 msgstr ""
 
-#: ui/components/sidebar.slint:360
+#: ui/components/sidebar.slint:362
 msgid "All Inboxes"
 msgstr ""
 
-#: ui/components/sidebar.slint:376 ui/dialogs/move-dialog.slint:44
+#: ui/components/sidebar.slint:378 ui/dialogs/move-dialog.slint:44
 msgid "Inbox"
 msgstr ""
 
-#: ui/components/sidebar.slint:438
+#: ui/components/sidebar.slint:444
 msgid "Categories"
 msgstr ""
 
-#: ui/components/sidebar.slint:456
+#: ui/components/sidebar.slint:462
 msgid "Important"
 msgstr ""
 
-#: ui/components/sidebar.slint:477 ui/dialogs/settings-dialog.slint:279
+#: ui/components/sidebar.slint:485 ui/dialogs/settings-dialog.slint:279
 msgid "Other"
 msgstr ""
 
-#: ui/components/sidebar.slint:522 ui/components/sidebar.slint:691
-#: ui/components/sidebar.slint:522 ui/components/sidebar.slint:691
+#: ui/components/sidebar.slint:534 ui/components/sidebar.slint:707
+#: ui/components/sidebar.slint:534 ui/components/sidebar.slint:707
 msgid "Labels"
 msgstr ""
 
-#: ui/components/sidebar.slint:541
+#: ui/components/sidebar.slint:553
 msgid "Global label {}"
 msgstr ""
 
-#: ui/components/sidebar.slint:574 ui/views/contacts-view.slint:221
-#: ui/components/sidebar.slint:574 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:588 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:588 ui/views/contacts-view.slint:221
 msgid "ACCOUNTS"
 msgstr ""
 
-#: ui/components/sidebar.slint:711
+#: ui/components/sidebar.slint:727
 msgid "{} label, {} account"
 msgstr ""
 
-#: ui/components/sidebar.slint:754 ui/dialogs/folder-dialog.slint:27
-#: ui/components/sidebar.slint:754 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354
-#: ui/components/sidebar.slint:754 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354 ui/views/files-view.slint:578
+#: ui/components/sidebar.slint:772 ui/dialogs/folder-dialog.slint:27
+#: ui/components/sidebar.slint:772 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354
+#: ui/components/sidebar.slint:772 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354 ui/views/files-view.slint:578
 msgid "New folder"
 msgstr ""
 
-#: ui/components/sidebar.slint:771 ui/dialogs/folder-dialog.slint:26
-#: ui/components/sidebar.slint:771 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:789 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:789 ui/dialogs/folder-dialog.slint:26
 msgid "New label"
 msgstr ""
 
-#: ui/components/sidebar.slint:791
+#: ui/components/sidebar.slint:809
 msgid "No folders found"
 msgstr ""
 
@@ -8833,11 +8853,11 @@ msgstr ""
 msgid "Use across all accounts (local only)"
 msgstr ""
 
-#: ui/views/mail-view.slint:455
+#: ui/views/mail-view.slint:458
 msgid "Message list width"
 msgstr ""
 
-#: ui/views/mail-view.slint:811
+#: ui/views/mail-view.slint:815
 msgid "Close folders"
 msgstr ""
 

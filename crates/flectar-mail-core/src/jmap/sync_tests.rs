@@ -121,6 +121,10 @@ struct MockJmap {
     max_objects_in_get: usize,
     /// How long to hold back the answer to a method call.
     delay: Option<fn(&str, &Value) -> Option<Duration>>,
+    /// Emails Email/set marked `$seen`.
+    seen: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Email/set answers as if it marked them, and doesn't.
+    forget_seen: bool,
 }
 
 impl Default for MockJmap {
@@ -135,6 +139,8 @@ impl Default for MockJmap {
             // One Email/get object per page.
             max_objects_in_get: 1,
             delay: None,
+            seen: Arc::default(),
+            forget_seen: false,
         }
     }
 }
@@ -343,19 +349,56 @@ impl MockJmap {
                 let received = |value: &Value| {
                     chrono::DateTime::parse_from_rfc3339(value.as_str().unwrap()).unwrap()
                 };
-                let after = args["filter"].get("after").map(received);
+                // One condition, or the conditions of an AND.
+                let conditions = match args["filter"].get("conditions") {
+                    Some(conditions) => conditions.as_array().unwrap().clone(),
+                    None => vec![args["filter"].clone()],
+                };
+                let condition = |name: &str| conditions.iter().find_map(|c| c.get(name).cloned());
+                let after = condition("after").map(|value| received(&value));
+                let before = condition("before").map(|value| received(&value));
+                let mailbox = condition("inMailbox");
+                let not_keyword = condition("notKeyword");
+                let seen = self.seen.lock().unwrap().clone();
+                let limit = args["limit"]
+                    .as_u64()
+                    .map_or(usize::MAX, |limit| limit as usize);
                 let ids = self
                     .emails
                     .iter()
                     .filter(|email| {
                         after.is_none_or(|after| received(&email["receivedAt"]) > after)
+                            && before.is_none_or(|before| received(&email["receivedAt"]) < before)
+                            && mailbox.as_ref().is_none_or(|mailbox| {
+                                email["mailboxIds"][mailbox.as_str().unwrap()] == true
+                            })
+                            && not_keyword.as_ref().is_none_or(|keyword| {
+                                let keyword = keyword.as_str().unwrap();
+                                email["keywords"][keyword] != true
+                                    && !(keyword == "$seen"
+                                        && seen.iter().any(|id| email["id"] == id.as_str()))
+                            })
                     })
                     .map(|email| &email["id"])
+                    .take(limit)
                     .collect::<Vec<_>>();
                 json!({
                     "accountId": "mail-account", "queryState": "query-0",
                     "canCalculateChanges": false, "position": 0,
                     "total": ids.len(), "ids": ids
+                })
+            }
+            "Email/set" => {
+                let mut updated = serde_json::Map::new();
+                for (id, patch) in args["update"].as_object().into_iter().flatten() {
+                    if patch["keywords/$seen"] == true && !self.forget_seen {
+                        self.seen.lock().unwrap().push(id.clone());
+                    }
+                    updated.insert(id.clone(), Value::Null);
+                }
+                json!({
+                    "accountId": "mail-account", "oldState": "state-0",
+                    "newState": "state-1", "updated": updated
                 })
             }
             "Email/get" => {
@@ -1790,4 +1833,53 @@ async fn counts_are_asked_only_for_mailboxes_that_changed() {
     .await;
     assert_eq!((gets, asked), (vec![vec!["inbox-remote".to_owned()]], true));
     assert_eq!(only_on_server(&ctx).await, (Some(3), None));
+}
+
+/// Inbox mail: a1 unread before the request, a2 already read, a3 unread
+/// but newer than it; elsewhere b1 unread.
+fn marking_mock() -> MockJmap {
+    let mut read = email("a2", "t2");
+    read["keywords"] = json!({"$seen": true});
+    let mut newer = email("a3", "t3");
+    newer["receivedAt"] = json!("2026-10-09T12:00:00Z");
+    let mut elsewhere = email("b1", "t4");
+    elsewhere["mailboxIds"] = json!({"archive-remote": true});
+    MockJmap {
+        emails: vec![email("a1", "t1"), read, newer, elsewhere],
+        ..MockJmap::default()
+    }
+}
+
+#[tokio::test]
+async fn marking_a_mailbox_read_marks_its_unread_mail_from_before_the_request() {
+    let mock = marking_mock().start().await;
+    let before = chrono::DateTime::parse_from_rfc3339("2026-10-09T00:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    mark_mailbox_read(&mock.connected, "inbox-remote", before)
+        .await
+        .unwrap();
+    let seen = mock.calls("Email/set");
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert_eq!(seen[0]["update"], json!({"a1": {"keywords/$seen": true}}));
+    // It asked again until nothing was left.
+    assert_eq!(mock.calls("Email/query").len(), 2);
+    mock.task.abort();
+}
+
+#[tokio::test]
+async fn a_server_that_keeps_mail_unread_stops_the_marking() {
+    let mock = MockJmap {
+        forget_seen: true,
+        ..marking_mock()
+    }
+    .start()
+    .await;
+    let before = chrono::DateTime::parse_from_rfc3339("2026-10-09T00:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    let result = mark_mailbox_read(&mock.connected, "inbox-remote", before).await;
+    assert!(matches!(result, Err(CoreError::Jmap(_))), "{result:?}");
+    assert_eq!(mock.calls("Email/set").len(), 1);
+    mock.task.abort();
 }

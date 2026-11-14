@@ -433,8 +433,8 @@ async fn complete_on_device(ctx: &SyncCtx, action: &repo::actions::PendingAction
             }
         }
         "archive" | "unarchive" | "trash" | "spam" | "not_spam" | "move" | "mark_read"
-        | "mark_unread" | "star" | "unstar" | "add_label" | "remove_label" | "snooze"
-        | "unsnooze" => Ok(()),
+        | "mark_unread" | "mark_folder_read" | "star" | "unstar" | "add_label" | "remove_label"
+        | "snooze" | "unsnooze" => Ok(()),
         other => {
             tracing::warn!("action kind {other} has nothing to do on this device");
             Ok(())
@@ -517,6 +517,7 @@ async fn execute_on_imap(
             crate::sync::finish_permanent_delete(ctx, action.message_id).await
         }
         "mark_read" => flag_action(ctx, session, action, "\\Seen", true).await,
+        "mark_folder_read" => mark_folder_read_on_imap(ctx, config, session, action).await,
         "mark_unread" => flag_action(ctx, session, action, "\\Seen", false).await,
         "star" => flag_action(ctx, session, action, "\\Flagged", true).await,
         "unstar" => flag_action(ctx, session, action, "\\Flagged", false).await,
@@ -665,6 +666,43 @@ pub(crate) async fn uid_by_message_id(
         }
     }
     Ok(newest)
+}
+
+/// Mark a whole folder read on the server through the newest message the
+/// check before the request knew of (#234). Its messages here were marked
+/// when it was queued.
+async fn mark_folder_read_on_imap(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Session,
+    action: &repo::actions::PendingAction,
+) -> Result<()> {
+    let Some(folder_id) = action.payload["folderId"].as_i64() else {
+        return Ok(());
+    };
+    let Some(through) = action.payload["throughUid"]
+        .as_i64()
+        .and_then(|uid| u32::try_from(uid).ok())
+        .filter(|uid| *uid > 0)
+    else {
+        return Ok(());
+    };
+    let folder = ctx
+        .db
+        .read(move |conn| repo::folders::get(conn, folder_id))
+        .await?;
+    // The folder went away since: nothing of it is left to mark.
+    let Some(folder) = folder.filter(|folder| folder.account_id == config.id) else {
+        return Ok(());
+    };
+    let selected = imap::select(session, &folder.path).await?;
+    // A new UIDVALIDITY means the UIDs now name other mail.
+    if let Some(validity) = action.payload["uidValidity"].as_i64()
+        && selected.uid_validity != Some(validity)
+    {
+        return Ok(());
+    }
+    imap::mark_seen_through(session, through).await
 }
 
 async fn flag_action(
@@ -1573,5 +1611,7 @@ pub(crate) mod sent_tests;
 #[cfg(test)]
 mod move_tests;
 
+#[cfg(test)]
+mod mark_folder_read_tests;
 #[cfg(test)]
 mod read_receipt_tests;

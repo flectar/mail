@@ -25,6 +25,7 @@ pub mod jmap;
 pub mod mail_import;
 pub mod mail_security;
 pub mod mailto;
+mod mark_all_read;
 mod mbox;
 pub mod migration;
 pub mod mime;
@@ -4757,6 +4758,71 @@ impl Core {
             &config.settings.connection,
         )
         .await
+    }
+
+    /// Mark everything a mail list shows as read. A list that is whole
+    /// mailboxes, such as an Inbox, a folder or a Gmail label, is marked on
+    /// the server too, mail older than this device keeps included, through
+    /// what the last check knew of: mail that arrived since stays unread. A
+    /// list that shows part of a mailbox, such as a split inbox half or
+    /// Starred, marks the messages this device keeps that it shows.
+    ///
+    /// The list is the one [`Core::list_threads`] shows for the same
+    /// arguments; `account_ids` limits it to a set of accounts, such as a
+    /// mail profile's.
+    pub async fn mark_all_read(
+        &self,
+        view: View,
+        split_id: Option<i64>,
+        account_id: Option<i64>,
+        account_ids: Option<Vec<i64>>,
+        label_id: Option<i64>,
+        folder_id: Option<i64>,
+    ) -> Result<ActionResult> {
+        let args = repo::threads::ListArgs {
+            view,
+            tab: self.tab_filter(split_id, label_id).await?,
+            account_id,
+            account_ids,
+            folder_id,
+            cursor: None,
+            limit: 1,
+        };
+        let now = now_ms();
+        let outcome = self
+            .db
+            .write(move |conn| mark_all_read::apply(conn, &args, now))
+            .await?;
+        match outcome {
+            mark_all_read::Outcome::Whole {
+                threads,
+                accounts,
+                action_ids,
+            } => {
+                if !threads.is_empty() {
+                    self.bus.emit(CoreEvent::MailUpdated {
+                        thread_ids: threads,
+                    });
+                }
+                for account_id in accounts {
+                    self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+                }
+                Ok(ActionResult { action_ids })
+            }
+            mark_all_read::Outcome::Part(message_ids) if message_ids.is_empty() => {
+                Ok(ActionResult {
+                    action_ids: Vec::new(),
+                })
+            }
+            mark_all_read::Outcome::Part(message_ids) => {
+                self.perform_action(PerformActionArgs {
+                    kind: ActionKind::MarkRead,
+                    target: ActionTarget::Messages(message_ids),
+                    params: None,
+                })
+                .await
+            }
+        }
     }
 
     pub async fn perform_action(&self, args: PerformActionArgs) -> Result<ActionResult> {

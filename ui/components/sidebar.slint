@@ -145,6 +145,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     callback request-rename-folder(int, string);
     callback request-delete-folder(int, string);
     callback request-empty-trash(int);
+    // Mark all as read for a row: its scope and the name it shows (#234).
+    callback request-mark-all-read(string, string);
     callback request-rename-label(int, string, color, string, bool);
     callback request-delete-label(int, string, string, bool, bool);
 
@@ -375,6 +377,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: @tr("Inbox");
                         count: root.unified-count;
+                        can-mark-all-read: root.unified-count != "" && root.unified-count != "0";
                         scope: "Unified Inbox";
                         account-id: 0;
                         folder-id: -1;
@@ -388,6 +391,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         body-color: root.body-color;
                         muted-color: root.muted-color;
                         icon-color: root.monochrome-icons ? (root.selected-scope == "Unified Inbox" ? root.accent-color : root.muted-color) : MailIconPalette.inbox;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
@@ -398,6 +402,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: entry.mailbox.label;
                         count: entry.mailbox.count;
+                        can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0" && entry.mailbox.scope != "Unified Drafts";
                         scope: entry.mailbox.scope;
                         account-id: entry.mailbox.account_id;
                         can-empty-trash: entry.mailbox.scope == "Unified Trash";
@@ -426,6 +431,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                             : entry.mailbox.scope == "Unified Trash" ? MailIconPalette.trash
                             : entry.mailbox.scope == "Unified Archive" ? MailIconPalette.archive
                             : MailIconPalette.drafts;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                         empty-trash(account-id) => { root.request-empty-trash(account-id); }
                     }
@@ -455,6 +461,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: @tr("Important");
                         count: entry.mailbox.count;
+                        can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0";
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Important";
                         mail-drop-enabled: true;
@@ -466,6 +473,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         body-color: root.body-color;
                         muted-color: root.muted-color;
                         icon-color: root.monochrome-icons ? (root.selected-scope == "Important" ? root.accent-color : root.muted-color) : MailIconPalette.inbox;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
@@ -476,6 +484,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: @tr("Other");
                         count: entry.mailbox.count;
+                        can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0";
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Other";
                         mail-drop-enabled: true;
@@ -487,6 +496,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         body-color: root.body-color;
                         muted-color: root.muted-color;
                         icon-color: root.monochrome-icons ? (root.selected-scope == "Other" ? root.accent-color : root.muted-color) : MailIconPalette.other;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
@@ -497,6 +507,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: entry.label.name;
                         count: entry.label.count;
+                        can-mark-all-read: entry.label.count != "" && entry.label.count != "0";
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Category:" + entry.label.id;
@@ -511,6 +522,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         icon-color: root.monochrome-icons
                             ? (root.selected-scope == "Category:" + entry.label.id ? root.accent-color : root.muted-color)
                             : entry.label.color;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
@@ -540,6 +552,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         label: entry.label.name;
                         accessible-name: @tr("Global label {}", entry.label.name);
                         count: entry.label.count;
+                        can-mark-all-read: entry.label.count != "" && entry.label.count != "0";
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         label-id: entry.label.id;
@@ -559,6 +572,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         icon-color: root.monochrome-icons
                             ? (root.selected-scope == "GlobalLabel:" + entry.label.id ? root.accent-color : root.muted-color)
                             : entry.label.color;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                         rename-label(id, name, color, account, global) => { root.request-rename-label(id, name, color, account, global); }
                         delete-label(id, name, account, global, has-children) => {
@@ -618,6 +632,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         label: entry.mailbox.label;
                         label-has-emoji: entry.mailbox.label_has_emoji;
                         count: entry.mailbox.count;
+                        can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0" && entry.mailbox.label != "Drafts";
                         scope: entry.mailbox.scope;
                         account-id: entry.mailbox.account_id;
                         folder-id: entry.mailbox.folder_id;
@@ -667,6 +682,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                             : entry.mailbox.label == "Drafts" ? MailIconPalette.drafts
                             : entry.mailbox.has_custom_color ? entry.mailbox.color
                             : MailIconPalette.folders;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => {
                             if (entry.mailbox.is_selectable || entry.mailbox.is_standard) {
                                 root.select-scope(scope);
@@ -710,6 +726,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         label-path: entry.label.name;
                         accessible-name: @tr("{} label, {} account", entry.label.name, entry.label.account_name);
                         count: entry.label.count;
+                        can-mark-all-read: entry.label.count != "" && entry.label.count != "0";
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent
                             + entry.label.depth * SidebarStyle.branch-indent;
@@ -735,6 +752,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         icon-color: root.monochrome-icons
                             ? (root.selected-scope == "AccountLabel:" + entry.label.id ? root.accent-color : root.muted-color)
                             : entry.label.color;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                         toggled(label-id, expanded) => { root.toggle-section(entry.key, expanded); }
                         new-child-label(account-id, label-id, path, account) => {

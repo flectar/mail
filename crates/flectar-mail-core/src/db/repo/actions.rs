@@ -447,7 +447,7 @@ pub(crate) fn counts_settling_sql(account: &str) -> String {
                  WHERE a.account_id = {account} AND a.state IN ('pending', 'inflight')
                    AND a.kind IN ('mark_read', 'mark_unread', 'archive', 'unarchive', 'trash',
                                   'delete_permanently', 'spam', 'not_spam', 'move', 'copy',
-                                  'empty_trash', 'remove_transferred'))"
+                                  'empty_trash', 'remove_transferred', 'mark_folder_read'))"
     )
 }
 
@@ -462,13 +462,20 @@ pub fn counts_settling(conn: &Connection, account_id: i64) -> Result<bool> {
 
 /// Is there any pending action referencing this message (local intent wins over remote flags)?
 pub fn has_pending_for_message(conn: &Connection, message_id: i64) -> Result<bool> {
-    let n: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM pending_actions
-         WHERE message_id = ?1 AND state IN ('pending','inflight')",
+    // Its own actions, or marking its whole folder read, still on the way.
+    Ok(conn.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM pending_actions
+             WHERE message_id = ?1 AND state IN ('pending','inflight'))
+         OR EXISTS (
+             SELECT 1 FROM pending_actions a JOIN messages m ON m.id = ?1
+             WHERE a.kind = 'mark_folder_read' AND a.state IN ('pending','inflight')
+               AND a.account_id = m.account_id
+               AND json_extract(a.payload, '$.folderId') = m.folder_id
+               AND m.uid <= json_extract(a.payload, '$.throughUid'))",
         params![message_id],
         |r| r.get(0),
-    )?;
-    Ok(n > 0)
+    )?)
 }
 
 /// Whether local intent may recreate or submit an Email that disappeared

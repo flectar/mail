@@ -1516,6 +1516,42 @@ async fn store_flag_inner(session: &mut Session, uid: u32, flag: &str, add: bool
     store_flag_set_inner(session, &uid.to_string(), flag, add).await
 }
 
+/// UIDs per command when a server turns down one command for the whole
+/// mailbox, such as for a message limit (RFC 9738).
+const MARK_SEEN_WINDOW: u32 = 10_000;
+
+/// Mark every message of the selected mailbox up to UID `through` seen
+/// (#234). One command does it, as `.SILENT` without CONDSTORE draws no
+/// per-message replies. A server that turns that down gets windows of
+/// [`MARK_SEEN_WINDOW`] UIDs from the newest down: a window that wide holds
+/// at most that many messages.
+pub async fn mark_seen_through(session: &mut Session, through: u32) -> Result<()> {
+    let whole = with_deadline(
+        "UID STORE seen",
+        CONTENT_TIMEOUT,
+        store_flag_set_inner(session, &format!("1:{through}"), "\\Seen", true),
+    )
+    .await;
+    match whole {
+        Err(CoreError::ImapRefused(reply)) if through > MARK_SEEN_WINDOW => {
+            tracing::info!(%reply, "marking a mailbox read in windows");
+            let mut high = through;
+            while high > 0 {
+                let low = high.saturating_sub(MARK_SEEN_WINDOW - 1).max(1);
+                with_deadline(
+                    "UID STORE seen",
+                    CONTENT_TIMEOUT,
+                    store_flag_set_inner(session, &format!("{low}:{high}"), "\\Seen", true),
+                )
+                .await?;
+                high = low - 1;
+            }
+            Ok(())
+        }
+        other => other,
+    }
+}
+
 async fn store_flag_set_inner(
     session: &mut Session,
     uid_set: &str,
