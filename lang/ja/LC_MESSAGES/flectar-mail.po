@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-12 04:29+0000\n"
+"PO-Revision-Date: 2026-11-12 09:41+0000\n"
 "Last-Translator: miyaji255 <miyaji255@users.noreply.translate.flectar.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
@@ -1584,96 +1584,82 @@ msgstr ""
 #: ui/app.slint:590
 msgid "Conversation archived."
 msgid_plural "{0} conversations archived."
-msgstr[0] ""
+msgstr[0] "{0}件のスレッドをアーカイブしました。"
 
 #: ui/app.slint:591
-#, fuzzy
-#| msgid "Message appearance"
 msgid "Message archived."
 msgid_plural "{0} messages archived."
-msgstr[0] "メールの表示"
+msgstr[0] "{0}件のメールをアーカイブしました。"
 
 #: ui/app.slint:592
 msgid "Conversation moved to Trash."
 msgid_plural "{0} conversations moved to Trash."
-msgstr[0] ""
+msgstr[0] "{0}件のスレッドをゴミ箱に移動しました。"
 
 #: ui/app.slint:593
-#, fuzzy
-#| msgid "Move to trash"
 msgid "Message moved to Trash."
 msgid_plural "{0} messages moved to Trash."
-msgstr[0] "ゴミ箱に移動"
+msgstr[0] "{0}件のメールをゴミ箱に移動しました。"
 
 #: ui/app.slint:594
 msgid "Conversation marked as spam."
 msgid_plural "{0} conversations marked as spam."
-msgstr[0] ""
+msgstr[0] "{0}件のスレッドを迷惑メールに分類しました。"
 
 #: ui/app.slint:595
 msgid "Message marked as spam."
 msgid_plural "{0} messages marked as spam."
-msgstr[0] ""
+msgstr[0] "{0}件のメールを迷惑メールに分類しました。"
 
 #: ui/app.slint:596
 msgid "Conversation moved."
 msgid_plural "{0} conversations moved."
-msgstr[0] ""
+msgstr[0] "{0}件のスレッドを移動しました。"
 
 #: ui/app.slint:597
-#, fuzzy
-#| msgid "Message from {}"
 msgid "Message moved."
 msgid_plural "{0} messages moved."
-msgstr[0] "{}からのメール"
+msgstr[0] "{0}件のメールを移動しました。"
 
 #: ui/app.slint:598
 msgid "Conversation marked as read."
 msgid_plural "{0} conversations marked as read."
-msgstr[0] ""
+msgstr[0] "{0}件のスレッドを既読にしました。"
 
 #: ui/app.slint:599
-#, fuzzy
-#| msgid "Mark as read"
 msgid "Message marked as read."
 msgid_plural "{0} messages marked as read."
-msgstr[0] "既読にする"
+msgstr[0] "{0}件のメールを既読にしました。"
 
 #: ui/app.slint:600
 msgid "Conversation marked as unread."
 msgid_plural "{0} conversations marked as unread."
-msgstr[0] ""
+msgstr[0] "{0}件のスレッドを未読にしました。"
 
 #: ui/app.slint:601
-#, fuzzy
-#| msgid "Mark as unread"
 msgid "Message marked as unread."
 msgid_plural "{0} messages marked as unread."
-msgstr[0] "未読にする"
+msgstr[0] "{0}件のメールを未読にしました。"
 
 #: ui/app.slint:602
 msgid "Conversation starred."
 msgid_plural "{0} conversations starred."
-msgstr[0] ""
+msgstr[0] "{0}件のスレッドにスターを付けました。"
 
 #: ui/app.slint:603
-#, fuzzy
-#| msgid "Message appearance"
 msgid "Message starred."
 msgid_plural "{0} messages starred."
-msgstr[0] "メールの表示"
+msgstr[0] "{0}件のメールにスターを付けました。"
 
 #: ui/app.slint:604
 msgid "Conversation unstarred."
 msgid_plural "{0} conversations unstarred."
-msgstr[0] ""
+msgstr[0] "{0}件のスレッドからスターを外しました。"
 
 #: ui/app.slint:605
-#, fuzzy
-#| msgid "Message appearance"
 msgid "Message unstarred."
 msgid_plural "{0} messages unstarred."
-msgstr[0] "メールの表示"
+msgstr[0] "{0}件のメールからスターを外しました。"
 
 #: ui/app.slint:606
 msgid "This can no longer be undone."
@@ -1756,15 +1742,15 @@ msgstr ""
 
 #: ui/app.slint:624
 msgid "Folder created."
-msgstr ""
+msgstr "フォルダーを作りました。"
 
 #: ui/app.slint:625
 msgid "Folder renamed."
-msgstr ""
+msgstr "フォルダー名を変更しました。"
 
 #: ui/app.slint:626
 msgid "Folder deleted."
-msgstr ""
+msgstr "フォルダーを削除しました。"
 
 #: ui/app.slint:627
 msgid "Could not create folder: {}"
@@ -2950,7 +2936,7 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:228
 msgid "Send"
-msgstr ""
+msgstr "送信"
 
 #: ui/components/composer-actions.slint:245
 msgid "Attach files"
@@ -2962,7 +2948,7 @@ msgstr "下書きに保存"
 
 #: ui/components/composer-actions.slint:279
 msgid "Discard"
-msgstr ""
+msgstr "破棄"
 
 #: ui/components/composer-actions.slint:327
 msgid "Edit link"
@@ -2978,7 +2964,7 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:359 ui/views/contacts-view.slint:802
 msgid "https://example.com"
-msgstr ""
+msgstr "https://example.com"
 
 #: ui/components/composer-actions.slint:395
 msgid "Remove link"
@@ -2986,19 +2972,19 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:413
 msgid "Apply"
-msgstr ""
+msgstr "適用"
 
 #: ui/components/composer-actions.slint:453
 msgid "Discard this draft?"
-msgstr ""
+msgstr "この下書きを破棄しますか？"
 
 #: ui/components/composer-actions.slint:464
 msgid "The message and its attachments will be removed from this composer."
-msgstr ""
+msgstr "メールと添付ファイルが作成画面から削除されます。"
 
 #: ui/components/composer-actions.slint:475
 msgid "Keep"
-msgstr ""
+msgstr "破棄しない"
 
 #: ui/components/composer-fields.slint:13 ui/views/mail-reading-pane.slint:342
 #: ui/views/mail-reading-pane.slint:388 ui/views/mail-reading-pane.slint:782
@@ -3022,7 +3008,7 @@ msgstr "下書きを編集"
 #: ui/components/composer-fields.slint:17 ui/views/mail-reading-pane.slint:345
 #: ui/views/mail-reading-pane.slint:391
 msgid "Edit as new"
-msgstr ""
+msgstr "新しいメールとして編集"
 
 #: ui/components/composer-fields.slint:69
 msgid "Open in a new window"
@@ -3030,59 +3016,59 @@ msgstr "新しいウィンドウで開く"
 
 #: ui/components/composer-fields.slint:123 ui/views/files-view.slint:701
 msgid "Account"
-msgstr ""
+msgstr "アカウント"
 
 #: ui/components/composer-fields.slint:363
 msgid "To"
-msgstr ""
+msgstr "宛先"
 
 #: ui/components/composer-fields.slint:364
 msgid "name@example.com · separate with commas"
-msgstr ""
+msgstr "name@example.com・コンマ区切り"
 
 #: ui/components/composer-fields.slint:390
 msgid "Cc"
-msgstr ""
+msgstr "CC"
 
 #: ui/components/composer-fields.slint:391
 msgid "Carbon copy"
-msgstr ""
+msgstr "CCを入力"
 
 #: ui/components/composer-fields.slint:401
 msgid "Bcc"
-msgstr ""
+msgstr "BCC"
 
 #: ui/components/composer-fields.slint:402
 msgid "Blind carbon copy"
-msgstr ""
+msgstr "BCCを入力"
 
 #: ui/components/composer-fields.slint:490
 msgid "Subject"
-msgstr ""
+msgstr "件名"
 
 #: ui/components/composer-fields.slint:502
 msgid "What is this email about?"
-msgstr ""
+msgstr "件名を入力"
 
 #: ui/components/confirmation-dialog.slint:13
 msgid "Confirm"
-msgstr ""
+msgstr "確認"
 
 #: ui/components/controls.slint:108
 msgid "On"
-msgstr ""
+msgstr "オン"
 
 #: ui/components/controls.slint:108 ui/dialogs/settings-dialog.slint:674
 msgid "Off"
-msgstr ""
+msgstr "オフ"
 
 #: ui/components/controls.slint:156 ui/views/mail-list-pane.slint:770
 msgid "Clear selection"
-msgstr ""
+msgstr "選択を解除"
 
 #: ui/components/controls.slint:156
 msgid "Select"
-msgstr ""
+msgstr "選択"
 
 #: ui/components/controls.slint:487
 msgid "Hide password"
@@ -4169,11 +4155,11 @@ msgstr ""
 
 #: ui/dialogs/calendar-details-dialog.slint:246
 msgid "Gmail"
-msgstr ""
+msgstr "Gmail"
 
 #: ui/dialogs/calendar-details-dialog.slint:247
 msgid "Outlook"
-msgstr ""
+msgstr "Outlook"
 
 #: ui/dialogs/calendar-details-dialog.slint:248
 msgid "Local"
@@ -4181,7 +4167,7 @@ msgstr ""
 
 #: ui/dialogs/calendar-details-dialog.slint:248
 msgid "CalDAV"
-msgstr ""
+msgstr "CalDAV"
 
 #: ui/dialogs/calendar-details-dialog.slint:272
 msgid "WHEN"
@@ -5595,7 +5581,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1374
 msgid "Conversation view"
-msgstr ""
+msgstr "スレッド表示"
 
 #: ui/dialogs/settings-dialog.slint:1375
 msgid ""
@@ -6268,14 +6254,12 @@ msgstr "Flectar Mailから通知を受け取る方法を選んでください。
 
 #: ui/dialogs/settings-dialog.slint:2627 ui/dialogs/settings-dialog.slint:2642
 #: ui/dialogs/settings-dialog.slint:2680
-#, fuzzy
-#| msgid "Account settings"
 msgid "Open system settings"
-msgstr "アカウント設定"
+msgstr "システム設定を開く"
 
 #: ui/dialogs/settings-dialog.slint:2687
 msgid "Notification sounds"
-msgstr ""
+msgstr "通知音"
 
 #: ui/dialogs/settings-dialog.slint:2689
 msgid "Your desktop decides whether notifications play a sound."
@@ -6349,7 +6333,7 @@ msgstr "フォルダーにコピー"
 #: ui/dialogs/settings-dialog.slint:2744 ui/views/mail-list-pane.slint:801
 #: ui/views/mail-reading-pane.slint:360 ui/views/mail-reading-pane.slint:842
 msgid "Move to spam"
-msgstr "迷惑メールフォルダーに移動"
+msgstr "迷惑メールに分類"
 
 #: ui/dialogs/settings-dialog.slint:2745 ui/views/mail-list-pane.slint:810
 #: ui/views/mail-reading-pane.slint:339 ui/views/mail-reading-pane.slint:384
@@ -6423,7 +6407,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2795
 msgid "Flectar account"
-msgstr ""
+msgstr "Flectar アカウント"
 
 #: ui/dialogs/settings-dialog.slint:2795
 msgid "Not signed in"
@@ -6579,7 +6563,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3094
 msgid "License"
-msgstr ""
+msgstr "ライセンス"
 
 #: ui/dialogs/settings-dialog.slint:3094
 msgid "AGPL-3.0-only."
@@ -6627,7 +6611,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3286
 msgid "https://calendar.example.com/"
-msgstr ""
+msgstr "https://calendar.example.com/"
 
 #: ui/dialogs/settings-dialog.slint:3291
 msgid ""
@@ -7941,15 +7925,15 @@ msgstr ""
 
 #: ui/views/mail-reading-pane.slint:751
 msgid "Close conversation"
-msgstr ""
+msgstr "スレッドを閉じる"
 
 #: ui/views/mail-reading-pane.slint:761
 msgid "Previous conversation"
-msgstr ""
+msgstr "前のスレッド"
 
 #: ui/views/mail-reading-pane.slint:771
 msgid "Next conversation"
-msgstr ""
+msgstr "次のスレッド"
 
 #: ui/views/mail-reading-pane.slint:812
 msgid "Archive message"
