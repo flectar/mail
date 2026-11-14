@@ -1649,6 +1649,8 @@ pub(super) fn make_mailbox_rows(
                 .into(),
                 color: custom_color.unwrap_or_default(),
                 has_custom_color: custom_color.is_some(),
+                // The sidebar sets each account's status.
+                status: AccountStatus::default(),
             }
         })
         .collect()

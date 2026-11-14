@@ -72,6 +72,8 @@ export component MailView inherits FocusScope {
     in property <string> clipboard_request: "";
     in property <int> clipboard_request_id: 0;
     in property <bool> sync_in_progress: false;
+    // An account's checks fail, as its sidebar heading shows.
+    in property <bool> account_problem: false;
     in property <bool> can_load_more: false;
     in property <bool> loading_more: false;
     in property <int> list_content_revision: 0;
@@ -94,6 +96,8 @@ export component MailView inherits FocusScope {
     in-out property <length> email-scroll-y: 0px;
     in-out property <bool> settings_open: false;
     in-out property <string> settings_tab: "General";
+    // An account Settings signs in again once it shows the account.
+    in-out property <int> settings_sign_in_account: -1;
     in-out property <string> compact-page: "list";
     in-out property <bool> folders-open: false;
     private property <bool> focus-list-after-settings: false;
@@ -288,6 +292,14 @@ export component MailView inherits FocusScope {
         reject
     }
 
+    // The sidebar's Sign in again: Settings opens on Accounts and starts the
+    // account's own sign-in there.
+    function sign-in-again(account-id: int) {
+        root.settings_sign_in_account = account-id;
+        root.settings_tab = "Accounts";
+        root.settings_open = true;
+    }
+
     changed layout-mode => {
         if (root.layout-mode == "minimal") {
             root.compact-page = "list";
@@ -370,6 +382,7 @@ export component MailView inherits FocusScope {
                     root.request_label_delete(id, name, account, global, has-children);
                 }
                 sync-account(account-id) => { root.sync_account(account-id); }
+                sign-in-account(account-id) => { root.sign-in-again(account-id); }
                 compose => { root.open_compose(); }
                 manage-accounts => {
                     root.settings_tab = "Accounts";
@@ -391,6 +404,7 @@ export component MailView inherits FocusScope {
                 search_query <=> root.search_query;
                 search_filter: root.search_filter;
                 sync_in_progress: root.sync_in_progress;
+                account-problem: root.account_problem;
                 can_load_more: root.can_load_more;
                 loading_more: root.loading_more;
                 content_revision: root.list_content_revision;
@@ -598,6 +612,7 @@ export component MailView inherits FocusScope {
                     root.request_label_delete(id, name, account, global, has-children);
                 }
                 sync-account(account-id) => { root.sync_account(account-id); }
+                sign-in-account(account-id) => { root.sign-in-again(account-id); }
                 compose => { root.open_compose(); }
                 manage-accounts => {
                     root.settings_tab = "Accounts";
@@ -631,6 +646,7 @@ export component MailView inherits FocusScope {
                 search_query <=> root.search_query;
                 search_filter: root.search_filter;
                 sync_in_progress: root.sync_in_progress;
+                account-problem: root.account_problem;
                 can_load_more: root.can_load_more;
                 loading_more: root.loading_more;
                 content_revision: root.list_content_revision;
@@ -865,6 +881,7 @@ export component MailView inherits FocusScope {
                     root.request_label_delete(id, name, account, global, has-children);
                 }
                 sync-account(account-id) => { root.sync_account(account-id); }
+                sign-in-account(account-id) => { root.sign-in-again(account-id); }
                 compose => {
                     root.folders-open = false;
                     root.open_compose();
