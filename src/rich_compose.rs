@@ -1369,14 +1369,10 @@ impl RichComposeDocument {
         self.html_for(&self.text, &self.styles)
     }
 
-    /// The HTML for the text without the blank lines it ends with: what the
-    /// user wrote, above the original a reply quotes.
-    pub fn body_html_above_quote(&self) -> Option<String> {
-        self.html_for(self.text.trim_end_matches(['\r', '\n']), &self.styles)
-    }
-
-    /// [`Self::body_html`], or above the quote, with the images `file` gives another file for
-    /// written with that one, as photos go out shrunk. They show at the same size.
+    /// [`Self::body_html`], or the HTML for what the user wrote above the original a reply
+    /// quotes, without the blank lines the text ends with, with the images `file` gives
+    /// another file for written with that one, as photos go out shrunk. They show at the same
+    /// size.
     pub(crate) fn body_html_with(
         &self,
         above_quote: bool,

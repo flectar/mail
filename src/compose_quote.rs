@@ -349,7 +349,7 @@ mod tests {
         // Blank lines the user left at the end, and a tab, reopen too.
         let mut written = crate::rich_compose::RichComposeDocument::default();
         written.load("Qty:\t3\n\n\n", 0, 0);
-        let (text, html) = quote.below(written.text(), written.body_html_above_quote());
+        let (text, html) = quote.below(written.text(), written.body_html_with(true, |_| None));
         assert_eq!(text, format!("Qty:\t3\n\n{}", quote.plain));
         let saved =
             ComposeQuote::split_saved(&html, &text, |own| document.load_html_start(own, &text))
