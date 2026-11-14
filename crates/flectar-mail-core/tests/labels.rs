@@ -35,6 +35,7 @@ fn list_ids(conn: &Connection, label_id: Option<i64>) -> Vec<i64> {
             folder_id: None,
             cursor: None,
             limit: 50,
+            order: flectar_mail_core::models::ListOrder::NewestFirst,
         },
     )
     .unwrap();

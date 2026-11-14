@@ -56,6 +56,7 @@ export component MailView inherits FocusScope {
     in property <string> unified_count: "";
     in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
+    in property <bool> mail_oldest_first: false;
     in property <string> selected_sender: "";
     in property <string> selected_address: "";
     in property <string> selected_subject: "";
@@ -146,6 +147,7 @@ export component MailView inherits FocusScope {
     callback select_thread_message(int);
     callback search_changed(string);
     callback set_search_filter(string);
+    callback set_mail_oldest_first(bool);
     callback select_scope(string);
     callback toggle_folder(int, bool);
     callback toggle_sidebar_section(string, bool);
@@ -157,6 +159,7 @@ export component MailView inherits FocusScope {
     callback request_label_rename(int, string, color, string, bool);
     callback request_label_delete(int, string, string, bool, bool);
     callback load_more();
+    callback load_earlier_mail();
     callback sync_mail();
     callback sync_account(int);
     callback check_mail_in_view();
@@ -406,6 +409,7 @@ export component MailView inherits FocusScope {
                 trash_view: root.trash_view;
                 search_query <=> root.search_query;
                 search_filter: root.search_filter;
+                oldest_first: root.mail_oldest_first;
                 sync_in_progress: root.sync_in_progress;
                 account-problem: root.account_problem;
                 can_load_more: root.can_load_more;
@@ -433,7 +437,9 @@ export component MailView inherits FocusScope {
                 open_email(id) => { root.select_email(id); root.focus-reader(); }
                 search_changed(query) => { root.search_changed(query); }
                 set_search_filter(filter) => { root.set_search_filter(filter); }
+                set_oldest_first(oldest) => { root.set_mail_oldest_first(oldest); }
                 load_more => { root.load_more(); }
+                load_earlier => { root.load_earlier_mail(); }
                 sync_mail => { root.sync_mail(); }
                 open_compose => { root.open_compose(); }
                 message_action_for_email(id, action) => {
@@ -649,6 +655,7 @@ export component MailView inherits FocusScope {
                 trash_view: root.trash_view;
                 search_query <=> root.search_query;
                 search_filter: root.search_filter;
+                oldest_first: root.mail_oldest_first;
                 sync_in_progress: root.sync_in_progress;
                 account-problem: root.account_problem;
                 can_load_more: root.can_load_more;
@@ -685,7 +692,9 @@ export component MailView inherits FocusScope {
                 }
                 search_changed(query) => { root.search_changed(query); }
                 set_search_filter(filter) => { root.set_search_filter(filter); }
+                set_oldest_first(oldest) => { root.set_mail_oldest_first(oldest); }
                 load_more => { root.load_more(); }
+                load_earlier => { root.load_earlier_mail(); }
                 sync_mail => { root.sync_mail(); }
                 open_folders => { root.folders-open = true; }
                 open_compose => { root.open_compose(); }

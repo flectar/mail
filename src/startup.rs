@@ -20,8 +20,8 @@ use flectar_mail_core::{
     config::Paths,
     events::{CoreEvent, TransferReport},
     models::{
-        Account, AccountConfig, CalendarConnection, CardDavConnection, MailGrouping, MessageCursor,
-        Settings, ThreadCursor, normalized_workspace_list_pane_width,
+        Account, AccountConfig, CalendarConnection, CardDavConnection, ListOrder, MailGrouping,
+        MessageCursor, Settings, ThreadCursor, normalized_workspace_list_pane_width,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -282,6 +282,9 @@ pub(crate) struct WarmStartSnapshot {
     pub(crate) inbox_count: usize,
     /// Whether the saved rows are conversations or single messages.
     pub(crate) grouping: MailGrouping,
+    /// The order of the saved rows, which `next_cursor` continues.
+    #[serde(default)]
+    pub(crate) order: ListOrder,
     pub(crate) next_cursor: Option<WarmStartCursor>,
     pub(crate) accounts: Vec<Account>,
     /// The active profile's accounts, which the saved rows show.
@@ -296,6 +299,7 @@ pub(crate) struct WarmStartProjection<'a> {
     pub(crate) scope: Scope,
     pub(crate) inbox_count: usize,
     pub(crate) grouping: MailGrouping,
+    pub(crate) order: ListOrder,
     pub(crate) next_cursor: Option<WarmStartCursor>,
     pub(crate) accounts: &'a [Account],
     pub(crate) profile_accounts: Option<&'a [i64]>,
@@ -319,6 +323,7 @@ impl WarmStartSnapshot {
             scope: projection.scope,
             inbox_count: projection.inbox_count,
             grouping: projection.grouping,
+            order: projection.order,
             next_cursor: projection.next_cursor,
             accounts: projection
                 .accounts
@@ -409,6 +414,7 @@ pub(crate) fn apply_warm_start_snapshot(
         state.set_scope(snapshot.scope);
         state.inbox_count = snapshot.inbox_count;
         state.grouping = snapshot.grouping;
+        state.list_order = snapshot.order;
         state.next_cursor = snapshot.next_cursor.map(WarmStartCursor::mail_cursor);
         state.messages = snapshot
             .messages
@@ -1111,6 +1117,7 @@ mod warm_start_tests {
             scope: Scope::UNIFIED_INBOX,
             inbox_count: 3,
             grouping: MailGrouping::Conversations,
+            order: ListOrder::NewestFirst,
             next_cursor: None,
             accounts: &[account()],
             profile_accounts: None,
@@ -1346,6 +1353,7 @@ mod warm_start_tests {
             scope: PERSON_INBOX,
             inbox_count: 3,
             grouping: MailGrouping::Messages,
+            order: ListOrder::NewestFirst,
             next_cursor: Some(WarmStartCursor::Message(MessageCursor {
                 date: 123,
                 message_id: 9,
@@ -1428,6 +1436,7 @@ mod warm_start_tests {
             scope: Scope::UNIFIED_INBOX,
             inbox_count: messages.len(),
             grouping: MailGrouping::Conversations,
+            order: ListOrder::NewestFirst,
             next_cursor: None,
             accounts: &accounts,
             profile_accounts: None,

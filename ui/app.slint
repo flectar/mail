@@ -360,6 +360,7 @@ export global I18n {
         if (key == "Conversation view updated for this session.") { return @tr("Conversation view updated for this session."); }
         if (key == "Conversation view preference saved.") { return @tr("Conversation view preference saved."); }
         if (key == "Could not save conversation view preference: {}") { return @tr("Could not save conversation view preference: {}", argument); }
+        if (key == "Could not save the order of this list: {}") { return @tr("Could not save the order of this list: {}", argument); }
         if (key == "Profile changes require local mail data.") { return @tr("Profile changes require local mail data."); }
         if (key == "Profile saved.") { return @tr("Profile saved."); }
         if (key == "Could not save profile: {}") { return @tr("Could not save profile: {}", argument); }
@@ -834,6 +835,7 @@ export component AppWindow inherits Window {
     callback select_thread_message(int);
     callback search_changed(string);
     callback set_search_filter(string);
+    callback set_mail_oldest_first(bool);
     callback select_scope(string);
     callback toggle_folder(int, bool);
     callback toggle_sidebar_section(string, bool);
@@ -842,6 +844,7 @@ export component AppWindow inherits Window {
     callback rename_folder(int, string);
     callback delete_folder(int);
     callback load_more();
+    callback load_earlier_mail();
     callback toggle_settings();
     callback sync_mail();
     callback sync_account(int);
@@ -1107,6 +1110,8 @@ export component AppWindow inherits Window {
     in property <string> unified_count: "";
     in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
+    // The mail list shows its oldest mail first.
+    in property <bool> mail_oldest_first: false;
     in property <string> selected_sender: "";
     in property <string> selected_address: "";
     in property <string> selected_subject: "";
@@ -1748,6 +1753,7 @@ export component AppWindow inherits Window {
             unified_count: root.unified_count;
             search_query <=> root.search_query;
             search_filter: root.search_filter;
+            mail_oldest_first: root.mail_oldest_first;
             selected_sender: root.selected_sender;
             selected_address: root.selected_address;
             selected_subject: root.selected_subject;
@@ -1810,6 +1816,7 @@ export component AppWindow inherits Window {
             select_thread_message(index) => { root.select_thread_message(index); }
             search_changed(query) => { root.search_changed(query); }
             set_search_filter(filter) => { root.set_search_filter(filter); }
+            set_mail_oldest_first(oldest) => { root.set_mail_oldest_first(oldest); }
             select_scope(scope) => { root.select_scope(scope); }
             toggle_sidebar_section(key, open) => { root.toggle_sidebar_section(key, open); }
             toggle_folder(id, expanded) => { root.toggle_folder(id, expanded); }
@@ -1825,6 +1832,7 @@ export component AppWindow inherits Window {
                 root.open-label-delete(id, name, account, global, has-descendants);
             }
             load_more => { root.load_more(); }
+            load_earlier_mail => { root.load_earlier_mail(); }
             sync_mail => { root.sync_mail(); }
             sync_account(account-id) => { root.sync_account(account-id); }
             check_mail_in_view => { root.check_mail_in_view(); }

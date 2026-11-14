@@ -943,6 +943,7 @@ mod tests {
                     folder_id,
                     cursor: None,
                     limit: 10_000,
+                    order: crate::models::ListOrder::NewestFirst,
                 };
                 if messages {
                     let page = threads::list_messages(&conn, &args, None).unwrap();

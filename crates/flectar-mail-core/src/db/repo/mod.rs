@@ -13,6 +13,7 @@ pub mod embeddings;
 pub mod folders;
 pub mod gmail;
 pub mod labels;
+pub mod list_orders;
 pub mod local;
 pub mod messages;
 pub mod notifications;

@@ -392,6 +392,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 folder_id: None,
                 cursor: None,
                 limit: 50,
+                order: flectar_mail_core::models::ListOrder::NewestFirst,
             };
             Ok(json!({
                 "badges": repo::counts::badge_query_plan(
@@ -412,6 +413,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             folder_id: None,
             cursor: None,
             limit: 50,
+            order: flectar_mail_core::models::ListOrder::NewestFirst,
         };
         let started = Instant::now();
         let badges = db

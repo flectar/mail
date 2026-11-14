@@ -40,6 +40,8 @@ mod mail_render_projection;
 mod mail_scope;
 mod mail_setup;
 mod mail_view_model;
+#[cfg(test)]
+mod mail_window_tests;
 mod mail_work;
 mod mailto_links;
 mod memory;
@@ -133,8 +135,8 @@ use flectar_mail_core::models::ThreadCursor;
 use flectar_mail_core::models::{
     Account, AccountConfig, AddPasswordAccountArgs, CalendarConnection, CardDavConnection,
     ConnectionSecurity, ContactRecord, ContactRecordCursor, ContactRecordPage, CreateEventArgs,
-    DraftAttachmentIn, Label, MailConnectionSettings, MailGrouping, MailProfile, MailProtocol,
-    Provider, Settings, Snippet, UpdateEventArgs,
+    DraftAttachmentIn, Label, ListOrder, MailConnectionSettings, MailGrouping, MailProfile,
+    MailProtocol, Provider, Settings, Snippet, UpdateEventArgs,
 };
 #[cfg(test)]
 use mail::fixture_messages;
@@ -143,8 +145,8 @@ use mail::{
     MailTarget, MailboxEntry, SidebarBadges, display_preview,
 };
 use mail_groups::{
-    MailGroupState, mail_group_key, mail_list_entry_key, project_mail_list, same_mail_list_entry,
-    server_only_entry,
+    MailGroupState, earlier_entry, mail_group_key, mail_list_entry_key, project_mail_list,
+    same_mail_list_entry, server_only_entry,
 };
 use mail_render_projection::*;
 use mail_scope::{Scope, StandardMailbox, accounts_to_check};
@@ -440,6 +442,11 @@ struct MailListUpdate {
 enum MailListUpdateKind {
     Refresh,
     Pagination { cursor: MailCursor, generation: u64 },
+    /// The rows before the first one, which `first` is the cursor of.
+    Earlier {
+        first: MailCursor,
+        generation: u64,
+    },
 }
 
 struct MailMetadataUpdate {
@@ -681,6 +688,10 @@ struct InboxState {
     inbox_count: usize,
     page: usize,
     next_cursor: Option<MailCursor>,
+    /// Where the rows start when the list's earlier rows aren't loaded: a
+    /// list opened at a message further down than one read goes. Refreshes
+    /// read from here, and the list offers the rows before.
+    window_start: Option<MailCursor>,
     selected_id: Option<i32>,
     /// Conversation to select once the next replacing page arrives, for a
     /// tab restored without cached rows.
@@ -732,6 +743,8 @@ struct InboxState {
     mark_read: flectar_mail_core::models::MarkRead,
     /// Whether the mail list shows conversations or each message on its own.
     grouping: MailGrouping,
+    /// The order of `messages`, which their date sections follow.
+    list_order: ListOrder,
     warm_start_cache: WarmStartCacheWriter,
 }
 
@@ -1248,6 +1261,7 @@ impl InboxState {
             search_filter: "All mail".to_owned(),
             page: 1,
             next_cursor: None,
+            window_start: None,
             selected_id: None,
             pending_selection: None,
             pending_selection_opens: false,
@@ -1283,7 +1297,17 @@ impl InboxState {
             remote_images_override_id: None,
             mark_read: flectar_mail_core::models::MarkRead::Immediately,
             grouping: MailGrouping::Conversations,
+            list_order: ListOrder::NewestFirst,
             warm_start_cache,
+        }
+    }
+
+    /// The order the list of the current mailbox and search loads in: the
+    /// mailbox's own, except search results, which are newest first.
+    fn list_order_for_view(&self) -> ListOrder {
+        match &self.core {
+            Some(core) if self.query.trim().is_empty() => core.order(self.scope),
+            _ => ListOrder::NewestFirst,
         }
     }
 
@@ -1332,14 +1356,20 @@ impl InboxState {
     }
 
     /// How many older unread messages of the list are only on the server,
-    /// which its end mentions once all of its mail is shown: not for
-    /// searches, nor for filters other than unread mail.
+    /// which the list's old end mentions once it is shown. A list shown
+    /// oldest first starts there, and a newest first one gets there once all
+    /// of its mail is in. Not for searches, nor for filters other than
+    /// unread mail.
     fn server_only_note(&self) -> u32 {
+        let at_old_end = match self.list_order {
+            ListOrder::OldestFirst => self.window_start.is_none(),
+            ListOrder::NewestFirst => self.next_cursor.is_none(),
+        };
         match self.server_only {
             Some((scope, count))
                 if scope == self.scope
                     && self.using_core
-                    && self.next_cursor.is_none()
+                    && at_old_end
                     && self.query.trim().is_empty()
                     && matches!(self.search_filter.as_str(), "All mail" | "Unread") =>
             {
@@ -1438,7 +1468,11 @@ impl InboxState {
         }
         // Search results and temporary filters are intentionally session-only;
         // keep the last ordinary mailbox page as the repeat-launch surface.
-        if !self.query.trim().is_empty() || self.search_filter != "All mail" {
+        // A list opened further down starts at its start next time.
+        if !self.query.trim().is_empty()
+            || self.search_filter != "All mail"
+            || self.window_start.is_some()
+        {
             return;
         }
         self.warm_start_cache
@@ -1446,6 +1480,7 @@ impl InboxState {
                 scope: self.scope,
                 inbox_count: self.inbox_count,
                 grouping: self.grouping,
+                order: self.list_order,
                 next_cursor: self.next_cursor.and_then(WarmStartCursor::of),
                 accounts: &self.connected_accounts,
                 profile_accounts: self.profile_accounts.as_deref(),
@@ -3897,6 +3932,37 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         app.set_mail_list_revision(app.get_mail_list_revision().wrapping_add(1));
                     }
                 }
+                MailListUpdateKind::Earlier { first, generation } => {
+                    if generation != mail_pagination_generation_for_result.get() {
+                        continue;
+                    }
+                    mail_pagination_in_progress_for_result.set(false);
+                    let still_current = mail_work::accepts_background(
+                        &mail_update_state.borrow(),
+                        update.view_generation,
+                    ) && update.scope == current_scope
+                        && update.query == current_query
+                        && mail_update_state
+                            .borrow()
+                            .messages
+                            .first()
+                            .is_some_and(|row| mail::cursor_of(row) == first);
+                    if still_current
+                        && let Err(error) = update.result.map(|page| {
+                            mail_view_model::prepend_mail_page(
+                                &app,
+                                &mail_update_state,
+                                &mail_update_runtime,
+                                page,
+                            )
+                        })
+                    {
+                        app.set_render_status(UiMessage::detail(
+                            "Mail pagination failed: {}",
+                            error,
+                        ));
+                    }
+                }
             }
         }
         if let Some(app) = mail_list_app.upgrade() {
@@ -4034,13 +4100,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             && !mail_work::actions_pending(&mail_update_state.borrow())
             && !mail_work::loading(&mail_update_state.borrow())
         {
-            let (using_core, core, scope, query, limit) = {
+            let (using_core, core, scope, query, start, limit) = {
                 let state = mail_update_state.borrow();
                 (
                     state.using_core,
                     state.core.clone(),
                     state.scope,
                     state.query.clone(),
+                    state.window_start,
                     mail_work::refresh_limit(state.messages.len(), &state.query),
                 )
             };
@@ -4050,7 +4117,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 let view_generation = mail_work::generation(&mail_update_state.borrow());
                 let updates = mail_list_tx_for_core.clone();
                 mail_update_runtime.spawn(async move {
-                    let result = core.load_page(scope, &query, None, limit, false).await;
+                    let result = core.load_page(scope, &query, start, limit, false).await;
                     let _ = updates
                         .send(MailListUpdate {
                             view_generation,
@@ -4550,6 +4617,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                                 state.inbox_count = page.messages.len();
                             }
                             state.messages = page.messages;
+                            state.list_order = page.order;
                             state.labels = page.labels;
                             state.mailboxes = page.mailboxes;
                             state.unified_mailboxes = page.unified_mailboxes;
@@ -5054,6 +5122,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                             selected_id,
                         );
                         state.messages = page.messages;
+                        state.list_order = page.order;
                         state.labels = page.labels;
                         state.next_cursor = page.next_cursor;
                     }
@@ -7027,6 +7096,67 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     });
 
+    // Turning a list around is like opening it again: it starts over at the
+    // top, in the new order, and keeps that order from now on.
+    let app_weak = app.as_weak();
+    let state_for_order = Rc::clone(&state);
+    let runtime_for_order = runtime.clone();
+    let mail_pagination_generation_for_order = Rc::clone(&mail_pagination_generation);
+    let mail_pagination_in_progress_for_order = Rc::clone(&mail_pagination_in_progress);
+    app.on_set_mail_oldest_first(move |oldest_first| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let order = if oldest_first {
+            ListOrder::OldestFirst
+        } else {
+            ListOrder::NewestFirst
+        };
+        let (core, scope) = {
+            let state = state_for_order.borrow();
+            (state.core.clone().filter(|_| state.using_core), state.scope)
+        };
+        let Some(core) = core else {
+            return;
+        };
+        if !core.set_order(scope, order) {
+            return;
+        }
+        mail_pagination_generation_for_order
+            .set(mail_pagination_generation_for_order.get().wrapping_add(1));
+        mail_pagination_in_progress_for_order.set(false);
+        app.set_mail_loading_more(false);
+        {
+            let mut state = state_for_order.borrow_mut();
+            state.list_order = state.list_order_for_view();
+            state.pending_selection = None;
+            state.pending_selection_opens = false;
+            state.restore_thread_message = None;
+            state.mail_groups.clear();
+            state.page = 1;
+            state.next_cursor = None;
+            state.selected_id = None;
+            state.checked_ids.clear();
+            state.preview_closed = false;
+        }
+        if let Err(error) =
+            refresh_from_source(&app, &state_for_order, &runtime_for_order, false, &[])
+        {
+            app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
+        }
+        let app = app.as_weak();
+        runtime_for_order.spawn(async move {
+            if let Err(error) = core.save_order(scope, order).await {
+                let _ = app.upgrade_in_event_loop(move |app| {
+                    app.set_render_status(UiMessage::detail(
+                        "Could not save the order of this list: {}",
+                        error,
+                    ));
+                });
+            }
+        });
+    });
+
     let app_weak = app.as_weak();
     let state_for_scope = Rc::clone(&state);
     let runtime_for_scope = runtime.clone();
@@ -7176,6 +7306,47 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     scope,
                     query,
                     kind: MailListUpdateKind::Pagination { cursor, generation },
+                    result,
+                })
+                .await;
+        });
+    });
+
+    // A list opened further down shows the rows before its first one on
+    // request, read toward the list's start.
+    let state_for_earlier = Rc::clone(&state);
+    let runtime_for_earlier = runtime.clone();
+    let mail_list_tx_for_earlier = mail_list_tx.clone();
+    let mail_pagination_generation_for_earlier = Rc::clone(&mail_pagination_generation);
+    let mail_pagination_in_progress_for_earlier = Rc::clone(&mail_pagination_in_progress);
+    app.on_load_earlier_mail(move || {
+        let (core, scope, first) = {
+            let state = state_for_earlier.borrow();
+            (
+                state.core.clone().filter(|_| state.using_core),
+                state.scope,
+                state
+                    .window_start
+                    .and(state.messages.first().map(mail::cursor_of)),
+            )
+        };
+        let (Some(core), Some(first)) = (core, first) else {
+            return;
+        };
+        if mail_pagination_in_progress_for_earlier.replace(true) {
+            return;
+        }
+        let generation = mail_pagination_generation_for_earlier.get();
+        let view_generation = mail_work::generation(&state_for_earlier.borrow());
+        let updates = mail_list_tx_for_earlier.clone();
+        runtime_for_earlier.spawn(async move {
+            let result = core.load_earlier(scope, first, PAGE_SIZE as i64).await;
+            let _ = updates
+                .send(MailListUpdate {
+                    view_generation,
+                    scope,
+                    query: String::new(),
+                    kind: MailListUpdateKind::Earlier { first, generation },
                     result,
                 })
                 .await;

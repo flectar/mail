@@ -54,6 +54,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/035_read_receipts.sql")),
     Migration::Plain(include_str!("migrations/036_returned_receipts.sql")),
     Migration::Plain(include_str!("migrations/037_mark_read.sql")),
+    Migration::Plain(include_str!("migrations/038_oldest_first_lists.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -372,6 +373,7 @@ mod tests {
             "messages",
             "messages_fts",
             "notification_outbox",
+            "oldest_first_lists",
             "pending_actions",
             "pop3_sync_state",
             "pop3_uidls",

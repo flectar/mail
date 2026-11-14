@@ -1314,8 +1314,40 @@ pub struct ThreadDetail {
     pub messages: Vec<MessageDetail>,
 }
 
-/// Stable keyset cursor for the descending thread timeline. Timestamps alone
-/// are not unique, so the thread id is the deterministic tie-breaker.
+/// Which end of a mail list's timeline comes first.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ListOrder {
+    #[default]
+    NewestFirst,
+    OldestFirst,
+}
+
+impl ListOrder {
+    /// The other order, which pages toward a list's start.
+    #[must_use]
+    pub const fn reversed(self) -> Self {
+        match self {
+            Self::NewestFirst => Self::OldestFirst,
+            Self::OldestFirst => Self::NewestFirst,
+        }
+    }
+}
+
+/// What a mail list's saved order belongs to. The order goes when its
+/// account, folder or label does, so a later one that takes the same id
+/// starts newest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListOwner {
+    /// A list across accounts, such as a unified mailbox or an inbox half.
+    Unified,
+    Account(i64),
+    Folder(i64),
+    Label(i64),
+}
+
+/// Stable keyset cursor for the thread timeline, in either order. Timestamps
+/// alone are not unique, so the thread id is the deterministic tie-breaker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadCursor {
@@ -1346,8 +1378,8 @@ pub struct SearchPage {
     pub next_cursor: Option<SearchCursor>,
 }
 
-/// Stable keyset cursor for the descending message timeline; the message id
-/// breaks ties between messages with the same date.
+/// Stable keyset cursor for the message timeline, in either order; the
+/// message id breaks ties between messages with the same date.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageCursor {
