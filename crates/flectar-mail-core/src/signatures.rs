@@ -64,7 +64,42 @@ pub(crate) fn sanitize_html(html: &str) -> String {
                 .link_rel(Some("noopener noreferrer"));
             builder
         });
-    SANITIZER.clean(html).to_string()
+    without_unsourced_pictures(SANITIZER.clean(html).to_string())
+}
+
+/// `html` as ammonia writes it, without the pictures whose address it took out: some mail apps
+/// show an `<img>` without one as a broken picture. Ammonia quotes every attribute value with
+/// `"` and escapes that inside them, so a tag ends at the first `>` outside quotes.
+fn without_unsourced_pictures(html: String) -> String {
+    if !html.contains("<img") {
+        return html;
+    }
+    let mut kept = String::with_capacity(html.len());
+    let mut rest = html.as_str();
+    while let Some(start) = rest.find("<img") {
+        kept.push_str(&rest[..start]);
+        let tag = &rest[start..];
+        let mut quoted = false;
+        let end = tag
+            .char_indices()
+            .find(|&(_, character)| {
+                if character == '"' {
+                    quoted = !quoted;
+                }
+                character == '>' && !quoted
+            })
+            .map_or(tag.len(), |(at, _)| at + 1);
+        let is_picture = tag[4..]
+            .chars()
+            .next()
+            .is_some_and(|next| next.is_ascii_whitespace() || next == '>' || next == '/');
+        if !is_picture || tag[..end].contains(" src=\"") {
+            kept.push_str(&tag[..end]);
+        }
+        rest = &tag[end..];
+    }
+    kept.push_str(rest);
+    kept
 }
 
 /// Whether `src` holds a PNG, JPEG, GIF or WebP picture itself, as the composer writes them.
@@ -304,9 +339,24 @@ mod tests {
             "javascript",
             "<script",
             "onclick",
+            // Without their address, the pictures go entirely.
+            "<img",
+            "alt=",
         ] {
             assert!(!clean.contains(gone), "{gone} in {clean}");
         }
         assert!(clean.contains("Me"), "{clean}");
+
+        // Only those: the signature's own picture stays, and text that reads like a tag is text.
+        let clean = sanitize_html(&format!(
+            "<p>a &lt;img&gt; b<img alt='x > y' src='https://example.org/a.png'>c\
+             <img alt='Logo \"Zoë\" >' src='{logo}'>d</p>"
+        ));
+        assert_eq!(
+            clean,
+            format!(
+                "<p>a &lt;img&gt; bc<img alt=\"Logo &quot;Zoë&quot; &gt;\" src=\"{logo}\">d</p>"
+            )
+        );
     }
 }
