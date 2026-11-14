@@ -412,7 +412,7 @@ msgid "New address-book entry"
 msgstr ""
 
 #: ui/app.slint:225 ui/app.slint:1255 ui/components/composer-fields.slint:90
-#: ui/app.slint:225 ui/app.slint:1255 ui/components/composer-fields.slint:90 ui/components/email-composer.slint:35
+#: ui/app.slint:225 ui/app.slint:1255 ui/components/composer-fields.slint:90 ui/components/email-composer.slint:36
 msgid "No connected account"
 msgstr ""
 
@@ -1906,7 +1906,7 @@ msgstr ""
 msgid "{} wrote:"
 msgstr ""
 
-#: ui/app.slint:665 ui/components/email-composer.slint:821
+#: ui/app.slint:665 ui/components/email-composer.slint:822
 msgid "Forwarded message"
 msgstr ""
 
@@ -3473,106 +3473,114 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
-#: ui/components/email-composer.slint:381
-#: ui/components/email-composer.slint:381
+#: ui/components/email-composer.slint:382
+#: ui/components/email-composer.slint:382
 msgid "From"
 msgstr ""
 
-#: ui/components/email-composer.slint:382
+#: ui/components/email-composer.slint:383
 msgid "Verified sender identity"
 msgstr ""
 
-#: ui/components/email-composer.slint:395
+#: ui/components/email-composer.slint:396
 msgid "Signature"
 msgstr ""
 
-#: ui/components/email-composer.slint:498
+#: ui/components/email-composer.slint:499
 msgid "Write your message…"
 msgstr ""
 
-#: ui/components/email-composer.slint:668
+#: ui/components/email-composer.slint:669
 msgid "No suggestions"
 msgstr ""
 
-#: ui/components/email-composer.slint:672
+#: ui/components/email-composer.slint:673
 msgid "Add to dictionary"
 msgstr ""
 
-#: ui/components/email-composer.slint:676
+#: ui/components/email-composer.slint:677
 msgid "Ignore"
 msgstr ""
 
-#: ui/components/email-composer.slint:681
+#: ui/components/email-composer.slint:682
 msgid "Image size"
 msgstr ""
 
-#: ui/components/email-composer.slint:688
+#: ui/components/email-composer.slint:689
 msgid "Alt text…"
 msgstr ""
 
-#: ui/components/email-composer.slint:696
+#: ui/components/email-composer.slint:697
 msgid "Cut"
 msgstr ""
 
-#: ui/components/email-composer.slint:701
+#: ui/components/email-composer.slint:702
 msgid "Copy"
 msgstr ""
 
-#: ui/components/email-composer.slint:706
+#: ui/components/email-composer.slint:707
 msgid "Paste"
 msgstr ""
 
-#: ui/components/email-composer.slint:711
+#: ui/components/email-composer.slint:712
 msgid "Paste as plain text"
 msgstr ""
 
-#: ui/components/email-composer.slint:716
+#: ui/components/email-composer.slint:717
 msgid "Select all"
 msgstr ""
 
-#: ui/components/email-composer.slint:722
+#: ui/components/email-composer.slint:723
 msgid "Spelling"
 msgstr ""
 
-#: ui/components/email-composer.slint:724
-#: ui/components/email-composer.slint:724
+#: ui/components/email-composer.slint:725
+#: ui/components/email-composer.slint:725
 msgid "Check spelling"
 msgstr ""
 
-#: ui/components/email-composer.slint:738
+#: ui/components/email-composer.slint:739
 msgid "No dictionaries installed"
 msgstr ""
 
-#: ui/components/email-composer.slint:821
+#: ui/components/email-composer.slint:822
 msgid "Quoted text"
 msgstr ""
 
-#: ui/components/email-composer.slint:827
+#: ui/components/email-composer.slint:828
 msgid "Hide the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:827
+#: ui/components/email-composer.slint:828
 msgid "Show the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:838
+#: ui/components/email-composer.slint:839
 msgid "Edit the quoted message as text"
 msgstr ""
 
-#: ui/components/email-composer.slint:849
+#: ui/components/email-composer.slint:850
 msgid "Remove the forwarded message"
 msgstr ""
 
-#: ui/components/email-composer.slint:849
+#: ui/components/email-composer.slint:850
 msgid "Remove the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:880
+#: ui/components/email-composer.slint:881
 msgid "Add the forwarded message back"
 msgstr ""
 
-#: ui/components/email-composer.slint:880
+#: ui/components/email-composer.slint:881
 msgid "Add the quoted text back"
+msgstr ""
+
+#: ui/components/email-composer.slint:1051
+msgid "Drop to add to your message"
+msgstr ""
+
+#: ui/components/email-composer.slint:1059
+msgid "Pictures go in the text, and other files are attached."
 msgstr ""
 
 #: ui/components/email-link-context-area.slint:25

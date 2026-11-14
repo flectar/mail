@@ -80,6 +80,9 @@ pub(super) struct ComposeSession {
     edited_quote: RefCell<Option<EditedQuote>>,
     send_action: Cell<Option<i64>>,
     picking: Cell<bool>,
+    /// Files dropped on the message, which go in together once the drop ends.
+    #[cfg(desktop)]
+    dropped: RefCell<Vec<PathBuf>>,
     /// The signature block this composer inserted, while the user has not
     /// edited it, and the signatures of its sending account.
     signature: RefCell<Option<String>>,
@@ -261,6 +264,26 @@ pub(super) fn install(
 }
 
 /// The composers, once installed.
+/// Files dragged over the main window, for its open message to show where they'll go.
+#[cfg(desktop)]
+pub(super) fn files_hovered(hovering: bool) {
+    with_composers(|composers| {
+        if let Some(session) = composers.in_app() {
+            session.files_hovered(hovering);
+        }
+    });
+}
+
+/// A file dropped on the main window goes into its open message.
+#[cfg(desktop)]
+pub(super) fn file_dropped(path: PathBuf) {
+    with_composers(|composers| {
+        if let Some(session) = composers.in_app() {
+            session.file_dropped(path);
+        }
+    });
+}
+
 pub(super) fn with_composers<R>(f: impl FnOnce(&Rc<Composers>) -> R) -> Option<R> {
     COMPOSERS.with(|slot| slot.borrow().as_ref().map(f))
 }
@@ -577,6 +600,8 @@ impl Composers {
             edited_quote: RefCell::default(),
             send_action: Cell::new(None),
             picking: Cell::new(false),
+            #[cfg(desktop)]
+            dropped: RefCell::default(),
             signature: RefCell::default(),
             signatures: RefCell::default(),
             preferences_generation: Cell::new(0),
@@ -1327,6 +1352,19 @@ impl ComposeSession {
                         && crate::window_chrome::quit_key(&app, event, modifiers.get())
                     {
                         return EventResult::PreventDefault;
+                    }
+                }
+                _ => {}
+            }
+            match event {
+                WindowEvent::HoveredFile(_) | WindowEvent::HoveredFileCancelled => {
+                    if let Some(session) = session.upgrade() {
+                        session.files_hovered(matches!(event, WindowEvent::HoveredFile(_)));
+                    }
+                }
+                WindowEvent::DroppedFile(path) => {
+                    if let Some(session) = session.upgrade() {
+                        session.file_dropped(path.clone());
                     }
                 }
                 _ => {}
@@ -2104,68 +2142,154 @@ impl ComposeSession {
                     return;
                 }
             };
-            if documents.is_empty() {
-                return;
+            session.attach(
+                documents
+                    .into_iter()
+                    .map(|document| NewAttachment {
+                        path: document.path().to_path_buf(),
+                        filename: document.name(),
+                        import: Some(document),
+                    })
+                    .collect(),
+            );
+        });
+    }
+
+    /// Attaches `new`, leaving out files already attached, ones that can't be read, and any
+    /// that would take the message's images and attachments past what it carries, and says
+    /// what went in.
+    fn attach(&self, new: Vec<NewAttachment>) {
+        if new.is_empty() {
+            return;
+        }
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        let mut files = self.files.borrow_mut();
+        let mut total_size = files
+            .iter()
+            .map(|file| file.size)
+            .sum::<u64>()
+            .saturating_add(image_bytes(&self.document.borrow()));
+        let mut added = 0usize;
+        let mut skipped = 0usize;
+        for document in new {
+            let path = std::fs::canonicalize(&document.path).unwrap_or(document.path);
+            if files.iter().any(|file| file.path == path) {
+                skipped += 1;
+                continue;
             }
-            let mut files = session.files.borrow_mut();
-            let mut total_size = files
-                .iter()
-                .map(|file| file.size)
-                .sum::<u64>()
-                .saturating_add(image_bytes(&session.document.borrow()));
-            let mut added = 0usize;
-            let mut skipped = 0usize;
-            for document in documents {
-                let path = std::fs::canonicalize(document.path())
-                    .unwrap_or_else(|_| document.path().to_path_buf());
-                if files.iter().any(|file| file.path == path) {
-                    skipped += 1;
-                    continue;
-                }
-                let Ok(metadata) = std::fs::metadata(&path) else {
-                    skipped += 1;
-                    continue;
-                };
-                if !metadata.is_file()
-                    || total_size.saturating_add(metadata.len()) > MAX_COMPOSE_ATTACHMENT_BYTES
-                {
-                    skipped += 1;
-                    continue;
-                }
-                let Some(filename) = document.name() else {
-                    skipped += 1;
-                    continue;
-                };
-                total_size += metadata.len();
-                files.push(ComposeFile {
-                    path,
-                    filename,
-                    size: metadata.len(),
-                    _import: Some(Rc::new(document)),
-                });
-                added += 1;
+            let Ok(metadata) = std::fs::metadata(&path) else {
+                skipped += 1;
+                continue;
+            };
+            if !metadata.is_file()
+                || total_size.saturating_add(metadata.len()) > MAX_COMPOSE_ATTACHMENT_BYTES
+            {
+                skipped += 1;
+                continue;
             }
-            apply_compose_files(&ui, &files);
-            if skipped == 0 {
-                ui.set_notice(
-                    if added == 1 {
-                        UiMessage::plain("Added 1 attachment.")
-                    } else {
-                        UiMessage::detail("Added {} attachments.", added)
-                    },
-                    false,
-                );
-            } else {
-                ui.set_notice(
-                    UiMessage::arguments(
-                        "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).",
-                        added,
-                        skipped,
-                    ),
-                    added == 0,
-                );
+            let Some(filename) = document.filename else {
+                skipped += 1;
+                continue;
+            };
+            total_size += metadata.len();
+            files.push(ComposeFile {
+                path,
+                filename,
+                size: metadata.len(),
+                _import: document.import.map(Rc::new),
+            });
+            added += 1;
+        }
+        apply_compose_files(&ui, &files);
+        if skipped == 0 {
+            ui.set_notice(
+                if added == 1 {
+                    UiMessage::plain("Added 1 attachment.")
+                } else {
+                    UiMessage::detail("Added {} attachments.", added)
+                },
+                false,
+            );
+        } else {
+            ui.set_notice(
+                UiMessage::arguments(
+                    "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).",
+                    added,
+                    skipped,
+                ),
+                added == 0,
+            );
+        }
+    }
+
+    /// Files dragged over the message's window show where they'll go, until they're dropped
+    /// or taken away.
+    #[cfg(desktop)]
+    fn files_hovered(&self, hovering: bool) {
+        if let Some(host) = self.host() {
+            let ui = host.ui();
+            ui.set_drop_hint(hovering && !ui.get_sending());
+        }
+    }
+
+    /// A file dropped on the message. Several come one after another, and go in together.
+    #[cfg(desktop)]
+    fn file_dropped(self: &Rc<Self>, path: PathBuf) {
+        let mut dropped = self.dropped.borrow_mut();
+        dropped.push(path);
+        if dropped.len() > 1 {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        Timer::single_shot(Duration::from_millis(30), move || {
+            if let Some(session) = weak.upgrade() {
+                session.place_dropped_files();
             }
         });
+    }
+
+    /// Puts dropped pictures in the text at the caret, as pasting does, and attaches the
+    /// other files.
+    #[cfg(desktop)]
+    fn place_dropped_files(&self) {
+        let paths = std::mem::take(&mut *self.dropped.borrow_mut());
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        ui.set_drop_hint(false);
+        if ui.get_sending() {
+            return;
+        }
+        let mut attachments = Vec::new();
+        for path in paths {
+            let image = is_image_name(&path)
+                .then(|| std::fs::metadata(&path).ok())
+                .flatten()
+                .filter(|metadata| {
+                    metadata.is_file() && metadata.len() <= MAX_COMPOSE_ATTACHMENT_BYTES
+                })
+                .and_then(|_| std::fs::read(&path).ok())
+                .and_then(|bytes| crate::rich_compose::InlineImage::from_file_bytes(bytes, ""));
+            match image {
+                Some(image) => {
+                    if !self.insert_image(image) {
+                        break;
+                    }
+                }
+                None => attachments.push(NewAttachment {
+                    filename: path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned()),
+                    path,
+                    import: None,
+                }),
+            }
+        }
+        self.attach(attachments);
     }
 
     /// Opens a picker for images to put in the text at the caret.
@@ -3011,6 +3135,26 @@ impl ComposeSession {
 }
 
 type FetchedFiles = Vec<Result<(PathBuf, String, u64), String>>;
+
+/// A file to attach: where it is, the name it goes out with, and the copy that keeps it
+/// readable, when the host made one.
+struct NewAttachment {
+    path: PathBuf,
+    filename: Option<String>,
+    import: Option<documents::ImportedDocument>,
+}
+
+/// Whether a file's name says it's a picture the text can show.
+#[cfg(desktop)]
+fn is_image_name(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["png", "jpg", "jpeg", "gif", "webp"]
+                .iter()
+                .any(|known| extension.eq_ignore_ascii_case(known))
+        })
+}
 
 /// The size of the images in a message's text, which count with its attachments.
 fn image_bytes(document: &RichComposeDocument) -> u64 {
