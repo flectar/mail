@@ -360,6 +360,7 @@ export global I18n {
         if (key == "Conversation view updated for this session.") { return @tr("Conversation view updated for this session."); }
         if (key == "Conversation view preference saved.") { return @tr("Conversation view preference saved."); }
         if (key == "Could not save conversation view preference: {}") { return @tr("Could not save conversation view preference: {}", argument); }
+        if (key == "Could not save the order of this list: {}") { return @tr("Could not save the order of this list: {}", argument); }
         if (key == "Profile changes require local mail data.") { return @tr("Profile changes require local mail data."); }
         if (key == "Profile saved.") { return @tr("Profile saved."); }
         if (key == "Could not save profile: {}") { return @tr("Could not save profile: {}", argument); }
@@ -532,6 +533,7 @@ export global I18n {
         if (key == "Read receipt preference saved.") { return @tr("Read receipt preference saved."); }
         if (key == "Could not save the read receipt preference: {}") { return @tr("Could not save the read receipt preference: {}", argument); }
         if (key == "Could not answer the read receipt request: {}") { return @tr("Could not answer the read receipt request: {}", argument); }
+        if (key == "Could not mark all as read: {}") { return @tr("Could not mark all as read: {}", argument); }
         if (key == "Use YYYY-MM-DD for the date and a time such as {}.") { return @tr("Use YYYY-MM-DD for the date and a time such as {}.", argument); }
         if (key == "Event duration must be a number of minutes.") { return @tr("Event duration must be a number of minutes."); }
         if (key == "Add a title and choose a duration from 15 to 1440 minutes.") { return @tr("Add a title and choose a duration from 15 to 1440 minutes."); }
@@ -835,6 +837,7 @@ export component AppWindow inherits Window {
     callback select_thread_message(int);
     callback search_changed(string);
     callback set_search_filter(string);
+    callback set_mail_oldest_first(bool);
     callback select_scope(string);
     callback toggle_folder(int, bool);
     callback toggle_sidebar_section(string, bool);
@@ -843,6 +846,7 @@ export component AppWindow inherits Window {
     callback rename_folder(int, string);
     callback delete_folder(int);
     callback load_more();
+    callback load_earlier_mail();
     callback toggle_settings();
     callback sync_mail();
     callback sync_account(int);
@@ -854,6 +858,8 @@ export component AppWindow inherits Window {
     callback bulk_message_action(string);
     callback toggle_mail_group(string);
     callback empty_trash(int);
+    // Mark everything a mailbox lists as read, by its scope key (#234).
+    callback mark_all_read(string);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
@@ -896,7 +902,7 @@ export component AppWindow inherits Window {
     callback save_sync_interval(int);
     callback save_undo_send(int);
     callback save_compose_text_style(string, string);
-    callback save_mark_read_on_open(bool);
+    callback save_mark_read(string);
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
@@ -1106,6 +1112,8 @@ export component AppWindow inherits Window {
     in property <string> unified_count: "";
     in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
+    // The mail list shows its oldest mail first.
+    in property <bool> mail_oldest_first: false;
     in property <string> selected_sender: "";
     in property <string> selected_address: "";
     in property <string> selected_subject: "";
@@ -1249,7 +1257,7 @@ export component AppWindow inherits Window {
     // The font and size new messages start in.
     in-out property <string> compose_font: "default";
     in-out property <string> compose_text_size: "normal";
-    in-out property <bool> mark_read_on_open: true;
+    in-out property <string> mark_read: "immediately";
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
     in-out property <bool> contact_suggest_all_accounts: false;
@@ -1399,6 +1407,10 @@ export component AppWindow inherits Window {
     private property <bool> folder-dialog-open: false;
     private property <bool> trash-delete-open: false;
     private property <string> trash-delete-kind: "";
+    // "Mark all as read…" waits for its confirmation here.
+    private property <bool> mark-all-read-open: false;
+    private property <string> mark-all-read-scope: "";
+    private property <string> mark-all-read-name: "";
     private property <int> trash-delete-id: -1;
 
     function confirm-trash-deletion(kind: string, id: int) {
@@ -1743,6 +1755,7 @@ export component AppWindow inherits Window {
             unified_count: root.unified_count;
             search_query <=> root.search_query;
             search_filter: root.search_filter;
+            mail_oldest_first: root.mail_oldest_first;
             selected_sender: root.selected_sender;
             selected_address: root.selected_address;
             selected_subject: root.selected_subject;
@@ -1805,6 +1818,7 @@ export component AppWindow inherits Window {
             select_thread_message(index) => { root.select_thread_message(index); }
             search_changed(query) => { root.search_changed(query); }
             set_search_filter(filter) => { root.set_search_filter(filter); }
+            set_mail_oldest_first(oldest) => { root.set_mail_oldest_first(oldest); }
             select_scope(scope) => { root.select_scope(scope); }
             toggle_sidebar_section(key, open) => { root.toggle_sidebar_section(key, open); }
             toggle_folder(id, expanded) => { root.toggle_folder(id, expanded); }
@@ -1820,6 +1834,7 @@ export component AppWindow inherits Window {
                 root.open-label-delete(id, name, account, global, has-descendants);
             }
             load_more => { root.load_more(); }
+            load_earlier_mail => { root.load_earlier_mail(); }
             sync_mail => { root.sync_mail(); }
             sync_account(account-id) => { root.sync_account(account-id); }
             check_mail_in_view => { root.check_mail_in_view(); }
@@ -1837,6 +1852,11 @@ export component AppWindow inherits Window {
             }
             toggle_mail_group(key) => { root.toggle_mail_group(key); }
             request_empty_trash(account-id) => { root.confirm-trash-deletion("empty", account-id); }
+            request_mark_all_read(scope, name) => {
+                root.mark-all-read-scope = scope;
+                root.mark-all-read-name = name;
+                root.mark-all-read-open = true;
+            }
             set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
             set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             toggle_mail_label(id, applied) => { root.toggle_mail_label(id, applied); }
@@ -2196,7 +2216,7 @@ export component AppWindow inherits Window {
             undo_send_seconds <=> root.undo_send_seconds;
             compose_font <=> root.compose_font;
             compose_text_size <=> root.compose_text_size;
-            mark_read_on_open <=> root.mark_read_on_open;
+            mark_read <=> root.mark_read;
             collect_outgoing_contacts <=> root.collect_outgoing_contacts;
             collect_incoming_contacts <=> root.collect_incoming_contacts;
             contact_suggest_all_accounts <=> root.contact_suggest_all_accounts;
@@ -2301,7 +2321,7 @@ export component AppWindow inherits Window {
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
             save_undo_send(seconds) => { root.save_undo_send(seconds); }
             save_compose_text_style(font, size) => { root.save_compose_text_style(font, size); }
-            save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
+            save_mark_read(choice) => { root.save_mark_read(choice); }
             save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }
             save_conversation_view(enabled) => { root.save_conversation_view(enabled); }
             save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest) => {
@@ -2445,6 +2465,28 @@ export component AppWindow inherits Window {
             else if root.trash-delete-kind == "row" { root.message_action_for_email(root.trash-delete-id, "delete_permanently"); }
             else { root.message_action("delete_permanently"); }
         }
+    }
+
+    if root.mark-all-read-open : ConfirmationDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        z: 16000;
+        open <=> root.mark-all-read-open;
+        title: @tr("Mark all as read?");
+        subject: "";
+        description: @tr("All unread messages in {} will be marked as read.", root.mark-all-read-name);
+        detail: @tr("This action cannot be undone.");
+        confirm-label: @tr("Mark all as read");
+        destructive: false;
+        icon: @image-url("icons/lucide/outline/mail-open.svg");
+        surface: root.surface;
+        dialog-border-color: root.border;
+        title-color: root.title-color;
+        body-color: root.body-text;
+        muted-color: root.muted-text;
+        confirmed => { root.mark_all_read(root.mark-all-read-scope); }
     }
 
     if AccountImport.open : ImportDialog {

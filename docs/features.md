@@ -30,6 +30,17 @@ Replies stay grouped in chronological order, with the active message expanded
 inside the reading pane. To list, open and act on every message on its own, turn
 off **Conversation view** in Settings → General.
 
+Opening an unread message marks it read. **Mark messages as read** in Settings →
+General can wait 2 or 5 seconds instead, so messages you only pass over, such
+as with the arrow keys, stay unread. **Never** leaves marking to you.
+
+To mark everything in a mailbox read, right-click it in the sidebar, or press
+and hold it on a phone, and choose **Mark all as read…**. In an Inbox, a folder
+or a Gmail label this happens on the server too, including older mail this
+device doesn't keep, up to the last check, so mail that arrives after that stays
+unread. In a split inbox half, Starred or a category it marks the messages this
+device shows. It can't be undone, so it asks first.
+
 | Keys | Action |
 | --- | --- |
 | **Up/Down** | Move between messages |
@@ -42,6 +53,12 @@ off **Conversation view** in Settings → General.
 
 In the minimal layout, arrow keys highlight messages and **Enter** opens them;
 **Escape** or **F6** returns to the list.
+
+Lists start with the newest mail. To read a mailbox from its oldest mail
+instead, choose **Oldest first** from the filter button next to the search
+field. Each mailbox, folder and label keeps the order you chose for it, and
+search results stay newest first. A notification about new mail opens such a
+list at that message when it is far down, with **Show earlier mail** above it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../resources/screenshots/desktop-thread-dark.png">

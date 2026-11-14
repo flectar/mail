@@ -25,6 +25,7 @@ pub mod jmap;
 pub mod mail_import;
 pub mod mail_security;
 pub mod mailto;
+mod mark_all_read;
 mod mbox;
 pub mod migration;
 pub mod mime;
@@ -801,11 +802,19 @@ mod calendar_oauth_scope_tests {
 pub struct ThreadPageRequest {
     pub cursor: Option<ThreadCursor>,
     pub limit: i64,
+    /// Which end of the timeline comes first. A cursor continues in the order
+    /// of the page that gave it.
+    pub order: ListOrder,
 }
 
+/// A page newest first.
 impl From<(Option<ThreadCursor>, i64)> for ThreadPageRequest {
     fn from((cursor, limit): (Option<ThreadCursor>, i64)) -> Self {
-        Self { cursor, limit }
+        Self {
+            cursor,
+            limit,
+            order: ListOrder::NewestFirst,
+        }
     }
 }
 
@@ -813,6 +822,8 @@ impl From<(Option<ThreadCursor>, i64)> for ThreadPageRequest {
 pub struct MessagePageRequest {
     pub cursor: Option<MessageCursor>,
     pub limit: i64,
+    /// Which end of the timeline comes first, as for threads.
+    pub order: ListOrder,
 }
 
 #[derive(Clone)]
@@ -3300,7 +3311,11 @@ impl Core {
         folder_id: Option<i64>,
         page: ThreadPageRequest,
     ) -> Result<ThreadPage> {
-        let ThreadPageRequest { cursor, limit } = page;
+        let ThreadPageRequest {
+            cursor,
+            limit,
+            order,
+        } = page;
         let tab = self.tab_filter(split_id, label_id).await?;
         self.db
             .read(move |conn| {
@@ -3314,6 +3329,7 @@ impl Core {
                         folder_id,
                         cursor,
                         limit: limit.clamp(1, 200),
+                        order,
                     },
                 )
             })
@@ -3369,7 +3385,11 @@ impl Core {
         folder_id: Option<i64>,
         page: MessagePageRequest,
     ) -> Result<MessagePage> {
-        let MessagePageRequest { cursor, limit } = page;
+        let MessagePageRequest {
+            cursor,
+            limit,
+            order,
+        } = page;
         let tab = self.tab_filter(split_id, label_id).await?;
         self.db
             .read(move |conn| {
@@ -3383,6 +3403,7 @@ impl Core {
                         folder_id,
                         cursor: None,
                         limit: limit.clamp(1, 200),
+                        order,
                     },
                     cursor,
                 )
@@ -3476,6 +3497,7 @@ impl Core {
                         folder_id,
                         cursor: None,
                         limit: 1,
+                        order: ListOrder::NewestFirst,
                     },
                 )
             })
@@ -4001,6 +4023,36 @@ impl Core {
     /// Every blocked sender, alphabetically.
     pub async fn blocked_senders(&self) -> Result<Vec<BlockedSender>> {
         self.db.read(|conn| repo::blocked::list(conn)).await
+    }
+
+    /// When a mail-list row's timeline puts it, which a page that starts at
+    /// the row pages from: a conversation's latest message, or a message's
+    /// own date. None for a row that is gone.
+    pub async fn row_time(&self, grouping: MailGrouping, id: i64) -> Result<Option<i64>> {
+        self.db
+            .read(move |conn| repo::threads::row_time(conn, grouping, id))
+            .await
+    }
+
+    /// The app's keys for the mail lists shown oldest first. Every other list
+    /// is newest first.
+    pub async fn oldest_first_lists(&self) -> Result<Vec<String>> {
+        self.db
+            .read(|conn| repo::list_orders::oldest_first(conn))
+            .await
+    }
+
+    /// Show the mail list with the app's `key` in `order` from now on.
+    /// `owner` is what the list belongs to; the saved order goes with it.
+    pub async fn set_list_order(
+        &self,
+        key: String,
+        owner: ListOwner,
+        order: ListOrder,
+    ) -> Result<()> {
+        self.db
+            .write(move |conn| repo::list_orders::set(conn, &key, owner, order))
+            .await
     }
 
     /// Rewrite `src="cid:…"` references in a message body to `data:` URIs built
@@ -4757,6 +4809,72 @@ impl Core {
             &config.settings.connection,
         )
         .await
+    }
+
+    /// Mark everything a mail list shows as read. A list that is whole
+    /// mailboxes, such as an Inbox, a folder or a Gmail label, is marked on
+    /// the server too, mail older than this device keeps included, through
+    /// what the last check knew of: mail that arrived since stays unread. A
+    /// list that shows part of a mailbox, such as a split inbox half or
+    /// Starred, marks the messages this device keeps that it shows.
+    ///
+    /// The list is the one [`Core::list_threads`] shows for the same
+    /// arguments; `account_ids` limits it to a set of accounts, such as a
+    /// mail profile's.
+    pub async fn mark_all_read(
+        &self,
+        view: View,
+        split_id: Option<i64>,
+        account_id: Option<i64>,
+        account_ids: Option<Vec<i64>>,
+        label_id: Option<i64>,
+        folder_id: Option<i64>,
+    ) -> Result<ActionResult> {
+        let args = repo::threads::ListArgs {
+            view,
+            tab: self.tab_filter(split_id, label_id).await?,
+            account_id,
+            account_ids,
+            folder_id,
+            cursor: None,
+            limit: 1,
+            order: ListOrder::NewestFirst,
+        };
+        let now = now_ms();
+        let outcome = self
+            .db
+            .write(move |conn| mark_all_read::apply(conn, &args, now))
+            .await?;
+        match outcome {
+            mark_all_read::Outcome::Whole {
+                threads,
+                accounts,
+                action_ids,
+            } => {
+                if !threads.is_empty() {
+                    self.bus.emit(CoreEvent::MailUpdated {
+                        thread_ids: threads,
+                    });
+                }
+                for account_id in accounts {
+                    self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+                }
+                Ok(ActionResult { action_ids })
+            }
+            mark_all_read::Outcome::Part(message_ids) if message_ids.is_empty() => {
+                Ok(ActionResult {
+                    action_ids: Vec::new(),
+                })
+            }
+            mark_all_read::Outcome::Part(message_ids) => {
+                self.perform_action(PerformActionArgs {
+                    kind: ActionKind::MarkRead,
+                    target: ActionTarget::Messages(message_ids),
+                    params: None,
+                })
+                .await
+            }
+        }
     }
 
     pub async fn perform_action(&self, args: PerformActionArgs) -> Result<ActionResult> {

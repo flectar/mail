@@ -1314,8 +1314,40 @@ pub struct ThreadDetail {
     pub messages: Vec<MessageDetail>,
 }
 
-/// Stable keyset cursor for the descending thread timeline. Timestamps alone
-/// are not unique, so the thread id is the deterministic tie-breaker.
+/// Which end of a mail list's timeline comes first.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ListOrder {
+    #[default]
+    NewestFirst,
+    OldestFirst,
+}
+
+impl ListOrder {
+    /// The other order, which pages toward a list's start.
+    #[must_use]
+    pub const fn reversed(self) -> Self {
+        match self {
+            Self::NewestFirst => Self::OldestFirst,
+            Self::OldestFirst => Self::NewestFirst,
+        }
+    }
+}
+
+/// What a mail list's saved order belongs to. The order goes when its
+/// account, folder or label does, so a later one that takes the same id
+/// starts newest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListOwner {
+    /// A list across accounts, such as a unified mailbox or an inbox half.
+    Unified,
+    Account(i64),
+    Folder(i64),
+    Label(i64),
+}
+
+/// Stable keyset cursor for the thread timeline, in either order. Timestamps
+/// alone are not unique, so the thread id is the deterministic tie-breaker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadCursor {
@@ -1346,8 +1378,8 @@ pub struct SearchPage {
     pub next_cursor: Option<SearchCursor>,
 }
 
-/// Stable keyset cursor for the descending message timeline; the message id
-/// breaks ties between messages with the same date.
+/// Stable keyset cursor for the message timeline, in either order; the
+/// message id breaks ties between messages with the same date.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageCursor {
@@ -2168,6 +2200,56 @@ impl<'de> Deserialize<'de> for AppIcon {
     }
 }
 
+/// When an unread message the user opens counts as read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MarkRead {
+    /// As it opens.
+    #[default]
+    Immediately,
+    /// Once it has stayed open for two seconds.
+    AfterTwoSeconds,
+    /// Once it has stayed open for five seconds.
+    AfterFiveSeconds,
+    /// Only when the user marks it.
+    Never,
+}
+
+impl MarkRead {
+    pub const ALL: [Self; 4] = [
+        Self::Immediately,
+        Self::AfterTwoSeconds,
+        Self::AfterFiveSeconds,
+        Self::Never,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Immediately => "immediately",
+            Self::AfterTwoSeconds => "afterTwoSeconds",
+            Self::AfterFiveSeconds => "afterFiveSeconds",
+            Self::Never => "never",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|choice| choice.as_str() == value)
+    }
+
+    /// How long an opened message stays open before it counts as read, or
+    /// `None` when opening never marks it.
+    pub fn delay(self) -> Option<std::time::Duration> {
+        match self {
+            Self::Immediately => Some(std::time::Duration::ZERO),
+            Self::AfterTwoSeconds => Some(std::time::Duration::from_secs(2)),
+            Self::AfterFiveSeconds => Some(std::time::Duration::from_secs(5)),
+            Self::Never => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -2241,9 +2323,9 @@ pub struct Settings {
     pub compose_text_size: String,
     #[serde(default)]
     pub load_remote_images: bool,
-    /// Mark unread conversations as read when the user opens them.
-    #[serde(default = "default_true")]
-    pub mark_read_on_open: bool,
+    /// When an unread message the user opens counts as read.
+    #[serde(default)]
+    pub mark_read: MarkRead,
     /// Directory desktop save dialogs open in. An empty value follows the
     /// platform default. The path is deliberately not validated when stored:
     /// a saved location can be unavailable later, such as an unmounted network
@@ -2566,7 +2648,7 @@ impl Default for Settings {
             compose_font: default_compose_font(),
             compose_text_size: default_compose_text_size(),
             load_remote_images: false,
-            mark_read_on_open: true,
+            mark_read: MarkRead::Immediately,
             download_directory: String::new(),
             ai_base_url: default_ai_base_url(),
             ai_model_instant: default_ai_model(),
@@ -3002,6 +3084,26 @@ mod tests {
             assert_eq!(AuthKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(AuthKind::parse("token"), None);
+    }
+
+    #[test]
+    fn mark_read_choices_keep_their_names_and_waits() {
+        use std::time::Duration;
+        for choice in MarkRead::ALL {
+            assert_eq!(MarkRead::parse(choice.as_str()), Some(choice));
+            assert_eq!(serde_json::to_value(choice).unwrap(), choice.as_str());
+        }
+        assert_eq!(MarkRead::parse("sometimes"), None);
+        assert_eq!(MarkRead::Immediately.delay(), Some(Duration::ZERO));
+        assert_eq!(
+            MarkRead::AfterTwoSeconds.delay(),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            MarkRead::AfterFiveSeconds.delay(),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(MarkRead::Never.delay(), None);
     }
 
     #[test]

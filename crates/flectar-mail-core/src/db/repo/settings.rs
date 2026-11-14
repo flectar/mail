@@ -29,6 +29,7 @@ pub fn set(conn: &Connection, settings: &Settings) -> Result<()> {
 mod tests {
     use super::*;
     use crate::db::testutil;
+    use crate::models::MarkRead;
 
     #[test]
     fn defaults_when_unset_and_roundtrip() {
@@ -38,7 +39,7 @@ mod tests {
         assert_eq!(d.sync_interval_minutes, 5);
         assert!(d.auto_advance);
         assert!(d.auto_labels_enabled);
-        assert!(d.mark_read_on_open);
+        assert_eq!(d.mark_read, MarkRead::Immediately);
         assert!(!d.load_remote_images);
         assert!(!d.monochrome_sidebar_icons);
         assert_eq!(d.app_icon, crate::models::AppIcon::Orange);
@@ -168,7 +169,7 @@ mod tests {
         assert_eq!(s.compose_font, "default");
         assert_eq!(s.compose_text_size, "normal");
         assert!(s.load_remote_images);
-        assert!(s.mark_read_on_open);
+        assert_eq!(s.mark_read, MarkRead::Immediately);
         assert!(!s.monochrome_sidebar_icons);
         assert_eq!(s.app_icon, crate::models::AppIcon::Orange);
         assert!(s.show_avatars);
