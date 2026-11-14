@@ -36,3 +36,6 @@ blitz-paint = { path = "../../crates/blitz-paint" }
 parley = { path = "../../crates/parley" }
 # Remove when Slint releases its Wayland clipboard fix; see patches/slint-winit/README.md.
 i-slint-backend-winit = { path = "../../crates/i-slint-backend-winit" }
+# Files dropped on a Wayland window come through the clipboard's data device,
+# as patches/smithay-clipboard/README.md explains.
+smithay-clipboard = { path = "../../crates/smithay-clipboard" }

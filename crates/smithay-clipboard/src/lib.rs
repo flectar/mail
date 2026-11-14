@@ -12,9 +12,12 @@ use sctk::reexports::calloop::channel::{self, Sender};
 use sctk::reexports::client::backend::Backend;
 use sctk::reexports::client::Connection;
 
+mod drop;
 mod mime;
 mod state;
 mod worker;
+
+pub use drop::{DropEvent, DropHandler};
 
 /// Access to a Wayland clipboard.
 pub struct Clipboard {
@@ -32,6 +35,16 @@ impl Clipboard {
     /// `display` must be a valid `*mut wl_display` pointer, and it must remain
     /// valid for as long as `Clipboard` object is alive.
     pub unsafe fn new(display: *mut c_void) -> Self {
+        unsafe { Self::with_drops(display, None) }
+    }
+
+    /// Like [`Clipboard::new`], and files dragged onto the client's surfaces
+    /// go to `drops`, on the clipboard's thread.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Clipboard::new`].
+    pub unsafe fn with_drops(display: *mut c_void, drops: Option<Box<dyn DropHandler>>) -> Self {
         let backend = unsafe { Backend::from_foreign_display(display.cast()) };
         let connection = Connection::from_backend(backend);
 
@@ -41,7 +54,8 @@ impl Clipboard {
         let (clipboard_reply_sender, request_receiver) = mpsc::channel();
 
         let name = String::from("smithay-clipboard");
-        let clipboard_thread = worker::spawn(name, connection, rx_chan, clipboard_reply_sender);
+        let clipboard_thread =
+            worker::spawn(name, connection, rx_chan, clipboard_reply_sender, drops);
 
         Self { request_receiver, request_sender, clipboard_thread }
     }

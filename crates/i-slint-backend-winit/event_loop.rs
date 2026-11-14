@@ -37,6 +37,9 @@ pub enum CustomEvent {
     Accesskit(accesskit_winit::Event),
     #[cfg(muda)]
     Muda(muda::MenuEvent),
+    /// Files dragged over or dropped on a window on Wayland, which winit doesn't report.
+    #[cfg(wayland_file_drops)]
+    FileDrop(smithay_clipboard::DropEvent),
 }
 
 impl std::fmt::Debug for CustomEvent {
@@ -51,6 +54,8 @@ impl std::fmt::Debug for CustomEvent {
             Self::Accesskit(a) => write!(f, "AccessKit({a:?})"),
             #[cfg(muda)]
             Self::Muda(e) => write!(f, "Muda({e:?})"),
+            #[cfg(wayland_file_drops)]
+            Self::FileDrop(e) => write!(f, "FileDrop({e:?})"),
         }
     }
 }
@@ -92,6 +97,36 @@ impl EventLoopState {
             .collect::<Vec<_>>();
         for window in windows_to_suspend.into_iter() {
             let _ = window.suspend();
+        }
+    }
+}
+
+#[cfg(wayland_file_drops)]
+impl EventLoopState {
+    /// Files dragged over or dropped on a window on Wayland, which winit
+    /// doesn't report there, as the window events it gives for them elsewhere.
+    fn file_drop(&mut self, event_loop: &ActiveEventLoop, drop: smithay_clipboard::DropEvent) {
+        use smithay_clipboard::DropEvent;
+        use winit::application::ApplicationHandler;
+        let Some(window_id) = self.shared_backend_data.window_for_wayland_surface(drop.surface())
+        else {
+            return;
+        };
+        match drop {
+            // A portal drag names its files only once they're dropped.
+            DropEvent::Enter { .. } => self.window_event(
+                event_loop,
+                window_id,
+                WindowEvent::HoveredFile(std::path::PathBuf::new()),
+            ),
+            DropEvent::Leave { .. } => {
+                self.window_event(event_loop, window_id, WindowEvent::HoveredFileCancelled)
+            }
+            DropEvent::Drop { paths, .. } => {
+                for path in paths {
+                    self.window_event(event_loop, window_id, WindowEvent::DroppedFile(path));
+                }
+            }
         }
     }
 }
@@ -158,6 +193,8 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: SlintEvent) {
         match event.0 {
+            #[cfg(wayland_file_drops)]
+            CustomEvent::FileDrop(drop) => self.file_drop(event_loop, drop),
             CustomEvent::UserEvent(user_callback) => user_callback(),
             CustomEvent::UserEventWithEventLoop(user_callback) => user_callback(event_loop),
             CustomEvent::Exit(generation) => {

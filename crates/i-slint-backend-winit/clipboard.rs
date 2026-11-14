@@ -130,6 +130,7 @@ impl ClipboardProvider for WaylandClipboard {
 
 pub fn create_clipboard(
     _display_handle: &winit::raw_window_handle::DisplayHandle<'_>,
+    _event_loop_proxy: &winit::event_loop::EventLoopProxy<crate::SlintEvent>,
 ) -> ClipboardPair {
     cfg_if::cfg_if! {
         if #[cfg(all(
@@ -146,7 +147,11 @@ pub fn create_clipboard(
             {
                 // Safety: the display outlives the clipboard, stored next to the event loop.
                 let display = wayland.display.as_ptr();
-                let clipboard = unsafe { smithay_clipboard::Clipboard::new(display) };
+                // winit doesn't report files dragged onto a window on Wayland, so they come
+                // through the clipboard's own data device.
+                let drops = Box::new(WaylandDrops { event_loop_proxy: _event_loop_proxy.clone() });
+                let clipboard =
+                    unsafe { smithay_clipboard::Clipboard::with_drops(display, Some(drops)) };
                 let clipboard = std::rc::Rc::new(clipboard);
                 return (
                     Box::new(WaylandClipboard { clipboard: clipboard.clone(), primary: false }),
@@ -179,4 +184,48 @@ pub fn create_clipboard(
             (Box::new(SilentClipboardContext), Box::new(SilentClipboardContext))
         }
     }
+}
+
+/// Files dragged onto a window on Wayland, which the event loop turns into
+/// the window events winit gives for them on other platforms.
+#[cfg(wayland_file_drops)]
+struct WaylandDrops {
+    event_loop_proxy: winit::event_loop::EventLoopProxy<crate::SlintEvent>,
+}
+
+#[cfg(wayland_file_drops)]
+impl smithay_clipboard::DropHandler for WaylandDrops {
+    fn event(&mut self, event: smithay_clipboard::DropEvent) {
+        let event = crate::SlintEvent(crate::event_loop::CustomEvent::FileDrop(event));
+        let _ = self.event_loop_proxy.send_event(event);
+    }
+
+    fn retrieve_files(&mut self, key: &str) -> Option<Vec<std::path::PathBuf>> {
+        futures::executor::block_on(retrieve_portal_files(key))
+    }
+}
+
+/// The files a document portal transfer names, as this app can read them,
+/// which in a sandbox are its own copies of what the source named.
+#[cfg(wayland_file_drops)]
+async fn retrieve_portal_files(key: &str) -> Option<Vec<std::path::PathBuf>> {
+    let connection = zbus::connection::Builder::session()
+        .ok()?
+        .method_timeout(std::time::Duration::from_secs(5))
+        .build()
+        .await
+        .ok()?;
+    let options = std::collections::HashMap::<&str, zbus::zvariant::Value<'_>>::new();
+    let reply = connection
+        .call_method(
+            Some("org.freedesktop.portal.Documents"),
+            "/org/freedesktop/portal/documents",
+            Some("org.freedesktop.portal.FileTransfer"),
+            "RetrieveFiles",
+            &(key, options),
+        )
+        .await
+        .ok()?;
+    let files: Vec<String> = reply.body().deserialize().ok()?;
+    Some(files.into_iter().map(std::path::PathBuf::from).collect())
 }

@@ -11,7 +11,7 @@ clipboard, so copy and paste do nothing (Mail #108).
 ## Sources and adaptation
 
 `crates/i-slint-backend-winit` is the published 1.18.1 archive, revision
-`372cf0ee5577c3dfec309a45e7b778ba4e81b734`, plus two patches.
+`372cf0ee5577c3dfec309a45e7b778ba4e81b734`, plus three patches.
 `0001-wayland-clipboard.patch` is
 [Slint #14248](https://github.com/slint-ui/slint/pull/14248) at
 `cb91c1927cd8c17649ba445d28d3a0c2a0041238`, adapted to 1.18.1's `cfg_if`
@@ -21,6 +21,12 @@ protocols, which every compositor offers to sandboxed clients too. arboard
 stays for X11. The upstream changelog and lockfile hunks are omitted.
 `0002-dependency-scanner.patch` lists five dependencies that the release
 declares but does not import, so `cargo machete` can scan the crate.
+`0003-wayland-file-drops.patch` is ours. winit 0.30 doesn't report files
+dragged onto a window on Wayland, so the clipboard's data device takes them
+(see `patches/smithay-clipboard/README.md`) and the event loop hands them to
+the window as the `HoveredFile`, `HoveredFileCancelled` and `DroppedFile`
+events winit gives on other platforms. Slint's own winit 0.31 branch reports
+them natively.
 `Cargo.toml.orig` is kept unchanged for provenance. The standalone lockfile is
 omitted; both application lockfiles resolve the patched manifest.
 
