@@ -301,7 +301,18 @@ Messages carry the formatting in HTML that mail apps widely support. Sizes
 scale with the reader's own text size, and each font names common
 alternatives in case the reader lacks it. In a dark theme, the composer shows
 dark text colors lighter so they stay readable, and the message keeps the
-colors you chose.
+colors you chose. Mail apps that read only plain text get each link's address
+after its text, and each picture's name in its place.
+
+**Plain text** in the toolbar sends a message as plain text only, with no
+formatting or HTML. Switching takes the message's formatting and pictures out
+and writes each link's address after its text, and Undo brings them back. A
+plain-text message shows the original it answers as the quoted text that goes
+out, its signature goes in as text, and pictures dropped on it are attached.
+**Formatted text** switches back. Each account chooses how its messages start
+in Settings → Accounts, under its sender identities and signatures, and replies
+and forwards to plain-text messages start as plain text unless that's turned
+off there. A draft opens again as it was saved.
 
 ## Spell check
 
