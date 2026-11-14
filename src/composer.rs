@@ -3453,6 +3453,7 @@ mod tests {
             sync_error: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
+            caught_up_at: None,
         }];
         let state = Rc::new(RefCell::new(state));
         app.set_compose_account_id(1);

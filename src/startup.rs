@@ -367,6 +367,7 @@ pub(crate) fn apply_warm_start_snapshot(
     // The cache contains account summaries, not connection settings. Project
     // these directly: the full settings projection requires AccountConfig and
     // would filter every cached account out before the database has opened.
+    let now = chrono::Local::now();
     let account_rows = snapshot
         .accounts
         .iter()
@@ -376,6 +377,8 @@ pub(crate) fn apply_warm_start_snapshot(
                 .as_ref()
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or(&account.email);
+            let (checked_day, checked_at) =
+                crate::account_status::last_checked(account.caught_up_at, &now);
             Some(AccountRow {
                 id: i32::try_from(account.id).ok()?,
                 drag_key: account.id.to_string().into(),
@@ -385,6 +388,8 @@ pub(crate) fn apply_warm_start_snapshot(
                 mail_protocol: account.mail_protocol.as_str().into(),
                 status: account.sync_state.as_str().into(),
                 sync_error: account.sync_error.as_deref().unwrap_or_default().into(),
+                checked_day,
+                checked_at: checked_at.into(),
                 initials: avatar_initials(name).into(),
                 ..Default::default()
             })
@@ -588,6 +593,8 @@ pub(crate) struct PendingCoreUpdates {
     pub(crate) changed_threads: HashSet<i64>,
     pub(crate) all_mail_changed: bool,
     pub(crate) account_states: HashMap<i64, (String, Option<String>)>,
+    /// When each account's latest check caught its Inbox up.
+    pub(crate) caught_up: HashMap<i64, i64>,
     pub(crate) action_error: Option<String>,
     /// What became of the latest mail copied or moved to other accounts.
     pub(crate) transfers: Option<TransferReport>,
@@ -768,6 +775,14 @@ pub(crate) fn spawn_core_event_listener(
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .account_states
                         .insert(account_id, (sync_state, sync_error));
+                    true
+                }
+                Ok(CoreEvent::AccountCaughtUp { account_id, at }) => {
+                    pending
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .caught_up
+                        .insert(account_id, at);
                     true
                 }
                 Ok(CoreEvent::ActionState {
@@ -1244,6 +1259,7 @@ mod warm_start_tests {
             sync_error: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
+            caught_up_at: None,
         }
     }
 

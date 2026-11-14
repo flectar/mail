@@ -910,6 +910,11 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
     let mut expected = removed_threads.clone();
     expected.sort_unstable();
     assert_eq!(thread_ids, expected);
+    // The Inbox pass caught up, which the app shows as the last check.
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        CoreEvent::AccountCaughtUp { account_id: caught_up, .. } if caught_up == account_id
+    ));
     ctx.db
         .read(move |conn| {
             assert!(repo::messages::by_folder_uid(conn, folder_id, 42)?.is_none());
@@ -959,6 +964,10 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
     assert!(matches!(
         events.try_recv().unwrap(),
         CoreEvent::MailUpdated { .. }
+    ));
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        CoreEvent::AccountCaughtUp { .. }
     ));
     assert!(
         events.try_recv().is_err(),

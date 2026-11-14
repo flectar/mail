@@ -3,6 +3,9 @@
     "alert.svg": {
       "source": "triangle-alert"
     },
+    "alert-circle.svg": {
+      "source": "circle-alert"
+    },
     "align-center.svg": {
       "source": "text-align-center"
     },
@@ -315,6 +318,10 @@
     "chevron-up": {
       "path": "sources/chevron-up.svg",
       "sha256": "4d22ff60442a449baab10caeacbe2613400a34ac14f9df805fedec2472c987a5"
+    },
+    "circle-alert": {
+      "path": "sources/circle-alert.svg",
+      "sha256": "3bbf2a6d6353e20d052a368f7a7101987747a419e6fb21020d9f59c92a693a17"
     },
     "circle-check": {
       "path": "sources/circle-check.svg",

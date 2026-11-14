@@ -26,6 +26,7 @@ fn account_from_row(row: &Row) -> rusqlite::Result<Account> {
                 Expire::Never => None,
             }
         }),
+        caught_up_at: row.get("caught_up_at")?,
     })
 }
 
@@ -55,7 +56,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Account>> {
     let mut stmt = conn.prepare(
         "SELECT a.id, a.email, a.display_name, a.avatar_url, a.provider, a.auth_kind,
                 a.mail_protocol, a.sync_state, a.sync_error, a.can_create_top_level_mailbox,
-                s.expire
+                a.caught_up_at, s.expire
          FROM accounts a LEFT JOIN pop3_sync_state s ON s.account_id = a.id
          WHERE a.sync_state <> ?1 AND a.mail_protocol <> 'local'
          ORDER BY a.sort_order, a.id",
@@ -95,7 +96,7 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Account>> {
     let mut stmt = conn.prepare(
         "SELECT a.id, a.email, a.display_name, a.avatar_url, a.provider, a.auth_kind,
                 a.mail_protocol, a.sync_state, a.sync_error, a.can_create_top_level_mailbox,
-                s.expire
+                a.caught_up_at, s.expire
          FROM accounts a LEFT JOIN pop3_sync_state s ON s.account_id = a.id
          WHERE a.id = ?1 AND a.mail_protocol <> 'local'",
     )?;
@@ -1055,6 +1056,23 @@ mod tests {
             !update_sync_state_with_error(&conn, 1, "retrying", Some("connection lost")).unwrap()
         );
         assert!(update_sync_state_with_error(&conn, 1, "idle", None).unwrap());
+    }
+
+    #[test]
+    fn accounts_tell_when_a_check_last_caught_their_inbox_up() {
+        let conn = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&conn);
+        assert_eq!(get(&conn, 1).unwrap().unwrap().caught_up_at, None);
+
+        set_caught_up(&conn, 1, 1_763_100_000_000).unwrap();
+        assert_eq!(
+            get(&conn, 1).unwrap().unwrap().caught_up_at,
+            Some(1_763_100_000_000)
+        );
+        assert_eq!(
+            list(&conn).unwrap()[0].caught_up_at,
+            Some(1_763_100_000_000)
+        );
     }
 
     #[test]

@@ -88,6 +88,12 @@ pub enum CoreEvent {
         sync_state: String,
         sync_error: Option<String>,
     },
+    /// A check stored all the mail the account's Inbox had when it started
+    /// at `at` (milliseconds since the epoch), as `Account::caught_up_at`.
+    AccountCaughtUp {
+        account_id: i64,
+        at: i64,
+    },
     /// RAG "ask" retrieved its source messages (emitted before the answer
     /// streams, so the UI can show sources immediately).
     AskCitations {

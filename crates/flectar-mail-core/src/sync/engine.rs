@@ -1283,14 +1283,21 @@ pub(crate) async fn set_state_error(ctx: &SyncCtx, account_id: i64, state: &str,
 /// Note that a sync of the account that started at `started` stored all the
 /// mail its Inbox had by then. A check in the background tells of what
 /// arrives after it while the app isn't running (see
-/// `Core::announce_missed`).
+/// `Core::announce_missed`), and the app shows it as the account's last
+/// check.
 pub(crate) async fn caught_up(ctx: &SyncCtx, account_id: i64, started: i64) {
     let noted = ctx
         .db
         .write(move |conn| repo::accounts::set_caught_up(conn, account_id, started))
         .await;
-    if let Err(error) = noted {
-        tracing::warn!(account_id, %error, "could not note how far a sync caught up");
+    match noted {
+        Ok(()) => ctx.bus.emit(CoreEvent::AccountCaughtUp {
+            account_id,
+            at: started,
+        }),
+        Err(error) => {
+            tracing::warn!(account_id, %error, "could not note how far a sync caught up");
+        }
     }
 }
 

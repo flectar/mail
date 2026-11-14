@@ -132,6 +132,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     callback compose;
     callback manage-accounts;
     callback sync-account(int);
+    // Sign the account in again, where its settings are.
+    callback sign-in-account(int);
     callback choose-profile(string);
     callback create-profile();
     callback manage-profiles();
@@ -599,9 +601,12 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         // Mail on this device has no server or settings page.
                         account-menu: !self.local;
                         can-check-mail: !root.sync-in-progress;
+                        status: entry.mailbox.status;
+                        touch-mode: root.touch-mode;
                         toggled(open) => { root.toggle-section(entry.key, open); }
                         check-mail => { root.sync-account(entry.mailbox.account_id); }
                         account-settings => { root.manage-accounts(); }
+                        sign-in => { root.sign-in-account(entry.mailbox.account_id); }
                     }
 
                     if entry.kind == SidebarRowKind.folder: SidebarItem {

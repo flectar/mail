@@ -540,6 +540,11 @@ pub struct Account {
     /// said.
     #[serde(default)]
     pub server_keeps_mail_days: Option<u32>,
+    /// When the last check that brought the Inbox up to date started, in
+    /// milliseconds since the epoch: the account last checked for new mail
+    /// then. `None` before its first complete check.
+    #[serde(default)]
+    pub caught_up_at: Option<i64>,
 }
 
 /// Mail imported into folders that exist only on this device. It belongs to

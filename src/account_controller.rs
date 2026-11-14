@@ -216,6 +216,7 @@ pub(super) fn apply_connected_accounts(
         .iter()
         .map(|connection| (connection.account_id, connection))
         .collect();
+    let now = Local::now();
     let rows = accounts
         .iter()
         .filter_map(|account| {
@@ -233,6 +234,8 @@ pub(super) fn apply_connected_accounts(
                 .unwrap_or_default();
             let carddav = carddav_connections.get(&account.id);
             let profile = presentation.profile(account.id);
+            let (checked_day, checked_at) =
+                account_status::last_checked(account.caught_up_at, &now);
             Some(AccountRow {
                 id: i32::try_from(account.id).ok()?,
                 drag_key: account.id.to_string().into(),
@@ -242,6 +245,8 @@ pub(super) fn apply_connected_accounts(
                 mail_protocol: account.mail_protocol.as_str().to_owned().into(),
                 status: account.sync_state.clone().into(),
                 sync_error: account.sync_error.clone().unwrap_or_default().into(),
+                checked_day,
+                checked_at: checked_at.into(),
                 initials: avatar_initials(&name).into(),
                 avatar: avatar
                     .map(|images| slint_image(&images.regular))
@@ -350,6 +355,7 @@ pub(super) fn apply_connected_accounts(
 }
 
 pub(super) fn refresh_connected_accounts(app: &AppWindow, state: &Rc<RefCell<InboxState>>) {
+    let weak_state = Rc::downgrade(state);
     let state = state.borrow();
     apply_connected_accounts(
         app,
@@ -389,6 +395,14 @@ pub(super) fn refresh_connected_accounts(app: &AppWindow, state: &Rc<RefCell<Inb
     app.global::<FilesUi>().invoke_context_changed();
     // A link that waited for an account to send from can open now.
     mailto_links::open_pending_soon(app);
+    // The accounts may have come with other states. Outside any borrow the
+    // caller still holds.
+    let app = app.as_weak();
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        if let (Some(app), Some(state)) = (app.upgrade(), weak_state.upgrade()) {
+            account_status::refresh(&app, &state);
+        }
+    });
 }
 
 /// Show the mail kept on this device, or that there is none.
@@ -588,10 +602,13 @@ pub(super) fn prefer_shown_compose_account(app: &AppWindow, state: &InboxState) 
     }
 }
 
+/// Accounts' checks moved on: their states, and when a check last caught
+/// each Inbox up. Only the status shown for them changes.
 pub(super) fn apply_account_states(
     app: &AppWindow,
     inbox_state: &Rc<RefCell<InboxState>>,
     states: &HashMap<i64, (String, Option<String>)>,
+    caught_up: &HashMap<i64, i64>,
 ) {
     let mut state_guard = inbox_state.borrow_mut();
     let mut changed = false;
@@ -606,10 +623,16 @@ pub(super) fn apply_account_states(
                 changed = true;
             }
         }
+        if let Some(&at) = caught_up.get(&account.id)
+            && account.caught_up_at != Some(at)
+        {
+            account.caught_up_at = Some(at);
+            changed = true;
+        }
     }
     drop(state_guard);
     if changed {
-        refresh_connected_accounts(app, inbox_state);
+        account_status::refresh(app, inbox_state);
     }
 }
 

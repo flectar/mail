@@ -1,0 +1,46 @@
+import { MotionSettings } from "../design-system.slint";
+
+// A small busy indicator: eight spokes, fading behind the one in front. The
+// front spoke steps round eight times a second rather than turning smoothly,
+// so a long check redraws the window eight times a second instead of every
+// frame. While motion is reduced it holds still.
+export component ActivitySpinner {
+    in property <color> color;
+    in property <bool> running: true;
+    private property <int> step: 0;
+
+    width: 14px;
+    height: 14px;
+    accessible-role: none;
+
+    Timer {
+        interval: 125ms;
+        running: root.running && MotionSettings.movement;
+        triggered => {
+            root.step = mod(root.step + 1, 8);
+        }
+    }
+
+    for index in 8 : Path {
+        private property <angle> direction: index * 45deg;
+        // How many steps the spoke trails the front one.
+        private property <int> behind: mod(root.step - index + 8, 8);
+        width: root.width;
+        height: root.height;
+        fit: preserve;
+        stroke: root.color;
+        stroke-width: 1.6px;
+        stroke-line-cap: round;
+        opacity: max(0.2, 1 - self.behind * 0.12);
+
+        MoveTo {
+            x: 7 + 3 * sin(direction);
+            y: 7 - 3 * cos(direction);
+        }
+
+        LineTo {
+            x: 7 + 6 * sin(direction);
+            y: 7 - 6 * cos(direction);
+        }
+    }
+}

@@ -4,6 +4,7 @@ A closer look at what the [README](../README.md) summarizes.
 
 - [Conversation threads](#conversation-threads)
 - [Tabs](#tabs)
+- [Checking for mail](#checking-for-mail)
 - [New-mail notifications](#new-mail-notifications)
 - [Profiles and account colors](#profiles-and-account-colors)
 - [Appearance](#appearance)
@@ -79,6 +80,29 @@ Settings → General.
   <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-tabs-light.png">
   <img src="../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail with tabs for several conversations, the calendar, contacts, and files">
 </picture>
+
+## Checking for mail
+
+Flectar Mail checks every account for new mail on its own: as soon as the
+server announces new mail, where it can, and otherwise every 5 minutes, or as
+often as **Check for new mail** in Settings → General says. To check now, press
+F5 for the accounts the mail view shows, or Shift+F5 or the refresh button
+beside the search field for every account. An account's menu in the sidebar
+(right-click, or hold a finger on it on a phone) checks just that account.
+
+While a check runs for more than a moment, a small spinner turns beside the
+account's name in the sidebar; it holds still while motion is reduced. When the
+server doesn't accept an account's sign-in, or its checks keep failing for a
+minute, a red marker takes its place. Click or tap the marker to see why, with
+**Try again** to check right away, or **Sign in again** when the sign-in needs
+renewing. After a check you asked for, the marker shows at once. Flectar Mail
+keeps trying a failing account on its own, and the marker goes away with the
+next check that works. When the sidebar is hidden, as on a phone, a red dot on
+the folders button says an account has a problem.
+
+The account's menu also tells when it last checked mail, and so does its card
+in Settings → Accounts, together with the account's state and the server's own
+words about a failure.
 
 ## New-mail notifications
 
