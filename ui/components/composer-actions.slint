@@ -336,7 +336,7 @@ export component ComposerToolbar inherits Rectangle {
     toolbar-scroll := ScrollView {
         x: 8px;
         y: 6px;
-        width: parent.width - 16px;
+        width: max(0px, trailing.x - self.x - 4px);
         height: 32px;
         content-width: max(self.visible-width, toolbar-row.preferred-width);
         content-height: self.visible-height;
@@ -461,12 +461,19 @@ export component ComposerToolbar inherits Rectangle {
             if root.templates-shown : Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
             if root.templates-shown : IconButton { icon: @image-url("../icons/lucide/outline/book.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
-
-            Rectangle { horizontal-stretch: 1; }
-
-            IconButton { icon: @image-url("../icons/lucide/outline/undo.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Undo · Ctrl+Z"); clicked => { root.undo(); } }
-            IconButton { icon: @image-url("../icons/lucide/outline/redo.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Redo · Ctrl+Shift+Z"); clicked => { root.redo(); } }
         }
+    }
+
+    // Undo and redo stay in reach while the tools beside them scroll.
+    trailing := HorizontalLayout {
+        x: parent.width - self.width - 8px;
+        y: 6px;
+        width: self.preferred-width;
+        height: 32px;
+        spacing: 2px;
+
+        IconButton { icon: @image-url("../icons/lucide/outline/undo.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Undo · Ctrl+Z"); clicked => { root.undo(); } }
+        IconButton { icon: @image-url("../icons/lucide/outline/redo.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Redo · Ctrl+Shift+Z"); clicked => { root.redo(); } }
     }
 }
 
