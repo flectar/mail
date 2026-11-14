@@ -151,6 +151,10 @@ impl Place {
 struct CachedRows {
     messages: Vec<MailMessage>,
     next_cursor: Option<MailCursor>,
+    /// The order of `messages`, which `next_cursor` continues.
+    order: ListOrder,
+    /// Where `messages` start when the list's earlier rows aren't loaded.
+    window_start: Option<MailCursor>,
     collapsed: HashSet<String>,
 }
 
@@ -1204,6 +1208,9 @@ impl Tabs {
             state.set_scope(scope);
             state.query = query;
             state.search_filter = filter;
+            // Rows in the order the list had before it was turned around
+            // load again.
+            let rows = rows.filter(|rows| rows.order == state.list_order_for_view());
             state.mail_groups.clear();
             state.page = 1;
             state.checked_ids.clear();
@@ -1217,6 +1224,8 @@ impl Tabs {
                 Some(rows) => {
                     state.messages = rows.messages;
                     state.next_cursor = rows.next_cursor;
+                    state.list_order = rows.order;
+                    state.window_start = rows.window_start;
                     state.mail_groups.collapsed = rows.collapsed;
                     state.selected_id = conversation;
                     state.pending_selection = None;
@@ -1225,6 +1234,7 @@ impl Tabs {
                 None => {
                     state.messages.clear();
                     state.next_cursor = None;
+                    state.window_start = None;
                     state.selected_id = None;
                     state.pending_selection = conversation;
                     state.pending_selection_opens = unseen && conversation.is_some();
@@ -1639,6 +1649,8 @@ fn cached_rows(state: &InboxState) -> CachedRows {
     CachedRows {
         messages,
         next_cursor: state.next_cursor,
+        order: state.list_order,
+        window_start: state.window_start,
         collapsed: state.mail_groups.collapsed.clone(),
     }
 }

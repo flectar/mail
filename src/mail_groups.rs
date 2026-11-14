@@ -2,6 +2,7 @@
 
 use crate::{EmailRow, MailListEntry, mail::MailMessage, mail_view_model::same_email_row};
 use chrono::{DateTime, Datelike, Duration, Local, Utc};
+use flectar_mail_core::models::ListOrder;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
@@ -105,11 +106,15 @@ pub(super) fn mail_group_key(timestamp_ms: i64, now: DateTime<Local>) -> String 
     date_group(timestamp_ms, now).key
 }
 
+/// The list's rows with the date sections of `order` around them. The
+/// sections run from the list's start, so oldest first they begin with the
+/// older mail and end with today's.
 pub(super) fn project_mail_list<M: std::borrow::Borrow<MailMessage>>(
     messages: &[M],
     rows: &[EmailRow],
     groups: &MailGroupState,
     group_by_date: bool,
+    order: ListOrder,
     now: DateTime<Local>,
 ) -> Vec<MailListEntry> {
     debug_assert_eq!(messages.len(), rows.len());
@@ -122,8 +127,8 @@ pub(super) fn project_mail_list<M: std::borrow::Borrow<MailMessage>>(
     }
 
     // Keep source order within each section. A late sync can briefly deliver
-    // rows out of date order, so gather by key and sort the sections by their
-    // latest message before flattening.
+    // rows out of date order, so gather by key and sort the sections by the
+    // message nearest the list's start before flattening.
     let mut ordered = Vec::<(DateGroup, i64, Vec<&EmailRow>)>::new();
     let mut group_indices = HashMap::<String, usize>::new();
     let mut older_rows = Vec::new();
@@ -131,24 +136,38 @@ pub(super) fn project_mail_list<M: std::borrow::Borrow<MailMessage>>(
         let message = std::borrow::Borrow::borrow(message);
         let group = date_group(message.date_ms, now);
         // Only recent calendar sections are accordions. Older and undated
-        // mail stays visible as one flat tail, regardless of collapse state.
+        // mail stays visible as one flat run, regardless of collapse state.
         if matches!(group.kind, "last-month" | "month" | "unknown") {
             older_rows.push(row);
             continue;
         }
         if let Some(&index) = group_indices.get(&group.key) {
-            let (_, latest, group_rows) = &mut ordered[index];
-            *latest = (*latest).max(message.date_ms);
+            let (_, first, group_rows) = &mut ordered[index];
+            *first = match order {
+                ListOrder::NewestFirst => (*first).max(message.date_ms),
+                ListOrder::OldestFirst => (*first).min(message.date_ms),
+            };
             group_rows.push(row);
         } else {
             group_indices.insert(group.key.clone(), ordered.len());
             ordered.push((group, message.date_ms, vec![row]));
         }
     }
-    ordered.sort_by_key(|(_, latest, _)| std::cmp::Reverse(*latest));
+    match order {
+        ListOrder::NewestFirst => ordered.sort_by_key(|(_, first, _)| std::cmp::Reverse(*first)),
+        ListOrder::OldestFirst => ordered.sort_by_key(|(_, first, _)| *first),
+    }
 
     let mut entries = Vec::with_capacity(rows.len() + ordered.len());
     let mut display_index = 0;
+    // The older mail is at the list's old end, its start when oldest first.
+    if order == ListOrder::OldestFirst {
+        push_flat(
+            &mut entries,
+            &mut display_index,
+            std::mem::take(&mut older_rows),
+        );
+    }
     for (group, _, group_rows) in ordered {
         let collapsed = groups.collapsed.contains(&group.key);
         entries.push(MailListEntry {
@@ -175,15 +194,37 @@ pub(super) fn project_mail_list<M: std::borrow::Borrow<MailMessage>>(
             display_index += 1;
         }
     }
-    for row in older_rows {
-        entries.push(message_entry(row, display_index, "", true, false));
-        display_index += 1;
-    }
+    push_flat(&mut entries, &mut display_index, older_rows);
     entries
 }
 
-/// Ends a list whose older unread mail is only on the server, saying how
-/// much. It is a header, which keyboard navigation passes over.
+/// Rows without a section, which stay shown whatever is collapsed.
+fn push_flat(entries: &mut Vec<MailListEntry>, display_index: &mut usize, rows: Vec<&EmailRow>) {
+    for row in rows {
+        entries.push(message_entry(row, *display_index, "", true, false));
+        *display_index += 1;
+    }
+}
+
+/// Starts a list opened further down, offering the rows before. It is a
+/// header, which keyboard navigation passes over.
+pub(super) fn earlier_entry() -> MailListEntry {
+    MailListEntry {
+        is_header: true,
+        group_key: "earlier".into(),
+        group_kind: "earlier".into(),
+        group_count: 0,
+        expanded: false,
+        show_row: false,
+        reveal_row: false,
+        email_index: -1,
+        email: EmailRow::default(),
+    }
+}
+
+/// Ends a list whose older unread mail is only on the server, or starts one
+/// shown oldest first, saying how much. It is a header, which keyboard
+/// navigation passes over.
 pub(super) fn server_only_entry(count: u32) -> MailListEntry {
     MailListEntry {
         is_header: true,
@@ -304,7 +345,8 @@ mod tests {
         let today_key = mail_group_key(messages[0].date_ms, now);
         let mut groups = MailGroupState::default();
 
-        let expanded = project_mail_list(&messages, &rows, &groups, true, now);
+        let expanded =
+            project_mail_list(&messages, &rows, &groups, true, ListOrder::NewestFirst, now);
         assert_eq!(expanded.iter().filter(|entry| entry.is_header).count(), 2);
         assert_eq!(expanded[0].group_count, 2);
         assert_eq!(expanded[1].email_index, 0);
@@ -313,26 +355,36 @@ mod tests {
 
         let (generation, is_open) = groups.toggle(&today_key);
         assert!(!is_open);
-        let closing = project_mail_list(&messages, &rows, &groups, true, now);
+        let closing =
+            project_mail_list(&messages, &rows, &groups, true, ListOrder::NewestFirst, now);
         assert!(!closing[1].show_row);
         assert_eq!(closing.len(), 5);
 
         assert!(groups.finish_transition(&today_key, generation));
-        let closed = project_mail_list(&messages, &rows, &groups, true, now);
+        let closed =
+            project_mail_list(&messages, &rows, &groups, true, ListOrder::NewestFirst, now);
         assert_eq!(closed.len(), 3);
         assert_eq!(closed[0].group_count, 2);
         assert!(!closed[0].expanded);
         assert_eq!(closed[2].email_index, 2);
 
         groups.reveal(&today_key);
-        let revealed = project_mail_list(&messages, &rows, &groups, true, now);
+        let revealed =
+            project_mail_list(&messages, &rows, &groups, true, ListOrder::NewestFirst, now);
         assert_eq!(revealed.len(), 5);
         assert!(revealed[0].expanded);
         assert!(!revealed[1].reveal_row);
 
         let reordered_messages = vec![messages[2].clone(), messages[0].clone(), messages[1].clone()];
         let reordered_rows = vec![rows[2].clone(), rows[0].clone(), rows[1].clone()];
-        let reordered = project_mail_list(&reordered_messages, &reordered_rows, &groups, true, now);
+        let reordered = project_mail_list(
+            &reordered_messages,
+            &reordered_rows,
+            &groups,
+            true,
+            ListOrder::NewestFirst,
+            now,
+        );
         assert_eq!(reordered[1].email.id, messages[0].id);
         assert_eq!(reordered[1].email_index, 0);
         assert_eq!(reordered[4].email.id, messages[2].id);
@@ -350,9 +402,78 @@ mod tests {
             .iter()
             .map(|message| EmailRow { id: message.id, ..Default::default() })
             .collect::<Vec<_>>();
-        let entries = project_mail_list(&messages, &rows, &groups, false, now);
+        let entries = project_mail_list(
+            &messages,
+            &rows,
+            &groups,
+            false,
+            ListOrder::NewestFirst,
+            now,
+        );
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().all(|entry| !entry.is_header && entry.show_row));
+    }
+
+    #[test]
+    fn oldest_first_lists_start_with_older_mail_and_end_with_today() {
+        let now = local_day(2026, 9, 30);
+        // Oldest first, as the list loads them.
+        let dates = [
+            local_day(2026, 7, 30),
+            local_day(2026, 8, 30),
+            local_day(2026, 9, 1),
+            local_day(2026, 9, 24),
+            local_day(2026, 9, 28),
+            local_day(2026, 9, 29),
+            now,
+        ];
+        let mut messages = vec![crate::mail::fixture_messages()[0].clone(); dates.len()];
+        for (index, (message, date)) in messages.iter_mut().zip(dates).enumerate() {
+            message.id = index as i32;
+            message.date_ms = date.timestamp_millis();
+        }
+        let rows = messages
+            .iter()
+            .map(|message| EmailRow {
+                id: message.id,
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        let entries = project_mail_list(
+            &messages,
+            &rows,
+            &MailGroupState::default(),
+            true,
+            ListOrder::OldestFirst,
+            now,
+        );
+        // The older mail starts the list, without a section.
+        assert!(
+            entries[..2]
+                .iter()
+                .all(|entry| !entry.is_header && entry.group_key.is_empty())
+        );
+        let sections = entries
+            .iter()
+            .filter(|entry| entry.is_header)
+            .map(|entry| entry.group_kind.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sections,
+            ["this-month", "last-week", "this-week", "yesterday", "today"]
+        );
+        // The rows keep the list's order, which keyboard navigation follows.
+        let shown = entries
+            .iter()
+            .filter(|entry| !entry.is_header)
+            .map(|entry| (entry.email.id, entry.email_index))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shown,
+            (0..dates.len() as i32)
+                .map(|index| (index, index))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -385,7 +506,8 @@ mod tests {
                 ..Default::default()
             })
             .collect::<Vec<_>>();
-        let entries = project_mail_list(&messages, &rows, &groups, true, now);
+        let entries =
+            project_mail_list(&messages, &rows, &groups, true, ListOrder::NewestFirst, now);
         assert_eq!(entries.len(), 8);
         assert!(
             entries[..5]
@@ -402,7 +524,8 @@ mod tests {
         }
 
         groups.clear();
-        let expanded = project_mail_list(&messages, &rows, &groups, true, now);
+        let expanded =
+            project_mail_list(&messages, &rows, &groups, true, ListOrder::NewestFirst, now);
         assert_eq!(expanded.iter().filter(|entry| entry.is_header).count(), 5);
         assert_eq!(
             expanded.iter().filter(|entry| !entry.is_header).count(),

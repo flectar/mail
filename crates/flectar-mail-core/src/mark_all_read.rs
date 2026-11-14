@@ -299,6 +299,7 @@ mod tests {
             folder_id: None,
             cursor: None,
             limit: 50,
+            order: crate::models::ListOrder::NewestFirst,
         }
     }
 

@@ -9,10 +9,10 @@ use flectar_mail_core::{
         Address, BlockOffer, BlockResult, CalendarConnection, CalendarEvent, CardDavConnection,
         ConnectCaldavArgs, ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage,
         CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, InvitationCard, Label,
-        MailGrouping, MailHistory, MailProfile, MailProtocol, MailboxBadgeCounts, MessageCursor,
-        MessageDetail, MessageSearchCursor, MessageSummary, PerformActionArgs,
-        PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult, RsvpEventArgs,
-        SaveDraftArgs, SearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary,
+        ListOrder, ListOwner, MailGrouping, MailHistory, MailProfile, MailProtocol,
+        MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor, MessageSummary,
+        PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult,
+        RsvpEventArgs, SaveDraftArgs, SearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary,
         UnsubscribeOffer, UnsubscribeOutcome, View, normalized_workspace_list_pane_width, roles,
     },
 };
@@ -245,6 +245,10 @@ pub struct ComposeSource {
 #[derive(Clone, Debug)]
 pub struct MailPage {
     pub account_revision: u64,
+    /// The order the rows are in. Search results are newest first.
+    pub order: ListOrder,
+    /// Where the rows start: after this cursor, or at the list's start.
+    pub start: Option<MailCursor>,
     pub messages: Vec<MailMessage>,
     pub labels: Vec<Label>,
     pub mailboxes: Vec<MailboxEntry>,
@@ -318,6 +322,9 @@ struct PageLoadContext<'a> {
     query: &'a str,
     cursor: Option<MailCursor>,
     limit: i64,
+    /// Read toward the list's start from `cursor`, for the rows before the
+    /// ones shown. The page still lists them in the list's order.
+    backward: bool,
     include_counts: bool,
     /// The accounts and folders the mail view shows.
     accounts: &'a [Account],
@@ -394,6 +401,8 @@ pub struct CoreMailSource {
     profile_accounts: Arc<std::sync::Mutex<Option<Arc<[i64]>>>>,
     /// Whether mail lists show conversations or each message on its own.
     grouping: Arc<std::sync::Mutex<MailGrouping>>,
+    /// The lists shown oldest first; every other list is newest first.
+    oldest_first: Arc<std::sync::Mutex<std::collections::HashSet<Scope>>>,
 }
 
 pub struct AccountSnapshot {
@@ -462,6 +471,52 @@ impl CoreMailSource {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// The order `scope` lists its mail in.
+    pub fn order(&self, scope: Scope) -> ListOrder {
+        let oldest_first = self
+            .oldest_first
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if oldest_first.contains(&scope) {
+            ListOrder::OldestFirst
+        } else {
+            ListOrder::NewestFirst
+        }
+    }
+
+    /// List `scope` in `order` from now on. Returns whether that changed;
+    /// pages loaded in the other order are then out of date. `save_order`
+    /// keeps it for later sessions.
+    pub fn set_order(&self, scope: Scope, order: ListOrder) -> bool {
+        {
+            let mut oldest_first = self
+                .oldest_first
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let changed = match order {
+                ListOrder::OldestFirst => oldest_first.insert(scope),
+                ListOrder::NewestFirst => oldest_first.remove(&scope),
+            };
+            if !changed {
+                return false;
+            }
+        }
+        // After the new order is in place: a load that reads the new
+        // revision also reads it.
+        self.account_revision
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        true
+    }
+
+    /// Keep `scope` in `order` for later sessions. Fails for a list whose
+    /// folder, label or account is gone.
+    pub async fn save_order(&self, scope: Scope, order: ListOrder) -> Result<(), String> {
+        self.core
+            .set_list_order(scope.to_string(), list_owner(scope), order)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     fn profile_accounts(&self) -> Option<Arc<[i64]>> {
         self.profile_accounts
             .lock()
@@ -511,11 +566,19 @@ impl CoreMailSource {
         let core = Core::start_mail_ui_with_platform(paths, credentials, oauth_redirects)
             .await
             .map_err(|error| error.to_string())?;
+        // A list whose saved order can't be read is newest first, as before
+        // it was turned around.
+        let oldest_first =
+            oldest_first_scopes(core.oldest_first_lists().await.unwrap_or_else(|error| {
+                tracing::warn!(%error, "mail list orders could not be read");
+                Vec::new()
+            }));
         Ok(Self {
             core: Arc::new(core),
             account_revision: Arc::default(),
             profile_accounts: Arc::default(),
             grouping: Arc::default(),
+            oldest_first: Arc::new(std::sync::Mutex::new(oldest_first)),
         })
     }
 
@@ -533,6 +596,51 @@ impl CoreMailSource {
         cursor: Option<MailCursor>,
         limit: i64,
         include_counts: bool,
+    ) -> Result<MailPage, String> {
+        self.read_page(scope, query, cursor, limit, include_counts, false)
+            .await
+    }
+
+    /// The rows of `scope` before the shown ones, which start with the row
+    /// whose own cursor is `first`, in the list's order. The page's
+    /// `next_cursor` reads on toward the list's start, and is None once that
+    /// is reached.
+    pub async fn load_earlier(
+        &self,
+        scope: Scope,
+        first: MailCursor,
+        limit: i64,
+    ) -> Result<MailPage, String> {
+        self.read_page(scope, "", Some(first), limit, false, true)
+            .await
+    }
+
+    /// The rows of `scope` from list row `row` on, for a row further down
+    /// than one read goes. A row that is gone gives the list's start.
+    pub async fn load_page_from_row(
+        &self,
+        scope: Scope,
+        row: i32,
+        limit: i64,
+    ) -> Result<MailPage, String> {
+        let grouping = self.grouping();
+        let start = self
+            .core
+            .row_time(grouping, i64::from(row))
+            .await
+            .map_err(|error| error.to_string())?
+            .map(|time| cursor_before(grouping, time, i64::from(row), self.order(scope)));
+        self.load_page(scope, "", start, limit, false).await
+    }
+
+    async fn read_page(
+        &self,
+        scope: Scope,
+        query: &str,
+        cursor: Option<MailCursor>,
+        limit: i64,
+        include_counts: bool,
+        backward: bool,
     ) -> Result<MailPage, String> {
         let revision = self.account_revision();
         let profile = self.profile_accounts();
@@ -555,6 +663,7 @@ impl CoreMailSource {
             query,
             cursor,
             limit,
+            backward,
             include_counts,
             accounts: &accounts,
             folders: &folders,
@@ -648,6 +757,7 @@ impl CoreMailSource {
                         query: "",
                         cursor: None,
                         limit,
+                        backward: false,
                         include_counts: false,
                         accounts: &shown,
                         folders: &folders,
@@ -749,6 +859,7 @@ impl CoreMailSource {
             query,
             cursor,
             limit,
+            backward,
             include_counts,
             accounts,
             folders,
@@ -786,19 +897,40 @@ impl CoreMailSource {
         // Unified mailboxes, categories and shared labels cover the profile's
         // accounts; an account's own mailboxes need no more than its id.
         let profile_accounts = profile.filter(|_| resolved.account_id.is_none());
+        // Search results span folders, so they keep to newest first.
+        let order = if query.trim().is_empty() {
+            self.order(scope)
+        } else {
+            ListOrder::NewestFirst
+        };
+        // Rows before the shown ones come nearest first from the other order.
+        let read_order = if backward { order.reversed() } else { order };
+        let start = (!backward).then_some(cursor).flatten();
 
         if self.grouping() == MailGrouping::Messages {
             let (rows, next_cursor) = self
-                .load_message_rows(&resolved, profile_accounts, query, cursor, limit)
+                .load_message_rows(
+                    &resolved,
+                    profile_accounts,
+                    query,
+                    cursor,
+                    limit,
+                    read_order,
+                )
                 .await?;
-            let messages = rows
+            let mut messages = rows
                 .into_iter()
                 .filter_map(|row| {
                     message_summary_to_message(row, accounts, resolved.title.as_str())
                 })
-                .collect();
+                .collect::<Vec<_>>();
+            if backward {
+                messages.reverse();
+            }
             return Ok(MailPage {
                 account_revision: self.account_revision(),
+                order,
+                start,
                 messages,
                 labels,
                 mailboxes,
@@ -816,6 +948,11 @@ impl CoreMailSource {
                 Some(MailCursor::Thread(cursor)) => Some(cursor),
                 Some(_) => return Err("this cursor belongs to another list".into()),
             };
+            let page = flectar_mail_core::ThreadPageRequest {
+                cursor,
+                limit,
+                order: read_order,
+            };
             let page = match profile_accounts {
                 Some(accounts) => {
                     self.core
@@ -825,7 +962,7 @@ impl CoreMailSource {
                             accounts.to_vec(),
                             resolved.label_id,
                             resolved.folder_id,
-                            (cursor, limit),
+                            page,
                         )
                         .await
                 }
@@ -837,7 +974,7 @@ impl CoreMailSource {
                             resolved.account_id,
                             resolved.label_id,
                             resolved.folder_id,
-                            (cursor, limit),
+                            page,
                         )
                         .await
                 }
@@ -875,13 +1012,18 @@ impl CoreMailSource {
             (page.threads, page.next_cursor.map(MailCursor::Search))
         };
 
-        let messages = threads
+        let mut messages = threads
             .into_iter()
             .filter_map(|thread| summary_to_message(thread, accounts, resolved.title.as_str()))
-            .collect();
+            .collect::<Vec<_>>();
+        if backward {
+            messages.reverse();
+        }
 
         Ok(MailPage {
             account_revision: self.account_revision(),
+            order,
+            start,
             messages,
             labels,
             mailboxes,
@@ -902,6 +1044,7 @@ impl CoreMailSource {
         query: &str,
         cursor: Option<MailCursor>,
         limit: i64,
+        order: ListOrder,
     ) -> Result<(Vec<MessageSummary>, Option<MailCursor>), String> {
         if query.trim().is_empty() {
             let cursor = match cursor {
@@ -909,7 +1052,11 @@ impl CoreMailSource {
                 Some(MailCursor::Message(cursor)) => Some(cursor),
                 Some(_) => return Err("this cursor belongs to another list".into()),
             };
-            let page = flectar_mail_core::MessagePageRequest { cursor, limit };
+            let page = flectar_mail_core::MessagePageRequest {
+                cursor,
+                limit,
+                order,
+            };
             let page = match profile_accounts {
                 Some(accounts) => {
                     self.core
@@ -3120,6 +3267,68 @@ fn server_only_folders(scope: Scope, folders: &[FolderInfo]) -> Vec<i64> {
         .collect()
 }
 
+/// The cursor of a list row: its timeline time and id, in `grouping`.
+pub fn row_cursor(grouping: MailGrouping, time: i64, id: i64) -> MailCursor {
+    match grouping {
+        MailGrouping::Conversations => MailCursor::Thread(ThreadCursor {
+            last_message_at: time,
+            thread_id: id,
+        }),
+        MailGrouping::Messages => MailCursor::Message(MessageCursor {
+            date: time,
+            message_id: id,
+        }),
+    }
+}
+
+/// Whether a loaded row is a conversation or a single message.
+fn row_grouping(row: &MailMessage) -> MailGrouping {
+    if row.message_id.is_some() {
+        MailGrouping::Messages
+    } else {
+        MailGrouping::Conversations
+    }
+}
+
+/// The cursor of a loaded row.
+pub fn cursor_of(row: &MailMessage) -> MailCursor {
+    row_cursor(row_grouping(row), row.date_ms, i64::from(row.id))
+}
+
+/// The cursor a page in `order` reads from to start with a loaded `row`.
+pub fn cursor_before_row(row: &MailMessage, order: ListOrder) -> MailCursor {
+    cursor_before(row_grouping(row), row.date_ms, i64::from(row.id), order)
+}
+
+/// The cursor a page in `order` reads from to start with the row of `time`
+/// and `id`: the same time and the next id toward the list's start. Ids are
+/// whole numbers, so that leaves out no other row.
+pub fn cursor_before(grouping: MailGrouping, time: i64, id: i64, order: ListOrder) -> MailCursor {
+    let id = match order {
+        ListOrder::OldestFirst => id - 1,
+        ListOrder::NewestFirst => id + 1,
+    };
+    row_cursor(grouping, time, id)
+}
+
+/// The lists with these saved keys. A key the app no longer knows is left
+/// out, and its list is newest first.
+fn oldest_first_scopes(keys: Vec<String>) -> std::collections::HashSet<Scope> {
+    keys.into_iter()
+        .filter_map(|key| key.parse::<Scope>().ok())
+        .collect()
+}
+
+/// What `scope` belongs to, which its saved order goes with.
+fn list_owner(scope: Scope) -> ListOwner {
+    match scope {
+        Scope::Unified(_) | Scope::Important | Scope::Other => ListOwner::Unified,
+        Scope::Label { id, .. } => ListOwner::Label(id),
+        Scope::Folder(id) => ListOwner::Folder(id),
+        Scope::Account { account_id, .. } => ListOwner::Account(account_id),
+    }
+}
+
 struct ScopeResolution {
     account_id: Option<i64>,
     folder_id: Option<i64>,
@@ -4677,13 +4886,13 @@ mod search_pagination_adapter_tests {
     use super::*;
     use flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore;
 
-    #[tokio::test]
-    async fn search_and_inbox_pages_keep_their_own_cursors() {
-        let dir = tempfile::tempdir().unwrap();
+    /// A source with one account whose inbox has threads 1 to 27, each one
+    /// message from that time, all matching "needle".
+    async fn source_with_27_threads(dir: &std::path::Path) -> CoreMailSource {
         let source = CoreMailSource::start(
-            Paths::for_tests(dir.path()),
+            Paths::for_tests(dir),
             Arc::new(DevelopmentFileCredentialStore::new(
-                dir.path().join("credentials.json"),
+                dir.join("credentials.json"),
             )),
             Arc::new(flectar_mail_core::oauth::redirect::LoopbackRedirectBroker::default()),
         )
@@ -4719,6 +4928,13 @@ mod search_pagination_adapter_tests {
             })
             .await
             .unwrap();
+        source
+    }
+
+    #[tokio::test]
+    async fn search_and_inbox_pages_keep_their_own_cursors() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = source_with_27_threads(dir.path()).await;
 
         for query in ["needle", ""] {
             let first = source
@@ -4742,6 +4958,105 @@ mod search_pagination_adapter_tests {
                 .collect::<Vec<_>>();
             assert_eq!(ids, (1..=27).rev().collect::<Vec<_>>());
         }
+    }
+
+    #[tokio::test]
+    async fn a_list_turned_around_pages_oldest_first_and_keeps_that() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = source_with_27_threads(dir.path()).await;
+        let inbox = Scope::UNIFIED_INBOX;
+        assert_eq!(source.order(inbox), ListOrder::NewestFirst);
+        let row_ids = |page: MailPage| page.messages.iter().map(|row| row.id).collect::<Vec<_>>();
+        // A list can open at any row, in either order.
+        let from_20 = source.load_page_from_row(inbox, 20, 3).await.unwrap();
+        assert!(from_20.start.is_some());
+        assert_eq!(row_ids(from_20), [20, 19, 18]);
+
+        let revision = source.account_revision();
+        assert!(source.set_order(inbox, ListOrder::OldestFirst));
+        assert_ne!(
+            source.account_revision(),
+            revision,
+            "pages loaded newest first are out of date"
+        );
+        assert!(!source.set_order(inbox, ListOrder::OldestFirst));
+        let first = source.load_page(inbox, "", None, 25, false).await.unwrap();
+        assert_eq!(first.order, ListOrder::OldestFirst);
+        let second = source
+            .load_page(inbox, "", first.next_cursor, 25, false)
+            .await
+            .unwrap();
+        assert!(second.next_cursor.is_none());
+        let ids = first
+            .messages
+            .into_iter()
+            .chain(second.messages)
+            .map(|message| message.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, (1..=27).collect::<Vec<_>>());
+
+        let from_20 = source.load_page_from_row(inbox, 20, 3).await.unwrap();
+        assert_eq!(row_ids(from_20.clone()), [20, 21, 22]);
+        // The rows before come nearest last, as the list shows them.
+        let first = cursor_of(&from_20.messages[0]);
+        let earlier = source.load_earlier(inbox, first, 3).await.unwrap();
+        assert!(earlier.next_cursor.is_some());
+        assert_eq!(row_ids(earlier), [17, 18, 19]);
+        let first = cursor_of(
+            &source
+                .load_page_from_row(inbox, 2, 1)
+                .await
+                .unwrap()
+                .messages[0],
+        );
+        let earliest = source.load_earlier(inbox, first, 3).await.unwrap();
+        assert!(
+            earliest.next_cursor.is_none(),
+            "the list's start is reached"
+        );
+        assert_eq!(row_ids(earliest), [1]);
+        // A row that is gone gives the list's start.
+        let gone = source.load_page_from_row(inbox, 404, 3).await.unwrap();
+        assert!(gone.start.is_none());
+        assert_eq!(row_ids(gone), [1, 2, 3]);
+
+        // Search results span folders, so they stay newest first.
+        let search = source
+            .load_page(inbox, "needle", None, 25, false)
+            .await
+            .unwrap();
+        assert_eq!(search.order, ListOrder::NewestFirst);
+        assert_eq!(search.messages[0].id, 27);
+        // Every other list keeps its own order.
+        assert_eq!(
+            source.order(Scope::Unified(StandardMailbox::Sent)),
+            ListOrder::NewestFirst
+        );
+
+        // The next session starts with the saved orders.
+        source
+            .save_order(inbox, ListOrder::OldestFirst)
+            .await
+            .unwrap();
+        let saved = source.core.oldest_first_lists().await.unwrap();
+        assert_eq!(saved, [inbox.to_string()]);
+        assert_eq!(
+            oldest_first_scopes(saved),
+            std::collections::HashSet::from([inbox])
+        );
+        // A folder that is gone can't keep an order.
+        assert!(
+            source
+                .save_order(Scope::Folder(404), ListOrder::OldestFirst)
+                .await
+                .is_err()
+        );
+        source.set_order(inbox, ListOrder::NewestFirst);
+        source
+            .save_order(inbox, ListOrder::NewestFirst)
+            .await
+            .unwrap();
+        assert!(source.core.oldest_first_lists().await.unwrap().is_empty());
     }
 
     #[tokio::test]

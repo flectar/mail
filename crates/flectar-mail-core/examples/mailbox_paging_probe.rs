@@ -26,6 +26,7 @@ async fn page(
                 folder_id: None,
                 cursor,
                 limit: 25,
+                order: flectar_mail_core::models::ListOrder::NewestFirst,
             },
         )
     })
@@ -44,6 +45,7 @@ async fn count(db: &Db, account_id: Option<i64>) -> Result<usize> {
                 folder_id: None,
                 cursor: None,
                 limit: 25,
+                order: flectar_mail_core::models::ListOrder::NewestFirst,
             },
         )
     })
@@ -121,6 +123,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     folder_id: None,
                     cursor: Some(deep_cursor),
                     limit: 25,
+                    order: flectar_mail_core::models::ListOrder::NewestFirst,
                 },
             )
         })
