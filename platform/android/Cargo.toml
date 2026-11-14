@@ -5,6 +5,9 @@ blitz-dom = { path = "../../crates/blitz-dom" }
 blitz-paint = { path = "../../crates/blitz-paint" }
 parley = { path = "../../crates/parley" }
 i-slint-backend-winit = { path = "../../crates/i-slint-backend-winit" }
+# Remove when Slint releases its Android pointer scroll fix; see
+# patches/slint-android-activity/README.md.
+i-slint-backend-android-activity = { path = "../../crates/i-slint-backend-android-activity" }
 
 [profile.release]
 opt-level = 3

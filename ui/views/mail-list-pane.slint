@@ -536,7 +536,7 @@ export component MailListPane inherits FocusScope {
         list-keyboard.pointer-activated();
     }
 
-    animate bulk-toolbar-height { duration: 180ms; easing: spring(0); }
+    animate bulk-toolbar-height { duration: 180ms; easing: spring(0); enabled: MotionSettings.movement; }
 
     pagination := InfiniteScrollController {
         active: true;
@@ -957,7 +957,7 @@ export component MailListPane inherits FocusScope {
                                 private property <float> touch-start-y: 0;
                                 width: max(0px, mail-list-scroll.visible-width - LayoutMetrics.list-scrollbar-gutter);
                                 height: entry.is_header ? (entry.group_kind == "server-only" ? 100px : root.compact ? 44px : 40px)
-                                    : entry.show_row && (mail-row.reveal-ready || !MotionSettings.enabled)
+                                    : entry.show_row && (mail-row.reveal-ready || !MotionSettings.movement)
                                         ? root.message-row-height : 0px;
                                 border-radius: 6px;
                                 clip: true;
@@ -966,7 +966,7 @@ export component MailListPane inherits FocusScope {
                                 border-width: !entry.is_header && entry.show_row && list-keyboard.focus-visible && root.keyboard-email-id == mail-data.id ? 2px : 0px;
                                 border-color: root.accent;
                                 animate opacity { duration: 120ms; }
-                                animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.enabled; }
+                                animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.movement; }
                                 accessible-role: none;
 
                                 Rectangle {

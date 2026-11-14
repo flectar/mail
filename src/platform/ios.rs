@@ -17,6 +17,8 @@ use std::{
 unsafe extern "C" {
     fn install_pdf_lifecycle_observers();
     fn install_memory_pressure_observers();
+    fn flectar_reduce_motion() -> bool;
+    fn flectar_watch_reduce_motion();
     fn flectar_set_app_icon(name: *const std::ffi::c_char);
     fn flectar_register_background_checks();
     fn flectar_check_finished(context: *mut c_void, checked: bool);
@@ -108,6 +110,7 @@ extern "C" fn flectar_wants_background_checks() -> bool {
 /// front.
 #[unsafe(no_mangle)]
 extern "C" fn flectar_app_became_active() {
+    crate::motion::system_changed();
     crate::notifications::app_became_active();
     let _ = slint::invoke_from_event_loop(crate::notifications::ui::came_to_front);
 }
@@ -117,6 +120,24 @@ extern "C" fn flectar_app_became_active() {
 #[unsafe(no_mangle)]
 extern "C" fn flectar_background_refresh_changed() {
     let _ = slint::invoke_from_event_loop(crate::notifications::ui::refresh_availability);
+}
+
+/// Settings > Accessibility > Motion > Reduce Motion. Main thread only.
+pub(crate) fn reduce_motion() -> bool {
+    // SAFETY: a plain query, made on the main thread like the rest of the UI.
+    unsafe { flectar_reduce_motion() }
+}
+
+pub(crate) fn watch_reduce_motion() {
+    // SAFETY: installs a NotificationCenter observer that lives for the
+    // process. The Objective-C side takes no arguments.
+    unsafe { flectar_watch_reduce_motion() };
+}
+
+/// Called by ReduceMotion.m on the main thread when Reduce Motion changes.
+#[unsafe(no_mangle)]
+extern "C" fn flectar_reduce_motion_changed() {
+    crate::motion::system_changed();
 }
 
 /// Whether the app is in front of the user. Main thread only.

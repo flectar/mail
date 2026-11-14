@@ -1,5 +1,5 @@
 import { ScrollView } from "std-widgets.slint";
-import { AppTheme, LayoutMetrics, ThemeUtilities } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MotionSettings, ThemeUtilities } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
 import { WindowChrome } from "../window-chrome.slint";
@@ -95,7 +95,7 @@ export component Switch inherits Rectangle {
         height: 16px;
         border-radius: 8px;
         background: white;
-        animate x { duration: 180ms; easing: spring(0.18); }
+        animate x { duration: 180ms; easing: spring(0.18); enabled: MotionSettings.movement; }
     }
 
     switch-focus := FocusVisibleScope {
@@ -335,7 +335,7 @@ export component IconButton inherits Rectangle {
         colorize: root.primary ? ThemeUtilities.contrasting-foreground(root.fill-color) : root.icon-color;
         image-fit: contain;
         accessible-role: none;
-        animate y { duration: 140ms; easing: spring(0); }
+        animate y { duration: 140ms; easing: spring(0); enabled: MotionSettings.movement; }
     }
 
     keyboard := FocusVisibleScope {

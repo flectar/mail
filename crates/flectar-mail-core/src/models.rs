@@ -1783,6 +1783,83 @@ impl MessageAppearance {
     }
 }
 
+/// Whether the interface reduces motion (#231): as the operating system asks,
+/// or always, or never.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReduceMotion {
+    #[default]
+    System,
+    On,
+    Off,
+}
+
+impl ReduceMotion {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::On => "on",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "system" => Some(Self::System),
+            "on" => Some(Self::On),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
+}
+
+/// The interface's text size (#231), as a step on the system's own text size.
+/// Message zoom and the composer's text size stay separate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InterfaceTextSize {
+    Smaller,
+    #[default]
+    Default,
+    Large,
+    Larger,
+    Largest,
+}
+
+impl InterfaceTextSize {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Smaller => "smaller",
+            Self::Default => "default",
+            Self::Large => "large",
+            Self::Larger => "larger",
+            Self::Largest => "largest",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "smaller" => Some(Self::Smaller),
+            "default" => Some(Self::Default),
+            "large" => Some(Self::Large),
+            "larger" => Some(Self::Larger),
+            "largest" => Some(Self::Largest),
+            _ => None,
+        }
+    }
+
+    /// How many times the system's text size the interface uses.
+    pub fn factor(self) -> f32 {
+        match self {
+            Self::Smaller => 0.9,
+            Self::Default => 1.0,
+            Self::Large => 1.15,
+            Self::Larger => 1.3,
+            Self::Largest => 1.5,
+        }
+    }
+}
+
 /// Which invitations found in mail join the calendar before the user answers
 /// them (#228). Answering one, or adding it from its card, always does.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1904,6 +1981,12 @@ pub struct Settings {
     pub theme: String,
     #[serde(default)]
     pub message_appearance: MessageAppearance,
+    /// Whether the interface reduces motion.
+    #[serde(default)]
+    pub reduce_motion: ReduceMotion,
+    /// The interface's text size.
+    #[serde(default)]
+    pub interface_text_size: InterfaceTextSize,
     /// Named application palette: "default" | "teal" | "green" | "purple" | "custom".
     #[serde(default = "default_theme_preset")]
     pub theme_preset: String,
@@ -2266,6 +2349,8 @@ impl Default for Settings {
         Settings {
             theme: "system".into(),
             message_appearance: MessageAppearance::default(),
+            reduce_motion: ReduceMotion::default(),
+            interface_text_size: InterfaceTextSize::default(),
             theme_preset: default_theme_preset(),
             custom_theme: CustomTheme::default(),
             show_avatars: true,
@@ -2735,6 +2820,21 @@ mod tests {
         assert_eq!(s.ai_base_url, crate::ai::DEFAULT_BASE_URL);
         assert!(s.show_avatars);
         assert_eq!(s.message_appearance, MessageAppearance::System);
+        assert_eq!(s.reduce_motion, ReduceMotion::System);
+        for motion in [ReduceMotion::System, ReduceMotion::On, ReduceMotion::Off] {
+            assert_eq!(ReduceMotion::parse(motion.as_str()), Some(motion));
+        }
+        assert_eq!(s.interface_text_size, InterfaceTextSize::Default);
+        assert_eq!(InterfaceTextSize::Default.factor(), 1.0);
+        for size in [
+            InterfaceTextSize::Smaller,
+            InterfaceTextSize::Default,
+            InterfaceTextSize::Large,
+            InterfaceTextSize::Larger,
+            InterfaceTextSize::Largest,
+        ] {
+            assert_eq!(InterfaceTextSize::parse(size.as_str()), Some(size));
+        }
         // Settings saved before the choice existed take the safe default.
         assert_eq!(s.add_invitations, AddInvitations::Known);
         for adding in [

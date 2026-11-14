@@ -467,6 +467,70 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_motion = Rc::clone(state);
+    let runtime_for_motion = runtime.clone();
+    app.global::<crate::MotionSettings>()
+        .on_choose(move |preference| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            if flectar_mail_core::models::ReduceMotion::parse(&preference).is_none() {
+                return;
+            }
+            let motion = app.global::<crate::MotionSettings>();
+            let previous = motion.get_preference();
+            motion.set_preference(preference.clone());
+            let Some(core) = state_for_motion.borrow().core.clone() else {
+                app.set_sync_status(UiMessage::plain("Reduce motion updated for this session."));
+                return;
+            };
+            match runtime_for_motion.block_on(core.set_reduce_motion(&preference)) {
+                Ok(()) => app.set_sync_status(UiMessage::plain("Reduce motion preference saved.")),
+                Err(error) => {
+                    motion.set_preference(previous);
+                    app.set_sync_status(UiMessage::detail(
+                        "Could not save the reduce motion preference: {}",
+                        error,
+                    ));
+                }
+            }
+        });
+
+    let app_weak = app.as_weak();
+    let state_for_text_size = Rc::clone(state);
+    let runtime_for_text_size = runtime.clone();
+    app.global::<crate::InterfaceText>()
+        .on_choose(move |choice| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let Some(size) = flectar_mail_core::models::InterfaceTextSize::parse(&choice) else {
+                return;
+            };
+            let previous = flectar_mail_core::models::InterfaceTextSize::parse(
+                &app.global::<crate::InterfaceText>().get_size(),
+            )
+            .unwrap_or_default();
+            crate::text_size::apply(&app, size);
+            let Some(core) = state_for_text_size.borrow().core.clone() else {
+                app.set_sync_status(UiMessage::plain(
+                    "Interface text size updated for this session.",
+                ));
+                return;
+            };
+            match runtime_for_text_size.block_on(core.set_interface_text_size(&choice)) {
+                Ok(()) => app.set_sync_status(UiMessage::plain("Interface text size saved.")),
+                Err(error) => {
+                    crate::text_size::apply(&app, previous);
+                    app.set_sync_status(UiMessage::detail(
+                        "Could not save the interface text size: {}",
+                        error,
+                    ));
+                }
+            }
+        });
+
+    let app_weak = app.as_weak();
     let state_for_invitations = Rc::clone(state);
     let runtime_for_invitations = runtime.clone();
     app.global::<InvitationSettings>().on_choose(move |choice| {

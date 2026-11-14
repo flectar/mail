@@ -19,3 +19,10 @@ export global TypeScale {
     out property <relative-font-size> display: 2rem;
     out property <relative-font-size> display-large: 2.08rem;
 }
+
+// The Interface text size setting (src/text_size.rs): "smaller", "default",
+// "large", "larger" or "largest".
+export global InterfaceText {
+    in-out property <string> size: "default";
+    callback choose(string);
+}
