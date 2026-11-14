@@ -409,6 +409,14 @@ standard puts it (RFC 8098). Sending one or ignoring the request answers it for
 good, and IMAP and JMAP servers usually keep that answer, so your other devices
 don't ask again.
 
+When a receipt comes back for a message you sent, the message lists it under
+**Read receipts** at its end, after any attachments, with when it was sent:
+**Read by** when your message was shown, **Deleted by** when it was deleted,
+read or not, and **Received by** when the recipient's mail program handled it
+without showing it, such as with a rule. A long list shows the first two
+receipts and a button for the rest. Deleting a receipt keeps what it said on
+your message.
+
 ## Calendar invitations
 
 A message with an invitation shows a card above it with the event's day and
