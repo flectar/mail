@@ -211,6 +211,14 @@ OpenPGP/MIME signing and encryption use installed GnuPG 2.x with pinentry for
 private-key passphrases. Required encryption blocks delivery when recipient keys
 are missing or invalid; protected drafts remain local until Send.
 
+Signatures are written in the composer, with the formatting, links and
+pictures a message can have. **Edit signature** and **New signature** open it
+in a window of its own on the desktop, and in place of Settings on phones,
+with the signature's name where a message has its subject. A signature goes
+into a message under a `-- ` line, its pictures as parts of the message, and
+its plain text takes the message's own font and size. It holds pictures of
+its own, never ones from the web, and up to 256 KB in all.
+
 S/MIME and mobile OpenPGP are not currently supported.
 
 ## Text formatting
