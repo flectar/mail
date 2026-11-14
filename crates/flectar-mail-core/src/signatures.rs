@@ -6,7 +6,8 @@ use crate::{
     models::{Signature, SignatureDefaults},
 };
 
-pub const MAX_SIGNATURE_BYTES: usize = 32 * 1024;
+/// A signature's HTML, pictures included, can be this large.
+pub const MAX_SIGNATURE_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_SIGNATURES_PER_ACCOUNT: usize = 20;
 
 pub fn plain_text(signature: &Signature) -> String {
@@ -46,12 +47,40 @@ pub fn text_html(text: &str) -> String {
     html
 }
 
-/// No active HTML, images or remote requests in signature settings.
+/// The formatting the composer writes, and pictures the signature holds itself: no active
+/// HTML, pictures from the web or other remote requests in signature settings.
 pub(crate) fn sanitize_html(html: &str) -> String {
-    ammonia::Builder::default()
-        .rm_tags(&["img"])
-        .clean(html)
-        .to_string()
+    static SANITIZER: std::sync::LazyLock<ammonia::Builder<'static>> =
+        std::sync::LazyLock::new(|| {
+            let mut builder = ammonia::Builder::default();
+            builder
+                .add_generic_attributes(["style", "align", "dir"])
+                .add_url_schemes(["data"])
+                .attribute_filter(|element, attribute, value| match (element, attribute) {
+                    ("img", "src") => is_embedded_picture(value).then(|| value.into()),
+                    (_, "href") if has_data_scheme(value) => None,
+                    _ => Some(value.into()),
+                })
+                .link_rel(Some("noopener noreferrer"));
+            builder
+        });
+    SANITIZER.clean(html).to_string()
+}
+
+/// Whether `src` holds a PNG, JPEG, GIF or WebP picture itself, as the composer writes them.
+fn is_embedded_picture(src: &str) -> bool {
+    let src = src.trim();
+    ["png", "jpeg", "gif", "webp"].iter().any(|kind| {
+        let prefix = format!("data:image/{kind};base64,");
+        src.get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(&prefix))
+    })
+}
+
+fn has_data_scheme(url: &str) -> bool {
+    url.trim()
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data:"))
 }
 
 /// Insert above the quotation, preserving the standard `-- ` delimiter.
@@ -95,7 +124,7 @@ impl Core {
             || signature.html.len() > MAX_SIGNATURE_BYTES
         {
             return Err(CoreError::Other(
-                "Use a signature name of 1–100 bytes and a body under 32 KiB".into(),
+                "Use a signature name of 1–100 bytes and a body under 256 KiB".into(),
             ));
         }
         signature.html = sanitize_html(&signature.html);
@@ -232,5 +261,47 @@ mod tests {
         };
         assert_eq!(plain_text(&s), "Zoë <me@example.org>\nEngineer");
         assert_eq!(insert("Body", ""), "Body");
+    }
+
+    #[test]
+    fn signatures_keep_their_formatting_and_their_own_pictures() {
+        let logo = "data:image/png;base64,iVBORw0KGgo=";
+        let html = format!(
+            "<div align=\"center\" style=\"text-align:center\"><span style=\"color:#0b5394;\
+             font-size:x-large\">Zoë</span><br><a href=\"https://example.org\">example.org</a>\
+             <br><img src=\"{logo}\" alt=\"Logo\" width=\"120\" height=\"40\" \
+             style=\"width:120px;max-width:100%;height:auto\"></div>"
+        );
+        let clean = sanitize_html(&html);
+        for kept in [
+            "align=\"center\"",
+            "style=\"text-align:center\"",
+            "style=\"color:#0b5394;font-size:x-large\"",
+            "href=\"https://example.org\"",
+            "src=\"data:image/png;base64,iVBORw0KGgo=\"",
+            "alt=\"Logo\"",
+            "style=\"width:120px;max-width:100%;height:auto\"",
+        ] {
+            assert!(clean.contains(kept), "{kept} in {clean}");
+        }
+
+        // Pictures from the web, other embedded data, scripts and data links go.
+        let clean = sanitize_html(
+            "<img src=\"https://tracker.example/p.gif\" alt=\"web\">\
+             <img src=\"data:image/svg+xml;base64,PHN2Zy8+\" alt=\"svg\">\
+             <a href=\"data:text/html,hi\">data</a><a href=\"javascript:alert(1)\">js</a>\
+             <script>alert(1)</script><span onclick=\"x()\">Me</span>",
+        );
+        for gone in [
+            "tracker.example",
+            "svg+xml",
+            "data:text",
+            "javascript",
+            "<script",
+            "onclick",
+        ] {
+            assert!(!clean.contains(gone), "{gone} in {clean}");
+        }
+        assert!(clean.contains("Me"), "{clean}");
     }
 }
