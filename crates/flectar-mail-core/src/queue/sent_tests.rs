@@ -328,6 +328,25 @@ async fn sent_copy_policy_setting_preserves_other_account_settings() {
 }
 
 #[tokio::test]
+async fn message_format_setting_preserves_other_account_settings() {
+    let (_temp, core, _, _) = local_outgoing().await;
+    core.set_account_sent_copy_policy(1, SentCopyPolicy::Client)
+        .await
+        .unwrap();
+    core.set_account_message_format(1, MessageFormat::PlainText, false)
+        .await
+        .unwrap();
+    let settings = core
+        .db
+        .read(|c| Ok(repo::accounts::get_config(c, 1)?.unwrap().settings))
+        .await
+        .unwrap();
+    assert_eq!(settings.message_format, MessageFormat::PlainText);
+    assert!(!settings.plain_text_replies);
+    assert_eq!(settings.sent_copy_policy, SentCopyPolicy::Client);
+}
+
+#[tokio::test]
 async fn only_pop3_accounts_remove_mail_from_their_server() {
     let (_temp, core, _, _) = local_outgoing().await;
     let refused = core

@@ -4,7 +4,7 @@ use flectar_mail_core::{
     Core,
     mail_security::{MailSecurity, OpenedMessage},
     models::{
-        AccountConfig, SenderIdentity, SenderIdentitySource, Settings, Signature,
+        AccountConfig, MessageFormat, SenderIdentity, SenderIdentitySource, Settings, Signature,
         SignatureDefaults,
     },
     sender_identities::{ManualIdentityPolicy, manual_identity_policy},
@@ -406,6 +406,10 @@ pub(super) fn register(
                             clear_sender_form(&ui);
                             project_identities(&app, config, &identities, warning.as_deref());
                             ui.invoke_edit_signature(-1);
+                            ui.set_message_format_index(i32::from(
+                                config.settings.message_format == MessageFormat::PlainText,
+                            ));
+                            ui.set_plain_text_replies(config.settings.plain_text_replies);
                             let p = &config.settings.security;
                             ui.set_fingerprint(p.signing_fingerprint.clone().into());
                             ui.set_sign(p.sign_by_default);
@@ -421,6 +425,41 @@ pub(super) fn register(
                         }
                     }
                     Err(e) => ui.set_status(e.into()),
+                }
+            },
+        );
+    });
+    let weak = app.as_weak();
+    let state_message_format = state.clone();
+    let work = tasks.clone();
+    ui.on_save_message_format(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let ui = app.global::<AccountMailPreferences>();
+        if ui.get_account_id() <= 0 {
+            return;
+        }
+        let Some(core) = core(&state_message_format) else {
+            return;
+        };
+        let account_id = i64::from(ui.get_account_id());
+        let format = if ui.get_message_format_index() == 1 {
+            MessageFormat::PlainText
+        } else {
+            MessageFormat::Formatted
+        };
+        let plain_text_replies = ui.get_plain_text_replies();
+        work.spawn(
+            &app,
+            false,
+            async move {
+                core.set_account_message_format(account_id, format, plain_text_replies)
+                    .await
+                    .map_err(|error| error.to_string())
+            },
+            |app, result| {
+                if let Err(error) = result {
+                    app.global::<AccountMailPreferences>()
+                        .set_status(error.into());
                 }
             },
         );

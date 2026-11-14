@@ -15,9 +15,11 @@ use std::rc::Weak;
 
 mod message_spelling;
 mod photos;
+mod plain_text;
 pub(crate) use message_spelling::spelling_changed;
 use message_spelling::{MessageSpelling, apply_spelling_state};
 use photos::MessagePhotos;
+use plain_text::PlainEdit;
 
 thread_local! {
     static COMPOSERS: RefCell<Option<Rc<Composers>>> = const { RefCell::new(None) };
@@ -97,6 +99,13 @@ pub(super) struct ComposeSession {
     preferences_generation: Cell<u64>,
     spelling: MessageSpelling,
     photos: MessagePhotos,
+    /// The message goes out as plain text only.
+    plain_text: Cell<bool>,
+    /// The edit that took the message's formatting out, while undo can take it back.
+    plain_edit: RefCell<Option<PlainEdit>>,
+    /// Until the sending account's preference chooses how the message starts: whether it
+    /// answers or forwards a plain-text message.
+    format_pending: Cell<Option<bool>>,
     /// Closed, and waiting for the event loop to let its window go.
     disposed: Cell<bool>,
 }
@@ -489,6 +498,7 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_from_label(from.get_from_label());
     to.set_attachments(from.get_attachments());
     to.set_attachment_summary(from.get_attachment_summary());
+    to.set_plain_text(from.get_plain_text());
     to.set_templates(from.get_templates());
     to.set_message(from.get_message());
     to.set_notice_is_error(from.get_notice_is_error());
@@ -631,6 +641,9 @@ impl Composers {
             preferences_generation: Cell::new(0),
             spelling: MessageSpelling::default(),
             photos: MessagePhotos::default(),
+            plain_text: Cell::new(false),
+            plain_edit: RefCell::default(),
+            format_pending: Cell::new(Some(false)),
             disposed: Cell::new(false),
         });
         session.connect();
@@ -833,6 +846,13 @@ impl Composers {
             split
         };
         session.set_quote(&ui, prepared.quote.or(quote));
+        // A message edited as new keeps the original's format; replies and forwards start as
+        // the account's preference says once it's loaded, which may follow the original's.
+        if action == "edit_as_new" {
+            session.start_format(prepared.plain_original);
+        } else {
+            session.format_pending.set(Some(prepared.plain_original));
+        }
         *session.intent.borrow_mut() = prepared.intent;
         session.show(action, Some(prepared.sender_email));
         // A forward, and a message edited as new, carry the original's files.
@@ -933,6 +953,12 @@ impl Composers {
             })
             .collect();
         apply_compose_files(&ui, &session.files.borrow());
+        // A draft saved as plain text has text and no HTML.
+        let plain = draft
+            .body_html
+            .as_deref()
+            .is_none_or(|html| html.trim().is_empty())
+            && !draft.body_text.trim().is_empty();
         let quote = {
             let mut document = session.document.borrow_mut();
             let html = draft.body_html.as_deref().unwrap_or_default();
@@ -957,6 +983,7 @@ impl Composers {
             split
         };
         session.set_quote(&ui, quote);
+        session.start_format(plain);
         *session.intent.borrow_mut() = ComposeIntent {
             mode: draft.mode,
             in_reply_to_message_id: draft.in_reply_to_message_id,
@@ -1127,23 +1154,22 @@ impl ComposeSession {
             );
             // Line the quote up with the reply above it, and give unstyled
             // text such as the attribution line the reply's size rather than
-            // the reader's 16px default.
-            let html = format!(
-                "<body style=\"margin:8px 0;font-size:{}px\">{}</body>",
-                crate::compose_editor::FONT_SIZE_LOGICAL,
-                quote.html
-            );
+            // the reader's 16px default. A plain-text message shows the
+            // original as the text that goes out.
+            let html = if self.plain_text.get() {
+                plain_text::plain_quote_html(&quote.plain)
+            } else {
+                format!(
+                    "<body style=\"margin:8px 0;font-size:{}px\">{}</body>",
+                    crate::compose_editor::FONT_SIZE_LOGICAL,
+                    quote.html
+                )
+            };
             // An original the renderer can't lay out shows as its text, as
             // the reader shows such a message; what is sent stays the same.
             let prepared = renderer.prepare_email_html(&html, false).or_else(|error| {
                 tracing::warn!(%error, "quoted message shown as text");
-                let mut text = format!(
-                    "<body style=\"margin:8px 0;font-size:{}px\"><div style=\"white-space:pre-wrap\">",
-                    crate::compose_editor::FONT_SIZE_LOGICAL
-                );
-                crate::email_document::append_escaped(&mut text, &quote.plain);
-                text.push_str("</div></body>");
-                renderer.prepare_email_html(&text, false)
+                renderer.prepare_email_html(&plain_text::plain_quote_html(&quote.plain), false)
             });
             match prepared {
                 Ok(prepared) => {
@@ -1227,6 +1253,7 @@ impl ComposeSession {
         ui.set_editor_tiles(ModelRc::default());
         apply_compose_files(&ui, &[]);
         photos::apply_photos(&ui, &photos::PhotoSummary::default());
+        ui.set_plain_text(false);
         apply_compose_contacts(&ui, &[]);
         ui.set_sending(false);
         ui.set_mode("new".into());
@@ -1611,8 +1638,17 @@ impl ComposeSession {
         });
         let weak = self.reference();
         ui.on_format(move |kind, body, anchor, cursor| {
-            if let Some(session) = weak.upgrade() {
+            // Plain text has no formatting to apply, also from the keyboard.
+            if let Some(session) = weak.upgrade()
+                && !session.plain_text.get()
+            {
                 session.edit(|document| document.format(&kind, &body, anchor, cursor));
+            }
+        });
+        let weak = self.reference();
+        ui.on_plain_text_chosen(move |plain| {
+            if let Some(session) = weak.upgrade() {
+                session.set_plain_text(plain);
             }
         });
         let weak = self.reference();
@@ -1930,6 +1966,10 @@ impl ComposeSession {
                 document.update_selection(anchor, cursor);
             }
         }
+        // Plain text takes what's pasted as text.
+        if self.plain_text.get() {
+            return false;
+        }
         if let Some(html) = crate::reader_clipboard::html()
             && self.paste_html(&host, &html)
         {
@@ -1999,6 +2039,10 @@ impl ComposeSession {
             } else {
                 document.update_selection(anchor, cursor);
             }
+            // Plain text copies as text.
+            if self.plain_text.get() {
+                return false;
+            }
             let Some((html, text)) = document.selection_html() else {
                 return false;
             };
@@ -2058,6 +2102,7 @@ impl ComposeSession {
                 .as_ref()
                 .map(|edited| document.edit_state(edited.mark))
         };
+        self.follow_plain_edit(&self.document.borrow());
         self.check_spelling_soon();
         self.refresh_photos();
         // Undoing Edit puts the drawn original back, and redoing it moves the
@@ -2358,7 +2403,8 @@ impl ComposeSession {
         }
         let mut attachments = Vec::new();
         for path in paths {
-            let image = is_image_name(&path)
+            // Plain text holds no pictures, so they're attached.
+            let image = (is_image_name(&path) && !self.plain_text.get())
                 .then(|| std::fs::metadata(&path).ok())
                 .flatten()
                 .filter(|metadata| {
@@ -2386,6 +2432,9 @@ impl ComposeSession {
 
     /// Opens a picker for images to put in the text at the caret.
     fn pick_images(self: &Rc<Self>) {
+        if self.plain_text.get() {
+            return;
+        }
         let Some(composers) = self.composers() else {
             return;
         };
@@ -2714,9 +2763,10 @@ impl ComposeSession {
             let html = document.body_html_with(self.quote.borrow().is_some(), |image| {
                 self.photos.shrunk(image)
             });
-            // Mail read as plain text names each image in its place. A draft keeps the
-            // placeholders, which the HTML's images reopen into.
-            (html, send.then(|| document.text_with_image_descriptions()))
+            // Mail read as plain text has each link's address and each image's name in
+            // its place. A draft keeps the placeholders, which the HTML's images reopen
+            // into.
+            (html, send.then(|| document.plain_text()))
         };
         let body = described.as_deref().unwrap_or(body);
         // The original goes below what the user wrote, in both parts.
@@ -2727,6 +2777,8 @@ impl ComposeSession {
             }
             None => (body.to_owned(), body_html),
         };
+        // A plain-text message goes out, and saves, without HTML.
+        let body_html = body_html.filter(|_| !self.plain_text.get());
         // Recipients reading plain text see quote blocks as quotes; a draft
         // keeps them as the editor writes them, to reopen as blocks.
         let body = if send {
@@ -3113,6 +3165,8 @@ impl ComposeSession {
         else {
             return;
         };
+        // How the message starts, before its signature goes in to match.
+        self.choose_starting_format(&config.settings);
         let requested = preferences.get_composer_sender_email().to_string();
         let identities = account_mail_preferences::selectable_identities(identities, &requested);
         let sender_choices = identities
@@ -3231,6 +3285,8 @@ impl ComposeSession {
                 }
             }
         }
+        // A signature keeps its formatting, for formatted messages to show.
+        self.start_format(false);
         self.show("signature", None);
         #[cfg(desktop)]
         if let HostRef::Window(handle) = &host {
@@ -3383,6 +3439,7 @@ impl ComposeSession {
                 old.as_deref(),
                 at,
                 signature.as_ref().map(|signature| signature.html.as_str()),
+                self.plain_text.get(),
             );
             inserted = block;
             selection

@@ -886,14 +886,16 @@ impl RichComposeDocument {
     }
 
     /// Swaps the signature block `old`, which the text holds once, for the signature `html`
-    /// under a `-- ` line, in its formatting, or puts that block at `at` when there's no old
-    /// one, as one undoable edit that leaves the caret where it was. Returns the block it put
-    /// in, which marks the signature for the next swap, or `None` when `html` holds no text.
+    /// under a `-- ` line, in its formatting or as `plain` text, or puts that block at `at` when
+    /// there's no old one, as one undoable edit that leaves the caret where it was. Returns the
+    /// block it put in, which marks the signature for the next swap, or `None` when `html` holds
+    /// no text.
     pub(crate) fn replace_signature(
         &mut self,
         old: Option<&str>,
         at: usize,
         html: Option<&str>,
+        plain: bool,
     ) -> (ComposeSelection, Option<String>) {
         let range =
             match old.and_then(|old| self.text.find(old).map(|start| start..start + old.len())) {
@@ -920,7 +922,16 @@ impl RichComposeDocument {
                             run
                         })
                         .collect::<Vec<_>>();
-                    (text, runs)
+                    if !plain {
+                        return (text, runs);
+                    }
+                    // In plain text, as plain text writes links and pictures.
+                    let (text, _) = plain_text_of(&text, &runs, false, 0);
+                    let run = ComposeStyleRun {
+                        range: 0..text.len(),
+                        style: self.base.clone(),
+                    };
+                    (text, vec![run])
                 });
         let mut block = String::new();
         let mut runs = Vec::new();
@@ -994,6 +1005,48 @@ impl RichComposeDocument {
         self.styles
             .iter()
             .filter_map(|run| run.style.image.as_ref())
+    }
+
+    /// The text as mail read as plain text gets it: each link followed by its address where its
+    /// text doesn't show it, and each picture named in its place.
+    pub(crate) fn plain_text(&self) -> String {
+        plain_text_of(&self.text, &self.styles, true, 0).0
+    }
+
+    /// The text in `range` as [`Self::make_plain`] writes it.
+    pub(crate) fn plain_text_in(&self, range: Range<usize>) -> String {
+        let range = valid_offset(&self.text, to_i32(range.start))
+            ..valid_offset(&self.text, to_i32(range.end));
+        let runs = self
+            .styles
+            .iter()
+            .filter_map(|run| {
+                let start = run.range.start.max(range.start);
+                let end = run.range.end.min(range.end);
+                (start < end).then(|| ComposeStyleRun {
+                    range: start - range.start..end - range.start,
+                    style: run.style.clone(),
+                })
+            })
+            .collect::<Vec<_>>();
+        plain_text_of(&self.text[range], &runs, false, 0).0
+    }
+
+    /// Takes all formatting out of the text, as one undoable edit that keeps the caret in its
+    /// place: links keep their addresses after their text, and pictures leave their alt text.
+    /// `None` when the text has no formatting to take out.
+    pub(crate) fn make_plain(&mut self) -> Option<ComposeSelection> {
+        if self
+            .styles
+            .iter()
+            .all(|run| is_plain_style(&run.style, &self.base))
+        {
+            return None;
+        }
+        let caret = valid_offset(&self.text, self.selection.1);
+        let (text, caret) = plain_text_of(&self.text, &self.styles, false, caret);
+        let end = self.text.len();
+        Some(self.replace_styled(0..end, &text, self.base.clone(), caret))
     }
 
     /// The text as plain text shows it, each image as its description.
@@ -3053,6 +3106,111 @@ fn signature_runs(html: &str, base: &CharacterStyle) -> Option<(String, Vec<Comp
         .filter(|(text, _)| !text.is_empty())
 }
 
+/// Whether text in `style` reads the same as plain text in `base`: no marks, colors, other
+/// fonts, alignment, pictures, or links but those typed as addresses.
+fn is_plain_style(style: &CharacterStyle, base: &CharacterStyle) -> bool {
+    style.marks == 0
+        && style.color.is_none()
+        && style.highlight.is_none()
+        && style.size == base.size
+        && style.family == base.family
+        && style.align == Alignment::Left
+        && style.image.is_none()
+        && (style.link.is_none() || style.link_is_auto)
+}
+
+/// `text`, styled by `runs`, as plain text: each link followed by its address in angle brackets
+/// where its text doesn't show it, as mail apps write links in plain text, and each picture as
+/// its description, or as its alt text alone when `described` is false. Also where `offset` in
+/// `text` lands in it.
+fn plain_text_of(
+    text: &str,
+    runs: &[ComposeStyleRun],
+    described: bool,
+    offset: usize,
+) -> (String, usize) {
+    let mut plain = String::with_capacity(text.len());
+    let mut mapped = None;
+    let mut copy = |plain: &mut String, range: Range<usize>| {
+        if mapped.is_none() && (range.start..=range.end).contains(&offset) {
+            mapped = Some(plain.len() + offset - range.start);
+        }
+        plain.push_str(&text[range]);
+    };
+    let mut at = 0;
+    // Where the link being written started in `text`.
+    let mut link_start = 0;
+    for (index, run) in runs.iter().enumerate() {
+        let range = run.range.start.max(at)..run.range.end.min(text.len());
+        if range.start > at {
+            copy(&mut plain, at..range.start);
+        }
+        if range.is_empty() {
+            continue;
+        }
+        let continues_link = index > 0
+            && runs[index - 1].range.end == range.start
+            && runs[index - 1].style.link.is_some()
+            && runs[index - 1].style.link == run.style.link;
+        if !continues_link {
+            link_start = range.start;
+        }
+        match &run.style.image {
+            Some(image) => {
+                for (local, character) in text[range.clone()].char_indices() {
+                    if character == IMAGE_PLACEHOLDER {
+                        copy(&mut plain, range.start + local..range.start + local);
+                        if described {
+                            plain.push_str(&image.description());
+                        } else {
+                            plain.push_str(image.alt.trim());
+                        }
+                    } else {
+                        let start = range.start + local;
+                        copy(&mut plain, start..start + character.len_utf8());
+                    }
+                }
+            }
+            None => copy(&mut plain, range.clone()),
+        }
+        at = range.end;
+        // A link's address follows its last run.
+        if let Some(url) = &run.style.link {
+            let ends_link = runs.get(index + 1).is_none_or(|next| {
+                next.range.start != range.end || next.style.link.as_ref() != Some(url)
+            });
+            if ends_link && !shows_address(&text[link_start..range.end], url) {
+                plain.push_str(" <");
+                plain.push_str(url);
+                plain.push('>');
+            }
+        }
+    }
+    if at < text.len() {
+        copy(&mut plain, at..text.len());
+    }
+    let mapped = mapped.unwrap_or(plain.len());
+    (plain, mapped)
+}
+
+/// Whether a link's `text` already shows its `address`, as a typed address does.
+fn shows_address(text: &str, address: &str) -> bool {
+    fn bare(value: &str) -> &str {
+        let value = value.trim();
+        let value = ["mailto:", "https://", "http://"]
+            .iter()
+            .find_map(|scheme| {
+                value
+                    .get(..scheme.len())
+                    .filter(|start| start.eq_ignore_ascii_case(scheme))
+                    .map(|_| &value[scheme.len()..])
+            })
+            .unwrap_or(value);
+        value.strip_suffix('/').unwrap_or(value)
+    }
+    bare(text).eq_ignore_ascii_case(bare(address))
+}
+
 /// What a signature's HTML reads as, pictures named in their places, for its preview.
 pub(crate) fn signature_preview(html: &str) -> String {
     let mut document = RichComposeDocument::default();
@@ -4915,6 +5073,100 @@ mod tests {
     }
 
     #[test]
+    fn plain_text_writes_out_link_addresses_and_names_pictures() {
+        let text = "See the plan, write to ana@example.org or go to example.org/a.";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let at = |part: &str| {
+            let start = text.find(part).unwrap() as i32;
+            (start, start + part.len() as i32)
+        };
+        let (start, end) = at("the plan");
+        document.set_link("https://example.org/plan", text, start, end);
+        let (start, end) = at("ana@example.org");
+        document.set_link("mailto:ana@example.org", text, start, end);
+        let (start, end) = at("example.org/a");
+        document.set_link("https://example.org/a/", text, start, end);
+        // A link partly bold is still one link.
+        let (start, _) = at("plan");
+        document.format("bold", text, start, start + 4);
+        document.update_selection(0, 0);
+        document.insert_image(InlineImage::from_file_bytes(png(4, 4), "Map").unwrap());
+        assert_eq!(
+            document.plain_text(),
+            "[image: Map]See the plan <https://example.org/plan>, write to ana@example.org or \
+             go to example.org/a."
+        );
+    }
+
+    #[test]
+    fn making_text_plain_takes_formatting_out_in_one_undoable_edit() {
+        let text = "Hi Ana\nThe plan is ready";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        assert_eq!(
+            document.make_plain(),
+            None,
+            "plain text has nothing to take out"
+        );
+        document.format("bold", text, 0, 2);
+        document.format("color:#c0392b", text, 3, 6);
+        let plan = text.find("plan").unwrap() as i32;
+        document.set_link("https://example.org/plan", text, plan, plan + 4);
+        document.update_selection(7, 7);
+        document.insert_image(InlineImage::from_file_bytes(png(4, 4), "Chart").unwrap());
+        document.insert_image(InlineImage::from_file_bytes(png(4, 4), "").unwrap());
+        let caret = document.selection();
+        let formatted_html = document.body_html();
+
+        let selection = document.make_plain().unwrap();
+        assert_eq!(
+            document.text(),
+            "Hi Ana\nChartThe plan <https://example.org/plan> is ready"
+        );
+        // The caret stays after the pictures' alt text.
+        let placeholders = 2 * IMAGE_PLACEHOLDER.len_utf8() as i32;
+        assert_eq!(
+            selection.start,
+            caret.start - placeholders + "Chart".len() as i32
+        );
+        assert!(
+            document
+                .style_runs()
+                .iter()
+                .all(|run| is_plain_style(&run.style, &document.base)),
+            "{:?}",
+            document.style_runs()
+        );
+        assert_eq!(document.make_plain(), None);
+        // Undo brings the formatting and the pictures back.
+        document.history("undo").unwrap();
+        assert_eq!(document.body_html(), formatted_html);
+    }
+
+    #[test]
+    fn plain_signatures_go_in_as_text() {
+        use base64::Engine;
+        let mut document = RichComposeDocument::default();
+        document.load("Thanks", 6, 6);
+        let logo = base64::engine::general_purpose::STANDARD.encode(png(4, 4));
+        let html = format!(
+            "<div><b>Zoë</b> · <a href=\"https://example.org\">Example</a><br>\
+             <img src=\"data:image/png;base64,{logo}\" alt=\"Logo\"></div>"
+        );
+        let (_, block) = document.replace_signature(None, 6, Some(&html), true);
+        let signature = "\n\n-- \nZoë · Example <https://example.org>\nLogo";
+        assert_eq!(document.text(), format!("Thanks{signature}"));
+        assert_eq!(block.as_deref(), Some(signature));
+        assert!(
+            document
+                .style_runs()
+                .iter()
+                .all(|run| is_plain_style(&run.style, &document.base))
+        );
+    }
+
+    #[test]
     fn images_can_go_out_with_other_files_at_the_same_size() {
         use base64::Engine;
         let mut document = RichComposeDocument::default();
@@ -5129,7 +5381,7 @@ mod tests {
 
         let mut document = RichComposeDocument::default();
         document.load("", 0, 0);
-        let (selection, block) = document.replace_signature(None, 0, Some(&rich));
+        let (selection, block) = document.replace_signature(None, 0, Some(&rich), false);
         let block = block.unwrap();
         assert_eq!(block, "\n\n-- \nZoë Ortiz\nEngineer\n\u{fffc}");
         assert_eq!(document.text(), block);
@@ -5143,7 +5395,7 @@ mod tests {
         // Writing goes on above it, and another signature takes its place.
         let written = format!("Hello{}", document.text());
         document.synchronize(&written, 5, 5);
-        let (selection, swapped) = document.replace_signature(Some(&block), 0, Some(plain));
+        let (selection, swapped) = document.replace_signature(Some(&block), 0, Some(plain), false);
         let swapped = swapped.unwrap();
         assert_eq!(document.text(), "Hello\n\n-- \nPat Lee\nSupport");
         assert_eq!(swapped, "\n\n-- \nPat Lee\nSupport");
@@ -5154,10 +5406,10 @@ mod tests {
         document.history("undo");
         assert_eq!(document.text(), format!("Hello{block}"));
         document.history("redo");
-        let (_, none) = document.replace_signature(Some(&swapped), 0, None);
+        let (_, none) = document.replace_signature(Some(&swapped), 0, None, false);
         assert_eq!((document.text(), none), ("Hello", None));
         // Nothing to swap is no edit.
-        let (_, none) = document.replace_signature(None, 5, Some("<div> </div>"));
+        let (_, none) = document.replace_signature(None, 5, Some("<div> </div>"), false);
         assert_eq!((document.text(), none), ("Hello", None));
         document.history("undo");
         assert_eq!(document.text(), format!("Hello{swapped}"));
@@ -5195,7 +5447,7 @@ mod tests {
         let mut message = RichComposeDocument::default();
         message.set_base_style(FontFamily::Serif, TextSize::Large);
         message.load("", 0, 0);
-        let (_, block) = message.replace_signature(None, 0, Some(&html));
+        let (_, block) = message.replace_signature(None, 0, Some(&html), false);
         assert!(block.is_some());
         let name = message.text().find("Zoë").unwrap();
         let style = message.style_at(name).unwrap();

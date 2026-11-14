@@ -1703,6 +1703,38 @@ impl Core {
         Ok(())
     }
 
+    /// Choose how an account's messages start: formatted or as plain text, and whether
+    /// replies and forwards to plain-text messages start in plain text.
+    pub async fn set_account_message_format(
+        &self,
+        account_id: i64,
+        format: MessageFormat,
+        plain_text_replies: bool,
+    ) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                if config.mail_protocol == MailProtocol::Local {
+                    return Err(CoreError::Other(
+                        "mail kept on this device is never sent".into(),
+                    ));
+                }
+                config.settings.message_format = format;
+                config.settings.plain_text_replies = plain_text_replies;
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
+        Ok(())
+    }
+
     /// Choose how long a POP3 account leaves downloaded mail on its server.
     /// The account's next sync applies the choice.
     pub async fn set_account_keep_on_server(

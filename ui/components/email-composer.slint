@@ -45,6 +45,8 @@ export component EmailComposer inherits Rectangle {
     in property <string> photo-full-size: "";
     in-out property <bool> shrink-photos: false;
     in property <bool> shrinking-photos: false;
+    // The message goes out as plain text only.
+    in property <bool> plain-text: false;
     in-out property <string> from-label: @tr("No connected account");
     in property <string> notice: "";
     in property <bool> notice-is-error: false;
@@ -128,6 +130,7 @@ export component EmailComposer inherits Rectangle {
     callback insert-images;
     callback remove-attachment(int);
     callback shrink-photos-toggled(bool);
+    callback plain-text-chosen(bool);
     callback format-requested(string, string, int, int);
     callback paste-requested(string, int, int) -> bool;
     callback copy-requested(bool, string, int, int) -> bool;
@@ -459,6 +462,9 @@ export component EmailComposer inherits Rectangle {
         ComposerToolbar {
             compact: root.compact;
             templates-shown: !root.signature-mode;
+            plain-text: root.plain-text;
+            format-switch-shown: !root.signature-mode;
+            plain-text-chosen(plain) => { root.plain-text-chosen(plain); }
             accent-background: root.accent-background;
             accent-color: root.accent-color;
             control-hover-color: root.control-hover-color;
