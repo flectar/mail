@@ -38,6 +38,14 @@ pub struct ParsedHeaders {
     pub via: Option<String>,
     /// Strongest authentication result reported by the receiving MTA.
     pub sender_verification: SenderVerification,
+    /// Where a read receipt was asked to go (RFC 8098
+    /// Disposition-Notification-To). Empty when the message asks for none,
+    /// or for one this client must not send.
+    pub receipt_to: Vec<Address>,
+    /// RFC 8098 section 2.1 wants the user's confirmation before a receipt
+    /// goes out: there is no Return-Path, it differs from the receipt
+    /// address, or several receipt addresses are listed.
+    pub receipt_confirm: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1532,6 +1540,160 @@ fn resolve_via(msg: &mail_parser::Message, from: Option<&Address>) -> Option<Str
 }
 
 #[cfg(test)]
+mod read_receipt_tests {
+    use super::{ReadReceipt, build_read_receipt};
+    use crate::models::Address;
+
+    fn build(user_agreed: bool, original_message_id: Option<&str>) -> String {
+        let recipient = Address {
+            name: Some("Me".into()),
+            email: "me@example.org".into(),
+        };
+        let to = [Address {
+            name: Some("Ana".into()),
+            email: "ana@example.com".into(),
+        }];
+        let (id, raw) = build_read_receipt(&ReadReceipt {
+            recipient: &recipient,
+            to: &to,
+            original_subject: "Quarterly plan",
+            original_message_id,
+            user_agreed,
+            reporting_domain: "example.org",
+        })
+        .unwrap();
+        assert!(id.starts_with('<') && id.ends_with("@example.org>"));
+        String::from_utf8(raw).unwrap()
+    }
+
+    #[test]
+    fn a_receipt_is_a_disposition_report_about_the_original() {
+        let raw = build(true, Some("<plan@example.com>"));
+        assert!(raw.contains("multipart/report"));
+        assert!(
+            raw.contains("report-type=\"disposition-notification\"")
+                || raw.contains("report-type=disposition-notification")
+        );
+        assert!(raw.contains("Content-Type: message/disposition-notification"));
+        assert!(raw.contains("Reporting-UA: example.org; Flectar Mail\r\n"));
+        assert!(raw.contains("Final-Recipient: rfc822; me@example.org\r\n"));
+        assert!(raw.contains("Original-Message-ID: <plan@example.com>\r\n"));
+        assert!(raw.contains("Disposition: manual-action/MDN-sent-manually; displayed\r\n"));
+        assert!(raw.contains("In-Reply-To: <plan@example.com>"));
+        assert!(raw.contains("Subject: Read: Quarterly plan"));
+        assert!(
+            raw.contains("To: \"Ana\" <ana@example.com>")
+                || raw.contains("To: Ana <ana@example.com>")
+        );
+        assert!(!raw.contains("Auto-Submitted"));
+        assert!(!raw.contains("Disposition-Notification-To"));
+    }
+
+    #[test]
+    fn a_receipt_settings_sent_says_so_and_marks_itself_automatic() {
+        let raw = build(false, None);
+        assert!(raw.contains("Disposition: manual-action/MDN-sent-automatically; displayed\r\n"));
+        assert!(raw.contains("Auto-Submitted: auto-replied"));
+        // Without a Message-ID there is none to name.
+        assert!(!raw.contains("Original-Message-ID"));
+        assert!(!raw.contains("In-Reply-To"));
+    }
+
+    #[test]
+    fn the_report_part_stays_7bit() {
+        let raw = build(true, Some("<plan@example.com>"));
+        let report = &raw[raw
+            .find("Content-Type: message/disposition-notification")
+            .unwrap()..];
+        let headers = &report[..report.find("\r\n\r\n").unwrap()];
+        assert!(
+            headers.contains("Content-Transfer-Encoding: 7bit"),
+            "{headers}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod receipt_request_tests {
+    use super::parse_message;
+
+    fn request(headers: &str) -> (Vec<String>, bool) {
+        let raw = format!(
+            "{headers}From: Ana <ana@example.com>\r\nTo: me@example.org\r\nSubject: hi\r\n\r\nbody"
+        );
+        let parsed = parse_message(raw.as_bytes()).unwrap().headers;
+        (
+            parsed.receipt_to.into_iter().map(|a| a.email).collect(),
+            parsed.receipt_confirm,
+        )
+    }
+
+    #[test]
+    fn a_request_to_the_return_path_needs_no_confirmation() {
+        let (to, confirm) = request(
+            "Return-Path: <ana@EXAMPLE.com>\r\nDisposition-Notification-To: Ana <ana@example.com>\r\n",
+        );
+        assert_eq!(to, ["ana@example.com"]);
+        assert!(!confirm, "the domain compares without case");
+    }
+
+    #[test]
+    fn rfc_8098_section_2_1_cases_need_confirmation() {
+        // No Return-Path.
+        assert!(request("Disposition-Notification-To: ana@example.com\r\n").1);
+        // A null Return-Path is no address.
+        assert!(request("Return-Path: <>\r\nDisposition-Notification-To: ana@example.com\r\n").1);
+        // Another address than the Return-Path; the local part keeps its case.
+        assert!(request("Return-Path: <bounce@example.com>\r\nDisposition-Notification-To: ana@example.com\r\n").1);
+        assert!(
+            request(
+                "Return-Path: <Ana@example.com>\r\nDisposition-Notification-To: ana@example.com\r\n"
+            )
+            .1
+        );
+        // Several receipt addresses.
+        let (to, confirm) = request(
+            "Return-Path: <ana@example.com>\r\nDisposition-Notification-To: ana@example.com, boss@example.com\r\n",
+        );
+        assert_eq!(to.len(), 2);
+        assert!(confirm);
+    }
+
+    #[test]
+    fn quoting_is_undone_before_comparing() {
+        let (_, confirm) = request(
+            "Return-Path: <\"ana\"@example.com>\r\nDisposition-Notification-To: ana@example.com\r\n",
+        );
+        assert!(!confirm);
+    }
+
+    #[test]
+    fn a_required_option_stops_the_receipt_and_no_header_asks_for_none() {
+        let (to, _) = request(
+            "Return-Path: <ana@example.com>\r\nDisposition-Notification-To: ana@example.com\r\nDisposition-Notification-Options: signed-receipt=required,pkcs7-signature\r\n",
+        );
+        assert!(to.is_empty());
+        let (to, _) = request(
+            "Return-Path: <ana@example.com>\r\nDisposition-Notification-To: ana@example.com\r\nDisposition-Notification-Options: signed-receipt=optional,pkcs7-signature\r\n",
+        );
+        assert_eq!(to, ["ana@example.com"]);
+        assert_eq!(
+            request("Return-Path: <ana@example.com>\r\n"),
+            (Vec::new(), false)
+        );
+    }
+
+    #[test]
+    fn the_same_address_twice_is_one_receipt_address() {
+        let (to, confirm) = request(
+            "Return-Path: <ana@example.com>\r\nDisposition-Notification-To: ana@example.com\r\nDisposition-Notification-To: Ana <ana@EXAMPLE.COM>\r\n",
+        );
+        assert_eq!(to, ["ana@example.com"]);
+        assert!(!confirm);
+    }
+}
+
+#[cfg(test)]
 mod via_tests {
     use super::parse_message;
 
@@ -2014,6 +2176,7 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
     let authentication_header = without_comments(&authentication_header);
     let authentication_results = authentication_results(&authentication_header);
     let sender_verification = sender_verification(&authentication_results, from.as_ref());
+    let (receipt_to, receipt_confirm) = receipt_request(msg);
 
     // multipart/report is the DSN/MDN envelope: bounces and read receipts.
     let is_report = msg
@@ -2066,6 +2229,93 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
         list_id: raw_header(msg, "List-Id").and_then(|raw| list_id(&raw)),
         via,
         sender_verification,
+        receipt_to,
+        receipt_confirm,
+    }
+}
+
+/// A read receipt request (RFC 8098 section 2): where the receipt goes, and
+/// whether section 2.1 wants the user's confirmation first.
+fn receipt_request(msg: &mail_parser::Message) -> (Vec<Address>, bool) {
+    // RFC 8098 defines no options. One a receiver must understand to answer
+    // stops the receipt, as RFC 3798 answered such a request with "failed".
+    if raw_header(msg, "Disposition-Notification-Options")
+        .is_some_and(|options| requires_unknown_option(&options))
+    {
+        return (Vec::new(), false);
+    }
+    let mut to = Vec::<Address>::new();
+    for value in msg.header_as(
+        "Disposition-Notification-To",
+        mail_parser::HeaderForm::Addresses,
+    ) {
+        if let mail_parser::HeaderValue::Address(addresses) = value {
+            for address in collect_addrs(Some(&addresses)) {
+                if !to
+                    .iter()
+                    .any(|seen| same_receipt_address(&seen.email, &address.email))
+                {
+                    to.push(address);
+                }
+            }
+        }
+    }
+    let Some(first) = to.first() else {
+        return (to, false);
+    };
+    let return_paths = match msg.return_path() {
+        mail_parser::HeaderValue::Text(path) => vec![path.as_ref()],
+        mail_parser::HeaderValue::TextList(paths) => paths.iter().map(AsRef::as_ref).collect(),
+        _ => Vec::new(),
+    }
+    .into_iter()
+    .map(|path| {
+        path.trim()
+            .trim_start_matches('<')
+            .trim_end_matches('>')
+            .trim()
+    })
+    .filter(|path| !path.is_empty())
+    .collect::<Vec<_>>();
+    // Several Return-Path fields that disagree count as a mismatch.
+    let confirm = to.len() > 1
+        || return_paths.is_empty()
+        || return_paths
+            .iter()
+            .any(|path| !same_receipt_address(path, &first.email));
+    (to, confirm)
+}
+
+/// Whether a Disposition-Notification-Options value has an attribute marked
+/// `required`; RFC 8098 defines none, so any is one this client doesn't know.
+fn requires_unknown_option(options: &str) -> bool {
+    options.split(';').any(|option| {
+        option
+            .split_once('=')
+            .and_then(|(_, value)| value.split(',').next())
+            .is_some_and(|importance| importance.trim().eq_ignore_ascii_case("required"))
+    })
+}
+
+/// RFC 8098 section 2.1 compares only the address: the local part exactly,
+/// once quoting is undone, and the domain without regard to case.
+fn same_receipt_address(left: &str, right: &str) -> bool {
+    fn parts(address: &str) -> Option<(String, String)> {
+        let (local, domain) = address.trim().rsplit_once('@')?;
+        let mut unquoted = String::with_capacity(local.len());
+        let mut chars = local.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => {}
+                '\\' => unquoted.extend(chars.next()),
+                c => unquoted.push(c),
+            }
+        }
+        Some((unquoted, domain.to_ascii_lowercase()))
+    }
+    match (parts(left), parts(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
     }
 }
 
@@ -2439,6 +2689,126 @@ fn attachment_part(attachment: MessageAttachment<'_>) -> mail_builder::mime::Mim
 }
 
 /// Build a raw RFC 5322 message. Returns (message_id, raw_bytes).
+/// What a read receipt reports (RFC 8098 section 3).
+pub struct ReadReceipt<'a> {
+    /// The account the message reached: the receipt's From and its
+    /// Final-Recipient.
+    pub recipient: &'a Address,
+    /// The Disposition-Notification-To addresses.
+    pub to: &'a [Address],
+    pub original_subject: &'a str,
+    pub original_message_id: Option<&'a str>,
+    /// The user agreed to this receipt, rather than Settings sending it on
+    /// its own.
+    pub user_agreed: bool,
+    /// Reporting-UA's name part: the account's mail domain, which says no
+    /// more about the device than the From address does.
+    pub reporting_domain: &'a str,
+}
+
+/// A read receipt: multipart/report with a sentence for people and the
+/// message/disposition-notification part for programs. The message was
+/// "displayed", which RFC 8098 is careful to say doesn't mean read or
+/// understood. Returns its Message-ID and bytes.
+pub fn build_read_receipt(receipt: &ReadReceipt) -> Result<(String, Vec<u8>)> {
+    use mail_builder::headers::content_type::ContentType;
+    use mail_builder::mime::{BodyPart, MimePart};
+    let msg_id = format!(
+        "{}.{}@{}",
+        chrono::Utc::now().timestamp_micros(),
+        rand_token(),
+        receipt.reporting_domain
+    );
+    let original_id = receipt
+        .original_message_id
+        .map(|id| id.trim().trim_matches(['<', '>']))
+        .filter(|id| !id.is_empty() && !id.contains(['\r', '\n']));
+    // Section 3: "manual-action" even when the user set the client to send
+    // on its own; MDN-sent-manually only for one they agreed to.
+    let sending_mode = if receipt.user_agreed {
+        "MDN-sent-manually"
+    } else {
+        "MDN-sent-automatically"
+    };
+    // The report part must be 7bit; RFC 6533 carries an address that isn't
+    // ASCII in message/global-disposition-notification instead.
+    let ascii = receipt.recipient.email.is_ascii()
+        && original_id.is_none_or(|id| id.is_ascii())
+        && receipt.reporting_domain.is_ascii();
+    let mut report = format!(
+        "Reporting-UA: {}; Flectar Mail\r\nFinal-Recipient: {}; {}\r\n",
+        receipt.reporting_domain,
+        if ascii { "rfc822" } else { "utf-8" },
+        receipt.recipient.email,
+    );
+    if let Some(id) = original_id {
+        report.push_str(&format!("Original-Message-ID: <{id}>\r\n"));
+    }
+    report.push_str(&format!(
+        "Disposition: manual-action/{sending_mode}; displayed\r\n"
+    ));
+    let text = format!(
+        "This is a receipt for the message you sent to {} with the subject \"{}\". \
+         It was displayed on the recipient's screen. That doesn't say it was \
+         read or understood.\r\n",
+        receipt.recipient.email, receipt.original_subject,
+    );
+    let report_part = MimePart::new(
+        if ascii {
+            "message/disposition-notification"
+        } else {
+            "message/global-disposition-notification"
+        },
+        BodyPart::Text(report.into()),
+    );
+    let report_part = if ascii {
+        report_part.transfer_encoding("7bit")
+    } else {
+        report_part
+    };
+    let mut builder = mail_builder::MessageBuilder::new()
+        .message_id(msg_id.clone())
+        .from((
+            receipt.recipient.name.as_deref().unwrap_or_default(),
+            receipt.recipient.email.as_str(),
+        ))
+        .to(mail_builder::headers::address::Address::new_list(
+            receipt
+                .to
+                .iter()
+                .map(|address| {
+                    mail_builder::headers::address::Address::from((
+                        address.name.as_deref().unwrap_or_default(),
+                        address.email.as_str(),
+                    ))
+                })
+                .collect(),
+        ))
+        .subject(format!("Read: {}", receipt.original_subject))
+        .body(MimePart::new(
+            ContentType::new("multipart/report")
+                .attribute("report-type", "disposition-notification"),
+            vec![
+                MimePart::new("text/plain", BodyPart::Text(text.into())),
+                report_part,
+            ],
+        ));
+    if let Some(id) = original_id {
+        builder = builder.in_reply_to(id).references(id);
+    }
+    if !receipt.user_agreed {
+        // RFC 3834: other automatic responders shouldn't answer it.
+        builder = builder.header(
+            "Auto-Submitted",
+            mail_builder::headers::raw::Raw::new("auto-replied"),
+        );
+    }
+    let raw = builder
+        .write_to_vec()
+        .map_err(|error| CoreError::Mime(format!("building a read receipt: {error}")))?;
+    Ok((format!("<{msg_id}>"), raw))
+}
+
 pub fn build_message(out: &OutgoingMessage) -> Result<(String, Vec<u8>)> {
     build_message_with_attachments(
         out,

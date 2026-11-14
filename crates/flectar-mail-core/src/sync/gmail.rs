@@ -63,6 +63,8 @@ const METADATA_HEADERS: &[&str] = &[
     "Bcc",
     "Cc",
     "Date",
+    "Disposition-Notification-Options",
+    "Disposition-Notification-To",
     "From",
     "In-Reply-To",
     "List-Id",
@@ -684,6 +686,18 @@ impl GmailApi {
             self.delete_json(&format!("{GMAIL_API}/drafts/{}", urlencode(draft_id)))
                 .await,
         )
+    }
+
+    /// Send a message as it is, in `thread_id`'s Gmail thread.
+    async fn send_raw(&self, raw: &[u8], thread_id: Option<&str>) -> Result<Value> {
+        self.post_json(
+            &format!("{GMAIL_API}/messages/send"),
+            &json!({
+                "raw": URL_SAFE_NO_PAD.encode(raw),
+                "threadId": thread_id,
+            }),
+        )
+        .await
     }
 
     async fn send_draft(&self, draft_id: &str) -> Result<Value> {
@@ -1899,6 +1913,11 @@ async fn store_resources(
                         list_id: resource.headers.list_id.clone(),
                         sender_addr: resource.headers.via.clone(),
                         sender_verification: resource.headers.sender_verification,
+                        receipt_to: resource.headers.receipt_to.clone(),
+                        receipt_confirm: resource.headers.receipt_confirm,
+                        // Gmail keeps no keywords for it; this device
+                        // records the answer.
+                        receipt_handled: false,
                     };
                     let id = repo::messages::insert(&tx, &message, thread_id)?;
                     tx.execute(
@@ -3383,6 +3402,24 @@ async fn apply_action(
             return super::finish_permanent_delete(ctx, action.message_id).await;
         }
         "snooze" | "unsnooze" => return Ok(()),
+        // Gmail keeps no mark for an answered request; this device recorded
+        // it. Gmail files what it sends in Sent, as it does every message.
+        "read_receipt" => {
+            let (Some(message_id), true) = (
+                action.message_id,
+                action.payload["send"].as_bool() == Some(true),
+            ) else {
+                return Ok(());
+            };
+            let user_agreed = action.payload["userAgreed"].as_bool().unwrap_or(false);
+            if let Some(receipt) =
+                crate::read_receipts::prepare(ctx, config.id, message_id, user_agreed).await?
+            {
+                api.send_raw(&receipt.raw, receipt.gm_thread.as_deref())
+                    .await?;
+            }
+            return Ok(());
+        }
         "save_draft" => {
             let draft_id = action.payload["draftId"]
                 .as_i64()

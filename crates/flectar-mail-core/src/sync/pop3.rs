@@ -850,6 +850,8 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
                         .iter()
                         .any(|attachment| !attachment.is_inline),
                     size: i64::try_from(size).ok(),
+                    // POP3 keeps no flags; this device records the answer.
+                    receipt_handled: false,
                 },
             )?;
             ingest::store_body(tx, imported.message_id, &path_string, &parsed)?;

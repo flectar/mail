@@ -33,6 +33,7 @@ pub mod net;
 pub mod oauth;
 pub mod pop3;
 pub mod queue;
+mod read_receipts;
 pub mod route;
 pub mod scheduler;
 pub mod search;
@@ -3677,6 +3678,53 @@ impl Core {
         Ok(None)
     }
 
+    /// Answer the read receipt `message_id` asks for (RFC 8098): send it, or
+    /// decline it. Either answer is final, and is recorded on the server
+    /// where it keeps one ($MDNSent), so no other device asks again. Does
+    /// nothing when the message asks for no receipt that may be answered, or
+    /// was answered meanwhile. A receipt that needs the user's agreement
+    /// isn't sent without it.
+    pub async fn answer_read_receipt(&self, message_id: i64, answer: ReceiptAnswer) -> Result<()> {
+        let answered = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let detail = repo::messages::detail(&tx, message_id)?;
+                let Some(request) = detail.receipt_request else {
+                    return Ok(None);
+                };
+                let (send, user_agreed) = match answer {
+                    ReceiptAnswer::Send { user_agreed } => (true, user_agreed),
+                    ReceiptAnswer::Decline => (false, false),
+                };
+                if send && !user_agreed && request.needs_confirmation {
+                    return Err(CoreError::Other(
+                        "this read receipt can only go with the user's agreement".into(),
+                    ));
+                }
+                repo::messages::mark_receipt_handled(&tx, message_id)?;
+                repo::actions::enqueue(
+                    &tx,
+                    detail.account_id,
+                    "read_receipt",
+                    Some(message_id),
+                    Some(detail.thread_id),
+                    &serde_json::json!({ "send": send, "userAgreed": user_agreed }),
+                    None,
+                )?;
+                tx.commit()?;
+                Ok(Some((detail.account_id, detail.thread_id)))
+            })
+            .await?;
+        if let Some((account_id, thread_id)) = answered {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: vec![thread_id],
+            });
+            self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+        }
+        Ok(())
+    }
+
     /// How the user can leave the list `message_id` came from, worked out
     /// before anything is sent so the app can ask first: RFC 2369 wants a
     /// chance to confirm, and RFC 8058 no POST without consent. None when
@@ -5316,6 +5364,9 @@ impl Core {
                             list_id: None,
                             sender_addr: None,
                             sender_verification: Default::default(),
+                            receipt_to: Vec::new(),
+                            receipt_confirm: false,
+                            receipt_handled: false,
                         };
                         let id = repo::messages::insert(&tx, &nm, tid)?;
                         let in_reply_to_header = args
@@ -12582,6 +12633,174 @@ mod send_confirmation_tests {
             })
             .await
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod read_receipt_answer_tests {
+    use super::*;
+
+    /// A message asking for a receipt at `receipt_to`; returns its id.
+    fn seed_request(conn: &rusqlite::Connection, receipt_to: &str, confirm: bool) -> i64 {
+        let (_, message_id) = db::testutil::seed_message(conn, "ana@example.com", "Plan", false);
+        conn.execute(
+            "UPDATE messages SET receipt_to = ?2, receipt_confirm = ?3,
+                 sender_verification = 'domain'
+             WHERE id = ?1",
+            rusqlite::params![
+                message_id,
+                format!("[{{\"name\":null,\"email\":\"{receipt_to}\"}}]"),
+                confirm as i64
+            ],
+        )
+        .unwrap();
+        message_id
+    }
+
+    async fn core_with_identity() -> (tempfile::TempDir, Core) {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                conn.execute(
+                    "INSERT OR REPLACE INTO sender_identities
+                         (account_id, email, is_primary, verification_status)
+                     VALUES (1, 'me@test.dev', 1, 'accepted')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        (temp, core)
+    }
+
+    #[tokio::test]
+    async fn an_answer_is_final_and_queued_for_the_server() {
+        let (_temp, core) = core_with_identity().await;
+        let message_id = core
+            .db
+            .write(|conn| Ok(seed_request(conn, "ana@example.com", false)))
+            .await
+            .unwrap();
+        let request = core
+            .db
+            .read(move |conn| repo::messages::detail(conn, message_id))
+            .await
+            .unwrap()
+            .receipt_request
+            .unwrap();
+        assert!(!request.needs_confirmation);
+
+        core.answer_read_receipt(message_id, ReceiptAnswer::Decline)
+            .await
+            .unwrap();
+        let (detail, actions) = core
+            .db
+            .read(move |conn| {
+                Ok((
+                    repo::messages::detail(conn, message_id)?,
+                    repo::actions::due(conn, 1, i64::MAX, 10)?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert!(detail.receipt_request.is_none(), "nothing asks again");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].kind, "read_receipt");
+        assert_eq!(actions[0].payload["send"], false);
+        // A second answer finds nothing left to answer.
+        core.answer_read_receipt(message_id, ReceiptAnswer::Send { user_agreed: true })
+            .await
+            .unwrap();
+        let actions = core
+            .db
+            .read(|conn| repo::actions::due(conn, 1, i64::MAX, 10))
+            .await
+            .unwrap();
+        assert_eq!(actions.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_request_that_needs_agreement_is_never_sent_on_its_own() {
+        let (_temp, core) = core_with_identity().await;
+        let message_id = core
+            .db
+            .write(|conn| Ok(seed_request(conn, "ana@example.com", true)))
+            .await
+            .unwrap();
+        assert!(
+            core.answer_read_receipt(message_id, ReceiptAnswer::Send { user_agreed: false })
+                .await
+                .is_err()
+        );
+        core.answer_read_receipt(message_id, ReceiptAnswer::Send { user_agreed: true })
+            .await
+            .unwrap();
+        let actions = core
+            .db
+            .read(|conn| repo::actions::due(conn, 1, i64::MAX, 10))
+            .await
+            .unwrap();
+        assert_eq!(actions[0].payload["send"], true);
+        assert_eq!(actions[0].payload["userAgreed"], true);
+    }
+
+    #[tokio::test]
+    async fn spam_lists_and_requests_back_to_the_account_ask_for_nothing() {
+        let (_temp, core) = core_with_identity().await;
+        let (own, spam, automated) = core
+            .db
+            .write(|conn| {
+                let own = seed_request(conn, "ME@test.dev", false);
+                let spam = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Junk', 'spam')",
+                    [],
+                )?;
+                conn.execute("UPDATE messages SET folder_id = 2 WHERE id = ?1", [spam])?;
+                let automated = seed_request(conn, "ana@example.com", false);
+                conn.execute("UPDATE messages SET is_automated = 1 WHERE id = ?1", [automated])?;
+                Ok((own, spam, automated))
+            })
+            .await
+            .unwrap();
+        for id in [own, spam, automated] {
+            let detail = core
+                .db
+                .read(move |conn| repo::messages::detail(conn, id))
+                .await
+                .unwrap();
+            assert!(detail.receipt_request.is_none(), "message {id}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unauthenticated_sender_needs_agreement() {
+        let (_temp, core) = core_with_identity().await;
+        let message_id = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "UPDATE messages SET sender_verification = '' WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        let request = core
+            .db
+            .read(move |conn| repo::messages::detail(conn, message_id))
+            .await
+            .unwrap()
+            .receipt_request
+            .unwrap();
+        assert!(request.needs_confirmation);
     }
 }
 

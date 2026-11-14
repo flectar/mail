@@ -51,6 +51,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/032_account_caught_up_at.sql")),
     Migration::Plain(include_str!("migrations/033_list_id.sql")),
     Migration::Plain(include_str!("migrations/034_blocked_senders.sql")),
+    Migration::Plain(include_str!("migrations/035_read_receipts.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

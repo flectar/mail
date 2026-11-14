@@ -1448,6 +1448,7 @@ mod tests {
             send_error: None,
             in_spam: false,
             sender_blocked: false,
+            receipt_request: None,
         }
     }
 

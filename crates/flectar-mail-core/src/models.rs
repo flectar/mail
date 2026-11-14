@@ -1095,6 +1095,33 @@ pub struct MessageDetail {
     pub in_spam: bool,
     /// Its sender is blocked: their mail goes to Spam.
     pub sender_blocked: bool,
+    /// The read receipt it asks for, when one may be sent and nothing has
+    /// answered it yet.
+    pub receipt_request: Option<ReceiptRequest>,
+}
+
+/// A read receipt a received message asks for (RFC 8098), which this client
+/// may send. Mail in Spam, drafts, sent and automated mail, and requests that
+/// go back to the account's own addresses, ask for none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptRequest {
+    /// Where the receipt would go.
+    pub to: Vec<Address>,
+    /// It may only go with the user's agreement: RFC 8098 section 2.1 wants
+    /// it for this request, or the receiving server didn't authenticate the
+    /// sender (section 6.1).
+    pub needs_confirmation: bool,
+}
+
+/// How a read receipt request is answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceiptAnswer {
+    /// Send it: the user agreed to this one, or Settings says to always
+    /// send and the request needs no confirmation.
+    Send { user_agreed: bool },
+    /// Don't send one, and don't ask again.
+    Decline,
 }
 
 /// A sender whose mail goes to Spam.
@@ -1818,6 +1845,38 @@ impl ReduceMotion {
     }
 }
 
+/// What to do when a message asks for a read receipt (RFC 8098). The
+/// standard wants none sent without the user's consent by default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReadReceiptPolicy {
+    #[default]
+    Never,
+    /// Ask above the message.
+    Ask,
+    /// Send them, except where RFC 8098 wants the user asked first.
+    Always,
+}
+
+impl ReadReceiptPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::Ask => "ask",
+            Self::Always => "always",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "never" => Some(Self::Never),
+            "ask" => Some(Self::Ask),
+            "always" => Some(Self::Always),
+            _ => None,
+        }
+    }
+}
+
 /// The interface's text size (#231), as a step on the system's own text size.
 /// Message zoom and the composer's text size stay separate.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1992,6 +2051,9 @@ pub struct Settings {
     /// The interface's text size.
     #[serde(default)]
     pub interface_text_size: InterfaceTextSize,
+    /// What to do when a message asks for a read receipt.
+    #[serde(default)]
+    pub read_receipts: ReadReceiptPolicy,
     /// Named application palette: "default" | "teal" | "green" | "purple" | "custom".
     #[serde(default = "default_theme_preset")]
     pub theme_preset: String,
@@ -2356,6 +2418,7 @@ impl Default for Settings {
             message_appearance: MessageAppearance::default(),
             reduce_motion: ReduceMotion::default(),
             interface_text_size: InterfaceTextSize::default(),
+            read_receipts: ReadReceiptPolicy::default(),
             theme_preset: default_theme_preset(),
             custom_theme: CustomTheme::default(),
             show_avatars: true,
