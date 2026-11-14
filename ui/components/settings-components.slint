@@ -190,7 +190,11 @@ export component SettingsSelectRow inherits Rectangle {
     HorizontalBox {
         visible: !root.compact;
         spacing: 20px;
+        // A description longer than the room beside the selector wraps, as
+        // switch rows' do, rather than losing its end; translations run long.
         VerticalBox {
+            horizontal-stretch: 1;
+            min-width: 0px;
             spacing: 2px;
             desktop-title := Text {
                 height: max(18px, self.preferred-height);
@@ -205,10 +209,9 @@ export component SettingsSelectRow inherits Rectangle {
                 text: root.description;
                 color: root.description-color;
                 font-size: TypeScale.caption;
-                overflow: elide;
+                wrap: word-wrap;
             }
         }
-        Rectangle { horizontal-stretch: 1; }
         SettingsSelect {
             width: 210px;
             choices: root.choices;
