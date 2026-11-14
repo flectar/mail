@@ -105,7 +105,9 @@ export component SettingsSwitchRow inherits Rectangle {
     in property <length> desktop-height: 48px;
     in property <string> title;
     in property <string> description;
-    in property <bool> checked: false;
+    // Bound with `<=>`, the switch keeps showing the value when it changes elsewhere, such as
+    // when another account's settings load.
+    in-out property <bool> checked: false;
     in property <bool> enabled: true;
     in property <color> title-color;
     in property <color> description-color;
@@ -141,7 +143,7 @@ export component SettingsSwitchRow inherits Rectangle {
             }
         }
         Switch {
-            checked: root.checked;
+            checked <=> root.checked;
             enabled: root.enabled;
             control-label: root.title;
             toggled => { root.toggled(self.checked); }

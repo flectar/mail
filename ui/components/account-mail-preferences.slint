@@ -228,12 +228,12 @@ export component AccountMailPreferencesPanel inherits OnScreenSurface {
                 LineEdit { text <=> AccountMailPreferences.fingerprint; input-label: @tr("Your full OpenPGP fingerprint"); placeholder-text: @tr("Your full OpenPGP key fingerprint"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; }
                 SettingsSwitchRow {
                     title: @tr("Digitally sign messages"); description: @tr("Proves possession of your private key; does not encrypt the message.");
-                    compact: root.compact; checked: AccountMailPreferences.sign; enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; toggled(value) => { AccountMailPreferences.sign = value; }
+                    compact: root.compact; checked <=> AccountMailPreferences.sign; enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; toggled(value) => { AccountMailPreferences.sign = value; }
                     title-color: AppTheme.heading; description-color: AppTheme.secondary;
                 }
                 SettingsSwitchRow {
                     title: @tr("Require encryption"); description: @tr("Blocks sending unless every recipient has a verified, usable key.");
-                    compact: root.compact; checked: AccountMailPreferences.encrypt; enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; toggled(value) => { AccountMailPreferences.encrypt = value; }
+                    compact: root.compact; checked <=> AccountMailPreferences.encrypt; enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; toggled(value) => { AccountMailPreferences.encrypt = value; }
                     title-color: AppTheme.heading; description-color: AppTheme.secondary;
                 }
                 Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Verified recipient keys"); color: AppTheme.heading; font-weight: 600; }
