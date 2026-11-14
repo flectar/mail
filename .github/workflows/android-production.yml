@@ -56,6 +56,10 @@ jobs:
             echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$toolchain/aarch64-linux-android26-clang"
           } >> "$GITHUB_ENV"
 
+      - name: Make room for the release build
+        # The app crate's release build peaks near all the memory a hosted
+        # runner has; see scripts/ci-swap.sh.
+        run: ./scripts/ci-swap.sh on
       - name: Build and validate production candidate
         env:
           FLECTAR_ANDROID_VERSION_NAME: ${{ inputs.version_name }}
