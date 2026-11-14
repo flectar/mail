@@ -34,6 +34,8 @@ export global ComposerUi {
     in property <string> photo-full-size: "";
     in-out property <bool> shrink-photos: false;
     in property <bool> shrinking-photos: false;
+    // The message goes out as plain text only.
+    in property <bool> plain-text: false;
     in property <[EmailTemplateRow]> templates: [];
     in property <LocalizedMessage> message;
     in property <bool> notice-is-error: false;
@@ -122,6 +124,7 @@ export global ComposerUi {
     callback insert-images();
     callback remove-attachment(int);
     callback shrink-photos-toggled(bool);
+    callback plain-text-chosen(bool);
     callback format(string, string, int, int);
     // Pastes the clipboard's HTML over the selection of the body given, with its
     // formatting: false when it holds none, for the plain text to go in.
@@ -182,6 +185,7 @@ export component BoundComposer inherits EmailComposer {
     photo-full-size: ComposerUi.photo-full-size;
     shrink-photos <=> ComposerUi.shrink-photos;
     shrinking-photos: ComposerUi.shrinking-photos;
+    plain-text: ComposerUi.plain-text;
     from-label <=> ComposerUi.from-label;
     notice-is-error: ComposerUi.notice-is-error;
     selection-start: ComposerUi.selection-start;
@@ -258,6 +262,7 @@ export component BoundComposer inherits EmailComposer {
     insert-images => { ComposerUi.insert-images(); }
     remove-attachment(index) => { ComposerUi.remove-attachment(index); }
     shrink-photos-toggled(on) => { ComposerUi.shrink-photos-toggled(on); }
+    plain-text-chosen(plain) => { ComposerUi.plain-text-chosen(plain); }
     format-requested(kind, body, anchor, cursor) => { ComposerUi.format(kind, body, anchor, cursor); }
     paste-requested(body, anchor, cursor) => { return ComposerUi.paste-formatted(body, anchor, cursor); }
     copy-requested(cut, body, anchor, cursor) => { return ComposerUi.copy-formatted(cut, body, anchor, cursor); }

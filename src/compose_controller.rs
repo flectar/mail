@@ -37,6 +37,9 @@ pub(super) struct PreparedMessageCompose {
     /// The original a reply or forward carries below the editor.
     pub quote: Option<ComposeQuote>,
     pub intent: ComposeIntent,
+    /// The original is plain text only, which a message edited as new keeps, and replies and
+    /// forwards may follow.
+    pub plain_original: bool,
 }
 
 /// A message as it was sent: its HTML, and the plain text that has to say
@@ -96,6 +99,7 @@ pub(super) fn prepare_message_compose(
             }),
             quote: None,
             intent: ComposeIntent::default(),
+            plain_original: source.html_body.is_none(),
         });
     }
 
@@ -135,6 +139,7 @@ pub(super) fn prepare_message_compose(
                 in_reply_to_header: None,
                 draft_id: None,
             },
+            plain_original: source.html_body.is_none(),
         });
     }
 
@@ -182,6 +187,7 @@ pub(super) fn prepare_message_compose(
             in_reply_to_header: None,
             draft_id: None,
         },
+        plain_original: source.html_body.is_none(),
     })
 }
 

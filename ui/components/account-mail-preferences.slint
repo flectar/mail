@@ -52,6 +52,11 @@ export global AccountMailPreferences {
     in-out property <string> sender-form-name;
     in-out property <string> sender-form-reply-to;
     in-out property <bool> sender-form-editing: false;
+    // How the account's messages start: 0 formatted, 1 plain text, and whether replies and
+    // forwards to plain-text messages start in plain text. Each change saves at once.
+    in-out property <int> message-format-index: 0;
+    in-out property <bool> plain-text-replies: true;
+    callback save-message-format;
     callback load(int);
     callback edit-signature(int);
     // Opens the chosen signature, or a new one, in the composer to write.
@@ -218,6 +223,24 @@ export component AccountMailPreferencesPanel inherits OnScreenSurface {
                     selected(index, value) => { AccountMailPreferences.reply-index = index; }
                 }
                 Button { text: @tr("Save signature defaults"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.save-defaults(); } }
+                Rectangle { height: 1px; background: AppTheme.input-border; }
+                SettingsSelectRow {
+                    compact: root.compact; title: @tr("Message format"); description: @tr("How new messages start. Each message can change it.");
+                    choices: [@tr("message format" => "Formatted text"), @tr("message format" => "Plain text")];
+                    selected-index <=> AccountMailPreferences.message-format-index;
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                    selected(index, value) => {
+                        AccountMailPreferences.message-format-index = index;
+                        AccountMailPreferences.save-message-format();
+                    }
+                }
+                if AccountMailPreferences.message-format-index == 0 : SettingsSwitchRow {
+                    compact: root.compact; title: @tr("Plain text in replies to plain text"); description: @tr("Replies and forwards to plain-text messages start as plain text.");
+                    checked <=> AccountMailPreferences.plain-text-replies;
+                    enabled: !AccountMailPreferences.busy;
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                    toggled(on) => { AccountMailPreferences.save-message-format(); }
+                }
             }
             if root.security-tab : VerticalBox {
                 spacing: 10px;

@@ -322,6 +322,32 @@ impl SentCopyPolicy {
     }
 }
 
+/// How an account's messages start: formatted, or as plain text only. Each message can change.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MessageFormat {
+    #[default]
+    Formatted,
+    PlainText,
+}
+
+impl MessageFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Formatted => "formatted",
+            Self::PlainText => "plainText",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "formatted" => Some(Self::Formatted),
+            "plainText" => Some(Self::PlainText),
+            _ => None,
+        }
+    }
+}
+
 /// How long a POP3 account leaves downloaded mail on its server. Mail is
 /// removed from the server only once this device has stored it, and every
 /// choice but `Always` also removes mail deleted here.
@@ -400,6 +426,17 @@ pub struct AccountSettings {
     /// POP3 accounts only.
     #[serde(default)]
     pub keep_on_server: KeepOnServer,
+    /// How new messages start.
+    #[serde(default)]
+    pub message_format: MessageFormat,
+    /// Replies and forwards to messages that are plain text only start in plain text, also
+    /// when new messages start formatted.
+    #[serde(default = "plain_text_replies_default")]
+    pub plain_text_replies: bool,
+}
+
+const fn plain_text_replies_default() -> bool {
+    true
 }
 
 impl AccountSettings {
@@ -413,6 +450,8 @@ impl AccountSettings {
             default_sender_email: None,
             sent_copy_policy: SentCopyPolicy::Auto,
             keep_on_server: KeepOnServer::Always,
+            message_format: MessageFormat::Formatted,
+            plain_text_replies: plain_text_replies_default(),
         }
     }
 }
@@ -450,6 +489,31 @@ mod account_settings_tests {
         assert_eq!(KeepOnServer::UntilDeleted.days(), None);
         assert_eq!(KeepOnServer::FourteenDays.days(), Some(14));
         assert_eq!(KeepOnServer::UntilDownloaded.days(), Some(0));
+    }
+
+    #[test]
+    fn message_format_defaults_and_choices_survive_serialization() {
+        let mut settings: AccountSettings = serde_json::from_str(MINIMAL_SETTINGS).unwrap();
+        // Accounts from before the choice start formatted, with plain-text replies to plain text.
+        assert_eq!(settings.message_format, MessageFormat::Formatted);
+        assert!(settings.plain_text_replies);
+        let new = AccountSettings::new(settings.connection.clone());
+        assert_eq!(
+            (new.message_format, new.plain_text_replies),
+            (MessageFormat::Formatted, true)
+        );
+        for format in [MessageFormat::Formatted, MessageFormat::PlainText] {
+            settings.message_format = format;
+            settings.plain_text_replies = false;
+            let restored: AccountSettings =
+                serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(
+                (restored.message_format, restored.plain_text_replies),
+                (format, false)
+            );
+            assert_eq!(MessageFormat::from_storage(format.as_str()), Some(format));
+        }
+        assert_eq!(MessageFormat::from_storage("html"), None);
     }
 
     #[test]
