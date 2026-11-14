@@ -3116,6 +3116,25 @@ enum SelectivePersistGuard {
     Priority { folder_id: i64 },
 }
 
+impl SelectivePersistGuard {
+    fn folder_id(self) -> i64 {
+        match self {
+            Self::Background { folder_id } | Self::Priority { folder_id } => folder_id,
+        }
+    }
+}
+
+/// A read receipt that came back (RFC 8098) is fetched whole when it's this
+/// small, as they nearly always are: its report part and the fields that
+/// stand in for what some reporters leave out then arrive together. A
+/// larger one returns the original message with its files, and is cached
+/// like any other message.
+const WHOLE_RECEIPT_LIMIT: u64 = 256 * 1024;
+
+fn fetch_receipt_whole(plan: &crate::mime::MimePlan) -> bool {
+    plan.carries_disposition_report() && plan.encoded_size() <= WHOLE_RECEIPT_LIMIT
+}
+
 fn can_persist_selective_content(
     row: &CurrentBodyRow,
     guard: SelectivePersistGuard,
@@ -3867,7 +3886,12 @@ async fn fetch_body_chunk(
         .map_err(classify_body_chunk_error)?;
     let mut groups: std::collections::BTreeMap<Vec<String>, Vec<PlannedBodyFetch>> =
         std::collections::BTreeMap::new();
+    let mut receipts = Vec::new();
     for item in planned {
+        if fetch_receipt_whole(&item.plan) {
+            receipts.push(item);
+            continue;
+        }
         if item.plan.text_sections.is_empty() {
             failures.push((
                 item.message_id,
@@ -3886,6 +3910,23 @@ async fn fetch_body_chunk(
         .map_err(BodyChunkError::Fatal)?;
 
     let mut cached = 0u64;
+    for item in receipts {
+        let Some(raw) = imap::fetch_full(session, item.uid)
+            .await
+            .map_err(BodyChunkError::Reconnect)?
+        else {
+            // Expunged since it was planned.
+            continue;
+        };
+        let guard = SelectivePersistGuard::Background {
+            folder_id: chunk.folder_id,
+        };
+        match persist_body(ctx, config, item.message_id, guard, item.uid, &raw).await {
+            Ok(true) => cached += 1,
+            Ok(false) => {}
+            Err(error) => record_content_failure(ctx, item.message_id, &error).await,
+        }
+    }
     for (sections, items) in groups {
         let max_bytes = match config.provider {
             Provider::Microsoft => MAX_MICROSOFT_BATCH_BYTES,
@@ -4249,8 +4290,9 @@ fn decode_selective_content(
 }
 
 /// Fetch only the MIME sections required to make a message readable and
-/// searchable. Full raw MIME is a user-open fallback only; the background path
-/// never downloads attachment bytes implicitly.
+/// searchable. Full raw MIME is a user-open fallback, and the form a small
+/// read receipt arrives in; the background path never downloads attachment
+/// bytes implicitly.
 async fn fetch_selective_content(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -4344,6 +4386,17 @@ async fn fetch_selective_content(
             "server did not provide a usable BODYSTRUCTURE".into(),
         ));
     };
+    if fetch_receipt_whole(&plan) {
+        return fetch_full_open_fallback(
+            ctx,
+            config,
+            session.as_mut().ok_or(CoreError::Offline)?,
+            message_id,
+            folder_id,
+            uid,
+        )
+        .await;
+    }
 
     // Keep persistence errors distinct: only selective protocol/decode
     // failures are eligible for the user-open full-MIME fallback.
@@ -4440,7 +4493,16 @@ async fn fetch_full_open_fallback(
     let Some(raw) = imap::fetch_full(session, uid).await? else {
         return Err(CoreError::NotFound(format!("remote message UID {uid}")));
     };
-    persist_body(ctx, config, message_id, folder_id, uid, &raw).await
+    persist_body(
+        ctx,
+        config,
+        message_id,
+        SelectivePersistGuard::Priority { folder_id },
+        uid,
+        &raw,
+    )
+    .await
+    .map(|_| ())
 }
 
 async fn persist_selective_batch(
@@ -4519,17 +4581,19 @@ async fn persist_selective_batch(
 }
 
 /// Parse one already-fetched raw message, persist it to disk + DB, and notify
-/// the UI. Shared by the single-body path and the bulk backfill.
+/// the UI. `guard` names the fetch it came from: a reader opening it, or the
+/// background caching a read receipt whole.
 async fn persist_body(
     ctx: &SyncCtx,
     config: &AccountConfig,
     message_id: i64,
-    folder_id: i64,
+    guard: SelectivePersistGuard,
     uid: u32,
     raw: &[u8],
-) -> Result<()> {
+) -> Result<bool> {
+    let folder_id = guard.folder_id();
     if !remote_location_is_current(ctx, message_id, folder_id, i64::from(uid)).await? {
-        return Ok(());
+        return Ok(false);
     }
     let dir = ctx.paths.mail_dir(config.id);
     tokio::fs::create_dir_all(&dir).await?;
@@ -4541,35 +4605,34 @@ async fn persist_body(
 
     let parsed = crate::mime::parse_message(raw)?;
     let calendar_events = super::ingest::calendar_parts(&parsed);
-    let (persisted, thread_id) = ctx
+    let (persisted, thread_ids) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
             let Some(current) = current_body_row(&tx, message_id)? else {
-                return Ok((false, None));
+                return Ok((false, Vec::new()));
             };
-            if !can_persist_selective_content(
-                &current,
-                SelectivePersistGuard::Priority { folder_id },
-                uid,
-            ) {
-                return Ok((false, None));
+            if !can_persist_selective_content(&current, guard, uid) {
+                return Ok((false, Vec::new()));
             }
-            super::ingest::store_body(&tx, message_id, &path_str, &parsed)?;
+            let mut thread_ids = super::ingest::store_body(&tx, message_id, &path_str, &parsed)?;
             let _ = repo::sync_failures::clear_content(&tx, message_id);
             let tid: Option<i64> =
                 repo::messages::get_row(&tx, message_id)?.and_then(|r| r.thread_id);
             if let Some(tid) = tid {
                 repo::threads::recompute(&tx, tid)?;
+                if !thread_ids.contains(&tid) {
+                    thread_ids.push(tid);
+                }
             }
             tx.commit()?;
-            Ok((true, tid))
+            Ok((true, thread_ids))
         })
         .await?;
 
     if !persisted {
         let _ = tokio::fs::remove_file(&path).await;
-        return Ok(());
+        return Ok(false);
     }
     super::ingest::store_calendar_events(
         ctx,
@@ -4578,12 +4641,10 @@ async fn persist_body(
         super::ingest::Arrival::Received,
     )
     .await?;
-    if let Some(tid) = thread_id {
-        ctx.bus.emit(CoreEvent::MailUpdated {
-            thread_ids: vec![tid],
-        });
+    if !thread_ids.is_empty() {
+        ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
     }
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(all(test, desktop))]

@@ -1274,6 +1274,7 @@ fn detail_from_row(row: &rusqlite::Row) -> rusqlite::Result<MessageDetail> {
         in_spam: row.get("in_spam")?,
         sender_blocked: row.get("sender_blocked")?,
         receipt_request: receipt_request_from_row(row)?,
+        returned_receipts: Vec::new(),
     })
 }
 
@@ -1443,6 +1444,7 @@ pub fn detail(conn: &Connection, id: i64) -> Result<MessageDetail> {
         detail.attachments.push(a?);
     }
     drop_own_receipt_requests(conn, std::slice::from_mut(&mut detail))?;
+    super::returned_receipts::attach(conn, std::slice::from_mut(&mut detail))?;
     Ok(detail)
 }
 
@@ -1508,6 +1510,7 @@ pub fn list_for_thread(conn: &Connection, thread_id: i64) -> Result<Vec<MessageD
         }
     }
     drop_own_receipt_requests(conn, &mut out)?;
+    super::returned_receipts::attach(conn, &mut out)?;
     Ok(out)
 }
 
@@ -1526,6 +1529,7 @@ pub fn list_outline_for_thread(conn: &Connection, thread_id: i64) -> Result<Vec<
         .query_map(params![thread_id], detail_from_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop_own_receipt_requests(conn, &mut out)?;
+    super::returned_receipts::attach(conn, &mut out)?;
     Ok(out)
 }
 

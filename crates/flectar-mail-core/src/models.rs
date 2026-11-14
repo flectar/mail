@@ -1098,6 +1098,9 @@ pub struct MessageDetail {
     /// The read receipt it asks for, when one may be sent and nothing has
     /// answered it yet.
     pub receipt_request: Option<ReceiptRequest>,
+    /// For a message one sent, the read receipts that came back for it,
+    /// earliest first.
+    pub returned_receipts: Vec<ReturnedReceipt>,
 }
 
 /// A read receipt a received message asks for (RFC 8098), which this client
@@ -1112,6 +1115,58 @@ pub struct ReceiptRequest {
     /// it for this request, or the receiving server didn't authenticate the
     /// sender (section 6.1).
     pub needs_confirmation: bool,
+}
+
+/// What a read receipt that came back says happened to the message (RFC 8098
+/// section 3.2.6.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Disposition {
+    /// Shown to someone reading the recipient's mailbox, which doesn't mean
+    /// it was read or understood.
+    Displayed,
+    /// Deleted, seen or not.
+    Deleted,
+    /// Printed, faxed or forwarded without being shown.
+    Dispatched,
+    /// Handled by rules or a server without being shown.
+    Processed,
+}
+
+impl Disposition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Displayed => "displayed",
+            Self::Deleted => "deleted",
+            Self::Dispatched => "dispatched",
+            Self::Processed => "processed",
+        }
+    }
+
+    /// A disposition type, in any case. The types RFC 3798 also had,
+    /// "denied" and "failed", say nothing happened to the message.
+    pub fn parse(value: &str) -> Option<Self> {
+        [
+            Self::Displayed,
+            Self::Deleted,
+            Self::Dispatched,
+            Self::Processed,
+        ]
+        .into_iter()
+        .find(|disposition| value.eq_ignore_ascii_case(disposition.as_str()))
+    }
+}
+
+/// A read receipt that came back for a message one sent: whom it's from and
+/// what it says happened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReturnedReceipt {
+    /// The recipient, named as the message addressed them where it did.
+    pub recipient: Address,
+    pub disposition: Disposition,
+    /// When the receipt was written, in milliseconds since the Unix epoch.
+    pub reported_at: i64,
 }
 
 /// How a read receipt request is answered.

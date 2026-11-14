@@ -21,7 +21,7 @@ import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { Unsubscribe } from "../unsubscribe.slint";
-import { ReadReceipts, ReceiptRequestBar } from "../read-receipts.slint";
+import { ReadReceipts, ReceiptRequestBar, ReturnedReceiptList } from "../read-receipts.slint";
 import { BlockSender } from "../block-sender.slint";
 import { Invitation } from "../invitation.slint";
 import { InvitationCard } from "../components/invitation-card.slint";
@@ -483,12 +483,23 @@ export component MailReadingPane inherits FocusScope {
     private property <length> attachment-section-height: MailAttachments.rows.length > 0
         ? 14px + root.attachment-heading-line + MailAttachments.rows.length * (root.attachment-card-height + 4px)
         : 0px;
+    // The read receipts that came back for a message the user sent follow
+    // its attachments, one line each and a button past three.
+    private property <length> returned-row-height: max(root.compact ? 32px : 26px, returned-row-probe.preferred-height + 8px);
+    private property <length> returned-button-height: root.compact ? 36px : 26px;
+    private property <length> returned-section-height: ReadReceipts.returned.length > 0
+        ? 8px + root.attachment-heading-line + ReadReceipts.returned.length * root.returned-row-height
+            + (ReadReceipts.more-returned > 0 ? root.returned-button-height + 8px : 0px)
+        : 0px;
+    private property <length> returned-section-y: root.attachment-flow-y + root.attachment-section-height
+        + (MailAttachments.rows.length > 0 ? 12px : 0px);
     // Normal HTML uses its intrinsic rendered height. Alternate surfaces own
     // their scrolling. Fit their body and footer in the outer viewport when
     // possible so a short reader view cannot scroll its header away.
     private property <length> message-body-content-height: root.alternate-body-active
         ? max(40px, root.email-viewport-height - root.attachment-section-height
             - (MailAttachments.rows.length > 0 ? 12px : 0px)
+            - root.returned-section-height - (ReadReceipts.returned.length > 0 ? 12px : 0px)
             - root.message-actions-height - root.message-bottom-padding)
         : root.rendered-email-height;
     private property <length> attachment-flow-y: root.message-body-content-height;
@@ -504,15 +515,16 @@ export component MailReadingPane inherits FocusScope {
     attachment-heading-probe := Text { visible: false; text: "Ag"; font-weight: 600; }
     attachment-name-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.body; font-weight: 600; }
     attachment-detail-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; }
+    returned-row-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.body; }
     private property <length> thread-item-stride: root.thread-header-height + root.thread-item-gap;
     private property <int> accordion-message-count: max(1, root.thread-messages.length);
     private property <int> accordion-selected-index: min(max(0, root.selected-thread-index), root.accordion-message-count - 1);
     private property <length> selected-header-y: root.accordion-selected-index * root.thread-item-stride;
     private property <length> renderer-controls-height: renderer-controls.preferred-height;
     private property <length> message-body-y: root.selected-header-y + root.thread-header-height + root.renderer-controls-height;
-    private property <length> message-document-height: root.attachment-flow-y
-        + root.attachment-section-height
-        + (MailAttachments.rows.length > 0 ? 12px : 0px);
+    private property <length> message-document-height: root.returned-section-y
+        + root.returned-section-height
+        + (ReadReceipts.returned.length > 0 ? 12px : 0px);
     private property <length> message-actions-y: root.message-body-y + root.message-document-height;
     private property <length> expanded-message-height: root.renderer-controls-height
         + root.message-document-height
@@ -1870,6 +1882,22 @@ export component MailReadingPane inherits FocusScope {
                                             clicked => { MailAttachments.command("download", attachment.id); }
                                         }
                                     }
+                                }
+
+                                // Then the read receipts that came back for a message
+                                // the user sent, lined up with the attachments.
+                                if ReadReceipts.returned.length > 0 : ReturnedReceiptList {
+                                    x: -email-scroll.content-x + root.message-card-inset + root.message-card-border-width + 12px;
+                                    y: root.message-body-y + root.returned-section-y;
+                                    width: max(0px, root.email-viewport-width - 24px);
+                                    height: root.returned-section-height;
+                                    compact: root.compact;
+                                    heading-color: root.heading;
+                                    text-color: root.heading;
+                                    secondary-color: root.secondary-text;
+                                    heading-line: root.attachment-heading-line;
+                                    row-height: root.returned-row-height;
+                                    button-height: root.returned-button-height;
                                 }
 
                                 reader-focus := FocusVisibleScope {

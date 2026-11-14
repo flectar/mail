@@ -16,6 +16,16 @@ enum Behavior {
     Reset,
     GlobalLegacy,
     GlobalExtended,
+    /// UID 2 is a small read receipt, UID 3 a large one that returns the
+    /// original with its files.
+    Receipt,
+}
+
+const RECEIPT_PLAN: &str = "((\"TEXT\" \"PLAIN\" (\"CHARSET\" \"US-ASCII\") NIL NIL \"7BIT\" 29 1)(\"MESSAGE\" \"DISPOSITION-NOTIFICATION\" NIL NIL NIL \"7BIT\" 140) \"REPORT\" (\"REPORT-TYPE\" \"disposition-notification\" \"BOUNDARY\" \"b\") NIL NIL)";
+const LARGE_RECEIPT_PLAN: &str = "((\"TEXT\" \"PLAIN\" (\"CHARSET\" \"US-ASCII\") NIL NIL \"7BIT\" 29 1)(\"MESSAGE\" \"DISPOSITION-NOTIFICATION\" NIL NIL NIL \"7BIT\" 140)(\"APPLICATION\" \"PDF\" (\"NAME\" \"plan.pdf\") NIL NIL \"BASE64\" 400000) \"REPORT\" (\"REPORT-TYPE\" \"disposition-notification\" \"BOUNDARY\" \"b\") NIL NIL)";
+
+fn receipt_raw() -> String {
+    "Message-ID: <receipt-2@example.test>\r\nFrom: Ana <ana@example.test>\r\nTo: reader@example.test\r\nSubject: Read: Plan\r\nDate: Tue, 01 Sep 2026 12:30:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: multipart/report; report-type=disposition-notification; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=us-ascii\r\n\r\nYour message was displayed.\r\n--b\r\nContent-Type: message/disposition-notification\r\n\r\nFinal-Recipient: rfc822; ana@example.test\r\nOriginal-Message-ID: <plan@example.test>\r\nDisposition: manual-action/MDN-sent-manually; displayed\r\n\r\n--b--\r\n".into()
 }
 
 struct Fixture {
@@ -131,6 +141,17 @@ async fn fixture(behavior: Behavior) -> (Fixture, Option<Session>) {
                                     ));
                                     continue;
                                 }
+                                if matches!(behavior, Behavior::Receipt) && uid > 1 {
+                                    let plan = if uid == 2 {
+                                        RECEIPT_PLAN
+                                    } else {
+                                        LARGE_RECEIPT_PLAN
+                                    };
+                                    response.push_str(&format!(
+                                        "* {uid} FETCH (UID {uid} BODYSTRUCTURE {plan})\r\n"
+                                    ));
+                                    continue;
+                                }
                                 if uid == 2 {
                                     response
                                         .push_str("* 2 FETCH (UID 2 BODYSTRUCTURE (BOGUS))\r\n");
@@ -143,7 +164,12 @@ async fn fixture(behavior: Behavior) -> (Fixture, Option<Session>) {
                                 let header = raw(uid);
                                 response.push_str(&format!("* {uid} FETCH (UID {uid} FLAGS () BODY[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID CONTENT-TYPE)] {{{}}}\r\n{header})\r\n", header.len()));
                             } else if line.contains("BODY.PEEK[]") {
-                                let message = raw(uid);
+                                let message = if matches!(behavior, Behavior::Receipt) {
+                                    assert_eq!(uid, 2, "only the small receipt comes whole");
+                                    receipt_raw()
+                                } else {
+                                    raw(uid)
+                                };
                                 response.push_str(&format!(
                                     "* {uid} FETCH (UID {uid} BODY[] {{{}}}\r\n{message})\r\n",
                                     message.len()
@@ -545,4 +571,110 @@ async fn legal_message_global_variants_remain_readable() {
             .await
             .unwrap();
     }
+}
+
+/// One whole-message fetch, for the small receipt.
+fn assert_only_the_small_receipt_came_whole(f: &Fixture) {
+    let commands = f.commands.lock().unwrap().clone();
+    let whole: Vec<_> = commands
+        .iter()
+        .filter(|(_, line)| line.contains("BODY.PEEK[]"))
+        .collect();
+    assert_eq!(whole.len(), 1, "{commands:?}");
+    assert!(whole[0].1.contains("UID FETCH 2 "), "{commands:?}");
+}
+
+async fn receipts(f: &Fixture) -> Vec<(String, String, String)> {
+    f.ctx
+        .db
+        .read(|conn| {
+            let mut statement = conn.prepare(
+                "SELECT original_message_id, recipient, disposition FROM returned_receipts",
+            )?;
+            Ok(statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn the_background_reads_a_small_read_receipt_whole() {
+    let (f, session) = fixture(Behavior::Receipt).await;
+    drop(session);
+    let items = f
+        .ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (*id, i as i64 + 1))
+        .collect();
+    let queue = Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::from([
+        BodyChunk {
+            folder_id: f.folder.id,
+            folder_name: "INBOX".into(),
+            uid_validity: Some(7),
+            items,
+        },
+    ])));
+    let persisted = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (_settings, rx) = watch::channel(f.config.settings.clone());
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        body_worker(
+            f.ctx.clone(),
+            f.config.clone(),
+            queue,
+            persisted.clone(),
+            rx,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(persisted.load(std::sync::atomic::Ordering::Relaxed), 3);
+    assert_only_the_small_receipt_came_whole(&f);
+    assert_eq!(
+        receipts(&f).await,
+        vec![(
+            "plan@example.test".into(),
+            "ana@example.test".into(),
+            "displayed".into()
+        )]
+    );
+    let ids = f.ids.clone();
+    f.ctx
+        .db
+        .read(move |conn| {
+            for id in &ids {
+                assert_eq!(
+                    repo::messages::get_row(conn, *id)?.unwrap().body_state,
+                    "cached"
+                );
+            }
+            // The large one is cached like other mail: its text only.
+            assert!(
+                repo::messages::get_row(conn, ids[1])?
+                    .unwrap()
+                    .raw_path
+                    .is_some()
+            );
+            assert!(
+                repo::messages::get_row(conn, ids[2])?
+                    .unwrap()
+                    .raw_path
+                    .is_none()
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn opening_a_small_read_receipt_reads_it_whole() {
+    let (f, mut session) = fixture(Behavior::Receipt).await;
+    open_second(&f, &mut session).await.unwrap();
+    assert_only_the_small_receipt_came_whole(&f);
+    assert_eq!(receipts(&f).await.len(), 1);
 }

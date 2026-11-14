@@ -2995,7 +2995,7 @@ async fn fetch_body(
     let path_string = path.to_string_lossy().into_owned();
     let guarded_remote = remote_id.clone();
     let guarded_blob = expected_blob.clone();
-    let (persisted, thread_id) = ctx
+    let (persisted, thread_ids) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
@@ -3005,15 +3005,18 @@ async fn fetch_body(
                     && current.jmap_blob_id.as_deref() == Some(&guarded_blob)
             });
             if !valid {
-                return Ok((false, None));
+                return Ok((false, Vec::new()));
             }
-            crate::sync::ingest::store_body(&tx, message_id, &path_string, &parsed)?;
-            let thread_id = current.and_then(|row| row.thread_id);
-            if let Some(thread_id) = thread_id {
+            let mut thread_ids =
+                crate::sync::ingest::store_body(&tx, message_id, &path_string, &parsed)?;
+            if let Some(thread_id) = current.and_then(|row| row.thread_id) {
                 repo::threads::recompute(&tx, thread_id)?;
+                if !thread_ids.contains(&thread_id) {
+                    thread_ids.push(thread_id);
+                }
             }
             tx.commit()?;
-            Ok((true, thread_id))
+            Ok((true, thread_ids))
         })
         .await?;
     if !persisted {
@@ -3027,10 +3030,8 @@ async fn fetch_body(
         crate::sync::ingest::Arrival::Received,
     )
     .await?;
-    if let Some(thread_id) = thread_id {
-        ctx.bus.emit(CoreEvent::MailUpdated {
-            thread_ids: vec![thread_id],
-        });
+    if !thread_ids.is_empty() {
+        ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
     }
     Ok(())
 }

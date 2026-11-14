@@ -1878,6 +1878,7 @@ mod tests {
             sender_blocked: false,
             invitation: None,
             receipt: None,
+            returned_receipts: Vec::new(),
             verification_code: None,
             account_uses_labels: false,
             first_attachment: None,
