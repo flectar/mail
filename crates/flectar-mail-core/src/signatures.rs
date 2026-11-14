@@ -83,13 +83,18 @@ fn has_data_scheme(url: &str) -> bool {
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data:"))
 }
 
+/// Where a signature goes in `body`: above the quotation, or at the end.
+pub fn insertion_point(body: &str) -> usize {
+    quotation_start(body).unwrap_or(body.len())
+}
+
 /// Insert above the quotation, preserving the standard `-- ` delimiter.
 pub fn insert(body: &str, signature: &str) -> String {
     let signature = signature.trim();
     if signature.is_empty() {
         return body.to_owned();
     }
-    let at = quotation_start(body).unwrap_or(body.len());
+    let at = insertion_point(body);
     let mut result = String::with_capacity(body.len() + signature.len() + 6);
     result.push_str(&body[..at]);
     result.push_str("\n\n-- \n");

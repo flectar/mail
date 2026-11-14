@@ -3119,17 +3119,20 @@ impl ComposeSession {
         let signature = usize::try_from(index - 1)
             .ok()
             .and_then(|i| self.signatures.borrow().get(i).cloned());
-        let text = signature
-            .as_ref()
-            .map(flectar_mail_core::signatures::plain_text)
-            .unwrap_or_default();
-        let new_body = flectar_mail_core::signatures::insert(&body, &text);
-        *self.signature.borrow_mut() = if text.is_empty() {
-            None
-        } else {
-            Some(format!("\n\n-- \n{}", text.trim()))
-        };
-        self.edit(|document| document.synchronize(&new_body, 0, 0));
+        // The new signature takes the old one's place, in its formatting and with its
+        // pictures, or goes above the quotation.
+        let at = flectar_mail_core::signatures::insertion_point(&body);
+        let mut inserted = None;
+        self.edit(|document| {
+            let (selection, block) = document.replace_signature(
+                old.as_deref(),
+                at,
+                signature.as_ref().map(|signature| signature.html.as_str()),
+            );
+            inserted = block;
+            selection
+        });
+        *self.signature.borrow_mut() = inserted;
         preferences.set_composer_signature_index(index);
     }
 }
