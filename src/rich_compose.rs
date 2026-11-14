@@ -1350,6 +1350,15 @@ impl RichComposeDocument {
         Some(self.reopen(text.to_owned(), styles))
     }
 
+    /// Reopens HTML that another mail app wrote, for a message edited as new, with the
+    /// formatting and images pasting keeps. Returns `None`, leaving the document untouched,
+    /// when it holds no text.
+    pub fn load_foreign_html(&mut self, html: &str) -> Option<ComposeSelection> {
+        let (text, styles) = crate::compose_paste::styled_text(html, &self.base)
+            .filter(|(text, _)| !text.trim().is_empty())?;
+        Some(self.reopen(text, styles))
+    }
+
     /// Reopens the start of `text` that `html` holds, up to a line break:
     /// what the user wrote above the original a saved reply quotes. Returns
     /// how much of `text` that is, or `None`, leaving the document
@@ -1361,7 +1370,8 @@ impl RichComposeDocument {
     }
 
     /// Loads `text` formatted with `styles` as a reopened message: nothing
-    /// to undo, and the caret at its end.
+    /// to undo, and the caret at its end. What's written next keeps the
+    /// default text style.
     fn reopen(&mut self, text: String, styles: Vec<ComposeStyleRun>) -> ComposeSelection {
         let revision = self.revision.wrapping_add(1);
         *self = Self {
@@ -1369,6 +1379,7 @@ impl RichComposeDocument {
             styles,
             revision,
             text_changes_since: revision,
+            base: std::mem::take(&mut self.base),
             ..Self::default()
         };
         self.auto_link_urls();
@@ -1408,8 +1419,6 @@ impl RichComposeDocument {
         self.commit_style_edit(start_byte, before);
     }
 
-    /// Changes the style of the text from `start_byte` to `end_byte` as one undoable edit, or
-    /// of what's typed next at a caret.
     /// Changes the images from `start_byte` to `end_byte` as one undoable edit.
     fn edit_images(
         &mut self,
@@ -1442,6 +1451,8 @@ impl RichComposeDocument {
         });
     }
 
+    /// Changes the style of the text from `start_byte` to `end_byte` as one undoable edit, or
+    /// of what's typed next at a caret.
     fn set_text_style(
         &mut self,
         start_byte: usize,
@@ -4849,6 +4860,58 @@ mod tests {
         assert_eq!(shown(&document), Some(MIN_IMAGE_WIDTH));
         document.history("undo");
         assert_eq!(shown(&document), None);
+    }
+
+    #[test]
+    fn reopened_messages_keep_the_default_text_style() {
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Serif, TextSize::Large);
+        document.load("Hello", 5, 5);
+        document.format("bold", "Hello", 0, 5);
+        let html = document.body_html().unwrap();
+
+        let mut reopened = RichComposeDocument::default();
+        reopened.set_base_style(FontFamily::Serif, TextSize::Large);
+        reopened.load_html(&html, "Hello").unwrap();
+        // Remove formatting goes back to it.
+        reopened.format("clear", "Hello", 0, 5);
+        let style = reopened.style_at(0).unwrap();
+        assert_eq!(
+            (style.family, style.size, style.marks),
+            (FontFamily::Serif, TextSize::Large, 0)
+        );
+    }
+
+    #[test]
+    fn messages_from_other_apps_reopen_with_their_formatting_and_images() {
+        use base64::Engine;
+        let png = base64::engine::general_purpose::STANDARD.encode(png(40, 20));
+        let html = format!(
+            "<div dir=\"ltr\"><div>Hi <b>Jamie</b>,</div><div><br></div>\
+             <div><img src=\"data:image/png;base64,{png}\" alt=\"Chart\" width=\"30\"><br></div>\
+             <ul><li>First</li><li>Second</li></ul></div>"
+        );
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Serif, TextSize::Normal);
+        // What the composer itself didn't write doesn't reopen as its own.
+        assert!(document.load_html(&html, "Hi Jamie,").is_none());
+        document.load_foreign_html(&html).unwrap();
+        assert_eq!(document.text(), "Hi Jamie,\n\n\u{fffc}\n• First\n• Second");
+        let jamie = document.text().find("Jamie").unwrap();
+        assert_eq!(document.style_at(jamie).unwrap().marks, BOLD);
+        let image = document.images().next().unwrap();
+        assert_eq!(
+            (image.width, image.shown_width, &*image.alt),
+            (40, Some(30), "Chart")
+        );
+        // Its usual font becomes the message's, and nothing is left to undo.
+        assert_eq!(document.style_at(0).unwrap().family, FontFamily::Serif);
+        assert!(document.history("undo").is_none());
+
+        let mut untouched = RichComposeDocument::default();
+        untouched.load("Kept", 4, 4);
+        assert!(untouched.load_foreign_html("<div><br></div>").is_none());
+        assert_eq!(untouched.text(), "Kept");
     }
 
     #[test]

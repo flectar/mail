@@ -241,6 +241,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_forward_keeps_the_images_of_the_original() {
+        let original = "<p>Look <img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"Logo\" width=\"20\"></p>";
+        let quote = ComposeQuote::forward(
+            &["From: Jamie".to_owned()],
+            "Look [image: Logo]",
+            Some(original),
+        );
+        assert!(
+            quote.html.contains(
+                "<img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"Logo\" width=\"20\">"
+            ),
+            "{}",
+            quote.html
+        );
+        let (_, html) = quote.below("FYI", Some("<div>FYI</div>".to_owned()));
+        assert!(html.contains("data:image/png;base64,iVBORw0KGgo="));
+    }
+
+    #[test]
     fn a_reply_quotes_the_original_html_under_its_attribution() {
         let quote = ComposeQuote::reply(
             "On Mon, Maya <maya@example.com> wrote:",

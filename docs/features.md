@@ -240,8 +240,9 @@ pasting a screenshot or a picture copied from another app does the same on
 the desktop. PNG, JPEG, GIF and WebP images show at their own size, or
 smaller to fit the window, and a click selects one. They go out as parts of
 the message that mail apps show in place, and mail read as plain text names
-each one. Images and attachments can take up to 25 MB in all, the size most
-mail servers accept.
+each one. A forward keeps the original's images, and a message edited as new
+keeps its images and formatting, also when another app wrote it. Images and
+attachments can take up to 25 MB in all, the size most mail servers accept.
 
 A selected image gets a bar of its own. **Size** makes it small, medium or large,
 or its own size again, and only changes how wide it shows, so the file goes
