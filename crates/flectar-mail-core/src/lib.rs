@@ -22,6 +22,7 @@ mod http_body;
 pub mod imap;
 mod invitation_card;
 pub mod jmap;
+pub mod links;
 pub mod mail_import;
 pub mod mail_security;
 pub mod mailto;
