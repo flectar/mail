@@ -1997,6 +1997,26 @@ async fn execute_action(
             }
             crate::sync::finish_permanent_delete(ctx, action.message_id).await
         }
+        "mark_folder_read" => {
+            let Some(folder_id) = action.payload["folderId"].as_i64() else {
+                return Ok(());
+            };
+            let before = action.payload["before"]
+                .as_i64()
+                .unwrap_or_else(crate::models::now_ms);
+            let folder = ctx
+                .db
+                .read(move |conn| repo::folders::get(conn, folder_id))
+                .await?;
+            // The mailbox went away since: nothing of it is left to mark.
+            let Some(mailbox_id) = folder
+                .filter(|folder| folder.account_id == config.id)
+                .and_then(|folder| folder.jmap_id)
+            else {
+                return Ok(());
+            };
+            mark_mailbox_read(c, &mailbox_id, before).await
+        }
         "mark_read" | "mark_unread" | "star" | "unstar" => {
             let Some(remote_id) = linked_or_retry(&remote_id)? else {
                 return Ok(());
@@ -2086,6 +2106,61 @@ async fn execute_action(
         other => Err(CoreError::Jmap(format!(
             "unsupported queued JMAP action: {other}"
         ))),
+    }
+}
+
+/// Mark a mailbox's unread messages that arrived before `before` (in
+/// milliseconds) seen (#234). JMAP has no call for a whole mailbox, so each
+/// round asks for as many unread ones as one Email/set takes and marks
+/// them, until none are left.
+async fn mark_mailbox_read(c: &ConnectedClient, mailbox_id: &str, before: i64) -> Result<()> {
+    let batch = c
+        .client
+        .session()
+        .core_capabilities()
+        .map_or(1, |caps| caps.max_objects_in_set().clamp(1, 500));
+    let mut previous = Vec::new();
+    loop {
+        let filter = jmap_client::core::query::Filter::and([
+            jmap_client::email::query::Filter::in_mailbox(mailbox_id),
+            jmap_client::email::query::Filter::not_keyword("$seen"),
+            jmap_client::email::query::Filter::before(before / 1000),
+        ]);
+        let mut request = c.request();
+        request
+            .query_email()
+            .account_id(&c.account_id)
+            .limit(batch)
+            .filter(filter);
+        let response: QueryResponse = c.send_single(request).await.map_err(client::map_error)?;
+        let ids = response.ids().to_vec();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        // A server that answers with what it was just asked to mark isn't
+        // marking: stop rather than ask forever.
+        if ids == previous {
+            return Err(CoreError::Jmap(
+                "the server still lists the messages it was asked to mark read".into(),
+            ));
+        }
+        let mut request = c.request();
+        {
+            let set = request.set_email().account_id(&c.account_id);
+            for id in &ids {
+                set.update(id).keyword("$seen", true);
+            }
+        }
+        let mut response: EmailSetResponse =
+            c.send_single(request).await.map_err(client::map_error)?;
+        for id in &ids {
+            match response.updated(id) {
+                Ok(_) => {}
+                Err(jmap_client::Error::Set(error)) if error.type_ == SetErrorType::NotFound => {}
+                Err(error) => return Err(client::map_error(error)),
+            }
+        }
+        previous = ids;
     }
 }
 

@@ -5863,6 +5863,34 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     });
 
+    // "Mark all as read…" from a sidebar row, once confirmed (#234).
+    let app_weak = app.as_weak();
+    let state_for_mark_all = Rc::clone(&state);
+    let runtime_for_mark_all = runtime.clone();
+    app.on_mark_all_read(move |scope| {
+        let Ok(scope) = scope.parse::<Scope>() else {
+            return;
+        };
+        let core = {
+            let state = state_for_mark_all.borrow();
+            state.core.clone().filter(|_| state.using_core)
+        };
+        let Some(core) = core else {
+            return;
+        };
+        let app = app_weak.clone();
+        runtime_for_mark_all.spawn(async move {
+            if let Err(error) = core.mark_all_read(scope).await {
+                let _ = app.upgrade_in_event_loop(move |app| {
+                    app.set_render_status(UiMessage::detail(
+                        "Could not mark all as read: {}",
+                        error,
+                    ));
+                });
+            }
+        });
+    });
+
     let app_weak = app.as_weak();
     let state_for_empty_trash = Rc::clone(&state);
     app.on_empty_trash(move |requested_account_id| {

@@ -34,6 +34,13 @@ Opening an unread message marks it read. **Mark messages as read** in Settings â
 General can wait 2 or 5 seconds instead, so messages you only pass over, such
 as with the arrow keys, stay unread. **Never** leaves marking to you.
 
+To mark everything in a mailbox read, right-click it in the sidebar, or press
+and hold it on a phone, and choose **Mark all as readâ€¦**. In an Inbox, a folder
+or a Gmail label this happens on the server too, including older mail this
+device doesn't keep, up to the last check, so mail that arrives after that stays
+unread. In a split inbox half, Starred or a category it marks the messages this
+device shows. It can't be undone, so it asks first.
+
 | Keys | Action |
 | --- | --- |
 | **Up/Down** | Move between messages |

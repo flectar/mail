@@ -569,6 +569,55 @@ impl CoreMailSource {
         })
     }
 
+    /// Mark everything `scope` lists as read (#234): a whole mailbox on its
+    /// server too, part of one as ordinary read actions. The list is the one
+    /// [`Self::load_page`] shows for the scope.
+    pub async fn mark_all_read(&self, scope: Scope) -> Result<(), String> {
+        let profile = self.profile_accounts();
+        let mut accounts = self
+            .core
+            .list_accounts()
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut folders = self
+            .core
+            .list_folders(None)
+            .await
+            .map_err(|error| error.to_string())?;
+        let local_mail = self.load_local_mail_account().await?;
+        let profile = with_local_mail(profile, local_mail);
+        retain_profile_accounts(profile.as_deref(), &mut accounts, &mut folders);
+        let mut labels = self
+            .core
+            .list_labels()
+            .await
+            .map_err(|error| error.to_string())?;
+        retain_profile_labels(profile.as_deref(), &mut labels);
+        let mut resolved = resolve_scope(scope, &folders, &labels);
+        if resolved
+            .account_id
+            .is_some_and(|account_id| !profile_shows(profile.as_deref(), account_id))
+        {
+            resolved = resolve_scope(Scope::UNIFIED_INBOX, &folders, &labels);
+        }
+        let profile_accounts = profile
+            .as_deref()
+            .filter(|_| resolved.account_id.is_none())
+            .map(<[i64]>::to_vec);
+        self.core
+            .mark_all_read(
+                resolved.view,
+                resolved.split_id,
+                resolved.account_id,
+                profile_accounts,
+                resolved.label_id,
+                resolved.folder_id,
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     /// Startup needs the account list and first page together. Loading them in
     /// one adapter call avoids querying accounts a second time while retaining
     /// the account list if folder/page projection happens to fail.

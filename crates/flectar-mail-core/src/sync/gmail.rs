@@ -58,6 +58,11 @@ const MAX_MESSAGES_PER_THREAD: usize = 10_000;
 const MAX_DRAFT_PAGES: usize = 100;
 const MAX_DRAFTS: usize = 50_000;
 const MAX_GMAIL_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+/// messages.batchModify takes at most 1000 ids a call.
+const MARK_READ_BATCH_SIZE: usize = 1000;
+/// A call costs 50 quota units, and a project made since May 2026 has 6000
+/// a minute per user: at most 100 calls a minute leaves room for the rest.
+const MARK_READ_PACE: Duration = Duration::from_millis(600);
 const METADATA_HEADERS: &[&str] = &[
     "Authentication-Results",
     "Bcc",
@@ -479,6 +484,65 @@ impl GmailApi {
             self.delete_json(&format!("{GMAIL_API}/messages/{}", urlencode(message_id)))
                 .await,
         )
+    }
+
+    /// Mark read every unread message with `label` that arrived before
+    /// `before`, in seconds (#234). The ids come first, so taking UNREAD off
+    /// doesn't move the pages; then a thousand at a time, paced so a big
+    /// label stays inside a minute's quota. A retry finds only what is
+    /// still unread.
+    async fn mark_label_read(&self, label: &str, before: i64) -> Result<()> {
+        let query = format!("is:unread before:{before}");
+        let mut ids = Vec::new();
+        let mut page_token: Option<String> = None;
+        let mut seen_page_tokens = HashSet::new();
+        loop {
+            let mut url = format!(
+                "{GMAIL_API}/messages?labelIds={}&q={}&includeSpamTrash=true&maxResults=500",
+                urlencode(label),
+                urlencode(&query)
+            );
+            if let Some(token) = page_token.as_deref() {
+                url.push_str("&pageToken=");
+                url.push_str(&urlencode(token));
+            }
+            let page = self.get_json(&url).await?;
+            ids.extend(
+                page.get("messages")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|message| message.get("id").and_then(Value::as_str))
+                    .map(str::to_owned),
+            );
+            page_token = page
+                .get("nextPageToken")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            match page_token.as_deref() {
+                None => break,
+                Some(token)
+                    if token.len() > MAX_GMAIL_PAGE_TOKEN_BYTES
+                        || !seen_page_tokens.insert(token.to_owned()) =>
+                {
+                    return Err(CoreError::Network(
+                        "Gmail returned an invalid page cursor".into(),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        for (index, batch) in ids.chunks(MARK_READ_BATCH_SIZE).enumerate() {
+            if index > 0 {
+                tokio::time::sleep(MARK_READ_PACE).await;
+            }
+            self.post_json(
+                &format!("{GMAIL_API}/messages/batchModify"),
+                &json!({ "ids": batch, "removeLabelIds": ["UNREAD"] }),
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     async fn empty_trash(&self) -> Result<()> {
@@ -3467,6 +3531,13 @@ async fn apply_action(
             let snapshot_ids = super::snapshot_trash_ids(ctx, config.id).await?;
             api.empty_trash().await?;
             return super::finish_empty_trash(ctx, config.id, snapshot_ids).await;
+        }
+        "mark_folder_read" => {
+            let Some(label) = action.payload["labelId"].as_str() else {
+                return Ok(());
+            };
+            let before = action.payload["before"].as_i64().unwrap_or_else(now_ms);
+            return api.mark_label_read(label, before / 1000).await;
         }
         "delete_permanently" => {
             let Some(message_id) = action.message_id else {
