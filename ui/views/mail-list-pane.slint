@@ -1034,7 +1034,8 @@ export component MailListPane inherits FocusScope {
                                     has-source: mail-data.has_favicon;
                                     fallback: mail-data.initials;
                                     image-fit: contain;
-                                    background-color: mail-data.has_favicon ? #ffffff : (mail-data.selected ? root.avatar-selected-bg : root.avatar-bg);
+                                    source-backdrop: mail-data.selected ? root.avatar-selected-bg : root.avatar-bg;
+                                    background-color: mail-data.selected ? root.avatar-selected-bg : root.avatar-bg;
                                     foreground-color: mail-data.selected ? root.accent : root.secondary-text;
                                     avatar-border-width: mail-data.has_favicon ? 1px : 0px;
                                     avatar-border-color: root.border;

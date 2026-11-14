@@ -372,28 +372,34 @@ async fn decode_brand_icons(
 ) -> Result<FaviconImages, String> {
     tokio::task::spawn_blocking(move || {
         let decoded = decode_bounded(bytes)?;
-        let flattened = flatten_on_white(decoded);
+        let premultiplied = premultiply_alpha(decoded);
         Ok(FaviconImages {
-            small: render_brand_icon(&flattened, small_pixel_side),
-            regular: render_brand_icon(&flattened, regular_pixel_side),
+            small: render_brand_icon(&premultiplied, small_pixel_side),
+            regular: render_brand_icon(&premultiplied, regular_pixel_side),
         })
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
-fn render_brand_icon(flattened: &DynamicImage, pixel_side: u32) -> FaviconImage {
+fn render_brand_icon(premultiplied: &DynamicImage, pixel_side: u32) -> FaviconImage {
     let content_side = centered_brand_content_side(pixel_side);
-    let fitted = flattened.resize(content_side, content_side, FilterType::Lanczos3);
+    let fitted = premultiplied
+        .resize(content_side, content_side, FilterType::Lanczos3)
+        .into_rgba8();
+    let mut fitted = fitted;
+    unpremultiply_alpha(&mut fitted);
 
-    // Brand marks are authored for light surfaces. Flattening their alpha
-    // into white before the one high-quality resize avoids dark fringes.
+    // The raster stays transparent: the surface behind the icon is painted by
+    // the UI (see `source-backdrop` on Avatar), so it follows the active theme
+    // instead of being baked in as white. Resizing happened on premultiplied
+    // pixels, which avoids dark fringes around transparent edges.
     // Bake the circular clip into the raster as well: the software renderer
     // does not reliably clip an Image to its parent's rounded corners.
-    let mut canvas = RgbaImage::from_pixel(pixel_side, pixel_side, Rgba([255, 255, 255, 255]));
+    let mut canvas = RgbaImage::from_pixel(pixel_side, pixel_side, Rgba([0, 0, 0, 0]));
     let x = i64::from((pixel_side - fitted.width()) / 2);
     let y = i64::from((pixel_side - fitted.height()) / 2);
-    image::imageops::overlay(&mut canvas, &fitted, x, y);
+    image::imageops::replace(&mut canvas, &fitted, x, y);
     apply_circular_alpha_mask(&mut canvas);
 
     FaviconImage {
@@ -456,16 +462,32 @@ fn decode_bounded(bytes: Vec<u8>) -> Result<DynamicImage, String> {
     reader.decode().map_err(|error| error.to_string())
 }
 
-fn flatten_on_white(image: DynamicImage) -> DynamicImage {
+/// Convert straight alpha to premultiplied alpha so that resampling does not
+/// blend the (often black) colour of fully transparent pixels into the edges.
+fn premultiply_alpha(image: DynamicImage) -> DynamicImage {
     let mut image = image.to_rgba8();
     for pixel in image.pixels_mut() {
         let alpha = u32::from(pixel[3]);
         for channel in &mut pixel.0[..3] {
-            *channel = ((u32::from(*channel) * alpha + 255 * (255 - alpha) + 127) / 255) as u8;
+            *channel = ((u32::from(*channel) * alpha + 127) / 255) as u8;
         }
-        pixel[3] = 255;
     }
     DynamicImage::ImageRgba8(image)
+}
+
+/// Inverse of [`premultiply_alpha`], applied after resizing. Lanczos ringing
+/// can push a premultiplied channel above its alpha, so the result is clamped.
+fn unpremultiply_alpha(image: &mut RgbaImage) {
+    for pixel in image.pixels_mut() {
+        let alpha = u32::from(pixel[3]);
+        if alpha == 0 {
+            pixel.0 = [0, 0, 0, 0];
+            continue;
+        }
+        for channel in &mut pixel.0[..3] {
+            *channel = ((u32::from(*channel) * 255 + alpha / 2) / alpha).min(255) as u8;
+        }
+    }
 }
 
 /// Apply a one-pixel antialiased circle to an exact-size avatar raster.
@@ -639,8 +661,8 @@ mod tests {
         let icons = decode_brand_icons(test_brand_png(), 28, 38).await.unwrap();
         assert_eq!((icons.small.width, icons.small.height), (28, 28));
         assert_eq!((icons.regular.width, icons.regular.height), (38, 38));
-        assert_eq!(&icons.small.pixels[..4], &[255, 255, 255, 0]);
-        assert_eq!(&icons.regular.pixels[..4], &[255, 255, 255, 0]);
+        assert_eq!(&icons.small.pixels[..4], &[0, 0, 0, 0]);
+        assert_eq!(&icons.regular.pixels[..4], &[0, 0, 0, 0]);
         let small_center = ((14 * icons.small.width + 14) * 4) as usize;
         let regular_center = ((19 * icons.regular.width + 19) * 4) as usize;
         assert_eq!(icons.small.pixels[small_center + 3], 255);
@@ -661,7 +683,18 @@ mod tests {
                 .as_chunks::<4>()
                 .0
                 .iter()
-                .any(|pixel| pixel[0] == 255 && (1..=254).contains(&pixel[1]))
+                .any(|pixel| pixel[0] >= 250 && (1..=254).contains(&pixel[3]))
+        );
+        // Anti-aliased edges keep the brand colour (no dark fringe) and the
+        // raster carries no baked-in white background.
+        assert!(
+            icons
+                .regular
+                .pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| pixel[3] == 0 || (pixel[0] >= 250 && pixel[1] <= 5 && pixel[2] <= 5))
         );
     }
 

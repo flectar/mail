@@ -210,7 +210,8 @@ component ThreadMessageHeader inherits Rectangle {
         has-source: root.has-favicon;
         fallback: root.initials;
         image-fit: contain;
-        background-color: root.has-favicon ? #ffffff : root.outgoing ? root.accent : root.control-bg;
+        source-backdrop: root.control-bg;
+        background-color: root.outgoing ? root.accent : root.control-bg;
         foreground-color: root.outgoing ? #ffffff : root.secondary-text;
         avatar-border-width: root.has-favicon ? 1px : 0px;
         avatar-border-color: root.border;

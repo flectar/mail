@@ -9,6 +9,9 @@ export component Avatar inherits Rectangle {
     in property <string> fallback: "?";
     in property <length> size: 40px;
     in property <color> background-color: #f1f1ef;
+    // Surface painted behind a downloaded raster (e.g. a transparent sender
+    // favicon). Callers pass a theme colour so the backdrop follows light/dark.
+    in property <color> source-backdrop: transparent;
     in property <color> foreground-color: #4b4c49;
     // Optional stable palette slot for people without stored photos. Callers
     // derive the slot from an identity key; Avatar owns the theme-aware muted
@@ -52,9 +55,9 @@ export component Avatar inherits Rectangle {
     height: root.size;
     border-radius: root.size / 2;
     // Downloaded rasters carry their own antialiased circular alpha mask.
-    // Keeping the source surface transparent prevents opaque square corners
-    // from showing through on software-rendered views.
-    background: root.has-source ? transparent
+    // The backdrop is a rounded rectangle (transparent by default), so no
+    // opaque square corners show through on software-rendered views.
+    background: root.has-source ? root.source-backdrop
         : root.color-tone >= 0 ? root.tone-background
         : root.background-color;
     clip: true;
