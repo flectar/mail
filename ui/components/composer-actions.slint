@@ -484,9 +484,11 @@ export component ComposerAttachments inherits Rectangle {
     // Chips hold a name and a detail line; both grow with the platform font.
     private property <length> chip-growth: max(16px, attachment-name-probe.preferred-height)
         + max(13px, attachment-detail-probe.preferred-height) - 29px;
+    // Files wider than the strip scroll, with the scroll bar below them rather than over them.
+    private property <length> bar-room: attachment-row.preferred-width > attachments-scroll.width ? 12px : 0px;
 
             visible: root.attachments.length > 0;
-            height: root.attachments.length > 0 ? 62px + root.chip-growth : 0px;
+            height: root.attachments.length > 0 ? 62px + root.chip-growth + root.bar-room : 0px;
             background: root.raised-color;
             border-width: 1px;
             border-color: root.subtle-border-color;
@@ -498,15 +500,19 @@ export component ComposerAttachments inherits Rectangle {
                 x: 10px;
                 y: 8px;
                 width: parent.width - 20px;
-                height: 46px + root.chip-growth;
+                height: 46px + root.chip-growth + root.bar-room;
                 content-width: max(self.visible-width, attachment-row.preferred-width);
                 content-height: self.visible-height;
                 horizontal-scrollbar-policy: as-needed;
                 vertical-scrollbar-policy: always-off;
                 mouse-drag-pan-enabled: root.compact;
 
+                // The files show whole, centered where there's no scroll bar, which goes below them.
                 attachment-row := HorizontalBox {
-                    height: 38px + root.chip-growth;
+                    y: (46px + root.chip-growth - self.height) / 2;
+                    height: 36px + root.chip-growth;
+                    padding-top: 0px;
+                    padding-bottom: 0px;
                     spacing: 7px;
 
                     for attachment[index] in root.attachments : Rectangle {
