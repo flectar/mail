@@ -1366,17 +1366,44 @@ impl RichComposeDocument {
     }
 
     pub fn body_html(&self) -> Option<String> {
-        self.html_for(&self.text)
+        self.html_for(&self.text, &self.styles)
     }
 
-    /// The HTML for the text without the blank lines it ends with: what the
-    /// user wrote, above the original a reply quotes.
-    pub fn body_html_above_quote(&self) -> Option<String> {
-        self.html_for(self.text.trim_end_matches(['\r', '\n']))
+    /// [`Self::body_html`], or the HTML for what the user wrote above the original a reply
+    /// quotes, without the blank lines the text ends with, with the images `file` gives
+    /// another file for written with that one, as photos go out shrunk. They show at the same
+    /// size.
+    pub(crate) fn body_html_with(
+        &self,
+        above_quote: bool,
+        file: impl Fn(&InlineImage) -> Option<Arc<[u8]>>,
+    ) -> Option<String> {
+        let styles = self
+            .styles
+            .iter()
+            .map(|run| {
+                let mut run = run.clone();
+                if let Some(image) = &run.style.image
+                    && let Some(data) = file(image)
+                {
+                    run.style.image = Some(Arc::new(InlineImage {
+                        data,
+                        ..InlineImage::clone(image)
+                    }));
+                }
+                run
+            })
+            .collect::<Vec<_>>();
+        let text = if above_quote {
+            self.text.trim_end_matches(['\r', '\n'])
+        } else {
+            &self.text
+        };
+        self.html_for(text, &styles)
     }
 
-    /// The HTML for `text`, the document's text or the start of it.
-    fn html_for(&self, text: &str) -> Option<String> {
+    /// The HTML for `text`, the document's text or the start of it, in `styles`.
+    fn html_for(&self, text: &str, styles: &[ComposeStyleRun]) -> Option<String> {
         if text.trim().is_empty() {
             return None;
         }
@@ -1400,7 +1427,7 @@ impl RichComposeDocument {
                         open = Some(OpenHtmlBlock::Bullets);
                     }
                     append_list_item_start(&mut html, align);
-                    append_inline_html(&mut html, &self.text, &self.styles, content);
+                    append_inline_html(&mut html, &self.text, styles, content);
                     html.push_str("</li>");
                 }
                 Some(LineBlock::Number(number)) => {
@@ -1419,7 +1446,7 @@ impl RichComposeDocument {
                     }
                     open = Some(OpenHtmlBlock::Numbers { next: number + 1 });
                     append_list_item_start(&mut html, align);
-                    append_inline_html(&mut html, &self.text, &self.styles, content);
+                    append_inline_html(&mut html, &self.text, styles, content);
                     html.push_str("</li>");
                 }
                 Some(LineBlock::Quote) => {
@@ -1428,11 +1455,11 @@ impl RichComposeDocument {
                         html.push_str("<blockquote>");
                         open = Some(OpenHtmlBlock::Quote);
                     }
-                    append_line_html(&mut html, &self.text, &self.styles, content, align);
+                    append_line_html(&mut html, &self.text, styles, content, align);
                 }
                 None => {
                     close_html_block(&mut html, &mut open);
-                    append_line_html(&mut html, &self.text, &self.styles, content, align);
+                    append_line_html(&mut html, &self.text, styles, content, align);
                 }
             }
             line_start += line.len() + 1;
@@ -4885,6 +4912,41 @@ mod tests {
         );
         // Files that aren't images, and images in formats mail doesn't show, aren't taken.
         assert!(InlineImage::from_file_bytes(b"not an image".to_vec(), "").is_none());
+    }
+
+    #[test]
+    fn images_can_go_out_with_other_files_at_the_same_size() {
+        use base64::Engine;
+        let mut document = RichComposeDocument::default();
+        document.load("A\n\n", 1, 1);
+        document.insert_image(InlineImage::from_file_bytes(png(40, 20), "Chart").unwrap());
+        document.insert_image(InlineImage::from_file_bytes(png(30, 30), "").unwrap());
+        let swapped = document.images().next().unwrap().id;
+        let smaller: Arc<[u8]> = png(4, 2).into();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&smaller);
+        let swap = |image: &InlineImage| (image.id == swapped).then(|| Arc::clone(&smaller));
+        let html = document.body_html_with(false, swap).unwrap();
+        // The other file, at the size the image shows, and the image left as it was.
+        assert!(
+            html.contains(&format!(
+                "<img src=\"data:image/png;base64,{encoded}\" alt=\"Chart\" width=\"40\" \
+                 height=\"20\""
+            )),
+            "{html}"
+        );
+        assert_eq!(html.matches("<img ").count(), 2);
+        assert!(html.ends_with("<div><br></div><div><br></div>"), "{html}");
+        let above = document.body_html_with(true, swap).unwrap();
+        assert!(above.contains(&encoded) && !above.ends_with("<div><br></div>"));
+        // The document keeps its own files.
+        assert_eq!(
+            document.images().next().unwrap().data.len(),
+            png(40, 20).len()
+        );
+        assert_eq!(
+            document.body_html_with(false, |_| None),
+            document.body_html()
+        );
     }
 
     #[test]

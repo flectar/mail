@@ -3,7 +3,7 @@ import { SettingsSelectRow } from "settings-components.slint";
 import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow, SpellingLanguage } from "../models.slint";
 import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } from "composer-fields.slint";
-import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, ImageResizeFrame, LinkEditor } from "composer-actions.slint";
+import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerPhotos, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, ImageResizeFrame, LinkEditor } from "composer-actions.slint";
 import { EmailTemplates } from "email-templates.slint";
 import { TypeScale } from "../typography.slint";
 import { IconButton } from "controls.slint";
@@ -37,6 +37,14 @@ export component EmailComposer inherits Rectangle {
     in property <[ComposeAttachment]> attachments: [];
     in property <[EmailTemplateRow]> templates: [];
     in property <string> attachment-summary: "";
+    // JPEG photos large enough to go out shrunk, in the text and attached: how many, their
+    // size as they go out and at full size, whether they go out shrunk, and whether they're
+    // being shrunk.
+    in property <int> photo-count: 0;
+    in property <string> photo-size: "";
+    in property <string> photo-full-size: "";
+    in-out property <bool> shrink-photos: false;
+    in property <bool> shrinking-photos: false;
     in-out property <string> from-label: @tr("No connected account");
     in property <string> notice: "";
     in property <bool> notice-is-error: false;
@@ -119,6 +127,7 @@ export component EmailComposer inherits Rectangle {
     callback pick-attachments;
     callback insert-images;
     callback remove-attachment(int);
+    callback shrink-photos-toggled(bool);
     callback format-requested(string, string, int, int);
     callback paste-requested(string, int, int) -> bool;
     callback copy-requested(bool, string, int, int) -> bool;
@@ -195,7 +204,8 @@ export component EmailComposer inherits Rectangle {
         ? root.signature-edited || root.subject != root.signature-saved-name
         : root.to != "" || root.cc != "" || root.bcc != ""
             || root.subject != "" || root.body != "" || root.attachments.length > 0 || root.quote != "";
-    private property <bool> can-send: !root.sending && root.selected-account-id > 0 && root.to != "" && (root.body != "" || root.quote != "") && AccountMailPreferences.composer-preferences-ready;
+    // Photos going out shrunk are sent once they are.
+    private property <bool> can-send: !root.sending && !root.shrinking-photos && root.selected-account-id > 0 && root.to != "" && (root.body != "" || root.quote != "") && AccountMailPreferences.composer-preferences-ready;
 
     // Pastes what the clipboard holds with its formatting, or as plain text in the message's
     // style when it holds none.
@@ -995,6 +1005,20 @@ export component EmailComposer inherits Rectangle {
             remove-attachment(index) => { root.remove-attachment(index); }
         }
 
+        if !root.signature-mode : ComposerPhotos {
+            compact: root.compact;
+            count: root.photo-count;
+            size: root.photo-size;
+            full-size: root.photo-full-size;
+            shrink <=> root.shrink-photos;
+            working: root.shrinking-photos;
+            body-color: root.body-color;
+            muted-color: root.muted-color;
+            raised-color: root.raised-color;
+            subtle-border-color: root.subtle-border-color;
+            toggled(on) => { root.shrink-photos-toggled(on); }
+        }
+
         ComposerNotice {
             notice: root.notice;
             notice-is-error: root.notice-is-error;
@@ -1009,6 +1033,7 @@ export component EmailComposer inherits Rectangle {
             can-send: root.can-send;
             has-content: root.has-content;
             sending: root.sending;
+            shrinking-photos: root.shrinking-photos;
             control-hover-color: root.control-hover-color;
             muted-color: root.muted-color;
             raised-color: root.raised-color;

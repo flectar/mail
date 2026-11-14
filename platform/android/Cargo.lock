@@ -1800,6 +1800,7 @@ dependencies = [
  "futures-util",
  "html5ever 0.40.1",
  "image",
+ "jpeg-decoder",
  "keyboard-types 0.8.3",
  "landlock",
  "libc",

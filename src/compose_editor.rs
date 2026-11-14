@@ -111,7 +111,8 @@ pub struct CosmicComposeEditor {
     click_count: u8,
     /// The images the layout shows, by the slot their space's metadata names.
     layout_images: Vec<Arc<InlineImage>>,
-    /// Images decoded at the size they're shown, premultiplied RGBA, by image and size.
+    /// Images decoded at the size they're shown, premultiplied RGBA, by image and size: only
+    /// the size each shows at now.
     image_pixels: HashMap<(u64, u32, u32), Arc<[u8]>>,
 }
 
@@ -1052,11 +1053,18 @@ impl CosmicComposeEditor {
                 let height = (width as f32 * image.height as f32 / image.width.max(1) as f32)
                     .round()
                     .max(1.0) as u32;
-                let pixels = self
-                    .image_pixels
-                    .entry((image.id, width, height))
-                    .or_insert_with(|| decode_image(image, width, height))
-                    .clone();
+                let key = (image.id, width, height);
+                let pixels = match self.image_pixels.get(&key) {
+                    Some(pixels) => pixels.clone(),
+                    None => {
+                        // Only the size it shows at now is kept, as the window or the image
+                        // changes size.
+                        self.image_pixels.retain(|(id, _, _), _| *id != image.id);
+                        let pixels = decode_image(image, width, height);
+                        self.image_pixels.insert(key, pixels.clone());
+                        pixels
+                    }
+                };
                 canvas.image(
                     x.round() as i32,
                     (bottom - height as f32).round() as i32,
@@ -1839,16 +1847,28 @@ fn multiply_alpha(first: u8, second: u8) -> u8 {
 /// premultiplied RGBA. One it can't decode shows as a gray box.
 fn decode_image(image: &InlineImage, width: u32, height: u32) -> Arc<[u8]> {
     let decoded = (|| {
-        let mut decoder = image::ImageReader::new(std::io::Cursor::new(&*image.data))
-            .with_guessed_format()
-            .ok()?
-            .into_decoder()
-            .ok()?;
-        let orientation = image::ImageDecoder::orientation(&mut decoder).ok();
-        let mut picture = image::DynamicImage::from_decoder(decoder).ok()?;
-        if let Some(orientation) = orientation {
-            picture.apply_orientation(orientation);
-        }
+        // A photo is read at little more than the size it shows, rather than all of it.
+        let read = if image.mime_type == "image/jpeg" {
+            crate::photo_shrink::read_jpeg(&image.data, width, height)
+        } else {
+            None
+        };
+        let picture = match read {
+            Some(picture) => picture,
+            None => {
+                let mut decoder = image::ImageReader::new(std::io::Cursor::new(&*image.data))
+                    .with_guessed_format()
+                    .ok()?
+                    .into_decoder()
+                    .ok()?;
+                let orientation = image::ImageDecoder::orientation(&mut decoder).ok();
+                let mut picture = image::DynamicImage::from_decoder(decoder).ok()?;
+                if let Some(orientation) = orientation {
+                    picture.apply_orientation(orientation);
+                }
+                picture
+            }
+        };
         Some(
             picture
                 .resize_exact(width, height, image::imageops::FilterType::Triangle)
@@ -3250,6 +3270,41 @@ mod tests {
         );
         assert_eq!(rendered.content_height, 160.0);
         assert_eq!(image_box(&editor).1, 320.0);
+    }
+
+    #[test]
+    fn photos_show_read_at_their_size_and_keep_only_that_size() {
+        // A photo far larger than it shows: red above, blue below.
+        let picture = image::RgbImage::from_fn(1600, 1200, |_, y| {
+            image::Rgb(if y < 600 { [255, 0, 0] } else { [0, 0, 255] })
+        });
+        let mut jpeg = Vec::new();
+        image::DynamicImage::ImageRgb8(picture)
+            .write_to(
+                &mut std::io::Cursor::new(&mut jpeg),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document.insert_image(InlineImage::from_file_bytes(jpeg, "").unwrap());
+        let mut editor = CosmicComposeEditor::default();
+        let pixels = painted(&mut editor, &document, 200.0, 1.0, spelling_style());
+        let (left, width) = image_box(&editor);
+        assert_eq!(width, 200.0);
+        let middle = (left + width / 2.0) as usize;
+        let at = |y: usize| pixels[y * 200 + middle];
+        assert!(at(20)[0] > 200 && at(20)[2] < 60, "{:?}", at(20));
+        assert!(at(130)[2] > 200 && at(130)[0] < 60, "{:?}", at(130));
+        // As the window narrows, only the size it shows at now is kept.
+        painted(&mut editor, &document, 150.0, 1.0, spelling_style());
+        painted(&mut editor, &document, 120.0, 1.0, spelling_style());
+        let sizes: Vec<_> = editor
+            .image_pixels
+            .keys()
+            .map(|(_, w, h)| (*w, *h))
+            .collect();
+        assert_eq!(sizes, [(120, 90)]);
     }
 
     #[test]

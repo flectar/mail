@@ -14,8 +14,10 @@ use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use std::rc::Weak;
 
 mod message_spelling;
+mod photos;
 pub(crate) use message_spelling::spelling_changed;
 use message_spelling::{MessageSpelling, apply_spelling_state};
+use photos::MessagePhotos;
 
 thread_local! {
     static COMPOSERS: RefCell<Option<Rc<Composers>>> = const { RefCell::new(None) };
@@ -35,6 +37,8 @@ pub(super) struct Composers {
     state: Rc<RefCell<InboxState>>,
     runtime: tokio::runtime::Handle,
     documents: Arc<dyn documents::DocumentProvider>,
+    /// Where shrunk copies of attached photos are kept while their messages are open.
+    temp_dir: PathBuf,
     templates: RefCell<Vec<Snippet>>,
     send_updates: UiSender<ComposeSendUpdate>,
     sessions: RefCell<Vec<Rc<ComposeSession>>>,
@@ -92,6 +96,7 @@ pub(super) struct ComposeSession {
     /// Bumped for each sending-account change; older results are dropped.
     preferences_generation: Cell<u64>,
     spelling: MessageSpelling,
+    photos: MessagePhotos,
     /// Closed, and waiting for the event loop to let its window go.
     disposed: Cell<bool>,
 }
@@ -180,6 +185,7 @@ pub(super) fn install(
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,
     documents: Arc<dyn documents::DocumentProvider>,
+    temp_dir: PathBuf,
     pop_out: bool,
 ) -> Rc<Composers> {
     let (send_tx, send_rx) = bounded_ui_channel::<ComposeSendUpdate>();
@@ -189,6 +195,7 @@ pub(super) fn install(
         state: Rc::clone(state),
         runtime: runtime.clone(),
         documents,
+        temp_dir,
         templates: RefCell::default(),
         send_updates: UiSender::new(
             send_tx,
@@ -623,6 +630,7 @@ impl Composers {
             signature_target: RefCell::default(),
             preferences_generation: Cell::new(0),
             spelling: MessageSpelling::default(),
+            photos: MessagePhotos::default(),
             disposed: Cell::new(false),
         });
         session.connect();
@@ -915,10 +923,12 @@ impl Composers {
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
                 ComposeFile {
+                    shrinkable: crate::photo_shrink::can_shrink_file(&path),
                     path,
                     filename: attachment.filename.clone(),
                     size,
                     _import: None,
+                    original: None,
                 }
             })
             .collect();
@@ -1064,6 +1074,7 @@ impl ComposeSession {
         }
         self.render_quote(host);
         self.check_spelling_soon();
+        self.refresh_photos();
     }
 
     /// Draw the visible part of the original below the editor, while it is
@@ -1215,6 +1226,7 @@ impl ComposeSession {
         host.preferences().invoke_composer_reset();
         ui.set_editor_tiles(ModelRc::default());
         apply_compose_files(&ui, &[]);
+        photos::apply_photos(&ui, &photos::PhotoSummary::default());
         apply_compose_contacts(&ui, &[]);
         ui.set_sending(false);
         ui.set_mode("new".into());
@@ -1461,6 +1473,7 @@ impl ComposeSession {
             return;
         }
         self.files.borrow_mut().clear();
+        self.photos.clear();
         // A picker still open for this composer must not attach to another.
         self.generation.set(self.generation.get().wrapping_add(1));
         self.preferences_generation
@@ -1574,6 +1587,12 @@ impl ComposeSession {
         ui.on_remove_attachment(move |index| {
             if let Some(session) = weak.upgrade() {
                 session.remove_attachment(index);
+            }
+        });
+        let weak = self.reference();
+        ui.on_shrink_photos_toggled(move |on| {
+            if let Some(session) = weak.upgrade() {
+                session.set_shrink_photos(on);
             }
         });
         let weak = self.reference();
@@ -1893,6 +1912,7 @@ impl ComposeSession {
             );
         }
         self.check_spelling_soon();
+        self.refresh_photos();
     }
 
     /// Pastes the HTML on the clipboard over the selection, with the formatting the composer
@@ -1939,7 +1959,7 @@ impl ComposeSession {
                 .sum::<u64>();
             let mut document = self.document.borrow_mut();
             let carried = |document: &RichComposeDocument| -> u64 {
-                files.saturating_add(image_bytes(document))
+                files.saturating_add(self.photos.image_bytes(document))
             };
             let before = carried(&document);
             let Some(mut selection) = document.paste_html(html) else {
@@ -1962,6 +1982,7 @@ impl ComposeSession {
             );
         }
         self.check_spelling_soon();
+        self.refresh_photos();
         true
     }
 
@@ -1996,6 +2017,7 @@ impl ComposeSession {
             );
         }
         self.check_spelling_soon();
+        self.refresh_photos();
         true
     }
 
@@ -2037,6 +2059,7 @@ impl ComposeSession {
                 .map(|edited| document.edit_state(edited.mark))
         };
         self.check_spelling_soon();
+        self.refresh_photos();
         // Undoing Edit puts the drawn original back, and redoing it moves the
         // original into the text again.
         let ui = host.ui();
@@ -2245,12 +2268,13 @@ impl ComposeSession {
             .iter()
             .map(|file| file.size)
             .sum::<u64>()
-            .saturating_add(image_bytes(&self.document.borrow()));
+            .saturating_add(self.photos.image_bytes(&self.document.borrow()));
         let mut added = 0usize;
         let mut skipped = 0usize;
+        let mut shrinking = Vec::new();
         for document in new {
             let path = std::fs::canonicalize(&document.path).unwrap_or(document.path);
-            if files.iter().any(|file| file.path == path) {
+            if files.iter().any(|file| file.holds(&path)) || self.photos.waiting_for(&path) {
                 skipped += 1;
                 continue;
             }
@@ -2258,45 +2282,39 @@ impl ComposeSession {
                 skipped += 1;
                 continue;
             };
-            if !metadata.is_file()
-                || total_size.saturating_add(metadata.len()) > MAX_COMPOSE_ATTACHMENT_BYTES
-            {
-                skipped += 1;
-                continue;
-            }
-            let Some(filename) = document.filename else {
+            let Some(filename) = document.filename.filter(|_| metadata.is_file()) else {
                 skipped += 1;
                 continue;
             };
-            total_size += metadata.len();
-            files.push(ComposeFile {
+            let file = ComposeFile {
+                shrinkable: crate::photo_shrink::can_shrink_file(&path),
                 path,
                 filename,
                 size: metadata.len(),
                 _import: document.import.map(Rc::new),
-            });
+                original: None,
+            };
+            // A photo going out shrunk goes in at the size it'll have.
+            if file.shrinkable && self.photos.on() {
+                shrinking.push(file);
+                continue;
+            }
+            if total_size.saturating_add(file.size) > MAX_COMPOSE_ATTACHMENT_BYTES {
+                skipped += 1;
+                continue;
+            }
+            total_size += file.size;
+            files.push(file);
             added += 1;
         }
         apply_compose_files(&ui, &files);
-        if skipped == 0 {
-            ui.set_notice(
-                if added == 1 {
-                    UiMessage::plain("Added 1 attachment.")
-                } else {
-                    UiMessage::detail("Added {} attachments.", added)
-                },
-                false,
-            );
-        } else {
-            ui.set_notice(
-                UiMessage::arguments(
-                    "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).",
-                    added,
-                    skipped,
-                ),
-                added == 0,
-            );
+        drop(files);
+        if shrinking.is_empty() || added + skipped > 0 {
+            let (notice, error) = attachments_notice(added, skipped);
+            ui.set_notice(notice, error);
         }
+        self.photos.attach_when_shrunk(shrinking);
+        self.refresh_photos();
     }
 
     /// Files dragged over the message's window show where they'll go, until they're dropped
@@ -2453,7 +2471,7 @@ impl ComposeSession {
                 .map(|file| file.size)
                 .sum::<u64>();
             files
-                .saturating_add(image_bytes(&self.document.borrow()))
+                .saturating_add(self.photos.image_bytes(&self.document.borrow()))
                 .saturating_add(image.data.len() as u64)
                 <= MAX_COMPOSE_ATTACHMENT_BYTES
         };
@@ -2481,6 +2499,8 @@ impl ComposeSession {
             let ui = host.ui();
             apply_compose_files(&ui, &files);
             ui.set_notice(UiMessage::plain("Attachment removed."), false);
+            drop(files);
+            self.refresh_photos();
         }
     }
 
@@ -2538,7 +2558,7 @@ impl ComposeSession {
                 .iter()
                 .map(|file| file.size)
                 .sum::<u64>()
-                .saturating_add(image_bytes(&session.document.borrow()));
+                .saturating_add(session.photos.image_bytes(&session.document.borrow()));
             let mut failure = None;
             let mut too_large = false;
             for file in fetched.unwrap_or_else(|error| vec![Err(error)]) {
@@ -2550,10 +2570,12 @@ impl ComposeSession {
                         }
                         total_size += size;
                         files.push(ComposeFile {
+                            shrinkable: crate::photo_shrink::can_shrink_file(&path),
                             path,
                             filename,
                             size,
                             _import: None,
+                            original: None,
                         });
                     }
                     Err(error) => {
@@ -2574,6 +2596,8 @@ impl ComposeSession {
             };
             let error = notice != UiMessage::EMPTY;
             ui.set_notice(notice, error);
+            drop(files);
+            session.refresh_photos();
         });
     }
 
@@ -2652,6 +2676,10 @@ impl ComposeSession {
         if send && !preferences.get_composer_preferences_ready() {
             return;
         }
+        // Photos going out shrunk are sent once they are.
+        if send && self.photos.on() && self.photos.busy() {
+            return;
+        }
         if account_id <= 0 {
             ui.set_notice(
                 UiMessage::plain("Choose the account this message should be sent from."),
@@ -2682,11 +2710,10 @@ impl ComposeSession {
             }
             // Blank lines at the end give way to the one above the quote, in
             // both parts, so a reopened draft finds where the quote starts.
-            let html = if self.quote.borrow().is_some() {
-                document.body_html_above_quote()
-            } else {
-                document.body_html()
-            };
+            // Photos go out shrunk when the message's photos do.
+            let html = document.body_html_with(self.quote.borrow().is_some(), |image| {
+                self.photos.shrunk(image)
+            });
             // Mail read as plain text names each image in its place. A draft keeps the
             // placeholders, which the HTML's images reopen into.
             (html, send.then(|| document.text_with_image_descriptions()))
@@ -3384,6 +3411,26 @@ struct NewAttachment {
     import: Option<documents::ImportedDocument>,
 }
 
+/// What adding files did, and whether that's an error: none of them went in.
+fn attachments_notice(added: usize, skipped: usize) -> (UiMessage, bool) {
+    if skipped == 0 {
+        let notice = if added == 1 {
+            UiMessage::plain("Added 1 attachment.")
+        } else {
+            UiMessage::detail("Added {} attachments.", added)
+        };
+        return (notice, false);
+    }
+    (
+        UiMessage::arguments(
+            "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).",
+            added,
+            skipped,
+        ),
+        added == 0,
+    )
+}
+
 /// Whether a file's name says it's a picture the text can show.
 #[cfg(desktop)]
 fn is_image_name(path: &std::path::Path) -> bool {
@@ -3394,11 +3441,6 @@ fn is_image_name(path: &std::path::Path) -> bool {
                 .iter()
                 .any(|known| extension.eq_ignore_ascii_case(known))
         })
-}
-
-/// The size of the images in a message's text, which count with its attachments.
-fn image_bytes(document: &RichComposeDocument) -> u64 {
-    document.images().map(|image| image.data.len() as u64).sum()
 }
 
 #[cfg(all(test, desktop))]
@@ -3415,14 +3457,14 @@ mod tests {
         }
     }
 
-    struct Setup {
-        app: AppWindow,
-        composers: Rc<Composers>,
-        _runtime: tokio::runtime::Runtime,
-        _dir: tempfile::TempDir,
+    pub(super) struct Setup {
+        pub(super) app: AppWindow,
+        pub(super) composers: Rc<Composers>,
+        pub(super) _runtime: tokio::runtime::Runtime,
+        pub(super) _dir: tempfile::TempDir,
     }
 
-    fn setup() -> Setup {
+    pub(super) fn setup() -> Setup {
         slint::platform::set_platform(Box::new(Windows)).unwrap();
         let app = AppWindow::new().unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -3462,6 +3504,7 @@ mod tests {
             &state,
             runtime.handle(),
             documents::default_provider(),
+            std::env::temp_dir(),
             true,
         );
 

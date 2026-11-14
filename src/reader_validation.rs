@@ -803,6 +803,7 @@ fn mailto_links_open_without_losing_the_draft(
         state,
         runtime,
         crate::documents::default_provider(),
+        std::env::temp_dir(),
         false,
     );
     mailto_links::install(app, composers);

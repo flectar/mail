@@ -286,6 +286,17 @@ and left empty it marks the image as decoration. Right-clicking an image
 offers both in the editor menu. On the desktop, dragging a corner of a
 selected image sizes it too, up to its own width.
 
+When a message holds JPEG photos larger than 1600 pixels across or down, in
+the text or attached, a **Shrink photos** switch shows above the message's
+buttons with their number and size. Turned on, each goes out at 1600 pixels
+on its longest side, and the row shows the size they come to. Photos stay
+upright and keep their colors, and leave out the other details cameras save
+in them, such as where they were taken. Photos added while it's on go in
+shrunk, so more fit in a message's 25 MB. The message shows the same as
+before, and turning the switch off brings back the photos at full size while
+the message is open. It starts off for each message, and other images, such
+as screenshots and animations, go out as they are.
+
 Messages carry the formatting in HTML that mail apps widely support. Sizes
 scale with the reader's own text size, and each font names common
 alternatives in case the reader lacks it. In a dark theme, the composer shows
