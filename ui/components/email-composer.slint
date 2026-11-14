@@ -27,6 +27,10 @@ export component EmailComposer inherits Rectangle {
     in-out property <string> body;
     in property <bool> sending: false;
     in property <bool> drop-hint: false;
+    // For a signature: whether its text or formatting changed since it opened, and the name
+    // it was saved with.
+    in property <bool> signature-edited: false;
+    in property <string> signature-saved-name: "";
     in property <[AccountRow]> accounts: [];
     in-out property <int> selected-account-id: -1;
     in property <[ComposeContact]> contact-suggestions: [];
@@ -111,6 +115,7 @@ export component EmailComposer inherits Rectangle {
     callback pop-out;
     callback back-requested;
     callback submit(bool);
+    callback save-signature();
     callback pick-attachments;
     callback insert-images;
     callback remove-attachment(int);
@@ -184,8 +189,12 @@ export component EmailComposer inherits Rectangle {
             body-input.focus();
         }
     }
-    private property <bool> has-content: root.to != "" || root.cc != "" || root.bcc != ""
-        || root.subject != "" || root.body != "" || root.attachments.length > 0 || root.quote != "";
+    // A signature being written, in place of a message: "signature" mode.
+    private property <bool> signature-mode: root.mode == "signature";
+    private property <bool> has-content: root.signature-mode
+        ? root.signature-edited || root.subject != root.signature-saved-name
+        : root.to != "" || root.cc != "" || root.bcc != ""
+            || root.subject != "" || root.body != "" || root.attachments.length > 0 || root.quote != "";
     private property <bool> can-send: !root.sending && root.selected-account-id > 0 && root.to != "" && (root.body != "" || root.quote != "") && AccountMailPreferences.composer-preferences-ready;
 
     // Pastes what the clipboard holds with its formatting, or as plain text in the message's
@@ -281,8 +290,8 @@ export component EmailComposer inherits Rectangle {
             // The typing proxy starts where the visible caret is.
             body-input.set-selection-offsets(root.selection-start, root.selection-end);
             root.editor-layout-changed();
-            // The recipients' row takes focus only while it is empty.
-            if root.to != "" {
+            // The recipients' row takes focus only while it is empty. A signature has none.
+            if root.to != "" || root.signature-mode {
                 body-input.focus();
             }
         }
@@ -359,7 +368,7 @@ export component EmailComposer inherits Rectangle {
             request-close => { root.request-close(); }
         }
 
-        ComposerFromRow {
+        if !root.signature-mode : ComposerFromRow {
             accounts: root.accounts;
             selected-account-id <=> root.selected-account-id;
             from-label <=> root.from-label;
@@ -377,7 +386,7 @@ export component EmailComposer inherits Rectangle {
             }
         }
 
-        SettingsSelectRow {
+        if !root.signature-mode : SettingsSelectRow {
             compact: root.compact;
             title: @tr("From");
             description: @tr("Verified sender identity");
@@ -391,7 +400,7 @@ export component EmailComposer inherits Rectangle {
             }
         }
 
-        SettingsSelectRow {
+        if !root.signature-mode : SettingsSelectRow {
             compact: root.compact;
             title: @tr("Signature");
             description: AccountMailPreferences.composer-security;
@@ -400,7 +409,7 @@ export component EmailComposer inherits Rectangle {
             title-color: root.title-color; description-color: root.secondary-color;
             selected(index, value) => { if AccountMailPreferences.composer-preferences-ready { AccountMailPreferences.composer-signature(index); } }
         }
-        recipients := ComposerRecipients {
+        if !root.signature-mode : ComposerRecipients {
             open: root.open;
             to <=> root.to;
             cc <=> root.cc;
@@ -423,13 +432,14 @@ export component EmailComposer inherits Rectangle {
             }
         }
 
-        Rectangle {
+        if !root.signature-mode : Rectangle {
             height: 1px;
             background: root.subtle-border-color;
         }
 
         ComposerSubject {
             subject <=> root.subject;
+            naming-signature: root.signature-mode;
             accent-color: root.accent-color;
             background-color: root.background-color;
             muted-color: root.muted-color;
@@ -438,6 +448,7 @@ export component EmailComposer inherits Rectangle {
 
         ComposerToolbar {
             compact: root.compact;
+            templates-shown: !root.signature-mode;
             accent-background: root.accent-background;
             accent-color: root.accent-color;
             control-hover-color: root.control-hover-color;
@@ -607,6 +618,10 @@ export component EmailComposer inherits Rectangle {
                         if ((event.modifiers.control || event.modifiers.meta) && event.text.to-lowercase() == "z") {
                             root.history-requested(event.modifiers.shift ? "redo" : "undo");
                             self.set-selection-offsets(root.selection-start, root.selection-end);
+                            return accept;
+                        }
+                        if ((event.modifiers.control || event.modifiers.meta) && event.text == Key.Return && root.signature-mode) {
+                            root.save-signature();
                             return accept;
                         }
                         if ((event.modifiers.control || event.modifiers.meta) && event.text == Key.Return && root.can-send) {
@@ -967,7 +982,7 @@ export component EmailComposer inherits Rectangle {
             }
         }
 
-        ComposerAttachments {
+        if !root.signature-mode : ComposerAttachments {
             compact: root.compact;
             attachments: root.attachments;
             accent-color: root.accent-color;
@@ -999,7 +1014,9 @@ export component EmailComposer inherits Rectangle {
             raised-color: root.raised-color;
             secondary-color: root.secondary-color;
             subtle-border-color: root.subtle-border-color;
+            signature: root.signature-mode;
             submit(send-now) => { root.submit(send-now); }
+            save-signature => { root.save-signature(); }
             pick-attachments => { root.pick-attachments(); }
             request-close => { root.request-close(); }
         }
@@ -1012,6 +1029,7 @@ export component EmailComposer inherits Rectangle {
         width: parent.width;
         height: parent.height;
         open: root.confirm-discard;
+        signature: root.signature-mode;
         background-color: root.background-color;
         frame-border-color: root.frame-border-color;
         secondary-color: root.secondary-color;

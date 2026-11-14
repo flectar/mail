@@ -19,6 +19,8 @@ pub(crate) const CODE: u8 = 1 << 4;
 pub(crate) const QUOTE_MARKER: &str = "│ ";
 /// Marks HTML the composer copied, which pastes back as it was.
 const COPIED_MARK: &str = "<!--flectar-mail-composer-->";
+/// The line a signature starts under, after a blank line, as mail has long marked them.
+pub(crate) const SIGNATURE_SEPARATOR: &str = "\n\n-- \n";
 /// Holds an image's place in the text, as in other rich text: its style carries the image.
 pub(crate) const IMAGE_PLACEHOLDER: char = '\u{fffc}';
 /// Images larger than this, in pixels across or down, aren't taken.
@@ -498,6 +500,8 @@ pub struct RichComposeDocument {
     text_changes: VecDeque<TextChange>,
     /// Positions in the text from this revision on can be followed through `text_changes`.
     text_changes_since: u64,
+    /// The revision when it was last opened or saved, to tell whether it changed since.
+    saved_revision: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -517,6 +521,27 @@ impl RichComposeDocument {
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Takes the text and formatting as they are for what was last opened or saved.
+    pub(crate) fn mark_saved(&mut self) {
+        self.saved_revision = self.revision;
+    }
+
+    /// Whether the text or its formatting changed since it was last opened or saved.
+    pub(crate) fn changed_since_saved(&self) -> bool {
+        self.revision != self.saved_revision
+    }
+
+    /// Opens a signature's HTML to write, the composer's own as it was and other HTML with
+    /// the formatting pasting keeps, with nothing to undo.
+    pub(crate) fn load_signature_html(&mut self, html: &str) -> ComposeSelection {
+        let selection = match signature_runs(html, &self.base) {
+            Some((text, styles)) => self.reopen(text, styles),
+            None => self.load("", 0, 0),
+        };
+        self.mark_saved();
+        selection
     }
 
     /// Sets the default text style's font and size. What's typed into an empty message starts
@@ -858,6 +883,82 @@ impl RichComposeDocument {
         }
         let caret = start + text.len();
         Some(self.replace_runs(start..end, &text, &runs, caret))
+    }
+
+    /// Swaps the signature block `old`, which the text holds once, for the signature `html`
+    /// under a `-- ` line, in its formatting, or puts that block at `at` when there's no old
+    /// one, as one undoable edit that leaves the caret where it was. Returns the block it put
+    /// in, which marks the signature for the next swap, or `None` when `html` holds no text.
+    pub(crate) fn replace_signature(
+        &mut self,
+        old: Option<&str>,
+        at: usize,
+        html: Option<&str>,
+    ) -> (ComposeSelection, Option<String>) {
+        let range =
+            match old.and_then(|old| self.text.find(old).map(|start| start..start + old.len())) {
+                Some(range) => range,
+                None => {
+                    let at = valid_offset(&self.text, to_i32(at));
+                    at..at
+                }
+            };
+        let signature =
+            html.and_then(|html| signature_runs(html, &self.base))
+                .map(|(text, runs)| {
+                    // A signature takes the message's font and size where it names none, as mail
+                    // apps' signatures match the default message font.
+                    let runs = runs
+                        .into_iter()
+                        .map(|mut run| {
+                            if run.style.family == FontFamily::Default {
+                                run.style.family = self.base.family;
+                            }
+                            if run.style.size == TextSize::Normal {
+                                run.style.size = self.base.size;
+                            }
+                            run
+                        })
+                        .collect::<Vec<_>>();
+                    (text, runs)
+                });
+        let mut block = String::new();
+        let mut runs = Vec::new();
+        if let Some((text, signature_runs)) = signature {
+            block.push_str(SIGNATURE_SEPARATOR);
+            runs.push(ComposeStyleRun {
+                range: 0..SIGNATURE_SEPARATOR.len(),
+                style: self.base.clone(),
+            });
+            let shift = block.len();
+            block.push_str(&text);
+            runs.extend(signature_runs.into_iter().map(|run| ComposeStyleRun {
+                range: run.range.start + shift..run.range.end + shift,
+                style: run.style,
+            }));
+        }
+        if range.is_empty() && block.is_empty() {
+            return (self.selection(), None);
+        }
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let follow = |offset: usize| {
+            if offset <= range.start {
+                offset
+            } else if offset >= range.end {
+                offset - range.len() + block.len()
+            } else {
+                range.start
+            }
+        };
+        let (anchor, cursor) = (follow(anchor), follow(cursor));
+        let selection = self.replace_runs(range, &block, &runs, cursor);
+        let selection = if anchor == cursor {
+            selection
+        } else {
+            self.update_selection(to_i32(anchor), to_i32(cursor))
+        };
+        (selection, (!block.is_empty()).then_some(block))
     }
 
     /// Puts `image` in place of the selection, as one undoable edit with the caret after it,
@@ -2915,6 +3016,41 @@ impl HtmlImport {
     }
 }
 
+/// A signature's text and formatting: the composer's own HTML as it wrote it, and other HTML
+/// with the formatting pasting keeps, without the blank space around it. `None` when it holds
+/// no text.
+fn signature_runs(html: &str, base: &CharacterStyle) -> Option<(String, Vec<ComposeStyleRun>)> {
+    import_body_html(html)
+        .or_else(|| crate::compose_paste::styled_text(html, base))
+        .map(|(text, runs)| trimmed_runs(text, runs))
+        .filter(|(text, _)| !text.is_empty())
+}
+
+/// What a signature's HTML reads as, pictures named in their places, for its preview.
+pub(crate) fn signature_preview(html: &str) -> String {
+    let mut document = RichComposeDocument::default();
+    document.load_signature_html(html);
+    document.text_with_image_descriptions()
+}
+
+/// `text` without the blank space around it, and `runs` cut to what's left.
+fn trimmed_runs(text: String, runs: Vec<ComposeStyleRun>) -> (String, Vec<ComposeStyleRun>) {
+    let start = text.len() - text.trim_start().len();
+    let end = text.trim_end().len().max(start);
+    let runs = runs
+        .into_iter()
+        .filter_map(|run| {
+            let range =
+                run.range.start.clamp(start, end) - start..run.range.end.clamp(start, end) - start;
+            (!range.is_empty()).then_some(ComposeStyleRun {
+                range,
+                style: run.style,
+            })
+        })
+        .collect();
+    (text[start..end].to_owned(), runs)
+}
+
 fn import_body_html(html: &str) -> Option<(String, Vec<ComposeStyleRun>)> {
     let tokenizer = Tokenizer::new(HtmlTokenSink(RefCell::default()), Default::default());
     let input = BufferQueue::default();
@@ -4912,6 +5048,99 @@ mod tests {
         untouched.load("Kept", 4, 4);
         assert!(untouched.load_foreign_html("<div><br></div>").is_none());
         assert_eq!(untouched.text(), "Kept");
+    }
+
+    #[test]
+    fn signatures_go_in_with_their_formatting_and_swap_in_place() {
+        use base64::Engine;
+        let logo = base64::engine::general_purpose::STANDARD.encode(png(60, 20));
+        // One the composer wrote, with a picture, and an older plain one.
+        let mut source = RichComposeDocument::default();
+        source.load("Zoë Ortiz\nEngineer\n", 0, 0);
+        source.format("bold", "Zoë Ortiz\nEngineer\n", 0, "Zoë Ortiz".len() as i32);
+        let end = source.text().len() as i32;
+        source.update_selection(end, end);
+        source.insert_image(InlineImage::from_file_bytes(png(60, 20), "Logo").unwrap());
+        let rich = source.body_html().unwrap();
+        assert!(rich.contains(&logo[..20]));
+        let plain = "<div>Pat Lee<br>Support</div>";
+
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        let (selection, block) = document.replace_signature(None, 0, Some(&rich));
+        let block = block.unwrap();
+        assert_eq!(block, "\n\n-- \nZoë Ortiz\nEngineer\n\u{fffc}");
+        assert_eq!(document.text(), block);
+        // The caret stays above it, where the message is written.
+        assert_eq!((selection.start, selection.end), (0, 0));
+        let name = document.text().find("Zoë").unwrap();
+        assert_eq!(document.style_at(name).unwrap().marks, BOLD);
+        assert_eq!(&*document.images().next().unwrap().alt, "Logo");
+        assert_eq!(document.style_at(0).unwrap().marks, 0);
+
+        // Writing goes on above it, and another signature takes its place.
+        let written = format!("Hello{}", document.text());
+        document.synchronize(&written, 5, 5);
+        let (selection, swapped) = document.replace_signature(Some(&block), 0, Some(plain));
+        let swapped = swapped.unwrap();
+        assert_eq!(document.text(), "Hello\n\n-- \nPat Lee\nSupport");
+        assert_eq!(swapped, "\n\n-- \nPat Lee\nSupport");
+        assert_eq!((selection.start, selection.end), (5, 5));
+        assert!(document.images().next().is_none());
+
+        // One undo brings the first back, and no signature takes it out.
+        document.history("undo");
+        assert_eq!(document.text(), format!("Hello{block}"));
+        document.history("redo");
+        let (_, none) = document.replace_signature(Some(&swapped), 0, None);
+        assert_eq!((document.text(), none), ("Hello", None));
+        // Nothing to swap is no edit.
+        let (_, none) = document.replace_signature(None, 5, Some("<div> </div>"));
+        assert_eq!((document.text(), none), ("Hello", None));
+        document.history("undo");
+        assert_eq!(document.text(), format!("Hello{swapped}"));
+    }
+
+    #[test]
+    fn signatures_open_to_write_and_preview_with_their_pictures() {
+        // Written in the composer, plain unless formatted.
+        let mut written = RichComposeDocument::default();
+        written.load("Zoë Ortiz\n", 0, 0);
+        written.format("color:#0b5394", "Zoë Ortiz\n", 0, "Zoë Ortiz".len() as i32);
+        let end = written.text().len() as i32;
+        written.update_selection(end, end);
+        written.insert_image(InlineImage::from_file_bytes(png(60, 20), "Logo").unwrap());
+        let html = written.body_html().unwrap();
+
+        let mut editor = RichComposeDocument::default();
+        editor.load_signature_html(&html);
+        assert_eq!(editor.text(), "Zoë Ortiz\n\u{fffc}");
+        assert!(!editor.changed_since_saved());
+        assert!(editor.history("undo").is_none());
+        editor.format("bold", "Zoë Ortiz\n\u{fffc}", 0, 3);
+        assert!(editor.changed_since_saved());
+        editor.mark_saved();
+        assert!(!editor.changed_since_saved());
+
+        assert_eq!(signature_preview(&html), "Zoë Ortiz\n[image: Logo]");
+        assert_eq!(
+            signature_preview("<div>Pat Lee<br>Support</div>"),
+            "Pat Lee\nSupport"
+        );
+        assert_eq!(signature_preview("<div> </div>"), "");
+
+        // In a message, plain text takes the message's font and size, and set ones stay.
+        let mut message = RichComposeDocument::default();
+        message.set_base_style(FontFamily::Serif, TextSize::Large);
+        message.load("", 0, 0);
+        let (_, block) = message.replace_signature(None, 0, Some(&html));
+        assert!(block.is_some());
+        let name = message.text().find("Zoë").unwrap();
+        let style = message.style_at(name).unwrap();
+        assert_eq!(
+            (style.family, style.size, style.color),
+            (FontFamily::Serif, TextSize::Large, Some(0x0b5394))
+        );
     }
 
     #[test]

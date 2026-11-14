@@ -29,7 +29,6 @@ export global AccountMailPreferences {
     in-out property <[string]> default-names;
     in-out property <int> editing-index: -1;
     in-out property <string> editing-id;
-    in-out property <string> signature-name;
     in-out property <string> signature-text;
     in-out property <int> new-index: 0;
     in-out property <int> reply-index: 0;
@@ -55,7 +54,8 @@ export global AccountMailPreferences {
     in-out property <bool> sender-form-editing: false;
     callback load(int);
     callback edit-signature(int);
-    callback save-signature;
+    // Opens the chosen signature, or a new one, in the composer to write.
+    callback open-signature(bool);
     callback delete-signature;
     callback save-defaults;
     callback refresh-sender-identities;
@@ -180,17 +180,29 @@ export component AccountMailPreferencesPanel inherits OnScreenSurface {
                 }
                 Rectangle { height: 1px; background: AppTheme.input-border; }
                 SettingsSelectRow {
-                    compact: root.compact; title: @tr("Edit signature"); description: @tr("Saved separately for each account.");
+                    compact: root.compact; title: @tr("Signature"); description: @tr("Saved separately for each account.");
                     choices: AccountMailPreferences.signature-names; selected-index: AccountMailPreferences.editing-index;
                     title-color: AppTheme.heading; description-color: AppTheme.secondary;
                     selected(index, value) => { AccountMailPreferences.edit-signature(index); }
                 }
-                Button { text: @tr("New signature"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.edit-signature(-1); } }
-                LineEdit { text <=> AccountMailPreferences.signature-name; input-label: @tr("Signature name"); placeholder-text: @tr("Signature name, for example Work"); enabled: !AccountMailPreferences.busy; }
-                TextEdit { wrap: word-wrap; height: 160px; text <=> AccountMailPreferences.signature-text; placeholder-text: @tr("Your name\nRole · Company\nPhone · Website"); enabled: !AccountMailPreferences.busy; }
-                Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Plain text works in every email client. You can format the inserted signature in the composer."); color: AppTheme.secondary; wrap: word-wrap; }
+                if AccountMailPreferences.editing-id != "" : Rectangle {
+                    min-height: signature-preview.preferred-height + 20px;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: AppTheme.input-border;
+                    signature-preview := Text {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        text: AccountMailPreferences.signature-text;
+                        color: AppTheme.body;
+                        wrap: word-wrap;
+                        accessible-label: @tr("Signature preview");
+                    }
+                }
+                Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Signatures can have formatting and pictures. They open in the composer to write."); color: AppTheme.secondary; wrap: word-wrap; }
                 HorizontalBox {
-                    Button { text: @tr("Save signature"); primary: true; enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.save-signature(); } }
+                    Button { text: @tr("Edit signature"); primary: true; enabled: !AccountMailPreferences.busy && AccountMailPreferences.editing-id != ""; clicked => { AccountMailPreferences.open-signature(false); } }
+                    Button { text: @tr("New signature"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.open-signature(true); } }
                     Button { text: @tr("Delete"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.editing-id != ""; clicked => { AccountMailPreferences.delete-signature(); } }
                 }
                 SettingsSelectRow {

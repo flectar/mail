@@ -82,6 +82,22 @@ fn status(app: &AppWindow, result: Result<(), String>, success: &str) {
             Err(e) => e.into(),
         });
 }
+/// A signature written in the composer was saved: Settings shows it, chosen, when it still
+/// shows that signature's account.
+pub(super) fn signature_saved(app: &AppWindow, saved: &Signature, settings: &Settings) {
+    let ui = app.global::<AccountMailPreferences>();
+    if i64::from(ui.get_account_id()) != saved.account_id {
+        return;
+    }
+    project(app, settings, saved.account_id);
+    let index = choices(settings, saved.account_id)
+        .iter()
+        .position(|signature| signature.id == saved.id)
+        .unwrap_or(0);
+    ui.invoke_edit_signature(index as i32);
+    ui.set_status("Signature saved.".into());
+}
+
 pub(super) fn choices(settings: &Settings, account_id: i64) -> Vec<Signature> {
     settings
         .signature_list
@@ -99,7 +115,7 @@ fn project(app: &AppWindow, settings: &Settings, account_id: i64) {
             .map(|s| SignatureChoice {
                 id: s.id.clone().into(),
                 name: s.name.clone().into(),
-                text: flectar_mail_core::signatures::plain_text(s).into(),
+                text: crate::rich_compose::signature_preview(&s.html).into(),
             })
             .collect::<Vec<_>>(),
     )));
@@ -590,57 +606,40 @@ pub(super) fn register(
             .and_then(|i| ui.get_signatures().row_data(i));
         ui.set_editing_index(index);
         ui.set_editing_id(signature.as_ref().map(|s| s.id.clone()).unwrap_or_default());
-        ui.set_signature_name(
-            signature
-                .as_ref()
-                .map(|s| s.name.clone())
-                .unwrap_or_default(),
-        );
         ui.set_signature_text(signature.map(|s| s.text).unwrap_or_default());
     });
     let weak = app.as_weak();
-    let state_save = state.clone();
+    let state_open = state.clone();
     let work = tasks.clone();
-    ui.on_save_signature(move || {
+    ui.on_open_signature(move |new| {
         let Some(app) = weak.upgrade() else { return };
-        let Some(core) = core(&state_save) else {
+        let Some(core) = core(&state_open) else {
             return;
         };
         let ui = app.global::<AccountMailPreferences>();
         if ui.get_busy() {
             return;
         }
-        let signature = Signature {
-            id: ui.get_editing_id().to_string(),
-            account_id: i64::from(ui.get_account_id()),
-            name: ui.get_signature_name().to_string(),
-            html: flectar_mail_core::signatures::text_html(ui.get_signature_text().as_str()),
-        };
+        let account_id = i64::from(ui.get_account_id());
+        if new {
+            crate::composer::edit_signature(&app, account_id, None);
+            return;
+        }
+        let id = ui.get_editing_id().to_string();
         work.spawn(
             &app,
             true,
-            async move {
-                let saved = core
-                    .save_signature(signature)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let settings = core.get_settings().await.map_err(|e| e.to_string())?;
-                Ok((saved, settings))
-            },
-            |app, result| {
-                let ui = app.global::<AccountMailPreferences>();
-                match result {
-                    Ok((saved, settings)) => {
-                        project(&app, &settings, saved.account_id);
-                        let index = choices(&settings, saved.account_id)
-                            .iter()
-                            .position(|s| s.id == saved.id)
-                            .unwrap_or(0);
-                        ui.invoke_edit_signature(index as i32);
-                        ui.set_status("Signature saved.".into());
+            async move { core.get_settings().await.map_err(|e| e.to_string()) },
+            move |app, result| match result {
+                Ok(settings) => {
+                    if let Some(signature) = choices(&settings, account_id)
+                        .into_iter()
+                        .find(|signature| signature.id == id)
+                    {
+                        crate::composer::edit_signature(&app, account_id, Some(signature));
                     }
-                    Err(e) => ui.set_status(e.into()),
                 }
+                Err(e) => app.global::<AccountMailPreferences>().set_status(e.into()),
             },
         );
     });

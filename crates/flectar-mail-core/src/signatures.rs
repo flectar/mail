@@ -6,7 +6,8 @@ use crate::{
     models::{Signature, SignatureDefaults},
 };
 
-pub const MAX_SIGNATURE_BYTES: usize = 32 * 1024;
+/// A signature's HTML, pictures included, can be this large.
+pub const MAX_SIGNATURE_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_SIGNATURES_PER_ACCOUNT: usize = 20;
 
 pub fn plain_text(signature: &Signature) -> String {
@@ -46,12 +47,80 @@ pub fn text_html(text: &str) -> String {
     html
 }
 
-/// No active HTML, images or remote requests in signature settings.
+/// The formatting the composer writes, and pictures the signature holds itself: no active
+/// HTML, pictures from the web or other remote requests in signature settings.
 pub(crate) fn sanitize_html(html: &str) -> String {
-    ammonia::Builder::default()
-        .rm_tags(&["img"])
-        .clean(html)
-        .to_string()
+    static SANITIZER: std::sync::LazyLock<ammonia::Builder<'static>> =
+        std::sync::LazyLock::new(|| {
+            let mut builder = ammonia::Builder::default();
+            builder
+                .add_generic_attributes(["style", "align", "dir"])
+                .add_url_schemes(["data"])
+                .attribute_filter(|element, attribute, value| match (element, attribute) {
+                    ("img", "src") => is_embedded_picture(value).then(|| value.into()),
+                    (_, "href") if has_data_scheme(value) => None,
+                    _ => Some(value.into()),
+                })
+                .link_rel(Some("noopener noreferrer"));
+            builder
+        });
+    without_unsourced_pictures(SANITIZER.clean(html).to_string())
+}
+
+/// `html` as ammonia writes it, without the pictures whose address it took out: some mail apps
+/// show an `<img>` without one as a broken picture. Ammonia quotes every attribute value with
+/// `"` and escapes that inside them, so a tag ends at the first `>` outside quotes.
+fn without_unsourced_pictures(html: String) -> String {
+    if !html.contains("<img") {
+        return html;
+    }
+    let mut kept = String::with_capacity(html.len());
+    let mut rest = html.as_str();
+    while let Some(start) = rest.find("<img") {
+        kept.push_str(&rest[..start]);
+        let tag = &rest[start..];
+        let mut quoted = false;
+        let end = tag
+            .char_indices()
+            .find(|&(_, character)| {
+                if character == '"' {
+                    quoted = !quoted;
+                }
+                character == '>' && !quoted
+            })
+            .map_or(tag.len(), |(at, _)| at + 1);
+        let is_picture = tag[4..]
+            .chars()
+            .next()
+            .is_some_and(|next| next.is_ascii_whitespace() || next == '>' || next == '/');
+        if !is_picture || tag[..end].contains(" src=\"") {
+            kept.push_str(&tag[..end]);
+        }
+        rest = &tag[end..];
+    }
+    kept.push_str(rest);
+    kept
+}
+
+/// Whether `src` holds a PNG, JPEG, GIF or WebP picture itself, as the composer writes them.
+fn is_embedded_picture(src: &str) -> bool {
+    let src = src.trim();
+    ["png", "jpeg", "gif", "webp"].iter().any(|kind| {
+        let prefix = format!("data:image/{kind};base64,");
+        src.get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(&prefix))
+    })
+}
+
+fn has_data_scheme(url: &str) -> bool {
+    url.trim()
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data:"))
+}
+
+/// Where a signature goes in `body`: above the quotation, or at the end.
+pub fn insertion_point(body: &str) -> usize {
+    quotation_start(body).unwrap_or(body.len())
 }
 
 /// Insert above the quotation, preserving the standard `-- ` delimiter.
@@ -60,7 +129,7 @@ pub fn insert(body: &str, signature: &str) -> String {
     if signature.is_empty() {
         return body.to_owned();
     }
-    let at = quotation_start(body).unwrap_or(body.len());
+    let at = insertion_point(body);
     let mut result = String::with_capacity(body.len() + signature.len() + 6);
     result.push_str(&body[..at]);
     result.push_str("\n\n-- \n");
@@ -95,7 +164,7 @@ impl Core {
             || signature.html.len() > MAX_SIGNATURE_BYTES
         {
             return Err(CoreError::Other(
-                "Use a signature name of 1–100 bytes and a body under 32 KiB".into(),
+                "Use a signature name of 1–100 bytes and a body under 256 KiB".into(),
             ));
         }
         signature.html = sanitize_html(&signature.html);
@@ -232,5 +301,62 @@ mod tests {
         };
         assert_eq!(plain_text(&s), "Zoë <me@example.org>\nEngineer");
         assert_eq!(insert("Body", ""), "Body");
+    }
+
+    #[test]
+    fn signatures_keep_their_formatting_and_their_own_pictures() {
+        let logo = "data:image/png;base64,iVBORw0KGgo=";
+        let html = format!(
+            "<div align=\"center\" style=\"text-align:center\"><span style=\"color:#0b5394;\
+             font-size:x-large\">Zoë</span><br><a href=\"https://example.org\">example.org</a>\
+             <br><img src=\"{logo}\" alt=\"Logo\" width=\"120\" height=\"40\" \
+             style=\"width:120px;max-width:100%;height:auto\"></div>"
+        );
+        let clean = sanitize_html(&html);
+        for kept in [
+            "align=\"center\"",
+            "style=\"text-align:center\"",
+            "style=\"color:#0b5394;font-size:x-large\"",
+            "href=\"https://example.org\"",
+            "src=\"data:image/png;base64,iVBORw0KGgo=\"",
+            "alt=\"Logo\"",
+            "style=\"width:120px;max-width:100%;height:auto\"",
+        ] {
+            assert!(clean.contains(kept), "{kept} in {clean}");
+        }
+
+        // Pictures from the web, other embedded data, scripts and data links go.
+        let clean = sanitize_html(
+            "<img src=\"https://tracker.example/p.gif\" alt=\"web\">\
+             <img src=\"data:image/svg+xml;base64,PHN2Zy8+\" alt=\"svg\">\
+             <a href=\"data:text/html,hi\">data</a><a href=\"javascript:alert(1)\">js</a>\
+             <script>alert(1)</script><span onclick=\"x()\">Me</span>",
+        );
+        for gone in [
+            "tracker.example",
+            "svg+xml",
+            "data:text",
+            "javascript",
+            "<script",
+            "onclick",
+            // Without their address, the pictures go entirely.
+            "<img",
+            "alt=",
+        ] {
+            assert!(!clean.contains(gone), "{gone} in {clean}");
+        }
+        assert!(clean.contains("Me"), "{clean}");
+
+        // Only those: the signature's own picture stays, and text that reads like a tag is text.
+        let clean = sanitize_html(&format!(
+            "<p>a &lt;img&gt; b<img alt='x > y' src='https://example.org/a.png'>c\
+             <img alt='Logo \"Zoë\" >' src='{logo}'>d</p>"
+        ));
+        assert_eq!(
+            clean,
+            format!(
+                "<p>a &lt;img&gt; bc<img alt=\"Logo &quot;Zoë&quot; &gt;\" src=\"{logo}\">d</p>"
+            )
+        );
     }
 }

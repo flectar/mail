@@ -17,6 +17,10 @@ export global ComposerUi {
     in property <bool> sending: false;
     // Files dragged from elsewhere are over the message.
     in property <bool> drop-hint: false;
+    // A signature being written ("signature" mode): whether it changed since it opened, and
+    // the name it was saved with.
+    in property <bool> signature-edited: false;
+    in property <string> signature-saved-name: "";
     in property <[AccountRow]> accounts: [];
     in-out property <int> account-id: -1;
     in-out property <string> from-label: @tr("No connected account");
@@ -103,6 +107,7 @@ export global ComposerUi {
     in property <length> editor-menu-word-bottom: 0px;
 
     callback close();
+    callback save-signature();
     callback pop-out();
     callback save(int, string, string, string, string, string, bool);
     callback pick-attachments();
@@ -156,6 +161,8 @@ export component BoundComposer inherits EmailComposer {
     body <=> ComposerUi.body;
     sending: ComposerUi.sending;
     drop-hint: ComposerUi.drop-hint;
+    signature-edited: ComposerUi.signature-edited;
+    signature-saved-name: ComposerUi.signature-saved-name;
     accounts: ComposerUi.accounts;
     selected-account-id <=> ComposerUi.account-id;
     contact-suggestions: ComposerUi.contact-suggestions;
@@ -221,6 +228,7 @@ export component BoundComposer inherits EmailComposer {
     accent-background: AppTheme.accent-soft;
 
     close => { ComposerUi.close(); }
+    save-signature => { ComposerUi.save-signature(); }
     pop-out => { ComposerUi.pop-out(); }
     submit(send-now) => {
         ComposerUi.save(
