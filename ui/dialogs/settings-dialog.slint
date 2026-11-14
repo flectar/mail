@@ -518,6 +518,10 @@ export component SettingsDialog inherits Rectangle {
     // When an opened unread message counts as read: "immediately",
     // "afterTwoSeconds", "afterFiveSeconds" or "never".
     in-out property <string> mark_read: "immediately";
+    // Tighter mail list rows, and how many lines of each message's text
+    // they show (0 to 3).
+    in-out property <bool> compact_rows: false;
+    in-out property <int> preview_lines: 1;
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
     in-out property <bool> contact_suggest_all_accounts: false;
@@ -635,6 +639,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_undo_send(int);
     callback save_compose_text_style(string, string);
     callback save_mark_read(string);
+    callback save_list_rows();
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
@@ -677,6 +682,16 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> flectar-services-available: false;
     callback start_flectar_sign_in();
 
+    private property <[string]> density-options: [
+        @tr("list density" => "Comfortable"),
+        @tr("list density" => "Compact"),
+    ];
+    private property <[string]> preview-line-options: [
+        @tr("message preview" => "None"),
+        @tr("message preview" => "1 line"),
+        @tr("message preview" => "2 lines"),
+        @tr("message preview" => "3 lines"),
+    ];
     private property <[string]> mark-read-options: [
         @tr("Immediately"),
         @tr("After 2 seconds"),
@@ -832,6 +847,7 @@ export component SettingsDialog inherits Rectangle {
             ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads reduce motion animation accessibility text size font") + " " + @tr("sending undo send delay take back")
                 + " " + @tr("spelling spell check dictionary misspelled words")
                 + " " + @tr("writing default text style font typeface text size")
+                + " " + @tr("message list density compact comfortable rows preview lines")
                 + " " + @tr("mark read opened delay receipts")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap pop3 jmap caldav carddav mail history server oauth security signatures")
@@ -1285,6 +1301,34 @@ export component SettingsDialog inherits Rectangle {
                                         toggled(checked) => {
                                             root.show_avatars = !checked;
                                             root.save_avatar_visibility(root.show_avatars);
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Message list density");
+                                        description: @tr("Compact rows fit more messages on the screen.");
+                                        choices: root.density-options;
+                                        selected-index: root.compact_rows ? 1 : 0;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            root.compact_rows = index == 1;
+                                            root.save_list_rows();
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Message preview");
+                                        description: @tr("How many lines of each message's text the list shows below its subject.");
+                                        choices: root.preview-line-options;
+                                        selected-index: root.preview_lines;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            root.preview_lines = index;
+                                            root.save_list_rows();
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }

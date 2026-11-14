@@ -1022,6 +1022,19 @@ fn perform_mail_drop(
     )
 }
 
+/// Shows the mail list's rows as dense as `settings` keep them, with as many
+/// lines of each message's text.
+pub(crate) fn apply_list_rows(app: &AppWindow, settings: &Settings) {
+    app.set_mail_compact_rows(
+        settings.list_density == flectar_mail_core::models::ListDensity::Compact,
+    );
+    app.set_mail_preview_lines(i32::from(
+        settings
+            .preview_lines
+            .min(flectar_mail_core::models::MAX_PREVIEW_LINES),
+    ));
+}
+
 /// Show conversations, or each message on its own. The list starts over like
 /// a newly chosen mailbox, and tabs forget the conversations or messages they
 /// had open, whose ids belong to the other grouping. Returns whether the

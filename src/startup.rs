@@ -909,6 +909,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.set_monochrome_sidebar_icons(settings.monochrome_sidebar_icons);
     crate::app_icon::apply(app, settings.app_icon);
     app.set_show_avatars(settings.show_avatars);
+    crate::apply_list_rows(app, settings);
     app.set_group_mail_by_date(settings.group_mail_by_date);
     app.set_show_tabs(settings.show_tabs);
     app.set_conversation_view(settings.conversation_view);
