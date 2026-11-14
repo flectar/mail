@@ -130,6 +130,8 @@ export component SidebarItem inherits SidebarRowSurface {
     in property <bool> can-rename: false;
     in property <bool> can-delete: false;
     in property <bool> can-empty-trash: false;
+    // The row lists unread mail that "Mark all as read…" can mark (#234).
+    in property <bool> can-mark-all-read: false;
     in property <bool> label-manageable: false;
     in property <bool> label-can-create-child: false;
     in property <bool> label-is-global: false;
@@ -149,6 +151,8 @@ export component SidebarItem inherits SidebarRowSurface {
     callback rename-folder(int, string);
     callback delete-folder(int, string);
     callback empty-trash(int);
+    // The row's scope and the name it shows.
+    callback mark-all-read(string, string);
     callback new-child-label(int, int, string, string);
     callback rename-label(int, string, color, string, bool);
     callback delete-label(int, string, string, bool, bool);
@@ -207,10 +211,15 @@ export component SidebarItem inherits SidebarRowSurface {
 
     // Folder and label actions. Rows without any keep the area disabled.
     row-menu := ContextMenuArea {
-        enabled: root.interactive && (root.folder-menu-enabled || root.can-empty-trash || root.label-manageable);
+        enabled: root.interactive && (root.can-mark-all-read || root.folder-menu-enabled || root.can-empty-trash || root.label-manageable);
         width: parent.width;
         height: parent.height;
         Menu {
+            if root.can-mark-all-read: MenuItem {
+                title: @tr("Mark all as read…");
+                activated => { root.mark-all-read(root.scope, root.label); }
+            }
+            if root.can-mark-all-read && (root.folder-menu-enabled || root.can-empty-trash || root.label-manageable): MenuSeparator {}
             if root.folder-menu-enabled: MenuItem {
                 title: @tr("New subfolder");
                 enabled: root.can-create-child;

@@ -165,6 +165,8 @@ export component MailView inherits FocusScope {
     callback bulk_message_action(string);
     callback toggle_mail_group(string);
     callback request_empty_trash(int);
+    // Mark all as read for a sidebar row: its scope and the name it shows.
+    callback request_mark_all_read(string, string);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
@@ -339,6 +341,7 @@ export component MailView inherits FocusScope {
             spacing: 0px;
 
             if root.active_view == "mail" && !root.single-pane : MailSidebar {
+                request-mark-all-read(scope, name) => { root.request_mark_all_read(scope, name); }
                 show-profiles: root.profiles-in-sidebar;
                 profiles: root.mail_profiles;
                 active-profile: root.active_mail_profile;
@@ -565,6 +568,7 @@ export component MailView inherits FocusScope {
             // navigation. The Default collapsible sidebar remains, with the
             // list/reader stack consuming its animated remainder.
             if root.active_view == "mail" && root.single-pane && !root.compact : MailSidebar {
+                request-mark-all-read(scope, name) => { root.request_mark_all_read(scope, name); }
                 show-profiles: root.profiles-in-sidebar;
                 profiles: root.mail_profiles;
                 active-profile: root.active_mail_profile;
@@ -814,6 +818,7 @@ export component MailView inherits FocusScope {
                 }
             }
             if root.active_view == "mail" && root.compact : MailSidebar {
+                request-mark-all-read(scope, name) => { root.request_mark_all_read(scope, name); }
                 visible: root.folders-open || self.x > -self.width - 11px;
                 x: root.folders-open ? 0px : -self.width - 12px;
                 y: 0px;

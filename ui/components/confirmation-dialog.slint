@@ -1,6 +1,7 @@
 import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { Button } from "button.slint";
 import { TypeScale } from "../typography.slint";
+import { AppTheme } from "../design-system.slint";
 
 // Reusable destructive confirmation overlay. The scrim intentionally does
 // not dismiss the dialog: data deletion must end in an explicit choice.
@@ -19,6 +20,10 @@ export component ConfirmationDialog inherits Rectangle {
     in property <color> body-color;
     in property <color> muted-color;
     in property <color> danger-color: #d04a43;
+    // A confirmation that destroys nothing, such as marking mail read, asks
+    // in the accent color instead of red.
+    in property <bool> destructive: true;
+    private property <color> tone: root.destructive ? root.danger-color : AppTheme.accent;
     // An optional step before deciding, such as saving a copy of what will be
     // deleted. It leaves the dialog open and reports in `action-status`.
     in property <string> action-label;
@@ -105,8 +110,8 @@ export component ConfirmationDialog inherits Rectangle {
                         width: 42px;
                         height: 42px;
                         border-radius: 21px;
-                        background: #d04a4324;
-                        Image { x: 11px; y: 11px; width: 20px; height: 20px; source: root.icon; colorize: root.danger-color; image-fit: contain; accessible-role: none; }
+                        background: root.tone.with-alpha(0.14);
+                        Image { x: 11px; y: 11px; width: 20px; height: 20px; source: root.icon; colorize: root.tone; image-fit: contain; accessible-role: none; }
                     }
                     dialog-title := Text { text: root.title; color: root.title-color; font-size: TypeScale.heading; font-weight: 700; vertical-alignment: center; wrap: word-wrap; }
                 }
@@ -122,7 +127,7 @@ export component ConfirmationDialog inherits Rectangle {
                     height: panel.width < 360px ? 76px : 34px;
                     spacing: 8px;
                     Button { row: 0; col: 0; height: 34px; text: root.cancel-label; selected: !root.confirm-selected; clicked => { root.cancel(); } }
-                    Button { row: panel.width < 360px ? 1 : 0; col: panel.width < 360px ? 0 : 1; height: 34px; text: root.confirm-label; destructive: true; clicked => { root.confirm(); } }
+                    Button { row: panel.width < 360px ? 1 : 0; col: panel.width < 360px ? 0 : 1; height: 34px; text: root.confirm-label; destructive: root.destructive; primary: !root.destructive; clicked => { root.confirm(); } }
                 }
             }
         }

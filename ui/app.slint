@@ -532,6 +532,7 @@ export global I18n {
         if (key == "Read receipt preference saved.") { return @tr("Read receipt preference saved."); }
         if (key == "Could not save the read receipt preference: {}") { return @tr("Could not save the read receipt preference: {}", argument); }
         if (key == "Could not answer the read receipt request: {}") { return @tr("Could not answer the read receipt request: {}", argument); }
+        if (key == "Could not mark all as read: {}") { return @tr("Could not mark all as read: {}", argument); }
         if (key == "Use YYYY-MM-DD for the date and a time such as {}.") { return @tr("Use YYYY-MM-DD for the date and a time such as {}.", argument); }
         if (key == "Event duration must be a number of minutes.") { return @tr("Event duration must be a number of minutes."); }
         if (key == "Add a title and choose a duration from 15 to 1440 minutes.") { return @tr("Add a title and choose a duration from 15 to 1440 minutes."); }
@@ -852,6 +853,8 @@ export component AppWindow inherits Window {
     callback bulk_message_action(string);
     callback toggle_mail_group(string);
     callback empty_trash(int);
+    // Mark everything a mailbox lists as read, by its scope key (#234).
+    callback mark_all_read(string);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
@@ -1397,6 +1400,10 @@ export component AppWindow inherits Window {
     private property <bool> folder-dialog-open: false;
     private property <bool> trash-delete-open: false;
     private property <string> trash-delete-kind: "";
+    // "Mark all as read…" waits for its confirmation here.
+    private property <bool> mark-all-read-open: false;
+    private property <string> mark-all-read-scope: "";
+    private property <string> mark-all-read-name: "";
     private property <int> trash-delete-id: -1;
 
     function confirm-trash-deletion(kind: string, id: int) {
@@ -1835,6 +1842,11 @@ export component AppWindow inherits Window {
             }
             toggle_mail_group(key) => { root.toggle_mail_group(key); }
             request_empty_trash(account-id) => { root.confirm-trash-deletion("empty", account-id); }
+            request_mark_all_read(scope, name) => {
+                root.mark-all-read-scope = scope;
+                root.mark-all-read-name = name;
+                root.mark-all-read-open = true;
+            }
             set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
             set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             toggle_mail_label(id, applied) => { root.toggle_mail_label(id, applied); }
@@ -2443,6 +2455,28 @@ export component AppWindow inherits Window {
             else if root.trash-delete-kind == "row" { root.message_action_for_email(root.trash-delete-id, "delete_permanently"); }
             else { root.message_action("delete_permanently"); }
         }
+    }
+
+    if root.mark-all-read-open : ConfirmationDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        z: 16000;
+        open <=> root.mark-all-read-open;
+        title: @tr("Mark all as read?");
+        subject: "";
+        description: @tr("All unread messages in {} will be marked as read.", root.mark-all-read-name);
+        detail: @tr("This action cannot be undone.");
+        confirm-label: @tr("Mark all as read");
+        destructive: false;
+        icon: @image-url("icons/lucide/outline/mail-open.svg");
+        surface: root.surface;
+        dialog-border-color: root.border;
+        title-color: root.title-color;
+        body-color: root.body-text;
+        muted-color: root.muted-text;
+        confirmed => { root.mark_all_read(root.mark-all-read-scope); }
     }
 
     if AccountImport.open : ImportDialog {
