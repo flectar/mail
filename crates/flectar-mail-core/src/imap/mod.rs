@@ -1527,14 +1527,12 @@ async fn store_flag_set_inner(
     } else {
         "-FLAGS.SILENT"
     };
-    let mut stream = session
-        .uid_store(uid_set, format!("{op} ({flag})"))
+    // The command's own status says whether the server made the change: a
+    // FETCH stream ends at a tagged NO or BAD just as it does at OK.
+    session
+        .run_command_and_check_ok(format!("UID STORE {uid_set} {op} ({flag})"))
         .await
-        .map_err(command_error)?;
-    while let Some(item) = stream.next().await {
-        item.map_err(command_error)?;
-    }
-    Ok(())
+        .map_err(command_error)
 }
 
 /// Move one UID without guessing at unsupported server extensions.
