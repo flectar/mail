@@ -47,6 +47,10 @@ pub(super) struct Composers {
     /// Wakes the composers when a quoted message's image finished loading.
     quote_wake: UiWake,
     quote_poll_pending: Cell<bool>,
+    /// Files dropped on the main window with no message open there, for the
+    /// new one they start. They arrive one at a time.
+    #[cfg(desktop)]
+    dropped: RefCell<Vec<PathBuf>>,
 }
 
 /// An original moved into the message's text by Edit.
@@ -213,6 +217,8 @@ pub(super) fn install(
         sessions: RefCell::default(),
         quote_wake: UiWake::new(app.as_weak(), |app| app.invoke_refresh_composer_quotes()),
         quote_poll_pending: Cell::new(false),
+        #[cfg(desktop)]
+        dropped: RefCell::default(),
     });
     COMPOSERS.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&composers)));
 
@@ -287,23 +293,23 @@ pub(super) fn edit_signature(app: &AppWindow, account_id: i64, signature: Option
     with_composers(|composers| composers.edit_signature(app, account_id, signature));
 }
 
-/// Files dragged over the main window, for its open message to show where they'll go.
+/// Files dragged over the main window, for its open message to show where
+/// they'll go, or the window when they'd start a new one.
 #[cfg(desktop)]
 pub(super) fn files_hovered(hovering: bool) {
-    with_composers(|composers| {
-        if let Some(session) = composers.in_app() {
-            session.files_hovered(hovering);
-        }
+    with_composers(|composers| match composers.in_app() {
+        Some(session) => session.files_hovered(hovering),
+        None => composers.new_message_hint(hovering),
     });
 }
 
-/// A file dropped on the main window goes into its open message.
+/// A file dropped on the main window goes into its open message, or starts a
+/// new one.
 #[cfg(desktop)]
 pub(super) fn file_dropped(path: PathBuf) {
-    with_composers(|composers| {
-        if let Some(session) = composers.in_app() {
-            session.file_dropped(path);
-        }
+    with_composers(|composers| match composers.in_app() {
+        Some(session) => session.file_dropped(path),
+        None => composers.dropped_for_new_message(path),
     });
 }
 
@@ -714,6 +720,51 @@ impl Composers {
         }
         session.show("new", None);
         Some(session)
+    }
+
+    /// Shows over the main window that files dropped there start a new
+    /// message, while one could.
+    #[cfg(desktop)]
+    fn new_message_hint(&self, hovering: bool) {
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        let can_start = !self.state.borrow().connected_accounts.is_empty();
+        app.set_drop_starts_message(hovering && can_start);
+    }
+
+    /// A file dropped on the main window with no message open there. The
+    /// others of the same drop follow at once, and they start one new
+    /// message together.
+    #[cfg(desktop)]
+    fn dropped_for_new_message(self: &Rc<Self>, path: PathBuf) {
+        let mut dropped = self.dropped.borrow_mut();
+        dropped.push(path);
+        if dropped.len() > 1 {
+            return;
+        }
+        let composers = Rc::downgrade(self);
+        Timer::single_shot(Duration::from_millis(30), move || {
+            if let Some(composers) = composers.upgrade() {
+                composers.start_with_dropped();
+            }
+        });
+    }
+
+    #[cfg(desktop)]
+    fn start_with_dropped(self: &Rc<Self>) {
+        let paths = std::mem::take(&mut *self.dropped.borrow_mut());
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        // No event ends the hover once files are dropped.
+        app.set_drop_starts_message(false);
+        if paths.is_empty() {
+            return;
+        }
+        if let Some(session) = self.open_new(&app, "") {
+            session.place_files(paths);
+        }
     }
 
     /// Reply, reply all, forward, edit as new, or edit the selected draft.
@@ -2388,11 +2439,16 @@ impl ComposeSession {
         });
     }
 
-    /// Puts dropped pictures in the text at the caret, as pasting does, and attaches the
-    /// other files.
     #[cfg(desktop)]
     fn place_dropped_files(&self) {
         let paths = std::mem::take(&mut *self.dropped.borrow_mut());
+        self.place_files(paths);
+    }
+
+    /// Puts dropped pictures in the text at the caret, as pasting does, and attaches the
+    /// other files.
+    #[cfg(desktop)]
+    fn place_files(&self, paths: Vec<PathBuf>) {
         let Some(host) = self.host() else {
             return;
         };
@@ -3571,6 +3627,63 @@ mod tests {
             _runtime: runtime,
             _dir: dir,
         }
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn files_dropped_with_no_message_open_start_one_with_all_of_them() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        let files = tempfile::tempdir().unwrap();
+        let notes = files.path().join("notes.txt");
+        let plan = files.path().join("plan.pdf");
+        std::fs::write(&notes, "notes").unwrap();
+        std::fs::write(&plan, "%PDF-1.4").unwrap();
+        let wait_for_the_rest = || {
+            std::thread::sleep(Duration::from_millis(40));
+            slint::platform::update_timers_and_animations();
+        };
+
+        // With no message open, the window says the files would start one.
+        files_hovered(true);
+        assert!(app.get_drop_starts_message());
+        files_hovered(false);
+        assert!(!app.get_drop_starts_message());
+
+        // A drop's files arrive one at a time and start one message.
+        files_hovered(true);
+        file_dropped(notes);
+        file_dropped(plan.clone());
+        assert!(composers.in_app().is_none());
+        wait_for_the_rest();
+        assert!(
+            !app.get_drop_starts_message(),
+            "the hint goes with the drop"
+        );
+        let session = composers.in_app().expect("a new message opened");
+        let names = || {
+            session
+                .files
+                .borrow()
+                .iter()
+                .map(|file| file.filename.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(), ["notes.txt", "plan.pdf"]);
+
+        // Files dropped while it's open go into it, not into another one.
+        files_hovered(true);
+        assert!(!app.get_drop_starts_message());
+        let agenda = files.path().join("agenda.txt");
+        std::fs::write(&agenda, "agenda").unwrap();
+        file_dropped(agenda);
+        wait_for_the_rest();
+        assert!(Rc::ptr_eq(&composers.in_app().unwrap(), &session));
+        assert_eq!(names(), ["notes.txt", "plan.pdf", "agenda.txt"]);
     }
 
     #[test]
