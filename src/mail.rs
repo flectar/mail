@@ -1818,6 +1818,22 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// How tightly the mail list packs its rows, and how many lines of each
+    /// message's text they show.
+    pub async fn set_list_rows(
+        &self,
+        density: flectar_mail_core::models::ListDensity,
+        preview_lines: u8,
+    ) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.list_density = density;
+        settings.preview_lines = preview_lines.min(flectar_mail_core::models::MAX_PREVIEW_LINES);
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_spelling(
         &self,
         enabled: bool,

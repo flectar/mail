@@ -680,6 +680,7 @@ pub(super) fn restore_account_backup(
     app.global::<crate::ReadReceipts>()
         .set_policy(settings.read_receipts.as_str().into());
     app.set_show_avatars(settings.show_avatars);
+    crate::apply_list_rows(app, &settings);
     app.set_show_tabs(settings.show_tabs);
     crate::spelling::apply_settings(
         settings.spelling_enabled,
@@ -1694,6 +1695,7 @@ pub(super) fn register_data_management_callbacks(
                     app.set_monochrome_sidebar_icons(false);
                     crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);
+                    crate::apply_list_rows(&app, &Default::default());
                     app.set_show_tabs(true);
                     apply_mail_grouping(
                         &app,

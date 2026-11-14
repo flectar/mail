@@ -2200,6 +2200,33 @@ impl<'de> Deserialize<'de> for AppIcon {
     }
 }
 
+/// How tightly the mail list packs its rows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ListDensity {
+    #[default]
+    Comfortable,
+    Compact,
+}
+
+impl ListDensity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Comfortable => "comfortable",
+            Self::Compact => "compact",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        [Self::Comfortable, Self::Compact]
+            .into_iter()
+            .find(|choice| choice.as_str() == value)
+    }
+}
+
+/// The most lines of a message's text the mail list shows.
+pub const MAX_PREVIEW_LINES: u8 = 3;
+
 /// When an unread message the user opens counts as read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2278,6 +2305,13 @@ pub struct Settings {
     /// Group the mail list into collapsible local-date sections.
     #[serde(default = "default_true")]
     pub group_mail_by_date: bool,
+    /// How tightly the mail list packs its rows.
+    #[serde(default)]
+    pub list_density: ListDensity,
+    /// How many lines of each message's text the mail list shows, up to
+    /// `MAX_PREVIEW_LINES`.
+    #[serde(default = "default_preview_lines")]
+    pub preview_lines: u8,
     /// Show browser-style tabs: the strip in the desktop top bar, and the tab
     /// switcher in compact layouts. Saved tabs are kept while they are hidden.
     #[serde(default = "default_true")]
@@ -2622,6 +2656,10 @@ fn default_theme_preset() -> String {
     "default".into()
 }
 
+fn default_preview_lines() -> u8 {
+    1
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -2634,6 +2672,8 @@ impl Default for Settings {
             custom_theme: CustomTheme::default(),
             show_avatars: true,
             group_mail_by_date: true,
+            list_density: ListDensity::Comfortable,
+            preview_lines: default_preview_lines(),
             show_tabs: true,
             conversation_view: true,
             workspace_layout: default_workspace_layout(),
@@ -3145,6 +3185,13 @@ mod tests {
         }
         assert_eq!(s.app_icon, AppIcon::Orange);
         assert!(s.group_mail_by_date);
+        // Rows stay as they were before the list could be made denser.
+        assert_eq!(s.list_density, ListDensity::Comfortable);
+        assert_eq!(s.preview_lines, 1);
+        for density in [ListDensity::Comfortable, ListDensity::Compact] {
+            assert_eq!(ListDensity::parse(density.as_str()), Some(density));
+        }
+        assert_eq!(ListDensity::parse("cozy"), None);
         assert!(s.show_tabs);
         assert!(s.conversation_view);
         // New installs draw their own frame; a saved choice stays.

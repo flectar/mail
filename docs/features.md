@@ -227,6 +227,12 @@ instead of sliding or growing, and only fades remain.
 settings smaller or larger, from 90% to 150% of your device's text size. Message
 zoom and the text size of new messages stay separate.
 
+**Message list density**, also there, makes the list's rows **Compact** to fit
+more messages on the screen, and **Message preview** shows up to three lines of
+each message's text below its subject. With **None**, a row is the sender and
+the subject, with any codes, attachments and labels beside the subject and the
+account beside the time.
+
 ## Frameless window
 
 Flectar Mail replaces the system title bar with window controls in the toolbar
