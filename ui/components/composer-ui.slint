@@ -27,6 +27,13 @@ export global ComposerUi {
     in property <[ComposeContact]> contact-suggestions: [];
     in property <[ComposeAttachment]> attachments: [];
     in property <string> attachment-summary: "";
+    // The message's JPEG photos that can go out shrunk: how many, their size as they go out
+    // and at full size, whether they go out shrunk, and whether they're being shrunk.
+    in property <int> photo-count: 0;
+    in property <string> photo-size: "";
+    in property <string> photo-full-size: "";
+    in-out property <bool> shrink-photos: false;
+    in property <bool> shrinking-photos: false;
     in property <[EmailTemplateRow]> templates: [];
     in property <LocalizedMessage> message;
     in property <bool> notice-is-error: false;
@@ -114,6 +121,7 @@ export global ComposerUi {
     // Opens a picker for images to put in the text at the caret.
     callback insert-images();
     callback remove-attachment(int);
+    callback shrink-photos-toggled(bool);
     callback format(string, string, int, int);
     // Pastes the clipboard's HTML over the selection of the body given, with its
     // formatting: false when it holds none, for the plain text to go in.
@@ -169,6 +177,11 @@ export component BoundComposer inherits EmailComposer {
     attachments: ComposerUi.attachments;
     templates: ComposerUi.templates;
     attachment-summary: ComposerUi.attachment-summary;
+    photo-count: ComposerUi.photo-count;
+    photo-size: ComposerUi.photo-size;
+    photo-full-size: ComposerUi.photo-full-size;
+    shrink-photos <=> ComposerUi.shrink-photos;
+    shrinking-photos: ComposerUi.shrinking-photos;
     from-label <=> ComposerUi.from-label;
     notice-is-error: ComposerUi.notice-is-error;
     selection-start: ComposerUi.selection-start;
@@ -244,6 +257,7 @@ export component BoundComposer inherits EmailComposer {
     pick-attachments => { ComposerUi.pick-attachments(); }
     insert-images => { ComposerUi.insert-images(); }
     remove-attachment(index) => { ComposerUi.remove-attachment(index); }
+    shrink-photos-toggled(on) => { ComposerUi.shrink-photos-toggled(on); }
     format-requested(kind, body, anchor, cursor) => { ComposerUi.format(kind, body, anchor, cursor); }
     paste-requested(body, anchor, cursor) => { return ComposerUi.paste-formatted(body, anchor, cursor); }
     copy-requested(cut, body, anchor, cursor) => { return ComposerUi.copy-formatted(cut, body, anchor, cursor); }

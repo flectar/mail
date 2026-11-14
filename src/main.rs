@@ -61,6 +61,7 @@ mod oauth_browser;
 #[cfg(test)]
 mod on_screen_surface_tests;
 pub mod pdf_preview;
+mod photo_shrink;
 pub mod platform;
 mod preview_controls;
 mod reader_clipboard;
@@ -386,6 +387,11 @@ struct ComposeFile {
     /// clearing the composer releases it; drafts and sends stage the file in
     /// Core first.
     _import: Option<Rc<documents::ImportedDocument>>,
+    /// A JPEG photo large enough to go out shrunk.
+    shrinkable: bool,
+    /// The photo this file is a shrunk copy of, which comes back when the message's photos
+    /// no longer go out shrunk.
+    original: Option<Box<ComposeFile>>,
 }
 
 struct FaviconUpdate {
@@ -6140,6 +6146,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         &state,
         &runtime,
         platform.documents.clone(),
+        platform.paths.temp_dir(),
         cfg!(desktop),
     );
     mailto_links::install(&app, composers);

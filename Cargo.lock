@@ -2237,6 +2237,7 @@ dependencies = [
  "html5ever 0.40.1",
  "i-slint-core",
  "image",
+ "jpeg-decoder",
  "keyboard-types 0.8.3",
  "landlock",
  "libc",

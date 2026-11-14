@@ -1,7 +1,7 @@
 import { HorizontalBox, ScrollView } from "std-widgets.slint";
 import { ComposeAttachment } from "../models.slint";
 import { Button } from "button.slint";
-import { IconButton } from "controls.slint";
+import { IconButton, Switch } from "controls.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
@@ -596,6 +596,69 @@ export component ComposerNotice inherits Rectangle {
             }
 }
 
+// The message's large photos, which can go out shrunk, while it has some.
+export component ComposerPhotos inherits Rectangle {
+    in property <bool> compact: false;
+    in property <int> count: 0;
+    // Their size as they go out, and at full size.
+    in property <string> size: "";
+    in property <string> full-size: "";
+    in-out property <bool> shrink: false;
+    in property <bool> working: false;
+    in property <color> body-color;
+    in property <color> muted-color;
+    in property <color> raised-color;
+    in property <color> subtle-border-color;
+    callback toggled(bool);
+
+    private property <bool> shown: root.count > 0 || root.working;
+    private property <length> inset: root.compact ? 14px : 16px;
+
+    visible: root.shown;
+    height: root.shown ? max(root.compact ? 48px : 40px, title.preferred-height + 16px) : 0px;
+    background: root.raised-color;
+
+    Rectangle {
+        y: 0px;
+        height: 1px;
+        background: root.subtle-border-color;
+    }
+
+    title := Text {
+        x: root.inset;
+        width: min(self.preferred-width, max(0px, switch.x - self.x - 12px));
+        height: parent.height;
+        text: @tr("Shrink photos");
+        color: root.body-color;
+        font-size: TypeScale.body;
+        font-weight: 600;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: title.x + title.width + 10px;
+        width: max(0px, switch.x - self.x - 12px);
+        height: parent.height;
+        text: root.working ? @tr("Shrinking…")
+            : root.shrink && root.size != root.full-size
+            ? @tr("{n} photo, {0} ({1} at full size)" | "{n} photos, {0} ({1} at full size)" % root.count, root.size, root.full-size)
+            : @tr("{n} photo, {0}" | "{n} photos, {0}" % root.count, root.size);
+        color: root.muted-color;
+        font-size: TypeScale.caption;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    switch := Switch {
+        x: parent.width - self.width - root.inset;
+        y: (parent.height - self.height) / 2;
+        checked <=> root.shrink;
+        control-label: @tr("Shrink photos");
+        toggled => { root.toggled(self.checked); }
+    }
+}
+
 export component ComposerFooter inherits Rectangle {
     in property <bool> compact: false;
     in property <bool> attachment-picker-supported: true;
@@ -603,6 +666,8 @@ export component ComposerFooter inherits Rectangle {
     in property <bool> can-send: false;
     in property <bool> has-content: false;
     in property <bool> sending: false;
+    // Photos are being shrunk to go out, which a draft waits for too.
+    in property <bool> shrinking-photos: false;
     // A signature saves to Settings or is left, with nothing to send or attach.
     in property <bool> signature: false;
     callback save-signature();
@@ -692,7 +757,7 @@ export component ComposerFooter inherits Rectangle {
                 width: max(root.compact ? 104px : 112px, self.content-width);
                 height: 32px;
                 text: @tr("Save draft");
-                enabled: root.has-content;
+                enabled: root.has-content && !root.shrinking-photos;
                 clicked => { root.submit(false); }
             }
 
