@@ -159,6 +159,11 @@ jobs:
           # broken URLs. Flathub performs its own online validation on submit.
           appstreamcli validate --no-net resources/com.flectar.mail.metainfo.xml
 
+      - name: Make room for the release build
+        # The app crate's release build peaks near all the memory a hosted
+        # runner has; see scripts/ci-swap.sh.
+        run: ./scripts/ci-swap.sh on
+
       - name: Build release executable
         env:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
@@ -167,6 +172,10 @@ jobs:
           # Release files tell of newer releases; stores update the app themselves.
           FLECTAR_UPDATE_CHECKS: github
         run: cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
+
+      # The startup benchmark below must not measure swapped memory.
+      - name: Take the build's swap away again
+        run: ./scripts/ci-swap.sh off
 
       - name: Build AppImage
         env:
@@ -210,7 +219,10 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     # Build against the oldest supported Fedora; test this exact artifact below.
-    container: fedora:43
+    container:
+      image: fedora:43
+      # Turning on swap for the release build needs it (scripts/ci-swap.sh).
+      options: --privileged
     env:
       SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
@@ -236,6 +248,7 @@ jobs:
             python3 \
             rpm-build \
             tar \
+            util-linux \
             wayland-devel \
             xorg-x11-server-Xvfb
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -247,6 +260,10 @@ jobs:
           cache-on-failure: true
           key: native-fedora-43-rpm-${{ matrix.arch }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Make room for the release build
+        # The app crate's release build peaks near all the memory a hosted
+        # runner has; see scripts/ci-swap.sh.
+        run: ./scripts/ci-swap.sh on
       - name: Build Fedora release executable
         env:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
@@ -334,6 +351,10 @@ jobs:
             org.freedesktop.Platform//25.08 \
             org.freedesktop.Sdk//25.08 \
             org.freedesktop.Sdk.Extension.rust-stable//25.08
+      - name: Make room for the release build
+        # The app crate's release build peaks near all the memory a hosted
+        # runner has; see scripts/ci-swap.sh.
+        run: ./scripts/ci-swap.sh on
       - name: Build Flatpak bundle from locked sources
         run: ./scripts/build-flatpak.sh
       - name: Test Flatpak installation and packaged runtime
@@ -670,6 +691,10 @@ jobs:
             echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$toolchain/aarch64-linux-android26-clang"
           } >> "$GITHUB_ENV"
 
+      - name: Make room for the release build
+        # The app crate's release build peaks near all the memory a hosted
+        # runner has; see scripts/ci-swap.sh.
+        run: ./scripts/ci-swap.sh on
       - name: Build signed release APK
         env:
           RELEASE_PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
