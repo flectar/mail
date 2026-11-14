@@ -1,5 +1,6 @@
 //! The read receipt bar says who asked and where the receipt would go, and
-//! each answer reaches the app.
+//! each answer reaches the app. The receipts that came back for a sent
+//! message say who did what and when.
 
 use i_slint_core::accessibility::{AccessibilityAction, AccessibleStringProperty};
 use i_slint_core::item_tree::ItemRc;
@@ -12,15 +13,20 @@ use slint::platform::{
 use std::{cell::Cell, ops::ControlFlow, rc::Rc};
 
 slint::slint! {
-    import { ReadReceipts, ReceiptRequestBar } from "../ui/read-receipts.slint";
-    export { ReadReceipts }
+    import { ReadReceipts, ReceiptRequestBar, ReturnedReceipt, ReturnedReceiptList } from "../ui/read-receipts.slint";
+    export { ReadReceipts, ReturnedReceipt }
 
     export component ReceiptBarHarness inherits Window {
         width: 640px;
-        height: 200px;
-        ReceiptRequestBar {
-            width: parent.width;
-            text-color: black;
+        height: 400px;
+        VerticalLayout {
+            alignment: start;
+            ReceiptRequestBar {
+                text-color: black;
+            }
+            ReturnedReceiptList {
+                text-color: black;
+            }
         }
     }
 }
@@ -50,7 +56,7 @@ fn find(window: &slint::Window, label: &str) -> Option<ItemRc> {
 }
 
 #[test]
-fn the_bar_names_who_asked_and_passes_each_answer_on() {
+fn receipts_say_who_asked_and_who_did_what() {
     slint::platform::set_platform(Box::new(Headless)).unwrap();
     let ui = ReceiptBarHarness::new().unwrap();
     ui.show().unwrap();
@@ -87,4 +93,35 @@ fn the_bar_names_who_asked_and_passes_each_answer_on() {
         )
         .is_some()
     );
+
+    // On a message the user sent: the receipts that came back.
+    receipts.set_available(false);
+    let row = |kind: &str, name: &str, time: &str| ReturnedReceipt {
+        kind: kind.into(),
+        name: name.into(),
+        time: time.into(),
+    };
+    receipts.set_returned(slint::ModelRc::new(slint::VecModel::from(vec![
+        row("read", "Ana Ruiz", "10:42"),
+        row("deleted", "Ben Ortiz", "Yesterday"),
+        row("received", "Support team", "Nov 3"),
+    ])));
+    for label in [
+        "Read by Ana Ruiz, 10:42",
+        "Deleted by Ben Ortiz, Yesterday",
+        "Received by Support team, Nov 3",
+    ] {
+        assert!(find(ui.window(), label).is_some(), "{label}");
+    }
+    assert!(find(ui.window(), "Show 3 more receipts").is_none());
+
+    // A longer list holds the rest behind a button.
+    receipts.set_more_returned(3);
+    let asked = Rc::new(Cell::new(0));
+    let count = Rc::clone(&asked);
+    receipts.on_show_all_returned(move || count.set(count.get() + 1));
+    find(ui.window(), "Show 3 more receipts")
+        .unwrap()
+        .accessible_action(&AccessibilityAction::Default);
+    assert_eq!(asked.get(), 1);
 }

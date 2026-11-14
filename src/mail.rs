@@ -107,6 +107,8 @@ pub struct MailMessage {
     pub invitation: Option<flectar_mail_core::models::InvitationCard>,
     /// The read receipt it asks for, when one may still be sent (RFC 8098).
     pub receipt: Option<ReceiptAsk>,
+    /// For a message the user sent, the read receipts that came back.
+    pub returned_receipts: Vec<flectar_mail_core::models::ReturnedReceipt>,
     /// The one-time code the message asks its reader to enter.
     pub verification_code: Option<String>,
     /// Gmail labels are tags; other accounts file labels like folders.
@@ -154,6 +156,7 @@ impl MailMessage {
             sender_blocked: false,
             invitation: None,
             receipt: None,
+            returned_receipts: Vec::new(),
             verification_code: None,
             account_uses_labels: false,
             first_attachment: None,
@@ -3230,6 +3233,7 @@ fn summary_to_message(
         sender_blocked: false,
         invitation: None,
         receipt: None,
+        returned_receipts: Vec::new(),
         verification_code: thread.verification_code,
         account_uses_labels: thread_account
             .is_some_and(|account| account.mail_protocol == MailProtocol::Gmail),
@@ -3340,6 +3344,7 @@ fn message_summary_to_message(
         sender_blocked: false,
         invitation: None,
         receipt: None,
+        returned_receipts: Vec::new(),
         verification_code: message.verification_code,
         account_uses_labels: message_account
             .is_some_and(|account| account.mail_protocol == MailProtocol::Gmail),
@@ -3466,6 +3471,7 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
                 message_id: message.id,
                 request,
             }),
+        returned_receipts: message.returned_receipts.clone(),
         verification_code: row.verification_code.clone(),
         account_uses_labels: row.account_uses_labels,
         first_attachment: row.first_attachment.clone(),
