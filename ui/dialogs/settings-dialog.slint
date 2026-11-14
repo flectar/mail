@@ -14,6 +14,7 @@ import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, CalendarConnectionRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
 import { AccountCalendars } from "../components/account-calendars.slint";
 import { AccountStatusText } from "../components/account-status.slint";
+import { ReadReceipts } from "../read-receipts.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
@@ -674,6 +675,13 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> flectar-services-available: false;
     callback start_flectar_sign_in();
 
+    private property <[string]> read-receipt-options: [
+        @tr("Never send"),
+        @tr("Ask each time"),
+        @tr("Always send"),
+    ];
+    private property <int> read-receipt-index: ReadReceipts.policy == "always" ? 2
+        : ReadReceipts.policy == "ask" ? 1 : 0;
     private property <[string]> sync-interval-options: [
         @tr("Every minute"),
         @tr("Every 5 minutes"),
@@ -1465,6 +1473,19 @@ export component SettingsDialog inherits Rectangle {
                                                 root.mark_read_on_open = self.checked;
                                                 root.save_mark_read_on_open(self.checked);
                                             }
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Read receipts");
+                                        description: @tr("When a sender asks to be notified that you read their message. Always send still asks when a request looks unusual.");
+                                        choices: root.read-receipt-options;
+                                        selected-index: root.read-receipt-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            ReadReceipts.choose(index == 2 ? "always" : index == 1 ? "ask" : "never");
                                         }
                                     }
                                 }

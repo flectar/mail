@@ -153,6 +153,9 @@
     "lock.svg": {
       "source": "lock-keyhole"
     },
+    "mail-check.svg": {
+      "source": "mail-check"
+    },
     "mail-open.svg": {
       "source": "mail-open"
     },
@@ -514,6 +517,10 @@
     "mail": {
       "path": "sources/mail.svg",
       "sha256": "9d775f2e0be8e53777adb4ee6526c405c09ea657b1c000363ca70d1c149a4720"
+    },
+    "mail-check": {
+      "path": "sources/mail-check.svg",
+      "sha256": "44b12a7533daf66252e0d6af2ceeb4f02ff61032d5923e458f969492a5164eb6"
     },
     "mail-open": {
       "path": "sources/mail-open.svg",

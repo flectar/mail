@@ -50,6 +50,13 @@ pub struct EmailFixture {
     pub html: String,
 }
 
+/// A read receipt the open message asks for, and which message that is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReceiptAsk {
+    pub message_id: i64,
+    pub request: flectar_mail_core::models::ReceiptRequest,
+}
+
 /// Owned view data used by the Slint shell.
 #[derive(Clone, Debug)]
 pub struct MailMessage {
@@ -98,6 +105,8 @@ pub struct MailMessage {
     /// The calendar the message carries, as the card above it shows it
     /// (#228). Loaded with the message's body.
     pub invitation: Option<flectar_mail_core::models::InvitationCard>,
+    /// The read receipt it asks for, when one may still be sent (RFC 8098).
+    pub receipt: Option<ReceiptAsk>,
     /// The one-time code the message asks its reader to enter.
     pub verification_code: Option<String>,
     /// Gmail labels are tags; other accounts file labels like folders.
@@ -144,6 +153,7 @@ impl MailMessage {
             can_block: false,
             sender_blocked: false,
             invitation: None,
+            receipt: None,
             verification_code: None,
             account_uses_labels: false,
             first_attachment: None,
@@ -1430,6 +1440,28 @@ impl CoreMailSource {
             .ok_or("Unknown message appearance")?;
         let mut settings = self.load_settings().await?;
         settings.message_appearance = preference;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn answer_read_receipt(
+        &self,
+        message_id: i64,
+        answer: flectar_mail_core::models::ReceiptAnswer,
+    ) -> Result<(), String> {
+        self.core
+            .answer_read_receipt(message_id, answer)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_read_receipts(&self, policy: &str) -> Result<(), String> {
+        let policy = flectar_mail_core::models::ReadReceiptPolicy::parse(policy)
+            .ok_or("Unknown read receipt preference")?;
+        let mut settings = self.load_settings().await?;
+        settings.read_receipts = policy;
         self.core
             .set_settings(settings)
             .await
@@ -3197,6 +3229,7 @@ fn summary_to_message(
         can_block: false,
         sender_blocked: false,
         invitation: None,
+        receipt: None,
         verification_code: thread.verification_code,
         account_uses_labels: thread_account
             .is_some_and(|account| account.mail_protocol == MailProtocol::Gmail),
@@ -3306,6 +3339,7 @@ fn message_summary_to_message(
         can_block: false,
         sender_blocked: false,
         invitation: None,
+        receipt: None,
         verification_code: message.verification_code,
         account_uses_labels: message_account
             .is_some_and(|account| account.mail_protocol == MailProtocol::Gmail),
@@ -3425,6 +3459,13 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
         can_block: !message.is_draft && !message.is_outgoing && message.from.email.contains('@'),
         sender_blocked: message.sender_blocked,
         invitation: None,
+        receipt: message
+            .receipt_request
+            .clone()
+            .map(|request| ReceiptAsk {
+                message_id: message.id,
+                request,
+            }),
         verification_code: row.verification_code.clone(),
         account_uses_labels: row.account_uses_labels,
         first_attachment: row.first_attachment.clone(),

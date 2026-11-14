@@ -531,6 +531,36 @@ pub(super) fn register_settings_preference_callbacks(
         });
 
     let app_weak = app.as_weak();
+    let state_for_receipts = Rc::clone(state);
+    let runtime_for_receipts = runtime.clone();
+    app.global::<crate::ReadReceipts>()
+        .on_choose(move |choice| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            if flectar_mail_core::models::ReadReceiptPolicy::parse(&choice).is_none() {
+                return;
+            }
+            let receipts = app.global::<crate::ReadReceipts>();
+            let previous = receipts.get_policy();
+            receipts.set_policy(choice.clone());
+            let Some(core) = state_for_receipts.borrow().core.clone() else {
+                receipts.set_policy(previous);
+                return;
+            };
+            match runtime_for_receipts.block_on(core.set_read_receipts(&choice)) {
+                Ok(()) => app.set_sync_status(UiMessage::plain("Read receipt preference saved.")),
+                Err(error) => {
+                    receipts.set_policy(previous);
+                    app.set_sync_status(UiMessage::detail(
+                        "Could not save the read receipt preference: {}",
+                        error,
+                    ));
+                }
+            }
+        });
+
+    let app_weak = app.as_weak();
     let state_for_invitations = Rc::clone(state);
     let runtime_for_invitations = runtime.clone();
     app.global::<InvitationSettings>().on_choose(move |choice| {

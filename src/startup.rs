@@ -145,6 +145,7 @@ impl From<WarmStartMessage> for mail::MailMessage {
             can_block: false,
             sender_blocked: false,
             invitation: None,
+            receipt: None,
             verification_code: None,
             account_uses_labels: message.account_uses_labels,
             first_attachment: None,
@@ -1296,6 +1297,7 @@ mod warm_start_tests {
             can_block: false,
             sender_blocked: false,
             invitation: None,
+            receipt: None,
             verification_code: Some("48291375".into()),
             account_uses_labels: true,
             first_attachment: Some(flectar_mail_core::models::AttachmentMeta {
