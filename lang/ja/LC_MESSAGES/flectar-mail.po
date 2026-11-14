@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-08 15:58+0000\n"
+"PO-Revision-Date: 2026-11-12 04:29+0000\n"
 "Last-Translator: miyaji255 <miyaji255@users.noreply.translate.flectar.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
@@ -376,11 +376,11 @@ msgstr "(無題の予定)"
 
 #: ui/app.slint:199
 msgid "No conversation history"
-msgstr ""
+msgstr "メールの履歴はありません"
 
 #: ui/app.slint:200
 msgid "Conversation history available"
-msgstr ""
+msgstr "メールの履歴があります"
 
 #: ui/app.slint:201
 msgid "New address-book entry"
@@ -406,11 +406,9 @@ msgid "(No subject)"
 msgstr "（件名なし）"
 
 #: ui/app.slint:209
-#, fuzzy
-#| msgid "New messages"
 msgid "{n} new message"
 msgid_plural "{n} new messages"
-msgstr[0] "新しいメール"
+msgstr[0] "{n} 件の新しいメール"
 
 #: ui/app.slint:212
 #, fuzzy
@@ -422,10 +420,8 @@ msgid_plural "{0} and {n} more"
 msgstr[0] "{0} {1}"
 
 #: ui/app.slint:215
-#, fuzzy
-#| msgid "OpenPGP"
 msgid "Open"
-msgstr "OpenPGP"
+msgstr "開く"
 
 #: ui/app.slint:216 ui/views/mail-list-pane.slint:848
 #: ui/views/mail-reading-pane.slint:351 ui/views/mail-reading-pane.slint:393
@@ -434,11 +430,9 @@ msgid "Mark as read"
 msgstr "既読にする"
 
 #: ui/app.slint:218
-#, fuzzy
-#| msgid "New messages"
 msgid "{n} unread message"
 msgid_plural "{n} unread messages"
-msgstr[0] "新しいメール"
+msgstr[0] "{n} 件の未読メール"
 
 #. Local mail has no archive or spam.
 #: ui/app.slint:220 ui/dialogs/move-dialog.slint:45
@@ -453,8 +447,6 @@ msgstr "削除"
 
 #. notification settings list: mail that may play a sound, and the rest.
 #: ui/app.slint:224
-#, fuzzy
-#| msgid "New email"
 msgid "New mail"
 msgstr "新しいメール"
 
@@ -496,7 +488,7 @@ msgstr ""
 
 #: ui/app.slint:267
 msgid "Notification preferences saved."
-msgstr ""
+msgstr "通知設定を保存しました。"
 
 #: ui/app.slint:268
 msgid "Could not save notifications: {}"
@@ -556,7 +548,7 @@ msgstr ""
 
 #: ui/app.slint:282
 msgid "Theme preference saved."
-msgstr ""
+msgstr "テーマ設定を保存しました。"
 
 #: ui/app.slint:283
 msgid "Message appearance updated for this session."
@@ -620,7 +612,7 @@ msgstr ""
 
 #: ui/app.slint:298
 msgid "Language preference saved."
-msgstr ""
+msgstr "言語設定を保存しました。"
 
 #: ui/app.slint:299
 msgid "Could not save language: {}"
@@ -732,7 +724,7 @@ msgstr ""
 
 #: ui/app.slint:326
 msgid "Profile saved."
-msgstr ""
+msgstr "プロファイル設定を保存しました。"
 
 #: ui/app.slint:327
 msgid "Could not save profile: {}"
@@ -1170,7 +1162,7 @@ msgstr ""
 
 #: ui/app.slint:450
 msgid "No conversations in this folder"
-msgstr ""
+msgstr "このフォルダーにメールの履歴はありません"
 
 #: ui/app.slint:451
 msgid "No conversations match this search"
@@ -2798,17 +2790,17 @@ msgstr ""
 #: ui/components/composer-fields.slint:13 ui/views/mail-reading-pane.slint:338
 #: ui/views/mail-reading-pane.slint:380 ui/views/mail-reading-pane.slint:774
 msgid "Reply"
-msgstr ""
+msgstr "返信"
 
 #: ui/components/composer-fields.slint:14 ui/views/mail-reading-pane.slint:339
 #: ui/views/mail-reading-pane.slint:381 ui/views/mail-reading-pane.slint:783
 msgid "Reply all"
-msgstr ""
+msgstr "全員に返信"
 
 #: ui/components/composer-fields.slint:15 ui/views/mail-reading-pane.slint:340
 #: ui/views/mail-reading-pane.slint:382 ui/views/mail-reading-pane.slint:792
 msgid "Forward"
-msgstr ""
+msgstr "転送"
 
 #: ui/components/composer-fields.slint:16
 msgid "Edit draft"
@@ -2820,10 +2812,8 @@ msgid "Edit as new"
 msgstr ""
 
 #: ui/components/composer-fields.slint:69
-#, fuzzy
-#| msgid "Open in new tab"
 msgid "Open in a new window"
-msgstr "新しいタブで開く"
+msgstr "新しいウィンドウで開く"
 
 #: ui/components/composer-fields.slint:123 ui/views/files-view.slint:701
 msgid "Account"
@@ -4793,24 +4783,41 @@ msgid ""
 "accounts profiles personal work colors providers gmail outlook imap pop3 "
 "jmap caldav carddav mail history server oauth security signatures"
 msgstr ""
+"accounts profiles personal work colors providers gmail outlook imap pop3 "
+"jmap caldav carddav mail history server oauth security signatures アカウント "
+"プロファイル 個人用 仕事用 色 プロバイダー メール履歴 メールの履歴 サーバー "
+"認証 セキュリティ 署名"
 
 #: ui/dialogs/settings-dialog.slint:762
 msgid ""
 "contacts people suggestions autocomplete recipients senders address book "
 "privacy clear"
 msgstr ""
+"contacts people suggestions autocomplete recipients senders address book "
+"privacy clear 連絡先 連絡帳 アドレス帳 候補 入力候補 自動補完 宛先 送信相手 "
+"差出人 送信者 プライバシー 消去 削除"
 
 #: ui/dialogs/settings-dialog.slint:764
 msgid ""
 "notifications alerts sounds desktop new mail unread count badge app icon "
 "dock taskbar background app refresh low power mode battery saver"
 msgstr ""
+"notifications alerts sounds desktop new mail unread count badge app icon "
+"dock taskbar background app refresh low power mode battery saver 通知 お知ら"
+"せ 音 サウンド デスクトップ 新着メール 未読 未読数 バッジ アプリアイコン "
+"Dock ドック タスクバー バックグラウンド 更新 低電力モード バッテリーセーバー "
+"省電力"
 
 #: ui/dialogs/settings-dialog.slint:766
 msgid ""
 "shortcuts keyboard keys compose search archive spam junk trash delete "
 "navigation messages reading find zoom caret tabs"
 msgstr ""
+"shortcuts keyboard keys compose search archive spam junk trash delete "
+"navigation messages reading find zoom caret tabs ショートカット "
+"ショートカットキー キーボード キー 作成 メール作成 検索 アーカイブ 迷惑"
+"メール スパム ゴミ箱 削除 移動 メール メッセージ 閲覧 拡大 縮小 ズーム "
+"キャレット ブラウズ タブ"
 
 #: ui/dialogs/settings-dialog.slint:768
 msgid ""
@@ -5264,7 +5271,7 @@ msgstr ""
 msgid ""
 "Group accounts as Personal or Work and identify them by color in the mail "
 "list."
-msgstr ""
+msgstr "アカウントを個人用や仕事用などにまとめ、メール一覧で色で見分けられます。"
 
 #: ui/dialogs/settings-dialog.slint:1874 ui/dialogs/settings-dialog.slint:1904
 msgid "Add profile"
