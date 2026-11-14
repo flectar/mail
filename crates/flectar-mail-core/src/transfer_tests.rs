@@ -408,3 +408,83 @@ async fn a_transfer_that_cannot_happen_is_reported_and_leaves_the_original() {
     assert!(accounts.message(accounts.local, "Receipt").await.is_none());
     assert_eq!(accounts.transfers().await, 0);
 }
+
+#[tokio::test]
+async fn forwarded_messages_attach_as_they_arrived_without_their_bcc() {
+    let accounts = accounts(tempfile::tempdir().unwrap()).await;
+    let receipt = accounts.message(accounts.pop3, "Receipt").await.unwrap();
+    let itinerary = accounts.message(accounts.pop3, "Itinerary").await.unwrap();
+    // A copy of mail sent from here keeps the addresses it was blind copied to.
+    let raw_path: String = accounts
+        .core
+        .db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT raw_path FROM messages WHERE id = ?1",
+                params![receipt],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let original = std::fs::read(&raw_path).unwrap();
+    let mut with_bcc = b"Bcc: secret@example.org,\r\n  other@example.org\r\n".to_vec();
+    with_bcc.extend_from_slice(&original);
+    std::fs::write(&raw_path, &with_bcc).unwrap();
+
+    let chosen = accounts
+        .core
+        .forwarded_messages(ActionTarget::Messages(vec![itinerary, receipt]))
+        .await
+        .unwrap();
+    assert_eq!(
+        chosen
+            .iter()
+            .map(|message| (
+                message.message_id,
+                message.account_id,
+                message.subject.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (itinerary, accounts.pop3, "Itinerary"),
+            (receipt, accounts.pop3, "Receipt")
+        ]
+    );
+    let thread: i64 = accounts
+        .core
+        .db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT thread_id FROM messages WHERE id = ?1",
+                params![receipt],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let conversation = accounts
+        .core
+        .forwarded_messages(ActionTarget::Threads(vec![thread]))
+        .await
+        .unwrap();
+    assert_eq!(conversation.len(), 1);
+    assert_eq!(conversation[0].message_id, receipt);
+    assert_eq!(conversation[0].thread_id, Some(thread));
+
+    let mut originals = accounts.core.forwarded_originals(vec![receipt]).await;
+    assert_eq!(originals.len(), 1);
+    let (id, file) = originals.remove(0);
+    assert_eq!(id, receipt);
+    let path = file.unwrap();
+    assert!(path.starts_with(accounts.core.paths.temp_dir()));
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        original,
+        "the message as it arrived, without its Bcc field"
+    );
+    // The file goes with its path.
+    let kept = path.to_path_buf();
+    drop(path);
+    assert!(!kept.exists());
+}

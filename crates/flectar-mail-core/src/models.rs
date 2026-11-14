@@ -1500,6 +1500,16 @@ pub struct ActionParams {
     pub label_id: Option<i64>,
 }
 
+/// A message to forward as an attachment, as the composer names it before its original is
+/// fetched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForwardedMessage {
+    pub message_id: i64,
+    pub account_id: i64,
+    pub thread_id: Option<i64>,
+    pub subject: String,
+}
+
 /// What an action applies to: whole conversations, or single messages, as a
 /// mail list without conversations shows them.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

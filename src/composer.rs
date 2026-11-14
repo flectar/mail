@@ -13,6 +13,7 @@ use slint::SharedString;
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use std::rc::Weak;
 
+mod forward;
 mod message_spelling;
 mod photos;
 mod plain_text;
@@ -231,7 +232,11 @@ pub(super) fn install(
         if let Some(composers) = weak.upgrade()
             && let Some(app) = composers.app.upgrade()
         {
-            composers.open_from_message(&app, action.as_str());
+            if action == "forward_attachment" {
+                composers.forward_shown_as_attachment(&app);
+            } else {
+                composers.open_from_message(&app, action.as_str());
+            }
         }
     });
     let weak = Rc::downgrade(&composers);
@@ -722,24 +727,8 @@ impl Composers {
 
     /// Reply, reply all, forward, edit as new, or edit the selected draft.
     fn open_from_message(self: &Rc<Self>, app: &AppWindow, action: &str) {
-        let (core, row, conversation_message_id) = {
-            let state = self.state.borrow();
-            let row = state
-                .selected_id
-                .and_then(|id| state.messages.iter().find(|message| message.id == id))
-                .cloned();
-            let conversation_message_id = row.as_ref().and_then(|row| {
-                (state.conversation_owner_id == Some(row.id))
-                    .then(|| {
-                        state
-                            .conversation_messages
-                            .get(state.conversation_selected_index)
-                            .map(|message| i64::from(message.id))
-                    })
-                    .flatten()
-            });
-            (state.core.clone(), row, conversation_message_id)
-        };
+        let (row, conversation_message_id) = self.shown_message();
+        let core = self.core();
         let Some(core) = core else {
             app.set_render_status(UiMessage::plain(
                 "Connect an account before replying or forwarding.",

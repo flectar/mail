@@ -3184,6 +3184,41 @@ fn message_part(bytes: &[u8]) -> Option<(Vec<u8>, &'static str)> {
     Some((lines, if eight_bit { "8bit" } else { "7bit" }))
 }
 
+/// `raw`, a whole message, without its Bcc field: a copy of mail sent from here keeps the
+/// addresses it was blind copied to, which its recipients never saw, and which a forward
+/// mustn't show either.
+pub fn without_bcc(raw: &[u8]) -> Vec<u8> {
+    let mut kept = Vec::with_capacity(raw.len());
+    let mut rest = raw;
+    let mut skipping = false;
+    while !rest.is_empty() {
+        let end = rest
+            .iter()
+            .position(|&byte| byte == b'\n')
+            .map_or(rest.len(), |at| at + 1);
+        let (line, after) = rest.split_at(end);
+        rest = after;
+        // The header ends at its first empty line, and the body stays as it is.
+        if line == b"\r\n" || line == b"\n" {
+            kept.extend_from_slice(line);
+            kept.extend_from_slice(rest);
+            break;
+        }
+        let folded = line
+            .first()
+            .is_some_and(|byte| *byte == b' ' || *byte == b'\t');
+        if !folded {
+            skipping = line
+                .get(..4)
+                .is_some_and(|name| name.eq_ignore_ascii_case(b"bcc:"));
+        }
+        if !skipping {
+            kept.extend_from_slice(line);
+        }
+    }
+    kept
+}
+
 /// Build a raw RFC 5322 message. Returns (message_id, raw_bytes).
 /// What a read receipt reports (RFC 8098 section 3).
 pub struct ReadReceipt<'a> {
@@ -4272,6 +4307,23 @@ mod tests {
         );
         assert!(
             message_part(format!("Subject: x\r\n\r\n{}", "a".repeat(998)).as_bytes()).is_some()
+        );
+    }
+
+    #[test]
+    fn forwarded_copies_leave_out_their_bcc_field() {
+        let raw = b"From: me@example.com\r\nBcc: secret@example.org,\r\n  other@example.org\r\n\
+                    To: ana@example.org\r\nbcc: more@example.org\r\nSubject: Plans\r\n\r\n\
+                    Bcc: in the body stays\r\n";
+        assert_eq!(
+            without_bcc(raw),
+            b"From: me@example.com\r\nTo: ana@example.org\r\nSubject: Plans\r\n\r\n\
+              Bcc: in the body stays\r\n"
+        );
+        let lf = b"From: me@example.com\nBcc: secret@example.org\nSubject: Plans\n\nBody\n";
+        assert_eq!(
+            without_bcc(lf),
+            b"From: me@example.com\nSubject: Plans\n\nBody\n"
         );
     }
 

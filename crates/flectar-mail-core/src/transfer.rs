@@ -15,7 +15,9 @@ use crate::db::repo::{
 use crate::error::{CoreError, Result};
 use crate::events::{CoreEvent, TransferReport};
 use crate::mail_import::{Uploaded, Uploads};
-use crate::models::{ActionKind, ActionTarget, MailProtocol, PerformActionArgs, now_ms, roles};
+use crate::models::{
+    ActionKind, ActionTarget, ForwardedMessage, MailProtocol, PerformActionArgs, now_ms, roles,
+};
 use crate::{imap, jmap, queue, sync};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
@@ -252,6 +254,94 @@ impl crate::Core {
         }
     }
 
+    /// The messages of `target` a forward attaches, with their subjects: a conversation's but
+    /// its drafts, in the order they came, or those chosen, which are not drafts.
+    pub async fn forwarded_messages(&self, target: ActionTarget) -> Result<Vec<ForwardedMessage>> {
+        self.db
+            .read(move |conn| forwarded_messages(conn, &target))
+            .await
+    }
+
+    /// The originals of `message_ids`, to forward as attachments, each as it arrived in a file
+    /// of its own in this app's temporary directory, which goes when its path is dropped: from
+    /// where this app keeps the whole message, and otherwise from its server. A copy of mail
+    /// sent from here leaves out its Bcc field.
+    pub async fn forwarded_originals(
+        &self,
+        message_ids: Vec<i64>,
+    ) -> Vec<(i64, Result<tempfile::TempPath>)> {
+        let mut run = Run::default();
+        let mut originals = Vec::with_capacity(message_ids.len());
+        for message_id in message_ids {
+            originals.push((
+                message_id,
+                self.forwarded_original(&mut run, message_id).await,
+            ));
+        }
+        for (session, _) in run.imap.into_values() {
+            imap::logout(session).await;
+        }
+        originals
+    }
+
+    async fn forwarded_original(
+        &self,
+        run: &mut Run,
+        message_id: i64,
+    ) -> Result<tempfile::TempPath> {
+        let source = self
+            .db
+            .read(move |conn| Source::get(conn, message_id))
+            .await?
+            .ok_or_else(|| CoreError::NotFound("the message".into()))?;
+        let raw = self.original_bytes(run, message_id, &source).await?;
+        let raw = crate::mime::without_bcc(&raw);
+        let directory = self.paths.temp_dir();
+        tokio::fs::create_dir_all(&directory).await?;
+        let path = tempfile::Builder::new()
+            .prefix("forward-")
+            .suffix(".eml")
+            .tempfile_in(&directory)?
+            .into_temp_path();
+        tokio::fs::write(&path, &raw).await?;
+        crate::file_io::restrict_permissions(&directory, &[&*path])?;
+        Ok(path)
+    }
+
+    /// The source's raw message, from where this app keeps it when it does, and otherwise from
+    /// its server.
+    async fn original_bytes(
+        &self,
+        run: &mut Run,
+        message_id: i64,
+        source: &Source,
+    ) -> Result<Vec<u8>> {
+        let raw = match source.full_original() {
+            Some(path) => {
+                self.read_original(
+                    source.account_id,
+                    message_id,
+                    path,
+                    crate::MAX_CACHED_MESSAGE_BYTES,
+                    "original message",
+                )
+                .await?
+            }
+            None => match source.protocol {
+                MailProtocol::Imap => self.fetch_from_imap(run, source).await?,
+                MailProtocol::Jmap => self.fetch_from_jmap(run, source).await?,
+                MailProtocol::Gmail => self.fetch_from_gmail(run, source).await?,
+                MailProtocol::Pop3 | MailProtocol::Local => {
+                    return Err(CoreError::NotFound("the message's original".into()));
+                }
+            },
+        };
+        if raw.len() > crate::MAX_CACHED_MESSAGE_BYTES {
+            return Err(CoreError::Other("the message is too large".into()));
+        }
+        Ok(raw)
+    }
+
     /// Fetches the source's raw message into the transfer's file, from where
     /// this app keeps it when it does, and otherwise from its server.
     async fn fetch_original(&self, run: &mut Run, transfer: &Transfer) -> Result<String> {
@@ -263,31 +353,7 @@ impl crate::Core {
             .read(move |conn| Source::get(conn, message_id))
             .await?
             .ok_or_else(|| CoreError::NotFound("the message".into()))?;
-        let raw = match source.full_original() {
-            Some(path) => {
-                self.read_original(
-                    source.account_id,
-                    message_id,
-                    path,
-                    crate::MAX_CACHED_MESSAGE_BYTES,
-                    "message to transfer",
-                )
-                .await?
-            }
-            None => match source.protocol {
-                MailProtocol::Imap => self.fetch_from_imap(run, &source).await?,
-                MailProtocol::Jmap => self.fetch_from_jmap(run, &source).await?,
-                MailProtocol::Gmail => self.fetch_from_gmail(run, &source).await?,
-                MailProtocol::Pop3 | MailProtocol::Local => {
-                    return Err(CoreError::NotFound("the message's original".into()));
-                }
-            },
-        };
-        if raw.len() > crate::MAX_CACHED_MESSAGE_BYTES {
-            return Err(CoreError::Other(
-                "the message is too large to transfer".into(),
-            ));
-        }
+        let raw = self.original_bytes(run, message_id, &source).await?;
         let directory = self.paths.transfers_dir();
         tokio::fs::create_dir_all(&directory).await?;
         let path = directory.join(format!("{}.eml", transfer.id));
@@ -608,6 +674,38 @@ impl Source {
             _ => self.raw_path.as_deref(),
         }
     }
+}
+
+/// The messages of `target` a forward attaches, as [`crate::Core::forwarded_messages`] says.
+fn forwarded_messages(conn: &Connection, target: &ActionTarget) -> Result<Vec<ForwardedMessage>> {
+    let (sql, ids) = match target {
+        ActionTarget::Threads(ids) => (
+            "SELECT id, account_id, thread_id, COALESCE(subject, '') FROM messages
+             WHERE thread_id = ?1 AND is_draft = 0 ORDER BY date, id",
+            ids,
+        ),
+        ActionTarget::Messages(ids) => (
+            "SELECT id, account_id, thread_id, COALESCE(subject, '') FROM messages
+             WHERE id = ?1 AND is_draft = 0",
+            ids,
+        ),
+    };
+    let mut statement = conn.prepare_cached(sql)?;
+    let mut messages = Vec::new();
+    for id in ids {
+        let rows = statement.query_map(params![id], |row| {
+            Ok(ForwardedMessage {
+                message_id: row.get(0)?,
+                account_id: row.get(1)?,
+                thread_id: row.get(2)?,
+                subject: row.get(3)?,
+            })
+        })?;
+        for message in rows {
+            messages.push(message?);
+        }
+    }
+    Ok(messages)
 }
 
 /// The messages of `target` a transfer can take: a conversation's but its
