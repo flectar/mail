@@ -297,17 +297,19 @@ component MailGroupHeader inherits Rectangle {
     }
 }
 
-// Ends a list whose older unread mail is only on the server: how much, and
-// the setting that downloads further back.
+// Ends a list whose older unread mail is only on the server, or starts one
+// shown oldest first: how much, and the setting that downloads further back.
 component ServerOnlyNote inherits Rectangle {
     in property <int> count;
     in property <color> text-color;
     in property <color> divider-color;
+    // The note starts the list, so its divider goes below it.
+    in property <bool> at-top: false;
     callback open-mail-history();
 
     Rectangle {
         x: 0px;
-        y: 0px;
+        y: root.at-top ? parent.height - self.height : 0px;
         width: parent.width;
         height: LayoutMetrics.divider-width;
         background: root.divider-color;
@@ -337,6 +339,34 @@ component ServerOnlyNote inherits Rectangle {
     }
 }
 
+// Starts a list opened at a message further down, such as new mail a
+// notification shows in a list shown oldest first. The rows before it come
+// on request.
+component EarlierMailRow inherits Rectangle {
+    in property <color> divider-color;
+    callback show-earlier();
+
+    Rectangle {
+        x: 0px;
+        y: parent.height - self.height;
+        width: parent.width;
+        height: LayoutMetrics.divider-width;
+        background: root.divider-color;
+        accessible-role: none;
+    }
+    HorizontalLayout {
+        alignment: center;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        Button {
+            width: self.content-width;
+            text: @tr("Show earlier mail");
+            accessible-id: "mail-list-show-earlier";
+            clicked => { root.show-earlier(); }
+        }
+    }
+}
+
 // A focus scope only so message shortcuts work from anywhere in the pane.
 export component MailListPane inherits FocusScope {
     enabled: false;
@@ -356,6 +386,8 @@ export component MailListPane inherits FocusScope {
     in property <bool> trash_view: false;
     in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
+    // The list shows its oldest mail first.
+    in property <bool> oldest_first: false;
     in property <bool> sync_in_progress: false;
     // An account's checks fail, as its sidebar heading shows.
     in property <bool> account-problem: false;
@@ -391,7 +423,9 @@ export component MailListPane inherits FocusScope {
     callback open_email(int);
     callback search_changed(string);
     callback set_search_filter(string);
+    callback set_oldest_first(bool);
     callback load_more();
+    callback load_earlier();
     callback sync_mail();
     callback open_folders();
     callback open_compose();
@@ -728,8 +762,13 @@ export component MailListPane inherits FocusScope {
                                 { title: @tr("Starred"), value: "Starred" },
                                 { title: @tr("Has attachments"), value: "Has attachments" },
                             ];
-                            filter-active: root.search_filter != "All mail";
-                            filter-tooltip: @tr("Filter mail");
+                            selected-filter: root.search_filter;
+                            // Search results span folders and stay newest first.
+                            show-sort: true;
+                            sort-enabled: root.search_query == "";
+                            oldest-first: root.oldest_first;
+                            filter-active: root.search_filter != "All mail" || root.oldest_first;
+                            filter-tooltip: @tr("Filter and sort mail");
                             filter-accessible-id: "mail-filter-button";
                             refresh-enabled: !root.sync_in_progress;
                             refresh-tooltip: root.sync_in_progress ? @tr("Synchronizing mail") : @tr("Check for new mail");
@@ -743,6 +782,13 @@ export component MailListPane inherits FocusScope {
                             }
                             edited(text) => { root.search_changed(text); }
                             filter-selected(value) => { root.set_search_filter(value); }
+                            sort-selected(oldest-first) => {
+                                if oldest-first != root.oldest_first {
+                                    root.set_oldest_first(oldest-first);
+                                    // The list starts over at the top in its new order.
+                                    root.reset-pagination();
+                                }
+                            }
                             refresh => { root.sync_mail(); }
                         }
                     }
@@ -961,7 +1007,8 @@ export component MailListPane inherits FocusScope {
                                 private property <float> touch-start-x: 0;
                                 private property <float> touch-start-y: 0;
                                 width: max(0px, mail-list-scroll.visible-width - LayoutMetrics.list-scrollbar-gutter);
-                                height: entry.is_header ? (entry.group_kind == "server-only" ? 100px : root.compact ? 44px : 40px)
+                                height: entry.is_header
+                                    ? (entry.group_kind == "server-only" ? 100px : entry.group_kind == "earlier" ? 56px : root.compact ? 44px : 40px)
                                     : entry.show_row && (mail-row.reveal-ready || !MotionSettings.movement)
                                         ? root.message-row-height : 0px;
                                 border-radius: 6px;
@@ -1467,9 +1514,16 @@ export component MailListPane inherits FocusScope {
                                     count: entry.group_count;
                                     text-color: root.secondary-text;
                                     divider-color: root.border-subtle;
+                                    at-top: root.oldest_first;
                                     open-mail-history => { root.open-mail-history(); }
                                 }
-                                if entry.is_header && entry.group_kind != "server-only" : MailGroupHeader {
+                                if entry.is_header && entry.group_kind == "earlier" : EarlierMailRow {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    divider-color: root.border-subtle;
+                                    show-earlier => { root.load_earlier(); }
+                                }
+                                if entry.is_header && entry.group_kind != "server-only" && entry.group_kind != "earlier" : MailGroupHeader {
                                     width: parent.width;
                                     height: parent.height;
                                     title: root.group-title(entry.group_kind);

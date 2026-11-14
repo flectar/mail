@@ -29,7 +29,7 @@ pub(super) fn refresh_from_source(
 ///
 /// Refreshes re-read every loaded row up to a bound (`mail_work::refresh_limit`),
 /// so the retained tail (everything beyond the refreshed head) is only rows
-/// past that bound and the oldest rows that new mail pushed out of it. It is
+/// past that bound and the last rows that new mail pushed out of it. It is
 /// kept as-is without re-querying it, so it can go stale relative to the
 /// backend. `drop_ids` names messages known to no longer belong in the current
 /// view (e.g. messages the user just archived/spammed/trashed) — the only
@@ -45,15 +45,15 @@ fn merge_refreshed_mail_head(
         return (refreshed, false);
     }
 
-    // The loaded rows after the oldest refreshed row come next in the
+    // The loaded rows after the last refreshed row come next in the
     // mailbox too, so they stay as they are, including rows new mail pushed
-    // out of the refresh. When the oldest refreshed row was never loaded, the
+    // out of the refresh. When the last refreshed row was never loaded, the
     // refresh reached past rows that have left, which the loaded rows below
     // it would bring back, or new mail filled it, which would leave a gap
     // above them; the refreshed rows replace the list.
     let Some(tail_start) = refreshed
         .last()
-        .and_then(|oldest| current.iter().position(|old| old.id == oldest.id))
+        .and_then(|last| current.iter().position(|old| old.id == last.id))
         .map(|index| index + 1)
     else {
         return (refreshed, false);
@@ -124,6 +124,8 @@ pub(super) fn apply_background_mail_page(
         labels,
         mailboxes,
         next_cursor,
+        order,
+        start,
         ..
     } = page;
     let selection_removed = {
@@ -155,6 +157,13 @@ pub(super) fn apply_background_mail_page(
         }
 
         let old_next_cursor = state.next_cursor;
+        // Rows in the other order, or from another start, have no place in
+        // these.
+        if order != state.list_order || start != state.window_start {
+            old_messages.clear();
+            state.list_order = order;
+            state.window_start = start;
+        }
         let (merged, retained_tail) =
             merge_refreshed_mail_head(old_messages, messages, next_cursor, acted_on_ids);
         state.messages = merged;
@@ -218,6 +227,25 @@ pub(super) fn apply_background_mail_page(
 /// Rows to read instead when a refresh shares no row with the list while the
 /// reader shows one of them: new mail filled the refresh and pushed the open
 /// conversation below it. Each read is twice as long, up to one store read.
+/// Offer the rows before a list opened further down.
+fn add_earlier_row(entries: &mut Vec<MailListEntry>, window_start: Option<MailCursor>) {
+    if window_start.is_some() {
+        entries.insert(0, earlier_entry());
+    }
+}
+
+/// Say how much older unread mail only the server has, at the list's old
+/// end.
+fn add_server_only_note(entries: &mut Vec<MailListEntry>, count: u32, order: ListOrder) {
+    if count == 0 {
+        return;
+    }
+    match order {
+        ListOrder::NewestFirst => entries.push(server_only_entry(count)),
+        ListOrder::OldestFirst => entries.insert(0, server_only_entry(count)),
+    }
+}
+
 fn deeper_refresh(state: &InboxState, page: &mail::MailPage) -> Option<usize> {
     let open = state.rendered_id?;
     let read = page.messages.len();
@@ -232,6 +260,44 @@ fn deeper_refresh(state: &InboxState, page: &mail::MailPage) -> Option<usize> {
         && loaded.contains(&open)
         && !page.messages.iter().any(|row| loaded.contains(&row.id)))
     .then_some(read * 2)
+}
+
+/// Put the rows before the first one in front of the list, and say where it
+/// starts now: at its start once no rows are left before.
+pub(super) fn prepend_mail_page(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    page: mail::MailPage,
+) {
+    if !snapshot_is_current(state, page.account_revision) {
+        return;
+    }
+    {
+        let mut state = state.borrow_mut();
+        let known = state
+            .messages
+            .iter()
+            .map(|message| message.id)
+            .collect::<HashSet<_>>();
+        let mut messages = page
+            .messages
+            .into_iter()
+            .filter(|message| !known.contains(&message.id))
+            .collect::<Vec<_>>();
+        messages.append(&mut state.messages);
+        state.messages = messages;
+        let window_start = page
+            .next_cursor
+            .and(state.messages.first())
+            .map(|first| mail::cursor_before_row(first, state.list_order));
+        state.window_start = window_start;
+        state.labels = page.labels;
+    }
+    // As with pagination, only the list changes.
+    refresh_rows_only(app, state, runtime);
+    refresh_list_metadata(app, state);
+    app.set_mail_list_revision(app.get_mail_list_revision().wrapping_add(1));
 }
 
 pub(super) fn append_mail_page(
@@ -488,12 +554,15 @@ pub(super) fn render_current(
             &projected_rows,
             &state.mail_groups,
             query.trim().is_empty() && app.get_group_mail_by_date(),
+            state.list_order,
             Local::now(),
         );
-        let server_only = state.server_only_note();
-        if server_only > 0 {
-            list_projection.push(server_only_entry(server_only));
-        }
+        add_server_only_note(
+            &mut list_projection,
+            state.server_only_note(),
+            state.list_order,
+        );
+        add_earlier_row(&mut list_projection, state.window_start);
         let (previous_email_id, next_email_id) = adjacent_message_ids(visible, selected_id);
         (
             selected_email,
@@ -525,6 +594,7 @@ pub(super) fn render_current(
     refresh_sidebar(state);
     app.set_selected_scope_title(mailbox_scope_title(scope, &mailboxes, &labels).into());
     app.set_trash_view(is_trash_scope(scope));
+    app.set_mail_oldest_first(state.borrow().list_order == ListOrder::OldestFirst);
     app.set_selected_scope(scope.into());
     app.set_search_query(query.clone().into());
     app.set_unified_count(sidebar_badge_text(inbox_count).into());
@@ -1197,12 +1267,15 @@ pub(super) fn refresh_rows_only(
             &projected_rows,
             &state.mail_groups,
             state.query.trim().is_empty() && app.get_group_mail_by_date(),
+            state.list_order,
             Local::now(),
         );
-        let server_only = state.server_only_note();
-        if server_only > 0 {
-            list_projection.push(server_only_entry(server_only));
-        }
+        add_server_only_note(
+            &mut list_projection,
+            state.server_only_note(),
+            state.list_order,
+        );
+        add_earlier_row(&mut list_projection, state.window_start);
         (
             selected_id,
             checked_ids,
@@ -1354,6 +1427,7 @@ pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxSta
     refresh_sidebar(state);
     app.set_selected_scope_title(mailbox_scope_title(scope, &mailboxes, &labels).into());
     app.set_trash_view(is_trash_scope(scope));
+    app.set_mail_oldest_first(state.borrow().list_order == ListOrder::OldestFirst);
     app.set_selected_scope(scope.into());
     app.set_search_query(query.clone().into());
     app.set_unified_count(sidebar_badge_text(inbox_count).into());
@@ -1697,6 +1771,52 @@ fn is_trash_scope(scope: Scope) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_note_on_mail_only_on_the_server_is_at_the_lists_old_end() {
+        let row = |id| MailListEntry {
+            email: EmailRow {
+                id,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut newest_first = vec![row(2), row(1)];
+        add_server_only_note(&mut newest_first, 4, ListOrder::NewestFirst);
+        assert_eq!(newest_first[2].group_kind, "server-only");
+        assert_eq!(newest_first[2].group_count, 4);
+
+        let mut oldest_first = vec![row(1), row(2)];
+        add_server_only_note(&mut oldest_first, 4, ListOrder::OldestFirst);
+        assert_eq!(oldest_first[0].group_kind, "server-only");
+        assert_eq!(oldest_first[1].email.id, 1);
+
+        let mut none = vec![row(1)];
+        add_server_only_note(&mut none, 0, ListOrder::OldestFirst);
+        assert_eq!(none.len(), 1);
+    }
+
+    #[test]
+    fn a_list_opened_further_down_starts_with_its_earlier_mail() {
+        let row = |id| MailListEntry {
+            email: EmailRow {
+                id,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut window = vec![row(300)];
+        let start = MailCursor::Thread(flectar_mail_core::models::ThreadCursor {
+            last_message_at: 300,
+            thread_id: 299,
+        });
+        add_earlier_row(&mut window, Some(start));
+        assert_eq!(window[0].group_kind, "earlier");
+        assert_eq!(window[1].email.id, 300);
+        let mut whole = vec![row(1)];
+        add_earlier_row(&mut whole, None);
+        assert_eq!(whole.len(), 1);
+    }
 
     #[test]
     fn message_times_show_the_clock_for_recent_mail_and_dates_for_older_mail() {

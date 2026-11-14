@@ -321,6 +321,14 @@ export component WorkspaceSearchToolbar inherits Rectangle {
     in property <bool> leading-badge: false;
     in property <string> leading-badge-description;
     in property <[WorkspaceSearchFilter]> filters: [];
+    // The filter in use, which its menu item checks. Lists that only offer
+    // actions in the menu leave it empty.
+    in property <string> selected-filter: "";
+    // Newest first and Oldest first after the filters, for lists that sort
+    // by date. Disabled, they show the order the list has anyway.
+    in property <bool> show-sort: false;
+    in property <bool> sort-enabled: true;
+    in property <bool> oldest-first: false;
     in property <bool> filter-active: false;
     in property <string> filter-tooltip;
     in property <string> filter-accessible-id;
@@ -330,6 +338,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
     callback edited(string);
     callback submitted(string);
     callback filter-selected(string);
+    callback sort-selected(/* oldest first */ bool);
     callback leading-clicked;
     callback refresh;
     out property <bool> search-focused: search-edit.has-focus;
@@ -420,7 +429,24 @@ export component WorkspaceSearchToolbar inherits Rectangle {
                 Menu {
                     for option in root.filters : MenuItem {
                         title: option.title;
+                        checkable: root.selected-filter != "";
+                        checked: option.value == root.selected-filter;
                         activated => { root.filter-selected(option.value); }
+                    }
+                    if root.show-sort : MenuSeparator {}
+                    if root.show-sort : MenuItem {
+                        title: @tr("Newest first");
+                        enabled: root.sort-enabled;
+                        checkable: true;
+                        checked: !root.oldest-first;
+                        activated => { root.sort-selected(false); }
+                    }
+                    if root.show-sort : MenuItem {
+                        title: @tr("Oldest first");
+                        enabled: root.sort-enabled;
+                        checkable: true;
+                        checked: root.oldest-first;
+                        activated => { root.sort-selected(true); }
                     }
                 }
             }

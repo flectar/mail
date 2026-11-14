@@ -802,11 +802,19 @@ mod calendar_oauth_scope_tests {
 pub struct ThreadPageRequest {
     pub cursor: Option<ThreadCursor>,
     pub limit: i64,
+    /// Which end of the timeline comes first. A cursor continues in the order
+    /// of the page that gave it.
+    pub order: ListOrder,
 }
 
+/// A page newest first.
 impl From<(Option<ThreadCursor>, i64)> for ThreadPageRequest {
     fn from((cursor, limit): (Option<ThreadCursor>, i64)) -> Self {
-        Self { cursor, limit }
+        Self {
+            cursor,
+            limit,
+            order: ListOrder::NewestFirst,
+        }
     }
 }
 
@@ -814,6 +822,8 @@ impl From<(Option<ThreadCursor>, i64)> for ThreadPageRequest {
 pub struct MessagePageRequest {
     pub cursor: Option<MessageCursor>,
     pub limit: i64,
+    /// Which end of the timeline comes first, as for threads.
+    pub order: ListOrder,
 }
 
 #[derive(Clone)]
@@ -3301,7 +3311,11 @@ impl Core {
         folder_id: Option<i64>,
         page: ThreadPageRequest,
     ) -> Result<ThreadPage> {
-        let ThreadPageRequest { cursor, limit } = page;
+        let ThreadPageRequest {
+            cursor,
+            limit,
+            order,
+        } = page;
         let tab = self.tab_filter(split_id, label_id).await?;
         self.db
             .read(move |conn| {
@@ -3315,6 +3329,7 @@ impl Core {
                         folder_id,
                         cursor,
                         limit: limit.clamp(1, 200),
+                        order,
                     },
                 )
             })
@@ -3370,7 +3385,11 @@ impl Core {
         folder_id: Option<i64>,
         page: MessagePageRequest,
     ) -> Result<MessagePage> {
-        let MessagePageRequest { cursor, limit } = page;
+        let MessagePageRequest {
+            cursor,
+            limit,
+            order,
+        } = page;
         let tab = self.tab_filter(split_id, label_id).await?;
         self.db
             .read(move |conn| {
@@ -3384,6 +3403,7 @@ impl Core {
                         folder_id,
                         cursor: None,
                         limit: limit.clamp(1, 200),
+                        order,
                     },
                     cursor,
                 )
@@ -3477,6 +3497,7 @@ impl Core {
                         folder_id,
                         cursor: None,
                         limit: 1,
+                        order: ListOrder::NewestFirst,
                     },
                 )
             })
@@ -4002,6 +4023,36 @@ impl Core {
     /// Every blocked sender, alphabetically.
     pub async fn blocked_senders(&self) -> Result<Vec<BlockedSender>> {
         self.db.read(|conn| repo::blocked::list(conn)).await
+    }
+
+    /// When a mail-list row's timeline puts it, which a page that starts at
+    /// the row pages from: a conversation's latest message, or a message's
+    /// own date. None for a row that is gone.
+    pub async fn row_time(&self, grouping: MailGrouping, id: i64) -> Result<Option<i64>> {
+        self.db
+            .read(move |conn| repo::threads::row_time(conn, grouping, id))
+            .await
+    }
+
+    /// The app's keys for the mail lists shown oldest first. Every other list
+    /// is newest first.
+    pub async fn oldest_first_lists(&self) -> Result<Vec<String>> {
+        self.db
+            .read(|conn| repo::list_orders::oldest_first(conn))
+            .await
+    }
+
+    /// Show the mail list with the app's `key` in `order` from now on.
+    /// `owner` is what the list belongs to; the saved order goes with it.
+    pub async fn set_list_order(
+        &self,
+        key: String,
+        owner: ListOwner,
+        order: ListOrder,
+    ) -> Result<()> {
+        self.db
+            .write(move |conn| repo::list_orders::set(conn, &key, owner, order))
+            .await
     }
 
     /// Rewrite `src="cid:…"` references in a message body to `data:` URIs built
@@ -4787,6 +4838,7 @@ impl Core {
             folder_id,
             cursor: None,
             limit: 1,
+            order: ListOrder::NewestFirst,
         };
         let now = now_ms();
         let outcome = self

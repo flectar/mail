@@ -7,6 +7,14 @@ struct PageRequest {
     scope: Scope,
     query: String,
     limit: i64,
+    /// Where the rows start: the list's start, after a cursor, or at a row.
+    from: PageStart,
+}
+
+#[derive(Clone, Copy)]
+enum PageStart {
+    Cursor(Option<MailCursor>),
+    Row(i32),
 }
 
 /// Rows the mail store returns from one read of a mailbox, and of a search.
@@ -34,6 +42,9 @@ pub(super) struct MailWork {
     pub epoch: u64,
     pub loading: bool,
     replace: bool,
+    /// The list was opened at the row a pending selection is for, which
+    /// needs no second try while that selection waits.
+    opened_at_row: bool,
     moved: HashSet<i32>,
     pending: HashSet<i32>,
 }
@@ -188,10 +199,20 @@ pub(super) fn register(
     runtime.spawn(latest_load::run(
         page_rx,
         |request: PageRequest| async move {
-            request
-                .core
-                .load_page(request.scope, &request.query, None, request.limit, false)
-                .await
+            match request.from {
+                PageStart::Cursor(start) => {
+                    request
+                        .core
+                        .load_page(request.scope, &request.query, start, request.limit, false)
+                        .await
+                }
+                PageStart::Row(row) => {
+                    request
+                        .core
+                        .load_page_from_row(request.scope, row, request.limit)
+                        .await
+                }
+            }
         },
         move |generation, result| {
             let updates = updates.clone();
@@ -230,6 +251,7 @@ pub(super) fn register(
         epoch: 0,
         loading: false,
         replace: false,
+        opened_at_row: false,
         moved: HashSet::new(),
         pending: HashSet::new(),
     });
@@ -274,17 +296,36 @@ pub(super) fn register(
             if replace {
                 let mut state = page_state.borrow_mut();
                 state.messages = page.messages;
+                state.list_order = page.order;
+                state.window_start = page.start;
                 state.labels = page.labels;
                 state.next_cursor = page.next_cursor;
+                let unseen = state.pending_selection.filter(|id| {
+                    state.next_cursor.is_some() && !state.messages.iter().any(|row| row.id == *id)
+                });
                 // A restored tab whose conversation is not on the first page
                 // looks as far down as one read goes.
-                if state.pending_selection.is_some_and(|id| {
-                    state.next_cursor.is_some()
-                        && state.messages.len() <= PAGE_SIZE
-                        && !state.messages.iter().any(|row| row.id == id)
-                }) {
+                if unseen.is_some() && state.messages.len() <= PAGE_SIZE {
                     drop(state);
                     if let Err(error) = reload(&app, &page_state, &page_runtime, usize::MAX) {
+                        app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
+                    }
+                    continue;
+                }
+                // New mail a notification opens is at the end of a list shown
+                // oldest first, further down than that in a long one. The list
+                // opens at it instead, with the rows before it on request.
+                let opened_at_row = state
+                    .mail_work
+                    .as_ref()
+                    .is_some_and(|work| work.opened_at_row);
+                if let Some(id) = unseen
+                    && state.pending_selection_opens
+                    && state.list_order == ListOrder::OldestFirst
+                    && !opened_at_row
+                {
+                    drop(state);
+                    if let Err(error) = open_at_row(&app, &page_state, &page_runtime, id) {
                         app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
                     }
                     continue;
@@ -294,6 +335,9 @@ pub(super) fn register(
                 // than an unrelated first row.
                 let opens = std::mem::take(&mut state.pending_selection_opens);
                 let mut open = None;
+                if let Some(work) = state.mail_work.as_mut() {
+                    work.opened_at_row = false;
+                }
                 if let Some(id) = state.pending_selection.take() {
                     let found = state.messages.iter().any(|row| row.id == id);
                     state.selected_id = found.then_some(id);
@@ -412,6 +456,16 @@ pub(super) fn reload(
     load(app, state, runtime, false, &[], Some(rows))
 }
 
+/// Replace the list with its rows from row `id` on.
+fn open_at_row(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    id: i32,
+) -> Result<(), String> {
+    load_from(app, state, runtime, false, &[], None, PageStart::Row(id))
+}
+
 fn load(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -420,6 +474,29 @@ fn load(
     moved: &[i32],
     rows: Option<usize>,
 ) -> Result<(), String> {
+    // A refresh reads from where the rows start; anything else starts over
+    // at the list's start.
+    let start = preserve.then(|| state.borrow().window_start).flatten();
+    load_from(
+        app,
+        state,
+        runtime,
+        preserve,
+        moved,
+        rows,
+        PageStart::Cursor(start),
+    )
+}
+
+fn load_from(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    preserve: bool,
+    moved: &[i32],
+    rows: Option<usize>,
+    from: PageStart,
+) -> Result<(), String> {
     {
         let mut state = state.borrow_mut();
         let request = PageRequest {
@@ -427,7 +504,9 @@ fn load(
             scope: state.scope,
             query: state.query.clone(),
             limit: refresh_limit(rows.unwrap_or(state.messages.len()), &state.query),
+            from,
         };
+        let selection_waits = state.pending_selection.is_some();
         let work = state
             .mail_work
             .as_mut()
@@ -437,6 +516,11 @@ fn load(
             work.epoch = work.epoch.wrapping_add(1);
             work.moved.clear();
             work.replace = true;
+            if matches!(from, PageStart::Row(_)) {
+                work.opened_at_row = true;
+            } else if !selection_waits {
+                work.opened_at_row = false;
+            }
         }
         work.moved.extend(moved);
         work.loading = true;
@@ -445,6 +529,7 @@ fn load(
             state.messages.clear();
             state.selected_id = None;
             state.next_cursor = None;
+            state.window_start = None;
         }
     }
     if !preserve {

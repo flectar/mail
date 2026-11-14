@@ -243,6 +243,8 @@ fn background_removal_keeps_the_reader_and_visible_selection_in_sync() {
             runtime.handle(),
             mail::MailPage {
                 account_revision: core.account_revision(),
+                order: flectar_mail_core::models::ListOrder::NewestFirst,
+                start: None,
                 messages: case
                     .refreshed
                     .iter()

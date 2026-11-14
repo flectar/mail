@@ -123,6 +123,7 @@ async fn hundred_k_messages_stay_instant() {
                 folder_id: None,
                 cursor: None,
                 limit: 50,
+                order: flectar_mail_core::models::ListOrder::NewestFirst,
             },
         )
     })
@@ -143,6 +144,7 @@ async fn hundred_k_messages_stay_instant() {
                     folder_id: None,
                     cursor: None,
                     limit: 50,
+                    order: flectar_mail_core::models::ListOrder::NewestFirst,
                 },
             )
         })
@@ -165,6 +167,7 @@ async fn hundred_k_messages_stay_instant() {
                     folder_id: None,
                     cursor: None,
                     limit: 1,
+                    order: flectar_mail_core::models::ListOrder::NewestFirst,
                 },
             )
         })
@@ -207,6 +210,7 @@ async fn hundred_k_messages_stay_instant() {
                             thread_id: i64::MAX,
                         }),
                         limit: 50,
+                        order: flectar_mail_core::models::ListOrder::NewestFirst,
                     },
                 )
             }

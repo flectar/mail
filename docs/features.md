@@ -54,6 +54,12 @@ device shows. It can't be undone, so it asks first.
 In the minimal layout, arrow keys highlight messages and **Enter** opens them;
 **Escape** or **F6** returns to the list.
 
+Lists start with the newest mail. To read a mailbox from its oldest mail
+instead, choose **Oldest first** from the filter button next to the search
+field. Each mailbox, folder and label keeps the order you chose for it, and
+search results stay newest first. A notification about new mail opens such a
+list at that message when it is far down, with **Show earlier mail** above it.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../resources/screenshots/desktop-thread-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-thread-light.png">
