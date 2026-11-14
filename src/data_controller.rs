@@ -462,6 +462,13 @@ pub(super) fn restore_account_backup(
             {
                 settings.reduce_motion = preference;
             }
+            if let Some(policy) = preferences
+                .get("readReceipts")
+                .and_then(|value| value.as_str())
+                .and_then(flectar_mail_core::models::ReadReceiptPolicy::parse)
+            {
+                settings.read_receipts = policy;
+            }
             if let Some(width) = preferences
                 .get("workspaceListPaneWidth")
                 .and_then(|value| value.as_i64())
@@ -673,6 +680,8 @@ pub(super) fn restore_account_backup(
     app.global::<crate::MotionSettings>()
         .set_preference(settings.reduce_motion.as_str().into());
     crate::text_size::apply(app, settings.interface_text_size);
+    app.global::<crate::ReadReceipts>()
+        .set_policy(settings.read_receipts.as_str().into());
     app.set_show_avatars(settings.show_avatars);
     app.set_show_tabs(settings.show_tabs);
     crate::spelling::apply_settings(
@@ -1355,6 +1364,7 @@ pub(super) fn register_data_management_callbacks(
                     "messageAppearance": settings.message_appearance,
                     "reduceMotion": settings.reduce_motion,
                     "interfaceTextSize": settings.interface_text_size,
+                    "readReceipts": settings.read_receipts,
                     "showAvatars": settings.show_avatars,
                     "showTabs": settings.show_tabs,
                     "conversationView": settings.conversation_view,
@@ -1679,6 +1689,11 @@ pub(super) fn register_data_management_callbacks(
                     app.global::<crate::MotionSettings>()
                         .set_preference("system".into());
                     crate::text_size::apply(&app, Default::default());
+                    app.global::<crate::ReadReceipts>().set_policy(
+                        flectar_mail_core::models::ReadReceiptPolicy::default()
+                            .as_str()
+                            .into(),
+                    );
                     app.set_monochrome_sidebar_icons(false);
                     crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);

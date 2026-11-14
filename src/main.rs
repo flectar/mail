@@ -64,6 +64,7 @@ mod on_screen_surface_tests;
 pub mod pdf_preview;
 pub mod platform;
 mod preview_controls;
+mod read_receipts;
 mod reader_clipboard;
 #[cfg(test)]
 mod reader_validation;
@@ -6164,6 +6165,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     mailto_links::install(&app, composers);
     undo::install(&app, &state, &runtime);
     unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
+    read_receipts::install(&app, &state, &runtime);
     block_sender::install(&app, &state, &runtime);
     invitation::install(&app, &state, &calendar_state, &runtime);
     #[cfg(target_os = "macos")]

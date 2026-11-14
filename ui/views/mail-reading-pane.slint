@@ -21,6 +21,7 @@ import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { Unsubscribe } from "../unsubscribe.slint";
+import { ReadReceipts, ReceiptRequestBar } from "../read-receipts.slint";
 import { BlockSender } from "../block-sender.slint";
 import { Invitation } from "../invitation.slint";
 import { InvitationCard } from "../components/invitation-card.slint";
@@ -1351,6 +1352,12 @@ export component MailReadingPane inherits FocusScope {
                                             accessible-id: "message-unsubscribe";
                                             clicked => { Unsubscribe.start(); }
                                         }
+                                    }
+                                    // A sender asked to be notified when the message is
+                                    // read (RFC 8098), and Settings says to ask.
+                                    if ReadReceipts.available && !LocalMailUi.selected : ReceiptRequestBar {
+                                        compact: root.compact;
+                                        text-color: root.secondary-text;
                                     }
                                     // A calendar the message carries (#228), above the
                                     // message as Outlook, Apple Mail and Gmail put theirs.

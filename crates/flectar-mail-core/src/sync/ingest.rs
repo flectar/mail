@@ -42,6 +42,9 @@ pub(crate) struct Delivery<'a> {
     pub draft: bool,
     pub has_attachments: bool,
     pub size: Option<i64>,
+    /// The server says a read receipt was already sent or declined
+    /// ($MDNSent), or the mail is imported and was answered long ago.
+    pub receipt_handled: bool,
 }
 
 /// A message row created by [`Importer::insert`].
@@ -146,6 +149,9 @@ impl Importer {
             list_id: headers.list_id.clone(),
             sender_addr: headers.via.clone(),
             sender_verification: headers.sender_verification,
+            receipt_to: headers.receipt_to.clone(),
+            receipt_confirm: headers.receipt_confirm,
+            receipt_handled: delivery.receipt_handled,
         };
         let message_id = repo::messages::insert(conn, &message, thread_id)?;
         if !self.thread_ids.contains(&thread_id) {

@@ -17,6 +17,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Undo send](#undo-send)
 - [Unsubscribing](#unsubscribing)
 - [Blocking senders](#blocking-senders)
+- [Read receipts](#read-receipts)
 - [Calendar invitations](#calendar-invitations)
 - [Storage and backups](#storage-and-backups)
 - [Importing accounts and mail](#importing-accounts-and-mail)
@@ -389,6 +390,24 @@ mail in the inbox until Flectar Mail checks for mail.
 
 **Unblock sender** in the same menu, or **Unblock** in Settings → Contacts →
 Blocked senders, stops it. Mail already in Spam stays there.
+
+## Read receipts
+
+Some senders ask to be notified when you read their message. Flectar Mail sends
+no such read receipt unless you choose otherwise with **Read receipts** in
+Settings → General. **Never send**, the default, leaves the requests
+unanswered. **Ask each time** shows the request above the message, with **Send
+receipt** and **Ignore**. **Always send** sends one when you open the message,
+but still asks first when a request looks unusual: the receipt would go
+somewhere other than where the message came from, or to several addresses, or
+the receiving server couldn't confirm who sent the message. Mail in Spam,
+mailing lists and other automated mail, and your drafts and sent mail never
+get one.
+
+A receipt says only that the message was shown on your screen, as the
+standard puts it (RFC 8098). Sending one or ignoring the request answers it for
+good, and IMAP and JMAP servers usually keep that answer, so your other devices
+don't ask again.
 
 ## Calendar invitations
 

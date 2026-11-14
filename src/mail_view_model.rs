@@ -1877,6 +1877,7 @@ mod tests {
             can_block: false,
             sender_blocked: false,
             invitation: None,
+            receipt: None,
             verification_code: None,
             account_uses_labels: false,
             first_attachment: None,

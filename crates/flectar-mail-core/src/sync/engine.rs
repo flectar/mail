@@ -2849,6 +2849,7 @@ async fn store_headers(
                         draft: fh.flags.draft,
                         has_attachments: fh.has_attachments,
                         size: fh.size.map(|s| s as i64),
+                        receipt_handled: fh.flags.mdn_sent,
                     },
                 )?;
                 let msg_id = imported.message_id;
@@ -2929,7 +2930,10 @@ async fn reconcile_flags(ctx: &SyncCtx, session: &mut Session, folder: &Folder) 
                     }
                     let labels_changed =
                         repo::labels::reconcile_keywords(&tx, row.id, &flags.keywords)?;
-                    if (flags_changed || labels_changed)
+                    // Another device sent or declined the read receipt.
+                    let receipt_answered =
+                        flags.mdn_sent && repo::messages::mark_receipt_handled(&tx, row.id)?;
+                    if (flags_changed || labels_changed || receipt_answered)
                         && let Some(tid) = row.thread_id
                     {
                         repo::threads::recompute(&tx, tid)?;

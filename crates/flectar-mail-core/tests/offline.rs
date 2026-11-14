@@ -111,6 +111,9 @@ async fn seed(db: &Db, port: u16) -> (i64, i64) {
             list_id: None,
             sender_addr: None,
             sender_verification: Default::default(),
+            receipt_to: Vec::new(),
+            receipt_confirm: false,
+            receipt_handled: false,
         };
         repo::messages::insert(conn, &msg, thread_id)?;
         repo::threads::recompute(conn, thread_id)?;
