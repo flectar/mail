@@ -66,6 +66,8 @@ pub(super) struct ComposeSession {
     /// left on the one it moved from no longer reach it.
     host_id: Cell<u64>,
     files: RefCell<Vec<ComposeFile>>,
+    /// Downloads of a forward's files still on their way, which sending waits for.
+    attaching: Cell<u32>,
     /// Bumped when the message is cleared, so a file picker or a download of
     /// the original's files that finishes later attaches to nothing.
     generation: Cell<u64>,
@@ -498,6 +500,7 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_from_label(from.get_from_label());
     to.set_attachments(from.get_attachments());
     to.set_attachment_summary(from.get_attachment_summary());
+    to.set_attaching_files(from.get_attaching_files());
     to.set_plain_text(from.get_plain_text());
     to.set_templates(from.get_templates());
     to.set_message(from.get_message());
@@ -621,6 +624,7 @@ impl Composers {
             host: RefCell::new(host),
             host_id: Cell::new(0),
             files: RefCell::default(),
+            attaching: Cell::new(0),
             generation: Cell::new(0),
             document: RefCell::default(),
             editor: RefCell::default(),
@@ -1252,6 +1256,7 @@ impl ComposeSession {
         host.preferences().invoke_composer_reset();
         ui.set_editor_tiles(ModelRc::default());
         apply_compose_files(&ui, &[]);
+        ui.set_attaching_files(false);
         photos::apply_photos(&ui, &photos::PhotoSummary::default());
         ui.set_plain_text(false);
         apply_compose_contacts(&ui, &[]);
@@ -1500,6 +1505,7 @@ impl ComposeSession {
             return;
         }
         self.files.borrow_mut().clear();
+        self.attaching.set(0);
         self.photos.clear();
         // A picker still open for this composer must not attach to another.
         self.generation.set(self.generation.get().wrapping_add(1));
@@ -2569,6 +2575,7 @@ impl ComposeSession {
         };
         host.ui()
             .set_notice(UiMessage::plain("Attaching the original's files…"), false);
+        self.count_attaching(true);
         let core = core.clone();
         let request: documents::DocumentFuture<FetchedFiles> = Box::pin(async move {
             let mut fetched = Vec::with_capacity(attachments.len());
@@ -2599,6 +2606,7 @@ impl ComposeSession {
             if session.generation.get() != started_in {
                 return;
             }
+            session.count_attaching(false);
             let Some(host) = session.host() else {
                 return;
             };
@@ -2648,6 +2656,20 @@ impl ComposeSession {
             drop(files);
             session.refresh_photos();
         });
+    }
+
+    /// Count a download of a forward's files starting or finishing: sending waits while any
+    /// is on its way.
+    fn count_attaching(&self, started: bool) {
+        let count = if started {
+            self.attaching.get().saturating_add(1)
+        } else {
+            self.attaching.get().saturating_sub(1)
+        };
+        self.attaching.set(count);
+        if let Some(host) = self.host() {
+            host.ui().set_attaching_files(count > 0);
+        }
     }
 
     fn search_contacts(&self, recipients: &str, account_id: i32) {
@@ -2725,8 +2747,8 @@ impl ComposeSession {
         if send && !preferences.get_composer_preferences_ready() {
             return;
         }
-        // Photos going out shrunk are sent once they are.
-        if send && self.photos.on() && self.photos.busy() {
+        // Photos going out shrunk are sent once they are, and a forward once its files are here.
+        if send && (self.photos.on() && self.photos.busy() || self.attaching.get() > 0) {
             return;
         }
         if account_id <= 0 {
@@ -3571,6 +3593,36 @@ mod tests {
             _runtime: runtime,
             _dir: dir,
         }
+    }
+
+    #[test]
+    fn a_forward_goes_once_its_files_are_in() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.invoke_open_compose("ana@example.test".into());
+        let session = composers.in_app().unwrap();
+        session.count_attaching(true);
+        assert!(app.global::<ComposerUi>().get_attaching_files());
+
+        // The wait moves with the message to a window of its own.
+        app.global::<ComposerUi>().invoke_pop_out();
+        let host = session.host().unwrap();
+        let ui = host.ui();
+        assert!(ui.get_attaching_files());
+        host.preferences().set_composer_preferences_ready(true);
+        let send = || session.save(1, "ana@example.test", "", "", "Fwd: Plans", "Here", true);
+        send();
+        assert!(!ui.get_notice_is_error(), "nothing was sent");
+
+        // Once they're in, it goes, which with no account connected it can't.
+        session.count_attaching(false);
+        assert!(!ui.get_attaching_files());
+        send();
+        assert!(ui.get_notice_is_error());
     }
 
     #[test]
