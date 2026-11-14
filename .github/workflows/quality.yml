@@ -137,6 +137,8 @@ jobs:
           cargo test --manifest-path crates/parley/Cargo.toml --lib --locked --target-dir target/parley-tests
       - name: Verify the Slint winit clipboard backport
         run: python3 scripts/verify-slint-winit.py
+      - name: Verify the Slint Android pointer scroll backport
+        run: python3 scripts/verify-slint-android-activity.py
       - name: Verify and test the vendored spellbook
         run: |
           python3 scripts/verify-spellbook.py

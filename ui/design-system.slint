@@ -43,8 +43,19 @@ export global LayoutMetrics {
 // Runtime motion stays enabled by default. Deterministic renderers such as the
 // README screenshot generator can opt out so they capture the settled state
 // without changing the motion users see in the application.
+// Animations. `enabled` turns every animation off, for deterministic tests
+// and screenshots. Reduce motion keeps fades and color changes but drops
+// movement, so slides, growing panels, bounce and reveals happen at once.
 export global MotionSettings {
     in-out property <bool> enabled: true;
+    // The Reduce motion setting, "system", "on" or "off".
+    in-out property <string> preference: "system";
+    // The operating system asks apps to reduce motion.
+    in-out property <bool> system-reduced: false;
+    out property <bool> reduced: root.preference == "on" || (root.preference == "system" && root.system-reduced);
+    // Whether things may move as they change.
+    out property <bool> movement: root.enabled && !root.reduced;
+    callback choose(string);
 }
 
 // Mail actions and their matching sidebar destinations share one semantic

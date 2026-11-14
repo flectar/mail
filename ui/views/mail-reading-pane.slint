@@ -521,7 +521,7 @@ export component MailReadingPane inherits FocusScope {
     // navigation uses the active surface's height, including attachments.
     out property <length> email-scroll-document-height: root.message-document-height
         + root.message-actions-height + root.message-bottom-padding;
-    animate selected-header-y { duration: 240ms; easing: spring(0); }
+    animate selected-header-y { duration: 240ms; easing: spring(0); enabled: MotionSettings.movement; }
     in property <color> accent;
     in property <color> accent-soft;
     in property <color> border;
@@ -1249,7 +1249,7 @@ export component MailReadingPane inherits FocusScope {
                                     x: -email-scroll.content-x + root.message-card-inset;
                                     y: row.index * root.thread-item-stride
                                         + (row.index > root.accordion-selected-index ? root.expanded-message-height : 0px);
-                                    animate y { duration: 240ms; easing: spring(0); }
+                                    animate y { duration: 240ms; easing: spring(0); enabled: MotionSettings.movement; }
                                     width: max(0px, email-scroll.visible-width - 2 * root.message-card-inset);
                                     sender: row.sender;
                                     address: row.address;

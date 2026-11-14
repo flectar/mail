@@ -3,8 +3,11 @@ package com.flectar.mail;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import android.app.NativeActivity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -52,6 +55,19 @@ public final class LauncherIconsTest {
         for (String icon : LauncherIcons.NAMES) {
             LauncherIcons.choose(context, icon);
             assertOnly(icon);
+        }
+    }
+
+    @Test
+    public void everyLauncherEntryNamesTheNativeLibrary() throws Exception {
+        // NativeActivity loads the library named by the component that started
+        // it, which is the alias when the launcher opens the app.
+        PackageManager packages = context.getPackageManager();
+        for (String icon : LauncherIcons.NAMES) {
+            ActivityInfo info = packages.getActivityInfo(LauncherIcons.alias(context, icon),
+                    PackageManager.GET_META_DATA | PackageManager.MATCH_DISABLED_COMPONENTS);
+            assertEquals(icon, "flectar_mail_android", info.metaData == null ? null
+                    : info.metaData.getString(NativeActivity.META_DATA_LIB_NAME));
         }
     }
 

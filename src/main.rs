@@ -43,6 +43,7 @@ mod mail_work;
 mod mailto_links;
 mod memory;
 mod message_appearance;
+mod motion;
 mod move_picker;
 mod notifications;
 /// What Android asks of the app without its window.
@@ -89,6 +90,7 @@ mod single_instance;
 mod startup;
 mod startup_metrics;
 mod tabs;
+mod text_size;
 mod theme;
 mod ui_dispatch;
 mod ui_message;
@@ -1829,6 +1831,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_workspace_list_pane_width(width as f32);
     }
     window_chrome::register(&app, &runtime);
+    motion::watch(&app, &runtime);
     app_icon::apply(&app, startup_presentation.app_icon);
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     app.on_settings_search_matches(|haystack, query| {
@@ -3615,7 +3618,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         let animate = section_toggle_app
             .upgrade()
-            .is_some_and(|app| app.global::<MotionSettings>().get_enabled());
+            .is_some_and(|app| app.global::<MotionSettings>().get_movement());
         refresh_sidebar_with_motion(&section_toggle_state, animate);
     });
 
@@ -3636,7 +3639,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         let animate = folder_toggle_app
             .upgrade()
-            .is_some_and(|app| app.global::<MotionSettings>().get_enabled());
+            .is_some_and(|app| app.global::<MotionSettings>().get_movement());
         refresh_sidebar_with_motion(&folder_toggle_state, animate);
     });
 
@@ -5743,7 +5746,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         if !header_exists {
             return;
         }
-        let motion_enabled = app.global::<MotionSettings>().get_enabled();
+        let motion_enabled = app.global::<MotionSettings>().get_movement();
         let generation = {
             let mut state = state_for_mail_group.borrow_mut();
             let (generation, _) = state.mail_groups.toggle(&key);

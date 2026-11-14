@@ -175,6 +175,16 @@ To temporarily show the sender's original colors, use the contrast icon between
 Find and Reader mode in the desktop message toolbar, or choose **Show original
 colors** from the message's three-dot menu on any screen size.
 
+Turn on **Reduce motion** in Settings → General → Interface, or leave it on
+System to follow Animation effects on Windows, Reduce motion on macOS and iOS,
+the desktop's reduced motion setting on Linux, Remove animations on Android, or
+animation reduction on HarmonyOS. Panels, rows and dialogs then appear at once
+instead of sliding or growing, and only fades remain.
+
+**Interface text size**, in the same place, makes the text in menus, lists and
+settings smaller or larger, from 90% to 150% of your device's text size. Message
+zoom and the text size of new messages stay separate.
+
 ## Frameless window
 
 Flectar Mail replaces the system title bar with window controls in the toolbar
@@ -349,7 +359,8 @@ Blocked senders, stops it. Mail already in Spam stays there.
 ## Calendar invitations
 
 A message with an invitation shows a card above it with the event's day and
-time, where it takes place, who organizes it, and how many guests have accepted.
+time, where it takes place, who organizes it, who else is invited, and how many
+guests have accepted.
 It also says when the event clashes with others in your calendar. **Accept**,
 **Maybe** and **Decline** answer it, and your answer stays selected, so another
 click changes it. **Join** opens an online meeting, and the calendar button

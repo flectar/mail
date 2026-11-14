@@ -36,15 +36,14 @@ use windows_sys::Win32::UI::Shell::{
     APPBARDATA, DefSubclassProc, RemoveWindowSubclass, SHAppBarMessage, SetWindowSubclass,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GWL_STYLE, GetClassNameW, GetClientRect, GetWindowLongW, HCBT_CREATEWND,
-    HHOOK, HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, HTTOP, HTTOPLEFT, HTTOPRIGHT,
-    IsZoomed, NCCALCSIZE_PARAMS, PostMessageW, SC_CLOSE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE,
-    SM_CXPADDEDBORDER, SM_CYSIZEFRAME, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, SetWindowsHookExW,
-    UnhookWindowsHookEx, WH_CBT, WM_DPICHANGED, WM_MOUSEMOVE, WM_NCCALCSIZE, WM_NCDESTROY,
-    WM_NCHITTEST,
-    WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE,
-    WM_SYSCOMMAND, WS_CAPTION,
+    CallNextHookEx, GWL_STYLE, GetClassNameW, GetClientRect, GetWindowLongW, HCBT_CREATEWND, HHOOK,
+    HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsZoomed,
+    NCCALCSIZE_PARAMS, PostMessageW, SC_CLOSE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE,
+    SM_CXPADDEDBORDER, SM_CYSIZEFRAME, SPI_SETCLIENTAREAANIMATION, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+    SetWindowsHookExW, UnhookWindowsHookEx, WH_CBT, WM_DPICHANGED, WM_MOUSEMOVE, WM_NCCALCSIZE,
+    WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
+    WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_SETTINGCHANGE, WM_SYSCOMMAND, WS_CAPTION,
 };
 
 /// Window class that identifies the main window during creation.
@@ -275,6 +274,9 @@ unsafe extern "system" fn subclass_proc(
     }
     if message == super::taskbar_badge::button_created_message() || message == WM_DPICHANGED {
         super::taskbar_badge::apply(hwnd);
+    }
+    if message == WM_SETTINGCHANGE && wparam == SPI_SETCLIENTAREAANIMATION as WPARAM {
+        crate::motion::system_changed();
     }
     if message == WM_NCDESTROY {
         STATE.with(|state| state.hwnd.set(null_mut()));
