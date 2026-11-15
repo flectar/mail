@@ -288,10 +288,20 @@ closed. Syncing reads them back, so replies set on the web show too, and a
 strip over the mail list says when they're on, with Turn off.
 
 JMAP accounts whose server offers automatic replies, such as Fastmail, set
-them the same way, with a subject and days, for every sender. A JMAP server
-that also runs mail filters keeps automatic replies in a filter script of its
-own, which would turn your filters off, so those accounts and other IMAP and
-POP3 accounts get automatic replies from their provider's webmail for now.
+them the same way, with a subject and days, for every sender.
+
+IMAP accounts whose server runs mail filters through ManageSieve, as Dovecot,
+Cyrus and Stalwart servers can, set them the same way, with a subject and
+days, for every sender, and so do JMAP accounts on servers that run mail
+filters, such as Stalwart and Cyrus. The server answers each sender once, and
+again after four days, and skips mailing lists, newsletters and spam. Flectar
+Mail keeps the replies in a filter script of its own, named flectar-mail,
+which other devices read back, and never edits your own filter scripts. When
+the server already runs one, Flectar Mail asks first, then sends the replies
+and runs your script after them, unchanged, and turning replies off leaves
+your script running alone again. It won't combine them with a script that
+sends replies of its own. Other IMAP accounts and POP3 accounts get automatic
+replies from their provider's webmail.
 
 ## Text formatting
 

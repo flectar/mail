@@ -38,17 +38,32 @@ pub fn all(conn: &Connection) -> Result<Vec<(i64, AutoReply)>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-/// Keeps `reply` as account `account_id`'s, read from its server at `now`,
-/// or saved to it by the app when `saved`. Whether that changed them.
+/// Where replies the app keeps come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// The app saved them to the server.
+    Saved,
+    /// The app read them from the server, in a read that began when it had
+    /// last saved them at `saved_at`, if ever.
+    Read { saved_at: Option<i64> },
+}
+
+/// Keeps `reply` as account `account_id`'s at `now`. A read that began
+/// before the app saved them since keeps nothing, as the server may have
+/// answered it with the replies from before. Whether that changed them.
 pub fn store(
     conn: &Connection,
     account_id: i64,
     reply: &AutoReply,
     now: i64,
-    saved: bool,
+    origin: Origin,
 ) -> Result<bool> {
-    let changed = get(conn, account_id)?.as_ref() != Some(reply);
-    conn.execute(
+    let before = get(conn, account_id)?;
+    let (saved, read_since) = match origin {
+        Origin::Saved => (true, None),
+        Origin::Read { saved_at } => (false, saved_at),
+    };
+    let stored = conn.execute(
         "INSERT INTO auto_replies
            (account_id, enabled, subject, text, starts_at, ends_at, contacts_only, domain_only,
             saved_at, read_at)
@@ -59,7 +74,8 @@ pub fn store(
            starts_at = excluded.starts_at, ends_at = excluded.ends_at,
            contacts_only = excluded.contacts_only, domain_only = excluded.domain_only,
            saved_at = COALESCE(excluded.saved_at, auto_replies.saved_at),
-           read_at = excluded.read_at",
+           read_at = excluded.read_at
+         WHERE ?10 OR auto_replies.saved_at IS ?11",
         params![
             account_id,
             reply.enabled,
@@ -71,9 +87,23 @@ pub fn store(
             reply.domain_only,
             now,
             saved,
+            read_since,
         ],
     )?;
-    Ok(changed)
+    Ok(stored > 0 && before.as_ref() != Some(reply))
+}
+
+/// When the app last saved account `account_id`'s replies to its server,
+/// if it has.
+pub fn saved_at(conn: &Connection, account_id: i64) -> Result<Option<i64>> {
+    Ok(conn
+        .query_row(
+            "SELECT saved_at FROM auto_replies WHERE account_id = ?1",
+            params![account_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten())
 }
 
 /// Whether the app saved account `account_id`'s replies, so it uses the
@@ -119,27 +149,50 @@ mod tests {
         let conn = testutil::conn();
         testutil::seed_account(&conn);
         assert_eq!(get(&conn, 1).unwrap(), None);
+        let read = Origin::Read { saved_at: None };
         // Read from the server: the app hasn't used the settings permission.
-        assert!(store(&conn, 1, &away(), 10, false).unwrap());
+        assert!(store(&conn, 1, &away(), 10, read).unwrap());
         assert_eq!(get(&conn, 1).unwrap(), Some(away()));
         assert!(!uses_settings(&conn, 1).unwrap());
-        assert!(!store(&conn, 1, &away(), 20, false).unwrap(), "unchanged");
+        assert!(!store(&conn, 1, &away(), 20, read).unwrap(), "unchanged");
 
         // Saved by the app, then read back changed in webmail.
         let off = AutoReply {
             enabled: false,
             ..away()
         };
-        assert!(store(&conn, 1, &off, 30, true).unwrap());
+        assert!(store(&conn, 1, &off, 30, Origin::Saved).unwrap());
         assert!(uses_settings(&conn, 1).unwrap());
-        assert!(store(&conn, 1, &away(), 40, false).unwrap());
+        assert_eq!(saved_at(&conn, 1).unwrap(), Some(30));
+        let read = Origin::Read { saved_at: Some(30) };
+        assert!(store(&conn, 1, &away(), 40, read).unwrap());
         assert!(uses_settings(&conn, 1).unwrap(), "a read keeps the save");
         assert_eq!(all(&conn).unwrap(), [(1, away())]);
 
         forget_settings(&conn, 1).unwrap();
         assert!(!uses_settings(&conn, 1).unwrap());
         // An account that doesn't exist keeps nothing.
-        store(&conn, 4242, &away(), 50, true).unwrap();
+        store(&conn, 4242, &away(), 50, Origin::Saved).unwrap();
         assert_eq!(get(&conn, 4242).unwrap(), None);
+    }
+
+    #[test]
+    fn a_read_that_began_before_a_save_keeps_the_save() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let off = AutoReply {
+            enabled: false,
+            ..away()
+        };
+        // A sync began reading before the app had saved anything, and the
+        // user saved while it waited for the server.
+        let began = saved_at(&conn, 1).unwrap();
+        assert!(store(&conn, 1, &away(), 10, Origin::Saved).unwrap());
+        assert!(!store(&conn, 1, &off, 11, Origin::Read { saved_at: began }).unwrap());
+        assert_eq!(get(&conn, 1).unwrap(), Some(away()));
+        // So did one that began after an older save.
+        assert!(store(&conn, 1, &off, 20, Origin::Saved).unwrap());
+        assert!(!store(&conn, 1, &away(), 21, Origin::Read { saved_at: Some(10) }).unwrap());
+        assert_eq!(get(&conn, 1).unwrap(), Some(off));
     }
 }
