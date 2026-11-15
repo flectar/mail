@@ -1,7 +1,8 @@
 //! Automatic replies (#239): the Automatic replies tab of an account's mail
-//! preferences, and the strip over the mail list while replies are on. The
-//! core saves them to the account's server and reads them back on each
-//! sync, so this only shows and edits them.
+//! preferences, the strip over the mail list while replies are on, and what
+//! saving asks before it changes the filters an IMAP server runs. The core
+//! saves them to the account's server and reads them back on each sync, so
+//! this only shows and edits them.
 
 use crate::date_format::{self, DateStyle};
 use crate::ui_message::{AppWindowMessages, UiMessage, translated};
@@ -10,7 +11,9 @@ use chrono::{Local, NaiveDate, TimeZone};
 use flectar_mail_core::{
     Core,
     events::CoreEvent,
-    models::{AccountConfig, AutoReply, MailProtocol, Provider, now_ms},
+    models::{
+        AccountConfig, AutoReply, AutoReplyQuestion, AutoReplySaved, MailProtocol, Provider, now_ms,
+    },
 };
 use slint::{ComponentHandle, Weak};
 use std::{
@@ -36,6 +39,7 @@ pub(crate) fn register(
         state: Rc::clone(state),
         runtime: runtime.clone(),
         opener,
+        waiting: RefCell::new(None),
     });
     let save = Rc::clone(&saver);
     app.global::<AccountMailPreferences>()
@@ -43,6 +47,9 @@ pub(crate) fn register(
     let turn_off = Rc::clone(&saver);
     app.global::<AutoReplies>()
         .on_turn_off(move |account_id| turn_off.turn_off(i64::from(account_id)));
+    let answer = Rc::clone(&saver);
+    app.global::<AutoReplies>()
+        .on_answer(move |go_ahead| answer.answer(go_ahead));
     let weak = app.as_weak();
     app.global::<AutoReplies>().on_open_settings(move || {
         if let Some(app) = weak.upgrade() {
@@ -140,28 +147,40 @@ pub(crate) fn load_tab(app: &AppWindow, runtime: &Handle, core: Arc<Core>, confi
     let ui = app.global::<AccountMailPreferences>();
     ui.set_auto_reply_status("".into());
     ui.set_auto_reply_saving(false);
-    let cant = if config.mail_protocol == MailProtocol::Pop3 {
-        UiMessage::plain(
+    let cant = match config.mail_protocol {
+        MailProtocol::Pop3 => UiMessage::plain(
             "POP3 accounts can't have automatic replies from Flectar Mail. Your provider's webmail may offer them.",
-        )
-    } else {
-        UiMessage::plain(
+        ),
+        MailProtocol::Imap => UiMessage::plain(
+            "Flectar Mail found no way to set automatic replies on this account's server. Your provider's webmail may offer them.",
+        ),
+        _ => UiMessage::plain(
             "Flectar Mail can't set this account's automatic replies yet. Your provider's webmail can.",
-        )
+        ),
     };
     let kind = match (config.provider, config.mail_protocol) {
         (Provider::Gmail, _) => Server::Gmail,
         (Provider::Microsoft, _) => Server::Outlook,
         (_, MailProtocol::Jmap) => Server::Jmap,
+        (_, MailProtocol::Imap) => Server::Sieve,
         _ => {
             ui.set_auto_reply_supported(false);
             ui.set_auto_reply_unsupported_text(translated(app, &cant));
             return;
         }
     };
-    // A JMAP server offers them when a sync could read them.
-    ui.set_auto_reply_supported(kind != Server::Jmap);
-    ui.set_auto_reply_unsupported_text("".into());
+    // A JMAP server offers them when a sync could read them, and an IMAP
+    // server when it runs Sieve scripts, which the app asks it the first
+    // time.
+    ui.set_auto_reply_supported(matches!(kind, Server::Gmail | Server::Outlook));
+    ui.set_auto_reply_unsupported_text(if kind == Server::Sieve {
+        translated(
+            app,
+            &UiMessage::plain("Checking whether this account's server can send automatic replies…"),
+        )
+    } else {
+        "".into()
+    });
     ui.set_auto_reply_note(translated(
         app,
         &match kind {
@@ -174,16 +193,21 @@ pub(crate) fn load_tab(app: &AppWindow, runtime: &Handle, core: Arc<Core>, confi
             Server::Jmap => UiMessage::plain(
                 "Your server answers each sender once every few days, and never mailing lists.",
             ),
+            Server::Sieve => UiMessage::plain(
+                "Your server answers each sender once, and again after four days. Mailing lists and spam get no reply.",
+            ),
         },
     ));
     // Outlook's replies have no subject of their own, and its days need an end.
     ui.set_auto_reply_subject_available(kind != Server::Outlook);
     ui.set_auto_reply_needs_last_day(kind == Server::Outlook);
-    // JMAP replies go to every sender. Work accounts can keep Gmail's and
-    // Outlook's inside the organization, and Outlook always answers it.
+    // JMAP and Sieve replies go to every sender. Work accounts can keep
+    // Gmail's and Outlook's inside the organization, and Outlook always
+    // answers it.
     let work = !personal_account(&config.email);
-    ui.set_auto_reply_contacts_available(kind != Server::Jmap);
-    ui.set_auto_reply_domain_available(work && kind != Server::Jmap);
+    let senders = matches!(kind, Server::Gmail | Server::Outlook);
+    ui.set_auto_reply_contacts_available(senders);
+    ui.set_auto_reply_domain_available(work && senders);
     let contacts = if work && kind == Server::Outlook {
         UiMessage::plain(
             "Senders outside your organization who aren't in your contacts get no reply.",
@@ -195,9 +219,15 @@ pub(crate) fn load_tab(app: &AppWindow, runtime: &Handle, core: Arc<Core>, confi
     show_form(app, &AutoReply::default());
     let account_id = config.id;
     let weak = app.as_weak();
-    let task = runtime.spawn(async move { core.auto_reply(account_id).await });
+    let task = runtime.spawn(async move {
+        match core.auto_reply(account_id).await {
+            // The app hasn't asked this server yet.
+            Ok(None) if kind == Server::Sieve => core.check_auto_reply(account_id).await,
+            known => known,
+        }
+    });
     let _ = slint::spawn_local(async move {
-        let Ok(Ok(reply)) = task.await else {
+        let Ok(found) = task.await else {
             return;
         };
         let Some(app) = weak.upgrade() else {
@@ -207,15 +237,24 @@ pub(crate) fn load_tab(app: &AppWindow, runtime: &Handle, core: Arc<Core>, confi
         if i64::from(ui.get_account_id()) != account_id {
             return;
         }
-        match reply {
-            Some(reply) => {
+        match found {
+            Ok(Some(reply)) => {
                 ui.set_auto_reply_supported(true);
                 show_form(&app, &reply);
             }
-            None if kind == Server::Jmap => {
+            Ok(None) if matches!(kind, Server::Jmap | Server::Sieve) => {
                 ui.set_auto_reply_unsupported_text(translated(&app, &cant));
             }
-            None => {}
+            Err(error) if kind == Server::Sieve => {
+                ui.set_auto_reply_unsupported_text(translated(
+                    &app,
+                    &UiMessage::detail(
+                        "Couldn't check this account's server: {}",
+                        error.to_string(),
+                    ),
+                ));
+            }
+            _ => {}
         }
     });
 }
@@ -229,6 +268,8 @@ enum Server {
     Outlook,
     /// JMAP's VacationResponse.
     Jmap,
+    /// A Sieve script of the app's own on an IMAP server.
+    Sieve,
 }
 
 /// Whether `email` is a personal Google or Microsoft account, which has no
@@ -324,12 +365,15 @@ fn local_day(at: i64) -> Option<NaiveDate> {
 }
 
 /// Saves replies to an account's server, asking Google for permission in
-/// the browser the first time.
+/// the browser the first time, and the user when saving would change the
+/// filters an IMAP server runs.
 struct Saver {
     app: Weak<AppWindow>,
     state: Rc<RefCell<InboxState>>,
     runtime: Handle,
     opener: crate::ExternalUrlOpener,
+    /// Replies saving asked about, until the user answers.
+    waiting: RefCell<Option<(i64, AutoReply, AutoReplyQuestion)>>,
 }
 
 impl Saver {
@@ -341,18 +385,18 @@ impl Saver {
             .map(|core| core.account_preferences_core())
     }
 
-    fn save_form(&self) {
+    fn save_form(self: &Rc<Self>) {
         let Some(app) = self.app.upgrade() else {
             return;
         };
         let ui = app.global::<AccountMailPreferences>();
         match form_reply(&ui) {
-            Ok(reply) => self.save(i64::from(ui.get_account_id()), reply),
+            Ok(reply) => self.save(i64::from(ui.get_account_id()), reply, None),
             Err(problem) => ui.set_auto_reply_status(translated(&app, &problem)),
         }
     }
 
-    fn turn_off(&self, account_id: i64) {
+    fn turn_off(self: &Rc<Self>, account_id: i64) {
         let Some(core) = self.core() else {
             return;
         };
@@ -368,10 +412,26 @@ impl Saver {
                 enabled: false,
                 ..current
             },
+            None,
         );
     }
 
-    fn save(&self, account_id: i64, reply: AutoReply) {
+    /// Saves the replies saving asked about, once the user goes ahead.
+    fn answer(self: &Rc<Self>, go_ahead: bool) {
+        let Some((account_id, reply, question)) = self.waiting.borrow_mut().take() else {
+            return;
+        };
+        if go_ahead {
+            self.save(account_id, reply, Some(question));
+        }
+    }
+
+    fn save(
+        self: &Rc<Self>,
+        account_id: i64,
+        reply: AutoReply,
+        allowed: Option<AutoReplyQuestion>,
+    ) {
         let (Some(app), Some(core)) = (self.app.upgrade(), self.core()) else {
             return;
         };
@@ -389,8 +449,9 @@ impl Saver {
         let asked = Arc::clone(&consenting);
         let browser_app = app.as_weak();
         let opener = self.opener.clone();
+        let asked_about = reply.clone();
         let task = self.runtime.spawn(async move {
-            core.set_auto_reply(account_id, reply, move |url| {
+            core.set_auto_reply(account_id, reply, allowed, move |url| {
                 asked.store(true, Ordering::Relaxed);
                 let _ = browser_app.upgrade_in_event_loop(|app| {
                     app.set_oauth_in_progress(true);
@@ -404,6 +465,7 @@ impl Saver {
             .await
         });
         let weak = app.as_weak();
+        let saver = Rc::clone(self);
         let _ = slint::spawn_local(async move {
             let result = task.await;
             let Some(app) = weak.upgrade() else {
@@ -417,11 +479,26 @@ impl Saver {
             ui.set_auto_reply_saving(false);
             let shown = i64::from(ui.get_account_id()) == account_id;
             match result {
-                Ok(Ok(saved)) => {
+                Ok(Ok(AutoReplySaved::Done(saved))) => {
                     if shown {
                         show_form(&app, &saved);
                         ui.set_auto_reply_status(translated(&app, &UiMessage::plain("Saved.")));
                     }
+                }
+                Ok(Ok(AutoReplySaved::Ask(question))) => {
+                    let replies = app.global::<AutoReplies>();
+                    match &question {
+                        AutoReplyQuestion::RunBefore(script) => {
+                            replies.set_question("run-before".into());
+                            replies.set_question_script(script.as_str().into());
+                        }
+                        AutoReplyQuestion::ReplaceChanges => {
+                            replies.set_question("replace".into());
+                            replies.set_question_script("".into());
+                        }
+                    }
+                    *saver.waiting.borrow_mut() = Some((account_id, asked_about, question));
+                    replies.set_question_open(true);
                 }
                 Ok(Err(error)) => {
                     let problem = UiMessage::detail(
