@@ -8,3 +8,4 @@
 
 pub mod client;
 pub mod sync;
+pub(crate) mod vacation;

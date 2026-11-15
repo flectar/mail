@@ -99,6 +99,8 @@ export global AccountMailPreferences {
     // Who "only my contacts" leaves out: in a Microsoft work account, only
     // senders outside the organization.
     in property <string> auto-reply-contacts-note;
+    // JMAP's replies go to every sender.
+    in property <bool> auto-reply-contacts-available: true;
     in-out property <bool> auto-reply-on: false;
     // Days as YYYY-MM-DD, or empty for no limit.
     in-out property <string> auto-reply-first-day;
@@ -308,7 +310,7 @@ export component AccountMailPreferencesPanel inherits OnScreenSurface {
                     placeholder-text: @tr("Message, such as I'm away until Monday and will answer when I'm back.");
                     enabled: !AccountMailPreferences.auto-reply-saving;
                 }
-                SettingsSwitchRow {
+                if AccountMailPreferences.auto-reply-contacts-available : SettingsSwitchRow {
                     compact: root.compact; title: @tr("Only reply to my contacts"); description: AccountMailPreferences.auto-reply-contacts-note;
                     checked <=> AccountMailPreferences.auto-reply-contacts-only;
                     enabled: !AccountMailPreferences.auto-reply-saving;

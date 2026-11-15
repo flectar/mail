@@ -196,3 +196,157 @@ fn replies_are_on_until_their_last_day_ends() {
     };
     assert!(!off.on_at(0));
 }
+
+/// A JMAP session for account "a1" at `origin`, with JMAP Sieve or not.
+fn jmap_session(origin: &str, sieve: bool) -> Value {
+    let mail = json!({
+        "maxMailboxesPerEmail": null,
+        "maxMailboxDepth": 10,
+        "maxSizeMailboxName": 255,
+        "maxSizeAttachmentsPerEmail": 50_000_000,
+        "emailQuerySortOptions": ["receivedAt"],
+        "mayCreateTopLevelMailbox": true
+    });
+    let submission = json!({ "maxDelayedSend": 0, "submissionExtensions": [] });
+    let mut account = json!({
+        "urn:ietf:params:jmap:mail": mail.clone(),
+        "urn:ietf:params:jmap:submission": submission.clone(),
+        "urn:ietf:params:jmap:vacationresponse": {},
+    });
+    if sieve {
+        account["urn:ietf:params:jmap:sieve"] = json!({});
+    }
+    json!({
+        "capabilities": {
+            "urn:ietf:params:jmap:core": {
+                "maxSizeUpload": 50_000_000,
+                "maxConcurrentUpload": 4,
+                "maxSizeRequest": 10_000_000,
+                "maxConcurrentRequests": 4,
+                "maxCallsInRequest": 16,
+                "maxObjectsInGet": 500,
+                "maxObjectsInSet": 500,
+                "collationAlgorithms": []
+            },
+            "urn:ietf:params:jmap:mail": mail,
+            "urn:ietf:params:jmap:submission": submission,
+            "urn:ietf:params:jmap:vacationresponse": {},
+        },
+        "accounts": {
+            "a1": {
+                "name": "Test",
+                "isPersonal": true,
+                "isReadOnly": false,
+                "accountCapabilities": account,
+            }
+        },
+        "primaryAccounts": { "urn:ietf:params:jmap:mail": "a1" },
+        "username": "me@example.test",
+        "apiUrl": format!("{origin}/api"),
+        "downloadUrl": format!("{origin}/download/{{accountId}}/{{blobId}}/{{name}}?accept={{type}}"),
+        "uploadUrl": format!("{origin}/upload/{{accountId}}"),
+        "eventSourceUrl": format!("{origin}/events?types={{types}}&closeafter={{closeafter}}&ping={{ping}}"),
+        "state": "session-1"
+    })
+}
+
+/// A JMAP server whose VacationResponse starts as `stored`, with JMAP Sieve
+/// or not.
+async fn jmap_server(sieve: bool) -> (String, Arc<Mutex<Value>>) {
+    let stored = Arc::new(Mutex::new(json!({ "id": "singleton", "isEnabled": false })));
+    let kept = Arc::clone(&stored);
+    let origin = Arc::new(Mutex::new(String::new()));
+    let known = Arc::clone(&origin);
+    let (address, _) = server(move |(method, _, body)| {
+        if method == "GET" {
+            return (200, jmap_session(&known.lock().unwrap(), sieve));
+        }
+        let request: Value = serde_json::from_str(body).unwrap();
+        let call = &request["methodCalls"][0];
+        let response = match call[0].as_str().unwrap() {
+            "VacationResponse/get" => json!([
+                "VacationResponse/get",
+                { "accountId": "a1", "state": "1", "list": [kept.lock().unwrap().clone()], "notFound": [] },
+                call[2],
+            ]),
+            "VacationResponse/set" => {
+                let mut object = kept.lock().unwrap();
+                for (name, value) in call[1]["update"]["singleton"].as_object().unwrap() {
+                    object[name] = value.clone();
+                }
+                json!([
+                    "VacationResponse/set",
+                    { "accountId": "a1", "oldState": "1", "newState": "2", "updated": { "singleton": null } },
+                    call[2],
+                ])
+            }
+            other => panic!("unexpected {other}"),
+        };
+        (200, json!({ "methodResponses": [response], "sessionState": "session-1" }))
+    })
+    .await;
+    *origin.lock().unwrap() = address.clone();
+    (address, stored)
+}
+
+#[tokio::test]
+async fn replies_go_to_a_jmap_server_as_its_vacation_response() {
+    let (origin, stored) = jmap_server(false).await;
+    let connected = crate::jmap::client::connect_with(
+        "me@example.test",
+        "me@example.test",
+        "secret",
+        &origin,
+        Some("a1"),
+    )
+    .await
+    .unwrap();
+    assert!(crate::jmap::vacation::offered(&connected));
+    assert!(
+        !crate::jmap::vacation::read(&connected)
+            .await
+            .unwrap()
+            .enabled
+    );
+
+    let reply = AutoReply {
+        contacts_only: false,
+        ..away()
+    };
+    let saved = crate::jmap::vacation::save(&connected, &reply)
+        .await
+        .unwrap();
+    // JMAP keeps whole seconds, so the end comes back to the second.
+    assert_eq!(
+        saved.ends_at,
+        reply.ends_at.map(|at| (at + 1) / 1000 * 1000 - 1)
+    );
+    assert_eq!(
+        AutoReply {
+            ends_at: reply.ends_at,
+            ..saved
+        },
+        reply
+    );
+    let object = stored.lock().unwrap().clone();
+    assert_eq!(object["isEnabled"], true);
+    assert_eq!(object["textBody"], reply.text);
+    // The end is the first moment without replies: the next day's start.
+    assert_eq!(object["toDate"], "2025-11-21T00:00:00Z");
+}
+
+#[tokio::test]
+async fn a_jmap_server_with_sieve_keeps_its_replies_to_itself() {
+    let (origin, _) = jmap_server(true).await;
+    let connected = crate::jmap::client::connect_with(
+        "me@example.test",
+        "me@example.test",
+        "secret",
+        &origin,
+        Some("a1"),
+    )
+    .await
+    .unwrap();
+    // Saving there would turn the user's own filters off.
+    assert!(!crate::jmap::vacation::offered(&connected));
+}

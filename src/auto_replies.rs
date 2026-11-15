@@ -138,42 +138,53 @@ fn strip_detail(email: &str, reply: &AutoReply, now: i64) -> Option<UiMessage> {
 /// last read from its server.
 pub(crate) fn load_tab(app: &AppWindow, runtime: &Handle, core: Arc<Core>, config: &AccountConfig) {
     let ui = app.global::<AccountMailPreferences>();
-    let supported = matches!(config.provider, Provider::Gmail | Provider::Microsoft);
-    ui.set_auto_reply_supported(supported);
     ui.set_auto_reply_status("".into());
     ui.set_auto_reply_saving(false);
-    if !supported {
-        let reason = if config.mail_protocol == MailProtocol::Pop3 {
-            UiMessage::plain(
-                "POP3 accounts can't have automatic replies from Flectar Mail. Your provider's webmail may offer them.",
-            )
-        } else {
-            UiMessage::plain(
-                "Flectar Mail can't set this account's automatic replies yet. Your provider's webmail can.",
-            )
-        };
-        ui.set_auto_reply_unsupported_text(translated(app, &reason));
-        return;
-    }
-    let gmail = config.provider == Provider::Gmail;
+    let cant = if config.mail_protocol == MailProtocol::Pop3 {
+        UiMessage::plain(
+            "POP3 accounts can't have automatic replies from Flectar Mail. Your provider's webmail may offer them.",
+        )
+    } else {
+        UiMessage::plain(
+            "Flectar Mail can't set this account's automatic replies yet. Your provider's webmail can.",
+        )
+    };
+    let kind = match (config.provider, config.mail_protocol) {
+        (Provider::Gmail, _) => Server::Gmail,
+        (Provider::Microsoft, _) => Server::Outlook,
+        (_, MailProtocol::Jmap) => Server::Jmap,
+        _ => {
+            ui.set_auto_reply_supported(false);
+            ui.set_auto_reply_unsupported_text(translated(app, &cant));
+            return;
+        }
+    };
+    // A JMAP server offers them when a sync could read them.
+    ui.set_auto_reply_supported(kind != Server::Jmap);
+    ui.set_auto_reply_unsupported_text("".into());
     ui.set_auto_reply_note(translated(
         app,
-        &if gmail {
-            UiMessage::plain(
+        &match kind {
+            Server::Gmail => UiMessage::plain(
                 "Gmail answers each sender once, and again after four days. Mailing lists and spam get no reply.",
-            )
-        } else {
-            UiMessage::plain("Outlook answers each sender once while replies are on.")
+            ),
+            Server::Outlook => {
+                UiMessage::plain("Outlook answers each sender once while replies are on.")
+            }
+            Server::Jmap => UiMessage::plain(
+                "Your server answers each sender once every few days, and never mailing lists.",
+            ),
         },
     ));
     // Outlook's replies have no subject of their own, and its days need an end.
-    ui.set_auto_reply_subject_available(gmail);
-    ui.set_auto_reply_needs_last_day(!gmail);
-    // Work accounts can keep replies inside the organization, and Outlook
-    // always answers it.
+    ui.set_auto_reply_subject_available(kind != Server::Outlook);
+    ui.set_auto_reply_needs_last_day(kind == Server::Outlook);
+    // JMAP replies go to every sender. Work accounts can keep Gmail's and
+    // Outlook's inside the organization, and Outlook always answers it.
     let work = !personal_account(&config.email);
-    ui.set_auto_reply_domain_available(work);
-    let contacts = if work && !gmail {
+    ui.set_auto_reply_contacts_available(kind != Server::Jmap);
+    ui.set_auto_reply_domain_available(work && kind != Server::Jmap);
+    let contacts = if work && kind == Server::Outlook {
         UiMessage::plain(
             "Senders outside your organization who aren't in your contacts get no reply.",
         )
@@ -186,15 +197,38 @@ pub(crate) fn load_tab(app: &AppWindow, runtime: &Handle, core: Arc<Core>, confi
     let weak = app.as_weak();
     let task = runtime.spawn(async move { core.auto_reply(account_id).await });
     let _ = slint::spawn_local(async move {
-        let Ok(Ok(Some(reply))) = task.await else {
+        let Ok(Ok(reply)) = task.await else {
             return;
         };
-        if let Some(app) = weak.upgrade()
-            && i64::from(app.global::<AccountMailPreferences>().get_account_id()) == account_id
-        {
-            show_form(&app, &reply);
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        let ui = app.global::<AccountMailPreferences>();
+        if i64::from(ui.get_account_id()) != account_id {
+            return;
+        }
+        match reply {
+            Some(reply) => {
+                ui.set_auto_reply_supported(true);
+                show_form(&app, &reply);
+            }
+            None if kind == Server::Jmap => {
+                ui.set_auto_reply_unsupported_text(translated(&app, &cant));
+            }
+            None => {}
         }
     });
+}
+
+/// Where an account's automatic replies are kept.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Server {
+    /// Gmail's vacation responder.
+    Gmail,
+    /// A Microsoft mailbox's settings.
+    Outlook,
+    /// JMAP's VacationResponse.
+    Jmap,
 }
 
 /// Whether `email` is a personal Google or Microsoft account, which has no
@@ -262,7 +296,7 @@ fn form_reply(ui: &AccountMailPreferences<'_>) -> Result<AutoReply, UiMessage> {
             .and_then(|day| day.succ_opt())
             .and_then(local_midnight)
             .map(|midnight| midnight - 1),
-        contacts_only: ui.get_auto_reply_contacts_only(),
+        contacts_only: ui.get_auto_reply_contacts_available() && ui.get_auto_reply_contacts_only(),
         domain_only: ui.get_auto_reply_domain_available() && ui.get_auto_reply_domain_only(),
     })
 }
