@@ -57,6 +57,9 @@ export global AccountMailPreferences {
     in-out property <int> message-format-index: 0;
     in-out property <bool> plain-text-replies: true;
     callback save-message-format;
+    // New messages ask for a read receipt, which each message can change.
+    in-out property <bool> request-read-receipts: false;
+    callback save-read-receipt-requests;
     callback load(int);
     callback edit-signature(int);
     // Opens the chosen signature, or a new one, in the composer to write.
@@ -270,6 +273,13 @@ export component AccountMailPreferencesPanel inherits OnScreenSurface {
                     enabled: !AccountMailPreferences.busy;
                     title-color: AppTheme.heading; description-color: AppTheme.secondary;
                     toggled(on) => { AccountMailPreferences.save-message-format(); }
+                }
+                SettingsSwitchRow {
+                    compact: root.compact; title: @tr("Request read receipts"); description: @tr("New messages ask to be told when they're read. Each message can change it under More options.");
+                    checked <=> AccountMailPreferences.request-read-receipts;
+                    enabled: !AccountMailPreferences.busy;
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                    toggled(on) => { AccountMailPreferences.save-read-receipt-requests(); }
                 }
             }
             if root.tab == "replies" && !AccountMailPreferences.auto-reply-supported : Text {

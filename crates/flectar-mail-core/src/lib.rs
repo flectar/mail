@@ -1749,6 +1749,36 @@ impl Core {
         Ok(())
     }
 
+    /// Whether new messages from account `account_id` ask for a read
+    /// receipt (RFC 8098), which each message can still change.
+    pub async fn set_account_read_receipt_requests(
+        &self,
+        account_id: i64,
+        request: bool,
+    ) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                if config.mail_protocol == MailProtocol::Local {
+                    return Err(CoreError::Other(
+                        "mail kept on this device is never sent".into(),
+                    ));
+                }
+                config.settings.request_read_receipts = request;
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
+        Ok(())
+    }
+
     /// Choose how long a POP3 account leaves downloaded mail on its server.
     /// The account's next sync applies the choice.
     pub async fn set_account_keep_on_server(
@@ -3184,6 +3214,10 @@ impl Core {
             .nth(1)
             .unwrap_or("localhost")
             .to_owned();
+        let receipt_to = self
+            .db
+            .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+            .await?;
         let (_, raw) = crate::mime::build_message_owned(crate::mime::OutgoingMessage {
             from: detail.from.clone(),
             reply_to: None,
@@ -3198,6 +3232,7 @@ impl Core {
             message_id: None,
             message_id_domain: &domain,
             attachments,
+            receipt_to: &receipt_to,
         })?;
         Ok(raw)
     }
@@ -3865,6 +3900,7 @@ impl Core {
                         in_reply_to_message_id: None,
                         in_reply_to_header: None,
                         attachments: Vec::new(),
+                        request_read_receipt: false,
                     })
                     .await?;
                 let queued = self
@@ -5478,11 +5514,18 @@ impl Core {
                     None => None,
                 };
 
+                // A requested read receipt goes to the From address.
+                let receipt_to = if args.request_read_receipt {
+                    vec![sender.clone()]
+                } else {
+                    Vec::new()
+                };
                 let draft_id = match in_place {
                     Some(id) => {
                         let updated = tx.execute(
                             "UPDATE messages SET subject = ?2, to_json = ?3, cc_json = ?4,
-                                    bcc_json = ?5, date = ?6, from_name = ?7, from_addr = ?8
+                                    bcc_json = ?5, date = ?6, from_name = ?7, from_addr = ?8,
+                                    receipt_to = ?11
                               WHERE id = ?1 AND account_id = ?9 AND is_draft = 1
                                 AND (?10 IS NULL OR date = (SELECT saved_at FROM agent_drafts
                                                             WHERE draft_id = ?1))",
@@ -5497,6 +5540,9 @@ impl Core {
                                 sender.email,
                                 args.account_id,
                                 agent.as_deref(),
+                                (!receipt_to.is_empty())
+                                    .then(|| serde_json::to_string(&receipt_to))
+                                    .transpose()?,
                             ],
                         )?;
                         if updated != 1 {
@@ -5542,7 +5588,7 @@ impl Core {
                             list_id: None,
                             sender_addr: None,
                             sender_verification: Default::default(),
-                            receipt_to: Vec::new(),
+                            receipt_to,
                             receipt_confirm: false,
                             receipt_handled: false,
                         };
@@ -5693,7 +5739,7 @@ impl Core {
                                 m.to_json, m.cc_json, m.bcc_json, m.subject,
                                 COALESCE(b.text_body, ''), b.html_body,
                                 COALESCE(dm.mode, 'new'), dm.in_reply_to_message_id,
-                                m.is_draft, dm.in_reply_to_header
+                                m.is_draft, dm.in_reply_to_header, m.receipt_to IS NOT NULL
                          FROM messages m
                          LEFT JOIN message_bodies b ON b.message_id = m.id
                          LEFT JOIN drafts_meta dm ON dm.message_id = m.id
@@ -5721,6 +5767,7 @@ impl Core {
                                     in_reply_to_message_id: row.get(10)?,
                                     in_reply_to_header: row.get(12)?,
                                     attachments: Vec::new(),
+                                    request_read_receipt: row.get(13)?,
                                 },
                                 is_draft,
                             ))
@@ -7831,6 +7878,7 @@ impl Core {
                     filename: "invite.ics".into(),
                     mime_type: Some(format!("text/calendar; method={method}; charset=UTF-8")),
                 }],
+                request_read_receipt: false,
             })
             .await?;
         // The draft staged its own copy; the temp file can go.
@@ -12164,6 +12212,7 @@ mod message_by_header_id_tests {
             in_reply_to_message_id,
             in_reply_to_header: Some(header.into()),
             attachments: Vec::new(),
+            request_read_receipt: false,
         };
         let headers = |id| {
             let core = &core;
@@ -12287,7 +12336,53 @@ mod draft_staging_tests {
                 filename: filename.into(),
                 mime_type: None,
             }],
+            request_read_receipt: false,
         }
+    }
+
+    #[tokio::test]
+    async fn a_draft_keeps_its_read_receipt_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let source = temp.path().join("note.txt");
+        tokio::fs::write(&source, b"note").await.unwrap();
+        let asking = SaveDraftArgs {
+            request_read_receipt: true,
+            ..draft_args(None, &source, "note.txt")
+        };
+        let id = core.save_draft(asking.clone()).await.unwrap();
+        let draft = core.get_draft(id).await.unwrap();
+        assert!(draft.request_read_receipt);
+        // The receipt goes to the address the draft is from.
+        let to = core
+            .db
+            .read(move |conn| repo::messages::receipt_to(conn, id))
+            .await
+            .unwrap();
+        assert_eq!(to.len(), 1);
+        assert_eq!(
+            Some(&to[0].email),
+            draft.from.as_ref().map(|from| &from.email)
+        );
+
+        // Saved again without, it asks no more.
+        core.save_draft(SaveDraftArgs {
+            draft_id: Some(id),
+            request_read_receipt: false,
+            ..draft
+        })
+        .await
+        .unwrap();
+        assert!(!core.get_draft(id).await.unwrap().request_read_receipt);
     }
 
     #[tokio::test]
@@ -12340,6 +12435,7 @@ mod draft_staging_tests {
             in_reply_to_message_id: Some(parent),
             in_reply_to_header: None,
             attachments: Vec::new(),
+            request_read_receipt: false,
         };
         let thread_of = |message_id: i64| {
             let core = core.clone();

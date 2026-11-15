@@ -40,6 +40,8 @@ export global ComposerUi {
     in property <string> photo-full-size: "";
     in-out property <bool> shrink-photos: false;
     in property <bool> shrinking-photos: false;
+    // The message asks for a read receipt, which More options turns on and off.
+    in-out property <bool> request-receipt: false;
     // A forward's files are still on their way, which sending and saving wait for.
     in property <bool> attaching-files: false;
     // The message goes out as plain text only.
@@ -200,6 +202,7 @@ export component BoundComposer inherits EmailComposer {
     photo-full-size: ComposerUi.photo-full-size;
     shrink-photos <=> ComposerUi.shrink-photos;
     shrinking-photos: ComposerUi.shrinking-photos;
+    request-receipt <=> ComposerUi.request-receipt;
     attaching-files: ComposerUi.attaching-files;
     plain-text: ComposerUi.plain-text;
     from-label <=> ComposerUi.from-label;

@@ -2433,6 +2433,10 @@ async fn build_draft_message(
         .rsplit_once('@')
         .map(|(_, value)| value)
         .unwrap_or("localhost");
+    let receipt_to = ctx
+        .db
+        .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+        .await?;
     let outgoing = crate::mime::OutgoingMessage {
         from: detail.from.clone(),
         reply_to,
@@ -2447,6 +2451,7 @@ async fn build_draft_message(
         message_id: stored_message_id.as_deref(),
         message_id_domain: domain,
         attachments: outgoing_attachments,
+        receipt_to: &receipt_to,
     };
     let security_recipients = outgoing
         .to
@@ -2493,6 +2498,11 @@ async fn save_draft_action(
         .or(action.message_id)
         .ok_or_else(|| CoreError::Jmap("draft save has no draftId".into()))?;
     let (message_id, raw) = build_draft_message(ctx, config, c, draft_id).await?;
+    let asks_receipt = !ctx
+        .db
+        .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+        .await?
+        .is_empty();
     let draft_mailbox =
         ensure_role_mailbox(ctx, config.id, c, roles::DRAFTS, "Drafts", Role::Drafts).await?;
     if !action_is_inflight(ctx, action.id).await? {
@@ -2534,7 +2544,14 @@ async fn save_draft_action(
         .account_id(&c.account_id)
         .email(blob_id)
         .mailbox_ids([draft_mailbox])
-        .keywords(["$draft", "$seen"])
+        // A message that asks for a read receipt is marked as answered, so
+        // no client sends one for its draft or its sent copy (RFC 3503
+        // sections 3.3 and 3.4, RFC 9007).
+        .keywords(if asks_receipt {
+            vec!["$draft", "$seen", MDN_SENT]
+        } else {
+            vec!["$draft", "$seen"]
+        })
         .received_at(now_ms() / 1000);
     let create_id = import.create_id();
     let imported = c

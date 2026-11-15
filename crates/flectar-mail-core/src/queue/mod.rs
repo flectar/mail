@@ -891,11 +891,15 @@ async fn append_sent_action(
     let message_id = action
         .message_id
         .ok_or_else(|| CoreError::NotFound("message for Sent filing".into()))?;
-    let row = ctx
+    let (row, asks_receipt) = ctx
         .db
         .read(move |conn| {
-            repo::messages::get_row(conn, message_id)?
-                .ok_or_else(|| CoreError::NotFound(format!("message {message_id}")))
+            let row = repo::messages::get_row(conn, message_id)?
+                .ok_or_else(|| CoreError::NotFound(format!("message {message_id}")))?;
+            Ok((
+                row,
+                !repo::messages::receipt_to(conn, message_id)?.is_empty(),
+            ))
         })
         .await?;
     if row.account_id != config.id || action.account_id != config.id {
@@ -967,7 +971,14 @@ async fn append_sent_action(
             Ok(())
         })
         .await?;
-    let receipt = imap::append_with_receipt(session, &sent.path, &raw, true).await?;
+    // A saved copy of a message that asks for a read receipt is marked as
+    // answered, so no client sends one for it (RFC 3503 section 3.3).
+    let options = imap::AppendOptions {
+        seen: true,
+        mdn_sent: asks_receipt && selected.keeps_keyword(imap::MDN_SENT),
+        ..Default::default()
+    };
+    let receipt = imap::append_message(session, &sent.path, &raw, options).await?;
     // Tagged OK is enough to complete filing even without UIDPLUS. Header sync
     // will attach the UID later; no fallible post-APPEND SELECT/search is needed.
     let (validity, uid) = receipt
@@ -1155,6 +1166,10 @@ async fn send_action(
         });
     }
 
+    let receipt_to = ctx
+        .db
+        .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+        .await?;
     let out = crate::mime::OutgoingMessage {
         from: from.clone(),
         reply_to: identity.reply_to(),
@@ -1169,6 +1184,7 @@ async fn send_action(
         message_id: stored_message_id.as_deref(),
         message_id_domain: &domain,
         attachments,
+        receipt_to: &receipt_to,
     };
     let attachment_count = out.attachments.len();
     let security_recipients = out
