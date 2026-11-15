@@ -330,12 +330,15 @@ pub(super) fn perform_selected_action(
 pub(super) fn format_file_size(size: u64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = 1024.0 * 1024.0;
+    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
     if size < 1024 {
         format!("{size} B")
     } else if (size as f64) < MB {
         format!("{:.1} KB", size as f64 / KB)
-    } else {
+    } else if (size as f64) < GB {
         format!("{:.1} MB", size as f64 / MB)
+    } else {
+        format!("{:.1} GB", size as f64 / GB)
     }
 }
 

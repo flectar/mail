@@ -1,4 +1,5 @@
 import { AccountMailPreferencesPanel } from "../components/account-mail-preferences.slint";
+import { LargeFilesCard } from "../link-services.slint";
 import { InvitationSettings } from "../invitation-settings.slint";
 import { RendererSettings } from "../renderer-settings.slint";
 import { WindowChrome } from "../window-chrome.slint";
@@ -1578,6 +1579,16 @@ export component SettingsDialog inherits Rectangle {
                                         selected(index, value) => { root.select-compose-size(index); }
                                     }
                                 }
+                            }
+
+                            LargeFilesCard {
+                                compact: root.compact;
+                                shown: root.settings_open && root.settings_tab == "General";
+                                surface: root.surface;
+                                border-subtle: root.border-subtle;
+                                heading: root.heading;
+                                body-text: root.body-text;
+                                faint-text: root.faint-text;
                             }
 
                             Rectangle {
