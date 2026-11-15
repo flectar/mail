@@ -2473,17 +2473,22 @@ impl ComposeSession {
         self.refresh_photos();
     }
 
-    /// Whether a storage service is connected that files can go by link from.
+    /// The storage service the message's files go by link from, as its account says: the
+    /// account's own Google Drive or OneDrive, else the Nextcloud or ownCloud server.
+    pub(super) fn link_service(&self) -> Option<flectar_mail_core::links::LinkService> {
+        let (composers, host) = (self.composers()?, self.host()?);
+        let core = composers.core()?;
+        let account_id = i64::from(host.ui().get_account_id());
+        composers
+            .runtime
+            .block_on(core.link_service_for_account(account_id))
+            .ok()
+            .flatten()
+    }
+
+    /// Whether the message's files can go by link.
     fn can_share_by_link(&self) -> bool {
-        let Some(composers) = self.composers() else {
-            return false;
-        };
-        composers.core().is_some_and(|core| {
-            composers
-                .runtime
-                .block_on(core.link_services())
-                .is_ok_and(|services| !services.is_empty())
-        })
+        self.link_service().is_some()
     }
 
     /// Files dragged over the message's window show where they'll go, until they're dropped
@@ -3364,6 +3369,10 @@ impl ComposeSession {
             .and_then(|composers| composers.app.upgrade())
         {
             account_controller::remember_compose_account(&app, account_id);
+        }
+        // Files go by link from the account's own storage, where it has one on.
+        if let Some(host) = self.host() {
+            host.ui().set_link_sharing(self.can_share_by_link());
         }
         self.load_preferences(account_id);
     }

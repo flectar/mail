@@ -1306,6 +1306,34 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// The storage service a message from the account with id `account_id` sends files by
+    /// link from: the account's own when that's on, else the Nextcloud or ownCloud server.
+    pub async fn link_service_for_account(
+        &self,
+        account_id: i64,
+    ) -> Result<Option<flectar_mail_core::links::LinkService>, String> {
+        self.core
+            .link_service_for_account(account_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Turns on sending files by link from the account's Google Drive or OneDrive, widening
+    /// its sign-in in the browser, which `open_url` opens.
+    pub async fn add_cloud_link_service<F>(
+        &self,
+        account_id: i64,
+        open_url: F,
+    ) -> Result<flectar_mail_core::links::LinkService, String>
+    where
+        F: FnOnce(String) -> Result<(), String> + Send + 'static,
+    {
+        self.core
+            .add_cloud_link_service(account_id, open_url)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn remove_link_service(&self, id: i64) -> Result<(), String> {
         self.core
             .remove_link_service(id)
