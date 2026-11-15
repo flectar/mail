@@ -908,6 +908,10 @@ export component MailListPane inherits FocusScope {
                                             MovePickerUi.request("copy", "checked", -1);
                                         }
                                     }
+                                    MenuItem {
+                                        title: @tr("Forward as attachment");
+                                        activated => { root.bulk_message_action("forward_attachment"); }
+                                    }
                                     MenuItem { title: @tr("Mark as read"); activated => { root.bulk_message_action("mark_read"); } }
                                     MenuItem { title: @tr("Mark as unread"); activated => { root.bulk_message_action("mark_unread"); } }
                                     MenuItem { title: @tr("Star message"); activated => { root.bulk_message_action("star"); } }

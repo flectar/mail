@@ -3121,11 +3121,102 @@ fn attachment_part(attachment: MessageAttachment<'_>) -> mail_builder::mime::Mim
     use mail_builder::headers::content_type::ContentType;
     use mail_builder::mime::{BodyPart, MimePart};
 
-    MimePart::new(
-        ContentType::new(attachment.mime_type),
-        BodyPart::Binary(attachment.bytes),
-    )
-    .attachment(attachment.filename)
+    // A forwarded message goes in as it is: RFC 2046 lets a message/rfc822 body be only 7bit,
+    // 8bit or binary, so mail apps show it as a message rather than a file.
+    let message = is_message_type(&attachment.mime_type)
+        .then(|| message_part(&attachment.bytes))
+        .flatten();
+    match message {
+        Some((bytes, encoding)) => MimePart::new(
+            ContentType::new(attachment.mime_type),
+            BodyPart::Binary(bytes.into()),
+        )
+        .attachment(attachment.filename)
+        .transfer_encoding(encoding),
+        None => MimePart::new(
+            ContentType::new(attachment.mime_type),
+            BodyPart::Binary(attachment.bytes),
+        )
+        .attachment(attachment.filename),
+    }
+}
+
+/// Whether `mime_type` names a whole message, as a forwarded one is.
+fn is_message_type(mime_type: &str) -> bool {
+    let media = mime_type.split(';').next().unwrap_or_default().trim();
+    media.eq_ignore_ascii_case("message/rfc822") || media.eq_ignore_ascii_case("message/global")
+}
+
+/// A forwarded message's bytes with its lines ending in CRLF, as mail carries them, and its
+/// transfer encoding: 7bit when it's all ASCII, and 8bit otherwise. `None` leaves it to base64,
+/// for a message with NUL bytes, carriage returns of their own, or lines longer than the 998
+/// characters RFC 5322 allows, which only binary transport carries.
+fn message_part(bytes: &[u8]) -> Option<(Vec<u8>, &'static str)> {
+    let mut lines = Vec::with_capacity(bytes.len() + bytes.len() / 64);
+    let mut eight_bit = false;
+    let mut length = 0usize;
+    let mut index = 0;
+    while let Some(&byte) = bytes.get(index) {
+        match byte {
+            0 => return None,
+            b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
+                lines.extend_from_slice(b"\r\n");
+                length = 0;
+                index += 2;
+                continue;
+            }
+            b'\r' => return None,
+            b'\n' => {
+                lines.extend_from_slice(b"\r\n");
+                length = 0;
+            }
+            _ => {
+                length += 1;
+                if length > 998 {
+                    return None;
+                }
+                eight_bit |= !byte.is_ascii();
+                lines.push(byte);
+            }
+        }
+        index += 1;
+    }
+    Some((lines, if eight_bit { "8bit" } else { "7bit" }))
+}
+
+/// `raw`, a whole message, without its Bcc field: a copy of mail sent from here keeps the
+/// addresses it was blind copied to, which its recipients never saw, and which a forward
+/// mustn't show either.
+pub fn without_bcc(raw: &[u8]) -> Vec<u8> {
+    let mut kept = Vec::with_capacity(raw.len());
+    let mut rest = raw;
+    let mut skipping = false;
+    while !rest.is_empty() {
+        let end = rest
+            .iter()
+            .position(|&byte| byte == b'\n')
+            .map_or(rest.len(), |at| at + 1);
+        let (line, after) = rest.split_at(end);
+        rest = after;
+        // The header ends at its first empty line, and the body stays as it is.
+        if line == b"\r\n" || line == b"\n" {
+            kept.extend_from_slice(line);
+            kept.extend_from_slice(rest);
+            break;
+        }
+        let folded = line
+            .first()
+            .is_some_and(|byte| *byte == b' ' || *byte == b'\t');
+        if !folded {
+            skipping = line
+                .get(..4)
+                .is_some_and(|name| name.eq_ignore_ascii_case(b"bcc:"));
+        }
+        if !skipping {
+            kept.extend_from_slice(line);
+        }
+    }
+    kept
 }
 
 /// Build a raw RFC 5322 message. Returns (message_id, raw_bytes).
@@ -3411,14 +3502,11 @@ fn build_message_with_attachments<'a>(
             parts.extend(attachments.into_iter().map(attachment_part));
             MimePart::new("multipart/mixed", parts)
         });
-    } else {
-        for att in attachments {
-            builder = builder.attachment(
-                mail_builder::headers::content_type::ContentType::new(att.mime_type),
-                att.filename,
-                mail_builder::mime::BodyPart::Binary(att.bytes),
-            );
-        }
+    } else if !attachments.is_empty() {
+        builder
+            .attachments
+            .get_or_insert_with(Vec::new)
+            .extend(attachments.into_iter().map(attachment_part));
     }
     if let Some(irt) = out.in_reply_to {
         builder = builder.in_reply_to(irt.trim_matches(['<', '>']));
@@ -4167,6 +4255,76 @@ mod tests {
         );
         assert!(parsed.calendar_parts[0].contains("UID:evt-1@example.com"));
         assert_eq!(parsed.text.as_deref(), Some("Accepted: Design review"));
+    }
+
+    #[test]
+    fn attached_messages_go_in_unencoded() {
+        let original = "From: Ana <ana@example.org>\nTo: me@example.com\nSubject: Café plans\n\
+                        Content-Type: text/plain; charset=utf-8\n\nSee you at the café.\n";
+        // Plain text, HTML, and HTML with pictures of its own put their parts together each
+        // their own way.
+        let picture = "<p>Here it is</p><img src=\"data:image/png;base64,AAE=\">";
+        for html in [None, Some("<p>Here it is</p>"), Some(picture)] {
+            let mut message = outgoing("Here it is", html);
+            message.attachments.push(OutgoingAttachment {
+                filename: "Café plans.eml".into(),
+                mime_type: "message/rfc822".into(),
+                bytes: original.as_bytes().to_vec(),
+            });
+            let (_, raw) = build_message(&message).unwrap();
+            let text = String::from_utf8_lossy(&raw);
+            // RFC 2046 lets a message/rfc822 body be only 7bit, 8bit or binary, and mail
+            // carries its lines ending in CRLF.
+            assert!(text.contains("Subject: Café plans\r\n"), "{text}");
+            assert!(text.contains("\r\n\r\nSee you at the café.\r\n"), "{text}");
+            assert_eq!(
+                part_types(&raw).last().map(String::as_str),
+                Some("message/rfc822")
+            );
+            let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+            let attached = parsed
+                .attachments()
+                .find(|part| part.attachment_name() == Some("Café plans.eml"))
+                .unwrap();
+            assert_eq!(attached.content_transfer_encoding(), Some("8bit"), "{text}");
+            let inner = attached
+                .message()
+                .expect("the attachment reads as a message");
+            assert_eq!(inner.subject(), Some("Café plans"));
+        }
+
+        let (bytes, encoding) = message_part(b"Subject: x\r\n\r\nplain\r\n").unwrap();
+        assert_eq!(
+            (bytes.as_slice(), encoding),
+            (&b"Subject: x\r\n\r\nplain\r\n"[..], "7bit")
+        );
+        // Only binary transport carries NUL bytes, bare carriage returns and lines past 998
+        // characters, so those go in base64.
+        assert!(message_part(b"Subject: x\r\n\r\na\0b").is_none());
+        assert!(message_part(b"Subject: x\r\n\r\na\rb").is_none());
+        assert!(
+            message_part(format!("Subject: x\r\n\r\n{}", "a".repeat(999)).as_bytes()).is_none()
+        );
+        assert!(
+            message_part(format!("Subject: x\r\n\r\n{}", "a".repeat(998)).as_bytes()).is_some()
+        );
+    }
+
+    #[test]
+    fn forwarded_copies_leave_out_their_bcc_field() {
+        let raw = b"From: me@example.com\r\nBcc: secret@example.org,\r\n  other@example.org\r\n\
+                    To: ana@example.org\r\nbcc: more@example.org\r\nSubject: Plans\r\n\r\n\
+                    Bcc: in the body stays\r\n";
+        assert_eq!(
+            without_bcc(raw),
+            b"From: me@example.com\r\nTo: ana@example.org\r\nSubject: Plans\r\n\r\n\
+              Bcc: in the body stays\r\n"
+        );
+        let lf = b"From: me@example.com\nBcc: secret@example.org\nSubject: Plans\n\nBody\n";
+        assert_eq!(
+            without_bcc(lf),
+            b"From: me@example.com\nSubject: Plans\n\nBody\n"
+        );
     }
 
     #[test]

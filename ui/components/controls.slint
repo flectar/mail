@@ -12,9 +12,13 @@ export component TextEdit inherits Rectangle {
     in property <color> text-color: AppTheme.heading;
     in property <color> background-color: AppTheme.input-bg;
     in property <length> font-size: TypeScale.body;
+    // The selection's ends, as byte offsets into the text.
+    out property <int> anchor-offset: editor.anchor-position-byte-offset;
+    out property <int> cursor-offset: editor.cursor-position-byte-offset;
     callback edited(string);
     callback select-all;
     callback copy;
+    callback set-selection(int, int);
     forward-focus: editor;
 
     min-height: 80px;
@@ -71,6 +75,7 @@ export component TextEdit inherits Rectangle {
 
     select-all => { editor.select-all(); }
     copy => { editor.copy(); }
+    set-selection(anchor, cursor) => { editor.set-selection-offsets(anchor, cursor); }
 }
 
 export component Switch inherits Rectangle {

@@ -5933,6 +5933,38 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         else {
             return;
         };
+        // The chosen messages, or conversations, go as attachments of a new message.
+        if action == "forward_attachment" {
+            let targets = {
+                let state = state_for_bulk_action.borrow();
+                let mut threads = Vec::new();
+                let mut messages = Vec::new();
+                for id in mail_operation_ids(&state.messages, &state.checked_ids, trigger_id) {
+                    match state
+                        .messages
+                        .iter()
+                        .find(|message| message.id == id)
+                        .and_then(MailTarget::of)
+                    {
+                        Some(MailTarget::Thread(thread)) => threads.push(thread),
+                        Some(MailTarget::Message { id, .. }) => messages.push(id),
+                        None => {}
+                    }
+                }
+                [
+                    flectar_mail_core::models::ActionTarget::Threads(threads),
+                    flectar_mail_core::models::ActionTarget::Messages(messages),
+                ]
+                .into_iter()
+                .filter(|target| match target {
+                    flectar_mail_core::models::ActionTarget::Threads(ids)
+                    | flectar_mail_core::models::ActionTarget::Messages(ids) => !ids.is_empty(),
+                })
+                .collect::<Vec<_>>()
+            };
+            composer::with_composers(|composers| composers.forward_as_attachment(&app, targets));
+            return;
+        }
         if let Err(error) = perform_mail_list_action(
             &app,
             &state_for_bulk_action,
