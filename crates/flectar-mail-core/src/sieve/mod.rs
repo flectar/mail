@@ -369,15 +369,22 @@ pub(crate) async fn watch(ctx: SyncCtx, config: AccountConfig) {
 /// Reads the account's automatic replies from its server and keeps them.
 /// Whether the server offers them.
 pub(crate) async fn read_back(ctx: &SyncCtx, config: &AccountConfig) -> Result<bool> {
+    let account_id = config.id;
     let password =
-        credentials::load_async(ctx.credentials.clone(), config.id, Slot::Password).await?;
+        credentials::load_async(ctx.credentials.clone(), account_id, Slot::Password).await?;
+    let saved_at = ctx
+        .db
+        .read(move |conn| repo::auto_replies::saved_at(conn, account_id))
+        .await?;
     let Some(reply) = read(&server(config), &config.username, &password).await? else {
         return Ok(false);
     };
-    let account_id = config.id;
     let changed = ctx
         .db
-        .write(move |conn| repo::auto_replies::store(conn, account_id, &reply, now_ms(), false))
+        .write(move |conn| {
+            let read = repo::auto_replies::Origin::Read { saved_at };
+            repo::auto_replies::store(conn, account_id, &reply, now_ms(), read)
+        })
         .await?;
     if changed {
         ctx.bus.emit(CoreEvent::AutoReplyChanged { account_id });

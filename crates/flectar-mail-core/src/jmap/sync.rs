@@ -62,10 +62,17 @@ async fn sync_auto_reply(
     account_id: i64,
     connected: &ConnectedClient,
 ) -> Result<()> {
+    let saved_at = ctx
+        .db
+        .read(move |conn| repo::auto_replies::saved_at(conn, account_id))
+        .await?;
     let reply = crate::jmap::vacation::read(connected).await?;
     let changed = ctx
         .db
-        .write(move |conn| repo::auto_replies::store(conn, account_id, &reply, now_ms(), false))
+        .write(move |conn| {
+            let read = repo::auto_replies::Origin::Read { saved_at };
+            repo::auto_replies::store(conn, account_id, &reply, now_ms(), read)
+        })
         .await?;
     if changed {
         ctx.bus.emit(CoreEvent::AutoReplyChanged { account_id });

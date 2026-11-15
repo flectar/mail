@@ -12,6 +12,7 @@ mod graph;
 use crate::Core;
 use crate::accounts::credentials;
 use crate::db::repo;
+use crate::db::repo::auto_replies::Origin;
 use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
 use crate::models::{
@@ -174,7 +175,9 @@ impl Core {
         };
         let stored = saved.clone();
         self.db
-            .write(move |conn| repo::auto_replies::store(conn, account_id, &stored, now_ms(), true))
+            .write(move |conn| {
+                repo::auto_replies::store(conn, account_id, &stored, now_ms(), Origin::Saved)
+            })
             .await?;
         self.bus.emit(CoreEvent::AutoReplyChanged { account_id });
         Ok(AutoReplySaved::Done(saved))
@@ -213,11 +216,11 @@ impl Core {
 /// settings, once the app saved them there, so that replies changed in
 /// Outlook show too.
 pub(crate) async fn read_back_from_graph(ctx: &SyncCtx, account_id: i64) -> Result<()> {
-    let saved = ctx
+    let saved_at = ctx
         .db
-        .read(move |conn| repo::auto_replies::uses_settings(conn, account_id))
+        .read(move |conn| repo::auto_replies::saved_at(conn, account_id))
         .await?;
-    if !saved {
+    if saved_at.is_none() {
         return Ok(());
     }
     let token = ctx
@@ -231,7 +234,15 @@ pub(crate) async fn read_back_from_graph(ctx: &SyncCtx, account_id: i64) -> Resu
     let reply = graph::GraphReplies::new()?.read(&token).await?;
     let changed = ctx
         .db
-        .write(move |conn| repo::auto_replies::store(conn, account_id, &reply, now_ms(), false))
+        .write(move |conn| {
+            repo::auto_replies::store(
+                conn,
+                account_id,
+                &reply,
+                now_ms(),
+                Origin::Read { saved_at },
+            )
+        })
         .await?;
     if changed {
         ctx.bus.emit(CoreEvent::AutoReplyChanged { account_id });

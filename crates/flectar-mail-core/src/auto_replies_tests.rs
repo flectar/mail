@@ -162,7 +162,10 @@ async fn a_sign_in_keeps_the_settings_permission_once_replies_were_saved() {
 
     // Read back from Gmail, the replies use no settings permission yet.
     core.db
-        .write(|conn| repo::auto_replies::store(conn, 1, &away(), 1, false))
+        .write(|conn| {
+            let read = repo::auto_replies::Origin::Read { saved_at: None };
+            repo::auto_replies::store(conn, 1, &away(), 1, read)
+        })
         .await
         .unwrap();
     let scopes = core.google_scopes_in_use(1).await.unwrap();
@@ -170,7 +173,9 @@ async fn a_sign_in_keeps_the_settings_permission_once_replies_were_saved() {
 
     // Saved by the app, they do, and a new sign-in asks for it again.
     core.db
-        .write(|conn| repo::auto_replies::store(conn, 1, &away(), 2, true))
+        .write(|conn| {
+            repo::auto_replies::store(conn, 1, &away(), 2, repo::auto_replies::Origin::Saved)
+        })
         .await
         .unwrap();
     let scopes = core.google_scopes_in_use(1).await.unwrap();
