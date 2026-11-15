@@ -13,8 +13,8 @@ use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-        ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
-        ToolAnnotations,
+        ListToolsResult, MetaObject, PaginatedRequestParams, ServerCapabilities, ServerConfig,
+        Tool, ToolAnnotations,
     },
     service::RequestContext,
 };
@@ -135,7 +135,7 @@ fn mcp_tool(tool: &tools::Tool) -> Tool {
         serde_json::Value::Object(schema) => schema,
         _ => serde_json::Map::new(),
     };
-    Tool::new(tool.name, tool.description, Arc::new(schema))
+    let described = Tool::new(tool.name, tool.description, Arc::new(schema))
         .with_title(tool.title)
         .with_annotations(
             ToolAnnotations::with_title(tool.title)
@@ -143,7 +143,18 @@ fn mcp_tool(tool: &tools::Tool) -> Tool {
                 .destructive(tool.effect.destructive)
                 .idempotent(tool.effect.idempotent)
                 .open_world(false),
-        )
+        );
+    if !tool.effect.asks_user {
+        return described;
+    }
+    // Claude Code then asks the user before every call, even when its other
+    // tools run without asking.
+    let mut meta = MetaObject::new();
+    meta.0.insert(
+        "anthropic/requiresUserInteraction".into(),
+        serde_json::Value::Bool(true),
+    );
+    described.with_meta(meta)
 }
 
 /// Hands `request` to the running app and returns its answer.
@@ -279,6 +290,12 @@ mod tests {
                 ours.effect.destructive
             );
             assert_eq!(tool["annotations"]["openWorldHint"], false);
+            assert_eq!(
+                tool["_meta"]["anthropic/requiresUserInteraction"].as_bool(),
+                ours.effect.asks_user.then_some(true),
+                "{}",
+                ours.name
+            );
             assert_eq!(tool["inputSchema"]["type"], "object");
         }
 
@@ -357,6 +374,22 @@ mod tests {
                 .unwrap()
                 .contains("Moving messages is off")
         );
+        send(
+            &mut host_write,
+            json!({
+                "jsonrpc": "2.0", "id": 8, "method": "tools/call",
+                "params": { "name": "send_draft", "arguments": { "draft_id": 1 } },
+            }),
+        )
+        .await;
+        let sending_off = receive(&mut lines).await;
+        assert_eq!(sending_off["result"]["isError"], true);
+        assert!(
+            sending_off["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Asking to send is off")
+        );
 
         // Once access is off, nothing more is read or logged.
         core.update_agent_access(|access| access.enabled = false)
@@ -386,6 +419,11 @@ mod tests {
                 .map(|entry| (entry.agent.as_str(), entry.tool.as_str(), entry.outcome))
                 .collect::<Vec<_>>(),
             [
+                (
+                    "test-host",
+                    "send_draft",
+                    flectar_mail_core::models::AgentOutcome::Refused
+                ),
                 (
                     "test-host",
                     "move_messages",

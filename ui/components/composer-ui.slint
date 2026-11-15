@@ -17,6 +17,9 @@ export global ComposerUi {
     in property <bool> sending: false;
     // Files dragged from elsewhere are over the message.
     in property <bool> drop-hint: false;
+    // Who asked to send this draft, when an AI agent did (#237), as the note
+    // the composer shows over it. Empty otherwise.
+    in property <string> review-note: "";
     // A signature being written ("signature" mode): whether it changed since it opened, and
     // the name it was saved with.
     in property <bool> signature-edited: false;
@@ -181,6 +184,7 @@ export component BoundComposer inherits EmailComposer {
     body <=> ComposerUi.body;
     sending: ComposerUi.sending;
     drop-hint: ComposerUi.drop-hint;
+    review-note: ComposerUi.review-note;
     signature-edited: ComposerUi.signature-edited;
     signature-saved-name: ComposerUi.signature-saved-name;
     accounts: ComposerUi.accounts;

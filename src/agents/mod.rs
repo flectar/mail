@@ -94,10 +94,138 @@ pub(crate) fn on_activity(listener: impl Fn() + Send + 'static) {
     }
 }
 
+type ReviewListener = Box<dyn Fn(i64, String) + Send>;
+
+/// Drafts agents asked to send, which open for the user to check.
+struct Reviews {
+    /// Opens a draft for the user, given its id and the agent's name.
+    listener: Mutex<Option<ReviewListener>>,
+    /// The draft the user is checking. One at a time, so an agent can't bury
+    /// the user in windows.
+    in_review: Mutex<Option<i64>>,
+}
+
+static REVIEWS: Reviews = Reviews::new();
+
+/// Why a draft an agent asked to send didn't open.
+#[derive(Debug, PartialEq, Eq)]
+enum ReviewRefused {
+    /// The user is checking this other draft.
+    Checking(i64),
+    /// Nothing in the app can show it.
+    NoComposer,
+}
+
+impl Reviews {
+    const fn new() -> Self {
+        Self {
+            listener: Mutex::new(None),
+            in_review: Mutex::new(None),
+        }
+    }
+
+    fn listen(&self, listener: ReviewListener) {
+        if let Ok(mut slot) = self.listener.lock() {
+            *slot = Some(listener);
+        }
+    }
+
+    /// Opens draft `draft_id` for the user to check and send, unless
+    /// they're checking another one.
+    fn request(&self, draft_id: i64, agent: String) -> Result<(), ReviewRefused> {
+        let Ok(mut in_review) = self.in_review.lock() else {
+            return Err(ReviewRefused::NoComposer);
+        };
+        match *in_review {
+            Some(other) if other != draft_id => return Err(ReviewRefused::Checking(other)),
+            _ => *in_review = Some(draft_id),
+        }
+        drop(in_review);
+        let listener = self.listener.lock();
+        if let Ok(slot) = &listener
+            && let Some(listener) = slot.as_ref()
+        {
+            listener(draft_id, agent);
+            Ok(())
+        } else {
+            self.ended(draft_id);
+            Err(ReviewRefused::NoComposer)
+        }
+    }
+
+    fn ended(&self, draft_id: i64) {
+        if let Ok(mut in_review) = self.in_review.lock()
+            && *in_review == Some(draft_id)
+        {
+            *in_review = None;
+        }
+    }
+}
+
+/// Calls `listener` with a draft and the agent's name when an agent asks to
+/// send that draft. It opens the draft for the user to check, and calls
+/// [`review_ended`] once the user sent or closed it, or when it couldn't open.
+pub(crate) fn on_send_review(listener: impl Fn(i64, String) + Send + 'static) {
+    REVIEWS.listen(Box::new(listener));
+}
+
+fn request_review(draft_id: i64, agent: String) -> Result<(), ReviewRefused> {
+    REVIEWS.request(draft_id, agent)
+}
+
+/// The user sent or closed draft `draft_id`, which an agent asked to send.
+pub(crate) fn review_ended(draft_id: i64) {
+    REVIEWS.ended(draft_id);
+}
+
 fn activity_recorded() {
     if let Ok(slot) = ACTIVITY_LISTENER.lock()
         && let Some(listener) = slot.as_ref()
     {
         listener();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_user_checks_one_draft_an_agent_asks_to_send_at_a_time() {
+        let reviews = Reviews::new();
+        assert_eq!(
+            reviews.request(7, "Claude".into()),
+            Err(ReviewRefused::NoComposer),
+            "nothing can show it yet"
+        );
+        let opened = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&opened);
+        reviews.listen(Box::new(move |draft_id, agent| {
+            seen.lock().unwrap().push((draft_id, agent));
+        }));
+
+        assert_eq!(reviews.request(7, "Claude".into()), Ok(()));
+        // Asked again, it comes forward again.
+        assert_eq!(reviews.request(7, "Claude".into()), Ok(()));
+        assert_eq!(
+            reviews.request(8, "Codex".into()),
+            Err(ReviewRefused::Checking(7))
+        );
+        // Another draft's end leaves this one in review.
+        reviews.ended(8);
+        assert_eq!(
+            reviews.request(8, "Codex".into()),
+            Err(ReviewRefused::Checking(7))
+        );
+        reviews.ended(7);
+        assert_eq!(reviews.request(8, "Codex".into()), Ok(()));
+        assert_eq!(
+            *opened.lock().unwrap(),
+            [
+                (7, "Claude".into()),
+                (7, "Claude".into()),
+                (8, "Codex".into())
+            ]
+        );
     }
 }

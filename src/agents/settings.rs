@@ -84,6 +84,10 @@ pub(crate) fn register(app: &AppWindow, state: &Rc<RefCell<InboxState>>, runtime
         callbacks.change(move |access| access.can_label = allowed);
     });
     let callbacks = Rc::clone(&page);
+    ui.on_set_can_send(move |allowed| {
+        callbacks.change(move |access| access.can_send = allowed);
+    });
+    let callbacks = Rc::clone(&page);
     ui.on_set_account_shown(move |account_id, shown| {
         let account_id = i64::from(account_id);
         callbacks.change(move |access| {
@@ -253,6 +257,7 @@ impl Page {
         ui.set_can_mark(access.can_mark);
         ui.set_can_move(access.can_move);
         ui.set_can_label(access.can_label);
+        ui.set_can_send(access.can_send);
         let open = self.open_folders.borrow();
         let rows = accounts
             .iter()
@@ -416,6 +421,7 @@ fn activity_row(
         "mark_messages" => UiMessage::plain("Marked messages"),
         "move_messages" => UiMessage::plain("Moved messages"),
         "label_messages" => UiMessage::plain("Labeled messages"),
+        "send_draft" => UiMessage::plain("Asked to send a draft"),
         _ => UiMessage::detail("Used {}", &entry.tool),
     };
     let mut detail = Vec::new();
@@ -475,7 +481,12 @@ fn activity_row(
 fn changes_mail(tool: &str) -> bool {
     matches!(
         tool,
-        "create_draft" | "update_draft" | "mark_messages" | "move_messages" | "label_messages"
+        "create_draft"
+            | "update_draft"
+            | "send_draft"
+            | "mark_messages"
+            | "move_messages"
+            | "label_messages"
     )
 }
 

@@ -28,12 +28,15 @@ pub(crate) struct Effect {
     pub(crate) destructive: bool,
     /// Calling it again with the same arguments changes nothing more.
     pub(crate) idempotent: bool,
+    /// The host should ask the user before every call, whatever its settings.
+    pub(crate) asks_user: bool,
 }
 
 const READS: Effect = Effect {
     read_only: true,
     destructive: false,
     idempotent: true,
+    asks_user: false,
 };
 
 /// In the order agents see them.
@@ -119,6 +122,7 @@ Agents can't send. Only works when the user lets agents write drafts.",
             read_only: false,
             destructive: false,
             idempotent: false,
+            asks_user: false,
         },
     },
     Tool {
@@ -131,6 +135,7 @@ fields given change.",
             read_only: false,
             destructive: true,
             idempotent: true,
+            asks_user: false,
         },
     },
     Tool {
@@ -143,6 +148,7 @@ agents mark messages, and the user can undo it.",
             read_only: false,
             destructive: false,
             idempotent: true,
+            asks_user: false,
         },
     },
     Tool {
@@ -156,6 +162,7 @@ the user can undo it.",
             read_only: false,
             destructive: true,
             idempotent: true,
+            asks_user: false,
         },
     },
     Tool {
@@ -168,6 +175,21 @@ Only works when the user lets agents label messages, and the user can undo it.",
             read_only: false,
             destructive: true,
             idempotent: true,
+            asks_user: false,
+        },
+    },
+    Tool {
+        name: "send_draft",
+        title: "Ask to send a draft",
+        description: "Asks the user to send a draft: Flectar Mail opens it for them to check, \
+and it's sent only if they send it themselves. Returns at once, without waiting for them. Only \
+works when the user lets agents ask to send.",
+        input_schema: send_draft,
+        effect: Effect {
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+            asks_user: true,
         },
     },
 ];
@@ -369,6 +391,17 @@ fn label_messages() -> Value {
             "remove": label_ids("Labels to take off."),
         },
         "required": ["message_ids"],
+        "additionalProperties": false,
+    })
+}
+
+fn send_draft() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "draft_id": { "type": "integer" },
+        },
+        "required": ["draft_id"],
         "additionalProperties": false,
     })
 }
