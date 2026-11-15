@@ -21,6 +21,9 @@ pub const MS_CALENDARS_SCOPE: &str = "https://graph.microsoft.com/Calendars.Read
 /// Incremental-consent scope for Google Drive, to send large files by link. It reaches only
 /// files the app made, and Google counts it as non-sensitive.
 pub const GOOGLE_DRIVE_FILE_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
+/// Changing Gmail settings such as the vacation responder, for automatic
+/// replies (#239). Reading them needs only the mail scope.
+pub const GMAIL_SETTINGS_SCOPE: &str = "https://www.googleapis.com/auth/gmail.settings.basic";
 
 /// Incremental-consent scope (Microsoft Graph) for OneDrive, to send large files by link.
 /// Same single-resource caveat as the meetings scope.
