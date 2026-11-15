@@ -337,6 +337,27 @@ mod tests {
                 .contains("isn't available to agents")
         );
 
+        // Changing mail stays off until the user allows it.
+        send(
+            &mut host_write,
+            json!({
+                "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                "params": {
+                    "name": "move_messages",
+                    "arguments": { "message_ids": [1], "to": "trash" },
+                },
+            }),
+        )
+        .await;
+        let moving_off = receive(&mut lines).await;
+        assert_eq!(moving_off["result"]["isError"], true);
+        assert!(
+            moving_off["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Moving messages is off")
+        );
+
         // Once access is off, nothing more is read or logged.
         core.update_agent_access(|access| access.enabled = false)
             .await
@@ -365,6 +386,11 @@ mod tests {
                 .map(|entry| (entry.agent.as_str(), entry.tool.as_str(), entry.outcome))
                 .collect::<Vec<_>>(),
             [
+                (
+                    "test-host",
+                    "move_messages",
+                    flectar_mail_core::models::AgentOutcome::Refused
+                ),
                 (
                     "test-host",
                     "create_draft",

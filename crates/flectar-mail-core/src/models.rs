@@ -1258,6 +1258,10 @@ pub struct AgentActivity {
     /// How many accounts, folders, messages, contacts or events it touched.
     pub items: i64,
     pub outcome: AgentOutcome,
+    /// The user can still undo what it changed.
+    pub undoable: bool,
+    /// The user undid what it changed.
+    pub undone: bool,
 }
 
 /// How an agent's request ended.
