@@ -270,6 +270,28 @@ its own, never ones from the web, and up to 256 KB in all.
 
 S/MIME and mobile OpenPGP are not currently supported.
 
+## Automatic replies
+
+Settings → Accounts → Automatic replies sets the replies a Gmail or Microsoft
+account's server sends while you're away: a message, an optional first and
+last day, and whether only your contacts or, in a work account, only your
+organization get one. Gmail replies have a subject of their own, and Gmail
+answers each sender once, and again after four days, never answering mailing
+lists or spam. Outlook answers each sender once while replies are on, and
+replies that start on a first day need a last day too. The first save asks
+Google or Microsoft to let Flectar Mail change those settings, and signing in
+again keeps that.
+
+The replies are kept on the server, so they go out while Flectar Mail is
+closed. Syncing reads them back, so replies set on the web show too, and a
+strip over the mail list says when they're on, with Turn off.
+
+JMAP accounts whose server offers automatic replies, such as Fastmail, set
+them the same way, with a subject and days, for every sender. A JMAP server
+that also runs mail filters keeps automatic replies in a filter script of its
+own, which would turn your filters off, so those accounts and other IMAP and
+POP3 accounts get automatic replies from their provider's webmail for now.
+
 ## Text formatting
 
 The composer's toolbar sets the font, size and color of text, a highlight

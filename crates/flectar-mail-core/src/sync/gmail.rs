@@ -15,7 +15,8 @@ use crate::error::{CoreError, Result};
 use crate::events::{CoreEvent, SyncProgress};
 use crate::http_body;
 use crate::models::{
-    AccountConfig, AccountSettings, Address, AuthKind, MailHistory, Provider, now_ms, roles,
+    AccountConfig, AccountSettings, Address, AuthKind, AutoReply, MailHistory, Provider, now_ms,
+    roles,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use futures::{StreamExt, stream};
@@ -1366,6 +1367,163 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
             Ok(())
         })
         .await
+}
+
+/// Gmail's vacation responder, which sends the account's automatic replies
+/// (#239), as `users.settings.vacation` has it.
+#[derive(Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VacationSettings {
+    #[serde(default)]
+    enable_auto_reply: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    response_subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    response_body_plain_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    response_body_html: Option<String>,
+    #[serde(default)]
+    restrict_to_contacts: bool,
+    #[serde(default)]
+    restrict_to_domain: bool,
+    #[serde(
+        default,
+        with = "google_int64",
+        skip_serializing_if = "Option::is_none"
+    )]
+    start_time: Option<i64>,
+    #[serde(
+        default,
+        with = "google_int64",
+        skip_serializing_if = "Option::is_none"
+    )]
+    end_time: Option<i64>,
+}
+
+/// Google's JSON gives 64-bit numbers as strings, and takes them so too.
+mod google_int64 {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        value: &Option<i64>,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        match value {
+            Some(value) => serializer.serialize_str(&value.to_string()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Option<i64>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Number {
+            Text(String),
+            Value(i64),
+        }
+        match Option::<Number>::deserialize(deserializer)? {
+            None => Ok(None),
+            Some(Number::Value(value)) => Ok(Some(value)),
+            Some(Number::Text(text)) => text.parse().map(Some).map_err(serde::de::Error::custom),
+        }
+    }
+}
+
+impl From<VacationSettings> for AutoReply {
+    fn from(settings: VacationSettings) -> Self {
+        // Webmail saves replies as HTML. The app edits them as text.
+        let text = crate::mime::body_text(
+            settings.response_body_plain_text.as_deref(),
+            settings.response_body_html.as_deref(),
+        )
+        .map(|text| text.trim().to_owned())
+        .unwrap_or_default();
+        Self {
+            enabled: settings.enable_auto_reply,
+            subject: settings.response_subject.unwrap_or_default(),
+            text,
+            starts_at: settings.start_time,
+            ends_at: settings.end_time,
+            contacts_only: settings.restrict_to_contacts,
+            domain_only: settings.restrict_to_domain,
+        }
+    }
+}
+
+impl From<&AutoReply> for VacationSettings {
+    fn from(reply: &AutoReply) -> Self {
+        Self {
+            enable_auto_reply: reply.enabled,
+            response_subject: Some(reply.subject.clone()),
+            // Without HTML, Gmail sends the text as it is.
+            response_body_plain_text: Some(reply.text.clone()),
+            response_body_html: None,
+            restrict_to_contacts: reply.contacts_only,
+            restrict_to_domain: reply.domain_only,
+            start_time: reply.starts_at,
+            end_time: reply.ends_at,
+        }
+    }
+}
+
+async fn read_vacation(api: &GmailApi, base: &str) -> Result<AutoReply> {
+    let settings: VacationSettings =
+        serde_json::from_value(api.get_json(&format!("{base}/settings/vacation")).await?)?;
+    Ok(settings.into())
+}
+
+/// The vacation responder of one Gmail account, outside its sync, so that a
+/// missing permission comes back to the caller instead of pausing the sync.
+pub(crate) struct VacationResponder {
+    api: GmailApi,
+    base: String,
+}
+
+impl VacationResponder {
+    pub(crate) fn new(ctx: SyncCtx, config: AccountConfig) -> Result<Self> {
+        Ok(Self {
+            api: GmailApi::new(ctx, config)?,
+            base: GMAIL_API.to_owned(),
+        })
+    }
+
+    /// A responder that talks to a test server instead of Gmail.
+    #[cfg(test)]
+    pub(crate) fn with_base(ctx: SyncCtx, config: AccountConfig, origin: &str) -> Result<Self> {
+        Ok(Self {
+            api: GmailApi::new(ctx, config)?,
+            base: format!("{origin}/gmail/v1/users/me"),
+        })
+    }
+
+    /// Saves `reply`, which needs Gmail's settings permission, and gives the
+    /// replies as Gmail keeps them now.
+    pub(crate) async fn save(&self, reply: &AutoReply) -> Result<AutoReply> {
+        let body = serde_json::to_value(VacationSettings::from(reply))?;
+        let saved: VacationSettings = serde_json::from_value(
+            self.api
+                .put_json(&format!("{}/settings/vacation", self.base), &body)
+                .await?,
+        )?;
+        Ok(saved.into())
+    }
+}
+
+/// Reads the account's automatic replies back, so that replies set in
+/// webmail show in the app too.
+async fn sync_auto_reply(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> Result<()> {
+    let reply = read_vacation(api, GMAIL_API).await?;
+    let account_id = config.id;
+    let changed = ctx
+        .db
+        .write(move |conn| repo::auto_replies::store(conn, account_id, &reply, now_ms(), false))
+        .await?;
+    if changed {
+        ctx.bus.emit(CoreEvent::AutoReplyChanged { account_id });
+    }
+    Ok(())
 }
 
 async fn sync_sender_identities(
@@ -4105,6 +4263,10 @@ async fn run_actor(
             if refresh_labels {
                 sync_sender_identities(&ctx, &config, &api).await?;
                 sync_labels(&ctx, &config, &api).await?;
+                // Replies set in webmail show too. Reading them never fails a sync.
+                if let Err(error) = sync_auto_reply(&ctx, &config, &api).await {
+                    tracing::warn!(account_id, %error, "Gmail automatic replies failed");
+                }
             }
             let actions_remaining = execute_actions(&ctx, &config, &api).await?;
             let backfill_done =
@@ -4518,6 +4680,40 @@ mod tests {
         let resources = parse_batch_response(body, "response", 2).unwrap();
         assert_eq!(resources.len(), 1);
         assert_eq!(resources[0]["id"], "one");
+    }
+
+    #[test]
+    fn the_vacation_responder_reads_as_the_app_s_automatic_replies() {
+        // Times as strings, and a reply written in webmail, as HTML only.
+        let settings: VacationSettings = serde_json::from_value(json!({
+            "enableAutoReply": true,
+            "responseSubject": "Away",
+            "responseBodyHtml": "<div>Back on <b>Monday</b>.</div><div>Alex</div>",
+            "restrictToContacts": false,
+            "restrictToDomain": true,
+            "startTime": "1763251200000",
+            "endTime": 1763683199999_i64,
+        }))
+        .unwrap();
+        let reply = AutoReply::from(settings);
+        assert!(reply.enabled && reply.domain_only && !reply.contacts_only);
+        assert_eq!(reply.subject, "Away");
+        assert!(reply.text.contains("Back on Monday."), "{:?}", reply.text);
+        assert!(reply.text.contains("Alex") && !reply.text.contains('<'));
+        assert_eq!(reply.starts_at, Some(1_763_251_200_000));
+        assert_eq!(reply.ends_at, Some(1_763_683_199_999));
+
+        // A responder that was never set reads as off.
+        let unset: VacationSettings = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(AutoReply::from(unset), AutoReply::default());
+
+        // Saved, the text goes as plain text, and times as strings.
+        let saved = serde_json::to_value(VacationSettings::from(&reply)).unwrap();
+        assert_eq!(saved["startTime"], "1763251200000");
+        assert!(saved.get("responseBodyHtml").is_none());
+        let open_ended =
+            serde_json::to_value(VacationSettings::from(&AutoReply::default())).unwrap();
+        assert!(open_ended.get("startTime").is_none() && open_ended.get("endTime").is_none());
     }
 
     #[test]

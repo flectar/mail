@@ -88,6 +88,11 @@ pub enum CoreEvent {
         sync_state: String,
         sync_error: Option<String>,
     },
+    /// What the app knows of an account's automatic replies changed, read
+    /// from its server or saved to it.
+    AutoReplyChanged {
+        account_id: i64,
+    },
     /// A check stored all the mail the account's Inbox had when it started
     /// at `at` (milliseconds since the epoch), as `Account::caught_up_at`.
     AccountCaughtUp {

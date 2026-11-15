@@ -8,6 +8,7 @@ mod app_icon;
 mod account_removal_tests;
 mod app_runtime;
 mod attachment_controller;
+mod auto_replies;
 #[cfg(desktop)]
 mod autostart;
 mod block_sender;
@@ -4720,6 +4721,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         core.file_core(),
                     );
                     notifications::ui::core_ready();
+                    auto_replies::core_ready(&app, &startup_runtime, core.file_core());
                     if !startup_benchmark_disable_background {
                         core.notify_ui_ready();
                     }
@@ -6317,6 +6319,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     agents::register_settings(&app, &state, &runtime);
 
     account_mail_preferences::register(&app, &state, &runtime);
+    auto_replies::register(&app, &state, &runtime, platform.external_urls.clone());
     let composers = composer::install(
         &app,
         &state,
