@@ -121,7 +121,7 @@ export component AgentAccessPage inherits VerticalLayout {
                             overflow: elide;
                         }
                         Text {
-                            text: account.address + " · " + (account.shown ? account.folders-summary : @tr("Agents can't read this account."));
+                            text: (account.address == "" ? "" : account.address + " · ") + (account.shown ? account.folders-summary : @tr("Agents can't read this account."));
                             color: root.faint-text;
                             font-size: TypeScale.caption;
                             wrap: word-wrap;

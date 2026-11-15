@@ -13,8 +13,8 @@ use flectar_mail_core::{
     ai::clean_untrusted,
     db::repo::agent_activity::NewAgentActivity,
     models::{
-        Account, Address, AgentAccess, AgentOutcome, FolderInfo, ListOrder, MessageCursor,
-        MessageDetail, MessageSearchCursor, MessageSummary, View, now_ms,
+        Address, AgentAccess, AgentOutcome, FolderInfo, ListOrder, MessageCursor, MessageDetail,
+        MessageSearchCursor, MessageSummary, View, now_ms,
     },
 };
 use serde_json::{Map, Value, json};
@@ -234,22 +234,49 @@ async fn call(
 /// The accounts and folders agents may see, read fresh for each call.
 struct Scope {
     every_account: bool,
-    accounts: Vec<Account>,
+    accounts: Vec<ScopeAccount>,
     folders: Vec<FolderInfo>,
+}
+
+/// An account agents may see: a connected one, or the mail kept only on
+/// this device.
+struct ScopeAccount {
+    id: i64,
+    /// None for the mail on this device, which has no address.
+    address: Option<String>,
+    name: Option<String>,
+    provider: &'static str,
 }
 
 impl Scope {
     async fn load(core: &Core, access: &AgentAccess) -> Result<Self, Failure> {
         let all_accounts = core.list_accounts().await?;
+        // Mail imported to this device has an account of its own, which
+        // account lists leave out.
+        let local = core.local_mail_account().await?;
         let every_account = all_accounts
             .iter()
-            .all(|account| access.shows_account(account.id));
-        let accounts = all_accounts
-            .into_iter()
+            .map(|account| account.id)
+            .chain(local)
+            .all(|account_id| access.shows_account(account_id));
+        let mut accounts = all_accounts
+            .iter()
             .filter(|account| access.shows_account(account.id))
+            .map(|account| ScopeAccount {
+                id: account.id,
+                address: Some(account.email.clone()),
+                name: account.display_name.clone(),
+                provider: account.provider.as_str(),
+            })
             .collect::<Vec<_>>();
-        // Only the listed accounts' folders: mail kept only on this device
-        // belongs to an account that account lists leave out.
+        if let Some(account_id) = local.filter(|account_id| access.shows_account(*account_id)) {
+            accounts.push(ScopeAccount {
+                id: account_id,
+                address: None,
+                name: Some("Mail on this device".into()),
+                provider: "local",
+            });
+        }
         let folders = core
             .list_folders(None)
             .await?
@@ -269,7 +296,7 @@ impl Scope {
         })
     }
 
-    fn account(&self, account_id: i64) -> Option<&Account> {
+    fn account(&self, account_id: i64) -> Option<&ScopeAccount> {
         self.accounts
             .iter()
             .find(|account| account.id == account_id)
@@ -343,9 +370,9 @@ fn list_accounts(scope: &Scope) -> Result<Answer, Failure> {
         .map(|account| {
             json!({
                 "id": account.id,
-                "address": account.email,
-                "name": account.display_name,
-                "provider": account.provider.as_str(),
+                "address": account.address,
+                "name": account.name,
+                "provider": account.provider,
             })
         })
         .collect::<Vec<_>>();
@@ -355,9 +382,13 @@ fn list_accounts(scope: &Scope) -> Result<Answer, Failure> {
         scope
             .accounts
             .iter()
-            .map(|account| match &account.display_name {
-                Some(name) => format!("Account {}: {name} <{}>", account.id, account.email),
-                None => format!("Account {}: {}", account.id, account.email),
+            .map(|account| match (&account.name, &account.address) {
+                (Some(name), Some(address)) => {
+                    format!("Account {}: {name} <{address}>", account.id)
+                }
+                (Some(name), None) => format!("Account {}: {name}", account.id),
+                (None, Some(address)) => format!("Account {}: {address}", account.id),
+                (None, None) => format!("Account {}", account.id),
             })
             .collect::<Vec<_>>()
             .join("\n")

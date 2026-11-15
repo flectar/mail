@@ -10,7 +10,7 @@ use crate::{
 use chrono::{Local, Timelike};
 use flectar_mail_core::{
     Core,
-    models::{Account, AgentAccess, AgentActivity, AgentOutcome, FolderInfo, roles},
+    models::{AgentAccess, AgentActivity, AgentOutcome, FolderInfo, roles},
 };
 use serde_json::{Value, json};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -179,10 +179,11 @@ impl Page {
             ui.set_activity(ModelRc::default());
             return;
         };
-        let (settings, accounts, folders, activity) = self.runtime.block_on(async {
+        let (settings, accounts, local, folders, activity) = self.runtime.block_on(async {
             (
                 core.get_settings().await,
                 core.list_accounts().await,
+                core.local_mail_account().await,
                 core.list_folders(None).await,
                 core.agent_activity(ACTIVITY_SHOWN).await,
             )
@@ -190,7 +191,27 @@ impl Page {
         let access = settings
             .map(|settings| settings.agent_access)
             .unwrap_or_default();
-        let accounts = accounts.unwrap_or_default();
+        // The accounts as the page names them, with the mail imported to
+        // this device, which account lists leave out, at the end.
+        let mut accounts = accounts
+            .unwrap_or_default()
+            .into_iter()
+            .map(|account| PageAccount {
+                id: account.id,
+                name: account
+                    .display_name
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| account.email.clone()),
+                address: account.email,
+            })
+            .collect::<Vec<_>>();
+        if let Ok(Some(account_id)) = local {
+            accounts.push(PageAccount {
+                id: account_id,
+                name: translated(&app, &UiMessage::plain("Mail on this device")).into(),
+                address: String::new(),
+            });
+        }
         let folders = folders
             .unwrap_or_default()
             .into_iter()
@@ -251,9 +272,17 @@ impl Page {
     }
 }
 
+/// An account as the page lists it.
+struct PageAccount {
+    id: i64,
+    name: String,
+    /// Empty for the mail on this device, which has no address.
+    address: String,
+}
+
 fn account_row(
     app: &AppWindow,
-    account: &Account,
+    account: &PageAccount,
     folders: &[FolderInfo],
     access: &AgentAccess,
     folders_open: bool,
@@ -284,13 +313,8 @@ fn account_row(
     };
     AgentAccount {
         id: i32::try_from(account.id).unwrap_or_default(),
-        name: account
-            .display_name
-            .as_deref()
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or(&account.email)
-            .into(),
-        address: account.email.as_str().into(),
+        name: account.name.as_str().into(),
+        address: account.address.as_str().into(),
         shown,
         folders_summary: translated(app, &folders_summary(&own, &as_shown)),
         folders_open,
@@ -339,7 +363,7 @@ fn folders_summary(folders: &[&FolderInfo], access: &AgentAccess) -> UiMessage {
 fn activity_row(
     app: &AppWindow,
     entry: &AgentActivity,
-    accounts: &[Account],
+    accounts: &[PageAccount],
     folders: &[FolderInfo],
 ) -> AgentActivityEntry {
     let action = match entry.tool.as_str() {
@@ -359,13 +383,7 @@ fn activity_row(
         .account_id
         .and_then(|id| accounts.iter().find(|account| account.id == id))
     {
-        detail.push(
-            account
-                .display_name
-                .clone()
-                .filter(|name| !name.trim().is_empty())
-                .unwrap_or_else(|| account.email.clone()),
-        );
+        detail.push(account.name.clone());
     }
     if let Some(folder) = entry
         .folder_id
