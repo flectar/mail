@@ -14,6 +14,8 @@ use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use std::rc::Weak;
 
 mod forward;
+mod link_block;
+mod links;
 mod message_spelling;
 mod photos;
 mod placeholders;
@@ -72,8 +74,14 @@ pub(super) struct ComposeSession {
     /// left on the one it moved from no longer reach it.
     host_id: Cell<u64>,
     files: RefCell<Vec<ComposeFile>>,
-    /// Downloads of a forward's files still on their way, which sending waits for.
+    /// Downloads of a forward's files still on their way, and uploads of files sent by link,
+    /// which sending waits for.
     attaching: Cell<u32>,
+    /// Files the message sends by link, and the timer that shows how far along their uploads
+    /// are.
+    links: RefCell<Vec<links::LinkedFile>>,
+    next_link: Cell<u64>,
+    link_timer: Timer,
     /// Bumped when the message is cleared, so a file picker or a download of
     /// the original's files that finishes later attaches to nothing.
     generation: Cell<u64>,
@@ -517,6 +525,8 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_attachments(from.get_attachments());
     to.set_attachment_summary(from.get_attachment_summary());
     to.set_attaching_files(from.get_attaching_files());
+    to.set_links(from.get_links());
+    to.set_link_sharing(from.get_link_sharing());
     to.set_plain_text(from.get_plain_text());
     to.set_templates(from.get_templates());
     to.set_message(from.get_message());
@@ -641,6 +651,9 @@ impl Composers {
             host_id: Cell::new(0),
             files: RefCell::default(),
             attaching: Cell::new(0),
+            links: RefCell::default(),
+            next_link: Cell::new(0),
+            link_timer: Timer::default(),
             generation: Cell::new(0),
             document: RefCell::default(),
             editor: RefCell::default(),
@@ -1012,7 +1025,9 @@ impl Composers {
             && !draft.body_text.trim().is_empty();
         let quote = {
             let mut document = session.document.borrow_mut();
-            let html = draft.body_html.as_deref().unwrap_or_default();
+            // Files the draft sends by link come back as such.
+            let html = session.restore_links(draft.body_html.as_deref().unwrap_or_default());
+            let html = html.as_str();
             // The HTML keeps the draft's formatting and the original it
             // quotes; HTML that holds other text than the draft's opens as
             // the plain text.
@@ -1303,6 +1318,7 @@ impl ComposeSession {
         host.preferences().invoke_composer_reset();
         ui.set_editor_tiles(ModelRc::default());
         apply_compose_files(&ui, &[]);
+        ui.set_links(ModelRc::default());
         ui.set_attaching_files(false);
         photos::apply_photos(&ui, &photos::PhotoSummary::default());
         ui.set_plain_text(false);
@@ -1332,6 +1348,7 @@ impl ComposeSession {
         };
         let ui = host.ui();
         ui.set_mode(mode.into());
+        ui.set_link_sharing(self.can_share_by_link());
         // A signature has no sender, and no signature of its own to insert.
         if mode != "signature" {
             let preferences = host.preferences();
@@ -1553,6 +1570,9 @@ impl ComposeSession {
         }
         self.files.borrow_mut().clear();
         self.attaching.set(0);
+        // Files already shared stay so: a sent message links to them.
+        self.links.borrow_mut().clear();
+        self.link_timer.stop();
         self.templated.set(false);
         self.placeholder_warning.borrow_mut().clear();
         self.photos.clear();
@@ -1774,6 +1794,18 @@ impl ComposeSession {
         });
         ui.on_splice_text(|text, start, end, insert| {
             placeholders::splice(&text, start, end, &insert).into()
+        });
+        let weak = self.reference();
+        ui.on_remove_link(move |index| {
+            if let Some(session) = weak.upgrade() {
+                session.remove_link(index);
+            }
+        });
+        let weak = self.reference();
+        ui.on_share_by_link(move || {
+            if let Some(session) = weak.upgrade() {
+                session.pick_link_files();
+            }
         });
         let weak = self.reference();
         ui.on_edit_quote(move || {
@@ -2349,9 +2381,9 @@ impl ComposeSession {
     }
 
     /// Attaches `new`, leaving out files already attached, ones that can't be read, and any
-    /// that would take the message's images and attachments past what it carries, and says
-    /// what went in.
-    fn attach(&self, new: Vec<NewAttachment>) {
+    /// that would take the message's images and attachments past what it carries, which go
+    /// by link instead when a storage service is connected, and says what went in.
+    fn attach(self: &Rc<Self>, new: Vec<NewAttachment>) {
         if new.is_empty() {
             return;
         }
@@ -2375,6 +2407,8 @@ impl ComposeSession {
         let mut added = 0usize;
         let mut skipped = 0usize;
         let mut shrinking = Vec::new();
+        let mut by_link = Vec::new();
+        let mut linking = None;
         for document in new {
             let path = std::fs::canonicalize(&document.path).unwrap_or(document.path);
             if files.iter().any(|file| file.holds(&path)) || self.photos.waiting_for(&path) {
@@ -2389,8 +2423,25 @@ impl ComposeSession {
                 skipped += 1;
                 continue;
             };
+            let shrinkable = crate::photo_shrink::can_shrink_file(&path);
+            // A file the message can't carry goes by link, where a storage service is
+            // connected.
+            if !(shrinkable && self.photos.on())
+                && total_size.saturating_add(metadata.len()) > MAX_COMPOSE_ATTACHMENT_BYTES
+            {
+                if *linking.get_or_insert_with(|| self.can_share_by_link()) {
+                    by_link.push(NewAttachment {
+                        path,
+                        filename: Some(filename),
+                        import: document.import,
+                    });
+                } else {
+                    skipped += 1;
+                }
+                continue;
+            }
             let file = ComposeFile {
-                shrinkable: crate::photo_shrink::can_shrink_file(&path),
+                shrinkable,
                 path,
                 filename,
                 size: metadata.len(),
@@ -2402,22 +2453,37 @@ impl ComposeSession {
                 shrinking.push(file);
                 continue;
             }
-            if total_size.saturating_add(file.size) > MAX_COMPOSE_ATTACHMENT_BYTES {
-                skipped += 1;
-                continue;
-            }
             total_size += file.size;
             files.push(file);
             added += 1;
         }
         apply_compose_files(&ui, &files);
         drop(files);
-        if shrinking.is_empty() || added + skipped > 0 {
+        if !by_link.is_empty() {
+            ui.set_notice(
+                UiMessage::plain("Files over the 25 MB limit go as links."),
+                false,
+            );
+            self.share_by_link(by_link);
+        } else if shrinking.is_empty() || added + skipped > 0 {
             let (notice, error) = attachments_notice(added, skipped);
             ui.set_notice(notice, error);
         }
         self.photos.attach_when_shrunk(shrinking);
         self.refresh_photos();
+    }
+
+    /// Whether a storage service is connected that files can go by link from.
+    fn can_share_by_link(&self) -> bool {
+        let Some(composers) = self.composers() else {
+            return false;
+        };
+        composers.core().is_some_and(|core| {
+            composers
+                .runtime
+                .block_on(core.link_services())
+                .is_ok_and(|services| !services.is_empty())
+        })
     }
 
     /// Files dragged over the message's window show where they'll go, until they're dropped
@@ -2447,7 +2513,7 @@ impl ComposeSession {
     }
 
     #[cfg(desktop)]
-    fn place_dropped_files(&self) {
+    fn place_dropped_files(self: &Rc<Self>) {
         let paths = std::mem::take(&mut *self.dropped.borrow_mut());
         self.place_files(paths);
     }
@@ -2455,7 +2521,7 @@ impl ComposeSession {
     /// Puts dropped pictures in the text at the caret, as pasting does, and attaches the
     /// other files.
     #[cfg(desktop)]
-    fn place_files(&self, paths: Vec<PathBuf>) {
+    fn place_files(self: &Rc<Self>, paths: Vec<PathBuf>) {
         let Some(host) = self.host() else {
             return;
         };
@@ -2808,6 +2874,14 @@ impl ComposeSession {
         if send && (self.photos.on() && self.photos.busy() || self.attaching.get() > 0) {
             return;
         }
+        // A file that couldn't go up by link holds the message back until it's removed.
+        if send && let Some(name) = self.failed_link() {
+            ui.set_notice(
+                UiMessage::detail("Remove {} to send the message.", name),
+                true,
+            );
+            return;
+        }
         // A message from a template says which placeholders it still has, and goes as it is
         // when sent again.
         if send && self.templated.get() {
@@ -2861,6 +2935,29 @@ impl ComposeSession {
             (html, send.then(|| document.plain_text()))
         };
         let body = described.as_deref().unwrap_or(body);
+        // Files sent by link go in a block after what's written. A draft keeps the block in
+        // its HTML only, with each link's details, to reopen as the files.
+        let (body, body_html) = match self.link_blocks(!send) {
+            Some((html_block, text_block)) => {
+                let rich = !self.plain_text.get();
+                let text = if send || !rich {
+                    match body.trim_end() {
+                        "" => text_block,
+                        written => format!("{written}\n\n{text_block}"),
+                    }
+                } else {
+                    body.to_owned()
+                };
+                let html = if rich {
+                    Some(format!("{}{html_block}", body_html.unwrap_or_default()))
+                } else {
+                    body_html
+                };
+                (text, html)
+            }
+            None => (body.to_owned(), body_html),
+        };
+        let body = body.as_str();
         // The original goes below what the user wrote, in both parts.
         let (body, body_html) = match self.quote.borrow().as_ref() {
             Some(quote) => {

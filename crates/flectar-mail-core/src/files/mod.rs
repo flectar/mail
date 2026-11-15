@@ -14,7 +14,7 @@ mod storage_tests;
 pub mod store;
 pub mod sync;
 mod text_index;
-mod transport;
+pub(crate) mod transport;
 
 use crate::{
     Core,

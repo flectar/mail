@@ -55,6 +55,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/036_returned_receipts.sql")),
     Migration::Plain(include_str!("migrations/037_mark_read.sql")),
     Migration::Plain(include_str!("migrations/038_oldest_first_lists.sql")),
+    Migration::Plain(include_str!("migrations/039_link_services.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -364,6 +365,7 @@ mod tests {
             "jmap_full_sync_stored",
             "jmap_sync_state",
             "labels",
+            "link_services",
             "mail_transfers",
             "message_bodies",
             "message_embeddings",

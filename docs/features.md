@@ -359,6 +359,17 @@ known. A placeholder the message can't fill, or one of your own such as
 `{{company}}`, stays for you to fill in, and sending a message that still has
 one asks once to send it as it is.
 
+**Large files** go by link. With a Nextcloud or ownCloud server connected in
+Settings → General, signed in to in the browser or with an app password, files
+too large for a message go up to it as they're added, as do files shared with
+**Share files by link** beside **Attach files**. Each goes in a folder of its
+own under Mail attachments, and the message carries a block listing them with
+their sizes and until when their links work, 30 days unless that's changed,
+or less where the server limits links. A link can ask for a password, which
+the message leaves out for you to pass on another way. Sending waits for the
+uploads, removing a file before sending takes its upload back, and a draft
+keeps its links.
+
 ## Spell check
 
 Flectar Mail underlines misspelled words as you write. On Windows, macOS, iOS

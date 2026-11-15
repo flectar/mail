@@ -1,4 +1,4 @@
-import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow, LocalizedMessage, SpellingLanguage } from "../models.slint";
+import { AccountRow, ComposeAttachment, ComposeLink, ComposeContact, ComposeEditorTile, EmailTemplateRow, LocalizedMessage, SpellingLanguage } from "../models.slint";
 import { AppTheme } from "../design-system.slint";
 import { EmailComposer } from "email-composer.slint";
 
@@ -27,6 +27,9 @@ export global ComposerUi {
     in property <[ComposeContact]> contact-suggestions: [];
     in property <[ComposeAttachment]> attachments: [];
     in property <string> attachment-summary: "";
+    // Files the message sends by link, and whether a storage service is there to send them.
+    in property <[ComposeLink]> links: [];
+    in property <bool> link-sharing: false;
     // The message's JPEG photos that can go out shrunk: how many, their size as they go out
     // and at full size, whether they go out shrunk, and whether they're being shrunk.
     in property <int> photo-count: 0;
@@ -125,6 +128,8 @@ export global ComposerUi {
     // Opens a picker for images to put in the text at the caret.
     callback insert-images();
     callback remove-attachment(int);
+    callback remove-link(int);
+    callback share-by-link();
     callback shrink-photos-toggled(bool);
     callback plain-text-chosen(bool);
     callback format(string, string, int, int);
@@ -182,6 +187,8 @@ export component BoundComposer inherits EmailComposer {
     selected-account-id <=> ComposerUi.account-id;
     contact-suggestions: ComposerUi.contact-suggestions;
     attachments: ComposerUi.attachments;
+    links: ComposerUi.links;
+    link-sharing: ComposerUi.link-sharing;
     templates: ComposerUi.templates;
     attachment-summary: ComposerUi.attachment-summary;
     photo-count: ComposerUi.photo-count;
@@ -266,6 +273,8 @@ export component BoundComposer inherits EmailComposer {
     pick-attachments => { ComposerUi.pick-attachments(); }
     insert-images => { ComposerUi.insert-images(); }
     remove-attachment(index) => { ComposerUi.remove-attachment(index); }
+    remove-link(index) => { ComposerUi.remove-link(index); }
+    share-by-link => { ComposerUi.share-by-link(); }
     shrink-photos-toggled(on) => { ComposerUi.shrink-photos-toggled(on); }
     plain-text-chosen(plain) => { ComposerUi.plain-text-chosen(plain); }
     format-requested(kind, body, anchor, cursor) => { ComposerUi.format(kind, body, anchor, cursor); }

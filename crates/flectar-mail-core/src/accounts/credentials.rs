@@ -41,6 +41,9 @@ pub enum Slot {
     /// CardDAV app password. Kept separate because a user may configure
     /// different DAV providers for calendars and contacts.
     CarddavPassword,
+    /// The app password of the storage service with this id that files go by link from,
+    /// kept under account id 0 as the service belongs to no account.
+    LinkServicePassword(i64),
 }
 
 impl Slot {
@@ -59,6 +62,9 @@ impl Slot {
                 format!("caldav_password:{connection_id}").into()
             }
             Slot::CarddavPassword => "carddav_password".into(),
+            Slot::LinkServicePassword(service_id) => {
+                format!("link_service_password:{service_id}").into()
+            }
         }
     }
 }

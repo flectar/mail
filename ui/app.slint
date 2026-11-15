@@ -5,6 +5,7 @@ import { AttachmentPreviewDialog } from "dialogs/attachment-preview-dialog.slint
 export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
+export { LinkServices, LinkServiceRow } from "link-services.slint";
 export { RendererSettings } from "renderer-settings.slint";
 export { WindowChrome } from "window-chrome.slint";
 export { AppIcon, AppIconVariant } from "app-icon.slint";
@@ -718,6 +719,19 @@ export global I18n {
         if (key == "Could not delete email template: {}") { return @tr("Could not delete email template: {}", argument); }
         if (key == "Email template is no longer available.") { return @tr("Email template is no longer available."); }
         if (key == "Email template inserted.") { return @tr("Email template inserted."); }
+        if (key == "Share files by link") { return @tr("Share files by link"); }
+        if (key == "Connect a storage service in Settings to send files by link.") { return @tr("Connect a storage service in Settings to send files by link."); }
+        if (key == "{} asks for the password {}. Pass it on another way.") { return @tr("{} asks for the password {}. Pass it on another way.", argument, second-argument); }
+        if (key == "{} couldn't go up: {}") { return @tr("{} couldn't go up: {}", argument, second-argument); }
+        if (key == "Uploading… {}%") { return @tr("Uploading… {}%", argument); }
+        if (key == "{} · until {}") { return @tr("{} · until {}", argument, second-argument); }
+        if (key == "{} files shared by link") { return @tr("1 file shared by link" | "{0} files shared by link" % round(argument.to-float()), argument); }
+        if (key == "available until {}") { return @tr("available until {}", argument); }
+        if (key == "password protected") { return @tr("password protected"); }
+        if (key == "Remove {} to send the message.") { return @tr("Remove {} to send the message.", argument); }
+        if (key == "Files over the 25 MB limit go as links.") { return @tr("Files over the 25 MB limit go as links."); }
+        if (key == "Large files preference saved.") { return @tr("Large files preference saved."); }
+        if (key == "Could not save the large files preference: {}") { return @tr("Could not save the large files preference: {}", argument); }
         if (key == "Fill in {} before sending.") { return @tr("Fill in {} before sending.", argument); }
         if (key == "Fill in {} or send again.") { return @tr("Fill in {} or send again.", argument); }
         if (key == "Email template inserted, but its usage could not be saved: {}") { return @tr("Email template inserted, but its usage could not be saved: {}", argument); }
