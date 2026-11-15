@@ -1,7 +1,7 @@
 //! Automatic replies an account's server sends while the user is away
 //! (#239): Gmail's vacation responder, a Microsoft mailbox's settings,
-//! JMAP's VacationResponse, and a Sieve script of the app's own on IMAP
-//! servers that run them.
+//! JMAP's VacationResponse, and a Sieve script of the app's own on IMAP and
+//! JMAP servers that run them.
 //! The app saves them to the server and reads them back while syncing, so
 //! replies set in webmail show too. It never sends replies itself, so
 //! servers keep their own rules against replying to lists, to automatic
@@ -129,12 +129,23 @@ impl Core {
                 )
                 .await?;
                 let connected = crate::jmap::client::connect(&config, &secret).await?;
-                if !crate::jmap::vacation::offered(&connected) {
+                // A server that runs Sieve scripts keeps them in the app's
+                // script, as over ManageSieve.
+                if let Some(mut scripts) = crate::jmap::sieve::scripts(&connected) {
+                    let addresses = self.reply_addresses(account_id).await?;
+                    match crate::sieve::save_to(&mut scripts, &reply, &addresses, allowed.as_ref())
+                        .await?
+                    {
+                        AutoReplySaved::Done(saved) => saved,
+                        ask @ AutoReplySaved::Ask(_) => return Ok(ask),
+                    }
+                } else if crate::jmap::vacation::offered(&connected) {
+                    crate::jmap::vacation::save(&connected, &reply).await?
+                } else {
                     return Err(CoreError::Other(
                         "Flectar Mail can't set this account's automatic replies yet".into(),
                     ));
                 }
-                crate::jmap::vacation::save(&connected, &reply).await?
             }
             Provider::Generic if account.mail_protocol == MailProtocol::Imap => {
                 let password = credentials::load_async(
@@ -143,16 +154,7 @@ impl Core {
                     credentials::Slot::Password,
                 )
                 .await?;
-                let addresses = self
-                    .db
-                    .read(move |conn| {
-                        Ok(repo::sender_identities::list(conn, account_id)?
-                            .into_iter()
-                            .filter(|identity| identity.is_verified() && !identity.is_wildcard())
-                            .map(|identity| identity.email)
-                            .collect::<Vec<_>>())
-                    })
-                    .await?;
+                let addresses = self.reply_addresses(account_id).await?;
                 match crate::sieve::save(
                     &crate::sieve::server(&config),
                     &config.username,
@@ -181,6 +183,20 @@ impl Core {
             .await?;
         self.bus.emit(CoreEvent::AutoReplyChanged { account_id });
         Ok(AutoReplySaved::Done(saved))
+    }
+
+    /// The addresses account `account_id` receives mail at, which Sieve
+    /// replies answer mail to.
+    async fn reply_addresses(&self, account_id: i64) -> Result<Vec<String>> {
+        self.db
+            .read(move |conn| {
+                Ok(repo::sender_identities::list(conn, account_id)?
+                    .into_iter()
+                    .filter(|identity| identity.is_verified() && !identity.is_wildcard())
+                    .map(|identity| identity.email)
+                    .collect())
+            })
+            .await
     }
 
     /// Asks Google, in the browser, to let the app change `account`'s Gmail

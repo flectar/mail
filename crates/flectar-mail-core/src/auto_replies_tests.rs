@@ -14,6 +14,18 @@ pub(super) type Request = (String, String, String);
 pub(super) async fn server(
     answer: impl Fn(&Request) -> (u16, Value) + Send + Sync + 'static,
 ) -> (String, Arc<Mutex<Vec<Request>>>) {
+    raw_server(move |request| {
+        let (status, json) = answer(request);
+        (status, "application/json", json.to_string())
+    })
+    .await
+}
+
+/// A stand-in that answers each request with `answer`'s status, content
+/// type and body, and keeps the requests.
+async fn raw_server(
+    answer: impl Fn(&Request) -> (u16, &'static str, String) + Send + Sync + 'static,
+) -> (String, Arc<Mutex<Vec<Request>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -48,11 +60,10 @@ pub(super) async fn server(
                 let mut body = vec![0; length];
                 stream.read_exact(&mut body).await.unwrap();
                 let request = (method, target, String::from_utf8(body).unwrap());
-                let (status, json) = answer(&request);
+                let (status, content_type, body) = answer(&request);
                 requests.lock().unwrap().push(request);
-                let body = json.to_string();
                 let response = format!(
-                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n\
+                    "HTTP/1.1 {status} X\r\nContent-Type: {content_type}\r\n\
                      Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
@@ -354,4 +365,272 @@ async fn a_jmap_server_with_sieve_keeps_its_replies_to_itself() {
     .unwrap();
     // Saving there would turn the user's own filters off.
     assert!(!crate::jmap::vacation::offered(&connected));
+}
+
+/// What a JMAP server with Sieve keeps: its scripts as id, name, blob id
+/// and whether it's the active one, and the blobs.
+#[derive(Default)]
+struct SieveAccount {
+    scripts: Vec<(String, String, String, bool)>,
+    blobs: std::collections::HashMap<String, String>,
+    next: usize,
+}
+
+impl SieveAccount {
+    fn put(&mut self, name: &str, text: &str, active: bool) {
+        self.next += 1;
+        let (id, blob) = (format!("s{}", self.next), format!("b{}", self.next));
+        self.blobs.insert(blob.clone(), text.into());
+        if active {
+            for script in &mut self.scripts {
+                script.3 = false;
+            }
+        }
+        self.scripts.push((id, name.into(), blob, active));
+    }
+
+    fn active(&self) -> Option<&str> {
+        self.scripts
+            .iter()
+            .find(|script| script.3)
+            .map(|script| script.1.as_str())
+    }
+
+    fn text(&self, name: &str) -> Option<&str> {
+        let (_, _, blob, _) = self.scripts.iter().find(|script| script.1 == name)?;
+        self.blobs.get(blob).map(String::as_str)
+    }
+}
+
+/// The session of a JMAP server with Sieve that offers `extensions`, listed
+/// with the account as RFC 9661 says, or with the session as earlier drafts
+/// did.
+fn jmap_sieve_session(origin: &str, extensions: &[&str], draft: bool) -> Value {
+    let mut session = jmap_session(origin, false);
+    let limits = json!({
+        "maxSizeScriptName": 512,
+        "maxSizeScript": 1_048_576,
+        "maxNumberScripts": 100,
+        "maxNumberRedirects": 10,
+        "sieveExtensions": extensions,
+        "notificationMethods": null,
+        "externalLists": null,
+    });
+    let (in_session, in_account) = if draft {
+        (limits, json!({}))
+    } else {
+        (json!({ "implementation": "Test Sieve" }), limits)
+    };
+    session["capabilities"]["urn:ietf:params:jmap:sieve"] = in_session;
+    session["accounts"]["a1"]["accountCapabilities"]["urn:ietf:params:jmap:sieve"] = in_account;
+    session
+}
+
+/// A JMAP server with Sieve (RFC 9661) that keeps scripts as a real one
+/// does.
+async fn jmap_sieve_server(
+    extensions: &'static [&'static str],
+    draft: bool,
+) -> (String, Arc<Mutex<SieveAccount>>) {
+    let account = Arc::new(Mutex::new(SieveAccount::default()));
+    let kept = Arc::clone(&account);
+    let origin = Arc::new(Mutex::new(String::new()));
+    let known = Arc::clone(&origin);
+    let (address, _) = raw_server(move |(method, target, body)| {
+        let mut account = kept.lock().unwrap();
+        let json = |value: Value| (200, "application/json", value.to_string());
+        if method == "GET" && target.starts_with("/download/") {
+            let blob = target.split('/').nth(3).unwrap_or_default();
+            return match account.blobs.get(blob) {
+                Some(text) => (200, "application/sieve", text.clone()),
+                None => (404, "text/plain", String::new()),
+            };
+        }
+        if method == "GET" {
+            return json(jmap_sieve_session(
+                &known.lock().unwrap(),
+                extensions,
+                draft,
+            ));
+        }
+        if target.starts_with("/upload/") {
+            account.next += 1;
+            let blob = format!("b{}", account.next);
+            account.blobs.insert(blob.clone(), body.clone());
+            return json(json!({
+                "accountId": "a1", "blobId": blob, "type": "application/sieve", "size": body.len()
+            }));
+        }
+        let request: Value = serde_json::from_str(body).unwrap();
+        let call = &request["methodCalls"][0];
+        let arguments = &call[1];
+        let response = match call[0].as_str().unwrap() {
+            "SieveScript/get" => {
+                let list = account
+                    .scripts
+                    .iter()
+                    .map(|(id, name, blob, active)| {
+                        json!({ "id": id, "name": name, "blobId": blob, "isActive": active })
+                    })
+                    .collect::<Vec<_>>();
+                json!([
+                    "SieveScript/get",
+                    { "accountId": "a1", "state": "1", "list": list, "notFound": [] },
+                    call[2],
+                ])
+            }
+            "SieveScript/set" => {
+                let mut created = serde_json::Map::new();
+                let mut ids = std::collections::HashMap::new();
+                for (creation, object) in arguments["create"].as_object().into_iter().flatten() {
+                    account.next += 1;
+                    let id = format!("s{}", account.next);
+                    let name = object["name"].as_str().unwrap().to_owned();
+                    let blob = object["blobId"].as_str().unwrap().to_owned();
+                    account.scripts.push((id.clone(), name, blob, false));
+                    created.insert(creation.clone(), json!({ "id": id, "isActive": false }));
+                    ids.insert(format!("#{creation}"), id);
+                }
+                let mut updated = serde_json::Map::new();
+                for (id, patch) in arguments["update"].as_object().into_iter().flatten() {
+                    let script = account.scripts.iter_mut().find(|script| &script.0 == id);
+                    script.unwrap().2 = patch["blobId"].as_str().unwrap().to_owned();
+                    updated.insert(id.clone(), Value::Null);
+                }
+                if let Some(activate) = arguments["onSuccessActivateScript"].as_str() {
+                    let id = ids
+                        .get(activate)
+                        .map_or(activate, String::as_str)
+                        .to_owned();
+                    for script in &mut account.scripts {
+                        script.3 = script.0 == id;
+                    }
+                }
+                if arguments["onSuccessDeactivateScript"] == json!(true) {
+                    for script in &mut account.scripts {
+                        script.3 = false;
+                    }
+                }
+                json!([
+                    "SieveScript/set",
+                    {
+                        "accountId": "a1", "oldState": "1", "newState": "2",
+                        "created": created, "updated": updated
+                    },
+                    call[2],
+                ])
+            }
+            other => panic!("unexpected {other}"),
+        };
+        json(json!({ "methodResponses": [response], "sessionState": "session-1" }))
+    })
+    .await;
+    *origin.lock().unwrap() = address.clone();
+    (address, account)
+}
+
+async fn jmap_connect(origin: &str) -> crate::jmap::client::ConnectedClient {
+    crate::jmap::client::connect_with(
+        "me@example.test",
+        "me@example.test",
+        "secret",
+        origin,
+        Some("a1"),
+    )
+    .await
+    .unwrap()
+}
+
+const SIEVE_EVERYTHING: &[&str] = &["fileinto", "vacation", "date", "relational", "include"];
+
+#[tokio::test]
+async fn replies_go_in_the_apps_script_on_a_jmap_server_with_sieve() {
+    let (origin, account) = jmap_sieve_server(SIEVE_EVERYTHING, false).await;
+    let connected = jmap_connect(&origin).await;
+    assert!(!crate::jmap::vacation::offered(&connected));
+    let mut scripts = crate::jmap::sieve::scripts(&connected).expect("Sieve with vacation");
+    let reply = AutoReply {
+        contacts_only: false,
+        ..away()
+    };
+    let addresses = ["me@example.test".to_owned()];
+    assert_eq!(
+        crate::sieve::save_to(&mut scripts, &reply, &addresses, None)
+            .await
+            .unwrap(),
+        AutoReplySaved::Done(reply.clone())
+    );
+    {
+        let account = account.lock().unwrap();
+        assert_eq!(account.active(), Some(crate::sieve::script::NAME));
+        let text = account.text(crate::sieve::script::NAME).unwrap();
+        assert!(text.contains("vacation :days 4 :addresses [\"me@example.test\"]"));
+    }
+    // Another device reads them back, and a second save replaces the script.
+    let mut again = crate::jmap::sieve::scripts(&connected).unwrap();
+    assert_eq!(crate::sieve::read_from(&mut again).await.unwrap(), reply);
+    let later = AutoReply {
+        text: "Back on Tuesday.".into(),
+        ..reply.clone()
+    };
+    crate::sieve::save_to(&mut again, &later, &addresses, None)
+        .await
+        .unwrap();
+    assert_eq!(account.lock().unwrap().scripts.len(), 1);
+    let mut third = crate::jmap::sieve::scripts(&connected).unwrap();
+    assert_eq!(crate::sieve::read_from(&mut third).await.unwrap(), later);
+}
+
+#[tokio::test]
+async fn a_jmap_server_runs_the_users_own_script_after_the_replies() {
+    let (origin, account) = jmap_sieve_server(SIEVE_EVERYTHING, false).await;
+    let filters = "require \"fileinto\";\r\nfileinto \"Lists\";\r\n";
+    account.lock().unwrap().put("filters", filters, true);
+    let connected = jmap_connect(&origin).await;
+    let reply = AutoReply {
+        contacts_only: false,
+        ..away()
+    };
+    let question = AutoReplyQuestion::RunBefore("filters".into());
+    let mut scripts = crate::jmap::sieve::scripts(&connected).unwrap();
+    assert_eq!(
+        crate::sieve::save_to(&mut scripts, &reply, &[], None)
+            .await
+            .unwrap(),
+        AutoReplySaved::Ask(question.clone())
+    );
+    assert_eq!(account.lock().unwrap().scripts.len(), 1, "nothing changed");
+    crate::sieve::save_to(&mut scripts, &reply, &[], Some(&question))
+        .await
+        .unwrap();
+    {
+        let account = account.lock().unwrap();
+        assert_eq!(account.active(), Some(crate::sieve::script::NAME));
+        assert_eq!(account.text("filters"), Some(filters));
+        let ours = account.text(crate::sieve::script::NAME).unwrap();
+        assert!(ours.ends_with("include :personal :optional \"filters\";\r\n"));
+    }
+    // Turned off, their script runs alone again.
+    let off = AutoReply {
+        enabled: false,
+        ..reply
+    };
+    let mut scripts = crate::jmap::sieve::scripts(&connected).unwrap();
+    crate::sieve::save_to(&mut scripts, &off, &[], None)
+        .await
+        .unwrap();
+    assert_eq!(account.lock().unwrap().active(), Some("filters"));
+}
+
+#[tokio::test]
+async fn jmap_servers_name_their_sieve_extensions_where_they_can() {
+    // Extensions listed with the session, as earlier drafts of RFC 9661 did.
+    let (origin, _) = jmap_sieve_server(SIEVE_EVERYTHING, true).await;
+    let connected = jmap_connect(&origin).await;
+    let scripts = crate::jmap::sieve::scripts(&connected).expect("draft extensions");
+    assert!(crate::sieve::Scripts::has_extension(&scripts, "Include"));
+    // A server whose scripts can't reply offers no script replies.
+    let (origin, _) = jmap_sieve_server(&["fileinto"], false).await;
+    let connected = jmap_connect(&origin).await;
+    assert!(crate::jmap::sieve::scripts(&connected).is_none());
 }
