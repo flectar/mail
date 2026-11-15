@@ -17,7 +17,7 @@ use crate::models::{
     AccountConfig, AutoReply, AutoReplyQuestion, AutoReplySaved, ConnectionSecurity, now_ms,
 };
 use crate::sync::engine::SyncCtx;
-use managesieve::{Error, Server, Session};
+use managesieve::{Error, Script, Server, Session};
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -49,6 +49,55 @@ pub(crate) fn server(config: &AccountConfig) -> Server<'_> {
     }
 }
 
+/// Where the user's Sieve scripts are kept: a ManageSieve session, or a JMAP
+/// account (RFC 9661).
+pub(crate) trait Scripts {
+    /// Whether scripts there may use Sieve extension `name`.
+    fn has_extension(&self, name: &str) -> bool;
+    /// The scripts, and which one the server runs.
+    async fn list(&mut self) -> Result<Vec<Script>>;
+    /// The script named `name`, if there is one, once the scripts were
+    /// listed.
+    async fn get(&mut self, name: &str) -> Result<Option<String>>;
+    /// Stores `text` as script `name`, in place of one of that name. A
+    /// refused script leaves the one before.
+    async fn put(&mut self, name: &str, text: &str) -> Result<()>;
+    /// Makes `name` the script the server runs, or stops every script.
+    async fn activate(&mut self, name: Option<&str>) -> Result<()>;
+}
+
+impl Scripts for Session {
+    fn has_extension(&self, name: &str) -> bool {
+        self.capabilities().has_extension(name)
+    }
+
+    async fn list(&mut self) -> Result<Vec<Script>> {
+        self.list_scripts().await.map_err(core_error)
+    }
+
+    async fn get(&mut self, name: &str) -> Result<Option<String>> {
+        match self.get_script(name).await {
+            Ok(text) => Ok(Some(text)),
+            Err(Error::Refused { .. }) => Ok(None),
+            Err(error) => Err(core_error(error)),
+        }
+    }
+
+    async fn put(&mut self, name: &str, text: &str) -> Result<()> {
+        if let Some(warnings) = self.put_script(name, text).await.map_err(refused_script)? {
+            tracing::info!(%warnings, "the server warned about a Sieve script");
+        }
+        Ok(())
+    }
+
+    async fn activate(&mut self, name: Option<&str>) -> Result<()> {
+        // An empty name stops every script (RFC 5804 section 2.8).
+        self.set_active(name.unwrap_or_default())
+            .await
+            .map_err(core_error)
+    }
+}
+
 /// The account's automatic replies as the app's script on its server holds
 /// them, off unless the server runs it. None when the server can't send
 /// them.
@@ -60,13 +109,19 @@ pub(crate) async fn read(
     let Some(mut session) = sign_in(server, user, password).await? else {
         return Ok(None);
     };
-    let found = State::read(&mut session).await;
+    let reply = read_from(&mut session).await;
     let _ = session.logout().await;
-    let state = found.map_err(core_error)?;
+    reply.map(Some)
+}
+
+/// The automatic replies the app's script among `scripts` holds, off unless
+/// the server runs it.
+pub(crate) async fn read_from(scripts: &mut impl Scripts) -> Result<AutoReply> {
+    let state = State::read(scripts).await?;
     let runs_ours = state.runs_ours();
     let mut reply = state.ours.map(|ours| ours.reply).unwrap_or_default();
     reply.enabled &= runs_ours;
-    Ok(Some(reply))
+    Ok(reply)
 }
 
 /// Saves `reply` in the app's script, sent for mail to any of `addresses`.
@@ -85,18 +140,19 @@ pub(crate) async fn save(
             "This account's server can't send automatic replies".into(),
         ));
     };
-    let saved = write(&mut session, reply, addresses, allowed).await;
+    let saved = save_to(&mut session, reply, addresses, allowed).await;
     let _ = session.logout().await;
     saved
 }
 
-async fn write(
-    session: &mut Session,
+/// Saves `reply` in the app's script among `scripts`, as [`save`] does.
+pub(crate) async fn save_to(
+    scripts: &mut impl Scripts,
     reply: &AutoReply,
     addresses: &[String],
     allowed: Option<&AutoReplyQuestion>,
 ) -> Result<AutoReplySaved> {
-    let state = State::read(session).await.map_err(core_error)?;
+    let state = State::read(scripts).await?;
     let runs_ours = state.runs_ours();
     let ours_active = state.active.as_deref() == Some(script::NAME);
     let ours = state.ours.unwrap_or_default();
@@ -125,7 +181,7 @@ async fn write(
     {
         let runs = match state.theirs {
             Some(runs) if activate => runs,
-            _ => Runs::read(session, &theirs).await.map_err(core_error)?,
+            _ => Runs::read(scripts, &theirs).await?,
         };
         // Their script must not reply too: a second vacation action fails
         // the whole run (RFC 5230 section 4.7), and their filters with it.
@@ -136,7 +192,7 @@ async fn write(
             )));
         }
         if activate {
-            if !session.capabilities().has_extension("include") {
+            if !scripts.has_extension("include") {
                 return Err(CoreError::Other(format!(
                     "Your server runs your filter script \u{201c}{theirs}\u{201d} and can't \
                      run automatic replies beside it"
@@ -156,7 +212,7 @@ async fn write(
     }
     if let Some(missing) = script::needs(reply, beside.as_deref())
         .into_iter()
-        .find(|extension| !session.capabilities().has_extension(extension))
+        .find(|extension| !scripts.has_extension(extension))
     {
         return Err(CoreError::Other(if missing == "include" {
             "Your server can't run automatic replies beside your filter script".into()
@@ -165,20 +221,9 @@ async fn write(
         }));
     }
     let text = script::generate(reply, addresses, beside.as_deref());
-    // A refused script leaves the one before in place (RFC 5804 section 2.6).
-    if let Some(warnings) = session
-        .put_script(script::NAME, &text)
-        .await
-        .map_err(refused_script)?
-    {
-        tracing::info!(%warnings, "the server warned about the automatic replies script");
-    }
+    scripts.put(script::NAME, &text).await?;
     if let Some(Activate(name)) = then {
-        // No name stops every script (RFC 5804 section 2.8).
-        session
-            .set_active(name.as_deref().unwrap_or_default())
-            .await
-            .map_err(core_error)?;
+        scripts.activate(name.as_deref()).await?;
     }
     Ok(AutoReplySaved::Done(AutoReply {
         contacts_only: false,
@@ -271,22 +316,26 @@ struct State {
 }
 
 impl State {
-    async fn read(session: &mut Session) -> std::result::Result<Self, Error> {
-        let scripts = session.list_scripts().await?;
-        let active = scripts
+    async fn read(scripts: &mut impl Scripts) -> Result<Self> {
+        let listed = scripts.list().await?;
+        let active = listed
             .iter()
             .find(|found| found.active)
             .map(|found| found.name.clone());
-        let ours = match scripts.iter().any(|found| found.name == script::NAME) {
-            true => Some(script::read(&session.get_script(script::NAME).await?)),
-            false => None,
+        let ours = if listed.iter().any(|found| found.name == script::NAME) {
+            scripts
+                .get(script::NAME)
+                .await?
+                .map(|text| script::read(&text))
+        } else {
+            None
         };
         let theirs = match active.as_deref() {
             None | Some(script::NAME) => None,
-            Some(theirs) => Some(Runs::read(session, theirs).await?),
+            Some(theirs) => Some(Runs::read(scripts, theirs).await?),
         };
         Ok(Self {
-            scripts: scripts.into_iter().map(|found| found.name).collect(),
+            scripts: listed.into_iter().map(|found| found.name).collect(),
             active,
             ours,
             theirs,
@@ -313,7 +362,7 @@ struct Runs {
 }
 
 impl Runs {
-    async fn read(session: &mut Session, name: &str) -> std::result::Result<Self, Error> {
+    async fn read(scripts: &mut impl Scripts, name: &str) -> Result<Self> {
         let mut runs = Self::default();
         let mut seen = HashSet::new();
         let mut waiting = vec![name.to_owned()];
@@ -325,11 +374,9 @@ impl Runs {
                 runs.ours = true;
                 continue;
             }
-            let text = match session.get_script(&name).await {
-                Ok(text) => text,
-                // Scripts included as optional may not exist.
-                Err(Error::Refused { .. }) => continue,
-                Err(error) => return Err(error),
+            // Scripts included as optional may not exist.
+            let Some(text) = scripts.get(&name).await? else {
+                continue;
             };
             runs.found |= seen.len() == 1;
             runs.replies |= script::requires(&text)
