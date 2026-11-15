@@ -8,6 +8,7 @@ mod app_icon;
 mod account_removal_tests;
 mod app_runtime;
 mod attachment_controller;
+mod attachment_reminder;
 mod auto_replies;
 #[cfg(desktop)]
 mod autostart;
