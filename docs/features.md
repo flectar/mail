@@ -589,6 +589,10 @@ archive, to Trash or to another folder, and add or take off your labels. They
 can change messages only in folders they can read, and never delete anything
 for good. Together they can change 100 messages a minute.
 
+With Ask to send on, an agent can ask to send a draft. It opens in a window of
+its own, with a note naming the agent, and it's sent only if you send it. One
+draft opens at a time, and a message you're writing stays as it is.
+
 The page shows how to add Flectar Mail to Claude Desktop, Claude Code, VS Code,
 Cursor, Zed, LM Studio and Codex, with links that add it to VS Code and LM
 Studio, and the command any other app needs. Its activity log lists what each

@@ -312,6 +312,8 @@ export global I18n {
         if (key == "Marked messages") { return @tr("Marked messages"); }
         if (key == "Moved messages") { return @tr("Moved messages"); }
         if (key == "Labeled messages") { return @tr("Labeled messages"); }
+        if (key == "Asked to send a draft") { return @tr("Asked to send a draft"); }
+        if (key == "{} asked to send this message. Check it, and send it only if it's right.") { return @tr("{} asked to send this message. Check it, and send it only if it's right.", argument); }
         if (key == "{} messages") { return @tr("{n} message" | "{n} messages" % round(argument.to-float())); }
         if (key == "There's nothing left to undo.") { return @tr("There's nothing left to undo."); }
         if (key == "To {} people") { return @tr("To {n} person" | "To {n} people" % round(argument.to-float())); }

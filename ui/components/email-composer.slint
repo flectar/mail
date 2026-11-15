@@ -27,6 +27,9 @@ export component EmailComposer inherits Rectangle {
     in-out property <string> body;
     in property <bool> sending: false;
     in property <bool> drop-hint: false;
+    // An AI agent asked to send this draft: the note says who, above the
+    // message the user checks before sending.
+    in property <string> review-note: "";
     // For a signature: whether its text or formatting changed since it opened, and the name
     // it was saved with.
     in property <bool> signature-edited: false;
@@ -386,6 +389,35 @@ export component EmailComposer inherits Rectangle {
             subtle-border-color: root.subtle-border-color;
             title-color: root.title-color;
             request-close => { root.request-close(); }
+        }
+
+        if root.review-note != "" : Rectangle {
+            background: root.accent-background;
+            height: review-row.preferred-height;
+            accessible-role: text;
+            accessible-label: root.review-note;
+            review-row := HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 10px;
+                padding-bottom: 10px;
+                spacing: 10px;
+                Image {
+                    y: (parent.height - self.height) / 2;
+                    width: 18px;
+                    height: 18px;
+                    source: @image-url("../icons/lucide/filled/bot.svg");
+                    colorize: root.accent-color;
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.review-note;
+                    color: root.title-color;
+                    font-size: TypeScale.secondary;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
         }
 
         if !root.signature-mode : ComposerFromRow {
