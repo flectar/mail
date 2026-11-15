@@ -360,16 +360,20 @@ known. A placeholder the message can't fill, or one of your own such as
 `{{company}}`, stays for you to fill in, and sending a message that still has
 one asks once to send it as it is.
 
-**Large files** go by link. With a Nextcloud or ownCloud server connected in
-Settings → General, signed in to in the browser or with an app password, files
-too large for a message go up to it as they're added, as do files shared with
-**Share files by link** beside **Attach files**. Each goes in a folder of its
-own under Mail attachments, and the message carries a block listing them with
-their sizes and until when their links work, 30 days unless that's changed,
-or less where the server limits links. A link can ask for a password, which
-the message leaves out for you to pass on another way. Sending waits for the
-uploads, removing a file before sending takes its upload back, and a draft
-keeps its links.
+**Large files** go by link. In Settings → General, turn on a Gmail account's
+Google Drive or a Microsoft account's OneDrive, which asks the account to let
+the app reach the files it makes there, or connect a Nextcloud or ownCloud
+server, signed in to in the browser or with an app password. A message uses its
+account's Google Drive or OneDrive when that's on, and the server otherwise.
+Files too large for a message go up as they're added, as do files shared with
+**Share files by link** beside **Attach files**, into a Mail attachments
+folder, and the message carries a block listing them with their sizes and
+until when their links work, 30 days unless that's changed, or less where the
+server limits links. Google Drive links, and OneDrive ones without Microsoft
+365, last until the file is deleted. A Nextcloud or ownCloud link can ask for a
+password, which the message leaves out for you to pass on another way. Sending
+waits for the uploads, removing a file before sending takes its upload back,
+and a draft keeps its links.
 
 ## Spell check
 
