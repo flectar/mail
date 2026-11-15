@@ -147,6 +147,8 @@ export global ComposerUi {
     callback use-template(int) -> bool;
     callback save-template(int, string, string, string, string) -> bool;
     callback delete-template(int) -> bool;
+    // `text` with the last string in place of the bytes between the two offsets.
+    pure callback splice-text(string, int, int, string) -> string;
     callback edit-quote();
     callback remove-quote();
     callback restore-quote();
@@ -286,6 +288,7 @@ export component BoundComposer inherits EmailComposer {
     use-template(id) => ComposerUi.use-template(id);
     save-template(id, name, shortcut, subject, body) => ComposerUi.save-template(id, name, shortcut, subject, body);
     delete-template(id) => ComposerUi.delete-template(id);
+    splice-text(text, start, end, insert) => ComposerUi.splice-text(text, start, end, insert);
     edit-quote => { ComposerUi.edit-quote(); }
     remove-quote => { ComposerUi.remove-quote(); }
     restore-quote => { ComposerUi.restore-quote(); }

@@ -149,6 +149,7 @@ export component EmailComposer inherits Rectangle {
     callback use-template(int) -> bool;
     callback save-template(int, string, string, string, string) -> bool;
     callback delete-template(int) -> bool;
+    pure callback splice-text(string, int, int, string) -> string;
     callback edit-quote();
     callback remove-quote();
     callback restore-quote();
@@ -1202,6 +1203,7 @@ export component EmailComposer inherits Rectangle {
         use-template(id) => root.use-template(id);
         save-template(id, name, shortcut, subject, body) => root.save-template(id, name, shortcut, subject, body);
         delete-template(id) => root.delete-template(id);
+        splice-text(text, start, end, insert) => root.splice-text(text, start, end, insert);
     }
 
     // Freeze the exact draft snapshot being submitted. If delivery fails the

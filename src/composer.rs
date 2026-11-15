@@ -16,6 +16,7 @@ use std::rc::Weak;
 mod forward;
 mod message_spelling;
 mod photos;
+mod placeholders;
 mod plain_text;
 pub(crate) use message_spelling::spelling_changed;
 use message_spelling::{MessageSpelling, apply_spelling_state};
@@ -106,6 +107,10 @@ pub(super) struct ComposeSession {
     plain_text: Cell<bool>,
     /// The edit that took the message's formatting out, while undo can take it back.
     plain_edit: RefCell<Option<PlainEdit>>,
+    /// An email template went into the message, whose placeholders sending checks for.
+    templated: Cell<bool>,
+    /// The placeholders the message was last sent with, which sending warned about.
+    placeholder_warning: RefCell<Vec<String>>,
     /// Until the sending account's preference chooses how the message starts: whether it
     /// answers or forwards a plain-text message.
     format_pending: Cell<Option<bool>>,
@@ -652,6 +657,8 @@ impl Composers {
             photos: MessagePhotos::default(),
             plain_text: Cell::new(false),
             plain_edit: RefCell::default(),
+            templated: Cell::new(false),
+            placeholder_warning: RefCell::default(),
             format_pending: Cell::new(Some(false)),
             disposed: Cell::new(false),
         });
@@ -1495,6 +1502,8 @@ impl ComposeSession {
         }
         self.files.borrow_mut().clear();
         self.attaching.set(0);
+        self.templated.set(false);
+        self.placeholder_warning.borrow_mut().clear();
         self.photos.clear();
         // A picker still open for this composer must not attach to another.
         self.generation.set(self.generation.get().wrapping_add(1));
@@ -1711,6 +1720,9 @@ impl ComposeSession {
         ui.on_use_template(move |id| {
             weak.upgrade()
                 .is_some_and(|session| session.use_template(id))
+        });
+        ui.on_splice_text(|text, start, end, insert| {
+            placeholders::splice(&text, start, end, &insert).into()
         });
         let weak = self.reference();
         ui.on_edit_quote(move || {
@@ -2740,6 +2752,19 @@ impl ComposeSession {
         if send && (self.photos.on() && self.photos.busy() || self.attaching.get() > 0) {
             return;
         }
+        // A message from a template says which placeholders it still has, and goes as it is
+        // when sent again.
+        if send && self.templated.get() {
+            let left = placeholders::placeholders_in(&format!("{subject}\n{body}"));
+            if !left.is_empty() && *self.placeholder_warning.borrow() != left {
+                ui.set_notice(
+                    UiMessage::detail("Fill in {} or send again.", left.join(", ")),
+                    true,
+                );
+                *self.placeholder_warning.borrow_mut() = left;
+                return;
+            }
+        }
         if account_id <= 0 {
             ui.set_notice(
                 UiMessage::plain("Choose the account this message should be sent from."),
@@ -3032,13 +3057,31 @@ impl ComposeSession {
             return false;
         };
 
+        // Its placeholders take the message's first recipient, its sender and today's date,
+        // and those it can't fill stay for the writer.
+        let values = self.placeholder_values(&composers, &host);
+        let mut left = Vec::new();
         if ui.get_subject().trim().is_empty()
             && let Some(subject) = template.subject.as_deref()
             && !subject.trim().is_empty()
         {
+            let subject = placeholders::fill(subject, &values);
+            left = placeholders::placeholders_in(&subject);
             ui.set_subject(subject.into());
         }
-        self.edit(|document| document.insert_text(&template.body_text));
+        let body = placeholders::fill(&template.body_text, &values);
+        for placeholder in placeholders::placeholders_in(&body) {
+            if !left.contains(&placeholder) {
+                left.push(placeholder);
+            }
+        }
+        self.edit(|document| document.insert_text(&body));
+        self.templated.set(true);
+        let inserted = if left.is_empty() {
+            UiMessage::plain("Email template inserted.")
+        } else {
+            UiMessage::detail("Fill in {} before sending.", left.join(", "))
+        };
 
         let usage = composers.core().map(|core| {
             composers
@@ -3057,7 +3100,7 @@ impl ComposeSession {
                 }
                 composers.sort_templates();
                 composers.apply_templates();
-                ui.set_notice(UiMessage::plain("Email template inserted."), false);
+                ui.set_notice(inserted, false);
             }
             Some(Err(error)) => ui.set_notice(
                 UiMessage::detail(
@@ -3066,9 +3109,79 @@ impl ComposeSession {
                 ),
                 true,
             ),
-            None => ui.set_notice(UiMessage::plain("Email template inserted."), false),
+            None => ui.set_notice(inserted, false),
         }
         true
+    }
+
+    /// What a template's placeholders take from this message: its first recipient, by the
+    /// name the message shows or else its contact's, its sender, and today's date.
+    fn placeholder_values(
+        &self,
+        composers: &Composers,
+        host: &HostRef,
+    ) -> placeholders::PlaceholderValues {
+        let ui = host.ui();
+        let core = composers.core();
+        let account_id = i64::from(ui.get_account_id());
+        let recipient = ui
+            .get_to()
+            .split([',', ';', '\n'])
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .find_map(|item| crate::mail::parse_address(item).ok())
+            .map_or_else(placeholders::Person::default, |address| {
+                let name = address.name.clone().or_else(|| {
+                    let contacts = composers
+                        .runtime
+                        .block_on(core.as_ref()?.list_contacts(
+                            address.email.clone(),
+                            (account_id > 0).then_some(account_id),
+                            6,
+                        ))
+                        .ok()?;
+                    contacts
+                        .into_iter()
+                        .find(|contact| contact.email.eq_ignore_ascii_case(&address.email))
+                        .and_then(|contact| contact.name)
+                });
+                placeholders::Person::new(name.as_deref(), Some(&address.email))
+            });
+        let sender_email = host.preferences().get_composer_sender_email().to_string();
+        let sender_name = core
+            .as_ref()
+            .and_then(|core| {
+                composers
+                    .runtime
+                    .block_on(
+                        core.account_preferences_core()
+                            .list_sender_identities(account_id),
+                    )
+                    .ok()
+            })
+            .and_then(|identities| {
+                identities
+                    .into_iter()
+                    .find(|identity| identity.email.eq_ignore_ascii_case(&sender_email))
+                    .and_then(|identity| identity.display_name)
+            })
+            .or_else(|| {
+                composers
+                    .state
+                    .borrow()
+                    .connected_accounts
+                    .iter()
+                    .find(|account| account.email.eq_ignore_ascii_case(&sender_email))
+                    .and_then(|account| account.display_name.clone())
+            });
+        placeholders::PlaceholderValues {
+            recipient,
+            sender: placeholders::Person::new(sender_name.as_deref(), Some(&sender_email)),
+            date: crate::date_format::current().date(
+                crate::date_format::DateStyle::Medium,
+                chrono::Local::now().date_naive(),
+            ),
+        }
     }
 
     fn reset_preferences(&self) {
@@ -3612,6 +3725,58 @@ mod tests {
         assert!(!ui.get_attaching_files());
         send();
         assert!(ui.get_notice_is_error());
+    }
+
+    #[test]
+    fn a_template_fills_its_placeholders_and_sending_asks_about_the_rest() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.invoke_open_compose("Ana María Ruiz <ana@example.test>".into());
+        let session = composers.in_app().unwrap();
+        let host = session.host().unwrap();
+        let ui = host.ui();
+        host.preferences().set_composer_preferences_ready(true);
+        host.preferences()
+            .set_composer_sender_email("me@example.test".into());
+        composers.templates.borrow_mut().push(Snippet {
+            id: 7,
+            name: "Thanks".into(),
+            shortcut: None,
+            subject: Some("Thanks, {{recipient.first_name}}".into()),
+            body_text: "Hi {{recipient.first_name}}, about {{company}}. {{sender.email}}".into(),
+            usage_count: 0,
+        });
+
+        // What the message knows goes in, and what it doesn't stays for the writer.
+        assert!(session.use_template(7));
+        assert_eq!(ui.get_subject(), "Thanks, Ana");
+        assert_eq!(
+            session.document.borrow().text(),
+            "Hi Ana, about {{company}}. me@example.test"
+        );
+        let notice = ui.get_message();
+        assert_eq!(notice.key, "Fill in {} before sending.");
+        assert_eq!(notice.argument, "{{company}}");
+
+        // Sending asks once about it, then sends it as it is, which with no account
+        // connected it can't.
+        let send = || {
+            let body = session.document.borrow().text().to_owned();
+            session.save(1, &ui.get_to(), "", "", &ui.get_subject(), &body, true);
+        };
+        send();
+        let notice = ui.get_message();
+        assert_eq!(notice.key, "Fill in {} or send again.");
+        assert_eq!(notice.argument, "{{company}}");
+        send();
+        assert_eq!(
+            ui.get_message().key,
+            "Connect an account before saving or sending mail."
+        );
     }
 
     #[test]

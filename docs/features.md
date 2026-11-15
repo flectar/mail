@@ -345,6 +345,17 @@ from this device or from the server, and a copy of mail sent from here leaves
 out who it was blind copied to. A forward waits for its files, these and the
 original's attachments, before it can be sent.
 
+**Email templates** keep a subject and message to start from, which the
+composer's template list inserts at the cursor. **Insert placeholder** in a
+template's editor adds placeholders, such as `{{recipient.first_name}}`,
+`{{sender.name}}` or `{{date}}`, that the template fills in as it's inserted,
+from the first person in To, by the name the message shows or their
+contact's, from the address the message is sent from, and with today's date.
+`{{recipient.first_name | 'there'}}` names what to put when the name isn't
+known. A placeholder the message can't fill, or one of your own such as
+`{{company}}`, stays for you to fill in, and sending a message that still has
+one asks once to send it as it is.
+
 ## Spell check
 
 Flectar Mail underlines misspelled words as you write. On Windows, macOS, iOS
