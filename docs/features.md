@@ -548,11 +548,15 @@ Flectar Mail while it runs, so mail still syncs in one place.
 
 Agents can list your accounts, folders and labels, list and search messages,
 read messages and conversations as plain text, search contacts and list
-calendar events. They can't change, move or send anything. You choose which
-accounts they can read and, for each account, which folders. Spam and Trash
-stay out until you add them, since junk mail is where hostile instructions are
-most likely to hide. Encrypted messages are withheld, and passwords, sign-in
-tokens and keys never reach an agent.
+calendar events, and nothing more unless you allow it. You choose which
+accounts they can read, mail imported to this device among them, and for each
+account which folders. Spam and Trash stay out until you add them, since junk
+mail is where hostile instructions are most likely to hide. Encrypted messages
+are withheld, and passwords, sign-in tokens and keys never reach an agent.
+
+With Write drafts on, agents can also save plain-text drafts, new messages or
+replies, in Drafts for you to check and send yourself. An agent can change its
+own draft until you edit it, and never anyone else's.
 
 The page shows how to add Flectar Mail to Claude Desktop, Claude Code, VS Code,
 Cursor, Zed, LM Studio and Codex, with links that add it to VS Code and LM

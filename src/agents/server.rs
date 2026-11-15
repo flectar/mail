@@ -12,9 +12,10 @@ use flectar_mail_core::{
     agents::is_end_to_end_encrypted,
     ai::clean_untrusted,
     db::repo::agent_activity::NewAgentActivity,
+    error::CoreError,
     models::{
-        Account, Address, AgentAccess, AgentOutcome, FolderInfo, ListOrder, MessageCursor,
-        MessageDetail, MessageSearchCursor, MessageSummary, View, now_ms,
+        Address, AgentAccess, AgentOutcome, FolderInfo, ListOrder, MessageCursor, MessageDetail,
+        MessageSearchCursor, MessageSummary, SaveDraftArgs, View, now_ms,
     },
 };
 use serde_json::{Map, Value, json};
@@ -38,9 +39,20 @@ const MAX_MESSAGE_CHARS: usize = 20_000;
 const MAX_CONVERSATION_CHARS: usize = 40_000;
 /// The most of an event's description an agent gets.
 const MAX_DESCRIPTION_CHARS: usize = 2_000;
+/// The most recipients one field of an agent's draft takes.
+const MAX_RECIPIENTS: usize = 50;
+/// The longest subject and text an agent's draft takes.
+const MAX_SUBJECT_CHARS: usize = 998;
+const MAX_DRAFT_CHARS: usize = 100_000;
 
 const ACCESS_OFF: &str =
     "Agent access is off. The user can turn it on in Flectar Mail, in Settings, AI agents.";
+const DRAFTS_OFF: &str = "Writing drafts is off. The user can turn it on in Flectar Mail, in \
+Settings, AI agents.";
+const ON_DEVICE_CANT_SEND: &str = "Mail on this device is answered from an email account. \
+Pass the account_id of one agents can read.";
+const NOT_AGENTS_DRAFT: &str = "Agents can change only their own drafts, and only until the \
+user changes them. Write a new draft instead.";
 const NOT_SHARED: &str = "That isn't available to agents. The user chooses what agents can read in Flectar Mail's \
      Settings.";
 
@@ -131,8 +143,8 @@ enum Failure {
     Failed(String),
 }
 
-impl From<flectar_mail_core::error::CoreError> for Failure {
-    fn from(error: flectar_mail_core::error::CoreError) -> Self {
+impl From<CoreError> for Failure {
+    fn from(error: CoreError) -> Self {
         Self::Failed(format!("Flectar Mail couldn't do that: {error}"))
     }
 }
@@ -164,7 +176,8 @@ async fn answer(core: &Core, limiter: &Mutex<RateLimiter>, request: Request) -> 
     let Some(tool) = super::tools::find(&request.tool) else {
         return Response::error(format!("There's no tool named {}.", request.tool));
     };
-    let result = call(core, &access, tool.name, &request.arguments).await;
+    let agent = agent_name(&request.agent);
+    let result = call(core, &access, tool.name, &request.arguments, &agent).await;
     let (outcome, account_id, folder_id, items, response) = match result {
         Ok(answer) => (
             AgentOutcome::Done,
@@ -181,7 +194,7 @@ async fn answer(core: &Core, limiter: &Mutex<RateLimiter>, request: Request) -> 
     let _ = core
         .record_agent_activity(NewAgentActivity {
             occurred_at: now_ms(),
-            agent: agent_name(&request.agent),
+            agent,
             tool: tool.name.to_owned(),
             account_id,
             folder_id,
@@ -214,6 +227,7 @@ async fn call(
     access: &AgentAccess,
     tool: &str,
     arguments: &Map<String, Value>,
+    agent: &str,
 ) -> Result<Answer, Failure> {
     let arguments = Arguments(arguments);
     let scope = Scope::load(core, access).await?;
@@ -227,6 +241,8 @@ async fn call(
         "read_conversation" => read_conversation(core, &scope, arguments).await,
         "search_contacts" => search_contacts(core, &scope, arguments).await,
         "list_events" => list_events(core, &scope, arguments).await,
+        "create_draft" => create_draft(core, access, &scope, arguments, agent).await,
+        "update_draft" => update_draft(core, access, &scope, arguments, agent).await,
         _ => Err(Failure::Failed(format!("There's no tool named {tool}."))),
     }
 }
@@ -234,22 +250,49 @@ async fn call(
 /// The accounts and folders agents may see, read fresh for each call.
 struct Scope {
     every_account: bool,
-    accounts: Vec<Account>,
+    accounts: Vec<ScopeAccount>,
     folders: Vec<FolderInfo>,
+}
+
+/// An account agents may see: a connected one, or the mail kept only on
+/// this device.
+struct ScopeAccount {
+    id: i64,
+    /// None for the mail on this device, which has no address.
+    address: Option<String>,
+    name: Option<String>,
+    provider: &'static str,
 }
 
 impl Scope {
     async fn load(core: &Core, access: &AgentAccess) -> Result<Self, Failure> {
         let all_accounts = core.list_accounts().await?;
+        // Mail imported to this device has an account of its own, which
+        // account lists leave out.
+        let local = core.local_mail_account().await?;
         let every_account = all_accounts
             .iter()
-            .all(|account| access.shows_account(account.id));
-        let accounts = all_accounts
-            .into_iter()
+            .map(|account| account.id)
+            .chain(local)
+            .all(|account_id| access.shows_account(account_id));
+        let mut accounts = all_accounts
+            .iter()
             .filter(|account| access.shows_account(account.id))
+            .map(|account| ScopeAccount {
+                id: account.id,
+                address: Some(account.email.clone()),
+                name: account.display_name.clone(),
+                provider: account.provider.as_str(),
+            })
             .collect::<Vec<_>>();
-        // Only the listed accounts' folders: mail kept only on this device
-        // belongs to an account that account lists leave out.
+        if let Some(account_id) = local.filter(|account_id| access.shows_account(*account_id)) {
+            accounts.push(ScopeAccount {
+                id: account_id,
+                address: None,
+                name: Some("Mail on this device".into()),
+                provider: "local",
+            });
+        }
         let folders = core
             .list_folders(None)
             .await?
@@ -269,7 +312,7 @@ impl Scope {
         })
     }
 
-    fn account(&self, account_id: i64) -> Option<&Account> {
+    fn account(&self, account_id: i64) -> Option<&ScopeAccount> {
         self.accounts
             .iter()
             .find(|account| account.id == account_id)
@@ -331,6 +374,39 @@ impl<'a> Arguments<'a> {
         }
     }
 
+    /// Recipients given as addresses, with or without names. `None` when the
+    /// argument is left out.
+    fn addresses(self, name: &str) -> Result<Option<Vec<Address>>, Failure> {
+        let list = match self.0.get(name) {
+            None | Some(Value::Null) => return Ok(None),
+            Some(Value::Array(list)) => list,
+            Some(_) => {
+                return Err(Failure::Failed(format!(
+                    "{name} must be a list of addresses."
+                )));
+            }
+        };
+        if list.len() > MAX_RECIPIENTS {
+            return Err(Failure::Failed(format!(
+                "{name} can hold {MAX_RECIPIENTS} addresses at most."
+            )));
+        }
+        list.iter()
+            .map(|value| {
+                let text = value.as_str().ok_or_else(|| {
+                    Failure::Failed(format!("{name} must be a list of addresses."))
+                })?;
+                // A line break in a name or address could start a header of its own.
+                if text.chars().any(char::is_control) {
+                    return Err(Failure::Failed(format!("{text} isn't an address.")));
+                }
+                crate::mail::parse_address(text.trim())
+                    .map_err(|_| Failure::Failed(format!("{text} isn't an address.")))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some)
+    }
+
     fn limit(self, default: i64) -> Result<i64, Failure> {
         Ok(self.integer("limit")?.unwrap_or(default).clamp(1, 50))
     }
@@ -343,9 +419,9 @@ fn list_accounts(scope: &Scope) -> Result<Answer, Failure> {
         .map(|account| {
             json!({
                 "id": account.id,
-                "address": account.email,
-                "name": account.display_name,
-                "provider": account.provider.as_str(),
+                "address": account.address,
+                "name": account.name,
+                "provider": account.provider,
             })
         })
         .collect::<Vec<_>>();
@@ -355,9 +431,13 @@ fn list_accounts(scope: &Scope) -> Result<Answer, Failure> {
         scope
             .accounts
             .iter()
-            .map(|account| match &account.display_name {
-                Some(name) => format!("Account {}: {name} <{}>", account.id, account.email),
-                None => format!("Account {}: {}", account.id, account.email),
+            .map(|account| match (&account.name, &account.address) {
+                (Some(name), Some(address)) => {
+                    format!("Account {}: {name} <{address}>", account.id)
+                }
+                (Some(name), None) => format!("Account {}: {name}", account.id),
+                (None, Some(address)) => format!("Account {}: {address}", account.id),
+                (None, None) => format!("Account {}", account.id),
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -818,6 +898,203 @@ fn render_message(
     }
 }
 
+/// The subject and text an agent gives a draft, checked.
+fn draft_subject(arguments: Arguments<'_>) -> Result<Option<String>, Failure> {
+    let Some(subject) = arguments.string("subject")? else {
+        return Ok(None);
+    };
+    if subject.chars().any(char::is_control) || subject.chars().count() > MAX_SUBJECT_CHARS {
+        return Err(Failure::Failed(format!(
+            "subject must be one line of {MAX_SUBJECT_CHARS} characters at most."
+        )));
+    }
+    Ok(Some(subject.trim().to_owned()))
+}
+
+fn draft_text(arguments: Arguments<'_>) -> Result<Option<String>, Failure> {
+    let Some(text) = arguments.string("text")? else {
+        return Ok(None);
+    };
+    if text.chars().count() > MAX_DRAFT_CHARS {
+        return Err(Failure::Failed(format!(
+            "text can hold {MAX_DRAFT_CHARS} characters at most."
+        )));
+    }
+    Ok(Some(text.replace("\r\n", "\n")))
+}
+
+async fn create_draft(
+    core: &Core,
+    access: &AgentAccess,
+    scope: &Scope,
+    arguments: Arguments<'_>,
+    agent: &str,
+) -> Result<Answer, Failure> {
+    if !access.can_write_drafts {
+        return Err(Failure::Refused(DRAFTS_OFF.to_owned()));
+    }
+    // A reply goes in its message's conversation, from its account. Mail on
+    // this device is answered from an email account, as in the composer.
+    let (account_id, reply_to) = match arguments.integer("reply_to_message_id")? {
+        Some(message_id) => {
+            let message = core
+                .stored_message(message_id)
+                .await
+                .map_err(|_| Failure::Failed("There's no message with that id.".into()))?;
+            let folder_ids = core.message_folder_ids(message_id).await?;
+            if !scope.shows_message(&message, &folder_ids) {
+                return Err(Failure::Refused(NOT_SHARED.to_owned()));
+            }
+            let on_device = scope
+                .account(message.account_id)
+                .is_some_and(|account| account.address.is_none());
+            let account_id = match arguments.integer("account_id")? {
+                Some(account_id) if on_device => account_id,
+                None if on_device => reply_account(core, scope, &message).await?,
+                _ => message.account_id,
+            };
+            (account_id, Some(message_id))
+        }
+        None => {
+            let account_id = arguments.integer("account_id")?.ok_or_else(|| {
+                Failure::Failed("account_id is missing. Use list_accounts to find it.".into())
+            })?;
+            (account_id, None)
+        }
+    };
+    let from = match scope.account(account_id) {
+        None => return Err(Failure::Refused(NOT_SHARED.to_owned())),
+        Some(ScopeAccount {
+            address: Some(address),
+            ..
+        }) => address.clone(),
+        Some(_) => return Err(Failure::Failed(ON_DEVICE_CANT_SEND.to_owned())),
+    };
+    let to = arguments.addresses("to")?.unwrap_or_default();
+    let cc = arguments.addresses("cc")?.unwrap_or_default();
+    let bcc = arguments.addresses("bcc")?.unwrap_or_default();
+    let subject = draft_subject(arguments)?.unwrap_or_default();
+    let text = draft_text(arguments)?.unwrap_or_default();
+    let recipients = to.len() + cc.len() + bcc.len();
+    let draft_id = core
+        .save_agent_draft(
+            SaveDraftArgs {
+                draft_id: None,
+                account_id,
+                from: None,
+                to,
+                cc,
+                bcc,
+                subject,
+                body_text: text,
+                body_html: None,
+                mode: if reply_to.is_some() { "reply" } else { "new" }.into(),
+                in_reply_to_message_id: reply_to,
+                in_reply_to_header: None,
+                attachments: Vec::new(),
+            },
+            agent.to_owned(),
+        )
+        .await?;
+    Ok(Answer {
+        text: format!(
+            "Saved draft {draft_id} in the Drafts of {from}. The user reviews and sends it in \
+             Flectar Mail."
+        ),
+        structured: json!({ "draft_id": draft_id, "account_id": account_id }),
+        account_id: Some(account_id),
+        folder_id: None,
+        items: recipients,
+    })
+}
+
+/// The account a reply to mail on this device goes from: the first one agents
+/// can read that the message reached, as in the composer, or else the first
+/// one agents can read.
+async fn reply_account(
+    core: &Core,
+    scope: &Scope,
+    message: &MessageDetail,
+) -> Result<i64, Failure> {
+    let mut first = None;
+    for account in scope
+        .accounts
+        .iter()
+        .filter(|account| account.address.is_some())
+    {
+        first.get_or_insert(account.id);
+        let identities = core.list_sender_identities(account.id).await?;
+        let reached = message
+            .to
+            .iter()
+            .chain(&message.cc)
+            .chain(std::iter::once(&message.from))
+            .any(|address| {
+                identities
+                    .iter()
+                    .any(|identity| identity.email.eq_ignore_ascii_case(&address.email))
+            });
+        if reached {
+            return Ok(account.id);
+        }
+    }
+    first.ok_or_else(|| Failure::Failed(ON_DEVICE_CANT_SEND.to_owned()))
+}
+
+async fn update_draft(
+    core: &Core,
+    access: &AgentAccess,
+    scope: &Scope,
+    arguments: Arguments<'_>,
+    agent: &str,
+) -> Result<Answer, Failure> {
+    if !access.can_write_drafts {
+        return Err(Failure::Refused(DRAFTS_OFF.to_owned()));
+    }
+    let draft_id = arguments.required_integer("draft_id")?;
+    // The user's own drafts, and an agent's the user has edited since, stay
+    // as they are.
+    if !core.agent_draft_unchanged(draft_id).await? {
+        return Err(Failure::Refused(NOT_AGENTS_DRAFT.to_owned()));
+    }
+    let mut draft = core.get_draft(draft_id).await?;
+    if scope.account(draft.account_id).is_none() {
+        return Err(Failure::Refused(NOT_SHARED.to_owned()));
+    }
+    if let Some(to) = arguments.addresses("to")? {
+        draft.to = to;
+    }
+    if let Some(cc) = arguments.addresses("cc")? {
+        draft.cc = cc;
+    }
+    if let Some(bcc) = arguments.addresses("bcc")? {
+        draft.bcc = bcc;
+    }
+    if let Some(subject) = draft_subject(arguments)? {
+        draft.subject = subject;
+    }
+    if let Some(text) = draft_text(arguments)? {
+        draft.body_text = text;
+        draft.body_html = None;
+    }
+    draft.draft_id = Some(draft_id);
+    let account_id = draft.account_id;
+    let recipients = draft.to.len() + draft.cc.len() + draft.bcc.len();
+    // The save checks again, in case the user saved the draft just now.
+    let saved = match core.save_agent_draft(draft, agent.to_owned()).await {
+        Ok(saved) => saved,
+        Err(CoreError::NotFound(_)) => return Err(Failure::Refused(NOT_AGENTS_DRAFT.to_owned())),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(Answer {
+        text: format!("Saved draft {saved}. The user reviews and sends it in Flectar Mail."),
+        structured: json!({ "draft_id": saved, "account_id": account_id }),
+        account_id: Some(account_id),
+        folder_id: None,
+        items: recipients,
+    })
+}
+
 async fn search_contacts(
     core: &Core,
     scope: &Scope,
@@ -1110,6 +1387,28 @@ mod tests {
         }
         assert!(!limiter.allow(start + Duration::from_secs(30)));
         assert!(limiter.allow(start + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn recipients_are_addresses_and_never_headers() {
+        let arguments = json!({
+            "to": ["alex@example.com", "Alex Morgan <alex@example.com>"],
+            "cc": ["Eve <eve@example.com>\r\nBcc: spy@example.com"],
+            "bcc": "alex@example.com",
+        });
+        let arguments = Arguments(arguments.as_object().unwrap());
+        let to = arguments.addresses("to").ok().flatten().unwrap();
+        assert_eq!(to[0].email, "alex@example.com");
+        assert_eq!(to[1].name.as_deref(), Some("Alex Morgan"));
+        assert!(arguments.addresses("cc").is_err());
+        assert!(arguments.addresses("bcc").is_err());
+        assert!(arguments.addresses("reply_to").ok().flatten().is_none());
+        let many = json!({ "to": vec!["a@example.com"; MAX_RECIPIENTS + 1] });
+        assert!(
+            Arguments(many.as_object().unwrap())
+                .addresses("to")
+                .is_err()
+        );
     }
 
     #[test]

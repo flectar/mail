@@ -5271,6 +5271,18 @@ impl Core {
     }
 
     pub async fn save_draft(&self, args: SaveDraftArgs) -> Result<i64> {
+        self.save_draft_as(args, None).await
+    }
+
+    /// Saves a draft the user wrote, or with `agent`, one an AI agent wrote
+    /// (#237). An agent's draft stays the agent's until anyone else saves it,
+    /// and an agent changes a draft only while it is its own, checked in the
+    /// same transaction as the save.
+    pub(crate) async fn save_draft_as(
+        &self,
+        args: SaveDraftArgs,
+        agent: Option<String>,
+    ) -> Result<i64> {
         // Resolve the visible From address independently of the authenticated
         // account identity. Only provider-discovered, verified identities can
         // cross this boundary; the canonical provider display name is stored.
@@ -5344,6 +5356,10 @@ impl Core {
             (Some(id), Some((_, true))) => (None, Some(id)),
             _ => (None, None),
         };
+        // An agent changes a draft only in place, never moving or recreating it.
+        if agent.is_some() && args.draft_id.is_some() && in_place.is_none() {
+            return Err(CoreError::NotFound("draft".into()));
+        }
         let staging_root = self.paths.draft_attachments_dir();
         let reusable_paths = if let Some(draft_id) = in_place {
             self.db
@@ -5460,7 +5476,9 @@ impl Core {
                         let updated = tx.execute(
                             "UPDATE messages SET subject = ?2, to_json = ?3, cc_json = ?4,
                                     bcc_json = ?5, date = ?6, from_name = ?7, from_addr = ?8
-                              WHERE id = ?1 AND account_id = ?9 AND is_draft = 1",
+                              WHERE id = ?1 AND account_id = ?9 AND is_draft = 1
+                                AND (?10 IS NULL OR date = (SELECT saved_at FROM agent_drafts
+                                                            WHERE draft_id = ?1))",
                             rusqlite::params![
                                 id,
                                 args.subject,
@@ -5471,6 +5489,7 @@ impl Core {
                                 sender.name,
                                 sender.email,
                                 args.account_id,
+                                agent.as_deref(),
                             ],
                         )?;
                         if updated != 1 {
@@ -5614,6 +5633,10 @@ impl Core {
                 } else {
                     None
                 };
+                match &agent {
+                    Some(agent) => repo::agent_drafts::record(&tx, draft_id, agent)?,
+                    None => repo::agent_drafts::forget(&tx, draft_id)?,
+                }
                 tx.commit()?;
                 Ok((draft_id, thread_id, sync_remote_account, old_paths))
             })

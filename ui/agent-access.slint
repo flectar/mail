@@ -46,6 +46,9 @@ export global AgentAccess {
     callback set-account-shown(int, bool);
     callback toggle-folders(int);
     callback set-folder-shown(int, int, bool);
+    // Agents may save drafts for the user to review and send.
+    in-out property <bool> can-write-drafts;
+    callback set-can-write-drafts(bool);
 
     // Connecting an agent's app: the apps there are instructions for, the
     // chosen one's text to paste, where it goes, and whether the app can

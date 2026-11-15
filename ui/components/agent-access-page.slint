@@ -78,7 +78,7 @@ export component AgentAccessPage inherits VerticalLayout {
         SettingsSwitchRow {
             compact: root.compact;
             title: @tr("Let AI agents read your mail");
-            description: @tr("Agents can read the accounts and folders you choose, your contacts and your calendars. They can't change, move or send anything.");
+            description: @tr("Agents can read the accounts and folders you choose, your contacts and your calendars, and nothing more unless you allow it below.");
             checked <=> AgentAccess.enabled;
             title-color: root.body-text;
             description-color: root.faint-text;
@@ -121,7 +121,7 @@ export component AgentAccessPage inherits VerticalLayout {
                             overflow: elide;
                         }
                         Text {
-                            text: account.address + " · " + (account.shown ? account.folders-summary : @tr("Agents can't read this account."));
+                            text: (account.address == "" ? "" : account.address + " · ") + (account.shown ? account.folders-summary : @tr("Agents can't read this account."));
                             color: root.faint-text;
                             font-size: TypeScale.caption;
                             wrap: word-wrap;
@@ -167,6 +167,22 @@ export component AgentAccessPage inherits VerticalLayout {
                         }
                     }
                 }
+            }
+        }
+
+        Card {
+            title: @tr("What agents can do");
+            surface: root.surface;
+            card-border-color: root.card-border-color;
+            heading: root.heading;
+            SettingsSwitchRow {
+                compact: root.compact;
+                title: @tr("Write drafts");
+                description: @tr("Agents can save drafts in Drafts for you to check and send. They can't send anything themselves.");
+                checked <=> AgentAccess.can-write-drafts;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                toggled(checked) => { AgentAccess.set-can-write-drafts(checked); }
             }
         }
 

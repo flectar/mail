@@ -129,8 +129,7 @@ impl ServerHandler for Bridge {
     }
 }
 
-/// A tool as MCP describes it. None of them change anything or reach past the
-/// user's own mail.
+/// A tool as MCP describes it.
 fn mcp_tool(tool: &tools::Tool) -> Tool {
     let schema = match (tool.input_schema)() {
         serde_json::Value::Object(schema) => schema,
@@ -140,9 +139,9 @@ fn mcp_tool(tool: &tools::Tool) -> Tool {
         .with_title(tool.title)
         .with_annotations(
             ToolAnnotations::with_title(tool.title)
-                .read_only(true)
-                .destructive(false)
-                .idempotent(true)
+                .read_only(tool.effect.read_only)
+                .destructive(tool.effect.destructive)
+                .idempotent(tool.effect.idempotent)
                 .open_world(false),
         )
 }
@@ -272,9 +271,14 @@ mod tests {
         let tools = listed["result"]["tools"].as_array().unwrap();
         assert_eq!(tools.len(), tools::TOOLS.len());
         assert_eq!(tools[0]["name"], "list_accounts");
-        for tool in tools {
-            assert_eq!(tool["annotations"]["readOnlyHint"], true);
-            assert_eq!(tool["annotations"]["destructiveHint"], false);
+        for (tool, ours) in tools.iter().zip(tools::TOOLS) {
+            assert_eq!(tool["name"], ours.name);
+            assert_eq!(tool["annotations"]["readOnlyHint"], ours.effect.read_only);
+            assert_eq!(
+                tool["annotations"]["destructiveHint"],
+                ours.effect.destructive
+            );
+            assert_eq!(tool["annotations"]["openWorldHint"], false);
             assert_eq!(tool["inputSchema"]["type"], "object");
         }
 
@@ -301,6 +305,37 @@ mod tests {
         .await;
         let refused = receive(&mut lines).await;
         assert_eq!(refused["result"]["isError"], true, "{refused}");
+
+        // Drafts stay off until the user allows them, and then only in
+        // accounts agents can read.
+        let draft = json!({
+            "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+            "params": {
+                "name": "create_draft",
+                "arguments": { "account_id": 1, "subject": "Plans", "text": "Hi" },
+            },
+        });
+        send(&mut host_write, draft.clone()).await;
+        let off = receive(&mut lines).await;
+        assert_eq!(off["result"]["isError"], true);
+        assert!(
+            off["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Writing drafts is off")
+        );
+        core.update_agent_access(|access| access.can_write_drafts = true)
+            .await
+            .unwrap();
+        send(&mut host_write, draft).await;
+        let unknown_account = receive(&mut lines).await;
+        assert_eq!(unknown_account["result"]["isError"], true);
+        assert!(
+            unknown_account["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("isn't available to agents")
+        );
 
         // Once access is off, nothing more is read or logged.
         core.update_agent_access(|access| access.enabled = false)
@@ -330,6 +365,16 @@ mod tests {
                 .map(|entry| (entry.agent.as_str(), entry.tool.as_str(), entry.outcome))
                 .collect::<Vec<_>>(),
             [
+                (
+                    "test-host",
+                    "create_draft",
+                    flectar_mail_core::models::AgentOutcome::Refused
+                ),
+                (
+                    "test-host",
+                    "create_draft",
+                    flectar_mail_core::models::AgentOutcome::Refused
+                ),
                 (
                     "test-host",
                     "list_folders",

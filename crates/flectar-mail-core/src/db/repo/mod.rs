@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod actions;
 pub mod agent_activity;
+pub mod agent_drafts;
 pub mod ai_usage;
 pub mod blocked;
 pub mod caldav;

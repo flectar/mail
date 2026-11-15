@@ -10,7 +10,7 @@ use crate::{
 use chrono::{Local, Timelike};
 use flectar_mail_core::{
     Core,
-    models::{Account, AgentAccess, AgentActivity, AgentOutcome, FolderInfo, roles},
+    models::{AgentAccess, AgentActivity, AgentOutcome, FolderInfo, roles},
 };
 use serde_json::{Value, json};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -66,6 +66,10 @@ pub(crate) fn register(app: &AppWindow, state: &Rc<RefCell<InboxState>>, runtime
     let callbacks = Rc::clone(&page);
     ui.on_set_enabled(move |enabled| {
         callbacks.change(move |access| access.enabled = enabled);
+    });
+    let callbacks = Rc::clone(&page);
+    ui.on_set_can_write_drafts(move |allowed| {
+        callbacks.change(move |access| access.can_write_drafts = allowed);
     });
     let callbacks = Rc::clone(&page);
     ui.on_set_account_shown(move |account_id, shown| {
@@ -179,10 +183,11 @@ impl Page {
             ui.set_activity(ModelRc::default());
             return;
         };
-        let (settings, accounts, folders, activity) = self.runtime.block_on(async {
+        let (settings, accounts, local, folders, activity) = self.runtime.block_on(async {
             (
                 core.get_settings().await,
                 core.list_accounts().await,
+                core.local_mail_account().await,
                 core.list_folders(None).await,
                 core.agent_activity(ACTIVITY_SHOWN).await,
             )
@@ -190,13 +195,34 @@ impl Page {
         let access = settings
             .map(|settings| settings.agent_access)
             .unwrap_or_default();
-        let accounts = accounts.unwrap_or_default();
+        // The accounts as the page names them, with the mail imported to
+        // this device, which account lists leave out, at the end.
+        let mut accounts = accounts
+            .unwrap_or_default()
+            .into_iter()
+            .map(|account| PageAccount {
+                id: account.id,
+                name: account
+                    .display_name
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| account.email.clone()),
+                address: account.email,
+            })
+            .collect::<Vec<_>>();
+        if let Ok(Some(account_id)) = local {
+            accounts.push(PageAccount {
+                id: account_id,
+                name: translated(&app, &UiMessage::plain("Mail on this device")).into(),
+                address: String::new(),
+            });
+        }
         let folders = folders
             .unwrap_or_default()
             .into_iter()
             .filter(|folder| folder.selectable)
             .collect::<Vec<_>>();
         ui.set_enabled(access.enabled);
+        ui.set_can_write_drafts(access.can_write_drafts);
         let open = self.open_folders.borrow();
         let rows = accounts
             .iter()
@@ -251,9 +277,17 @@ impl Page {
     }
 }
 
+/// An account as the page lists it.
+struct PageAccount {
+    id: i64,
+    name: String,
+    /// Empty for the mail on this device, which has no address.
+    address: String,
+}
+
 fn account_row(
     app: &AppWindow,
-    account: &Account,
+    account: &PageAccount,
     folders: &[FolderInfo],
     access: &AgentAccess,
     folders_open: bool,
@@ -284,13 +318,8 @@ fn account_row(
     };
     AgentAccount {
         id: i32::try_from(account.id).unwrap_or_default(),
-        name: account
-            .display_name
-            .as_deref()
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or(&account.email)
-            .into(),
-        address: account.email.as_str().into(),
+        name: account.name.as_str().into(),
+        address: account.address.as_str().into(),
         shown,
         folders_summary: translated(app, &folders_summary(&own, &as_shown)),
         folders_open,
@@ -339,7 +368,7 @@ fn folders_summary(folders: &[&FolderInfo], access: &AgentAccess) -> UiMessage {
 fn activity_row(
     app: &AppWindow,
     entry: &AgentActivity,
-    accounts: &[Account],
+    accounts: &[PageAccount],
     folders: &[FolderInfo],
 ) -> AgentActivityEntry {
     let action = match entry.tool.as_str() {
@@ -352,6 +381,8 @@ fn activity_row(
         "read_conversation" => UiMessage::plain("Read a conversation"),
         "search_contacts" => UiMessage::plain("Searched contacts"),
         "list_events" => UiMessage::plain("Listed calendar events"),
+        "create_draft" => UiMessage::plain("Wrote a draft"),
+        "update_draft" => UiMessage::plain("Changed a draft"),
         _ => UiMessage::detail("Used {}", &entry.tool),
     };
     let mut detail = Vec::new();
@@ -359,13 +390,7 @@ fn activity_row(
         .account_id
         .and_then(|id| accounts.iter().find(|account| account.id == id))
     {
-        detail.push(
-            account
-                .display_name
-                .clone()
-                .filter(|name| !name.trim().is_empty())
-                .unwrap_or_else(|| account.email.clone()),
-        );
+        detail.push(account.name.clone());
     }
     if let Some(folder) = entry
         .folder_id
@@ -374,20 +399,24 @@ fn activity_row(
         detail.push(folder.display_name.clone());
     }
     match entry.outcome {
-        AgentOutcome::Refused => detail.push(
-            translated(
-                app,
-                &UiMessage::plain("Refused, outside what agents can read"),
-            )
-            .into(),
-        ),
-        AgentOutcome::Failed => detail.push(translated(app, &UiMessage::plain("Failed")).into()),
-        AgentOutcome::Done if !entry.tool.starts_with("read_") => {
-            let results = if entry.items == 1 {
-                UiMessage::plain("1 result")
+        AgentOutcome::Refused => {
+            let refused = if entry.tool.ends_with("_draft") {
+                UiMessage::plain("Refused, outside what agents can do")
             } else {
-                UiMessage::detail("{} results", entry.items)
+                UiMessage::plain("Refused, outside what agents can read")
             };
+            detail.push(translated(app, &refused).into());
+        }
+        AgentOutcome::Failed => detail.push(translated(app, &UiMessage::plain("Failed")).into()),
+        // A draft counts its recipients, a list its results.
+        AgentOutcome::Done if entry.tool.ends_with("_draft") => {
+            if entry.items > 0 {
+                let recipients = UiMessage::detail("To {} people", entry.items);
+                detail.push(translated(app, &recipients).into());
+            }
+        }
+        AgentOutcome::Done if !entry.tool.starts_with("read_") => {
+            let results = UiMessage::detail("{} results", entry.items);
             detail.push(translated(app, &results).into());
         }
         AgentOutcome::Done => {}
@@ -817,6 +846,32 @@ mod tests {
         assert_eq!(
             folders_summary(&folders, &access),
             UiMessage::plain("No folders")
+        );
+    }
+
+    #[test]
+    fn counts_take_the_language_s_plural_forms() {
+        use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+        struct Headless(Rc<MinimalSoftwareWindow>);
+        impl slint::platform::Platform for Headless {
+            fn create_window_adapter(
+                &self,
+            ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window))).unwrap();
+        let app = AppWindow::new().unwrap();
+        let text = |message: UiMessage| translated(&app, &message).to_string();
+
+        assert_eq!(text(UiMessage::detail("{} results", 1)), "1 result");
+        assert_eq!(text(UiMessage::detail("{} results", 12)), "12 results");
+        assert_eq!(text(UiMessage::detail("To {} people", 1)), "To 1 person");
+        assert_eq!(text(UiMessage::detail("To {} people", 3)), "To 3 people");
+        assert_eq!(
+            text(UiMessage::arguments("{} of {} folders", 3, 12)),
+            "3 of 12 folders"
         );
     }
 }
