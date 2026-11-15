@@ -1,5 +1,5 @@
 import { HorizontalBox, ScrollView } from "std-widgets.slint";
-import { ComposeAttachment } from "../models.slint";
+import { ComposeAttachment, ComposeLink } from "../models.slint";
 import { Button } from "button.slint";
 import { IconButton, Switch } from "controls.slint";
 import { TypeScale } from "../typography.slint";
@@ -553,6 +553,8 @@ export component ComposerToolbar inherits Rectangle {
 export component ComposerAttachments inherits Rectangle {
     in property <bool> compact: false;
     in property <[ComposeAttachment]> attachments: [];
+    // Files sent by link, which show after the attached ones.
+    in property <[ComposeLink]> links: [];
     in property <color> accent-color;
     in property <color> background-color;
     in property <color> body-color;
@@ -561,14 +563,15 @@ export component ComposerAttachments inherits Rectangle {
     in property <color> raised-color;
     in property <color> subtle-border-color;
     callback remove-attachment(int);
+    callback remove-link(int);
     // Chips hold a name and a detail line; both grow with the platform font.
     private property <length> chip-growth: max(16px, attachment-name-probe.preferred-height)
         + max(13px, attachment-detail-probe.preferred-height) - 29px;
     // Files wider than the strip scroll, with the scroll bar below them rather than over them.
     private property <length> bar-room: attachment-row.preferred-width > attachments-scroll.width ? 12px : 0px;
 
-            visible: root.attachments.length > 0;
-            height: root.attachments.length > 0 ? 62px + root.chip-growth + root.bar-room : 0px;
+            visible: root.attachments.length + root.links.length > 0;
+            height: root.attachments.length + root.links.length > 0 ? 62px + root.chip-growth + root.bar-room : 0px;
             background: root.raised-color;
             border-width: 1px;
             border-color: root.subtle-border-color;
@@ -647,6 +650,61 @@ export component ComposerAttachments inherits Rectangle {
                             hover-background: root.control-hover-color;
                             tooltip-text: @tr("Remove attachment");
                             clicked => { root.remove-attachment(index); }
+                        }
+                    }
+
+                    for link[index] in root.links : Rectangle {
+                        width: 194px;
+                        height: 36px + root.chip-growth;
+                        border-radius: 7px;
+                        border-width: 1px;
+                        border-color: link.failed ? #d73a4966 : root.subtle-border-color;
+                        background: root.background-color;
+
+                        Image {
+                            x: 17px - self.width / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: LayoutMetrics.icon-size;
+                            height: LayoutMetrics.icon-size;
+                            source: @image-url("../icons/lucide/outline/link.svg");
+                            colorize: link.failed ? #d73a49 : root.accent-color;
+                            image-fit: contain;
+                            accessible-role: none;
+                        }
+
+                        link-name := Text {
+                            x: 32px;
+                            y: 4px;
+                            width: parent.width - 64px;
+                            height: max(16px, self.preferred-height);
+                            text: link.name;
+                            color: root.body-color;
+                            font-size: TypeScale.caption;
+                            font-weight: 600;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            x: 32px;
+                            y: link-name.y + link-name.height - 1px;
+                            width: parent.width - 64px;
+                            height: max(13px, self.preferred-height);
+                            text: link.detail;
+                            color: link.failed ? #d73a49 : root.muted-color;
+                            font-size: TypeScale.caption;
+                            overflow: elide;
+                        }
+
+                        IconButton {
+                            x: parent.width - 29px;
+                            y: (parent.height - self.height) / 2;
+                            width: 28px;
+                            height: 28px;
+                            icon: @image-url("../icons/lucide/outline/x.svg");
+                            icon-color: root.muted-color;
+                            hover-background: root.control-hover-color;
+                            tooltip-text: @tr("Remove link");
+                            clicked => { root.remove-link(index); }
                         }
                     }
                 }
@@ -760,6 +818,9 @@ export component ComposerFooter inherits Rectangle {
     in property <color> subtle-border-color;
     callback submit(bool);
     callback pick-attachments();
+    // A storage service is there to send files by link from.
+    in property <bool> link-sharing: false;
+    callback share-by-link();
     callback request-close();
 
             height: 54px;
@@ -820,9 +881,22 @@ export component ComposerFooter inherits Rectangle {
                 clicked => { root.pick-attachments(); }
             }
 
+            link-button := IconButton {
+                visible: root.link-sharing && root.attachment-picker-supported && !root.signature;
+                x: attach-button.x + attach-button.width + (root.compact ? 0px : 2px);
+                y: attach-button.y;
+                width: attach-button.width;
+                height: attach-button.height;
+                icon: @image-url("../icons/lucide/outline/link.svg");
+                icon-color: root.secondary-color;
+                hover-background: root.control-hover-color;
+                tooltip-text: @tr("Share files by link");
+                clicked => { root.share-by-link(); }
+            }
+
             Text {
                 visible: !root.compact && root.attachment-picker-supported && !root.signature;
-                x: attach-button.x + attach-button.width + 8px;
+                x: (link-button.visible ? link-button.x + link-button.width : attach-button.x + attach-button.width) + 8px;
                 width: max(0px, save-draft.x - self.x - 42px);
                 height: parent.height;
                 text: root.attachment-summary == "" ? @tr("Attach files") : root.attachment-summary;

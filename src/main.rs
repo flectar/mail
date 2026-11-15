@@ -33,6 +33,7 @@ mod import_controller;
 mod invitation;
 mod keyboard_keys;
 mod latest_load;
+mod link_services;
 mod mail;
 #[cfg(test)]
 mod mail_drop_tests;
@@ -6327,6 +6328,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     mailto_links::install(&app, composers);
     undo::install(&app, &state, &runtime);
     unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
+    link_services::install(&app, &state, &runtime, platform.external_urls.clone());
     read_receipts::install(&app, &state, &runtime);
     block_sender::install(&app, &state, &runtime);
     invitation::install(&app, &state, &calendar_state, &runtime);

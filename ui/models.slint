@@ -454,6 +454,13 @@ export struct ComposeAttachment {
     detail: string,
 }
 
+// A file the message sends by link: its name, and how its upload went.
+export struct ComposeLink {
+    name: string,
+    detail: string,
+    failed: bool,
+}
+
 // A deliberately small contact shape for compose autocomplete. The core
 // keeps affinity/account scoping private and only exposes what the menu needs.
 export struct ComposeContact {

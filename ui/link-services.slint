@@ -1,0 +1,186 @@
+import { VerticalBox } from "std-widgets.slint";
+import { Button } from "components/button.slint";
+import { LineEdit } from "components/controls.slint";
+import { SettingsSelectRow, SettingsSwitchRow } from "components/settings-components.slint";
+import { TypeScale } from "typography.slint";
+
+// A storage service files go by link from: its name, and who's signed in where.
+export struct LinkServiceRow {
+    id: int,
+    name: string,
+    detail: string,
+}
+
+// Storage services, such as a Nextcloud server, that large files go from by link.
+export global LinkServices {
+    in property <[LinkServiceRow]> services: [];
+    // "idle", "waiting" while the sign-in in the browser is open, or "connecting".
+    in property <string> state: "idle";
+    in property <string> error: "";
+    // How long links work: 7, 14, 30 or 90 days, or as long as the file is kept.
+    in-out property <int> expiry-index: 2;
+    in-out property <bool> password: false;
+    callback refresh();
+    // The server's address: sign in there in the browser.
+    callback sign-in(string);
+    // The server's address, the name to sign in with, and an app password.
+    callback connect-with-password(string, string, string);
+    callback cancel-sign-in();
+    callback remove(int);
+    callback expiry-chosen(int);
+    callback password-toggled(bool);
+}
+
+// Settings for files sent by link: the storage service, how long links work, and passwords.
+export component LargeFilesCard inherits Rectangle {
+    in property <bool> compact: false;
+    // The card shows, which brings what it lists up to date.
+    in property <bool> shown: false;
+    in property <color> surface;
+    in property <color> border-subtle;
+    in property <color> heading;
+    in property <color> body-text;
+    in property <color> faint-text;
+
+    private property <string> server: "";
+    private property <bool> with-password: false;
+    private property <string> login-name: "";
+    private property <string> app-password: "";
+
+    changed shown => {
+        if self.shown {
+            LinkServices.refresh();
+        }
+    }
+
+    height: max(120px, self.preferred-height);
+    background: root.surface;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.border-subtle;
+
+    VerticalBox {
+        padding-top: 15px;
+        padding-right: 20px;
+        padding-bottom: 15px;
+        padding-left: 20px;
+        spacing: 8px;
+
+        Text { text: @tr("Large files"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+        Text {
+            text: @tr("Files too large for a message, and ones you share by link, go to your Nextcloud or ownCloud storage, and the message carries links to them.");
+            color: root.faint-text;
+            font-size: TypeScale.secondary;
+            wrap: word-wrap;
+        }
+
+        for service in LinkServices.services : HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                alignment: center;
+                Text { text: service.name; color: root.body-text; font-weight: 600; overflow: elide; }
+                Text { text: service.detail; color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+            }
+            Button {
+                width: max(80px, self.content-width);
+                text: @tr("Remove");
+                clicked => { LinkServices.remove(service.id); }
+            }
+        }
+
+        if LinkServices.services.length == 0 && LinkServices.state == "waiting" : HorizontalLayout {
+            spacing: 12px;
+            Text {
+                text: @tr("Finish signing in in your browser.");
+                color: root.body-text;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+            Button {
+                width: max(80px, self.content-width);
+                text: @tr("Cancel");
+                clicked => { LinkServices.cancel-sign-in(); }
+            }
+        }
+
+        if LinkServices.services.length == 0 && LinkServices.state != "waiting" : VerticalLayout {
+            spacing: 8px;
+            LineEdit {
+                height: 36px;
+                text <=> root.server;
+                input-label: @tr("Server address");
+                placeholder-text: @tr("Server address, such as cloud.example.com");
+                enabled: LinkServices.state == "idle";
+            }
+            if root.with-password : LineEdit {
+                height: 36px;
+                text <=> root.login-name;
+                input-label: @tr("Name you sign in with");
+                placeholder-text: @tr("Name you sign in with");
+                enabled: LinkServices.state == "idle";
+            }
+            if root.with-password : LineEdit {
+                height: 36px;
+                text <=> root.app-password;
+                input-type: password;
+                input-label: @tr("App password");
+                placeholder-text: @tr("App password");
+                enabled: LinkServices.state == "idle";
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Button {
+                    width: max(96px, self.content-width);
+                    primary: true;
+                    text: root.with-password ? @tr("Connect") : @tr("Sign in");
+                    enabled: LinkServices.state == "idle" && root.server != ""
+                        && (!root.with-password || (root.login-name != "" && root.app-password != ""));
+                    clicked => {
+                        if root.with-password {
+                            LinkServices.connect-with-password(root.server, root.login-name, root.app-password);
+                            root.app-password = "";
+                        } else {
+                            LinkServices.sign-in(root.server);
+                        }
+                    }
+                }
+                Button {
+                    width: max(96px, self.content-width);
+                    text: root.with-password ? @tr("Sign in in the browser") : @tr("Use an app password");
+                    enabled: LinkServices.state == "idle";
+                    clicked => { root.with-password = !root.with-password; }
+                }
+            }
+        }
+
+        if LinkServices.error != "" : Text {
+            text: LinkServices.error;
+            color: #d04a43;
+            font-size: TypeScale.caption;
+            wrap: word-wrap;
+        }
+
+        Rectangle { height: 1px; background: root.border-subtle; }
+        SettingsSelectRow {
+            compact: root.compact;
+            title: @tr("Links work for");
+            description: @tr("A server that limits links shortens it.");
+            choices: [@tr("7 days"), @tr("14 days"), @tr("30 days"), @tr("90 days"), @tr("As long as the file is kept")];
+            selected-index <=> LinkServices.expiry-index;
+            title-color: root.body-text;
+            description-color: root.faint-text;
+            selected(index, value) => { LinkServices.expiry-chosen(index); }
+        }
+        Rectangle { height: 1px; background: root.border-subtle; }
+        SettingsSwitchRow {
+            compact: root.compact;
+            title: @tr("Ask for a password");
+            description: @tr("Each link gets a password of its own, which the message leaves out for you to pass on another way.");
+            checked <=> LinkServices.password;
+            title-color: root.body-text;
+            description-color: root.faint-text;
+            toggled(checked) => { LinkServices.password-toggled(checked); }
+        }
+    }
+}
