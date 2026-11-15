@@ -42,6 +42,7 @@ pub mod route;
 pub mod scheduler;
 pub mod search;
 pub mod sender_identities;
+mod sieve;
 pub mod signatures;
 pub mod smtp;
 pub mod sync;
