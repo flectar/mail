@@ -93,6 +93,12 @@ export global AccountMailPreferences {
     in property <string> auto-reply-unsupported-text;
     // How the server sends them, such as how often per sender.
     in property <string> auto-reply-note;
+    // Outlook's replies have no subject of their own, and its days need an end.
+    in property <bool> auto-reply-subject-available: true;
+    in property <bool> auto-reply-needs-last-day: false;
+    // Who "only my contacts" leaves out: in a Microsoft work account, only
+    // senders outside the organization.
+    in property <string> auto-reply-contacts-note;
     in-out property <bool> auto-reply-on: false;
     // Days as YYYY-MM-DD, or empty for no limit.
     in-out property <string> auto-reply-first-day;
@@ -290,8 +296,11 @@ export component AccountMailPreferencesPanel inherits OnScreenSurface {
                         LineEdit { text <=> AccountMailPreferences.auto-reply-last-day; input-label: @tr("Last day"); placeholder-text: @tr("YYYY-MM-DD"); enabled: !AccountMailPreferences.auto-reply-saving; }
                     }
                 }
-                Text { text: @tr("SUBJECT"); color: AppTheme.secondary; font-size: TypeScale.caption; font-weight: 700; overflow: elide; }
-                LineEdit { text <=> AccountMailPreferences.auto-reply-subject; input-label: @tr("Subject"); placeholder-text: @tr("Such as Out of office"); enabled: !AccountMailPreferences.auto-reply-saving; }
+                if AccountMailPreferences.auto-reply-subject-available : VerticalLayout {
+                    spacing: 10px;
+                    Text { text: @tr("SUBJECT"); color: AppTheme.secondary; font-size: TypeScale.caption; font-weight: 700; overflow: elide; }
+                    LineEdit { text <=> AccountMailPreferences.auto-reply-subject; input-label: @tr("Subject"); placeholder-text: @tr("Such as Out of office"); enabled: !AccountMailPreferences.auto-reply-saving; }
+                }
                 Text { text: @tr("MESSAGE"); color: AppTheme.secondary; font-size: TypeScale.caption; font-weight: 700; overflow: elide; }
                 TextEdit {
                     min-height: 120px; vertical-stretch: 0; wrap: word-wrap;
@@ -300,7 +309,7 @@ export component AccountMailPreferencesPanel inherits OnScreenSurface {
                     enabled: !AccountMailPreferences.auto-reply-saving;
                 }
                 SettingsSwitchRow {
-                    compact: root.compact; title: @tr("Only reply to my contacts"); description: @tr("Senders who aren't in your contacts get no reply.");
+                    compact: root.compact; title: @tr("Only reply to my contacts"); description: AccountMailPreferences.auto-reply-contacts-note;
                     checked <=> AccountMailPreferences.auto-reply-contacts-only;
                     enabled: !AccountMailPreferences.auto-reply-saving;
                     title-color: AppTheme.heading; description-color: AppTheme.secondary;
