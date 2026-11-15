@@ -55,6 +55,24 @@ pub(crate) fn spawn(
 
 const IDENTITY_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
+/// Reads the account's automatic replies back, so that replies set in
+/// webmail show in the app too.
+async fn sync_auto_reply(
+    ctx: &SyncCtx,
+    account_id: i64,
+    connected: &ConnectedClient,
+) -> Result<()> {
+    let reply = crate::jmap::vacation::read(connected).await?;
+    let changed = ctx
+        .db
+        .write(move |conn| repo::auto_replies::store(conn, account_id, &reply, now_ms(), false))
+        .await?;
+    if changed {
+        ctx.bus.emit(CoreEvent::AutoReplyChanged { account_id });
+    }
+    Ok(())
+}
+
 async fn sync_sender_identities(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -121,6 +139,12 @@ async fn actor(
                         %error,
                         "JMAP identity refresh failed; keeping cached identities"
                     ),
+                }
+                // Replies set in webmail show too. Reading them never fails a sync.
+                if crate::jmap::vacation::offered(&connected)
+                    && let Err(error) = sync_auto_reply(&ctx, config.id, &connected).await
+                {
+                    tracing::warn!(account_id = config.id, %error, "JMAP automatic replies failed");
                 }
             }
             let started = now_ms();

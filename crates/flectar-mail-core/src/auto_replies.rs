@@ -1,5 +1,6 @@
 //! Automatic replies an account's server sends while the user is away
-//! (#239): Gmail's vacation responder, and a Microsoft mailbox's settings.
+//! (#239): Gmail's vacation responder, a Microsoft mailbox's settings, and
+//! JMAP's VacationResponse.
 //! The app saves them to the server and reads them back while syncing, so
 //! replies set in webmail show too. It never sends replies itself, so
 //! servers keep their own rules against replying to lists, to automatic
@@ -12,7 +13,7 @@ use crate::accounts::credentials;
 use crate::db::repo;
 use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
-use crate::models::{Account, AutoReply, Provider, now_ms};
+use crate::models::{Account, AutoReply, MailProtocol, Provider, now_ms};
 use crate::sync::engine::SyncCtx;
 use crate::{oauth, sync};
 
@@ -97,6 +98,21 @@ impl Core {
                     }
                     saved => saved?,
                 }
+            }
+            Provider::Generic if account.mail_protocol == MailProtocol::Jmap => {
+                let secret = credentials::load_async(
+                    self.credentials.clone(),
+                    account_id,
+                    credentials::Slot::Password,
+                )
+                .await?;
+                let connected = crate::jmap::client::connect(&config, &secret).await?;
+                if !crate::jmap::vacation::offered(&connected) {
+                    return Err(CoreError::Other(
+                        "Flectar Mail can't set this account's automatic replies yet".into(),
+                    ));
+                }
+                crate::jmap::vacation::save(&connected, &reply).await?
             }
             Provider::Generic => {
                 return Err(CoreError::Other(
