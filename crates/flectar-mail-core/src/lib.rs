@@ -7453,10 +7453,15 @@ impl Core {
 
         credentials::check_available_async(self.credentials.clone()).await?;
 
+        // Asking for what else the account uses as well keeps it on Android.
+        let mut scopes = self.google_scopes_in_use(account_id).await?;
+        if !scopes.contains(&oauth::providers::GOOGLE_CALENDAR_SCOPE) {
+            scopes.push(oauth::providers::GOOGLE_CALENDAR_SCOPE);
+        }
         let outcome = tokio::select! {
             r = oauth::flow::authorize_with_broker(
                 Provider::Gmail,
-                &[oauth::providers::GOOGLE_CALENDAR_SCOPE],
+                &scopes,
                 Some(&account.email),
                 self.oauth_redirects.clone(),
                 open_url,
