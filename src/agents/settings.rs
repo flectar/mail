@@ -68,6 +68,10 @@ pub(crate) fn register(app: &AppWindow, state: &Rc<RefCell<InboxState>>, runtime
         callbacks.change(move |access| access.enabled = enabled);
     });
     let callbacks = Rc::clone(&page);
+    ui.on_set_can_write_drafts(move |allowed| {
+        callbacks.change(move |access| access.can_write_drafts = allowed);
+    });
+    let callbacks = Rc::clone(&page);
     ui.on_set_account_shown(move |account_id, shown| {
         let account_id = i64::from(account_id);
         callbacks.change(move |access| {
@@ -218,6 +222,7 @@ impl Page {
             .filter(|folder| folder.selectable)
             .collect::<Vec<_>>();
         ui.set_enabled(access.enabled);
+        ui.set_can_write_drafts(access.can_write_drafts);
         let open = self.open_folders.borrow();
         let rows = accounts
             .iter()
@@ -376,6 +381,8 @@ fn activity_row(
         "read_conversation" => UiMessage::plain("Read a conversation"),
         "search_contacts" => UiMessage::plain("Searched contacts"),
         "list_events" => UiMessage::plain("Listed calendar events"),
+        "create_draft" => UiMessage::plain("Wrote a draft"),
+        "update_draft" => UiMessage::plain("Changed a draft"),
         _ => UiMessage::detail("Used {}", &entry.tool),
     };
     let mut detail = Vec::new();
@@ -392,14 +399,22 @@ fn activity_row(
         detail.push(folder.display_name.clone());
     }
     match entry.outcome {
-        AgentOutcome::Refused => detail.push(
-            translated(
-                app,
-                &UiMessage::plain("Refused, outside what agents can read"),
-            )
-            .into(),
-        ),
+        AgentOutcome::Refused => {
+            let refused = if entry.tool.ends_with("_draft") {
+                UiMessage::plain("Refused, outside what agents can do")
+            } else {
+                UiMessage::plain("Refused, outside what agents can read")
+            };
+            detail.push(translated(app, &refused).into());
+        }
         AgentOutcome::Failed => detail.push(translated(app, &UiMessage::plain("Failed")).into()),
+        // A draft counts its recipients, a list its results.
+        AgentOutcome::Done if entry.tool.ends_with("_draft") => {
+            if entry.items > 0 {
+                let recipients = UiMessage::detail("To {} people", entry.items);
+                detail.push(translated(app, &recipients).into());
+            }
+        }
         AgentOutcome::Done if !entry.tool.starts_with("read_") => {
             let results = UiMessage::detail("{} results", entry.items);
             detail.push(translated(app, &results).into());
@@ -852,6 +867,8 @@ mod tests {
 
         assert_eq!(text(UiMessage::detail("{} results", 1)), "1 result");
         assert_eq!(text(UiMessage::detail("{} results", 12)), "12 results");
+        assert_eq!(text(UiMessage::detail("To {} people", 1)), "To 1 person");
+        assert_eq!(text(UiMessage::detail("To {} people", 3)), "To 3 people");
         assert_eq!(
             text(UiMessage::arguments("{} of {} folders", 3, 12)),
             "3 of 12 folders"
