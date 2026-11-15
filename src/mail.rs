@@ -8,12 +8,13 @@ use flectar_mail_core::{
         Account, AccountConfig, ActionKind, ActionParams, ActionTarget, AddPasswordAccountArgs,
         Address, BlockOffer, BlockResult, CalendarConnection, CalendarEvent, CardDavConnection,
         ConnectCaldavArgs, ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage,
-        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, InvitationCard, Label,
-        ListOrder, ListOwner, MailGrouping, MailHistory, MailProfile, MailProtocol,
-        MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor, MessageSummary,
-        PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult,
-        RsvpEventArgs, SaveDraftArgs, SearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary,
-        UnsubscribeOffer, UnsubscribeOutcome, View, normalized_workspace_list_pane_width, roles,
+        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, ForwardedMessage,
+        InvitationCard, Label, ListOrder, ListOwner, MailGrouping, MailHistory, MailProfile,
+        MailProtocol, MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor,
+        MessageSummary, PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs,
+        QueueSendResult, RsvpEventArgs, SaveDraftArgs, SearchCursor, SenderIdentity, Settings,
+        Snippet, ThreadCursor, ThreadSummary, UnsubscribeOffer, UnsubscribeOutcome, View,
+        normalized_workspace_list_pane_width, roles,
     },
 };
 #[cfg(test)]
@@ -1201,36 +1202,8 @@ impl CoreMailSource {
             .find(|message| Some(message.id) == message_id)
             .or_else(|| thread.messages.last())
             .ok_or_else(|| "thread has no messages".to_owned())?;
-        let accounts = self
-            .core
-            .list_accounts()
-            .await
-            .map_err(|error| error.to_string())?;
-        let account = match accounts
-            .iter()
-            .find(|account| account.id == message.account_id)
-        {
-            Some(account) => account.clone(),
-            // Local mail is answered from an account.
-            None => {
-                if self.load_local_mail_account().await? != Some(message.account_id) {
-                    return Err("message account is no longer connected".to_owned());
-                }
-                self.reply_account(&accounts, message).await?
-            }
-        };
-
-        let sender_identities = self
-            .core
-            .list_sender_identities(account.id)
-            .await
-            .map_err(|error| error.to_string())?;
-        let default_sender_email = self
-            .core
-            .default_sender_identity(account.id)
-            .await
-            .map_err(|error| error.to_string())?
-            .email;
+        let (account, sender_identities, default_sender_email) =
+            self.answering_account(message).await?;
         // The original's own images come inline, fetched now if they weren't
         // yet: the thread leaves those still downloading as cid: links, which
         // a reply or forward could not carry.
@@ -1275,6 +1248,98 @@ impl CoreMailSource {
             .get_attachment(attachment_id)
             .await
             .map_err(|error| error.to_string())
+    }
+
+    /// The messages of `target` to forward as attachments, with their subjects.
+    pub async fn forwarded_messages(
+        &self,
+        target: ActionTarget,
+    ) -> Result<Vec<ForwardedMessage>, String> {
+        self.core
+            .forwarded_messages(target)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// The originals of `message_ids` in files of their own to attach, which go when their
+    /// paths are dropped, or why they couldn't be fetched.
+    pub async fn forwarded_originals(
+        &self,
+        message_ids: Vec<i64>,
+    ) -> Vec<(i64, Result<tempfile::TempPath, String>)> {
+        self.core
+            .forwarded_originals(message_ids)
+            .await
+            .into_iter()
+            .map(|(id, file)| (id, file.map_err(|error| error.to_string())))
+            .collect()
+    }
+
+    /// The account a reply or forward of `message` goes from, with its sender identities and
+    /// the address it sends from by default: the message's own account, and for local mail,
+    /// the one [`Self::reply_account`] finds.
+    async fn answering_account(
+        &self,
+        message: &MessageDetail,
+    ) -> Result<(Account, Vec<SenderIdentity>, String), String> {
+        let accounts = self
+            .core
+            .list_accounts()
+            .await
+            .map_err(|error| error.to_string())?;
+        let account = match accounts
+            .iter()
+            .find(|account| account.id == message.account_id)
+        {
+            Some(account) => account.clone(),
+            // Local mail is answered from an account.
+            None => {
+                if self.load_local_mail_account().await? != Some(message.account_id) {
+                    return Err("message account is no longer connected".to_owned());
+                }
+                self.reply_account(&accounts, message).await?
+            }
+        };
+        let sender_identities = self
+            .core
+            .list_sender_identities(account.id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let default_sender_email = self
+            .core
+            .default_sender_identity(account.id)
+            .await
+            .map_err(|error| error.to_string())?
+            .email;
+        Ok((account, sender_identities, default_sender_email))
+    }
+
+    /// The account a forward of `message` goes from, and the address: the one the message
+    /// reached, as a forward that quotes it would.
+    pub async fn forward_sender(
+        &self,
+        message: &ForwardedMessage,
+    ) -> Result<(Account, String), String> {
+        let thread_id = message
+            .thread_id
+            .ok_or_else(|| "message is not backed by a core thread".to_owned())?;
+        let thread = self
+            .core
+            .get_thread_outline(thread_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let detail = thread
+            .messages
+            .iter()
+            .find(|detail| detail.id == message.message_id)
+            .ok_or_else(|| "message not found".to_owned())?;
+        let (account, identities, default_sender_email) = self.answering_account(detail).await?;
+        let sender = flectar_mail_core::sender_identities::reply_sender(
+            &identities,
+            detail.to.iter().chain(detail.cc.iter()),
+        )
+        .unwrap_or(default_sender_email);
+        Ok((account, sender))
     }
 
     /// The account that answers local mail, which is never sent from: the
@@ -2757,7 +2822,7 @@ fn parse_recipients(value: &str) -> Result<Vec<Address>, String> {
         .collect()
 }
 
-fn parse_address(value: &str) -> Result<Address, String> {
+pub(crate) fn parse_address(value: &str) -> Result<Address, String> {
     let (name, email) = value
         .rsplit_once('<')
         .and_then(|(name, email)| email.strip_suffix('>').map(|email| (Some(name), email)))

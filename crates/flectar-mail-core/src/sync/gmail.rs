@@ -3080,7 +3080,7 @@ async fn prepare_draft(
         attachment_bytes += bytes.len();
         attachments.push(crate::mime::OutgoingAttachment {
             filename: filename.clone(),
-            mime_type: mime_type.unwrap_or_else(|| mime_guess(&filename)),
+            mime_type: mime_type.unwrap_or_else(|| crate::queue::mime_guess_from_name(&filename)),
             bytes,
         });
     }
@@ -3125,7 +3125,8 @@ async fn prepare_draft(
             attachment_bytes += bytes.len();
             attachments.push(crate::mime::OutgoingAttachment {
                 filename: filename.clone(),
-                mime_type: mime_type.unwrap_or_else(|| mime_guess(&filename)),
+                mime_type: mime_type
+                    .unwrap_or_else(|| crate::queue::mime_guess_from_name(&filename)),
                 bytes,
             });
         }
@@ -3183,30 +3184,6 @@ async fn prepare_draft(
         provider_thread_id,
         provider_draft_id,
     })
-}
-
-fn mime_guess(filename: &str) -> String {
-    match filename
-        .rsplit('.')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "pdf" => "application/pdf",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        "txt" | "md" | "log" => "text/plain",
-        "csv" => "text/csv",
-        "json" => "application/json",
-        "zip" => "application/zip",
-        "ics" => "text/calendar",
-        _ => "application/octet-stream",
-    }
-    .to_owned()
 }
 
 async fn save_remote_draft(

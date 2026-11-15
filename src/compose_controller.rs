@@ -268,7 +268,7 @@ fn append_address(output: &mut String, address: &flectar_mail_core::models::Addr
     }
 }
 
-fn prefixed_subject(subject: &str, prefix: &str) -> String {
+pub(super) fn prefixed_subject(subject: &str, prefix: &str) -> String {
     let subject = subject.trim();
     let already_prefixed = match prefix {
         "Re" => subject
