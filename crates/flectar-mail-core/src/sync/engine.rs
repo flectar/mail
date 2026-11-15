@@ -1497,6 +1497,13 @@ async fn run_cycle(
     if listed_now {
         discover_folders(ctx, config, session).await?;
         listing.listed_at = Some(tokio::time::Instant::now());
+        // A Microsoft account's automatic replies live in its mailbox
+        // settings. Reading them never fails a sync.
+        if config.provider == Provider::Microsoft
+            && let Err(error) = crate::auto_replies::read_back_from_graph(ctx, account_id).await
+        {
+            tracing::warn!(account_id, %error, "Microsoft automatic replies failed");
+        }
     }
 
     let folders = {
