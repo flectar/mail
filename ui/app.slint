@@ -308,6 +308,11 @@ export global I18n {
         if (key == "Wrote a draft") { return @tr("Wrote a draft"); }
         if (key == "Mail on this device") { return @tr("Mail on this device"); }
         if (key == "Changed a draft") { return @tr("Changed a draft"); }
+        if (key == "Marked messages") { return @tr("Marked messages"); }
+        if (key == "Moved messages") { return @tr("Moved messages"); }
+        if (key == "Labeled messages") { return @tr("Labeled messages"); }
+        if (key == "{} messages") { return @tr("{n} message" | "{n} messages" % round(argument.to-float())); }
+        if (key == "There's nothing left to undo.") { return @tr("There's nothing left to undo."); }
         if (key == "To {} people") { return @tr("To {n} person" | "To {n} people" % round(argument.to-float())); }
         if (key == "Refused, outside what agents can read") { return @tr("Refused, outside what agents can read"); }
         if (key == "Refused, outside what agents can do") { return @tr("Refused, outside what agents can do"); }

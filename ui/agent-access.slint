@@ -25,6 +25,10 @@ export struct AgentAccount {
 
 // Something an agent did, without message content.
 export struct AgentActivityEntry {
+    id: int,
+    // What it changed can still be undone, or was.
+    undoable: bool,
+    undone: bool,
     time: string,
     agent: string,
     // What it did, such as "Searched messages".
@@ -46,9 +50,16 @@ export global AgentAccess {
     callback set-account-shown(int, bool);
     callback toggle-folders(int);
     callback set-folder-shown(int, int, bool);
-    // Agents may save drafts for the user to review and send.
+    // What agents may do besides reading: save drafts for the user to review
+    // and send, mark messages read or flagged, move them and label them.
     in-out property <bool> can-write-drafts;
     callback set-can-write-drafts(bool);
+    in-out property <bool> can-mark;
+    callback set-can-mark(bool);
+    in-out property <bool> can-move;
+    callback set-can-move(bool);
+    in-out property <bool> can-label;
+    callback set-can-label(bool);
 
     // Connecting an agent's app: the apps there are instructions for, the
     // chosen one's text to paste, where it goes, and whether the app can
@@ -63,5 +74,6 @@ export global AgentAccess {
 
     // The newest entries first.
     in property <[AgentActivityEntry]> activity;
+    callback undo-activity(int);
     callback clear-activity();
 }

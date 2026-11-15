@@ -72,6 +72,18 @@ pub(crate) fn register(app: &AppWindow, state: &Rc<RefCell<InboxState>>, runtime
         callbacks.change(move |access| access.can_write_drafts = allowed);
     });
     let callbacks = Rc::clone(&page);
+    ui.on_set_can_mark(move |allowed| {
+        callbacks.change(move |access| access.can_mark = allowed);
+    });
+    let callbacks = Rc::clone(&page);
+    ui.on_set_can_move(move |allowed| {
+        callbacks.change(move |access| access.can_move = allowed);
+    });
+    let callbacks = Rc::clone(&page);
+    ui.on_set_can_label(move |allowed| {
+        callbacks.change(move |access| access.can_label = allowed);
+    });
+    let callbacks = Rc::clone(&page);
     ui.on_set_account_shown(move |account_id, shown| {
         let account_id = i64::from(account_id);
         callbacks.change(move |access| {
@@ -119,6 +131,21 @@ pub(crate) fn register(app: &AppWindow, state: &Rc<RefCell<InboxState>>, runtime
     ui.on_choose_client(move |index| callbacks.choose_client(index));
     let callbacks = Rc::clone(&page);
     ui.on_install(move || callbacks.install());
+    let callbacks = Rc::clone(&page);
+    ui.on_undo_activity(move |activity_id| {
+        let (Some(app), Some(core)) = (callbacks.app.upgrade(), callbacks.core()) else {
+            return;
+        };
+        match callbacks
+            .runtime
+            .block_on(core.undo_agent_activity(i64::from(activity_id)))
+        {
+            Ok(true) => {}
+            Ok(false) => app.set_sync_status(UiMessage::plain("There's nothing left to undo.")),
+            Err(error) => app.set_sync_status(UiMessage::detail("Could not undo: {}", error)),
+        }
+        callbacks.refresh();
+    });
     let callbacks = Rc::clone(&page);
     ui.on_clear_activity(move || {
         if let Some(core) = callbacks.core() {
@@ -223,6 +250,9 @@ impl Page {
             .collect::<Vec<_>>();
         ui.set_enabled(access.enabled);
         ui.set_can_write_drafts(access.can_write_drafts);
+        ui.set_can_mark(access.can_mark);
+        ui.set_can_move(access.can_move);
+        ui.set_can_label(access.can_label);
         let open = self.open_folders.borrow();
         let rows = accounts
             .iter()
@@ -383,6 +413,9 @@ fn activity_row(
         "list_events" => UiMessage::plain("Listed calendar events"),
         "create_draft" => UiMessage::plain("Wrote a draft"),
         "update_draft" => UiMessage::plain("Changed a draft"),
+        "mark_messages" => UiMessage::plain("Marked messages"),
+        "move_messages" => UiMessage::plain("Moved messages"),
+        "label_messages" => UiMessage::plain("Labeled messages"),
         _ => UiMessage::detail("Used {}", &entry.tool),
     };
     let mut detail = Vec::new();
@@ -400,7 +433,7 @@ fn activity_row(
     }
     match entry.outcome {
         AgentOutcome::Refused => {
-            let refused = if entry.tool.ends_with("_draft") {
+            let refused = if changes_mail(&entry.tool) {
                 UiMessage::plain("Refused, outside what agents can do")
             } else {
                 UiMessage::plain("Refused, outside what agents can read")
@@ -415,6 +448,10 @@ fn activity_row(
                 detail.push(translated(app, &recipients).into());
             }
         }
+        AgentOutcome::Done if changes_mail(&entry.tool) => {
+            let messages = UiMessage::detail("{} messages", entry.items);
+            detail.push(translated(app, &messages).into());
+        }
         AgentOutcome::Done if !entry.tool.starts_with("read_") => {
             let results = UiMessage::detail("{} results", entry.items);
             detail.push(translated(app, &results).into());
@@ -422,6 +459,9 @@ fn activity_row(
         AgentOutcome::Done => {}
     }
     AgentActivityEntry {
+        id: i32::try_from(entry.id).unwrap_or_default(),
+        undoable: entry.undoable,
+        undone: entry.undone,
         time: activity_time(entry.occurred_at).into(),
         agent: entry.agent.as_str().into(),
         action: translated(app, &action),
@@ -429,6 +469,14 @@ fn activity_row(
         refused: entry.outcome == AgentOutcome::Refused,
         failed: entry.outcome == AgentOutcome::Failed,
     }
+}
+
+/// Whether `tool` changes mail rather than reading it.
+fn changes_mail(tool: &str) -> bool {
+    matches!(
+        tool,
+        "create_draft" | "update_draft" | "mark_messages" | "move_messages" | "label_messages"
+    )
 }
 
 /// The time today, or the day and time before that.

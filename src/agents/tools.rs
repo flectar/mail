@@ -133,6 +133,43 @@ fields given change.",
             idempotent: true,
         },
     },
+    Tool {
+        name: "mark_messages",
+        title: "Mark messages",
+        description: "Marks messages read or unread, flagged or not. Only works when the user lets \
+agents mark messages, and the user can undo it.",
+        input_schema: mark_messages,
+        effect: Effect {
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+        },
+    },
+    Tool {
+        name: "move_messages",
+        title: "Move messages",
+        description: "Moves messages to the archive, to Trash or to another folder of their \
+account. Nothing is deleted for good. Only works when the user lets agents move messages, and \
+the user can undo it.",
+        input_schema: move_messages,
+        effect: Effect {
+            read_only: false,
+            destructive: true,
+            idempotent: true,
+        },
+    },
+    Tool {
+        name: "label_messages",
+        title: "Label messages",
+        description: "Adds labels to messages or takes them off, by the ids list_labels gives. \
+Only works when the user lets agents label messages, and the user can undo it.",
+        input_schema: label_messages,
+        effect: Effect {
+            read_only: false,
+            destructive: true,
+            idempotent: true,
+        },
+    },
 ];
 
 pub(crate) fn find(name: &str) -> Option<&'static Tool> {
@@ -268,6 +305,70 @@ fn update_draft() -> Value {
             "text": { "type": "string", "maxLength": 100000 },
         },
         "required": ["draft_id"],
+        "additionalProperties": false,
+    })
+}
+
+fn message_ids() -> Value {
+    json!({
+        "type": "array",
+        "items": { "type": "integer" },
+        "minItems": 1,
+        "maxItems": 100,
+        "description": "Ids from list_messages, search_messages or read_conversation.",
+    })
+}
+
+fn label_ids(description: &str) -> Value {
+    json!({
+        "type": "array",
+        "items": { "type": "integer" },
+        "description": description,
+    })
+}
+
+fn mark_messages() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "message_ids": message_ids(),
+            "read": { "type": "boolean" },
+            "flagged": { "type": "boolean" },
+        },
+        "required": ["message_ids"],
+        "additionalProperties": false,
+    })
+}
+
+fn move_messages() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "message_ids": message_ids(),
+            "to": {
+                "type": "string",
+                "enum": ["archive", "trash"],
+                "description": "Where to move them, unless folder_id says.",
+            },
+            "folder_id": {
+                "type": "integer",
+                "description": "A folder from list_folders, of the messages' account.",
+            },
+        },
+        "required": ["message_ids"],
+        "additionalProperties": false,
+    })
+}
+
+fn label_messages() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "message_ids": message_ids(),
+            "add": label_ids("Labels to add."),
+            "remove": label_ids("Labels to take off."),
+        },
+        "required": ["message_ids"],
         "additionalProperties": false,
     })
 }

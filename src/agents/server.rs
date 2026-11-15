@@ -11,11 +11,12 @@ use flectar_mail_core::{
     Core, MessagePageRequest,
     agents::is_end_to_end_encrypted,
     ai::clean_untrusted,
-    db::repo::agent_activity::NewAgentActivity,
+    db::repo::agent_activity::{LabelChange, NewAgentActivity},
     error::CoreError,
     models::{
-        Address, AgentAccess, AgentOutcome, FolderInfo, ListOrder, MessageCursor, MessageDetail,
-        MessageSearchCursor, MessageSummary, SaveDraftArgs, View, now_ms,
+        ActionKind, ActionParams, ActionTarget, Address, AgentAccess, AgentOutcome, FolderInfo,
+        ListOrder, MessageCursor, MessageDetail, MessageSearchCursor, MessageSummary,
+        PerformActionArgs, SaveDraftArgs, View, now_ms,
     },
 };
 use serde_json::{Map, Value, json};
@@ -39,6 +40,11 @@ const MAX_MESSAGE_CHARS: usize = 20_000;
 const MAX_CONVERSATION_CHARS: usize = 40_000;
 /// The most of an event's description an agent gets.
 const MAX_DESCRIPTION_CHARS: usize = 2_000;
+/// Messages all agents together may change in a minute, as the strictest
+/// mail apps that let agents organize mail allow.
+const CHANGES_PER_MINUTE: usize = 100;
+/// The most messages one call changes.
+const MAX_CHANGED_MESSAGES: usize = 100;
 /// The most recipients one field of an agent's draft takes.
 const MAX_RECIPIENTS: usize = 50;
 /// The longest subject and text an agent's draft takes.
@@ -49,6 +55,12 @@ const ACCESS_OFF: &str =
     "Agent access is off. The user can turn it on in Flectar Mail, in Settings, AI agents.";
 const DRAFTS_OFF: &str = "Writing drafts is off. The user can turn it on in Flectar Mail, in \
 Settings, AI agents.";
+
+/// The refusal for a permission the user hasn't given, such as "Moving
+/// messages".
+fn turned_off(what: &str) -> String {
+    format!("{what} is off. The user can turn it on in Flectar Mail, in Settings, AI agents.")
+}
 const ON_DEVICE_CANT_SEND: &str = "Mail on this device is answered from an email account. \
 Pass the account_id of one agents can read.";
 const NOT_AGENTS_DRAFT: &str = "Agents can change only their own drafts, and only until the \
@@ -104,10 +116,12 @@ impl Drop for AgentServer {
     }
 }
 
-/// Calls in the last minute, to keep a runaway agent from flooding the app.
+/// Calls and changed messages in the last minute, to keep a runaway agent
+/// from flooding the app or turning the user's mail over.
 #[derive(Default)]
 struct RateLimiter {
     calls: VecDeque<Instant>,
+    changes: VecDeque<(Instant, usize)>,
 }
 
 impl RateLimiter {
@@ -125,6 +139,23 @@ impl RateLimiter {
         self.calls.push_back(now);
         true
     }
+
+    /// Whether `count` more messages may change now, counting them if so.
+    fn allow_changes(&mut self, now: Instant, count: usize) -> bool {
+        while self
+            .changes
+            .front()
+            .is_some_and(|(at, _)| now.duration_since(*at) >= Duration::from_secs(60))
+        {
+            self.changes.pop_front();
+        }
+        let recent: usize = self.changes.iter().map(|(_, count)| count).sum();
+        if recent + count > CHANGES_PER_MINUTE {
+            return false;
+        }
+        self.changes.push_back((now, count));
+        true
+    }
 }
 
 /// What a tool returned.
@@ -134,6 +165,20 @@ struct Answer {
     account_id: Option<i64>,
     folder_id: Option<i64>,
     items: usize,
+    changes: Changes,
+}
+
+/// What a tool changed, for undo from the activity log.
+struct Changes {
+    action_ids: Vec<i64>,
+    label_changes: Vec<LabelChange>,
+}
+
+impl Changes {
+    const NONE: Self = Self {
+        action_ids: Vec::new(),
+        label_changes: Vec::new(),
+    };
 }
 
 enum Failure {
@@ -177,19 +222,40 @@ async fn answer(core: &Core, limiter: &Mutex<RateLimiter>, request: Request) -> 
         return Response::error(format!("There's no tool named {}.", request.tool));
     };
     let agent = agent_name(&request.agent);
-    let result = call(core, &access, tool.name, &request.arguments, &agent).await;
-    let (outcome, account_id, folder_id, items, response) = match result {
+    let result = call(
+        core,
+        &access,
+        limiter,
+        tool.name,
+        &request.arguments,
+        &agent,
+    )
+    .await;
+    let (outcome, account_id, folder_id, items, changes, response) = match result {
         Ok(answer) => (
             AgentOutcome::Done,
             answer.account_id,
             answer.folder_id,
             answer.items,
+            answer.changes,
             Response::ok(answer.text, Some(answer.structured)),
         ),
-        Err(Failure::Refused(text)) => {
-            (AgentOutcome::Refused, None, None, 0, Response::error(text))
-        }
-        Err(Failure::Failed(text)) => (AgentOutcome::Failed, None, None, 0, Response::error(text)),
+        Err(Failure::Refused(text)) => (
+            AgentOutcome::Refused,
+            None,
+            None,
+            0,
+            Changes::NONE,
+            Response::error(text),
+        ),
+        Err(Failure::Failed(text)) => (
+            AgentOutcome::Failed,
+            None,
+            None,
+            0,
+            Changes::NONE,
+            Response::error(text),
+        ),
     };
     let _ = core
         .record_agent_activity(NewAgentActivity {
@@ -200,8 +266,8 @@ async fn answer(core: &Core, limiter: &Mutex<RateLimiter>, request: Request) -> 
             folder_id,
             items: i64::try_from(items).unwrap_or(i64::MAX),
             outcome,
-            action_ids: Vec::new(),
-            label_changes: Vec::new(),
+            action_ids: changes.action_ids,
+            label_changes: changes.label_changes,
         })
         .await;
     super::activity_recorded();
@@ -227,6 +293,7 @@ fn agent_name(raw: &str) -> String {
 async fn call(
     core: &Core,
     access: &AgentAccess,
+    limiter: &Mutex<RateLimiter>,
     tool: &str,
     arguments: &Map<String, Value>,
     agent: &str,
@@ -245,6 +312,9 @@ async fn call(
         "list_events" => list_events(core, &scope, arguments).await,
         "create_draft" => create_draft(core, access, &scope, arguments, agent).await,
         "update_draft" => update_draft(core, access, &scope, arguments, agent).await,
+        "mark_messages" => mark_messages(core, access, limiter, &scope, arguments).await,
+        "move_messages" => move_messages(core, access, limiter, &scope, arguments).await,
+        "label_messages" => label_messages(core, access, limiter, &scope, arguments).await,
         _ => Err(Failure::Failed(format!("There's no tool named {tool}."))),
     }
 }
@@ -369,10 +439,33 @@ impl<'a> Arguments<'a> {
     }
 
     fn boolean(self, name: &str) -> Result<bool, Failure> {
+        Ok(self.optional_boolean(name)?.unwrap_or(false))
+    }
+
+    fn optional_boolean(self, name: &str) -> Result<Option<bool>, Failure> {
         match self.0.get(name) {
-            None | Some(Value::Null) => Ok(false),
-            Some(Value::Bool(value)) => Ok(*value),
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Bool(value)) => Ok(Some(*value)),
             Some(_) => Err(Failure::Failed(format!("{name} must be true or false."))),
+        }
+    }
+
+    /// A list of ids, `None` when the argument is left out.
+    fn ids(self, name: &str) -> Result<Option<Vec<i64>>, Failure> {
+        let not_ids = || Failure::Failed(format!("{name} must be a list of ids."));
+        match self.0.get(name) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Array(list)) => {
+                let mut ids = Vec::with_capacity(list.len());
+                for value in list {
+                    let id = value.as_i64().ok_or_else(not_ids)?;
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
+                }
+                Ok(Some(ids))
+            }
+            Some(_) => Err(not_ids()),
         }
     }
 
@@ -447,6 +540,7 @@ fn list_accounts(scope: &Scope) -> Result<Answer, Failure> {
     Ok(Answer {
         text,
         items: accounts.len(),
+        changes: Changes::NONE,
         structured: json!({ "accounts": accounts }),
         account_id: None,
         folder_id: None,
@@ -487,6 +581,7 @@ fn list_folders(scope: &Scope, arguments: Arguments<'_>) -> Result<Answer, Failu
     Ok(Answer {
         text,
         items: folders.len(),
+        changes: Changes::NONE,
         structured: json!({
             "folders": folders.iter().map(|folder| json!({
                 "id": folder.id,
@@ -524,6 +619,7 @@ async fn list_labels(core: &Core, scope: &Scope) -> Result<Answer, Failure> {
     Ok(Answer {
         text,
         items: labels.len(),
+        changes: Changes::NONE,
         structured: json!({
             "labels": labels.iter().map(|label| json!({
                 "id": label.id,
@@ -705,6 +801,7 @@ fn message_list(
     Answer {
         text,
         items: listed.len(),
+        changes: Changes::NONE,
         structured: json!({ "messages": listed, "next_cursor": next_cursor }),
         account_id,
         folder_id,
@@ -736,6 +833,7 @@ async fn read_message(
             .copied()
             .find(|id| scope.folder(*id).is_some()),
         items: 1,
+        changes: Changes::NONE,
     })
 }
 
@@ -785,6 +883,7 @@ async fn read_conversation(
         account_id,
         folder_id: None,
         items: rendered.len(),
+        changes: Changes::NONE,
     })
 }
 
@@ -1007,6 +1106,7 @@ async fn create_draft(
         account_id: Some(account_id),
         folder_id: None,
         items: recipients,
+        changes: Changes::NONE,
     })
 }
 
@@ -1094,6 +1194,297 @@ async fn update_draft(
         account_id: Some(account_id),
         folder_id: None,
         items: recipients,
+        changes: Changes::NONE,
+    })
+}
+
+/// The messages a change applies to, every one a message agents can read,
+/// or no change at all.
+async fn messages_to_change(
+    core: &Core,
+    scope: &Scope,
+    arguments: Arguments<'_>,
+) -> Result<Vec<MessageDetail>, Failure> {
+    let ids = arguments.ids("message_ids")?.unwrap_or_default();
+    if ids.is_empty() || ids.len() > MAX_CHANGED_MESSAGES {
+        return Err(Failure::Failed(format!(
+            "message_ids takes 1 to {MAX_CHANGED_MESSAGES} message ids."
+        )));
+    }
+    let mut messages = Vec::with_capacity(ids.len());
+    for id in ids {
+        let message = core
+            .stored_message(id)
+            .await
+            .map_err(|_| Failure::Failed(format!("There's no message with id {id}.")))?;
+        let folder_ids = core.message_folder_ids(id).await?;
+        if !scope.shows_message(&message, &folder_ids) {
+            return Err(Failure::Refused(NOT_SHARED.to_owned()));
+        }
+        messages.push(message);
+    }
+    Ok(messages)
+}
+
+/// Counts `count` changed messages against the minute's allowance.
+fn limit_changes(limiter: &Mutex<RateLimiter>, count: usize) -> Result<(), Failure> {
+    let allowed = limiter
+        .lock()
+        .map(|mut limiter| limiter.allow_changes(Instant::now(), count))
+        .unwrap_or(false);
+    if allowed {
+        Ok(())
+    } else {
+        Err(Failure::Failed(format!(
+            "Agents can change {CHANGES_PER_MINUTE} messages a minute. Wait a minute, then try \
+             again."
+        )))
+    }
+}
+
+/// The account all of `messages` are in, if they're in one.
+fn one_account(messages: &[MessageDetail]) -> Option<i64> {
+    let first = messages.first()?.account_id;
+    messages
+        .iter()
+        .all(|message| message.account_id == first)
+        .then_some(first)
+}
+
+/// "1 message", "3 messages".
+fn message_count(count: usize) -> String {
+    match count {
+        1 => "1 message".to_owned(),
+        count => format!("{count} messages"),
+    }
+}
+
+async fn mark_messages(
+    core: &Core,
+    access: &AgentAccess,
+    limiter: &Mutex<RateLimiter>,
+    scope: &Scope,
+    arguments: Arguments<'_>,
+) -> Result<Answer, Failure> {
+    if !access.can_mark {
+        return Err(Failure::Refused(turned_off("Marking messages")));
+    }
+    let read = arguments.optional_boolean("read")?;
+    let flagged = arguments.optional_boolean("flagged")?;
+    if read.is_none() && flagged.is_none() {
+        return Err(Failure::Failed("Pass read, flagged or both.".into()));
+    }
+    let messages = messages_to_change(core, scope, arguments).await?;
+    limit_changes(limiter, messages.len())?;
+    let ids = messages
+        .iter()
+        .map(|message| message.id)
+        .collect::<Vec<_>>();
+    let kinds = [
+        read.map(|read| {
+            if read {
+                ActionKind::MarkRead
+            } else {
+                ActionKind::MarkUnread
+            }
+        }),
+        flagged.map(|flagged| {
+            if flagged {
+                ActionKind::Star
+            } else {
+                ActionKind::Unstar
+            }
+        }),
+    ];
+    let mut action_ids = Vec::new();
+    for kind in kinds.into_iter().flatten() {
+        let done = core
+            .perform_action(PerformActionArgs {
+                kind,
+                target: ActionTarget::Messages(ids.clone()),
+                params: None,
+            })
+            .await?;
+        action_ids.extend(done.action_ids);
+    }
+    Ok(Answer {
+        text: format!("Marked {}.", message_count(ids.len())),
+        structured: json!({ "message_ids": ids }),
+        account_id: one_account(&messages),
+        folder_id: None,
+        items: ids.len(),
+        changes: Changes {
+            action_ids,
+            label_changes: Vec::new(),
+        },
+    })
+}
+
+async fn move_messages(
+    core: &Core,
+    access: &AgentAccess,
+    limiter: &Mutex<RateLimiter>,
+    scope: &Scope,
+    arguments: Arguments<'_>,
+) -> Result<Answer, Failure> {
+    if !access.can_move {
+        return Err(Failure::Refused(turned_off("Moving messages")));
+    }
+    let messages = messages_to_change(core, scope, arguments).await?;
+    // Archive and Trash are each account's own. Another folder must be one
+    // agents can read, in the messages' account.
+    let (kind, folder) = match (arguments.string("to")?, arguments.integer("folder_id")?) {
+        (Some("archive"), None) => (ActionKind::Archive, None),
+        (Some("trash"), None) => (ActionKind::Trash, None),
+        (None, Some(folder_id)) => {
+            let folder = scope
+                .folder(folder_id)
+                .ok_or_else(|| Failure::Refused(NOT_SHARED.to_owned()))?;
+            if !folder.selectable {
+                return Err(Failure::Failed(format!(
+                    "{} holds folders, not messages.",
+                    folder.display_name
+                )));
+            }
+            if messages
+                .iter()
+                .any(|message| message.account_id != folder.account_id)
+            {
+                return Err(Failure::Failed(
+                    "Messages move only between folders of their own account.".into(),
+                ));
+            }
+            (ActionKind::Move, Some(folder))
+        }
+        _ => {
+            return Err(Failure::Failed(
+                "Pass to as archive or trash, or a folder_id.".into(),
+            ));
+        }
+    };
+    limit_changes(limiter, messages.len())?;
+    let ids = messages
+        .iter()
+        .map(|message| message.id)
+        .collect::<Vec<_>>();
+    let done = core
+        .perform_action(PerformActionArgs {
+            kind,
+            target: ActionTarget::Messages(ids.clone()),
+            params: folder.map(|folder| ActionParams {
+                wake_at: None,
+                target_folder_id: Some(folder.id),
+                label_id: None,
+            }),
+        })
+        .await?;
+    let place = match (kind, folder) {
+        (_, Some(folder)) => folder.display_name.clone(),
+        (ActionKind::Archive, _) => "the archive".to_owned(),
+        _ => "Trash".to_owned(),
+    };
+    Ok(Answer {
+        text: format!("Moved {} to {place}.", message_count(ids.len())),
+        structured: json!({ "message_ids": ids }),
+        account_id: one_account(&messages),
+        folder_id: folder.map(|folder| folder.id),
+        items: ids.len(),
+        changes: Changes {
+            action_ids: done.action_ids,
+            label_changes: Vec::new(),
+        },
+    })
+}
+
+async fn label_messages(
+    core: &Core,
+    access: &AgentAccess,
+    limiter: &Mutex<RateLimiter>,
+    scope: &Scope,
+    arguments: Arguments<'_>,
+) -> Result<Answer, Failure> {
+    if !access.can_label {
+        return Err(Failure::Refused(turned_off("Labeling messages")));
+    }
+    let add = arguments.ids("add")?.unwrap_or_default();
+    let remove = arguments.ids("remove")?.unwrap_or_default();
+    if add.is_empty() && remove.is_empty() {
+        return Err(Failure::Failed(
+            "Pass label ids to add, to remove or both.".into(),
+        ));
+    }
+    if add.iter().any(|label_id| remove.contains(label_id)) {
+        return Err(Failure::Failed(
+            "A label can't be added and removed at once.".into(),
+        ));
+    }
+    let messages = messages_to_change(core, scope, arguments).await?;
+    let labels = core.list_labels().await?;
+    for label_id in add.iter().chain(&remove) {
+        let label = labels
+            .iter()
+            .find(|label| label.id == *label_id && !label.is_auto)
+            .ok_or_else(|| Failure::Failed(format!("There's no label with id {label_id}.")))?;
+        // An account's own label goes only on that account's mail.
+        if let Some(owner) = label.owner_account_id
+            && (scope.account(owner).is_none()
+                || messages.iter().any(|message| message.account_id != owner))
+        {
+            return Err(Failure::Failed(format!(
+                "{} is a label of another account.",
+                label.name
+            )));
+        }
+    }
+    limit_changes(limiter, messages.len())?;
+    let ids = messages
+        .iter()
+        .map(|message| message.id)
+        .collect::<Vec<_>>();
+    // Only messages whose labels change are changed and remembered for undo.
+    let mut label_changes = Vec::new();
+    for (label_ids, added) in [(&add, true), (&remove, false)] {
+        for &label_id in label_ids {
+            let labelled = core.messages_with_label(ids.clone(), label_id).await?;
+            let changing = ids
+                .iter()
+                .copied()
+                .filter(|id| labelled.contains(id) != added)
+                .collect::<Vec<_>>();
+            if changing.is_empty() {
+                continue;
+            }
+            core.perform_action(PerformActionArgs {
+                kind: if added {
+                    ActionKind::AddLabel
+                } else {
+                    ActionKind::RemoveLabel
+                },
+                target: ActionTarget::Messages(changing.clone()),
+                params: Some(ActionParams {
+                    wake_at: None,
+                    target_folder_id: None,
+                    label_id: Some(label_id),
+                }),
+            })
+            .await?;
+            label_changes.extend(changing.into_iter().map(|message_id| LabelChange {
+                message_id,
+                label_id,
+                added,
+            }));
+        }
+    }
+    Ok(Answer {
+        text: format!("Labeled {}.", message_count(ids.len())),
+        structured: json!({ "message_ids": ids }),
+        account_id: one_account(&messages),
+        folder_id: None,
+        items: ids.len(),
+        changes: Changes {
+            action_ids: Vec::new(),
+            label_changes,
+        },
     })
 }
 
@@ -1120,6 +1511,7 @@ async fn search_contacts(
     Ok(Answer {
         text,
         items: contacts.len(),
+        changes: Changes::NONE,
         structured: json!({ "contacts": contacts.iter().map(address_json).collect::<Vec<_>>() }),
         account_id: None,
         folder_id: None,
@@ -1213,6 +1605,7 @@ async fn list_events(
     Ok(Answer {
         text,
         items: events.len(),
+        changes: Changes::NONE,
         structured: json!({
             "events": events.iter().map(|event| json!({
                 "id": event.id,
@@ -1389,6 +1782,29 @@ mod tests {
         }
         assert!(!limiter.allow(start + Duration::from_secs(30)));
         assert!(limiter.allow(start + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn agents_change_a_limited_number_of_messages_a_minute() {
+        let mut limiter = RateLimiter::default();
+        let start = Instant::now();
+        assert!(limiter.allow_changes(start, 60));
+        assert!(limiter.allow_changes(start, CHANGES_PER_MINUTE - 60));
+        assert!(!limiter.allow_changes(start + Duration::from_secs(30), 1));
+        // Calls are counted apart from changes.
+        assert!(limiter.allow(start + Duration::from_secs(30)));
+        assert!(limiter.allow_changes(start + Duration::from_secs(60), CHANGES_PER_MINUTE));
+    }
+
+    #[test]
+    fn one_account_is_named_only_when_every_message_is_in_it() {
+        let in_account = |account_id| MessageDetail {
+            account_id,
+            ..message("")
+        };
+        assert_eq!(one_account(&[in_account(1), in_account(1)]), Some(1));
+        assert_eq!(one_account(&[in_account(1), in_account(2)]), None);
+        assert_eq!(one_account(&[]), None);
     }
 
     #[test]
