@@ -138,7 +138,7 @@ fn strip_detail(email: &str, reply: &AutoReply, now: i64) -> Option<UiMessage> {
 /// last read from its server.
 pub(crate) fn load_tab(app: &AppWindow, runtime: &Handle, core: Arc<Core>, config: &AccountConfig) {
     let ui = app.global::<AccountMailPreferences>();
-    let supported = config.provider == Provider::Gmail;
+    let supported = matches!(config.provider, Provider::Gmail | Provider::Microsoft);
     ui.set_auto_reply_supported(supported);
     ui.set_auto_reply_status("".into());
     ui.set_auto_reply_saving(false);
@@ -155,20 +155,32 @@ pub(crate) fn load_tab(app: &AppWindow, runtime: &Handle, core: Arc<Core>, confi
         ui.set_auto_reply_unsupported_text(translated(app, &reason));
         return;
     }
+    let gmail = config.provider == Provider::Gmail;
     ui.set_auto_reply_note(translated(
         app,
-        &UiMessage::plain(
-            "Gmail answers each sender once, and again after four days. Mailing lists and spam get no reply.",
-        ),
+        &if gmail {
+            UiMessage::plain(
+                "Gmail answers each sender once, and again after four days. Mailing lists and spam get no reply.",
+            )
+        } else {
+            UiMessage::plain("Outlook answers each sender once while replies are on.")
+        },
     ));
-    // Google Workspace accounts can keep replies inside the organization.
-    let domain = config
-        .email
-        .rsplit_once('@')
-        .map_or("", |(_, domain)| domain);
-    ui.set_auto_reply_domain_available(
-        !domain.eq_ignore_ascii_case("gmail.com") && !domain.eq_ignore_ascii_case("googlemail.com"),
-    );
+    // Outlook's replies have no subject of their own, and its days need an end.
+    ui.set_auto_reply_subject_available(gmail);
+    ui.set_auto_reply_needs_last_day(!gmail);
+    // Work accounts can keep replies inside the organization, and Outlook
+    // always answers it.
+    let work = !personal_account(&config.email);
+    ui.set_auto_reply_domain_available(work);
+    let contacts = if work && !gmail {
+        UiMessage::plain(
+            "Senders outside your organization who aren't in your contacts get no reply.",
+        )
+    } else {
+        UiMessage::plain("Senders who aren't in your contacts get no reply.")
+    };
+    ui.set_auto_reply_contacts_note(translated(app, &contacts));
     show_form(app, &AutoReply::default());
     let account_id = config.id;
     let weak = app.as_weak();
@@ -183,6 +195,20 @@ pub(crate) fn load_tab(app: &AppWindow, runtime: &Handle, core: Arc<Core>, confi
             show_form(&app, &reply);
         }
     });
+}
+
+/// Whether `email` is a personal Google or Microsoft account, which has no
+/// organization to keep replies inside.
+fn personal_account(email: &str) -> bool {
+    let domain = email
+        .rsplit_once('@')
+        .map_or("", |(_, domain)| domain)
+        .to_ascii_lowercase();
+    let first = domain.split('.').next().unwrap_or_default();
+    matches!(
+        domain.as_str(),
+        "gmail.com" | "googlemail.com" | "msn.com" | "passport.com"
+    ) || matches!(first, "outlook" | "hotmail" | "live" | "windowslive")
 }
 
 fn show_form(app: &AppWindow, reply: &AutoReply) {
@@ -212,6 +238,11 @@ fn form_reply(ui: &AccountMailPreferences<'_>) -> Result<AutoReply, UiMessage> {
     {
         return Err(UiMessage::plain("The last day comes before the first."));
     }
+    if ui.get_auto_reply_needs_last_day() && first.is_some() && last.is_none() {
+        return Err(UiMessage::plain(
+            "Outlook needs a last day with a first day.",
+        ));
+    }
     let enabled = ui.get_auto_reply_on();
     let text = ui.get_auto_reply_text().trim().to_owned();
     if enabled && text.is_empty() {
@@ -219,7 +250,11 @@ fn form_reply(ui: &AccountMailPreferences<'_>) -> Result<AutoReply, UiMessage> {
     }
     Ok(AutoReply {
         enabled,
-        subject: ui.get_auto_reply_subject().trim().to_owned(),
+        subject: if ui.get_auto_reply_subject_available() {
+            ui.get_auto_reply_subject().trim().to_owned()
+        } else {
+            String::new()
+        },
         text,
         // From the start of the first day to the end of the last, here.
         starts_at: first.and_then(local_midnight),
@@ -377,6 +412,26 @@ impl Saver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn personal_accounts_have_no_organization() {
+        for email in [
+            "a@gmail.com",
+            "a@outlook.com",
+            "a@hotmail.co.uk",
+            "a@live.de",
+            "a@msn.com",
+        ] {
+            assert!(personal_account(email), "{email}");
+        }
+        for email in [
+            "a@flectar.com",
+            "a@contoso.onmicrosoft.com",
+            "a@liverpool.ac.uk",
+        ] {
+            assert!(!personal_account(email), "{email}");
+        }
+    }
 
     #[test]
     fn days_are_typed_as_iso_dates_or_left_empty() {

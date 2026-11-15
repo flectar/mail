@@ -17,6 +17,9 @@ pub const MS_ONLINE_MEETINGS_SCOPE: &str = "https://graph.microsoft.com/OnlineMe
 /// user's Outlook / Microsoft 365 calendar, so events created in the app show
 /// up in Outlook and Teams. Same single-resource caveat as the meetings scope.
 pub const MS_CALENDARS_SCOPE: &str = "https://graph.microsoft.com/Calendars.ReadWrite";
+/// Reading and changing a Microsoft mailbox's settings, such as its automatic
+/// replies (#239). It needs no admin consent and works for personal accounts.
+pub const MS_MAILBOX_SETTINGS_SCOPE: &str = "https://graph.microsoft.com/MailboxSettings.ReadWrite";
 
 /// Incremental-consent scope for Google Drive, to send large files by link. It reaches only
 /// files the app made, and Google counts it as non-sensitive.

@@ -6,12 +6,12 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
-/// A request the Gmail stand-in answered: method, target and body.
-type Request = (String, String, String);
+/// A request the stand-in server answered: method, target and body.
+pub(super) type Request = (String, String, String);
 
-/// A Gmail stand-in that answers each request with `answer`'s status and
-/// JSON, and keeps the requests.
-async fn gmail(
+/// A Gmail or Microsoft Graph stand-in that answers each request with
+/// `answer`'s status and JSON, and keeps the requests.
+pub(super) async fn server(
     answer: impl Fn(&Request) -> (u16, Value) + Send + Sync + 'static,
 ) -> (String, Arc<Mutex<Vec<Request>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -119,7 +119,7 @@ fn away() -> AutoReply {
 async fn replies_go_to_gmail_as_its_vacation_responder() {
     let directory = tempfile::tempdir().unwrap();
     let core = gmail_core(&directory).await;
-    let (origin, requests) = gmail(|(method, target, body)| {
+    let (origin, requests) = server(|(method, target, body)| {
         assert_eq!(method, "PUT");
         assert_eq!(target, "/gmail/v1/users/me/settings/vacation");
         // Gmail answers with what it keeps, which here is what came.
