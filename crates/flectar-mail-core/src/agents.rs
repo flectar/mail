@@ -9,6 +9,7 @@ use crate::db::repo::agent_activity::NewAgentActivity;
 use crate::error::Result;
 use crate::models::{
     Address, AgentAccess, AgentActivity, MessageDetail, MessageSearchCursor, MessageSearchPage,
+    SaveDraftArgs,
 };
 
 impl Core {
@@ -93,6 +94,20 @@ impl Core {
             .await
     }
 
+    /// Saves a draft an agent wrote, remembering it as the agent's until
+    /// someone else saves it. Saving over a draft that isn't the agent's, or
+    /// that changed since the agent's last save, fails with `NotFound`.
+    pub async fn save_agent_draft(&self, args: SaveDraftArgs, agent: String) -> Result<i64> {
+        self.save_draft_as(args, Some(agent)).await
+    }
+
+    /// Whether `draft_id` is a draft an agent wrote that nobody saved since.
+    pub async fn agent_draft_unchanged(&self, draft_id: i64) -> Result<bool> {
+        self.db
+            .read(move |conn| repo::agent_drafts::unchanged(conn, draft_id))
+            .await
+    }
+
     /// Changes what agents may do, read and written on the writer thread so
     /// no other preference is overwritten with a stale copy.
     pub async fn update_agent_access(
@@ -155,6 +170,7 @@ pub fn is_end_to_end_encrypted(message: &MessageDetail) -> bool {
 mod tests {
     use super::*;
     use crate::db::testutil;
+    use crate::error::CoreError;
     use crate::models::AttachmentMeta;
 
     fn attachment(filename: &str, mime_type: &str) -> AttachmentMeta {
@@ -192,6 +208,70 @@ mod tests {
         let mut folders = repo::messages::folder_ids(&conn, message_id).unwrap();
         folders.sort();
         assert_eq!(folders, [1, 2]);
+    }
+
+    #[tokio::test]
+    async fn an_agent_changes_its_draft_only_until_the_user_does() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(crate::config::Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                testutil::seed_account(conn);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let draft = |draft_id: Option<i64>, text: &str| SaveDraftArgs {
+            draft_id,
+            account_id: 1,
+            from: None,
+            to: vec![Address {
+                name: None,
+                email: "alex@example.com".into(),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Plans".into(),
+            body_text: text.into(),
+            body_html: None,
+            mode: "new".into(),
+            in_reply_to_message_id: None,
+            in_reply_to_header: None,
+            attachments: Vec::new(),
+        };
+
+        let id = core
+            .save_agent_draft(draft(None, "First"), "Test agent".into())
+            .await
+            .unwrap();
+        assert!(core.agent_draft_unchanged(id).await.unwrap());
+        let again = core
+            .save_agent_draft(draft(Some(id), "Second"), "Test agent".into())
+            .await
+            .unwrap();
+        assert_eq!(again, id, "saved in place");
+        assert!(core.agent_draft_unchanged(id).await.unwrap());
+        assert_eq!(core.get_draft(id).await.unwrap().body_text, "Second");
+
+        // The user saves it from the composer: from now on it's theirs, even
+        // for a save the agent started before.
+        core.save_draft(draft(Some(id), "Mine now")).await.unwrap();
+        assert!(!core.agent_draft_unchanged(id).await.unwrap());
+        let late = core
+            .save_agent_draft(draft(Some(id), "Third"), "Test agent".into())
+            .await;
+        assert!(matches!(late, Err(CoreError::NotFound(_))), "{late:?}");
+        assert_eq!(core.get_draft(id).await.unwrap().body_text, "Mine now");
+        // A draft the user wrote never was the agent's.
+        let own = core.save_draft(draft(None, "My own")).await.unwrap();
+        assert!(!core.agent_draft_unchanged(own).await.unwrap());
+        let taken = core
+            .save_agent_draft(draft(Some(own), "Taken"), "Test agent".into())
+            .await;
+        assert!(matches!(taken, Err(CoreError::NotFound(_))), "{taken:?}");
+        assert_eq!(core.get_draft(own).await.unwrap().body_text, "My own");
     }
 
     #[test]

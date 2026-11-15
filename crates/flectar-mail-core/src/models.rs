@@ -2603,6 +2603,8 @@ pub struct AgentAccess {
     /// Spam and Trash folders agents can see. They're hidden otherwise, since
     /// junk mail is where hostile instructions are most likely to be.
     pub shown_folders: Vec<i64>,
+    /// Write drafts for the user to review and send. Agents never send them.
+    pub can_write_drafts: bool,
     /// Mark messages read or unread, flagged or not.
     pub can_mark: bool,
     /// Move messages between folders, to the archive or to the trash.
