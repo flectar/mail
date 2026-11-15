@@ -128,6 +128,10 @@ pub(super) struct ComposeSession {
     format_pending: Cell<Option<bool>>,
     /// Closed, and waiting for the event loop to let its window go.
     disposed: Cell<bool>,
+    /// The draft an AI agent asked to send, which this composer shows the
+    /// user to check (#237).
+    #[cfg(desktop)]
+    reviewing: Cell<Option<i64>>,
 }
 
 enum Host {
@@ -237,6 +241,18 @@ pub(super) fn install(
         dropped: RefCell::default(),
     });
     COMPOSERS.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&composers)));
+    #[cfg(desktop)]
+    crate::agents::on_send_review(|draft_id, agent| {
+        let posted = slint::invoke_from_event_loop(move || {
+            let opened = with_composers(|composers| composers.review_send(draft_id, &agent));
+            if opened != Some(true) {
+                crate::agents::review_ended(draft_id);
+            }
+        });
+        if posted.is_err() {
+            crate::agents::review_ended(draft_id);
+        }
+    });
 
     let weak = Rc::downgrade(&composers);
     app.on_open_compose(move |to| {
@@ -680,6 +696,8 @@ impl Composers {
             placeholder_warning: RefCell::default(),
             format_pending: Cell::new(Some(false)),
             disposed: Cell::new(false),
+            #[cfg(desktop)]
+            reviewing: Cell::new(None),
         });
         session.connect();
         // What's written starts in the default text style from Settings.
@@ -938,6 +956,61 @@ impl Composers {
         }
     }
 
+    /// Opens draft `draft_id`, which the AI agent `agent` asked to send, for
+    /// the user to check and send themselves (#237). False when it couldn't
+    /// open.
+    #[cfg(desktop)]
+    fn review_send(self: &Rc<Self>, draft_id: i64, agent: &str) -> bool {
+        if let Some(open) = self.holding_draft(draft_id) {
+            open.bring_forward();
+            return self.mark_review(&open, draft_id, agent);
+        }
+        let Some(core) = self.core() else {
+            return false;
+        };
+        let Ok(draft) = self.runtime.block_on(core.file_core().get_draft(draft_id)) else {
+            return false;
+        };
+        self.show_review(draft, agent)
+    }
+
+    /// Opens `draft`, which an AI agent asked to send, in a window of its
+    /// own, so a message the main window holds stays as it is.
+    #[cfg(desktop)]
+    fn show_review(self: &Rc<Self>, draft: SaveDraftArgs, agent: &str) -> bool {
+        let (Some(app), Some(draft_id)) = (self.app.upgrade(), draft.draft_id) else {
+            return false;
+        };
+        if let Some(open) = self.holding_draft(draft_id) {
+            open.bring_forward();
+            return self.mark_review(&open, draft_id, agent);
+        }
+        let Some(window) = new_window(&app) else {
+            return false;
+        };
+        match self.show_written_in(&app, draft, "draft", Some(window)) {
+            Some(session) => self.mark_review(&session, draft_id, agent),
+            None => false,
+        }
+    }
+
+    /// Notes over `session` that `agent` asked to send it.
+    #[cfg(desktop)]
+    fn mark_review(&self, session: &ComposeSession, draft_id: i64, agent: &str) -> bool {
+        let (Some(app), Some(host)) = (self.app.upgrade(), session.host()) else {
+            return false;
+        };
+        session.reviewing.set(Some(draft_id));
+        host.ui().set_review_note(translated(
+            &app,
+            &UiMessage::detail(
+                "{} asked to send this message. Check it, and send it only if it's right.",
+                agent,
+            ),
+        ));
+        true
+    }
+
     /// Open a saved draft in a composer.
     fn show_draft(self: &Rc<Self>, app: &AppWindow, draft: SaveDraftArgs) {
         self.show_written(app, draft, "draft");
@@ -946,17 +1019,29 @@ impl Composers {
     /// Open a written message in a composer: a saved draft (`mode` "draft"),
     /// or a new message the user has yet to look over ("new").
     fn show_written(self: &Rc<Self>, app: &AppWindow, draft: SaveDraftArgs, mode: &str) {
+        self.show_written_in(app, draft, mode, None);
+    }
+
+    /// Open a written message in a composer in `window`, or in the main
+    /// window's, and give the composer that shows it.
+    fn show_written_in(
+        self: &Rc<Self>,
+        app: &AppWindow,
+        draft: SaveDraftArgs,
+        mode: &str,
+        window: Option<Host>,
+    ) -> Option<Rc<ComposeSession>> {
         // A draft already open in a composer comes forward instead of opening
         // twice, where each copy's saves would overwrite the other's.
         if let Some(open) = draft.draft_id.and_then(|id| self.holding_draft(id)) {
             open.bring_forward();
-            return;
+            return Some(open);
         }
         let Ok(account_id) = i32::try_from(draft.account_id) else {
             app.set_render_status(UiMessage::plain(
                 "Could not open draft: invalid account identifier",
             ));
-            return;
+            return None;
         };
         let account_label = self
             .state
@@ -984,12 +1069,11 @@ impl Composers {
             .map(|address| address.email.clone())
             .unwrap_or_default();
 
-        let Some(session) = self.open(app) else {
-            return;
-        };
-        let Some(host) = session.host() else {
-            return;
-        };
+        let session = match window {
+            Some(window) => self.start_session(app, window),
+            None => self.open(app),
+        }?;
+        let host = session.host()?;
         let ui = host.ui();
         ui.set_account_id(account_id);
         ui.set_from_label(account_label.into());
@@ -1057,6 +1141,7 @@ impl Composers {
             draft_id: draft.draft_id,
         };
         session.show(mode, Some(draft_sender_email));
+        Some(session)
     }
 
     /// A send reached its end: a sent message closes its composer, a failed
@@ -1337,6 +1422,7 @@ impl ComposeSession {
         ui.set_quote_tiles(ModelRc::default());
         ui.set_quote_height(0.0);
         ui.set_notice(UiMessage::EMPTY, false);
+        ui.set_review_note("".into());
         apply_rich_compose_state(&ui, &self.document.borrow(), ComposeSelection::default());
     }
 
@@ -1567,6 +1653,10 @@ impl ComposeSession {
     pub(super) fn dispose(self: &Rc<Self>) {
         if self.disposed.replace(true) {
             return;
+        }
+        #[cfg(desktop)]
+        if let Some(draft_id) = self.reviewing.take() {
+            crate::agents::review_ended(draft_id);
         }
         self.files.borrow_mut().clear();
         self.attaching.set(0);
@@ -3857,6 +3947,60 @@ mod tests {
             _runtime: runtime,
             _dir: dir,
         }
+    }
+
+    #[test]
+    fn a_draft_an_agent_asks_to_send_opens_in_a_window_of_its_own() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        let main = app.global::<ComposerUi>();
+        // The user is writing a message of their own.
+        app.invoke_open_compose("friend@example.com".into());
+        main.set_subject("Mine".into());
+
+        let draft = SaveDraftArgs {
+            draft_id: Some(42),
+            account_id: 1,
+            from: None,
+            to: vec![Address {
+                name: None,
+                email: "priya@example.com".into(),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Plans".into(),
+            body_text: "Thursday works.".into(),
+            body_html: None,
+            mode: "new".into(),
+            in_reply_to_message_id: None,
+            in_reply_to_header: None,
+            attachments: Vec::new(),
+        };
+        assert!(composers.show_review(draft.clone(), "Claude"));
+        assert_eq!(open_windows(), 1);
+        let review = composers.holding_draft(42).unwrap();
+        let host = review.host().unwrap();
+        let ui = host.ui();
+        assert_eq!(ui.get_subject(), "Plans");
+        assert_eq!(ui.get_to(), "priya@example.com");
+        assert!(ui.get_review_note().contains("Claude"));
+        // Asked again, the same window comes forward.
+        assert!(composers.show_review(draft, "Claude"));
+        assert_eq!(open_windows(), 1);
+        // The user's own message stays as it was, without the note.
+        assert!(main.get_open());
+        assert_eq!(main.get_subject(), "Mine");
+        assert_eq!(main.get_review_note(), "");
+
+        // Closing it ends the review.
+        review.dispose();
+        assert_eq!(review.reviewing.get(), None);
+        assert_eq!(open_windows(), 0);
+        assert_eq!(main.get_subject(), "Mine");
     }
 
     #[cfg(desktop)]

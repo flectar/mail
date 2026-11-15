@@ -214,6 +214,16 @@ export component AgentAccessPage inherits VerticalLayout {
                 description-color: root.faint-text;
                 toggled(checked) => { AgentAccess.set-can-label(checked); }
             }
+            Rectangle { height: 1px; background: root.card-border-color; }
+            SettingsSwitchRow {
+                compact: root.compact;
+                title: @tr("Ask to send");
+                description: @tr("Agents can ask to send a draft. It opens for you to check, and only you can send it.");
+                checked <=> AgentAccess.can-send;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                toggled(checked) => { AgentAccess.set-can-send(checked); }
+            }
         }
 
         Card {

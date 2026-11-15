@@ -60,6 +60,9 @@ export global AgentAccess {
     callback set-can-move(bool);
     in-out property <bool> can-label;
     callback set-can-label(bool);
+    // Agents may ask to send a draft, which opens for the user to check.
+    in-out property <bool> can-send;
+    callback set-can-send(bool);
 
     // Connecting an agent's app: the apps there are instructions for, the
     // chosen one's text to paste, where it goes, and whether the app can
