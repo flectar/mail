@@ -337,6 +337,14 @@ in Settings → Accounts, under its sender identities and signatures, and replie
 and forwards to plain-text messages start as plain text unless that's turned
 off there. A draft opens again as it was saved.
 
+**Forward as attachment**, in a message's **More** menu or in the **More** menu
+for messages chosen in the list, attaches them to a new message, each as it
+arrived, which mail apps open as a message. A conversation chosen in the list
+sends each of its messages. They join the new message once they're fetched,
+from this device or from the server, and a copy of mail sent from here leaves
+out who it was blind copied to. A forward waits for its files, these and the
+original's attachments, before it can be sent.
+
 ## Spell check
 
 Flectar Mail underlines misspelled words as you write. On Windows, macOS, iOS

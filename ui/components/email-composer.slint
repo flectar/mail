@@ -45,6 +45,8 @@ export component EmailComposer inherits Rectangle {
     in property <string> photo-full-size: "";
     in-out property <bool> shrink-photos: false;
     in property <bool> shrinking-photos: false;
+    // A forward's files are still on their way, which sending and saving wait for.
+    in property <bool> attaching-files: false;
     // The message goes out as plain text only.
     in property <bool> plain-text: false;
     in-out property <string> from-label: @tr("No connected account");
@@ -208,7 +210,7 @@ export component EmailComposer inherits Rectangle {
         : root.to != "" || root.cc != "" || root.bcc != ""
             || root.subject != "" || root.body != "" || root.attachments.length > 0 || root.quote != "";
     // Photos going out shrunk are sent once they are.
-    private property <bool> can-send: !root.sending && !root.shrinking-photos && root.selected-account-id > 0 && root.to != "" && (root.body != "" || root.quote != "") && AccountMailPreferences.composer-preferences-ready;
+    private property <bool> can-send: !root.sending && !root.shrinking-photos && !root.attaching-files && root.selected-account-id > 0 && root.to != "" && (root.body != "" || root.quote != "") && AccountMailPreferences.composer-preferences-ready;
 
     // Pastes what the clipboard holds with its formatting, or as plain text in the message's
     // style when it holds none.
@@ -1040,6 +1042,7 @@ export component EmailComposer inherits Rectangle {
             has-content: root.has-content;
             sending: root.sending;
             shrinking-photos: root.shrinking-photos;
+            attaching-files: root.attaching-files;
             control-hover-color: root.control-hover-color;
             muted-color: root.muted-color;
             raised-color: root.raised-color;

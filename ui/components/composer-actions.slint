@@ -746,8 +746,10 @@ export component ComposerFooter inherits Rectangle {
     in property <bool> can-send: false;
     in property <bool> has-content: false;
     in property <bool> sending: false;
-    // Photos are being shrunk to go out, which a draft waits for too.
+    // Photos are being shrunk to go out, or a forward's files are on their way, which a draft
+    // waits for too.
     in property <bool> shrinking-photos: false;
+    in property <bool> attaching-files: false;
     // A signature saves to Settings or is left, with nothing to send or attach.
     in property <bool> signature: false;
     callback save-signature();
@@ -837,7 +839,7 @@ export component ComposerFooter inherits Rectangle {
                 width: max(root.compact ? 104px : 112px, self.content-width);
                 height: 32px;
                 text: @tr("Save draft");
-                enabled: root.has-content && !root.shrinking-photos;
+                enabled: root.has-content && !root.shrinking-photos && !root.attaching-files;
                 clicked => { root.submit(false); }
             }
 
