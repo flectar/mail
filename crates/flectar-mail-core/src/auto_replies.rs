@@ -1,6 +1,7 @@
 //! Automatic replies an account's server sends while the user is away
-//! (#239): Gmail's vacation responder, a Microsoft mailbox's settings, and
-//! JMAP's VacationResponse.
+//! (#239): Gmail's vacation responder, a Microsoft mailbox's settings,
+//! JMAP's VacationResponse, and a Sieve script of the app's own on IMAP
+//! servers that run them.
 //! The app saves them to the server and reads them back while syncing, so
 //! replies set in webmail show too. It never sends replies itself, so
 //! servers keep their own rules against replying to lists, to automatic
@@ -11,9 +12,12 @@ mod graph;
 use crate::Core;
 use crate::accounts::credentials;
 use crate::db::repo;
+use crate::db::repo::auto_replies::Origin;
 use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
-use crate::models::{Account, AutoReply, MailProtocol, Provider, now_ms};
+use crate::models::{
+    Account, AutoReply, AutoReplyQuestion, AutoReplySaved, MailProtocol, Provider, now_ms,
+};
 use crate::sync::engine::SyncCtx;
 use crate::{oauth, sync};
 
@@ -31,16 +35,34 @@ impl Core {
         self.db.read(|conn| repo::auto_replies::all(conn)).await
     }
 
+    /// Reads account `account_id`'s automatic replies from its server now,
+    /// for an IMAP account, whose server may keep them in a Sieve script.
+    /// Other accounts' replies come with each sync.
+    pub async fn check_auto_reply(&self, account_id: i64) -> Result<Option<AutoReply>> {
+        let config = self
+            .db
+            .read(move |conn| repo::accounts::get_config(conn, account_id))
+            .await?
+            .ok_or_else(|| CoreError::NotFound("account".into()))?;
+        if config.provider == Provider::Generic && config.mail_protocol == MailProtocol::Imap {
+            crate::sieve::read_back(&self.sync_ctx(), &config).await?;
+        }
+        self.auto_reply(account_id).await
+    }
+
     /// Saves `reply` as account `account_id`'s automatic replies on its
     /// server, and gives them as the server keeps them now. The first time,
     /// Google asks the user to let Flectar Mail change Gmail settings, on the
-    /// page `open_url` opens.
+    /// page `open_url` opens. On an IMAP server that runs the user's own
+    /// filter script, nothing changes until the user `allowed` what saving
+    /// asks.
     pub async fn set_auto_reply(
         &self,
         account_id: i64,
         reply: AutoReply,
+        allowed: Option<AutoReplyQuestion>,
         open_url: impl FnOnce(String) -> std::result::Result<(), String> + Send,
-    ) -> Result<AutoReply> {
+    ) -> Result<AutoReplySaved> {
         let (account, config, granted) = self
             .db
             .read(move |conn| {
@@ -114,18 +136,51 @@ impl Core {
                 }
                 crate::jmap::vacation::save(&connected, &reply).await?
             }
+            Provider::Generic if account.mail_protocol == MailProtocol::Imap => {
+                let password = credentials::load_async(
+                    self.credentials.clone(),
+                    account_id,
+                    credentials::Slot::Password,
+                )
+                .await?;
+                let addresses = self
+                    .db
+                    .read(move |conn| {
+                        Ok(repo::sender_identities::list(conn, account_id)?
+                            .into_iter()
+                            .filter(|identity| identity.is_verified() && !identity.is_wildcard())
+                            .map(|identity| identity.email)
+                            .collect::<Vec<_>>())
+                    })
+                    .await?;
+                match crate::sieve::save(
+                    &crate::sieve::server(&config),
+                    &config.username,
+                    &password,
+                    &reply,
+                    &addresses,
+                    allowed.as_ref(),
+                )
+                .await?
+                {
+                    AutoReplySaved::Done(saved) => saved,
+                    ask @ AutoReplySaved::Ask(_) => return Ok(ask),
+                }
+            }
             Provider::Generic => {
                 return Err(CoreError::Other(
-                    "Flectar Mail can't set this account's automatic replies yet".into(),
+                    "Flectar Mail can't set this account's automatic replies".into(),
                 ));
             }
         };
         let stored = saved.clone();
         self.db
-            .write(move |conn| repo::auto_replies::store(conn, account_id, &stored, now_ms(), true))
+            .write(move |conn| {
+                repo::auto_replies::store(conn, account_id, &stored, now_ms(), Origin::Saved)
+            })
             .await?;
         self.bus.emit(CoreEvent::AutoReplyChanged { account_id });
-        Ok(saved)
+        Ok(AutoReplySaved::Done(saved))
     }
 
     /// Asks Google, in the browser, to let the app change `account`'s Gmail
@@ -161,11 +216,11 @@ impl Core {
 /// settings, once the app saved them there, so that replies changed in
 /// Outlook show too.
 pub(crate) async fn read_back_from_graph(ctx: &SyncCtx, account_id: i64) -> Result<()> {
-    let saved = ctx
+    let saved_at = ctx
         .db
-        .read(move |conn| repo::auto_replies::uses_settings(conn, account_id))
+        .read(move |conn| repo::auto_replies::saved_at(conn, account_id))
         .await?;
-    if !saved {
+    if saved_at.is_none() {
         return Ok(());
     }
     let token = ctx
@@ -179,7 +234,15 @@ pub(crate) async fn read_back_from_graph(ctx: &SyncCtx, account_id: i64) -> Resu
     let reply = graph::GraphReplies::new()?.read(&token).await?;
     let changed = ctx
         .db
-        .write(move |conn| repo::auto_replies::store(conn, account_id, &reply, now_ms(), false))
+        .write(move |conn| {
+            repo::auto_replies::store(
+                conn,
+                account_id,
+                &reply,
+                now_ms(),
+                Origin::Read { saved_at },
+            )
+        })
         .await?;
     if changed {
         ctx.bus.emit(CoreEvent::AutoReplyChanged { account_id });
