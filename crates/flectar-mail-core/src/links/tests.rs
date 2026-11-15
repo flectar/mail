@@ -1,27 +1,61 @@
 use super::*;
 use crate::accounts::credentials::{CredentialStoreHandle, DevelopmentFileCredentialStore};
 use crate::config::Paths;
+use crate::models::AuthKind;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+/// A fake server's answer: a status, headers, and JSON or nothing.
+struct Reply {
+    status: u16,
+    headers: Vec<(&'static str, String)>,
+    body: Option<Value>,
+}
+
+impl From<(u16, Option<Value>)> for Reply {
+    fn from((status, body): (u16, Option<Value>)) -> Self {
+        Self {
+            status,
+            headers: Vec::new(),
+            body,
+        }
+    }
+}
+
+fn reply(status: u16, body: Value) -> Reply {
+    (status, Some(body)).into()
+}
+
+fn header(status: u16, name: &'static str, value: String) -> Reply {
+    Reply {
+        status,
+        headers: vec![(name, value)],
+        body: None,
+    }
+}
+
 /// A server that answers each request, on a connection of its own, with the next reply,
-/// JSON or nothing, and hands back the requests it got.
-async fn server(
-    replies: Vec<(u16, Option<Value>)>,
-) -> (String, tokio::task::JoinHandle<Vec<String>>) {
+/// and hands back the requests it got.
+async fn server<R: Into<Reply>>(replies: Vec<R>) -> (String, tokio::task::JoinHandle<Vec<String>>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     serve(listener, replies)
 }
 
-fn serve(
+fn serve<R: Into<Reply>>(
     listener: tokio::net::TcpListener,
-    replies: Vec<(u16, Option<Value>)>,
+    replies: Vec<R>,
 ) -> (String, tokio::task::JoinHandle<Vec<String>>) {
     let url = format!("http://{}/", listener.local_addr().unwrap());
+    let replies = replies.into_iter().map(Into::into).collect::<Vec<Reply>>();
     let task = tokio::spawn(async move {
         let mut requests = Vec::new();
-        for (status, reply) in replies {
+        for Reply {
+            status,
+            headers,
+            body: reply,
+        } in replies
+        {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut bytes = Vec::new();
             let mut chunk = vec![0; 64 * 1024];
@@ -53,9 +87,13 @@ fn serve(
             }
             requests.push(request);
             let body = reply.map(|reply| reply.to_string()).unwrap_or_default();
+            let headers = headers
+                .iter()
+                .map(|(name, value)| format!("{name}: {value}\r\n"))
+                .collect::<String>();
             let response = format!(
                 "HTTP/1.1 {status} Test\r\nConnection: close\r\nContent-Type: application/json\r\n\
-                 Content-Length: {}\r\n\r\n{body}",
+                 {headers}Content-Length: {}\r\n\r\n{body}",
                 body.len()
             );
             stream.write_all(response.as_bytes()).await.unwrap();
@@ -459,4 +497,552 @@ async fn a_large_file_goes_up_in_pieces_where_the_server_takes_them() {
     }
     assert!(request_line(&requests[10]).starts_with("MOVE /remote.php/dav/uploads/ana/flectar-"));
     assert!(request_line(&requests[10]).ends_with("/.file HTTP/1.1"));
+}
+
+/// A mail account signed in with OAuth, or with a password for another provider.
+async fn mail_account(core: &Core, provider: Provider, email: &'static str) -> i64 {
+    core.db
+        .write(move |conn| {
+            let settings = crate::db::testutil::account_settings();
+            let (protocol, auth_kind) = match provider {
+                Provider::Gmail => (crate::models::MailProtocol::Gmail, AuthKind::Oauth2),
+                Provider::Microsoft => (crate::models::MailProtocol::Imap, AuthKind::Oauth2),
+                Provider::Generic => (crate::models::MailProtocol::Imap, AuthKind::Password),
+            };
+            repo::accounts::insert(
+                conn,
+                &repo::accounts::NewAccount {
+                    email,
+                    display_name: None,
+                    avatar_url: None,
+                    provider,
+                    auth_kind,
+                    mail_protocol: protocol,
+                    username: email,
+                    jmap_url: "",
+                    jmap_account_id: None,
+                    incoming_host: "imap.example.com",
+                    incoming_port: 993,
+                    smtp_host: "smtp.example.com",
+                    smtp_port: 465,
+                },
+                &settings,
+            )
+        })
+        .await
+        .unwrap()
+}
+
+/// A storage service kept as signing in keeps it, answering at `url`.
+async fn kept_service(
+    core: &Core,
+    kind: LinkServiceKind,
+    account_id: Option<i64>,
+    url: &str,
+) -> i64 {
+    let url = url.to_owned();
+    core.db
+        .write(move |conn| {
+            conn.execute(
+                "INSERT INTO link_services
+                   (kind, account_id, server_url, login_name, display_name, created_at)
+                 VALUES (?1, ?2, ?3, 'ana@example.org', 'Storage', 0)",
+                params![kind.as_str(), account_id, url],
+            )?;
+            Ok(conn.last_insert_rowid())
+        })
+        .await
+        .unwrap()
+}
+
+/// A request's JSON body.
+fn body(request: &str) -> Value {
+    serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap_or_default()).unwrap()
+}
+
+/// A file of `size` bytes in `directory`.
+fn file_of(directory: &tempfile::TempDir, name: &str, size: usize) -> std::path::PathBuf {
+    let path = directory.path().join(name);
+    std::fs::write(
+        &path,
+        (0..size).map(|index| index as u8).collect::<Vec<_>>(),
+    )
+    .unwrap();
+    path
+}
+
+#[tokio::test]
+async fn a_message_sends_files_from_its_own_accounts_storage_or_the_server() {
+    let directory = tempfile::tempdir().unwrap();
+    let core = core(&directory).await;
+    let gmail = mail_account(&core, Provider::Gmail, "ana@gmail.com").await;
+    let microsoft = mail_account(&core, Provider::Microsoft, "ana@outlook.com").await;
+    let other = mail_account(&core, Provider::Generic, "ana@example.org").await;
+    assert_eq!(core.link_service_for_account(gmail).await.unwrap(), None);
+    assert!(core.google_scopes_in_use(gmail).await.unwrap().is_empty());
+
+    let drive = kept_service(&core, LinkServiceKind::GoogleDrive, Some(gmail), drive::API).await;
+    let pick = |account| {
+        let core = &core;
+        async move {
+            core.link_service_for_account(account)
+                .await
+                .unwrap()
+                .map(|service| service.id)
+        }
+    };
+    assert_eq!(pick(gmail).await, Some(drive));
+    // One account's storage doesn't take another's files.
+    assert_eq!(pick(microsoft).await, None);
+    assert_eq!(pick(other).await, None);
+    // Signing in again asks Google for Drive as well, to keep it.
+    assert_eq!(
+        core.google_scopes_in_use(gmail).await.unwrap(),
+        [oauth::providers::GOOGLE_DRIVE_FILE_SCOPE]
+    );
+
+    let server = kept_service(
+        &core,
+        LinkServiceKind::Nextcloud,
+        None,
+        "https://cloud.example.com/",
+    )
+    .await;
+    assert_eq!(pick(gmail).await, Some(drive));
+    assert_eq!(pick(microsoft).await, Some(server));
+    assert_eq!(pick(other).await, Some(server));
+
+    // An account that goes takes its storage with it.
+    core.db
+        .write(move |conn| repo::accounts::delete(conn, gmail))
+        .await
+        .unwrap();
+    let left = core.link_services().await.unwrap();
+    assert_eq!(
+        left.iter().map(|service| service.id).collect::<Vec<_>>(),
+        [server]
+    );
+    let onedrive = kept_service(
+        &core,
+        LinkServiceKind::OneDrive,
+        Some(microsoft),
+        onedrive::API,
+    )
+    .await;
+    assert_eq!(pick(microsoft).await, Some(onedrive));
+    // Its storage has no password to forget.
+    core.remove_link_service(onedrive).await.unwrap();
+    assert_eq!(pick(microsoft).await, Some(server));
+}
+
+#[tokio::test]
+async fn a_file_goes_up_to_google_drive_and_is_shared_by_a_link_that_lasts() {
+    let directory = tempfile::tempdir().unwrap();
+    let core = core(&directory).await;
+    let gmail = mail_account(&core, Provider::Gmail, "ana@gmail.com").await;
+    core.tokens
+        .store_initial(
+            gmail,
+            "drive-token".into(),
+            Some(3600),
+            Some("refresh".into()),
+            "client".into(),
+            None,
+        )
+        .await
+        .unwrap();
+    let file = directory.path().join("report.pdf");
+    std::fs::write(&file, b"%PDF report").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/", listener.local_addr().unwrap());
+    let (url, requests) = serve(
+        listener,
+        vec![
+            reply(200, json!({"files": []})),
+            reply(200, json!({"id": "folder1"})),
+            header(
+                200,
+                "Location",
+                format!("{base}upload/drive/v3/files?uploadType=resumable&upload_id=s1"),
+            ),
+            reply(200, json!({"id": "file1"})),
+            reply(200, json!({"id": "anyoneWithLink"})),
+            reply(
+                200,
+                json!({"webViewLink": "https://drive.google.com/file/d/file1/view?usp=drivesdk"}),
+            ),
+            (204, None).into(),
+        ],
+    );
+    let service = kept_service(&core, LinkServiceKind::GoogleDrive, Some(gmail), &url).await;
+    let link = core
+        .share_by_link(service, &file, "report.pdf")
+        .await
+        .unwrap();
+    assert_eq!(
+        link.url,
+        "https://drive.google.com/file/d/file1/view?usp=drivesdk"
+    );
+    assert_eq!(link.size, 11);
+    // Drive can't make a link that anyone opens expire, and asks for no password.
+    assert_eq!(link.expires_on, None);
+    assert_eq!(link.password, None);
+    assert_eq!(link.share_id, "file1");
+    core.unshare_link(&link).await.unwrap();
+
+    let requests = requests.await.unwrap();
+    assert!(
+        request_line(&requests[0])
+            .starts_with("GET /drive/v3/files?q=name+%3D+%27Mail+attachments%27")
+    );
+    assert!(
+        requests[0]
+            .to_lowercase()
+            .contains("authorization: bearer drive-token")
+    );
+    assert_eq!(
+        request_line(&requests[1]),
+        "POST /drive/v3/files?fields=id HTTP/1.1"
+    );
+    assert_eq!(
+        body(&requests[1]),
+        json!({"name": "Mail attachments", "mimeType": "application/vnd.google-apps.folder"})
+    );
+    assert_eq!(
+        request_line(&requests[2]),
+        "POST /upload/drive/v3/files?uploadType=resumable&fields=id HTTP/1.1"
+    );
+    assert!(
+        requests[2]
+            .to_lowercase()
+            .contains("x-upload-content-length: 11")
+    );
+    assert_eq!(
+        body(&requests[2]),
+        json!({"name": "report.pdf", "parents": ["folder1"]})
+    );
+    assert_eq!(
+        request_line(&requests[3]),
+        "PUT /upload/drive/v3/files?uploadType=resumable&upload_id=s1 HTTP/1.1"
+    );
+    // The session's address authorizes the file's bytes, which go without the token.
+    assert!(
+        requests[3]
+            .to_lowercase()
+            .contains("content-range: bytes 0-10/11")
+    );
+    assert!(!requests[3].to_lowercase().contains("authorization"));
+    assert!(requests[3].ends_with("%PDF report"));
+    assert_eq!(
+        request_line(&requests[4]),
+        "POST /drive/v3/files/file1/permissions HTTP/1.1"
+    );
+    assert_eq!(
+        body(&requests[4]),
+        json!({"role": "reader", "type": "anyone"})
+    );
+    assert_eq!(
+        request_line(&requests[5]),
+        "GET /drive/v3/files/file1?fields=webViewLink HTTP/1.1"
+    );
+    assert_eq!(
+        request_line(&requests[6]),
+        "DELETE /drive/v3/files/file1 HTTP/1.1"
+    );
+}
+
+#[tokio::test]
+async fn a_large_file_goes_up_to_drive_from_where_google_says() {
+    let directory = tempfile::tempdir().unwrap();
+    let size = 8 * 1024 * 1024 + 5;
+    let file = file_of(&directory, "big.bin", size);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/", listener.local_addr().unwrap());
+    let (url, requests) = serve(
+        listener,
+        vec![
+            header(200, "Location", format!("{base}upload/s2")),
+            // Half the first piece arrived.
+            header(308, "Range", "bytes=0-4194303".to_owned()),
+            reply(201, json!({"id": "big"})),
+        ],
+    );
+    let drive = drive::Drive::new(&url, "drive-token".into()).unwrap();
+    let (id, uploaded) = drive.upload(&file, "big.bin", "folder1").await.unwrap();
+    assert_eq!((id.as_str(), uploaded), ("big", size as u64));
+    let requests = requests.await.unwrap();
+    assert!(
+        requests[1]
+            .to_lowercase()
+            .contains("content-range: bytes 0-8388607/8388613")
+    );
+    assert!(requests[1].ends_with("<8388608 bytes>"));
+    assert!(
+        requests[2]
+            .to_lowercase()
+            .contains("content-range: bytes 4194304-8388612/8388613")
+    );
+    assert!(requests[2].ends_with("<4194309 bytes>"));
+}
+
+#[tokio::test]
+async fn a_drive_link_the_organization_refuses_leaves_nothing_behind() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = file_of(&directory, "notes.txt", 5);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/", listener.local_addr().unwrap());
+    let (url, requests) = serve(
+        listener,
+        vec![
+            // The app's folder is there from before.
+            reply(200, json!({"files": [{"id": "folder1"}]})),
+            header(200, "Location", format!("{base}upload/s3")),
+            reply(200, json!({"id": "file1"})),
+            reply(
+                400,
+                json!({"error": {
+                    "errors": [{
+                        "domain": "global",
+                        "reason": "invalidSharingRequest",
+                        "message": "Bad Request. User message: \"ACL change not allowed.\"",
+                    }],
+                    "code": 400,
+                    "message": "Bad Request",
+                }}),
+            ),
+            (204, None).into(),
+        ],
+    );
+    let drive = drive::Drive::new(&url, "drive-token".into()).unwrap();
+    let error = share_on_drive(&drive, 1, &file, "notes.txt")
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Your organization doesn't allow links that anyone can open."
+    );
+    let requests = requests.await.unwrap();
+    assert!(request_line(&requests[1]).starts_with("POST /upload/drive/v3/files"));
+    assert_eq!(
+        request_line(&requests[4]),
+        "DELETE /drive/v3/files/file1 HTTP/1.1"
+    );
+}
+
+#[tokio::test]
+async fn a_file_goes_up_to_onedrive_in_a_folder_of_its_own() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("plan.pdf");
+    std::fs::write(&file, b"%PDF report").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/", listener.local_addr().unwrap());
+    let (url, requests) = serve(
+        listener,
+        vec![
+            reply(
+                200,
+                json!({"id": "app1", "name": "Mail attachments", "folder": {}}),
+            ),
+            reply(201, json!({"id": "folder9", "folder": {}})),
+            reply(
+                200,
+                json!({"uploadUrl": format!("{base}up/abc"), "expirationDateTime": "2026-11-22T10:00:00Z"}),
+            ),
+            reply(
+                201,
+                json!({"id": "item1", "name": "Q3_ plan_.pdf", "size": 11, "parentReference": {"id": "folder9"}}),
+            ),
+            // A personal account without Microsoft 365 can't make a link expire.
+            reply(
+                400,
+                json!({"error": {"code": "invalidRequest", "message": "Invalid expiration date"}}),
+            ),
+            reply(
+                201,
+                json!({"id": "perm1", "link": {"type": "view", "scope": "anonymous", "webUrl": "https://1drv.ms/u/s!abc"}}),
+            ),
+            (204, None).into(),
+        ],
+    );
+    let drive = onedrive::OneDrive::new(&url, "graph-token".into()).unwrap();
+    let link = share_on_onedrive(&drive, 4, &file, "Q3: plan?.pdf", Some("2026-12-15".into()))
+        .await
+        .unwrap();
+    assert_eq!(link.url, "https://1drv.ms/u/s!abc");
+    assert_eq!(link.name, "Q3: plan?.pdf");
+    assert_eq!(link.size, 11);
+    assert_eq!(link.expires_on, None);
+    assert_eq!(
+        (link.share_id.as_str(), link.folder.as_str()),
+        ("item1", "folder9")
+    );
+    drive.delete(&link.folder).await.unwrap();
+
+    let requests = requests.await.unwrap();
+    assert_eq!(
+        request_line(&requests[0]),
+        "GET /me/drive/root:/Mail%20attachments HTTP/1.1"
+    );
+    assert!(
+        requests[0]
+            .to_lowercase()
+            .contains("authorization: bearer graph-token")
+    );
+    assert_eq!(
+        request_line(&requests[1]),
+        "POST /me/drive/items/app1/children HTTP/1.1"
+    );
+    let folder = body(&requests[1]);
+    assert_eq!(folder["name"].as_str().map(str::len), Some(12));
+    assert_eq!(folder["folder"], json!({}));
+    let line = request_line(&requests[2]);
+    // OneDrive refuses some characters in names.
+    assert_eq!(
+        line,
+        "POST /me/drive/items/folder9:/Q3_%20plan_.pdf:/createUploadSession HTTP/1.1"
+    );
+    assert_eq!(
+        body(&requests[2]),
+        json!({"item": {"@microsoft.graph.conflictBehavior": "rename"}})
+    );
+    assert_eq!(request_line(&requests[3]), "PUT /up/abc HTTP/1.1");
+    // Graph refuses a token with the file's bytes.
+    assert!(!requests[3].to_lowercase().contains("authorization"));
+    assert!(
+        requests[3]
+            .to_lowercase()
+            .contains("content-range: bytes 0-10/11")
+    );
+    assert_eq!(
+        request_line(&requests[4]),
+        "POST /me/drive/items/item1/createLink HTTP/1.1"
+    );
+    assert_eq!(
+        body(&requests[4]),
+        json!({"type": "view", "scope": "anonymous", "expirationDateTime": "2026-12-15T23:59:59Z"})
+    );
+    assert_eq!(
+        body(&requests[5]),
+        json!({"type": "view", "scope": "anonymous"})
+    );
+    assert_eq!(
+        request_line(&requests[6]),
+        "DELETE /me/drive/items/folder9 HTTP/1.1"
+    );
+}
+
+#[tokio::test]
+async fn a_large_file_goes_up_to_onedrive_from_where_the_session_says() {
+    let directory = tempfile::tempdir().unwrap();
+    let size = 10 * 1024 * 1024 + 7;
+    let file = file_of(&directory, "big.bin", size);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/", listener.local_addr().unwrap());
+    let (url, requests) = serve(
+        listener,
+        vec![
+            reply(200, json!({"uploadUrl": format!("{base}up/big")})),
+            reply(202, json!({"nextExpectedRanges": ["5242880-"]})),
+            reply(201, json!({"id": "big", "parentReference": {"id": "f2"}})),
+        ],
+    );
+    let drive = onedrive::OneDrive::new(&url, "graph-token".into()).unwrap();
+    let (id, uploaded) = drive.upload(&file, "f2", "big.bin").await.unwrap();
+    assert_eq!((id.as_str(), uploaded), ("big", size as u64));
+    let requests = requests.await.unwrap();
+    assert_eq!(
+        request_line(&requests[0]),
+        "POST /me/drive/items/f2:/big.bin:/createUploadSession HTTP/1.1"
+    );
+    assert!(
+        requests[1]
+            .to_lowercase()
+            .contains("content-range: bytes 0-10485759/10485767")
+    );
+    assert!(requests[1].ends_with("<10485760 bytes>"));
+    assert!(
+        requests[2]
+            .to_lowercase()
+            .contains("content-range: bytes 5242880-10485766/10485767")
+    );
+    assert!(requests[2].ends_with("<5242887 bytes>"));
+}
+
+#[tokio::test]
+async fn an_empty_file_goes_up_to_onedrive_in_one_request() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = file_of(&directory, "empty.txt", 0);
+    let (url, requests) = server(vec![reply(
+        201,
+        json!({"id": "e1", "parentReference": {"id": "f3"}}),
+    )])
+    .await;
+    let drive = onedrive::OneDrive::new(&url, "graph-token".into()).unwrap();
+    let (id, size) = drive.upload(&file, "f3", "empty.txt").await.unwrap();
+    assert_eq!((id.as_str(), size), ("e1", 0));
+    let requests = requests.await.unwrap();
+    assert_eq!(
+        request_line(&requests[0]),
+        "PUT /me/drive/items/f3:/empty.txt:/content HTTP/1.1"
+    );
+    assert!(
+        requests[0]
+            .to_lowercase()
+            .contains("authorization: bearer graph-token")
+    );
+}
+
+#[tokio::test]
+async fn a_onedrive_link_the_organization_refuses_leaves_nothing_behind() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = file_of(&directory, "notes.txt", 5);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/", listener.local_addr().unwrap());
+    let (url, requests) = serve(
+        listener,
+        vec![
+            // The app's folder isn't there yet, and is made.
+            reply(
+                404,
+                json!({"error": {"code": "itemNotFound", "message": "The resource could not be found."}}),
+            ),
+            reply(201, json!({"id": "app1", "folder": {}})),
+            reply(201, json!({"id": "folder2", "folder": {}})),
+            reply(200, json!({"uploadUrl": format!("{base}up/n")})),
+            reply(
+                201,
+                json!({"id": "item2", "parentReference": {"id": "folder2"}}),
+            ),
+            reply(
+                403,
+                json!({"error": {"code": "accessDenied", "message": "Access denied"}}),
+            ),
+            (204, None).into(),
+        ],
+    );
+    let drive = onedrive::OneDrive::new(&url, "graph-token".into()).unwrap();
+    let error = share_on_onedrive(&drive, 1, &file, "notes.txt", None)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Your organization doesn't allow links that anyone can open."
+    );
+    let requests = requests.await.unwrap();
+    assert_eq!(
+        request_line(&requests[1]),
+        "POST /me/drive/root/children HTTP/1.1"
+    );
+    assert_eq!(
+        body(&requests[1]),
+        json!({"name": "Mail attachments", "folder": {}, "@microsoft.graph.conflictBehavior": "fail"})
+    );
+    assert_eq!(
+        request_line(&requests[2]),
+        "POST /me/drive/items/app1/children HTTP/1.1"
+    );
+    assert_eq!(
+        request_line(&requests[6]),
+        "DELETE /me/drive/items/folder2 HTTP/1.1"
+    );
 }

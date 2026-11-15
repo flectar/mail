@@ -1,21 +1,32 @@
 import { VerticalBox } from "std-widgets.slint";
 import { Button } from "components/button.slint";
 import { LineEdit } from "components/controls.slint";
+import { OAuthBrowserHelp } from "components/oauth-browser-help.slint";
 import { SettingsSelectRow, SettingsSwitchRow } from "components/settings-components.slint";
 import { TypeScale } from "typography.slint";
 
-// A storage service files go by link from: its name, and who's signed in where.
+// A storage service files go by link from, or a Gmail or Microsoft account's storage that
+// can be turned on: its name, and who's signed in where.
 export struct LinkServiceRow {
+    // The service, or 0 for an account's storage that's off.
     id: int,
+    // The account whose storage it is, or 0 for a server.
+    account-id: int,
     name: string,
     detail: string,
 }
 
-// Storage services, such as a Nextcloud server, that large files go from by link.
+// Storage services, such as a Nextcloud server or a mail account's Google Drive, that large
+// files go from by link.
 export global LinkServices {
+    // The Gmail and Microsoft accounts' storage, then the servers.
     in property <[LinkServiceRow]> services: [];
+    // A Nextcloud or ownCloud server is connected.
+    in property <bool> has-server: false;
     // "idle", "waiting" while the sign-in in the browser is open, or "connecting".
     in property <string> state: "idle";
+    // The account whose storage is being turned on in the browser, or 0.
+    in property <int> authorizing: 0;
     in property <string> error: "";
     // How long links work: 7, 14, 30 or 90 days, or as long as the file is kept.
     in-out property <int> expiry-index: 2;
@@ -26,6 +37,9 @@ export global LinkServices {
     // The server's address, the name to sign in with, and an app password.
     callback connect-with-password(string, string, string);
     callback cancel-sign-in();
+    // The account whose Google Drive or OneDrive to turn on.
+    callback turn-on(int);
+    callback cancel-turn-on();
     callback remove(int);
     callback expiry-chosen(int);
     callback password-toggled(bool);
@@ -36,6 +50,13 @@ export component LargeFilesCard inherits Rectangle {
     in property <bool> compact: false;
     // The card shows, which brings what it lists up to date.
     in property <bool> shown: false;
+    // Another sign-in in the browser is under way, or sign-in settings are being saved.
+    in property <bool> oauth-busy: false;
+    in property <string> oauth-authorization-url;
+    in property <bool> oauth-browser-error: false;
+    callback retry-oauth-browser();
+    callback copy-oauth-link();
+    callback submit-oauth-redirect(string);
     in property <color> surface;
     in property <color> border-subtle;
     in property <color> heading;
@@ -68,7 +89,7 @@ export component LargeFilesCard inherits Rectangle {
 
         Text { text: @tr("Large files"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
         Text {
-            text: @tr("Files too large for a message, and ones you share by link, go to your Nextcloud or ownCloud storage, and the message carries links to them.");
+            text: @tr("Files too large for a message, and ones you share by link, go to cloud storage, and the message carries links to them. A message uses its account's Google Drive or OneDrive when that's on, and your Nextcloud or ownCloud server otherwise.");
             color: root.faint-text;
             font-size: TypeScale.secondary;
             wrap: word-wrap;
@@ -81,14 +102,52 @@ export component LargeFilesCard inherits Rectangle {
                 Text { text: service.name; color: root.body-text; font-weight: 600; overflow: elide; }
                 Text { text: service.detail; color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
             }
-            Button {
+            if service.id > 0 : Button {
                 width: max(80px, self.content-width);
                 text: @tr("Remove");
+                accessible-label: @tr("Remove {} ({})", service.name, service.detail);
                 clicked => { LinkServices.remove(service.id); }
+            }
+            if service.id == 0 && LinkServices.authorizing != service.account-id : Button {
+                width: max(80px, self.content-width);
+                text: @tr("Turn on");
+                accessible-label: @tr("Turn on {} ({})", service.name, service.detail);
+                enabled: !root.oauth-busy;
+                clicked => { LinkServices.turn-on(service.account-id); }
+            }
+            if service.id == 0 && LinkServices.authorizing == service.account-id : Button {
+                width: max(80px, self.content-width);
+                text: @tr("Cancel");
+                accessible-label: @tr("Stop turning on {} ({})", service.name, service.detail);
+                clicked => { LinkServices.cancel-turn-on(); }
             }
         }
 
-        if LinkServices.services.length == 0 && LinkServices.state == "waiting" : HorizontalLayout {
+        if LinkServices.authorizing != 0 : Text {
+            text: @tr("Finish signing in in your browser.");
+            color: root.body-text;
+            wrap: word-wrap;
+        }
+        if LinkServices.authorizing != 0 && root.oauth-authorization-url != "" : OAuthBrowserHelp {
+            launch-failed: root.oauth-browser-error;
+            retry => { root.retry-oauth-browser(); }
+            copy-link => { root.copy-oauth-link(); }
+            submit-redirect(address) => { root.submit-oauth-redirect(address); }
+        }
+
+        // The server's sign-in is a section of its own below the accounts' storage.
+        if !LinkServices.has-server && LinkServices.services.length > 0 : Rectangle {
+            height: 1px;
+            background: root.border-subtle;
+        }
+        if !LinkServices.has-server : Text {
+            text: @tr("Nextcloud or ownCloud");
+            color: root.body-text;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+
+        if !LinkServices.has-server && LinkServices.state == "waiting" : HorizontalLayout {
             spacing: 12px;
             Text {
                 text: @tr("Finish signing in in your browser.");
@@ -103,7 +162,7 @@ export component LargeFilesCard inherits Rectangle {
             }
         }
 
-        if LinkServices.services.length == 0 && LinkServices.state != "waiting" : VerticalLayout {
+        if !LinkServices.has-server && LinkServices.state != "waiting" : VerticalLayout {
             spacing: 8px;
             LineEdit {
                 height: 36px;
@@ -165,7 +224,7 @@ export component LargeFilesCard inherits Rectangle {
         SettingsSelectRow {
             compact: root.compact;
             title: @tr("Links work for");
-            description: @tr("A server that limits links shortens it.");
+            description: @tr("A server that limits links shortens it. Google Drive links, and OneDrive ones without Microsoft 365, last until the file is deleted.");
             choices: [@tr("7 days"), @tr("14 days"), @tr("30 days"), @tr("90 days"), @tr("As long as the file is kept")];
             selected-index <=> LinkServices.expiry-index;
             title-color: root.body-text;
@@ -176,7 +235,7 @@ export component LargeFilesCard inherits Rectangle {
         SettingsSwitchRow {
             compact: root.compact;
             title: @tr("Ask for a password");
-            description: @tr("Each link gets a password of its own, which the message leaves out for you to pass on another way.");
+            description: @tr("Each Nextcloud or ownCloud link gets a password of its own, which the message leaves out for you to pass on another way.");
             checked <=> LinkServices.password;
             title-color: root.body-text;
             description-color: root.faint-text;
