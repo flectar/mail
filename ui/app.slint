@@ -1124,6 +1124,8 @@ export component AppWindow inherits Window {
     // they show (0 to 3).
     in-out property <bool> mail_compact_rows: false;
     in-out property <int> mail_preview_lines: 1;
+    // Files dragged over the window would start a new message with them.
+    in property <bool> drop_starts_message: false;
     in property <string> selected_sender: "";
     in property <string> selected_address: "";
     in property <string> selected_subject: "";
@@ -2396,6 +2398,49 @@ export component AppWindow inherits Window {
                 - (root.active_view == "mail" && (root.compact-layout || root.mail_sidebar_collapsed)
                     ? LayoutMetrics.touch-target + 12px : 0px);
             z: 9000;
+        }
+
+        // Files dragged over the window with no message open start a new one,
+        // as files dropped on a message go into it.
+        if root.drop_starts_message : Rectangle {
+            x: 8px;
+            y: 8px;
+            width: parent.width - 16px;
+            height: parent.height - 16px;
+            z: 9500;
+            border-radius: 12px;
+            border-width: 2px;
+            border-color: AppTheme.accent;
+            background: AppTheme.surface.with-alpha(0.92);
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 8px;
+                padding: 24px;
+
+                Image {
+                    height: 32px;
+                    source: @image-url("icons/lucide/filled/compose.svg");
+                    colorize: AppTheme.accent;
+                    image-fit: contain;
+                    accessible-role: none;
+                }
+                Text {
+                    text: @tr("Drop to start a new message");
+                    color: AppTheme.title;
+                    font-size: TypeScale.heading-small;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: @tr("Pictures go in the text, and other files are attached.");
+                    color: AppTheme.muted;
+                    font-size: TypeScale.secondary;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
         }
 
         if ComposerUi.open : ComposeDialog {

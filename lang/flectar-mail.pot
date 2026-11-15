@@ -411,8 +411,8 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:226 ui/app.slint:1288 ui/components/composer-fields.slint:91
-#: ui/app.slint:226 ui/app.slint:1288 ui/components/composer-fields.slint:91 ui/components/email-composer.slint:52
+#: ui/app.slint:226 ui/app.slint:1290 ui/components/composer-fields.slint:91
+#: ui/app.slint:226 ui/app.slint:1290 ui/components/composer-fields.slint:91 ui/components/email-composer.slint:52
 msgid "No connected account"
 msgstr ""
 
@@ -2280,81 +2280,89 @@ msgstr ""
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1503 ui/app.slint:1516
+#: ui/app.slint:1505 ui/app.slint:1518
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:2460
+#: ui/app.slint:2429
+msgid "Drop to start a new message"
+msgstr ""
+
+#: ui/app.slint:2437 ui/components/email-composer.slint:1112
+msgid "Pictures go in the text, and other files are attached."
+msgstr ""
+
+#: ui/app.slint:2505
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2460 ui/views/files-view.slint:578
+#: ui/app.slint:2505 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:2464
+#: ui/app.slint:2509
 msgid "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2465
+#: ui/app.slint:2510
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2467
+#: ui/app.slint:2512
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2468
+#: ui/app.slint:2513
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2469 ui/app.slint:2495 ui/components/calendar.slint:1043
-#: ui/app.slint:2469 ui/app.slint:2495 ui/components/calendar.slint:1043
+#: ui/app.slint:2514 ui/app.slint:2540 ui/components/calendar.slint:1043
+#: ui/app.slint:2514 ui/app.slint:2540 ui/components/calendar.slint:1043
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:2470
+#: ui/app.slint:2515
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2470 ui/views/files-view.slint:660
-#: ui/app.slint:2470 ui/views/files-view.slint:660
+#: ui/app.slint:2515 ui/views/files-view.slint:660
+#: ui/app.slint:2515 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2492
+#: ui/app.slint:2537
 msgid "Mark all as read?"
 msgstr ""
 
-#: ui/app.slint:2494
+#: ui/app.slint:2539
 msgid "All unread messages in {} will be marked as read."
 msgstr ""
 
-#: ui/app.slint:2496
+#: ui/app.slint:2541
 msgid "Mark all as read"
 msgstr ""
 
-#: ui/app.slint:2677
+#: ui/app.slint:2722
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:2683
+#: ui/app.slint:2728
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:2696
+#: ui/app.slint:2741
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:2699
+#: ui/app.slint:2744
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:2704
+#: ui/app.slint:2749
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:2712 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2757 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 
@@ -3772,10 +3780,6 @@ msgstr ""
 
 #: ui/components/email-composer.slint:1104
 msgid "Drop to add to your message"
-msgstr ""
-
-#: ui/components/email-composer.slint:1112
-msgid "Pictures go in the text, and other files are attached."
 msgstr ""
 
 #: ui/components/email-link-context-area.slint:25
