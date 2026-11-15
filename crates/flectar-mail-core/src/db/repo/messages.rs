@@ -1475,6 +1475,23 @@ pub fn latest_in_thread(conn: &Connection, thread_id: i64) -> Result<Option<i64>
         .optional()?)
 }
 
+/// The folders `message_id` is in, as mail lists show it: its folder, and for
+/// Gmail any of its labels.
+pub fn folder_ids(conn: &Connection, message_id: i64) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT folder_id FROM messages WHERE id = ?1 AND folder_id IS NOT NULL
+         UNION
+         SELECT mf.folder_id FROM message_folders mf
+         JOIN messages m ON m.id = mf.message_id
+         JOIN accounts a ON a.id = m.account_id AND a.provider = 'gmail'
+         WHERE mf.message_id = ?1",
+    )?;
+    let ids = stmt
+        .query_map(params![message_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    Ok(ids)
+}
+
 pub fn list_for_thread(conn: &Connection, thread_id: i64) -> Result<Vec<MessageDetail>> {
     let sql = format!(
         "SELECT {DETAIL_MESSAGE_COLS}, b.text_body, b.html_body, {SEND_STATE_COLS}

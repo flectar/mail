@@ -1243,6 +1243,51 @@ pub enum ReceiptAnswer {
     Decline,
 }
 
+/// Something an AI agent did through the local MCP server, without message
+/// content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentActivity {
+    pub id: i64,
+    pub occurred_at: i64,
+    /// The name the agent's app gave itself.
+    pub agent: String,
+    pub tool: String,
+    pub account_id: Option<i64>,
+    pub folder_id: Option<i64>,
+    /// How many accounts, folders, messages, contacts or events it touched.
+    pub items: i64,
+    pub outcome: AgentOutcome,
+}
+
+/// How an agent's request ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentOutcome {
+    Done,
+    /// It asked for something outside its access.
+    Refused,
+    Failed,
+}
+
+impl AgentOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Done => "done",
+            Self::Refused => "refused",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub(crate) fn from_column(value: &str) -> Self {
+        match value {
+            "done" => Self::Done,
+            "refused" => Self::Refused,
+            _ => Self::Failed,
+        }
+    }
+}
+
 /// A sender whose mail goes to Spam.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2539,6 +2584,49 @@ pub struct Settings {
     /// account. Never names a deleted or empty profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_mail_profile: Option<String>,
+    /// What AI agents on this computer may do with mail through the local
+    /// MCP server. Off until the user turns it on.
+    #[serde(default)]
+    pub agent_access: AgentAccess,
+}
+
+/// What AI agents may see and do through `flectar-mail mcp`, the same for
+/// every agent. Reading is the only right that comes with access itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AgentAccess {
+    pub enabled: bool,
+    /// Accounts agents can't see.
+    pub hidden_accounts: Vec<i64>,
+    /// Folders agents can't see.
+    pub hidden_folders: Vec<i64>,
+    /// Spam and Trash folders agents can see. They're hidden otherwise, since
+    /// junk mail is where hostile instructions are most likely to be.
+    pub shown_folders: Vec<i64>,
+    /// Mark messages read or unread, flagged or not.
+    pub can_mark: bool,
+    /// Move messages between folders, to the archive or to the trash.
+    pub can_move: bool,
+    /// Add and remove labels.
+    pub can_label: bool,
+    /// Send drafts, each one approved in the app first.
+    pub can_send: bool,
+}
+
+impl AgentAccess {
+    /// Whether agents can see the account `account_id`.
+    pub fn shows_account(&self, account_id: i64) -> bool {
+        self.enabled && !self.hidden_accounts.contains(&account_id)
+    }
+
+    /// Whether agents can see `folder`.
+    pub fn shows_folder(&self, folder: &FolderInfo) -> bool {
+        if !self.shows_account(folder.account_id) || self.hidden_folders.contains(&folder.id) {
+            return false;
+        }
+        let hidden_by_role = matches!(folder.role.as_deref(), Some(roles::SPAM | roles::TRASH));
+        !hidden_by_role || self.shown_folders.contains(&folder.id)
+    }
 }
 
 /// A named, rich-HTML signature belonging to one account.
@@ -2739,6 +2827,7 @@ impl Default for Settings {
             account_short_names: std::collections::HashMap::new(),
             mail_profiles: Vec::new(),
             active_mail_profile: None,
+            agent_access: AgentAccess::default(),
         }
     }
 }

@@ -55,6 +55,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/036_returned_receipts.sql")),
     Migration::Plain(include_str!("migrations/037_mark_read.sql")),
     Migration::Plain(include_str!("migrations/038_oldest_first_lists.sql")),
+    Migration::Plain(include_str!("migrations/039_agent_activity.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -340,6 +341,7 @@ mod tests {
         let conn = fresh();
         let expected = [
             "accounts",
+            "agent_activity",
             "ai_usage_events",
             "app_settings",
             "attachment_files_fts",

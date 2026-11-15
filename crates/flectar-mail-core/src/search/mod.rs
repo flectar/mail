@@ -38,6 +38,9 @@ pub struct ParsedQuery {
     /// Scope results to a set of accounts, such as a mail profile's; an empty
     /// set matches nothing. Combines with `account_id`. Set by the caller.
     pub account_ids: Option<Vec<i64>>,
+    /// Scope results to messages in any of these folders, such as the ones an
+    /// AI agent may see; an empty set matches nothing. Set by the caller.
+    pub folder_ids: Option<Vec<i64>>,
 }
 
 /// A raw query token: a bare word or a `"quoted phrase"`. A phrase can be

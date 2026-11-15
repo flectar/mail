@@ -63,6 +63,35 @@ fn append_account_clauses(
     if let Some(account_ids) = &q.account_ids {
         where_clauses.push(account_set_clause("m.account_id", account_ids, bind));
     }
+    if let Some(folder_ids) = &q.folder_ids {
+        where_clauses.push(folder_set_clause(folder_ids, bind));
+    }
+}
+
+/// Whether message `m` is in any of `folder_ids` as mail lists show it: its
+/// folder, or for Gmail any of its labels. An empty set matches nothing.
+pub(crate) fn folder_set_clause(
+    folder_ids: &[i64],
+    bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+) -> String {
+    if folder_ids.is_empty() {
+        return "0".to_owned();
+    }
+    let placeholders = folder_ids
+        .iter()
+        .map(|folder_id| {
+            bind.push(Box::new(*folder_id));
+            format!("?{}", bind.len())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "(m.folder_id IN ({placeholders})
+          OR (EXISTS (SELECT 1 FROM accounts ma
+                      WHERE ma.id = m.account_id AND ma.provider = 'gmail')
+              AND EXISTS (SELECT 1 FROM message_folders mf
+                          WHERE mf.message_id = m.id AND mf.folder_id IN ({placeholders}))))"
+    )
 }
 
 /// `column IN (…)` for a set of accounts; an empty set matches nothing.
@@ -110,7 +139,8 @@ fn append_operator_clauses(
             "EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = ?{})",
             bind.len()
         ));
-    } else if has_positive_selector(q) {
+    } else if has_positive_selector(q) && q.folder_ids.is_none() {
+        // A folder scope names its folders, Trash and Spam only when meant.
         // No explicit `in:` scope: keep Trash and Spam out of results, the same
         // way the inbox and folder views do. Without this, a `from:`/keyword
         // search matches messages in every folder, so triaging a result (trash,
@@ -938,6 +968,54 @@ mod tests {
         assert_eq!(set_ids(vec![2]), vec![99]);
         assert_eq!(set_ids(vec![1, 2]), vec![t1, 99]);
         assert_eq!(set_ids(Vec::new()), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn a_folder_scope_keeps_matches_to_those_folders() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        c.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Junk', 'spam')",
+            [],
+        )
+        .unwrap();
+        let (_, inbox) = testutil::seed_message(&c, "a@one.dev", "quarterly plans", false);
+        let (_, junk) = testutil::seed_message(&c, "b@two.dev", "quarterly prize", false);
+        c.execute("UPDATE messages SET folder_id = 2 WHERE id = ?1", [junk])
+            .unwrap();
+        index_message(&c, inbox).unwrap();
+        index_message(&c, junk).unwrap();
+
+        let found = |folder_ids: Vec<i64>| {
+            let query = ParsedQuery {
+                folder_ids: Some(folder_ids),
+                ..crate::search::parse("quarterly")
+            };
+            chronological_message_page(&c, &query, None, 20)
+                .unwrap()
+                .messages
+                .into_iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(found(vec![1]), [inbox]);
+        assert_eq!(found(vec![2]), [junk]);
+        assert!(found(Vec::new()).is_empty());
+        // Gmail labels count, as they do in mail lists.
+        c.execute(
+            "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 2)",
+            [inbox],
+        )
+        .unwrap();
+        assert_eq!(found(vec![2]), [junk]);
+        c.execute(
+            "UPDATE accounts SET provider = 'gmail', mail_protocol = 'gmail' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        let mut both = found(vec![2]);
+        both.sort();
+        assert_eq!(both, [inbox, junk]);
     }
 
     #[test]
