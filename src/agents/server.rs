@@ -315,6 +315,7 @@ async fn call(
         "mark_messages" => mark_messages(core, access, limiter, &scope, arguments).await,
         "move_messages" => move_messages(core, access, limiter, &scope, arguments).await,
         "label_messages" => label_messages(core, access, limiter, &scope, arguments).await,
+        "send_draft" => send_draft(core, access, &scope, arguments, agent).await,
         _ => Err(Failure::Failed(format!("There's no tool named {tool}."))),
     }
 }
@@ -1192,6 +1193,57 @@ async fn update_draft(
         text: format!("Saved draft {saved}. The user reviews and sends it in Flectar Mail."),
         structured: json!({ "draft_id": saved, "account_id": account_id }),
         account_id: Some(account_id),
+        folder_id: None,
+        items: recipients,
+        changes: Changes::NONE,
+    })
+}
+
+async fn send_draft(
+    core: &Core,
+    access: &AgentAccess,
+    scope: &Scope,
+    arguments: Arguments<'_>,
+    agent: &str,
+) -> Result<Answer, Failure> {
+    if !access.can_send {
+        return Err(Failure::Refused(turned_off("Asking to send")));
+    }
+    let draft_id = arguments.required_integer("draft_id")?;
+    let draft = core
+        .get_draft(draft_id)
+        .await
+        .map_err(|_| Failure::Failed("There's no draft with that id.".into()))?;
+    if scope.account(draft.account_id).is_none() {
+        return Err(Failure::Refused(NOT_SHARED.to_owned()));
+    }
+    let recipients = draft.to.len() + draft.cc.len() + draft.bcc.len();
+    if recipients == 0 {
+        return Err(Failure::Failed(
+            "The draft has no recipients yet, so it can't be sent.".into(),
+        ));
+    }
+    match super::request_review(draft_id, agent.to_owned()) {
+        Ok(()) => {}
+        Err(super::ReviewRefused::Checking(other)) => {
+            return Err(Failure::Failed(format!(
+                "The user is still checking draft {other}, which an agent asked to send. Ask \
+                 again once they're done with it."
+            )));
+        }
+        Err(super::ReviewRefused::NoComposer) => {
+            return Err(Failure::Failed(
+                "Flectar Mail couldn't show the draft. Try again once its window is open.".into(),
+            ));
+        }
+    }
+    Ok(Answer {
+        text: format!(
+            "Opened draft {draft_id} in Flectar Mail for the user to check. It's sent only if \
+             they send it themselves."
+        ),
+        structured: json!({ "draft_id": draft_id, "status": "waiting_for_user" }),
+        account_id: Some(draft.account_id),
         folder_id: None,
         items: recipients,
         changes: Changes::NONE,
