@@ -6078,7 +6078,9 @@ msgid "Paste your client secret"
 msgstr ""
 
 #: ui/dialogs/oauth-setup-dialog.slint:110
-msgid "Create a Desktop app client in Google Cloud and enable the Gmail API."
+msgid ""
+"Create a Desktop app client in Google Cloud and enable the Gmail API. To "
+"send large files from Google Drive, enable the Google Drive API too."
 msgstr ""
 
 #: ui/dialogs/oauth-setup-dialog.slint:110
