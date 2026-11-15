@@ -3,6 +3,7 @@
 //! [`CoreEvent`]s to the Slint UI.
 
 pub mod accounts;
+pub mod agents;
 pub mod ai;
 pub mod autolabel;
 pub mod caldav;

@@ -46,6 +46,9 @@ mod memory_levels;
 /// platform tests.
 #[cfg(any(test, target_os = "windows"))]
 pub(crate) mod windows_install;
+/// Pipes and other kernel objects only the current user can open.
+#[cfg(target_os = "windows")]
+pub(crate) mod windows_security;
 
 /// Fonts a host without Fontconfig hands to the email (Blitz/Parley) renderer
 /// and the composer: the platform font directory, and the fallback policy the

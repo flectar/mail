@@ -19,6 +19,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Blocking senders](#blocking-senders)
 - [Read receipts](#read-receipts)
 - [Calendar invitations](#calendar-invitations)
+- [AI agents](#ai-agents)
 - [Storage and backups](#storage-and-backups)
 - [Importing accounts and mail](#importing-accounts-and-mail)
 - [HTML rendering](#html-rendering)
@@ -536,6 +537,31 @@ In the calendar, an invitation waiting for your answer is outlined, and
 declined or cancelled events are faded with their title struck through. An
 invitation reminds you of itself only once you accept it or answer **Maybe**,
 so one you haven't answered, such as calendar spam, stays quiet.
+
+## AI agents
+
+Settings → AI agents lets an AI app on your computer, such as a desktop
+assistant or a local model, read your mail through the Model Context Protocol
+(MCP). Flectar Mail runs no AI itself, and access stays off until you turn it
+on. The agent's app starts `flectar-mail mcp`, which hands each request to
+Flectar Mail while it runs, so mail still syncs in one place.
+
+Agents can list your accounts, folders and labels, list and search messages,
+read messages and conversations as plain text, search contacts and list
+calendar events. They can't change, move or send anything. You choose which
+accounts they can read and, for each account, which folders. Spam and Trash
+stay out until you add them, since junk mail is where hostile instructions are
+most likely to hide. Encrypted messages are withheld, and passwords, sign-in
+tokens and keys never reach an agent.
+
+The page shows how to add Flectar Mail to Claude Desktop, Claude Code, VS Code,
+Cursor, Zed, LM Studio and Codex, with links that add it to VS Code and LM
+Studio, and the command any other app needs. Its activity log lists what each
+agent did, without message content.
+
+What a message says comes from its sender. Agents are told to treat mail as
+data, and message text reaches them between markers that say so, but no agent
+is immune to instructions hidden in mail, so give agents only what they need.
 
 ## Storage and backups
 

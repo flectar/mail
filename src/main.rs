@@ -1,6 +1,8 @@
 mod account_controller;
 mod account_mail_preferences;
 mod account_status;
+#[cfg(desktop)]
+pub mod agents;
 mod app_icon;
 #[cfg(test)]
 mod account_removal_tests;
@@ -4711,6 +4713,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         core.file_core(),
                         startup_notification_host.clone(),
                     );
+                    #[cfg(desktop)]
+                    agents::core_ready(
+                        &startup_runtime,
+                        &startup_paths_for_ui.data_dir,
+                        core.file_core(),
+                    );
                     notifications::ui::core_ready();
                     if !startup_benchmark_disable_background {
                         core.notify_ui_ready();
@@ -6305,6 +6313,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     register_settings_preference_callbacks(&app, &state, &runtime);
     settings_controller::register_update_callbacks(&app, &state, &runtime, &platform.paths.cache_dir);
+    #[cfg(desktop)]
+    agents::register_settings(&app, &state, &runtime);
 
     account_mail_preferences::register(&app, &state, &runtime);
     let composers = composer::install(
@@ -7664,6 +7674,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     composer::save_open_messages();
     // Messages sent with an undo delay leave now, not at the next start.
     undo::send_before_exit(&runtime);
+    // Agents can't reach a closing app, and its endpoint goes with it.
+    #[cfg(desktop)]
+    agents::shutdown();
     let core = state.borrow().core.as_ref().map(CoreMailSource::file_core);
     notifications::withdraw_before_exit(&runtime, core, platform.notifications.clone());
     // The runtime ends with this function.
