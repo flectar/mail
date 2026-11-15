@@ -401,11 +401,7 @@ fn activity_row(
         ),
         AgentOutcome::Failed => detail.push(translated(app, &UiMessage::plain("Failed")).into()),
         AgentOutcome::Done if !entry.tool.starts_with("read_") => {
-            let results = if entry.items == 1 {
-                UiMessage::plain("1 result")
-            } else {
-                UiMessage::detail("{} results", entry.items)
-            };
+            let results = UiMessage::detail("{} results", entry.items);
             detail.push(translated(app, &results).into());
         }
         AgentOutcome::Done => {}
@@ -835,6 +831,30 @@ mod tests {
         assert_eq!(
             folders_summary(&folders, &access),
             UiMessage::plain("No folders")
+        );
+    }
+
+    #[test]
+    fn counts_take_the_language_s_plural_forms() {
+        use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+        struct Headless(Rc<MinimalSoftwareWindow>);
+        impl slint::platform::Platform for Headless {
+            fn create_window_adapter(
+                &self,
+            ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window))).unwrap();
+        let app = AppWindow::new().unwrap();
+        let text = |message: UiMessage| translated(&app, &message).to_string();
+
+        assert_eq!(text(UiMessage::detail("{} results", 1)), "1 result");
+        assert_eq!(text(UiMessage::detail("{} results", 12)), "12 results");
+        assert_eq!(
+            text(UiMessage::arguments("{} of {} folders", 3, 12)),
+            "3 of 12 folders"
         );
     }
 }

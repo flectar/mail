@@ -307,7 +307,6 @@ export global I18n {
         if (key == "Mail on this device") { return @tr("Mail on this device"); }
         if (key == "Refused, outside what agents can read") { return @tr("Refused, outside what agents can read"); }
         if (key == "Failed") { return @tr("Failed"); }
-        if (key == "1 result") { return @tr("1 result"); }
         if (key == "Other apps") { return @tr("Other apps"); }
         if (key == "In Claude Desktop, open Settings, Developer, Edit Config, and add flectar-mail to the mcpServers in that file. Then restart Claude Desktop.") { return @tr("In Claude Desktop, open Settings, Developer, Edit Config, and add flectar-mail to the mcpServers in that file. Then restart Claude Desktop."); }
         if (key == "Run this in a terminal.") { return @tr("Run this in a terminal."); }
@@ -323,12 +322,12 @@ export global I18n {
         if (key == "All folders except {}") { return @tr("All folders except {}", argument); }
         if (key == "Only {}") { return @tr("Only {}", argument); }
         if (key == "Used {}") { return @tr("Used {}", argument); }
-        if (key == "{} results") { return @tr("{} results", argument); }
+        if (key == "{} results") { return @tr("{n} result" | "{n} results" % round(argument.to-float())); }
         if (key == "Could not open the app: {}") { return @tr("Could not open the app: {}", argument); }
         if (key == "Command: {}") { return @tr("Command: {}", argument); }
         if (key == "Arguments: {}") { return @tr("Arguments: {}", argument); }
         if (key == "Environment: {}") { return @tr("Environment: {}", argument); }
-        if (key == "{} of {} folders") { return @tr("{} of {} folders", argument, second-argument); }
+        if (key == "{} of {} folders") { return @tr("{0} of {n} folder" | "{0} of {n} folders" % round(second-argument.to-float()), argument); }
         if (key == "Undo send preference saved.") { return @tr("Undo send preference saved."); }
         if (key == "Text style preference saved.") { return @tr("Text style preference saved."); }
         if (key == "Could not save notifications: {}") { return @tr("Could not save notifications: {}", argument); }
