@@ -562,10 +562,16 @@ With Write drafts on, agents can also save plain-text drafts, new messages or
 replies, in Drafts for you to check and send yourself. An agent can change its
 own draft until you edit it, and never anyone else's.
 
+Three more switches let agents mark messages read or flagged, move them to the
+archive, to Trash or to another folder, and add or take off your labels. They
+can change messages only in folders they can read, and never delete anything
+for good. Together they can change 100 messages a minute.
+
 The page shows how to add Flectar Mail to Claude Desktop, Claude Code, VS Code,
 Cursor, Zed, LM Studio and Codex, with links that add it to VS Code and LM
 Studio, and the command any other app needs. Its activity log lists what each
-agent did, without message content.
+agent did, without message content, and undoes what an agent changed for a
+week after.
 
 What a message says comes from its sender. Agents are told to treat mail as
 data, and message text reaches them between markers that say so, but no agent
