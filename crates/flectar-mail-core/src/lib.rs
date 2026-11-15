@@ -2380,12 +2380,18 @@ impl Core {
             .ok_or_else(|| CoreError::NotFound("account".into()))?;
         // Only OAuth mailboxes reauth through the browser; password/IMAP
         // accounts recover by re-entering credentials in the account editor.
+        let google_scopes;
         let consent_extra: &[&str] = match account.provider {
             Provider::Microsoft => &[
                 oauth::providers::MS_ONLINE_MEETINGS_SCOPE,
                 oauth::providers::MS_CALENDARS_SCOPE,
             ],
-            Provider::Gmail => &[],
+            // Asking again for what else the account uses keeps it: Android asks Google
+            // for what the sign-in lists.
+            Provider::Gmail => {
+                google_scopes = self.google_scopes_in_use(account_id).await?;
+                &google_scopes
+            }
             Provider::Generic => return Err(CoreError::Auth("not an oauth provider".into())),
         };
         credentials::check_available_async(self.credentials.clone()).await?;
