@@ -86,6 +86,26 @@ export global AccountMailPreferences {
     callback read-message;
     callback export-message;
     callback close-reader;
+
+    // Automatic replies (#239), as the account's server keeps them. Some
+    // servers can't send them, which the unsupported text explains.
+    in property <bool> auto-reply-supported: false;
+    in property <string> auto-reply-unsupported-text;
+    // How the server sends them, such as how often per sender.
+    in property <string> auto-reply-note;
+    in-out property <bool> auto-reply-on: false;
+    // Days as YYYY-MM-DD, or empty for no limit.
+    in-out property <string> auto-reply-first-day;
+    in-out property <string> auto-reply-last-day;
+    in-out property <string> auto-reply-subject;
+    in-out property <string> auto-reply-text;
+    in-out property <bool> auto-reply-contacts-only: false;
+    // Workspace accounts can keep replies inside the organization.
+    in property <bool> auto-reply-domain-available: false;
+    in-out property <bool> auto-reply-domain-only: false;
+    in property <bool> auto-reply-saving: false;
+    in property <string> auto-reply-status;
+    callback save-auto-reply();
     callback context-changed;
     in-out property <bool> reader-open: false;
     in-out property <string> reader-status;
@@ -95,7 +115,8 @@ export global AccountMailPreferences {
 export component AccountMailPreferencesPanel inherits OnScreenSurface {
     in property <[AccountRow]> accounts;
     in property <bool> compact: false;
-    in-out property <bool> security-tab: false;
+    // "signatures", "openpgp" or "replies".
+    in-out property <string> tab: "signatures";
     background: AppTheme.surface;
     border-radius: 10px;
     border-width: 1px;
@@ -124,8 +145,8 @@ export component AccountMailPreferencesPanel inherits OnScreenSurface {
     }
     content := VerticalBox {
         padding: 20px; spacing: 12px; alignment: start;
-        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Sender identities, signatures & OpenPGP"); color: AppTheme.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
-        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Choose an account to manage its sender identity, signature, and message protection."); color: AppTheme.secondary; wrap: word-wrap; }
+        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Sender identities, signatures, OpenPGP & automatic replies"); color: AppTheme.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Choose an account to manage its sender identity, signature, message protection and automatic replies."); color: AppTheme.secondary; wrap: word-wrap; }
         for account in root.accounts : Button {
             text: account.email;
             primary: AccountMailPreferences.account-id == account.id;
@@ -136,10 +157,11 @@ export component AccountMailPreferencesPanel inherits OnScreenSurface {
             spacing: 12px;
             Text { min-height: self.preferred-height; vertical-stretch: 0; text: AccountMailPreferences.account-label; color: AppTheme.heading; font-weight: 600; overflow: elide; }
             HorizontalBox {
-                Button { text: @tr("Signatures"); primary: !root.security-tab; clicked => { root.security-tab = false; } }
-                Button { text: @tr("OpenPGP"); primary: root.security-tab; clicked => { root.security-tab = true; } }
+                Button { text: @tr("Signatures"); primary: root.tab == "signatures"; clicked => { root.tab = "signatures"; } }
+                Button { text: @tr("OpenPGP"); primary: root.tab == "openpgp"; clicked => { root.tab = "openpgp"; } }
+                Button { text: @tr("Automatic replies"); primary: root.tab == "replies"; clicked => { root.tab = "replies"; } }
             }
-            if !root.security-tab : VerticalBox {
+            if root.tab == "signatures" : VerticalBox {
                 spacing: 10px;
                 SettingsSelectRow {
                     compact: root.compact; title: @tr("Default sender identity"); description: @tr("Preselected for new messages. Your sign-in address is unchanged.");
@@ -242,7 +264,71 @@ export component AccountMailPreferencesPanel inherits OnScreenSurface {
                     toggled(on) => { AccountMailPreferences.save-message-format(); }
                 }
             }
-            if root.security-tab : VerticalBox {
+            if root.tab == "replies" && !AccountMailPreferences.auto-reply-supported : Text {
+                min-height: self.preferred-height; vertical-stretch: 0;
+                text: AccountMailPreferences.auto-reply-unsupported-text;
+                color: AppTheme.secondary; wrap: word-wrap;
+            }
+            if root.tab == "replies" && AccountMailPreferences.auto-reply-supported : VerticalBox {
+                spacing: 10px;
+                SettingsSwitchRow {
+                    compact: root.compact; title: @tr("Send automatic replies"); description: AccountMailPreferences.auto-reply-note;
+                    checked <=> AccountMailPreferences.auto-reply-on;
+                    enabled: !AccountMailPreferences.auto-reply-saving;
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                }
+                HorizontalBox {
+                    padding: 0px; spacing: 10px;
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text { text: @tr("FIRST DAY (OPTIONAL)"); color: AppTheme.secondary; font-size: TypeScale.caption; font-weight: 700; overflow: elide; }
+                        LineEdit { text <=> AccountMailPreferences.auto-reply-first-day; input-label: @tr("First day"); placeholder-text: @tr("YYYY-MM-DD"); enabled: !AccountMailPreferences.auto-reply-saving; }
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text { text: @tr("LAST DAY (OPTIONAL)"); color: AppTheme.secondary; font-size: TypeScale.caption; font-weight: 700; overflow: elide; }
+                        LineEdit { text <=> AccountMailPreferences.auto-reply-last-day; input-label: @tr("Last day"); placeholder-text: @tr("YYYY-MM-DD"); enabled: !AccountMailPreferences.auto-reply-saving; }
+                    }
+                }
+                Text { text: @tr("SUBJECT"); color: AppTheme.secondary; font-size: TypeScale.caption; font-weight: 700; overflow: elide; }
+                LineEdit { text <=> AccountMailPreferences.auto-reply-subject; input-label: @tr("Subject"); placeholder-text: @tr("Such as Out of office"); enabled: !AccountMailPreferences.auto-reply-saving; }
+                Text { text: @tr("MESSAGE"); color: AppTheme.secondary; font-size: TypeScale.caption; font-weight: 700; overflow: elide; }
+                TextEdit {
+                    min-height: 120px; vertical-stretch: 0; wrap: word-wrap;
+                    text <=> AccountMailPreferences.auto-reply-text;
+                    placeholder-text: @tr("Message, such as I'm away until Monday and will answer when I'm back.");
+                    enabled: !AccountMailPreferences.auto-reply-saving;
+                }
+                SettingsSwitchRow {
+                    compact: root.compact; title: @tr("Only reply to my contacts"); description: @tr("Senders who aren't in your contacts get no reply.");
+                    checked <=> AccountMailPreferences.auto-reply-contacts-only;
+                    enabled: !AccountMailPreferences.auto-reply-saving;
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                }
+                if AccountMailPreferences.auto-reply-domain-available : SettingsSwitchRow {
+                    compact: root.compact; title: @tr("Only reply inside my organization"); description: @tr("Senders from other domains get no reply.");
+                    checked <=> AccountMailPreferences.auto-reply-domain-only;
+                    enabled: !AccountMailPreferences.auto-reply-saving;
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                }
+                HorizontalBox {
+                    padding: 0px; spacing: 12px;
+                    Text {
+                        horizontal-stretch: 1; vertical-alignment: center; wrap: word-wrap;
+                        text: AccountMailPreferences.auto-reply-status;
+                        color: AppTheme.secondary;
+                    }
+                    Button {
+                        horizontal-stretch: 0;
+                        width: max(120px, self.content-width);
+                        text: AccountMailPreferences.auto-reply-saving ? @tr("Saving…") : @tr("Save");
+                        primary: true;
+                        enabled: !AccountMailPreferences.auto-reply-saving;
+                        clicked => { AccountMailPreferences.save-auto-reply(); }
+                    }
+                }
+            }
+            if root.tab == "openpgp" : VerticalBox {
                 spacing: 10px;
                 Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("OpenPGP protects message bodies and attachments. Digital signatures let recipients check who signed a message."); color: AppTheme.secondary; wrap: word-wrap; }
                 Text { min-height: self.preferred-height; vertical-stretch: 0; text: AccountMailPreferences.desktop-supported ? @tr("Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered in GnuPG's unlock dialog.") : @tr("OpenPGP is unavailable on this mobile build. Protected accounts cannot send without a supported encryption engine."); color: AppTheme.secondary; wrap: word-wrap; }

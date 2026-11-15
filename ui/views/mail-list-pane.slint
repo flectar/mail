@@ -16,6 +16,7 @@ import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { ImportActivity } from "../dialogs/import-dialog.slint";
+import { AutoReplyActivity } from "../auto-replies.slint";
 import { MovePickerUi } from "../dialogs/move-dialog.slint";
 
 // A chip on a message-list row that acts on what it shows instead of
@@ -922,6 +923,7 @@ export component MailListPane inherits FocusScope {
                     }
 
                     ImportActivity { compact: root.compact; }
+                    AutoReplyActivity { compact: root.compact; }
 
                     Rectangle {
                         vertical-stretch: 1;
