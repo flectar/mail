@@ -20,6 +20,17 @@ retains its upstream license texts in
 and its pointer scroll backport is documented in
 [`patches/slint-android-activity/README.md`](patches/slint-android-activity/README.md).
 
+## smithay-clipboard
+
+Slint's winit backend uses the locally patched `smithay-clipboard` 0.7.2 crate
+for the Wayland clipboard and, through its patch, for files dropped on a
+window. It is copyright © Smithay contributors and used under the MIT license,
+whose text it retains in
+[`crates/smithay-clipboard/LICENSE`](crates/smithay-clipboard/LICENSE). The
+upstream source is <https://github.com/smithay/smithay-clipboard>. The source
+checksum, the patch, and its removal condition are documented in
+[`patches/smithay-clipboard/README.md`](patches/smithay-clipboard/README.md).
+
 ## Blitz
 
 The locally patched `blitz-dom` and `blitz-paint` crates originate from the

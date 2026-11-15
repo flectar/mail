@@ -294,8 +294,10 @@ style of the text around it. On phones, text pastes as plain text.
 **Insert image** in the toolbar puts pictures in the text at the cursor, and
 pasting a screenshot or a picture copied from another app does the same on the
 desktop. Files dropped on a message go in too, pictures in the text and other
-files as attachments, on Windows, macOS and Linux under X11. Dropped on the
-window with no message open, they start a new one. PNG, JPEG, GIF
+files as attachments. Dropped on the window with no message open, they start a
+new one. The Flatpak gets dropped files through the desktop's file portal,
+which GNOME Files and Dolphin use under Wayland. Files from other apps, or
+under X11, go in with **Attach files** instead. PNG, JPEG, GIF
 and WebP images show at their own size, or smaller to fit the window, and a
 click selects one. They go out as parts of the message that mail apps show in
 place, and mail read as plain text names each one. A forward keeps the

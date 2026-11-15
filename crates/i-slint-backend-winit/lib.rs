@@ -542,6 +542,7 @@ impl SharedBackendData {
             &event_loop
                 .display_handle()
                 .map_err(|display_err| PlatformError::OtherError(display_err.into()))?,
+            &event_loop_proxy,
         );
         Ok(Self {
             context: Default::default(),
@@ -655,6 +656,25 @@ impl SharedBackendData {
 
     pub fn window_by_id(&self, id: winit::window::WindowId) -> Option<Rc<WinitWindowAdapter>> {
         self.active_windows.borrow().get(&id).and_then(|weakref| weakref.upgrade())
+    }
+
+    /// The window whose Wayland surface is the `wl_surface` at `surface`.
+    #[cfg(wayland_file_drops)]
+    pub(crate) fn window_for_wayland_surface(
+        &self,
+        surface: usize,
+    ) -> Option<winit::window::WindowId> {
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let windows = self.active_windows.borrow().clone();
+        windows.into_iter().find_map(|(id, adapter)| {
+            let window = adapter.upgrade()?.winit_window()?;
+            match window.window_handle().ok()?.as_raw() {
+                RawWindowHandle::Wayland(handle) if handle.surface.as_ptr() as usize == surface => {
+                    Some(id)
+                }
+                _ => None,
+            }
+        })
     }
 
     /// Buffer a mouse move event for the given window, coalescing it with the previously buffered
