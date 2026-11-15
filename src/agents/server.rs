@@ -200,6 +200,8 @@ async fn answer(core: &Core, limiter: &Mutex<RateLimiter>, request: Request) -> 
             folder_id,
             items: i64::try_from(items).unwrap_or(i64::MAX),
             outcome,
+            action_ids: Vec::new(),
+            label_changes: Vec::new(),
         })
         .await;
     super::activity_recorded();

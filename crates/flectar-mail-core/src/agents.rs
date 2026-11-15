@@ -5,12 +5,13 @@
 
 use crate::Core;
 use crate::db::repo;
-use crate::db::repo::agent_activity::NewAgentActivity;
+use crate::db::repo::agent_activity::{NewAgentActivity, Undo};
 use crate::error::Result;
 use crate::models::{
-    Address, AgentAccess, AgentActivity, MessageDetail, MessageSearchCursor, MessageSearchPage,
-    SaveDraftArgs,
+    ActionKind, ActionParams, ActionTarget, Address, AgentAccess, AgentActivity, MessageDetail,
+    MessageSearchCursor, MessageSearchPage, PerformActionArgs, SaveDraftArgs, now_ms,
 };
+use std::collections::BTreeMap;
 
 impl Core {
     /// Messages matching `query` in any of `folder_ids`, newest first.
@@ -133,7 +134,80 @@ impl Core {
     /// The newest `limit` activity log entries, newest first.
     pub async fn agent_activity(&self, limit: i64) -> Result<Vec<AgentActivity>> {
         self.db
-            .read(move |conn| repo::agent_activity::list(conn, limit))
+            .read(move |conn| repo::agent_activity::list(conn, limit, now_ms()))
+            .await
+    }
+
+    /// Takes back what an agent changed in activity entry `activity_id`, as
+    /// far as it still can. False when there was nothing left to undo.
+    pub async fn undo_agent_activity(&self, activity_id: i64) -> Result<bool> {
+        let undo = self
+            .db
+            .write(move |conn| repo::agent_activity::claim_undo(conn, activity_id, now_ms()))
+            .await?;
+        if undo.is_empty() {
+            return Ok(false);
+        }
+        let undone = self.take_back(undo).await;
+        // The entry stays undone once anything was taken back, so nothing is
+        // taken back twice.
+        if matches!(undone, Ok(false)) {
+            self.db
+                .write(move |conn| repo::agent_activity::release_undo(conn, activity_id))
+                .await?;
+        }
+        undone
+    }
+
+    /// Takes back queued actions, and puts labels back as they were.
+    async fn take_back(&self, undo: Undo) -> Result<bool> {
+        let mut undone = !undo.action_ids.is_empty() && self.undo_actions(undo.action_ids).await?;
+        let mut labels = BTreeMap::<(i64, bool), Vec<i64>>::new();
+        for change in undo.label_changes {
+            labels
+                .entry((change.label_id, change.added))
+                .or_default()
+                .push(change.message_id);
+        }
+        for ((label_id, added), message_ids) in labels {
+            self.perform_action(PerformActionArgs {
+                kind: if added {
+                    ActionKind::RemoveLabel
+                } else {
+                    ActionKind::AddLabel
+                },
+                target: ActionTarget::Messages(message_ids),
+                params: Some(ActionParams {
+                    wake_at: None,
+                    target_folder_id: None,
+                    label_id: Some(label_id),
+                }),
+            })
+            .await?;
+            undone = true;
+        }
+        Ok(undone)
+    }
+
+    /// Which of `message_ids` have label `label_id`.
+    pub async fn messages_with_label(
+        &self,
+        message_ids: Vec<i64>,
+        label_id: i64,
+    ) -> Result<Vec<i64>> {
+        self.db
+            .read(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT 1 FROM message_labels WHERE message_id = ?1 AND label_id = ?2",
+                )?;
+                let mut labelled = Vec::new();
+                for message_id in message_ids {
+                    if stmt.exists(rusqlite::params![message_id, label_id])? {
+                        labelled.push(message_id);
+                    }
+                }
+                Ok(labelled)
+            })
             .await
     }
 
@@ -272,6 +346,124 @@ mod tests {
             .await;
         assert!(matches!(taken, Err(CoreError::NotFound(_))), "{taken:?}");
         assert_eq!(core.get_draft(own).await.unwrap().body_text, "My own");
+    }
+
+    #[tokio::test]
+    async fn the_user_undoes_what_an_agent_changed_from_its_log_entry() {
+        use crate::models::AgentOutcome;
+
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(crate::config::Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let message_id = core
+            .db
+            .write(|conn| {
+                testutil::seed_account(conn);
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Archive', 'archive')",
+                    [],
+                )?;
+                Ok(testutil::seed_message(conn, "alice@test.dev", "Plans", false).1)
+            })
+            .await
+            .unwrap();
+        let folder = || async {
+            core.db
+                .read(move |conn| repo::messages::get_row(conn, message_id))
+                .await
+                .unwrap()
+                .unwrap()
+                .folder_id
+        };
+        let archived = core
+            .perform_action(PerformActionArgs {
+                kind: ActionKind::Archive,
+                target: ActionTarget::Messages(vec![message_id]),
+                params: None,
+            })
+            .await
+            .unwrap()
+            .action_ids;
+        assert_eq!(folder().await, Some(2));
+        core.record_agent_activity(NewAgentActivity {
+            occurred_at: 1,
+            agent: "Test agent".into(),
+            tool: "move_messages".into(),
+            account_id: Some(1),
+            folder_id: Some(2),
+            items: 1,
+            outcome: AgentOutcome::Done,
+            action_ids: archived,
+            label_changes: Vec::new(),
+        })
+        .await
+        .unwrap();
+        let entry = core.agent_activity(1).await.unwrap().remove(0);
+        assert!(entry.undoable);
+
+        assert!(core.undo_agent_activity(entry.id).await.unwrap());
+        assert_eq!(folder().await, Some(1), "back in the inbox");
+        let entry = core.agent_activity(1).await.unwrap().remove(0);
+        assert!(entry.undone && !entry.undoable);
+        assert!(
+            !core.undo_agent_activity(entry.id).await.unwrap(),
+            "undone once"
+        );
+        assert_eq!(folder().await, Some(1));
+
+        // A label it added comes off again.
+        core.db
+            .write(|conn| {
+                conn.execute(
+                    "INSERT INTO labels (id, name, keyword) VALUES (7, 'Later', 'later')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        core.perform_action(PerformActionArgs {
+            kind: ActionKind::AddLabel,
+            target: ActionTarget::Messages(vec![message_id]),
+            params: Some(ActionParams {
+                wake_at: None,
+                target_folder_id: None,
+                label_id: Some(7),
+            }),
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            core.messages_with_label(vec![message_id], 7).await.unwrap(),
+            [message_id]
+        );
+        core.record_agent_activity(NewAgentActivity {
+            occurred_at: now_ms(),
+            agent: "Test agent".into(),
+            tool: "label_messages".into(),
+            account_id: Some(1),
+            folder_id: None,
+            items: 1,
+            outcome: AgentOutcome::Done,
+            action_ids: Vec::new(),
+            label_changes: vec![repo::agent_activity::LabelChange {
+                message_id,
+                label_id: 7,
+                added: true,
+            }],
+        })
+        .await
+        .unwrap();
+        let entry = core.agent_activity(1).await.unwrap().remove(0);
+        assert_eq!(entry.tool, "label_messages");
+        assert!(core.undo_agent_activity(entry.id).await.unwrap());
+        assert!(
+            core.messages_with_label(vec![message_id], 7)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
