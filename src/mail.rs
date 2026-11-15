@@ -1261,6 +1261,82 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// The storage services files go by link from.
+    pub async fn link_services(
+        &self,
+    ) -> Result<Vec<flectar_mail_core::links::LinkService>, String> {
+        self.core
+            .link_services()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Starts signing in to a storage service in the browser.
+    pub async fn start_link_service_login(
+        &self,
+        server_url: String,
+    ) -> Result<flectar_mail_core::links::LinkLogin, String> {
+        self.core
+            .start_link_service_login(&server_url)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Waits for a sign-in in the browser to finish, and keeps the service.
+    pub async fn finish_link_service_login(
+        &self,
+        login: flectar_mail_core::links::LinkLogin,
+    ) -> Result<flectar_mail_core::links::LinkService, String> {
+        self.core
+            .finish_link_service_login(login)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Keeps a storage service signed in with an app password.
+    pub async fn add_link_service(
+        &self,
+        server_url: String,
+        login_name: String,
+        app_password: String,
+    ) -> Result<flectar_mail_core::links::LinkService, String> {
+        self.core
+            .add_link_service(&server_url, &login_name, &app_password)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn remove_link_service(&self, id: i64) -> Result<(), String> {
+        self.core
+            .remove_link_service(id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Uploads a file and shares it by link.
+    pub async fn share_by_link(
+        &self,
+        service_id: i64,
+        path: std::path::PathBuf,
+        name: String,
+    ) -> Result<flectar_mail_core::links::SharedLink, String> {
+        self.core
+            .share_by_link(service_id, &path, &name)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Takes back a link and the file it shares.
+    pub async fn unshare_link(
+        &self,
+        link: flectar_mail_core::links::SharedLink,
+    ) -> Result<(), String> {
+        self.core
+            .unshare_link(&link)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     /// The originals of `message_ids` in files of their own to attach, which go when their
     /// paths are dropped, or why they couldn't be fetched.
     pub async fn forwarded_originals(
@@ -2755,6 +2831,22 @@ impl CoreMailSource {
         let mut settings = self.load_settings().await?;
         settings.compose_font = font;
         settings.compose_text_size = size;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// How many days links to files sent by link work, 0 for as long as the file is kept, and
+    /// whether they ask for a password.
+    pub async fn set_link_preferences(
+        &self,
+        expiry_days: u32,
+        password: bool,
+    ) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.link_expiry_days = expiry_days;
+        settings.link_password = password;
         self.core
             .set_settings(settings)
             .await

@@ -2400,6 +2400,13 @@ pub struct Settings {
     pub compose_font: String,
     #[serde(default = "default_compose_text_size")]
     pub compose_text_size: String,
+    /// How many days a link to a file sent by link works, or 0 for as long as the file is
+    /// kept. A server that limits links shortens it.
+    #[serde(default = "default_link_expiry_days")]
+    pub link_expiry_days: u32,
+    /// A file sent by link asks for a password, which the sender passes on another way.
+    #[serde(default)]
+    pub link_password: bool,
     #[serde(default)]
     pub load_remote_images: bool,
     /// When an unread message the user opens counts as read.
@@ -2720,6 +2727,11 @@ fn default_compose_text_size() -> String {
     "normal".into()
 }
 
+/// Links to files sent by link work for 30 days, as Mail Drop's do.
+fn default_link_expiry_days() -> u32 {
+    30
+}
+
 /// Unknown values, including those written by newer versions, fall back to
 /// the platform frame so a window can never start without any controls.
 pub fn normalized_window_frame(frame: &str) -> &'static str {
@@ -2777,6 +2789,8 @@ impl Default for Settings {
             undo_send_seconds: 10,
             compose_font: default_compose_font(),
             compose_text_size: default_compose_text_size(),
+            link_expiry_days: default_link_expiry_days(),
+            link_password: false,
             load_remote_images: false,
             mark_read: MarkRead::Immediately,
             download_directory: String::new(),
