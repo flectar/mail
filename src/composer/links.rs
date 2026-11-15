@@ -91,8 +91,8 @@ impl ComposeSession {
         });
     }
 
-    /// Sends `files` by link from the first storage service, uploading them now. Sending waits
-    /// for them.
+    /// Sends `files` by link from the storage service the message's account uses, uploading
+    /// them now. Sending waits for them.
     pub(super) fn share_by_link(self: &Rc<Self>, files: Vec<NewAttachment>) {
         let (Some(composers), Some(host)) = (self.composers(), self.host()) else {
             return;
@@ -101,12 +101,7 @@ impl ComposeSession {
         let Some(core) = composers.core() else {
             return;
         };
-        let service = composers
-            .runtime
-            .block_on(core.link_services())
-            .ok()
-            .and_then(|services| services.first().map(|service| service.id));
-        let Some(service) = service else {
+        let Some(service) = self.link_service().map(|service| service.id) else {
             ui.set_notice(
                 UiMessage::plain("Connect a storage service in Settings to send files by link."),
                 true,

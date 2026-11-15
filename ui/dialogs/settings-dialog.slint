@@ -850,7 +850,7 @@ export component SettingsDialog inherits Rectangle {
         if section == "Agents" && !AgentAccess.available { return false; }
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads reduce motion animation accessibility text size font") + " " + @tr("sending undo send delay take back")
+            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads reduce motion animation accessibility text size font") + " " + @tr("sending undo send delay take back") + " " + @tr("large files share by link cloud storage nextcloud owncloud google drive onedrive expiry password")
                 + " " + @tr("spelling spell check dictionary misspelled words")
                 + " " + @tr("writing default text style font typeface text size")
                 + " " + @tr("message list density compact comfortable rows preview lines")
@@ -1594,6 +1594,12 @@ export component SettingsDialog inherits Rectangle {
                             LargeFilesCard {
                                 compact: root.compact;
                                 shown: root.settings_open && root.settings_tab == "General";
+                                oauth-busy: root.oauth_in_progress || root.oauth_settings_saving || root.account_setup_in_progress;
+                                oauth-authorization-url: root.oauth_authorization_url;
+                                oauth-browser-error: root.oauth_browser_error;
+                                retry-oauth-browser => { root.retry_oauth_browser(); }
+                                copy-oauth-link => { root.copy_oauth_link(); }
+                                submit-oauth-redirect(address) => { root.submit_oauth_redirect(address); }
                                 surface: root.surface;
                                 border-subtle: root.border-subtle;
                                 heading: root.heading;

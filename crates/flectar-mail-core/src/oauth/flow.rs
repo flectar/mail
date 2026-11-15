@@ -149,7 +149,9 @@ pub async fn authorize_with_broker(
         urlencode(&challenge),
     );
     if provider == Provider::Gmail {
-        auth_url.push_str("&access_type=offline&prompt=consent");
+        // A grant widened for one feature keeps what others were granted: Drive asked for
+        // after Calendar keeps Calendar, and the other way round.
+        auth_url.push_str("&access_type=offline&prompt=consent&include_granted_scopes=true");
     }
     if let Some(hint) = login_hint {
         auth_url.push_str(&format!("&login_hint={}", urlencode(hint)));
