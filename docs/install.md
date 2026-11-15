@@ -26,7 +26,9 @@ Builds without OAuth app keys keep Gmail and Outlook sign-in disabled. Use the
 Microsoft app registration, or connect an IMAP, POP3, or JMAP account. Custom
 keys are shared with Settings and take precedence over bundled keys; clearing a
 custom client ID restores the defaults when available. Each provider enables
-separately once its configuration is saved.
+separately once its configuration is saved. A Google app needs the Gmail API
+turned on in its Google Cloud project, and the Google Drive API as well for
+sending large files from Google Drive.
 
 ## Windows and macOS
 
