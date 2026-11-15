@@ -389,6 +389,7 @@ pub(super) fn register(
         if ui.get_busy() {
             return;
         }
+        let (replies_core, replies_runtime) = (Arc::clone(&core), work.runtime.clone());
         work.spawn(
             &app,
             true,
@@ -410,6 +411,12 @@ pub(super) fn register(
                                 config.settings.message_format == MessageFormat::PlainText,
                             ));
                             ui.set_plain_text_replies(config.settings.plain_text_replies);
+                            crate::auto_replies::load_tab(
+                                &app,
+                                &replies_runtime,
+                                replies_core,
+                                config,
+                            );
                             let p = &config.settings.security;
                             ui.set_fingerprint(p.signing_fingerprint.clone().into());
                             ui.set_sign(p.sign_by_default);

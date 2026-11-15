@@ -5,6 +5,7 @@
 pub mod accounts;
 pub mod agents;
 pub mod ai;
+mod auto_replies;
 pub mod autolabel;
 pub mod caldav;
 pub mod calendar;

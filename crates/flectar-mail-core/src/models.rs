@@ -1243,6 +1243,32 @@ pub enum ReceiptAnswer {
     Decline,
 }
 
+/// Automatic replies an account's server sends while the user is away
+/// (#239), such as Gmail's vacation responder.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoReply {
+    pub enabled: bool,
+    pub subject: String,
+    pub text: String,
+    /// When replies start and end, in milliseconds since the epoch. Mail
+    /// that arrives before or after gets none.
+    pub starts_at: Option<i64>,
+    pub ends_at: Option<i64>,
+    /// Only senders in the user's contacts get a reply.
+    pub contacts_only: bool,
+    /// Only senders of the account's own domain get a reply, which Google
+    /// Workspace offers.
+    pub domain_only: bool,
+}
+
+impl AutoReply {
+    /// Whether replies go out at `now`, or will once their first day comes.
+    pub fn on_at(&self, now: i64) -> bool {
+        self.enabled && self.ends_at.is_none_or(|ends_at| ends_at > now)
+    }
+}
+
 /// Something an AI agent did through the local MCP server, without message
 /// content.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

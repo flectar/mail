@@ -3,6 +3,7 @@ pub mod actions;
 pub mod agent_activity;
 pub mod agent_drafts;
 pub mod ai_usage;
+pub mod auto_replies;
 pub mod blocked;
 pub mod caldav;
 pub mod calendar;

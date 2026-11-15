@@ -60,6 +60,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/041_agent_drafts.sql")),
     Migration::Plain(include_str!("migrations/042_agent_undo.sql")),
     Migration::Plain(include_str!("migrations/043_cloud_link_services.sql")),
+    Migration::Plain(include_str!("migrations/044_auto_replies.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -351,6 +352,7 @@ mod tests {
             "agent_drafts",
             "ai_usage_events",
             "app_settings",
+            "auto_replies",
             "attachment_files_fts",
             "attachment_text_fts",
             "attachments",

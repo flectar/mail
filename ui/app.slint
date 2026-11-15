@@ -65,6 +65,7 @@ export { LocalMailUi } from "local-mail.slint";
 export { Numbers } from "numbers.slint";
 import { LocalMailUi } from "local-mail.slint";
 export { AccountImport, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportMailRow, ImportProfileRow } from "dialogs/import-dialog.slint";
+export { AutoReplies } from "auto-replies.slint";
 export { ThemeDraft } from "components/theme-editor.slint";
 import { ThemeDraft } from "components/theme-editor.slint";
 import { MailView } from "views/mail-view.slint";
@@ -801,6 +802,19 @@ export global I18n {
 
     ui-message-oauth(key, argument, second-argument, third-argument) => {
         if (key == "Another browser authorization is already in progress; finish it or choose Cancel.") { return @tr("Another browser authorization is already in progress; finish it or choose Cancel."); }
+        if (key == "{} accounts") { return @tr("{n} account" | "{n} accounts" % round(argument.to-float())); }
+        if (key == "{} · from {}") { return @tr("{} · from {}", argument, second-argument); }
+        if (key == "{} · until {}") { return @tr("{} · until {}", argument, second-argument); }
+        if (key == "POP3 accounts can't have automatic replies from Flectar Mail. Your provider's webmail may offer them.") { return @tr("POP3 accounts can't have automatic replies from Flectar Mail. Your provider's webmail may offer them."); }
+        if (key == "Flectar Mail can't set this account's automatic replies yet. Your provider's webmail can.") { return @tr("Flectar Mail can't set this account's automatic replies yet. Your provider's webmail can."); }
+        if (key == "Gmail answers each sender once, and again after four days. Mailing lists and spam get no reply.") { return @tr("Gmail answers each sender once, and again after four days. Mailing lists and spam get no reply."); }
+        if (key == "Write the first day as YYYY-MM-DD.") { return @tr("Write the first day as YYYY-MM-DD."); }
+        if (key == "Write the last day as YYYY-MM-DD.") { return @tr("Write the last day as YYYY-MM-DD."); }
+        if (key == "The last day comes before the first.") { return @tr("The last day comes before the first."); }
+        if (key == "Write the message to send.") { return @tr("Write the message to send."); }
+        if (key == "Allow Flectar Mail to change Gmail settings in your browser.") { return @tr("Allow Flectar Mail to change Gmail settings in your browser."); }
+        if (key == "Saved.") { return @tr("Saved."); }
+        if (key == "Could not save automatic replies: {}") { return @tr("Could not save automatic replies: {}", argument); }
         if (key == "Add app keys in Sign-in settings to enable this provider.") { return @tr("Add app keys in Sign-in settings to enable this provider."); }
         if (key == "Choose Gmail or Outlook OAuth.") { return @tr("Choose Gmail or Outlook OAuth."); }
         if (key == "Complete sign-in in your browser, or choose Cancel here.") { return @tr("Complete sign-in in your browser, or choose Cancel here."); }
