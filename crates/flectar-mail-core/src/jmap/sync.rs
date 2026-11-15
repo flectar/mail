@@ -66,7 +66,10 @@ async fn sync_auto_reply(
         .db
         .read(move |conn| repo::auto_replies::saved_at(conn, account_id))
         .await?;
-    let reply = crate::jmap::vacation::read(connected).await?;
+    let reply = match crate::jmap::sieve::scripts(connected) {
+        Some(mut scripts) => crate::sieve::read_from(&mut scripts).await?,
+        None => crate::jmap::vacation::read(connected).await?,
+    };
     let changed = ctx
         .db
         .write(move |conn| {
@@ -148,7 +151,8 @@ async fn actor(
                     ),
                 }
                 // Replies set in webmail show too. Reading them never fails a sync.
-                if crate::jmap::vacation::offered(&connected)
+                if (crate::jmap::sieve::scripts(&connected).is_some()
+                    || crate::jmap::vacation::offered(&connected))
                     && let Err(error) = sync_auto_reply(&ctx, config.id, &connected).await
                 {
                     tracing::warn!(account_id = config.id, %error, "JMAP automatic replies failed");
@@ -3146,22 +3150,9 @@ pub(crate) async fn download_message_bounded(
     c: &ConnectedClient,
     blob_id: &str,
 ) -> Result<Vec<u8>> {
-    use jmap_client::blob::URLParameter;
-    use jmap_client::core::session::URLPart;
     use reqwest::header::CONTENT_LENGTH;
 
-    let mut url = String::with_capacity(
-        c.client.session().download_url().len() + c.account_id.len() + blob_id.len(),
-    );
-    for part in c.client.download_url() {
-        match part {
-            URLPart::Value(value) => url.push_str(value),
-            URLPart::Parameter(URLParameter::AccountId) => url.push_str(&c.account_id),
-            URLPart::Parameter(URLParameter::BlobId) => url.push_str(blob_id),
-            URLPart::Parameter(URLParameter::Name) => url.push_str("message.eml"),
-            URLPart::Parameter(URLParameter::Type) => url.push_str("message/rfc822"),
-        }
-    }
+    let url = c.blob_url(blob_id, "message.eml", "message/rfc822");
     let response = c.get(url).send().await.map_err(|error| {
         CoreError::Network(format!(
             "JMAP message download failed: {}",
