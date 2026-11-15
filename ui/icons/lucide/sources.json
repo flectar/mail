@@ -30,6 +30,9 @@
     "book.svg": {
       "source": "book-open-text"
     },
+    "bot.svg": {
+      "source": "bot"
+    },
     "browser.svg": {
       "source": "app-window"
     },
@@ -289,6 +292,10 @@
     "book-open-text": {
       "path": "sources/book-open-text.svg",
       "sha256": "745b3391ab4b93f641fafaf1f4f96c760f9c1dbff94316243b41287b218d6f43"
+    },
+    "bot": {
+      "path": "sources/bot.svg",
+      "sha256": "7e72f487e479e73c9203555408efcef64544cd0b8b8f18f07560517fe6326b2f"
     },
     "building-2": {
       "path": "sources/building-2.svg",

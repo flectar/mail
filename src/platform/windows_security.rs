@@ -7,13 +7,15 @@ use std::{ffi::c_void, io, mem::size_of};
 use windows_sys::Win32::{
     Foundation::{CloseHandle, GENERIC_ALL, HANDLE},
     Security::{
-        ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, AddAccessAllowedAce, GetLengthSid,
+        ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, AddAccessAllowedAce, EqualSid, GetLengthSid,
         GetTokenInformation, InitializeAcl, InitializeSecurityDescriptor, SECURITY_ATTRIBUTES,
         SECURITY_DESCRIPTOR, SetSecurityDescriptorDacl, TOKEN_QUERY, TOKEN_USER, TokenUser,
     },
     System::{
         SystemServices::SECURITY_DESCRIPTOR_REVISION,
-        Threading::{GetCurrentProcess, OpenProcessToken},
+        Threading::{
+            GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+        },
     },
 };
 
@@ -125,4 +127,20 @@ impl CurrentUserOnly {
             bInheritHandle: 0,
         }
     }
+}
+
+/// Whether process `process_id` runs as the current user.
+pub(crate) fn process_is_current_user(process_id: u32) -> io::Result<bool> {
+    // SAFETY: a plain call; the handle is closed below.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    if process.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let theirs = TokenUserBuffer::of_process(process);
+    // SAFETY: opened above and not used after this.
+    unsafe { CloseHandle(process) };
+    // SAFETY: the pseudo handle of this process needs no closing.
+    let ours = TokenUserBuffer::of_process(unsafe { GetCurrentProcess() })?;
+    // SAFETY: both SIDs come from their tokens.
+    Ok(unsafe { EqualSid(theirs?.sid(), ours.sid()) } != 0)
 }

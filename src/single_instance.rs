@@ -126,7 +126,7 @@ pub(crate) fn acquire(runtime: &Handle, data_dir: &Path, request: Request) -> io
 
 /// A short, stable name for the profile; endpoints share a namespace across
 /// profiles and, for named pipes, across users.
-fn profile_key(data_dir: &Path) -> String {
+pub(crate) fn profile_key(data_dir: &Path) -> String {
     let digest = Sha256::digest(data_dir.as_os_str().as_encoded_bytes());
     digest[..12]
         .iter()

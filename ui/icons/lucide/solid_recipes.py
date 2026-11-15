@@ -159,6 +159,8 @@ def build(sources):
         "folders": Recipe("folders", over(
             solid(p("folders", 1, append="V8.268Z")), solid(p("folders", 0))),
             "Close hidden rear folder; separate original solid foreground folder."),
+        "bot": Recipe("bot", group(cut(solid(p("bot", 1)), lines("bot", 4, 5)), lines("bot", 0, 2, 3)),
+            "Solid head; original eyes become cutouts; antenna and ears stay lines."),
         "gear": Recipe("settings", cut(solid(p("settings", 0)), solid(p("settings", 1))),
             "Solid gear; central hole."),
         "inbox": Recipe("inbox", cut(solid(p("inbox", 1)), line(p("inbox", 0), 1.8)),

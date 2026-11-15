@@ -11,12 +11,14 @@ export { AppIcon, AppIconVariant } from "app-icon.slint";
 export { DefaultEmailApp } from "default-email-app.slint";
 export { SystemNotifications } from "system-notifications.slint";
 export { Updates } from "updates.slint";
+export { AgentAccess, AgentAccount, AgentActivityEntry, AgentFolder } from "agent-access.slint";
 export { Notice } from "notice.slint";
 export { Unsubscribe } from "unsubscribe.slint";
 export { BlockSender } from "block-sender.slint";
 export { Invitation } from "invitation.slint";
 export { InvitationSettings } from "invitation-settings.slint";
 import { AppIcon, AppIconVariant } from "app-icon.slint";
+import { AgentAccess } from "agent-access.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
 // Rust registers the separate Noto Emoji face before constructing this window.
@@ -290,6 +292,42 @@ export global I18n {
         if (key == "Notification preferences are active for this session.") { return @tr("Notification preferences are active for this session."); }
         if (key == "Notification preferences saved.") { return @tr("Notification preferences saved."); }
         if (key == "Update preference saved.") { return @tr("Update preference saved."); }
+        if (key == "AI agents can be set up once an account is added.") { return @tr("AI agents can be set up once an account is added."); }
+        if (key == "No folders") { return @tr("No folders"); }
+        if (key == "All folders") { return @tr("All folders"); }
+        if (key == "Listed accounts") { return @tr("Listed accounts"); }
+        if (key == "Listed folders") { return @tr("Listed folders"); }
+        if (key == "Listed labels") { return @tr("Listed labels"); }
+        if (key == "Listed messages") { return @tr("Listed messages"); }
+        if (key == "Searched messages") { return @tr("Searched messages"); }
+        if (key == "Read a message") { return @tr("Read a message"); }
+        if (key == "Read a conversation") { return @tr("Read a conversation"); }
+        if (key == "Searched contacts") { return @tr("Searched contacts"); }
+        if (key == "Listed calendar events") { return @tr("Listed calendar events"); }
+        if (key == "Refused, outside what agents can read") { return @tr("Refused, outside what agents can read"); }
+        if (key == "Failed") { return @tr("Failed"); }
+        if (key == "1 result") { return @tr("1 result"); }
+        if (key == "Other apps") { return @tr("Other apps"); }
+        if (key == "In Claude Desktop, open Settings, Developer, Edit Config, and add flectar-mail to the mcpServers in that file. Then restart Claude Desktop.") { return @tr("In Claude Desktop, open Settings, Developer, Edit Config, and add flectar-mail to the mcpServers in that file. Then restart Claude Desktop."); }
+        if (key == "Run this in a terminal.") { return @tr("Run this in a terminal."); }
+        if (key == "Click Add to VS Code to review it there, or add flectar-mail to the mcpServers in ~/.copilot/mcp-config.json.") { return @tr("Click Add to VS Code to review it there, or add flectar-mail to the mcpServers in ~/.copilot/mcp-config.json."); }
+        if (key == "Add flectar-mail to the mcpServers in ~/.cursor/mcp.json.") { return @tr("Add flectar-mail to the mcpServers in ~/.cursor/mcp.json."); }
+        if (key == "Add flectar-mail to the context_servers in Zed's settings.json.") { return @tr("Add flectar-mail to the context_servers in Zed's settings.json."); }
+        if (key == "Click Add to LM Studio to review it there, or add flectar-mail to the mcpServers in LM Studio's mcp.json.") { return @tr("Click Add to LM Studio to review it there, or add flectar-mail to the mcpServers in LM Studio's mcp.json."); }
+        if (key == "Add this to ~/.codex/config.toml.") { return @tr("Add this to ~/.codex/config.toml."); }
+        if (key == "Apps that use local MCP servers ask for the command that starts one. Give them this one.") { return @tr("Apps that use local MCP servers ask for the command that starts one. Give them this one."); }
+        if (key == "Add to VS Code") { return @tr("Add to VS Code"); }
+        if (key == "Add to LM Studio") { return @tr("Add to LM Studio"); }
+        if (key == "Could not save AI agent access: {}") { return @tr("Could not save AI agent access: {}", argument); }
+        if (key == "All folders except {}") { return @tr("All folders except {}", argument); }
+        if (key == "Only {}") { return @tr("Only {}", argument); }
+        if (key == "Used {}") { return @tr("Used {}", argument); }
+        if (key == "{} results") { return @tr("{} results", argument); }
+        if (key == "Could not open the app: {}") { return @tr("Could not open the app: {}", argument); }
+        if (key == "Command: {}") { return @tr("Command: {}", argument); }
+        if (key == "Arguments: {}") { return @tr("Arguments: {}", argument); }
+        if (key == "Environment: {}") { return @tr("Environment: {}", argument); }
+        if (key == "{} of {} folders") { return @tr("{} of {} folders", argument, second-argument); }
         if (key == "Undo send preference saved.") { return @tr("Undo send preference saved."); }
         if (key == "Text style preference saved.") { return @tr("Text style preference saved."); }
         if (key == "Could not save notifications: {}") { return @tr("Could not save notifications: {}", argument); }
@@ -1228,6 +1266,10 @@ export component AppWindow inherits Window {
     changed calendar_view_mode => { TabsUi.navigated(); }
     // Own scan lifetime here: the conditional SettingsDialog is destroyed on
     // close, so its own change handlers cannot reliably cancel a running scan.
+    // Settings → AI agents lists the accounts, folders and activity as
+    // they are when it's shown.
+    private property <bool> agents-page-open: root.settings_open && root.settings_tab == "Agents";
+    changed agents-page-open => { AgentAccess.page-shown(root.agents-page-open); }
     private property <bool> storage-page-open: root.settings_open && root.settings_tab == "Data";
     changed storage-page-open => {
         if root.storage-page-open { root.load_storage_usage(); }

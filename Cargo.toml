@@ -142,6 +142,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Storage_Packaging_Appx",
     "Win32_System_JobObjects",
     "Win32_System_Memory",
+    "Win32_System_Pipes",
     "Win32_System_Registry",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
@@ -240,6 +241,9 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "
 arboard = { version = "3.6", default-features = false, features = ["image-data", "wayland-data-control"] }
 # The same async-io backend for the file chooser portal; see ashpd above.
 rfd = { version = "0.16", default-features = false, features = ["async-std", "xdg-portal"] }
+# The official MCP SDK, for `flectar-mail mcp`. Only that bridge process runs
+# it; the running app answers the bridge over its own small protocol.
+rmcp = { version = "3.10", default-features = false, features = ["server", "transport-io"] }
 
 [package.metadata.appimage]
 icon = "resources/app-icon/flectar-mail-masked-512.png"
