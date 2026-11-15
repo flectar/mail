@@ -284,8 +284,13 @@ again keeps that.
 
 The replies are kept on the server, so they go out while Flectar Mail is
 closed. Syncing reads them back, so replies set on the web show too, and a
-strip over the mail list says when they're on, with Turn off. Other accounts
-get automatic replies from their provider's webmail for now.
+strip over the mail list says when they're on, with Turn off.
+
+JMAP accounts whose server offers automatic replies, such as Fastmail, set
+them the same way, with a subject and days, for every sender. A JMAP server
+that also runs mail filters keeps automatic replies in a filter script of its
+own, which would turn your filters off, so those accounts and other IMAP and
+POP3 accounts get automatic replies from their provider's webmail for now.
 
 ## Text formatting
 
