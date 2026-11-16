@@ -130,6 +130,15 @@ word in mail that has 2026. Parentheses group parts, and a dash before a word,
 a phrase, an operator or a group leaves out what it matches, as in
 `-from:billing` or `-(draft OR old)`.
 
+**Save search…** in the menu beside the search field keeps the search in the
+sidebar, under **Saved searches**, with a name. Its row counts the unread mail
+it finds on this device. Opening it runs the search again in the accounts in
+view, so new mail that matches shows up in it, and its list works like any
+other search. Right-click a saved search, or hold a finger on it on a phone, to
+edit its name or what it searches for, move it up or down, or delete it.
+Deleting a saved search leaves its mail where it is. With mail profiles, a saved
+search can show in one profile or in all of them.
+
 ## Checking for mail
 
 Flectar Mail checks every account for new mail on its own: as soon as the
