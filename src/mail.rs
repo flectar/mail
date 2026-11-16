@@ -330,11 +330,22 @@ pub struct MailMetadata {
     pub mailboxes: Vec<MailboxEntry>,
     pub unified_mailboxes: Vec<MailboxEntry>,
     pub sidebar_badges: SidebarBadges,
+    pub saved_searches: Vec<SavedSearchEntry>,
     /// The account of local mail, which an import creates.
     pub local_mail: Option<i64>,
     /// Unread mail of `scope` older than the mail history this device
     /// keeps, which only the server has.
     pub server_only_unread: u32,
+}
+
+/// A search kept in the sidebar, with the unread mail it finds here.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SavedSearchEntry {
+    pub id: i64,
+    pub name: String,
+    pub query: String,
+    pub profile_id: Option<String>,
+    pub unread: i64,
 }
 
 struct PageLoadContext<'a> {
@@ -863,6 +874,87 @@ impl CoreMailSource {
         })
     }
 
+    /// The saved searches the sidebar shows with the profile in view, each
+    /// with its unread mail.
+    pub async fn saved_searches(&self) -> Result<Vec<SavedSearchEntry>, String> {
+        let local_mail = self.load_local_mail_account().await?;
+        let shown = with_local_mail(self.profile_accounts(), local_mail);
+        self.saved_searches_for(shown.as_deref()).await
+    }
+
+    /// The saved searches of the profile in view and those of every profile,
+    /// counted in `shown`, the accounts the view shows, or every account.
+    async fn saved_searches_for(
+        &self,
+        shown: Option<&[i64]>,
+    ) -> Result<Vec<SavedSearchEntry>, String> {
+        let settings = self
+            .core
+            .get_settings()
+            .await
+            .map_err(|error| error.to_string())?;
+        if settings.saved_searches.is_empty() {
+            return Ok(Vec::new());
+        }
+        let counts = self
+            .core
+            .saved_search_counts(
+                self.grouping() == MailGrouping::Conversations,
+                shown.map(<[i64]>::to_vec),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        let active = settings.active_mail_profile;
+        Ok(settings
+            .saved_searches
+            .into_iter()
+            .filter(|saved| saved.profile_id.is_none() || saved.profile_id == active)
+            .map(|saved| SavedSearchEntry {
+                unread: counts
+                    .iter()
+                    .find(|(id, _)| *id == saved.id)
+                    .map_or(0, |(_, unread)| *unread),
+                id: saved.id,
+                name: saved.name,
+                query: saved.query,
+                profile_id: saved.profile_id,
+            })
+            .collect())
+    }
+
+    /// Keeps a search in the sidebar, or changes one kept there.
+    pub async fn save_search(
+        &self,
+        id: Option<i64>,
+        name: String,
+        query: String,
+        profile_id: Option<String>,
+    ) -> Result<(), String> {
+        self.core
+            .save_search(id, name, query, profile_id)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Takes a search out of the sidebar. Its mail stays where it is.
+    pub async fn delete_saved_search(&self, id: i64) -> Result<(), String> {
+        self.core
+            .delete_saved_search(id)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Moves a saved search to `index` in the sidebar's order.
+    pub async fn move_saved_search(&self, id: i64, index: usize) -> Result<(), String> {
+        self.core
+            .move_saved_search(id, index)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     async fn load_mail_metadata_with_context(
         &self,
         scope: Scope,
@@ -888,9 +980,11 @@ impl CoreMailSource {
                 .map_err(|error| error.to_string())?
                 .map_or(0, badge)
         };
+        let saved_searches = self.saved_searches_for(profile).await?;
         Ok(MailMetadata {
             account_revision: self.account_revision(),
             scope,
+            saved_searches,
             inbox_count: badges
                 .iter()
                 .map(|counts| counts.inbox.max(0) as usize)
