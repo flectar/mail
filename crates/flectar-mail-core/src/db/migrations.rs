@@ -61,6 +61,9 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/042_agent_undo.sql")),
     Migration::Plain(include_str!("migrations/043_cloud_link_services.sql")),
     Migration::Plain(include_str!("migrations/044_auto_replies.sql")),
+    Migration::Plain(include_str!("migrations/045_message_importance.sql")),
+    Migration::Plain(include_str!("migrations/046_mail_rules.sql")),
+    Migration::Plain(include_str!("migrations/047_rules_waiting.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -376,6 +379,7 @@ mod tests {
             "jmap_sync_state",
             "labels",
             "link_services",
+            "mail_rules",
             "mail_transfers",
             "message_bodies",
             "message_embeddings",

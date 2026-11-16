@@ -2,7 +2,7 @@
 //! message construction (mail-builder).
 
 use crate::error::{CoreError, Result};
-use crate::models::{Address, SenderVerification};
+use crate::models::{Address, Importance, SenderVerification};
 use mail_parser::MimeHeaders;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,8 @@ pub struct ParsedHeaders {
     /// (RFC 6522) of report-type disposition-notification. False when the
     /// fetch left Content-Type out.
     pub disposition_report: bool,
+    /// How important the sender marked the message.
+    pub importance: Importance,
 }
 
 #[derive(Debug, Clone)]
@@ -2500,7 +2502,47 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
         receipt_to,
         receipt_confirm,
         disposition_report,
+        importance: importance(
+            raw_header(msg, "Importance").as_deref(),
+            raw_header(msg, "X-Priority").as_deref(),
+            raw_header(msg, "X-MSMail-Priority").as_deref(),
+            raw_header(msg, "Priority").as_deref(),
+        ),
     }
+}
+
+/// How important a message's sender marked it, from the headers mail
+/// programs use for it: Importance (RFC 2156), which Outlook reads first,
+/// then the first digit of X-Priority, then X-MSMail-Priority, then
+/// Priority, whose "non-urgent" also says "urgent".
+pub fn importance(
+    importance: Option<&str>,
+    x_priority: Option<&str>,
+    x_msmail_priority: Option<&str>,
+    priority: Option<&str>,
+) -> Importance {
+    let word = |value: Option<&str>| value.map(|value| value.trim().to_ascii_lowercase());
+    let level = |value: Option<String>| match value.as_deref() {
+        Some("high") => Some(Importance::High),
+        Some("low") => Some(Importance::Low),
+        Some("normal") => Some(Importance::Normal),
+        _ => None,
+    };
+    level(word(importance))
+        .or_else(|| match word(x_priority)?.chars().next()? {
+            '1' | '2' => Some(Importance::High),
+            '3' => Some(Importance::Normal),
+            '4' | '5' => Some(Importance::Low),
+            _ => None,
+        })
+        .or_else(|| level(word(x_msmail_priority)))
+        .or_else(|| match word(priority)?.as_str() {
+            "non-urgent" => Some(Importance::Low),
+            "urgent" => Some(Importance::High),
+            "normal" => Some(Importance::Normal),
+            _ => None,
+        })
+        .unwrap_or_default()
 }
 
 /// A read receipt request (RFC 8098 section 2): where the receipt goes, and
@@ -2837,6 +2879,34 @@ fn returned_receipt(
     )
 }
 
+/// Every header field in `raw`, a header block or a whole message, by name
+/// and value: text as decoded, any other value as written, unfolded. For
+/// rules on any header (#238).
+pub fn header_fields(raw: &[u8]) -> Vec<(String, String)> {
+    let Some(message) = mail_parser::MessageParser::default().parse_headers(raw) else {
+        return Vec::new();
+    };
+    message
+        .headers()
+        .iter()
+        .map(|header| {
+            let value = match header.value() {
+                mail_parser::HeaderValue::Text(text) => text.to_string(),
+                mail_parser::HeaderValue::TextList(list) => list.join(", "),
+                _ => {
+                    let (start, end) =
+                        (header.offset_start() as usize, header.offset_end() as usize);
+                    let written = raw.get(start..end.max(start)).unwrap_or_default();
+                    String::from_utf8_lossy(written).into_owned()
+                }
+            };
+            // Unfolded, as a header of no known kind keeps its line breaks.
+            let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+            (header.name().to_owned(), value)
+        })
+        .collect()
+}
+
 /// Parse only headers (from a HEADER.FIELDS fetch).
 pub fn parse_header_block(raw: &[u8]) -> Result<ParsedHeaders> {
     let msg = mail_parser::MessageParser::default()
@@ -2892,6 +2962,7 @@ pub struct OutgoingMessage<'a> {
     /// Who the message asks to send a read receipt to
     /// (Disposition-Notification-To, RFC 8098), if anyone.
     pub receipt_to: &'a [Address],
+    pub importance: Importance,
 }
 
 /// An image extracted from the HTML body, to be sent as an inline CID part.
@@ -3472,6 +3543,21 @@ fn build_message_with_attachments<'a>(
     if !out.receipt_to.is_empty() {
         builder = builder.header("Disposition-Notification-To", addresses(out.receipt_to));
     }
+    // Importance for Outlook, X-Priority for Thunderbird and webmail, which
+    // read only that. Normal needs neither.
+    let importance = match out.importance {
+        Importance::High => Some(("High", "2 (High)")),
+        Importance::Low => Some(("Low", "4 (Low)")),
+        Importance::Normal => None,
+    };
+    if let Some((importance, priority)) = importance {
+        builder = builder
+            .header(
+                "Importance",
+                mail_builder::headers::raw::Raw::new(importance),
+            )
+            .header("X-Priority", mail_builder::headers::raw::Raw::new(priority));
+    }
     for att in &attachments {
         if att
             .mime_type
@@ -3652,6 +3738,23 @@ mod tests {
         let part = parsed.attachments().next().unwrap();
         assert_eq!(part.attachment_name(), Some("é-large.bin"));
         assert_eq!(part.contents(), message.attachments[0].bytes);
+    }
+
+    #[test]
+    fn header_fields_list_every_header_unfolded_and_decoded() {
+        let raw = b"Subject: =?utf-8?q?R=C3=A9sum=C3=A9?=\r\nX-Spam-Flag: YES\r\nX-Folded: one\r\n two\r\nTo: Ana <ana@test.dev>\r\n\r\nbody";
+        let fields = header_fields(raw);
+        let value = |name: &str| {
+            fields
+                .iter()
+                .find(|(field, _)| field.eq_ignore_ascii_case(name))
+                .map(|(_, value)| value.as_str())
+        };
+        assert_eq!(value("subject"), Some("Résumé"));
+        assert_eq!(value("x-spam-flag"), Some("YES"));
+        assert_eq!(value("X-Folded"), Some("one two"));
+        assert_eq!(value("To"), Some("Ana <ana@test.dev>"));
+        assert_eq!(value("X-Missing"), None);
     }
 
     #[test]
@@ -4171,6 +4274,61 @@ mod tests {
     }
 
     #[test]
+    fn importance_reads_outlooks_header_first_then_the_others() {
+        assert_eq!(
+            importance(Some("High"), Some("5"), None, None),
+            Importance::High
+        );
+        assert_eq!(
+            importance(None, Some("1 (Highest)"), None, None),
+            Importance::High
+        );
+        assert_eq!(
+            importance(None, Some(" 4 (Low)"), None, None),
+            Importance::Low
+        );
+        assert_eq!(
+            importance(None, Some("3"), Some("High"), None),
+            Importance::Normal
+        );
+        assert_eq!(importance(None, None, Some("low"), None), Importance::Low);
+        assert_eq!(
+            importance(None, None, None, Some("non-urgent")),
+            Importance::Low
+        );
+        assert_eq!(
+            importance(None, None, None, Some("Urgent")),
+            Importance::High
+        );
+        assert_eq!(
+            importance(Some("soon"), Some("x"), None, None),
+            Importance::Normal
+        );
+        let headers =
+            parse_header_block(b"Subject: Now\r\nX-Priority: 1 (Highest)\r\n\r\n").unwrap();
+        assert_eq!(headers.importance, Importance::High);
+    }
+
+    #[test]
+    fn importance_goes_out_for_outlook_and_thunderbird_alike() {
+        let high = OutgoingMessage {
+            importance: Importance::High,
+            ..outgoing("Hi", None)
+        };
+        let text = String::from_utf8(build_message(&high).unwrap().1).unwrap();
+        assert!(text.contains("Importance: High\r\n"), "{text}");
+        assert!(text.contains("X-Priority: 2 (High)\r\n"), "{text}");
+        let low = OutgoingMessage {
+            importance: Importance::Low,
+            ..outgoing("Hi", None)
+        };
+        let text = String::from_utf8(build_message(&low).unwrap().1).unwrap();
+        assert!(text.contains("Importance: Low\r\n") && text.contains("X-Priority: 4 (Low)\r\n"));
+        let text = String::from_utf8(build_message(&outgoing("Hi", None)).unwrap().1).unwrap();
+        assert!(!text.contains("Importance") && !text.contains("X-Priority"));
+    }
+
+    #[test]
     fn a_message_asks_for_a_read_receipt_at_the_address_given() {
         let me = [Address {
             name: Some("Me".into()),
@@ -4214,6 +4372,7 @@ mod tests {
             message_id_domain: "example.com",
             attachments: Vec::new(),
             receipt_to: &[],
+            importance: Importance::Normal,
         }
     }
 

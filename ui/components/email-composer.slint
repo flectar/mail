@@ -51,6 +51,7 @@ export component EmailComposer inherits Rectangle {
     in property <string> photo-full-size: "";
     in-out property <bool> shrink-photos: false;
     in-out property <bool> request-receipt: false;
+    in-out property <int> importance: 0;
     in property <bool> shrinking-photos: false;
     // A forward's files are still on their way, which sending and saving wait for.
     in property <bool> attaching-files: false;
@@ -1102,6 +1103,7 @@ export component EmailComposer inherits Rectangle {
             link-sharing: root.link-sharing;
             share-by-link => { root.share-by-link(); }
             request-receipt <=> root.request-receipt;
+            importance <=> root.importance;
             request-close => { root.request-close(); }
         }
     }

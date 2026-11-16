@@ -38,6 +38,8 @@ import { TabSwitcherButton } from "../components/tab-overview.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { Numbers } from "../numbers.slint";
 import { BlockSender } from "../block-sender.slint";
+import { MailRules } from "../rules.slint";
+import { RuleEditor } from "../components/rule-editor.slint";
 
 // Use the same focusable controls in both account-card layouts.
 component AccountActions inherits HorizontalLayout {
@@ -834,6 +836,7 @@ export component SettingsDialog inherits Rectangle {
         return section == "General" ? SettingsIconPalette.general
             : section == "Accounts" ? SettingsIconPalette.accounts
             : section == "Contacts" ? SettingsIconPalette.accounts
+            : section == "Rules" ? SettingsIconPalette.rules
             : section == "Notifications" ? SettingsIconPalette.notifications
             : section == "Shortcuts" ? SettingsIconPalette.shortcuts
             : section == "Data" ? SettingsIconPalette.storage
@@ -858,6 +861,8 @@ export component SettingsDialog inherits Rectangle {
             ? @tr("accounts profiles personal work colors providers gmail outlook imap pop3 jmap caldav carddav mail history server oauth security signatures")
             : section == "Contacts"
             ? @tr("contacts people suggestions autocomplete recipients senders address book privacy clear")
+            : section == "Rules"
+            ? @tr("rules filters sort incoming new mail automatically move folder label mark read star archive trash spam junk conditions actions")
             : section == "Notifications"
             ? @tr("notifications alerts sounds desktop new mail unread count badge app icon dock taskbar background app refresh low power mode battery saver")
             : section == "Shortcuts"
@@ -875,6 +880,7 @@ export component SettingsDialog inherits Rectangle {
 
     private property <bool> search-has-results: root.settings-section-visible("General")
         || root.settings-section-visible("Accounts") || root.settings-section-visible("Contacts")
+        || root.settings-section-visible("Rules")
         || root.settings-section-visible("Notifications")
         || root.settings-section-visible("Shortcuts") || root.settings-section-visible("Data")
         || root.settings-section-visible("Agents")
@@ -943,6 +949,7 @@ export component SettingsDialog inherits Rectangle {
             root.settings_tab = root.settings-section-visible("General") ? "General"
                 : root.settings-section-visible("Accounts") ? "Accounts"
                 : root.settings-section-visible("Contacts") ? "Contacts"
+                : root.settings-section-visible("Rules") ? "Rules"
                 : root.settings-section-visible("Notifications") ? "Notifications"
                 : root.settings-section-visible("Shortcuts") ? "Shortcuts"
                 : root.settings-section-visible("Data") ? "Data"
@@ -1185,6 +1192,7 @@ export component SettingsDialog inherits Rectangle {
                         if root.settings-section-visible("General") : SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/lucide/filled/sliders.svg"); icon-color: root.settings-icon-color("General"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; } }
                         if root.settings-section-visible("Accounts") : SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; } }
                         if root.settings-section-visible("Contacts") : SettingsNavItem { text: @tr("Contacts"); icon: @image-url("../icons/lucide/filled/contacts.svg"); icon-color: root.settings-icon-color("Contacts"); selected: root.settings_tab == "Contacts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Contacts"; } }
+                        if root.settings-section-visible("Rules") : SettingsNavItem { text: @tr("Rules"); icon: @image-url("../icons/lucide/filled/filter.svg"); icon-color: root.settings-icon-color("Rules"); selected: root.settings_tab == "Rules"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Rules"; } }
                         if root.settings-section-visible("Notifications") : SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; } }
                         if root.settings-section-visible("Shortcuts") : SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; } }
                         if root.settings-section-visible("Data") : SettingsNavItem { text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; } }
@@ -2184,6 +2192,137 @@ export component SettingsDialog inherits Rectangle {
                                 text: root.sync_status;
                                 text-color: root.secondary-text;
                                 font-size: TypeScale.secondary;
+                            }
+                        }
+                    }
+
+                    rules-settings-scroll := ScrollView {
+                        visible: root.settings_tab == "Rules";
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
+                        VerticalBox {
+                            x: root.compact ? 16px : max(24px, (rules-settings-scroll.visible-width - 920px) / 2);
+                            width: root.compact ? rules-settings-scroll.visible-width - 32px : min(920px, rules-settings-scroll.visible-width - 48px);
+                            padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px;
+                            padding-bottom: 32px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            SettingsPageTitle { label: @tr("Rules"); title-color: root.title-color; }
+                            Text {
+                                height: max(root.compact ? 52px : 34px, self.preferred-height);
+                                text: @tr("Rules sort new mail as it arrives in an Inbox, trying them from the top. Flectar Mail runs them on this device while it's open.");
+                                color: root.secondary-text;
+                                font-size: TypeScale.secondary;
+                                wrap: word-wrap;
+                            }
+                            HorizontalBox {
+                                padding: 0px;
+                                alignment: start;
+                                Button {
+                                    width: self.content-width;
+                                    text: @tr("New rule");
+                                    icon: @image-url("../icons/lucide/outline/plus.svg");
+                                    has-icon: true;
+                                    primary: true;
+                                    clicked => { MailRules.create(); }
+                                }
+                            }
+                            Rectangle {
+                                height: rules-list.preferred-height;
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                rules-list := VerticalLayout {
+                                    padding-top: 4px;
+                                    padding-bottom: 4px;
+                                    if MailRules.rows.length == 0 : HorizontalLayout {
+                                        padding: 16px;
+                                        Text {
+                                            text: @tr("No rules yet. New mail stays where it arrives.");
+                                            color: root.secondary-text;
+                                            font-size: TypeScale.secondary;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                    for rule[index] in MailRules.rows : VerticalLayout {
+                                        if index > 0 : Rectangle { height: 1px; background: root.border-subtle; }
+                                        HorizontalLayout {
+                                            padding-left: 16px;
+                                            padding-right: 10px;
+                                            padding-top: 10px;
+                                            padding-bottom: 10px;
+                                            spacing: 12px;
+                                            Switch {
+                                                checked: rule.enabled;
+                                                control-label: rule.name;
+                                                toggled => { MailRules.toggle(rule.id, self.checked); }
+                                            }
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                spacing: 2px;
+                                                Text {
+                                                    text: rule.name;
+                                                    color: rule.enabled ? root.body-text : root.secondary-text;
+                                                    font-size: TypeScale.body;
+                                                    font-weight: 600;
+                                                    overflow: elide;
+                                                }
+                                                Text {
+                                                    text: rule.problem ? @tr("A folder or label it uses is gone. Edit the rule to choose another.")
+                                                        : rule.account == "" ? @tr("All accounts") : rule.account;
+                                                    color: rule.problem ? AppTheme.destructive : root.faint-text;
+                                                    font-size: TypeScale.caption;
+                                                    wrap: rule.problem ? word-wrap : no-wrap;
+                                                    overflow: elide;
+                                                }
+                                            }
+                                            IconButton {
+                                                width: 36px;
+                                                height: 36px;
+                                                interactive: index > 0;
+                                                icon: @image-url("../icons/lucide/outline/chevron-up.svg");
+                                                icon-color: root.secondary-text;
+                                                ghost: true;
+                                                hover-background: root.accent-soft;
+                                                tooltip-text: @tr("Move {} up", rule.name);
+                                                clicked => { MailRules.move(rule.id, -1); }
+                                            }
+                                            IconButton {
+                                                width: 36px;
+                                                height: 36px;
+                                                interactive: index < MailRules.rows.length - 1;
+                                                icon: @image-url("../icons/lucide/outline/chevron-down.svg");
+                                                icon-color: root.secondary-text;
+                                                ghost: true;
+                                                hover-background: root.accent-soft;
+                                                tooltip-text: @tr("Move {} down", rule.name);
+                                                clicked => { MailRules.move(rule.id, 1); }
+                                            }
+                                            if !root.compact : Button {
+                                                width: max(80px, self.content-width);
+                                                text: @tr("Edit");
+                                                accessible-label: @tr("Edit {}", rule.name);
+                                                clicked => { MailRules.edit(rule.id); }
+                                            }
+                                            // A phone leaves the name the room.
+                                            if root.compact : IconButton {
+                                                width: 36px;
+                                                height: 36px;
+                                                icon: @image-url("../icons/lucide/outline/pencil.svg");
+                                                icon-color: root.secondary-text;
+                                                ghost: true;
+                                                hover-background: root.accent-soft;
+                                                tooltip-text: @tr("Edit {}", rule.name);
+                                                clicked => { MailRules.edit(rule.id); }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -3389,6 +3528,7 @@ export component SettingsDialog inherits Rectangle {
                 title: root.settings_tab == "General" ? @tr("General")
                     : root.settings_tab == "Accounts" ? @tr("Accounts")
                     : root.settings_tab == "Contacts" ? @tr("Contacts")
+                    : root.settings_tab == "Rules" ? @tr("Rules")
                     : root.settings_tab == "Notifications" ? @tr("Notifications")
                     : root.settings_tab == "Shortcuts" ? @tr("Shortcuts")
                     : root.settings_tab == "Data" ? @tr("Storage")
@@ -3461,6 +3601,7 @@ export component SettingsDialog inherits Rectangle {
                     if root.settings-section-visible("General") : SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/lucide/filled/sliders.svg"); icon-color: root.settings-icon-color("General"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Accounts") : SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Contacts") : SettingsNavItem { text: @tr("Contacts"); icon: @image-url("../icons/lucide/filled/contacts.svg"); icon-color: root.settings-icon-color("Contacts"); selected: root.settings_tab == "Contacts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Contacts"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Rules") : SettingsNavItem { text: @tr("Rules"); icon: @image-url("../icons/lucide/filled/filter.svg"); icon-color: root.settings-icon-color("Rules"); selected: root.settings_tab == "Rules"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Rules"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Notifications") : SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Shortcuts") : SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Data") : SettingsNavItem { text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; root.compact-nav-open = false; } }
@@ -3938,6 +4079,26 @@ export component SettingsDialog inherits Rectangle {
                     }
                     }
                 }
+            }
+        }
+
+        if root.settings_open && MailRules.editing : Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: #00000088;
+            z: 950;
+            accessible-role: groupbox;
+            accessible-label: MailRules.editing-id == 0 ? @tr("New rule") : @tr("Edit rule");
+
+            // A click beside the editor keeps what is written.
+            TouchArea { }
+            RuleEditor {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(640px, parent.width - 24px);
+                height: min(self.content-height, parent.height - 24px);
+                compact: root.compact;
+                close => { MailRules.close(); }
             }
         }
 

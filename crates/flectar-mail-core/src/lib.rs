@@ -39,6 +39,7 @@ pub mod pop3;
 pub mod queue;
 mod read_receipts;
 pub mod route;
+pub mod rules;
 pub mod scheduler;
 pub mod search;
 pub mod sender_identities;
@@ -3226,9 +3227,14 @@ impl Core {
             .nth(1)
             .unwrap_or("localhost")
             .to_owned();
-        let receipt_to = self
+        let (receipt_to, importance) = self
             .db
-            .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+            .read(move |conn| {
+                Ok((
+                    repo::messages::receipt_to(conn, draft_id)?,
+                    repo::messages::importance(conn, draft_id)?,
+                ))
+            })
             .await?;
         let (_, raw) = crate::mime::build_message_owned(crate::mime::OutgoingMessage {
             from: detail.from.clone(),
@@ -3245,6 +3251,7 @@ impl Core {
             message_id_domain: &domain,
             attachments,
             receipt_to: &receipt_to,
+            importance,
         })?;
         Ok(raw)
     }
@@ -3913,6 +3920,7 @@ impl Core {
                         in_reply_to_header: None,
                         attachments: Vec::new(),
                         request_read_receipt: false,
+                        importance: Default::default(),
                     })
                     .await?;
                 let queued = self
@@ -4080,6 +4088,41 @@ impl Core {
     /// Every blocked sender, alphabetically.
     pub async fn blocked_senders(&self) -> Result<Vec<BlockedSender>> {
         self.db.read(|conn| repo::blocked::list(conn)).await
+    }
+
+    /// Every rule that sorts new mail, in the order they are tried (#238).
+    pub async fn mail_rules(&self) -> Result<Vec<MailRule>> {
+        self.db.read(|conn| repo::rules::list(conn)).await
+    }
+
+    /// Save `rule`, a new one (id 0) or a changed one, once it checks out. A
+    /// new rule goes last. Rules sort mail that arrives from then on.
+    pub async fn save_mail_rule(&self, rule: MailRule) -> Result<MailRule> {
+        self.db
+            .write(move |conn| {
+                rules::check(conn, &rule)?;
+                repo::rules::save(conn, &rule, now_ms())
+            })
+            .await
+    }
+
+    pub async fn delete_mail_rule(&self, id: i64) -> Result<()> {
+        self.db
+            .write(move |conn| repo::rules::delete(conn, id))
+            .await
+    }
+
+    pub async fn set_mail_rule_enabled(&self, id: i64, enabled: bool) -> Result<()> {
+        self.db
+            .write(move |conn| repo::rules::set_enabled(conn, id, enabled, now_ms()))
+            .await
+    }
+
+    /// Try the rules in the order of `ids` from now on.
+    pub async fn reorder_mail_rules(&self, ids: Vec<i64>) -> Result<()> {
+        self.db
+            .write(move |conn| repo::rules::reorder(conn, &ids))
+            .await
     }
 
     /// When a mail-list row's timeline puts it, which a page that starts at
@@ -5537,7 +5580,7 @@ impl Core {
                         let updated = tx.execute(
                             "UPDATE messages SET subject = ?2, to_json = ?3, cc_json = ?4,
                                     bcc_json = ?5, date = ?6, from_name = ?7, from_addr = ?8,
-                                    receipt_to = ?11
+                                    receipt_to = ?11, importance = ?12
                               WHERE id = ?1 AND account_id = ?9 AND is_draft = 1
                                 AND (?10 IS NULL OR date = (SELECT saved_at FROM agent_drafts
                                                             WHERE draft_id = ?1))",
@@ -5555,6 +5598,7 @@ impl Core {
                                 (!receipt_to.is_empty())
                                     .then(|| serde_json::to_string(&receipt_to))
                                     .transpose()?,
+                                args.importance.as_i64(),
                             ],
                         )?;
                         if updated != 1 {
@@ -5603,6 +5647,7 @@ impl Core {
                             receipt_to,
                             receipt_confirm: false,
                             receipt_handled: false,
+                            importance: args.importance,
                         };
                         let id = repo::messages::insert(&tx, &nm, tid)?;
                         let in_reply_to_header = args
@@ -5751,7 +5796,8 @@ impl Core {
                                 m.to_json, m.cc_json, m.bcc_json, m.subject,
                                 COALESCE(b.text_body, ''), b.html_body,
                                 COALESCE(dm.mode, 'new'), dm.in_reply_to_message_id,
-                                m.is_draft, dm.in_reply_to_header, m.receipt_to IS NOT NULL
+                                m.is_draft, dm.in_reply_to_header, m.receipt_to IS NOT NULL,
+                                m.importance
                          FROM messages m
                          LEFT JOIN message_bodies b ON b.message_id = m.id
                          LEFT JOIN drafts_meta dm ON dm.message_id = m.id
@@ -5780,6 +5826,7 @@ impl Core {
                                     in_reply_to_header: row.get(12)?,
                                     attachments: Vec::new(),
                                     request_read_receipt: row.get(13)?,
+                                    importance: Importance::from_i64(row.get(14)?),
                                 },
                                 is_draft,
                             ))
@@ -7891,6 +7938,7 @@ impl Core {
                     mime_type: Some(format!("text/calendar; method={method}; charset=UTF-8")),
                 }],
                 request_read_receipt: false,
+                importance: Default::default(),
             })
             .await?;
         // The draft staged its own copy; the temp file can go.
@@ -10975,6 +11023,20 @@ fn apply_thread_action(
     params: Option<&ActionParams>,
 ) -> Result<Vec<(i64, i64)>> {
     let tx = conn.transaction()?;
+    let out = apply_thread_action_in(&tx, thread_id, only, kind, params)?;
+    tx.commit()?;
+    Ok(out)
+}
+
+/// [`apply_thread_action`] inside a transaction the caller commits, such as
+/// a sync's, where rules act on mail as it arrives (#238).
+pub(crate) fn apply_thread_action_in(
+    tx: &rusqlite::Transaction,
+    thread_id: i64,
+    only: Option<&[i64]>,
+    kind: ActionKind,
+    params: Option<&ActionParams>,
+) -> Result<Vec<(i64, i64)>> {
     let mut out: Vec<(i64, i64)> = Vec::new();
 
     let (account_id, mail_protocol): (i64, MailProtocol) = tx.query_row(
@@ -11055,7 +11117,7 @@ fn apply_thread_action(
                     continue;
                 }
                 let aid = repo::actions::enqueue(
-                    &tx,
+                    tx,
                     account_id,
                     kind.as_str(),
                     Some(*id),
@@ -11070,10 +11132,10 @@ fn apply_thread_action(
             let target_read = kind == ActionKind::MarkRead;
             for (id, _f, _u, is_read, _s, _role) in &msgs {
                 if *is_read != target_read {
-                    repo::messages::set_read(&tx, *id, target_read)?;
+                    repo::messages::set_read(tx, *id, target_read)?;
                     let payload = scoped(serde_json::json!({}));
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         kind.as_str(),
                         Some(*id),
@@ -11088,9 +11150,9 @@ fn apply_thread_action(
         ActionKind::Star if message_only => {
             for (id, _f, _u, _r, is_starred, _role) in &msgs {
                 if !*is_starred {
-                    repo::messages::set_starred(&tx, *id, true)?;
+                    repo::messages::set_starred(tx, *id, true)?;
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         "star",
                         Some(*id),
@@ -11106,13 +11168,12 @@ fn apply_thread_action(
             // Star the latest message only (thread-level star).
             if let Some((id, _f, _u, _r, is_starred, _role)) = msgs.iter().max_by_key(|m| m.0) {
                 if *is_starred {
-                    repo::threads::recompute(&tx, thread_id)?;
-                    tx.commit()?;
+                    repo::threads::recompute(tx, thread_id)?;
                     return Ok(out);
                 }
-                repo::messages::set_starred(&tx, *id, true)?;
+                repo::messages::set_starred(tx, *id, true)?;
                 let aid = repo::actions::enqueue(
-                    &tx,
+                    tx,
                     account_id,
                     "star",
                     Some(*id),
@@ -11126,9 +11187,9 @@ fn apply_thread_action(
         ActionKind::Unstar => {
             for (id, _f, _u, _r, is_starred, _role) in &msgs {
                 if *is_starred {
-                    repo::messages::set_starred(&tx, *id, false)?;
+                    repo::messages::set_starred(tx, *id, false)?;
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         "unstar",
                         Some(*id),
@@ -11147,9 +11208,9 @@ fn apply_thread_action(
                 _ => (roles::SPAM, "spam"),
             };
             // Gmail-style fallback: archiving with no Archive folder moves to All Mail.
-            let target = folder_of(&tx, account_id, target_role)?
+            let target = folder_of(tx, account_id, target_role)?
                 .or(if kind == ActionKind::Archive {
-                    folder_of(&tx, account_id, roles::ALL)?
+                    folder_of(tx, account_id, roles::ALL)?
                 } else {
                     None
                 })
@@ -11163,7 +11224,7 @@ fn apply_thread_action(
                 };
                 if movable && f.is_some() {
                     let aid = enqueue_move(
-                        &tx,
+                        tx,
                         account_id,
                         thread_id,
                         *id,
@@ -11179,12 +11240,12 @@ fn apply_thread_action(
             }
             // Archiving also clears snooze, once the whole conversation has
             // left the inbox.
-            if !message_only || !thread_in_inbox(&tx, thread_id)? {
-                repo::snoozes::clear(&tx, thread_id)?;
+            if !message_only || !thread_in_inbox(tx, thread_id)? {
+                repo::snoozes::clear(tx, thread_id)?;
             }
         }
         ActionKind::Unarchive | ActionKind::NotSpam => {
-            let target = folder_of(&tx, account_id, roles::INBOX)?
+            let target = folder_of(tx, account_id, roles::INBOX)?
                 .ok_or_else(|| CoreError::NotFound("no inbox folder".into()))?;
             let from_role = if kind == ActionKind::Unarchive {
                 roles::ARCHIVE
@@ -11196,7 +11257,7 @@ fn apply_thread_action(
                     && f.is_some()
                 {
                     let aid = enqueue_move(
-                        &tx,
+                        tx,
                         account_id,
                         thread_id,
                         *id,
@@ -11215,7 +11276,7 @@ fn apply_thread_action(
             let target = params
                 .and_then(|p| p.target_folder_id)
                 .ok_or_else(|| CoreError::Other("move requires targetFolderId".into()))?;
-            let target_folder = repo::folders::get(&tx, target)?
+            let target_folder = repo::folders::get(tx, target)?
                 .ok_or_else(|| CoreError::NotFound(format!("folder {target}")))?;
             if target_folder.account_id != account_id {
                 return Err(CoreError::Other(
@@ -11225,7 +11286,7 @@ fn apply_thread_action(
             for (id, f, u, _r, _s, _role) in &msgs {
                 if f.is_some() && *f != Some(target) {
                     let aid = enqueue_move(
-                        &tx,
+                        tx,
                         account_id,
                         thread_id,
                         *id,
@@ -11241,14 +11302,14 @@ fn apply_thread_action(
             }
             // The Move to picker lists these folders first.
             if !out.is_empty() {
-                repo::folders::mark_moved_to(&tx, target, now_ms())?;
+                repo::folders::mark_moved_to(tx, target, now_ms())?;
             }
         }
         ActionKind::Copy => {
             let target = params
                 .and_then(|p| p.target_folder_id)
                 .ok_or_else(|| CoreError::Other("copy requires targetFolderId".into()))?;
-            let target_folder = repo::folders::get(&tx, target)?
+            let target_folder = repo::folders::get(tx, target)?
                 .ok_or_else(|| CoreError::NotFound(format!("folder {target}")))?;
             if target_folder.account_id != account_id {
                 return Err(CoreError::Other(
@@ -11273,7 +11334,7 @@ fn apply_thread_action(
                 )? > 0;
                 if added {
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         "copy",
                         Some(*id),
@@ -11285,7 +11346,7 @@ fn apply_thread_action(
                 }
             }
             if !out.is_empty() {
-                repo::folders::mark_moved_to(&tx, target, now_ms())?;
+                repo::folders::mark_moved_to(tx, target, now_ms())?;
             }
         }
         ActionKind::Snooze => {
@@ -11293,9 +11354,9 @@ fn apply_thread_action(
                 .and_then(|p| p.wake_at)
                 .ok_or_else(|| CoreError::Other("snooze requires wakeAt".into()))?;
             let orig = msgs.iter().find_map(|(_, f, ..)| *f);
-            repo::snoozes::set(&tx, thread_id, account_id, wake_at, orig)?;
+            repo::snoozes::set(tx, thread_id, account_id, wake_at, orig)?;
             let aid = repo::actions::enqueue(
-                &tx,
+                tx,
                 account_id,
                 "snooze",
                 None,
@@ -11306,9 +11367,9 @@ fn apply_thread_action(
             out.push((aid, account_id));
         }
         ActionKind::Unsnooze => {
-            repo::snoozes::clear(&tx, thread_id)?;
+            repo::snoozes::clear(tx, thread_id)?;
             let aid = repo::actions::enqueue(
-                &tx,
+                tx,
                 account_id,
                 "unsnooze",
                 None,
@@ -11322,7 +11383,7 @@ fn apply_thread_action(
             let label_id = params
                 .and_then(|p| p.label_id)
                 .ok_or_else(|| CoreError::Other("label action requires labelId".into()))?;
-            let label = repo::labels::get(&tx, label_id)?
+            let label = repo::labels::get(tx, label_id)?
                 .ok_or_else(|| CoreError::NotFound(format!("label {label_id}")))?;
             if let Some(owner_account_id) = label.owner_account_id
                 && owner_account_id != account_id
@@ -11337,9 +11398,9 @@ fn apply_thread_action(
                 scoped(serde_json::json!({ "labelId": label_id, "keyword": label.keyword }));
             for (id, ..) in &msgs {
                 if add {
-                    repo::labels::add_to_message(&tx, *id, label_id)?;
+                    repo::labels::add_to_message(tx, *id, label_id)?;
                 } else {
-                    repo::labels::remove_from_message(&tx, *id, label_id)?;
+                    repo::labels::remove_from_message(tx, *id, label_id)?;
                 }
                 // Auto labels are local-only: mutate membership but never push
                 // their keyword to IMAP (server reconcile also skips them).
@@ -11347,7 +11408,7 @@ fn apply_thread_action(
                     continue;
                 }
                 let aid = repo::actions::enqueue(
-                    &tx,
+                    tx,
                     account_id,
                     kind.as_str(),
                     Some(*id),
@@ -11363,8 +11424,7 @@ fn apply_thread_action(
         }
     }
 
-    repo::threads::recompute(&tx, thread_id)?;
-    tx.commit()?;
+    repo::threads::recompute(tx, thread_id)?;
     Ok(out)
 }
 
@@ -12520,6 +12580,7 @@ mod message_by_header_id_tests {
             in_reply_to_header: Some(header.into()),
             attachments: Vec::new(),
             request_read_receipt: false,
+            importance: Default::default(),
         };
         let headers = |id| {
             let core = &core;
@@ -12644,6 +12705,7 @@ mod draft_staging_tests {
                 mime_type: None,
             }],
             request_read_receipt: false,
+            importance: Default::default(),
         }
     }
 
@@ -12664,6 +12726,7 @@ mod draft_staging_tests {
         tokio::fs::write(&source, b"note").await.unwrap();
         let asking = SaveDraftArgs {
             request_read_receipt: true,
+            importance: Default::default(),
             ..draft_args(None, &source, "note.txt")
         };
         let id = core.save_draft(asking.clone()).await.unwrap();
@@ -12685,11 +12748,26 @@ mod draft_staging_tests {
         core.save_draft(SaveDraftArgs {
             draft_id: Some(id),
             request_read_receipt: false,
+            importance: Default::default(),
             ..draft
         })
         .await
         .unwrap();
         assert!(!core.get_draft(id).await.unwrap().request_read_receipt);
+
+        // So does how important it says it is.
+        let draft = core.get_draft(id).await.unwrap();
+        assert_eq!(draft.importance, Importance::Normal);
+        core.save_draft(SaveDraftArgs {
+            importance: Importance::High,
+            ..draft
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            core.get_draft(id).await.unwrap().importance,
+            Importance::High
+        );
     }
 
     #[tokio::test]
@@ -12743,6 +12821,7 @@ mod draft_staging_tests {
             in_reply_to_header: None,
             attachments: Vec::new(),
             request_read_receipt: false,
+            importance: Default::default(),
         };
         let thread_of = |message_id: i64| {
             let core = core.clone();

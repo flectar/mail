@@ -1384,6 +1384,47 @@ pub(crate) async fn set_state_error(ctx: &SyncCtx, account_id: i64, state: &str,
 /// arrives after it while the app isn't running (see
 /// `Core::announce_missed`), and the app shows it as the account's last
 /// check.
+/// Settle the rules that waited too long for a body (#238), such as one the
+/// server wouldn't send: what can't be told doesn't match, and the held
+/// notifications show.
+pub(crate) async fn settle_waiting_rules(ctx: &SyncCtx, account_id: i64) {
+    let settled = ctx
+        .db
+        .write(move |conn| {
+            let ids =
+                crate::rules::overdue(conn, account_id, now_ms() - crate::rules::WAIT_LIMIT_MS)?;
+            let tx = conn.transaction()?;
+            let (mut touched, mut fresh) = (Vec::new(), Vec::new());
+            for id in ids {
+                if let Some(resumed) = crate::rules::give_up(&tx, id)? {
+                    touched.push(resumed.thread_id);
+                    if resumed.announced {
+                        fresh.push(resumed.thread_id);
+                    }
+                }
+            }
+            tx.commit()?;
+            Ok((touched, fresh))
+        })
+        .await;
+    match settled {
+        Ok((touched, fresh)) => {
+            if !touched.is_empty() {
+                ctx.bus.emit(CoreEvent::MailUpdated {
+                    thread_ids: touched,
+                });
+            }
+            if !fresh.is_empty() {
+                ctx.bus.emit(CoreEvent::MailNew {
+                    account_id,
+                    thread_ids: fresh,
+                });
+            }
+        }
+        Err(error) => tracing::warn!(account_id, %error, "receive: settling rules failed"),
+    }
+}
+
 pub(crate) async fn caught_up(ctx: &SyncCtx, account_id: i64, started: i64) {
     let noted = ctx
         .db
@@ -1625,7 +1666,7 @@ async fn run_cycle(
     // Give queued mutations one bounded turn before checking Inbox. This keeps
     // an Inbox catch-up from starving moves while the following Inbox pass
     // ensures a large mutation queue cannot starve newly arrived mail.
-    let action_slice = queue::execute_due(ctx, config, session).await?;
+    let mut action_slice = queue::execute_due(ctx, config, session).await?;
 
     // Every fifth cycle re-checks read state and removals in every folder:
     // STATUS does not report stars, labels, or a message read while another
@@ -1676,6 +1717,18 @@ async fn run_cycle(
         if !inbox_forward_remaining {
             caught_up(ctx, account_id, started).await;
         }
+    }
+
+    settle_waiting_rules(ctx, account_id).await;
+    // Rules and blocked senders file away mail that just arrived. Move it on
+    // the server in this pass, not after the next wait for new mail.
+    if !action_slice.due_remaining
+        && ctx
+            .db
+            .read(move |conn| repo::actions::has_due_except_send(conn, account_id, now_ms()))
+            .await?
+    {
+        action_slice = queue::execute_due(ctx, config, session).await?;
     }
 
     // A manual Sync Now resolves at the foreground Inbox boundary. Finish any
@@ -2139,7 +2192,15 @@ async fn sync_folder(
             .copied()
         {
             let set = imap::uid_set(&new_uids[..chunk_len]);
-            let headers = imap::fetch_headers(session, &set).await?;
+            // New Inbox mail brings the headers rules test (#238).
+            let rule_headers = if is_inbox {
+                ctx.db
+                    .read(move |conn| crate::rules::header_names(conn, account_id))
+                    .await?
+            } else {
+                Vec::new()
+            };
+            let headers = imap::fetch_headers_with(session, &set, &rule_headers).await?;
             let new: Vec<FetchedHeader> = headers
                 .into_iter()
                 .filter(|h| h.uid > last_seen && h.uid <= scanned_through)
@@ -2184,6 +2245,9 @@ async fn sync_folder(
                         account_id,
                         thread_ids: fresh,
                     });
+                }
+                if is_inbox {
+                    fetch_waiting_bodies(ctx, config, session, &fresh_folder).await?;
                 }
             }
             // The exact UID batch was scanned successfully. Advance even when
@@ -2800,6 +2864,42 @@ async fn extend_history(
     Ok(())
 }
 
+/// Fetch on this connection, now, the bodies of `folder`'s new mail that
+/// rules wait for (#238), as Thunderbird downloads new mail's bodies when its
+/// filters need them. The background download walks the history and could
+/// reach new mail only much later. Storing a body goes on with its rules.
+async fn fetch_waiting_bodies(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Session,
+    folder: &Folder,
+) -> Result<()> {
+    let folder_id = folder.id;
+    let items = ctx
+        .db
+        .read(move |conn| repo::messages::rules_waiting_in(conn, folder_id))
+        .await?;
+    if items.is_empty() {
+        return Ok(());
+    }
+    let chunk = BodyChunk {
+        folder_id,
+        folder_name: folder.path.clone(),
+        uid_validity: folder.uidvalidity,
+        items,
+    };
+    match fetch_body_chunk(ctx, config, session, &mut None, &chunk).await {
+        Ok(_) => Ok(()),
+        Err(BodyChunkError::Reconnect(error)) => Err(error),
+        // The rules settle without the body once they have waited long
+        // enough.
+        Err(BodyChunkError::Fatal(error)) => {
+            tracing::warn!(account_id = config.id, %error, "receive: bodies for rules failed");
+            Ok(())
+        }
+    }
+}
+
 /// What `store_headers` does with headers that match no local message.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum NewHeaders {
@@ -2818,6 +2918,11 @@ enum NewHeaders {
 /// refreshes, of the newly inserted messages and of those that moved to the
 /// folder of their server copy, `fresh` only for threads that queued a
 /// notification for an unread, incoming, recent message.
+///
+/// `notify_min_uid` is set for the Inbox's forward scan, whose new mail is
+/// what rules sort (#238), as Thunderbird filters UIDs past the highest it
+/// has seen. Mail from that UID on arrived while the account was followed,
+/// and may notify.
 async fn store_headers(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -2837,6 +2942,9 @@ async fn store_headers(
         .write(move |conn| {
             let tx = conn.transaction()?;
             let mut importer = super::ingest::Importer::new(&tx, account_id)?;
+            let sorter = notify_min_uid
+                .map(|_| crate::rules::Sorter::load(&tx, account_id))
+                .transpose()?;
             let mut max_uid: i64 = 0;
             let mut inserted = 0u32;
             let mut moved_threads = Vec::new();
@@ -2976,11 +3084,32 @@ async fn store_headers(
                 if crate::turn_away(&tx, msg_id)? {
                     continue;
                 }
-                importer.learn_contacts(&tx, &parsed, &imported)?;
+                // Then rules sort it. What they file away or mark read stays
+                // silent.
+                let sorted = match &sorter {
+                    Some(sorter) => sorter.arrived(
+                        &tx,
+                        msg_id,
+                        crate::rules::Arrival {
+                            headers: Some(crate::mime::header_fields(&fh.header_bytes)),
+                            text: None,
+                            // The attachments are known with the body.
+                            attachments_known: false,
+                        },
+                    )?,
+                    None => Default::default(),
+                };
+                if !sorted.unwanted {
+                    importer.learn_contacts(&tx, &parsed, &imported)?;
+                }
                 // Only mail past the inbox watermark arrived while this
                 // account was being followed.
                 let live = notify_min_uid.is_some_and(|min_uid| fh.uid >= min_uid);
-                importer.announce(&tx, &imported, live)?;
+                if sorted.waiting {
+                    importer.hold(&tx, &imported, live)?;
+                } else {
+                    importer.announce(&tx, &imported, live && !sorted.silent())?;
+                }
             }
 
             if max_uid > 0 && new_headers == NewHeaders::Insert {
@@ -4829,12 +4958,13 @@ async fn persist_selective_batch(
         .filter(|content| !content.calendar_parts.is_empty())
         .map(|content| (content.message_id, content.calendar_parts.clone()))
         .collect();
-    let (thread_ids, count) = ctx
+    let (thread_ids, count, fresh) = ctx
         .db
         .write(move |conn| {
             let _memory_permit = memory_permit;
             let tx = conn.transaction()?;
             let mut thread_ids = Vec::new();
+            let mut fresh = Vec::new();
             let mut count = 0u64;
             for content in contents {
                 let message_id = content.message_id;
@@ -4861,6 +4991,12 @@ async fn persist_selective_batch(
                 )?;
                 repo::search::index_message(&tx, message_id)?;
                 let _ = repo::sync_failures::clear_content(&tx, message_id);
+                // Rules that waited for this body go on (#238).
+                if let Some(resumed) = crate::rules::resume(&tx, message_id)?
+                    && resumed.announced
+                {
+                    fresh.push(resumed.thread_id);
+                }
                 if let Some(thread_id) =
                     repo::messages::get_row(&tx, message_id)?.and_then(|row| row.thread_id)
                     && !thread_ids.contains(&thread_id)
@@ -4873,7 +5009,7 @@ async fn persist_selective_batch(
                 repo::threads::recompute(&tx, thread_id)?;
             }
             tx.commit()?;
-            Ok((thread_ids, count))
+            Ok((thread_ids, count, fresh))
         })
         .await?;
     super::ingest::store_calendar_events(
@@ -4885,6 +5021,12 @@ async fn persist_selective_batch(
     .await?;
     if !thread_ids.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+    }
+    if !fresh.is_empty() {
+        ctx.bus.emit(CoreEvent::MailNew {
+            account_id,
+            thread_ids: fresh,
+        });
     }
     Ok(count)
 }
@@ -4914,18 +5056,22 @@ async fn persist_body(
 
     let parsed = crate::mime::parse_message(raw)?;
     let calendar_events = super::ingest::calendar_parts(&parsed);
-    let (persisted, thread_ids) = ctx
+    let (persisted, thread_ids, fresh) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
             let Some(current) = current_body_row(&tx, message_id)? else {
-                return Ok((false, Vec::new()));
+                return Ok((false, Vec::new(), None));
             };
             if !can_persist_selective_content(&current, guard, uid) {
-                return Ok((false, Vec::new()));
+                return Ok((false, Vec::new(), None));
             }
             let mut thread_ids = super::ingest::store_body(&tx, message_id, &path_str, &parsed)?;
             let _ = repo::sync_failures::clear_content(&tx, message_id);
+            // Rules that waited for this body go on (#238).
+            let fresh = crate::rules::resume(&tx, message_id)?
+                .filter(|resumed| resumed.announced)
+                .map(|resumed| resumed.thread_id);
             let tid: Option<i64> =
                 repo::messages::get_row(&tx, message_id)?.and_then(|r| r.thread_id);
             if let Some(tid) = tid {
@@ -4935,7 +5081,7 @@ async fn persist_body(
                 }
             }
             tx.commit()?;
-            Ok((true, thread_ids))
+            Ok((true, thread_ids, fresh))
         })
         .await?;
 
@@ -4952,6 +5098,12 @@ async fn persist_body(
     .await?;
     if !thread_ids.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+    }
+    if let Some(thread_id) = fresh {
+        ctx.bus.emit(CoreEvent::MailNew {
+            account_id: config.id,
+            thread_ids: vec![thread_id],
+        });
     }
     Ok(true)
 }

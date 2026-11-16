@@ -1033,6 +1033,8 @@ pub struct ThreadSummary {
     pub is_starred: bool,
     pub has_attachments: bool,
     pub has_replied: bool,
+    /// A message of the conversation was sent with high importance.
+    pub high_importance: bool,
     pub snoozed_until: Option<i64>,
     /// Ids of labels present on any message in the thread.
     pub labels: Vec<i64>,
@@ -1079,6 +1081,8 @@ pub struct MessageSummary {
     pub has_attachments: bool,
     /// A sent reply refers to this message.
     pub has_replied: bool,
+    /// The message was sent with high importance.
+    pub high_importance: bool,
     /// When the message's conversation is snoozed until.
     pub snoozed_until: Option<i64>,
     pub labels: Vec<i64>,
@@ -1373,6 +1377,111 @@ pub struct BlockResult {
     pub action_ids: Vec<i64>,
     /// How many messages moved.
     pub moved: usize,
+}
+
+/// A rule that sorts new mail as it arrives in an Inbox (#238). Rules are
+/// tried top to bottom.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailRule {
+    /// 0 for a rule not saved yet.
+    pub id: i64,
+    /// The account whose mail it sorts, or None for every account's.
+    pub account_id: Option<i64>,
+    pub name: String,
+    pub enabled: bool,
+    /// Whether mail must meet every condition, or any one.
+    pub match_all: bool,
+    pub conditions: Vec<RuleCondition>,
+    pub actions: Vec<RuleAction>,
+    /// Whether later rules leave alone the mail this one matched. Filing
+    /// mail away (move, archive, trash, junk) always ends the rules.
+    pub stop: bool,
+}
+
+/// What one condition of a [`MailRule`] tests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleCondition {
+    pub field: RuleField,
+    /// The header a [`RuleField::Header`] condition looks at, such as
+    /// "X-Spam-Flag".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub header: String,
+    pub op: RuleOp,
+    /// The text to look for, the pattern, or the size in KB.
+    #[serde(default)]
+    pub value: String,
+    /// Whether the condition holds when the test fails, as in "doesn't
+    /// contain".
+    #[serde(default)]
+    pub negate: bool,
+}
+
+/// The part of a message a [`RuleCondition`] tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuleField {
+    /// The sender's address or name.
+    From,
+    To,
+    Cc,
+    /// Any recipient in To or Cc.
+    ToOrCc,
+    Subject,
+    /// The List-Id of mailing list mail.
+    MailingList,
+    /// The message's size in KB.
+    Size,
+    /// A header the condition names.
+    Header,
+    /// The message's text.
+    Body,
+    /// Whether files are attached.
+    Attachments,
+}
+
+/// How a [`RuleCondition`] compares. Text is compared without regard to
+/// case, an address by its email and by its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuleOp {
+    Contains,
+    Is,
+    StartsWith,
+    EndsWith,
+    /// A regular expression, found anywhere in the text.
+    Matches,
+    /// The field is there at all, as mailing list mail has a List-Id and
+    /// some mail has files attached.
+    Exists,
+    /// A size larger than the value.
+    Over,
+    /// A size smaller than the value.
+    Under,
+}
+
+/// What a [`MailRule`] does with mail it matches. Mail is marked and
+/// labeled first, then copied, then filed away.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RuleAction {
+    /// Into one of the rule's account's folders.
+    Move {
+        folder: i64,
+    },
+    /// Into one more folder, where a message can be in several (JMAP).
+    Copy {
+        folder: i64,
+    },
+    Label {
+        label: i64,
+    },
+    MarkRead,
+    Star,
+    Archive,
+    Trash,
+    Junk,
 }
 
 /// How the user can leave a mailing list, for the confirmation shown before
@@ -1738,6 +1847,39 @@ pub struct SaveDraftArgs {
     /// RFC 8098), sent to its From address.
     #[serde(default)]
     pub request_read_receipt: bool,
+    /// How important the message says it is.
+    #[serde(default)]
+    pub importance: Importance,
+}
+
+/// How important a message's sender marked it, from its Importance or
+/// X-Priority header, or what a draft asks for (#236).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Importance {
+    Low,
+    #[default]
+    Normal,
+    High,
+}
+
+impl Importance {
+    /// As stored: -1, 0 or 1.
+    pub const fn as_i64(self) -> i64 {
+        match self {
+            Self::Low => -1,
+            Self::Normal => 0,
+            Self::High => 1,
+        }
+    }
+
+    pub const fn from_i64(value: i64) -> Self {
+        match value {
+            ..=-1 => Self::Low,
+            0 => Self::Normal,
+            _ => Self::High,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

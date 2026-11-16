@@ -165,6 +165,7 @@ async fn actor(
             sync_mailboxes(&ctx, config.id, &connected).await?;
             sync_emails(&ctx, &config, &connected, live_since).await?;
             caught_up(&ctx, config.id, started).await;
+            crate::sync::engine::settle_waiting_rules(&ctx, config.id).await;
             execute_actions(&ctx, &config, &connected).await?;
             // The counts only explain the badges, so they never fail a sync.
             if let Err(error) = sync_mailbox_counts(&ctx, config.id, &connected).await {
@@ -910,7 +911,41 @@ async fn current_email_state(c: &ConnectedClient) -> Result<String> {
     Ok(response.take_state())
 }
 
-fn header_properties() -> Vec<EmailProperty> {
+/// Headers read as text with every Email's metadata.
+const TEXT_HEADERS: [&str; 7] = [
+    "Auto-Submitted",
+    "List-Id",
+    "Precedence",
+    "Importance",
+    "X-Priority",
+    "X-MSMail-Priority",
+    "Priority",
+];
+
+/// The name `name` is fetched under: as [`TEXT_HEADERS`] spells it, when it
+/// is one of them, which servers name in the case asked for.
+fn fetched_header_name(name: &str) -> &str {
+    TEXT_HEADERS
+        .iter()
+        .find(|known| known.eq_ignore_ascii_case(name))
+        .copied()
+        .unwrap_or(name)
+}
+
+/// The values of the headers rules test (#238), as fetched with an Email.
+fn rule_header_values(email: &Email, names: &[String]) -> Vec<(String, String)> {
+    names
+        .iter()
+        .filter_map(|name| {
+            header_text(email, fetched_header_name(name))
+                .map(|value| (name.clone(), value.to_owned()))
+        })
+        .collect()
+}
+
+/// What Email/get asks for, with the headers `rule_headers` that the
+/// account's rules test.
+fn header_properties(rule_headers: &[String]) -> Vec<EmailProperty> {
     vec![
         EmailProperty::Id,
         EmailProperty::BlobId,
@@ -931,12 +966,20 @@ fn header_properties() -> Vec<EmailProperty> {
         // Not `attachments`: see `list_attachments`.
         EmailProperty::HasAttachment,
         EmailProperty::Preview,
-        EmailProperty::Header(Header::as_text("Auto-Submitted", false)),
-        EmailProperty::Header(Header::as_text("List-Id", false)),
-        EmailProperty::Header(Header::as_text("Precedence", false)),
     ]
     .into_iter()
+    .chain(
+        TEXT_HEADERS
+            .into_iter()
+            .map(|name| EmailProperty::Header(Header::as_text(name, false))),
+    )
     .chain(RECEIPT_HEADERS.map(|name| EmailProperty::Header(Header::as_raw(name, true))))
+    .chain(
+        rule_headers
+            .iter()
+            .filter(|name| fetched_header_name(name) == name.as_str())
+            .map(|name| EmailProperty::Header(Header::as_text(name.as_str(), false))),
+    )
     .collect()
 }
 
@@ -1059,11 +1102,19 @@ async fn sync_emails(
     // checkpointed once every page is stored.
     let mut remote_ids = skipped.into_iter().collect::<HashSet<_>>();
     remote_ids.reserve(ids.len());
+    let rule_headers = ctx
+        .db
+        .read(move |conn| crate::rules::header_names(conn, account_id))
+        .await?;
     let mut pages = HeaderPages {
         ids: &ids,
         position: 0,
         size: max_objects_in_get(c),
+        rule_headers: &rule_headers,
     };
+    // New mail whose rules wait for its body, which comes once the pages
+    // are stored.
+    let mut waiting = Vec::new();
     let mut fetched = pages.next(c).await?;
     while let Some((emails, not_found)) = fetched.take() {
         destroyed.extend(not_found);
@@ -1074,11 +1125,20 @@ async fn sync_emails(
         );
         let (next, persisted) = tokio::join!(
             pages.next(c),
-            persist_emails(ctx, config, emails, full, insert_after, live_since)
+            persist_emails(
+                ctx,
+                config,
+                emails,
+                full,
+                insert_after,
+                live_since,
+                Some(rule_headers.clone()),
+            )
         );
-        persisted?;
+        waiting.extend(persisted?);
         fetched = next?;
     }
+    fetch_waiting_bodies(ctx, config, c, waiting).await;
     destroyed.sort();
     destroyed.dedup();
     finish_email_sync(ctx, config, remote_ids, destroyed, checkpoint_state, full).await
@@ -1089,6 +1149,8 @@ struct HeaderPages<'a> {
     ids: &'a [String],
     position: usize,
     size: usize,
+    /// Headers the account's rules test, fetched too.
+    rule_headers: &'a [String],
 }
 
 impl HeaderPages<'_> {
@@ -1099,7 +1161,7 @@ impl HeaderPages<'_> {
     async fn next(&mut self, c: &ConnectedClient) -> Result<Option<(Vec<Email>, Vec<String>)>> {
         while self.position < self.ids.len() {
             let end = self.ids.len().min(self.position + self.size);
-            match fetch_headers(c, &self.ids[self.position..end]).await {
+            match fetch_headers(c, &self.ids[self.position..end], self.rule_headers).await {
                 Ok(page) => {
                     self.position = end;
                     return Ok(Some(page));
@@ -1121,13 +1183,14 @@ impl HeaderPages<'_> {
 async fn fetch_headers(
     c: &ConnectedClient,
     ids: &[String],
+    rule_headers: &[String],
 ) -> jmap_client::Result<(Vec<Email>, Vec<String>)> {
     let mut request = c.request();
     request
         .get_email()
         .account_id(&c.account_id)
         .ids(ids.iter().cloned())
-        .properties(header_properties());
+        .properties(header_properties(rule_headers));
     let mut response: EmailGetResponse = c.send_single(request).await?;
     Ok((response.take_list(), response.take_not_found()))
 }
@@ -1161,7 +1224,10 @@ fn first(values: Option<&[String]>) -> Option<String> {
 
 /// Stores a page of headers. A full sync also records each message as
 /// stored, so an interrupted run need not fetch it again. An Email received
-/// before `insert_after` only updates a message already here.
+/// before `insert_after` only updates a message already here. Rules sort mail
+/// new here (#238) with `rules`, the headers they test fetched with it, unless
+/// it is None: what a search on the server finds is never new mail. Returns
+/// the new mail whose rules wait for its body.
 async fn persist_emails(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -1169,13 +1235,15 @@ async fn persist_emails(
     full_sync: bool,
     insert_after: Option<i64>,
     live_since: i64,
-) -> Result<()> {
+    rules: Option<Vec<String>>,
+) -> Result<Vec<i64>> {
     let account_id = config.id;
-    let (thread_ids, notified_threads, stale_paths) = ctx
+    let (thread_ids, notified_threads, stale_paths, waiting) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
             let settings = repo::settings::get(&tx)?;
+            let mut waiting = Vec::new();
             let (outgoing_learning_since, incoming_learning_since) =
                 repo::contacts::learning_boundaries(&tx, account_id, now_ms())?;
             let account_emails = repo::sender_identities::own_addresses(&tx, account_id)?;
@@ -1183,6 +1251,19 @@ async fn persist_emails(
             // Threads queued for a new-mail notification, once each.
             let mut notified_threads = Vec::new();
             let mut stale_paths = Vec::new();
+            // Rules sort new mail (#238): what changes report, and what a
+            // full sync after the changes ran out finds received since the
+            // account last caught up. A first full sync finds only history.
+            let sorter = crate::rules::Sorter::load(&tx, account_id)?;
+            let caught_up_at = if full_sync {
+                tx.query_row(
+                    "SELECT caught_up_at FROM accounts WHERE id = ?1",
+                    params![account_id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )?
+            } else {
+                None
+            };
 
             for email in emails {
                 let remote_id = email
@@ -1331,7 +1412,10 @@ async fn persist_emails(
                             repo::contacts::harvest(&tx, account_id, address, true, date)?;
                         }
                     }
-                } else if inserted
+                }
+                // The sender of new incoming mail is learned once rules have
+                // sorted it, unless they throw it away.
+                let learn_sender = if inserted
                     && !is_outgoing
                     && settings.collect_incoming_contacts
                     && date >= incoming_learning_since
@@ -1341,8 +1425,10 @@ async fn persist_emails(
                     && !crate::mime::robot_sender(&sender.email)
                     && !repo::blocked::is_blocked(&tx, &sender.email.to_ascii_lowercase())?
                 {
-                    repo::contacts::harvest(&tx, account_id, sender, false, date)?;
-                }
+                    Some(sender.clone())
+                } else {
+                    None
+                };
                 let mut pending_keywords = false;
                 let mut pending_mailboxes = false;
                 let local_id;
@@ -1470,6 +1556,12 @@ async fn persist_emails(
                         receipt_to,
                         receipt_confirm,
                         receipt_handled: receipt_answered,
+                        importance: crate::mime::importance(
+                            header_text(&email, "Importance"),
+                            header_text(&email, "X-Priority"),
+                            header_text(&email, "X-MSMail-Priority"),
+                            header_text(&email, "Priority"),
+                        ),
                     };
                     local_id = repo::messages::insert(&tx, &new, thread_id)?;
                     repo::messages::set_jmap_remote(
@@ -1506,8 +1598,45 @@ async fn persist_emails(
                 // Mail from a blocked sender goes to Spam as it arrives, once
                 // its mailboxes are in place.
                 let turned_away = inserted && crate::turn_away(&tx, local_id)?;
-                if let Some(audible) = announce
+                // Then rules sort new mail. What they file away or mark read
+                // stays silent.
+                let arrived = rules.is_some()
+                    && inserted
                     && !turned_away
+                    && (!full_sync || caught_up_at.is_some_and(|at| date >= at));
+                let sorted = if arrived {
+                    sorter.arrived(
+                        &tx,
+                        local_id,
+                        crate::rules::Arrival {
+                            headers: Some(rule_header_values(
+                                &email,
+                                rules.as_deref().unwrap_or_default(),
+                            )),
+                            text: None,
+                            attachments_known: true,
+                        },
+                    )?
+                } else {
+                    Default::default()
+                };
+                if !sorted.unwanted
+                    && let Some(sender) = &learn_sender
+                {
+                    repo::contacts::harvest(&tx, account_id, sender, false, date)?;
+                }
+                // Rules that wait for the body hold the notification back
+                // until they are done.
+                if sorted.waiting {
+                    if let Some(audible) = announce
+                        && !turned_away
+                    {
+                        crate::rules::hold(&tx, local_id, audible)?;
+                    }
+                    waiting.push(local_id);
+                } else if let Some(audible) = announce
+                    && !turned_away
+                    && !sorted.silent()
                     && !notified_threads.contains(&thread_id)
                 {
                     repo::notifications::enqueue(&tx, local_id, audible)?;
@@ -1524,6 +1653,7 @@ async fn persist_emails(
                 changed_threads.into_iter().collect::<Vec<_>>(),
                 notified_threads,
                 stale_paths,
+                waiting,
             ))
         })
         .await?;
@@ -1534,7 +1664,26 @@ async fn persist_emails(
             thread_ids: notified_threads,
         });
     }
-    Ok(())
+    Ok(waiting)
+}
+
+/// Fetch over `c`, now, the bodies new mail's rules wait for (#238), as
+/// Thunderbird downloads new mail's bodies when its filters need them.
+/// Storing a body goes on with its rules; one that fails waits for the rules
+/// to settle without it.
+async fn fetch_waiting_bodies(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    waiting: Vec<i64>,
+) {
+    for message_id in waiting {
+        if let Err(error) =
+            fetch_body_over(ctx, config, BodyConnection::Shared(c), message_id).await
+        {
+            tracing::warn!(account_id = config.id, message_id, %error, "receive: a body for rules failed");
+        }
+    }
 }
 
 /// Applies remote deletions and full-sync reconciliation before checkpointing.
@@ -2446,9 +2595,14 @@ async fn build_draft_message(
         .rsplit_once('@')
         .map(|(_, value)| value)
         .unwrap_or("localhost");
-    let receipt_to = ctx
+    let (receipt_to, importance) = ctx
         .db
-        .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+        .read(move |conn| {
+            Ok((
+                repo::messages::receipt_to(conn, draft_id)?,
+                repo::messages::importance(conn, draft_id)?,
+            ))
+        })
         .await?;
     let outgoing = crate::mime::OutgoingMessage {
         from: detail.from.clone(),
@@ -2465,6 +2619,7 @@ async fn build_draft_message(
         message_id_domain: domain,
         attachments: outgoing_attachments,
         receipt_to: &receipt_to,
+        importance,
     };
     let security_recipients = outgoing
         .to
@@ -3165,9 +3320,12 @@ async fn search_server(
         }
     }
     for chunk in missing.chunks(max_objects_in_get(c).max(1)) {
-        let (emails, _) = fetch_headers(c, chunk).await.map_err(client::map_error)?;
-        // Found mail notifies of nothing, whenever it arrived.
-        persist_emails(ctx, config, emails, false, None, i64::MAX).await?;
+        let (emails, _) = fetch_headers(c, chunk, &[])
+            .await
+            .map_err(client::map_error)?;
+        // Found mail notifies of nothing, whenever it arrived, and rules
+        // leave it as it is.
+        persist_emails(ctx, config, emails, false, None, i64::MAX, None).await?;
     }
     let message_ids = ctx
         .db
@@ -3212,6 +3370,22 @@ async fn fetch_body(
     session: &mut Option<ConnectedClient>,
     message_id: i64,
 ) -> Result<()> {
+    fetch_body_over(ctx, config, BodyConnection::Own(session), message_id).await
+}
+
+/// The session a body comes over: the body fetcher's own, opened when it
+/// is needed, or the one a sync is using.
+enum BodyConnection<'a> {
+    Own(&'a mut Option<ConnectedClient>),
+    Shared(&'a ConnectedClient),
+}
+
+async fn fetch_body_over(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    connection: BodyConnection<'_>,
+    message_id: i64,
+) -> Result<()> {
     let row = ctx
         .db
         .read(move |conn| repo::messages::get_row(conn, message_id))
@@ -3234,7 +3408,10 @@ async fn fetch_body(
             MAX_JMAP_MESSAGE_BYTES / (1024 * 1024)
         )));
     }
-    let connected = body_session(ctx, config, session).await?;
+    let connected = match connection {
+        BodyConnection::Own(session) => body_session(ctx, config, session).await?,
+        BodyConnection::Shared(connected) => connected,
+    };
     let raw = download_message_bounded(connected, &expected_blob).await?;
     let parsed = crate::mime::parse_message(&raw)?;
     let calendar_events = crate::sync::ingest::calendar_parts(&parsed);
@@ -3245,7 +3422,7 @@ async fn fetch_body(
     let path_string = path.to_string_lossy().into_owned();
     let guarded_remote = remote_id.clone();
     let guarded_blob = expected_blob.clone();
-    let (persisted, thread_ids) = ctx
+    let (persisted, thread_ids, fresh) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
@@ -3255,10 +3432,14 @@ async fn fetch_body(
                     && current.jmap_blob_id.as_deref() == Some(&guarded_blob)
             });
             if !valid {
-                return Ok((false, Vec::new()));
+                return Ok((false, Vec::new(), None));
             }
             let mut thread_ids =
                 crate::sync::ingest::store_body(&tx, message_id, &path_string, &parsed)?;
+            // Rules that waited for this body go on (#238).
+            let fresh = crate::rules::resume(&tx, message_id)?
+                .filter(|resumed| resumed.announced)
+                .map(|resumed| resumed.thread_id);
             if let Some(thread_id) = current.and_then(|row| row.thread_id) {
                 repo::threads::recompute(&tx, thread_id)?;
                 if !thread_ids.contains(&thread_id) {
@@ -3266,7 +3447,7 @@ async fn fetch_body(
                 }
             }
             tx.commit()?;
-            Ok((true, thread_ids))
+            Ok((true, thread_ids, fresh))
         })
         .await?;
     if !persisted {
@@ -3282,6 +3463,12 @@ async fn fetch_body(
     .await?;
     if !thread_ids.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+    }
+    if let Some(thread_id) = fresh {
+        ctx.bus.emit(CoreEvent::MailNew {
+            account_id: config.id,
+            thread_ids: vec![thread_id],
+        });
     }
     Ok(())
 }

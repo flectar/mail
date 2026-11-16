@@ -273,6 +273,7 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
                     receipt_to: Vec::new(),
                     receipt_confirm: false,
                     receipt_handled: false,
+                    importance: Default::default(),
                 },
                 thread_id,
             )?;
@@ -746,6 +747,191 @@ async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
     ctx.db
         .read(move |conn| {
             assert!(repo::messages::by_folder_uid(conn, inbox, 51)?.is_some());
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn rules_sort_new_inbox_mail_and_what_they_file_away_stays_silent() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let (_dir, ctx, config, folder) = deleted_mail_context(1).await;
+    let (account_id, inbox) = (config.id, folder.id);
+    let news = ctx
+        .db
+        .write(move |conn| {
+            let news = repo::folders::upsert(conn, account_id, "News", Some("/"), None)?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(account_id),
+                    name: "News".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::Subject,
+                        header: String::new(),
+                        op: RuleOp::Is,
+                        value: "message 60".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::Move { folder: news }],
+                    stop: false,
+                },
+                0,
+            )?;
+            Ok(news)
+        })
+        .await
+        .unwrap();
+    let (updated, fresh) = store_headers(
+        &ctx,
+        &config,
+        &folder,
+        vec![deletion_header(60, false), deletion_header(61, false)],
+        Some(1),
+        NewHeaders::Insert,
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.len(), 2);
+    // Only the mail the rule left in the Inbox notifies.
+    assert_eq!(fresh.len(), 1);
+    ctx.db
+        .read(move |conn| {
+            let filed = repo::messages::get_row(
+                conn,
+                conn.query_row(
+                    "SELECT id FROM messages WHERE message_id = 'deletion-60@example.test'",
+                    [],
+                    |row| row.get(0),
+                )?,
+            )?
+            .unwrap();
+            assert_eq!(filed.folder_id, Some(news));
+            let kind: String = conn.query_row(
+                "SELECT kind FROM pending_actions WHERE message_id = ?1",
+                [filed.id],
+                |row| row.get(0),
+            )?;
+            assert_eq!(kind, "move");
+            assert!(repo::messages::by_folder_uid(conn, inbox, 61)?.is_some());
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // What a history pass finds stays where the server has it.
+    let mut old = deletion_header(40, false);
+    old.header_bytes = b"Message-ID: <old-40@example.test>\r\nFrom: sender@example.test\r\nSubject: Message 60\r\n\r\n".to_vec();
+    store_headers(&ctx, &config, &folder, vec![old], None, NewHeaders::Insert)
+        .await
+        .unwrap();
+    ctx.db
+        .read(move |conn| {
+            assert!(repo::messages::by_folder_uid(conn, inbox, 40)?.is_some());
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_rule_on_the_body_holds_new_mail_until_its_body_comes() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let (_dir, ctx, config, folder) = deleted_mail_context(1).await;
+    let (account_id, inbox) = (config.id, folder.id);
+    let news = ctx
+        .db
+        .write(move |conn| {
+            let news = repo::folders::upsert(conn, account_id, "News", Some("/"), None)?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(account_id),
+                    name: "Lists".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::Body,
+                        header: String::new(),
+                        op: RuleOp::Contains,
+                        value: "unsubscribe".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::Move { folder: news }],
+                    stop: false,
+                },
+                0,
+            )?;
+            Ok(news)
+        })
+        .await
+        .unwrap();
+    let (_, fresh) = store_headers(
+        &ctx,
+        &config,
+        &folder,
+        vec![deletion_header(80, false), deletion_header(81, false)],
+        Some(1),
+        NewHeaders::Insert,
+    )
+    .await
+    .unwrap();
+    // Both wait for their bodies, and so do their notifications.
+    assert!(fresh.is_empty());
+    let waiting = ctx
+        .db
+        .read(move |conn| repo::messages::rules_waiting_in(conn, inbox))
+        .await
+        .unwrap();
+    assert_eq!(
+        waiting.iter().map(|(_, uid)| *uid).collect::<Vec<_>>(),
+        [80, 81]
+    );
+    let raw = |uid: i64, text: &str| {
+        format!(
+            "Message-ID: <deletion-{uid}@example.test>\r\nFrom: sender@example.test\r\nTo: reader@example.test\r\nSubject: Message {uid}\r\n\r\n{text}\r\n"
+        )
+        .into_bytes()
+    };
+    let guard = SelectivePersistGuard::Background { folder_id: inbox };
+    for ((message_id, uid), text) in waiting.iter().zip(["Unsubscribe here", "Hello"]) {
+        let stored = persist_body(
+            &ctx,
+            &config,
+            *message_id,
+            guard,
+            *uid as u32,
+            &raw(*uid, text),
+        )
+        .await
+        .unwrap();
+        assert!(stored);
+    }
+    // The one that asks to unsubscribe moved without a word; the other
+    // notifies now.
+    let (moved, kept) = (waiting[0].0, waiting[1].0);
+    ctx.db
+        .read(move |conn| {
+            let folder_of = |id| -> rusqlite::Result<Option<i64>> {
+                conn.query_row(
+                    "SELECT folder_id FROM messages WHERE id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )
+            };
+            assert_eq!(folder_of(moved)?, Some(news));
+            assert_eq!(folder_of(kept)?, Some(inbox));
+            let notified: Vec<i64> = conn
+                .prepare("SELECT message_id FROM notification_outbox")?
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            assert_eq!(notified, [kept]);
+            assert!(repo::messages::rules_waiting_in(conn, inbox)?.is_empty());
             Ok(())
         })
         .await
@@ -1519,6 +1705,7 @@ fn seed_unread(
             receipt_to: Vec::new(),
             receipt_confirm: false,
             receipt_handled: false,
+            importance: Default::default(),
         },
         thread_id,
     )?;

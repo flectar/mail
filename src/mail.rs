@@ -8,11 +8,11 @@ use flectar_mail_core::{
         Account, AccountConfig, ActionKind, ActionParams, ActionTarget, AddPasswordAccountArgs,
         Address, BlockOffer, BlockResult, CalendarConnection, CalendarEvent, CardDavConnection,
         ConnectCaldavArgs, ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage,
-        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, ForwardedMessage,
+        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, ForwardedMessage, Importance,
         InvitationCard, Label, ListOrder, ListOwner, MailGrouping, MailHistory, MailProfile,
-        MailProtocol, MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor,
-        MessageSummary, PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs,
-        QueueSendResult, RsvpEventArgs, SaveDraftArgs, SearchCursor, SenderIdentity,
+        MailProtocol, MailRule, MailboxBadgeCounts, MessageCursor, MessageDetail,
+        MessageSearchCursor, MessageSummary, PerformActionArgs, PortableAccountConfig, Provider,
+        QueueSendArgs, QueueSendResult, RsvpEventArgs, SaveDraftArgs, SearchCursor, SenderIdentity,
         ServerSearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary, UnsubscribeOffer,
         UnsubscribeOutcome, View, normalized_workspace_list_pane_width, roles,
     },
@@ -47,6 +47,8 @@ pub struct EmailFixture {
     pub has_attachments: bool,
     #[serde(default)]
     pub has_replied: bool,
+    #[serde(default)]
+    pub high_importance: bool,
     #[serde(skip)]
     pub html: String,
 }
@@ -86,6 +88,7 @@ pub struct MailMessage {
     pub message_count: i64,
     pub attachments: Vec<flectar_mail_core::models::AttachmentMeta>,
     pub has_replied: bool,
+    pub high_importance: bool,
     pub is_outgoing: bool,
     pub labels: Vec<i64>,
     pub html: Option<String>,
@@ -146,6 +149,7 @@ impl MailMessage {
             message_count: 1,
             attachments: Vec::new(),
             has_replied: email.has_replied,
+            high_importance: email.high_importance,
             is_outgoing: false,
             labels: Vec::new(),
             html: Some(email.html.to_owned()),
@@ -220,6 +224,7 @@ pub struct ComposeMessage<'a> {
     pub in_reply_to_header: Option<&'a str>,
     /// The message asks for a read receipt.
     pub request_read_receipt: bool,
+    pub importance: Importance,
 }
 
 /// The latest concrete message in a selected thread, with the addressing data
@@ -2524,6 +2529,64 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// Every rule that sorts new mail, in order (#238).
+    pub async fn mail_rules(&self) -> Result<Vec<MailRule>, String> {
+        self.core
+            .mail_rules()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// What a rule can name: the accounts, their folders and the labels.
+    pub async fn rule_choices(
+        &self,
+    ) -> Result<(Vec<Account>, Vec<FolderInfo>, Vec<Label>), String> {
+        let accounts = self
+            .core
+            .list_accounts()
+            .await
+            .map_err(|error| error.to_string())?;
+        let folders = self
+            .core
+            .list_folders(None)
+            .await
+            .map_err(|error| error.to_string())?;
+        let labels = self
+            .core
+            .list_labels()
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok((accounts, folders, labels))
+    }
+
+    pub async fn save_mail_rule(&self, rule: MailRule) -> Result<MailRule, String> {
+        self.core
+            .save_mail_rule(rule)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn delete_mail_rule(&self, id: i64) -> Result<(), String> {
+        self.core
+            .delete_mail_rule(id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_mail_rule_enabled(&self, id: i64, enabled: bool) -> Result<(), String> {
+        self.core
+            .set_mail_rule_enabled(id, enabled)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn reorder_mail_rules(&self, ids: Vec<i64>) -> Result<(), String> {
+        self.core
+            .reorder_mail_rules(ids)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     /// Take back the actions of one gesture. False when none could be.
     pub async fn undo_actions(&self, action_ids: Vec<i64>) -> Result<bool, String> {
         self.core
@@ -3070,6 +3133,7 @@ fn compose_args(
         in_reply_to_header: message.in_reply_to_header.map(str::to_owned),
         attachments: message.attachments.to_vec(),
         request_read_receipt: message.request_read_receipt,
+        importance: message.importance,
     })
 }
 
@@ -3826,6 +3890,7 @@ fn summary_to_message(
         message_count: thread.message_count.max(1),
         attachments: Vec::new(),
         has_replied: thread.has_replied,
+        high_importance: thread.high_importance,
         is_outgoing: false,
         labels: thread.labels,
         html: None,
@@ -3937,6 +4002,7 @@ fn message_summary_to_message(
         message_count: 1,
         attachments: Vec::new(),
         has_replied: message.has_replied,
+        high_importance: message.high_importance,
         is_outgoing: message.is_outgoing,
         labels: message.labels,
         html: None,
@@ -4049,6 +4115,7 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
             Vec::new()
         },
         has_replied: row.has_replied,
+        high_importance: row.high_importance,
         is_outgoing: message.is_outgoing,
         labels: row.labels.clone(),
         html,
@@ -4299,7 +4366,7 @@ mod tests {
     };
     use crate::mail_scope::{LabelKind, Scope, StandardMailbox};
     use flectar_mail_core::models::{
-        Account, ActionTarget, Address, AuthKind, FolderInfo, Label, MailProtocol,
+        Account, ActionTarget, Address, AuthKind, FolderInfo, Importance, Label, MailProtocol,
         MailboxBadgeCounts, MessageSummary, Provider, ThreadSummary, View,
     };
     use std::collections::HashMap;
@@ -4631,6 +4698,7 @@ mod tests {
             is_outgoing: outgoing,
             has_attachments: false,
             has_replied: false,
+            high_importance: false,
             snoozed_until: None,
             labels: vec![3],
             verification_code: None,
@@ -4712,6 +4780,7 @@ mod tests {
             is_starred: false,
             has_attachments: false,
             has_replied: true,
+            high_importance: false,
             snoozed_until: None,
             labels: Vec::new(),
             verification_code: Some("482913".into()),
@@ -4802,6 +4871,7 @@ mod tests {
             in_reply_to_message_id: None,
             in_reply_to_header: None,
             request_read_receipt: false,
+            importance: Importance::Normal,
         };
         let draft = compose_args(message(), false).unwrap();
 
@@ -4829,6 +4899,7 @@ mod tests {
                 in_reply_to_message_id: Some(99),
                 in_reply_to_header: None,
                 request_read_receipt: true,
+                importance: Importance::High,
             },
             true,
         )
@@ -4840,6 +4911,7 @@ mod tests {
         assert_eq!(draft.mode, "reply");
         assert_eq!(draft.in_reply_to_message_id, Some(99));
         assert!(draft.request_read_receipt);
+        assert_eq!(draft.importance, Importance::High);
         assert_eq!(
             draft.body_html.as_deref(),
             Some("<div>Hello <strong>Maya</strong></div>")

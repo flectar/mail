@@ -823,6 +823,8 @@ export component ComposerFooter inherits Rectangle {
     callback share-by-link();
     // The message asks for a read receipt.
     in-out property <bool> request-receipt: false;
+    // How important the message says it is: 1 high, -1 low, 0 normal.
+    in-out property <int> importance: 0;
     callback request-close();
 
             height: 54px;
@@ -944,6 +946,18 @@ export component ComposerFooter inherits Rectangle {
                         checkable: true;
                         checked: root.request-receipt;
                         activated => { root.request-receipt = !root.request-receipt; }
+                    }
+                    MenuItem {
+                        title: @tr("High importance");
+                        checkable: true;
+                        checked: root.importance > 0;
+                        activated => { root.importance = root.importance > 0 ? 0 : 1; }
+                    }
+                    MenuItem {
+                        title: @tr("Low importance");
+                        checkable: true;
+                        checked: root.importance < 0;
+                        activated => { root.importance = root.importance < 0 ? 0 : -1; }
                     }
                     if root.compact && root.link-sharing && root.attachment-picker-supported : MenuItem {
                         title: @tr("Share files by link");

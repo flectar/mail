@@ -431,6 +431,7 @@ async fn sync(
     let first_synced = state.first_synced_at.is_some();
     for candidate in &mut planned {
         candidate.live = first_synced && !catch_up.contains(&candidate.uidl);
+        candidate.arrival = first_synced;
     }
     let listed: HashSet<String> = listing.iter().map(|message| message.uidl.clone()).collect();
     ctx.db
@@ -511,6 +512,9 @@ struct Candidate {
     /// Whether it arrived while Flectar Mail followed the account, so that
     /// it may notify. The session settles it.
     live: bool,
+    /// Whether it is new mail that rules sort (#238): anything after the
+    /// first complete download. The session settles it.
+    arrival: bool,
 }
 
 /// The listed messages to download, newest first. A server numbers its
@@ -558,6 +562,7 @@ fn plan(
             sent_at,
             attempts,
             live: false,
+            arrival: false,
         });
     }
     candidates
@@ -816,12 +821,15 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
         .map_err(|error| CoreError::Other(error.to_string()))?;
     let path = new_original_path(ctx, account_id);
     crate::file_io::write_durable(&path, &raw, "POP3 message").await?;
+    // Rules on any header read them from the original (#238).
+    let header_fields = candidate.arrival.then(|| crate::mime::header_fields(&raw));
     drop(raw);
     let calendar_events = ingest::calendar_parts(&parsed);
     let path_string = path.to_string_lossy().into_owned();
     let uidl = candidate.uidl.clone();
     let size = candidate.size;
     let live = candidate.live;
+    let arrival = candidate.arrival;
     let committed = ctx
         .db
         .write_durable(move |tx| {
@@ -861,10 +869,28 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
             let receipt_threads =
                 ingest::store_body(tx, imported.message_id, &path_string, &parsed)?;
             repo::threads::recompute(tx, imported.thread_id)?;
-            // Mail from a blocked sender goes to Spam as it arrives.
+            // Mail from a blocked sender goes to Spam as it arrives. Then
+            // rules sort new mail, and what they file away or mark read
+            // stays silent.
             if !crate::turn_away(tx, imported.message_id)? {
-                importer.learn_contacts(tx, &parsed.headers, &imported)?;
-                importer.announce(tx, &imported, live)?;
+                let sorted = if arrival {
+                    // The whole message is here: nothing waits.
+                    crate::rules::Sorter::load(tx, account_id)?.arrived(
+                        tx,
+                        imported.message_id,
+                        crate::rules::Arrival {
+                            headers: header_fields,
+                            text: parsed.text.clone(),
+                            attachments_known: true,
+                        },
+                    )?
+                } else {
+                    Default::default()
+                };
+                if !sorted.unwanted {
+                    importer.learn_contacts(tx, &parsed.headers, &imported)?;
+                }
+                importer.announce(tx, &imported, live && !sorted.silent())?;
             }
             let message_id = imported.message_id;
             let (mut thread_ids, fresh) = importer.finish(tx)?;
