@@ -11,6 +11,7 @@ use std::ops::ControlFlow;
 use std::rc::Rc;
 
 slint::slint! {
+    #[edition = "1.19"]
     import { RecipientRow } from "../ui/components/composer-controls.slint";
 
     export component RecipientHarness inherits Window {

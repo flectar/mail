@@ -40,6 +40,13 @@ if [[ -z "$android_ndk" || ! -d "$android_ndk/toolchains/llvm/prebuilt" ]]; then
   printf 'Android NDK not found. Set ANDROID_NDK_HOME to an installed NDK directory.\n' >&2
   exit 1
 fi
+# Slint's prebuilt Skia binaries need the C++ library of NDK r30 or newer.
+# With an older NDK the app links, then fails to load at startup.
+ndk_version="$(sed -n 's/^Pkg\.Revision *= *//p' "$android_ndk/source.properties" 2>/dev/null | tr -d '\r' || true)"
+if [[ ! "$ndk_version" =~ ^([0-9]+)\. ]] || (( BASH_REMATCH[1] < 30 )); then
+  printf 'Android NDK r30 or newer is required, but %s is %s.\n' "$android_ndk" "${ndk_version:-of unknown version}" >&2
+  exit 1
+fi
 toolchain="$(find "$android_ndk/toolchains/llvm/prebuilt" -mindepth 1 -maxdepth 1 -type d -print | head -n 1)/bin"
 if [[ ! -x "$toolchain/aarch64-linux-android26-clang" ]]; then
   printf 'Android ARM64 API 26 compiler not found under %s.\n' "$toolchain" >&2

@@ -67,8 +67,6 @@ pub use notifications::{
 };
 mod number_format;
 mod oauth_browser;
-#[cfg(test)]
-mod on_screen_surface_tests;
 pub mod pdf_preview;
 mod photo_shrink;
 pub mod platform;
@@ -104,6 +102,8 @@ mod single_instance;
 mod startup;
 mod startup_metrics;
 mod tabs;
+#[cfg(test)]
+mod tall_surface_tests;
 mod text_size;
 mod theme;
 mod ui_dispatch;
@@ -7715,14 +7715,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 /// shaping mixed text, so configuring its generic family keeps the normal UI
 /// font and emoji font separate without rewriting folder names into image runs.
 fn configure_emoji_font_fallback() -> Result<(), Box<dyn std::error::Error>> {
-    use slint::fontique_011::fontique::{Blob, GenericFamily};
+    use slint::fontique_012::fontique::{Blob, GenericFamily};
 
     const NOTO_EMOJI: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/resources/fonts/noto-emoji/NotoEmoji[wght].ttf"
     ));
 
-    let mut fonts = slint::fontique_011::shared_collection();
+    let mut fonts = slint::fontique_012::shared_collection();
     let noto_emoji = fonts
         .register_fonts(Blob::new(Arc::new(NOTO_EMOJI)), None)
         .first()

@@ -24,7 +24,7 @@
     <a href="https://translate.flectar.com/engage/flectar-mail/"><img src="https://translate.flectar.com/widget/flectar-mail/svg-badge.svg" alt="Состояние перевода"></a>
   </p>
   <p>
-    <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/language-Rust%201.92%2B-dea584?style=flat" alt="Язык: Rust 1.92+"></a>
+    <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/language-Rust%201.95%2B-dea584?style=flat" alt="Язык: Rust 1.95+"></a>
     <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android%20%7C%20iOS-475569?style=flat" alt="Платформы: Windows, macOS, Linux, Android, iOS">
   </p>
 </div>

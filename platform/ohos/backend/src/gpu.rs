@@ -124,7 +124,7 @@ fn requested_gl_api() -> i_slint_core::graphics::RequestedGraphicsAPI {
 pub fn render(renderer: &GpuRenderer, size: PhysicalSize) -> Result<(), String> {
     use i_slint_renderer_femtovg::FemtoVGRendererExt;
     renderer
-        .render_transformed_with_post_callback(0.0, (0.0, 0.0), size, None)
+        .render_transformed(0.0, (0.0, 0.0), size)
         .map(|_| ())
         .map_err(|error| format!("{error}"))
 }

@@ -24,7 +24,6 @@ import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
 import { IconButton, LineEdit, RadioButton, Switch } from "../components/controls.slint";
 import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
-import { OnScreenSurface } from "../components/on-screen-surface.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, ShortcutRow, ShortcutSection } from "../components/settings-components.slint";
 import { Shortcuts } from "../shortcuts.slint";
@@ -2580,9 +2579,7 @@ export component SettingsDialog inherits Rectangle {
                                     root.reorder_account(source, account.id, event.position.y > self.height / 2);
                                     return DragAction.move;
                                 }
-                                OnScreenSurface {
-                                    width: parent.width;
-                                    height: parent.height;
+                                Rectangle {
                                     background: drop-target.has-drag ? root.accent-soft : root.surface;
                                     border-radius: 10px;
                                     border-width: drop-target.has-drag ? 2px : 1px;
@@ -3894,7 +3891,7 @@ export component SettingsDialog inherits Rectangle {
                             }
                         }
 
-                        if root.show_account_status && root.sync_status != "" : OnScreenSurface {
+                        if root.show_account_status && root.sync_status != "" : Rectangle {
                             height: max(36px, account-status.preferred-height + 16px);
                             background: root.account_setup_in_progress ? root.accent-soft : AppTheme.destructive.transparentize(0.9);
                             border-radius: 8px;

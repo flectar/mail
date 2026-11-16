@@ -8,6 +8,7 @@ use slint::{ComponentHandle, LogicalPosition, Model, ModelRc, VecModel};
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { TabOverview, TabSwitcherButton } from "../ui/components/tab-overview.slint";
     import { MotionSettings } from "../ui/design-system.slint";
     import { TabsUi } from "../ui/components/tabs-ui.slint";

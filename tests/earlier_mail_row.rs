@@ -11,6 +11,7 @@ use slint::platform::{
 use std::{cell::Cell, ops::ControlFlow, rc::Rc, time::Duration};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { AppTheme } from "../ui/design-system.slint";
     export { MotionSettings } from "../ui/design-system.slint";
     import { MailView } from "../ui/views/mail-view.slint";

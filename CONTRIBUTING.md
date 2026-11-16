@@ -17,7 +17,7 @@ Translate the application through [Weblate](https://translate.flectar.com/).
 Weblate owns the catalogs in `lang/*/LC_MESSAGES/` and sends them back as pull
 requests, so other pull requests must not edit them. When a change adds, edits
 or moves translatable strings in `.slint` files, run
-`scripts/update-translation-template.sh` (it needs `slint-tr-extractor` 1.18.1)
+`scripts/update-translation-template.sh` (it needs `slint-tr-extractor` 1.19.0)
 and commit only `lang/flectar-mail.pot`. Weblate merges the template into every
 language after the change reaches `main`. Releases require complete Spanish and
 Russian translations, which `scripts/check-translation-completeness.sh es ru`
@@ -83,7 +83,7 @@ cargo fmt --all -- --check
 python3 scripts/check-platform-gates.py
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
-slint-viewer --check ui/app.slint
+slint-viewer --edition 1.19 --check ui/app.slint
 ```
 
 UI changes must be rendered and inspected in light and dark themes. Responsive

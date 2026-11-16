@@ -51,7 +51,7 @@ class AndroidOAuthTests(unittest.TestCase):
                 self.assertIn(key, str(error.exception))
                 self.assertNotIn(value, str(error.exception))
 
-    def run_build(self, script, configuration, ci_variable=None, preview=False):
+    def run_build(self, script, configuration, ci_variable=None, preview=False, ndk_revision="30.0.16248370"):
         # Run the real shell entry points. Replace Cargo with a recorder that
         # stops before compilation; no SDK downloads, signing or network calls.
         with tempfile.TemporaryDirectory() as directory:
@@ -71,6 +71,9 @@ class AndroidOAuthTests(unittest.TestCase):
             sdk.mkdir()
             toolchain = root / "ndk/toolchains/llvm/prebuilt/fixture/bin"
             toolchain.mkdir(parents=True)
+            (root / "ndk/source.properties").write_text(
+                f"Pkg.Desc = Android NDK\nPkg.Revision = {ndk_revision}\n"
+            )
             binaries = root / "bin"
             binaries.mkdir()
             for path in (toolchain / "aarch64-linux-android26-clang", binaries / "gradle"):
@@ -152,6 +155,15 @@ class AndroidOAuthTests(unittest.TestCase):
             result, recorded = self.run_build("build-android-release.sh", {**values, MICROSOFT: invalid})
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             self.assertIsNone(recorded)
+
+    def test_ndk_older_than_r30_is_refused_before_compilation(self):
+        # Slint's prebuilt Skia binaries need the libc++ of NDK r30 or newer.
+        for script, preview in (("build-android-release.sh", True), ("build-android-test-apk.sh", False)):
+            with self.subTest(script=script):
+                result, recorded = self.run_build(script, VALID, preview=preview, ndk_revision="27.3.13750724")
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIsNone(recorded)
+                self.assertIn("NDK r30 or newer is required", result.stderr)
 
     def test_stable_cannot_bypass_provider_checks_or_override_version_order(self):
         for values in (

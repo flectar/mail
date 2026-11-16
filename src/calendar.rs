@@ -1098,8 +1098,9 @@ mod tests {
         assert_eq!(calendar_color_index("not-a-color", 9), 1);
     }
 
-    /// Slint's software renderer panics when it paints a rectangle reaching
-    /// past ±32767 physical pixels (#35). Synced timed events can span weeks.
+    /// Before Slint 1.19, the software renderer panicked when it painted a
+    /// rectangle reaching past ±32767 physical pixels (#35). Synced timed
+    /// events can span weeks.
     #[test]
     fn week_view_paints_multi_week_timed_events() {
         use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};

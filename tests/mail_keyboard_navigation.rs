@@ -10,6 +10,7 @@ use std::{
 };
 
 slint::slint! {
+    #[edition = "1.19"]
     import { Palette } from "std-widgets.slint";
     import { EmailRow, MailListEntry } from "../ui/models.slint";
     export { MailListNavigation, MailNavigationTarget, EmailReader, ReaderItem } from "../ui/models.slint";

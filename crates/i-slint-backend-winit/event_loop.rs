@@ -60,13 +60,23 @@ impl std::fmt::Debug for CustomEvent {
     }
 }
 
+struct PumpState {
+    /// Pump events for the shortest amount of time possible.
+    instantly: bool,
+    /// winit never resets the exit of a pumped loop (on Linux),
+    /// so a pumped loop records its exit here instead of calling `exit()`.
+    exit_requested: bool,
+}
+
 pub struct EventLoopState {
     shared_backend_data: Rc<SharedBackendData>,
 
     loop_error: Option<PlatformError>,
 
-    /// Set to true when pumping events for the shortest amount of time possible.
-    pumping_events_instantly: bool,
+    /// Set while `pump_events` runs.
+    pump: Option<PumpState>,
+    /// Set from the first `pump_events` of a run until it returns `PumpStatus::Exit`.
+    pump_run_active: bool,
 
     custom_application_handler: Option<Box<dyn crate::CustomApplicationHandler>>,
 }
@@ -79,7 +89,8 @@ impl EventLoopState {
         Self {
             shared_backend_data,
             loop_error: Default::default(),
-            pumping_events_instantly: Default::default(),
+            pump: None,
+            pump_run_active: false,
             custom_application_handler,
         }
     }
@@ -179,7 +190,7 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
             return;
         }
 
-        let result = window.dispatch_winit_window_event(event_loop, &winit_window, event);
+        let result = window.dispatch_winit_window_event(event_loop, &winit_window, &event);
 
         // A window hidden during the dispatch looks kept alive until this reference is gone.
         drop(winit_window);
@@ -195,7 +206,11 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
         match event.0 {
             #[cfg(wayland_file_drops)]
             CustomEvent::FileDrop(drop) => self.file_drop(event_loop, drop),
-            CustomEvent::UserEvent(user_callback) => user_callback(),
+            CustomEvent::UserEvent(user_callback) => {
+                user_callback();
+                // winit can run several user events, then sleep, without calling `new_events`.
+                self.shared_backend_data.context().update_timers_and_animations();
+            }
             CustomEvent::UserEventWithEventLoop(user_callback) => user_callback(event_loop),
             CustomEvent::Exit(generation) => {
                 if self
@@ -205,7 +220,11 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
                     == generation
                 {
                     self.suspend_all_hidden_windows();
-                    event_loop.exit()
+                    if let Some(pump) = &mut self.pump {
+                        pump.exit_requested = true;
+                    } else {
+                        event_loop.exit()
+                    }
                 }
                 // else ignore the event, since it's from a previous run of the event loop
             }
@@ -229,19 +248,11 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
             }
             #[cfg(muda)]
             CustomEvent::Muda(event) => {
-                if let Some((window, eid, muda_type)) =
-                    event.id().0.split_once('|').and_then(|(w, e)| {
-                        let (e, muda_type) = e.split_once('|')?;
-                        Some((
-                            self.shared_backend_data.window_by_id(
-                                winit::window::WindowId::from(w.parse::<u64>().ok()?),
-                            )?,
-                            e.parse::<usize>().ok()?,
-                            muda_type.parse::<crate::muda::MudaType>().ok()?,
-                        ))
-                    })
+                if let Some((window_id, generation, entry_id, muda_type)) =
+                    crate::muda::parse_menu_item_id(event.id())
+                    && let Some(window) = self.shared_backend_data.window_by_id(window_id)
                 {
-                    window.muda_event(eid, muda_type);
+                    window.muda_event(generation, entry_id, muda_type);
                 };
             }
         }
@@ -278,6 +289,7 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
 
         if let Err(err) = self.shared_backend_data.create_inactive_windows(event_loop) {
             self.loop_error = Some(err);
+            event_loop.exit();
         }
 
         if !event_loop.exiting() {
@@ -288,7 +300,7 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
                 .values()
                 .filter_map(|w| w.upgrade())
             {
-                if w.window().has_active_animations() {
+                if w.window().has_active_animations() && !w.is_minimized_on_screen() {
                     w.request_redraw();
                 }
             }
@@ -301,7 +313,7 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
             event_loop.set_control_flow(ControlFlow::wait_duration(next_timer));
         }
 
-        if self.pumping_events_instantly {
+        if self.pump.as_ref().is_some_and(|pump| pump.instantly) {
             event_loop.set_control_flow(ControlFlow::Poll);
         }
     }
@@ -348,14 +360,15 @@ impl EventLoopState {
             .ok_or_else(|| PlatformError::from("Nested event loops are not supported"))?;
         let mut winit_loop = not_running_loop_instance;
 
-        cfg_if::cfg_if! {
-            if #[cfg(any(target_arch = "wasm32", ios_and_friends))] {
+        core::cfg_select! {
+            any(target_arch = "wasm32", ios_and_friends) => {
                 winit_loop
                     .run_app(&mut self)
                     .map_err(|e| format!("Error running winit event loop: {e}"))?;
                 // This can't really happen, as run() doesn't return
                 Ok(Self::new(self.shared_backend_data.clone(), None))
-            } else {
+            }
+            _ => {
                 use winit::platform::run_on_demand::EventLoopExtRunOnDemand as _;
                 winit_loop
                     .run_app_on_demand(&mut self)
@@ -390,11 +403,27 @@ impl EventLoopState {
             .ok_or_else(|| PlatformError::from("Nested event loops are not supported"))?;
         let mut winit_loop = not_running_loop_instance;
 
-        self.pumping_events_instantly = timeout.is_some_and(|duration| duration.is_zero());
+        if !self.pump_run_active {
+            self.pump_run_active = true;
+            // Like `run`, so that a quit requested before this run doesn't end it.
+            self.shared_backend_data
+                .event_loop_generation
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
 
-        let result = winit_loop.pump_app_events(timeout, &mut self);
+        self.pump = Some(PumpState {
+            instantly: timeout.is_some_and(|duration| duration.is_zero()),
+            exit_requested: false,
+        });
 
-        self.pumping_events_instantly = false;
+        let mut result = winit_loop.pump_app_events(timeout, &mut self);
+
+        if self.pump.take().is_some_and(|pump| pump.exit_requested) {
+            result = winit::platform::pump_events::PumpStatus::Exit(0);
+        }
+        if matches!(result, winit::platform::pump_events::PumpStatus::Exit(_)) {
+            self.pump_run_active = false;
+        }
 
         // Keep the EventLoop instance alive and re-use it in future invocations of run_event_loop().
         // Winit does not support creating multiple instances of the event loop.

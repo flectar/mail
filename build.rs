@@ -67,6 +67,9 @@ fn main() {
     // only the deterministic implementation for the remaining layout/scroll
     // infrastructure and never selects a platform widget toolkit.
     let config = slint_build::CompilerConfiguration::new()
+        // The `slint!` UI tests use the same edition, so they see the layout
+        // and state behavior that the application gets.
+        .with_edition((1, 19))
         .with_style("fluent".into())
         // A source phrase has one meaning throughout this application. Keeping
         // catalogs context-free avoids duplicate entries for shared controls.

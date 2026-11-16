@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/flectar-mail-core", "crates/flectar-spell", "crates/renderer-probe"]
-exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/parley", "crates/parley_emoji", "crates/smithay-clipboard", "crates/spellbook"]
+exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/i-slint-renderer-software", "crates/smithay-clipboard", "crates/spellbook"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -15,13 +15,14 @@ chrono = { version = "0.4", features = ["serde"] }
 [patch.crates-io]
 blitz-dom = { path = "crates/blitz-dom" }
 blitz-paint = { path = "crates/blitz-paint" }
-# Slint still uses Parley 0.11.1; Blitz's Parley 0.12 is already fixed upstream.
-parley = { path = "crates/parley" }
-# Remove when Slint releases its Wayland clipboard fix; see patches/slint-winit/README.md.
+# winit 0.30 doesn't report files dropped on a Wayland window, so they come
+# through the clipboard's data device, as patches/slint-winit/README.md and
+# patches/smithay-clipboard/README.md explain.
 i-slint-backend-winit = { path = "crates/i-slint-backend-winit" }
-# Files dropped on a Wayland window come through the clipboard's data device,
-# as patches/smithay-clipboard/README.md explains.
 smithay-clipboard = { path = "crates/smithay-clipboard" }
+# Slint 1.19's software renderer panics on a rounded clip far out of view; see
+# patches/slint-renderer-software/README.md.
+i-slint-renderer-software = { path = "crates/i-slint-renderer-software" }
 
 [package]
 name = "flectar-mail"
@@ -32,7 +33,7 @@ repository = "https://github.com/flectar/mail"
 homepage = "https://flectar.com"
 publish = false
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.95"
 build = "build.rs"
 autobins = false
 
@@ -98,9 +99,8 @@ flectar-mail-core = { path = "crates/flectar-mail-core", default-features = fals
 # Which words spelling checks, everywhere, and on Linux the checking itself, with the system's
 # Hunspell dictionaries read in place from disk.
 flectar-spell = { path = "crates/flectar-spell" }
-# Slint uses Fontique 0.11; Blitz beta.4 uses 0.12. Both must load
-# Fontconfig dynamically so the rendering stacks agree on the native ABI.
-fontique_0_11 = { package = "fontique", version = "=0.11.1", features = ["fontconfig-dlopen"] }
+# Slint and Blitz share Fontique 0.12, which loads Fontconfig dynamically so
+# both rendering stacks agree on the native ABI.
 fontique_0_12 = { package = "fontique", version = "=0.12.0", features = ["fontconfig-dlopen"] }
 chrono.workspace = true
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
@@ -121,11 +121,11 @@ tempfile = "3"
 # Linux enables both Wayland and X11; Apple and Windows use their native winit
 # integrations. Android supplies its dedicated activity backend separately.
 # The `gpu-renderer` feature adds WGPU and exposes its device/queue to Vello.
-slint = { version = "1.18.1", default-features = false, features = [
+slint = { version = "1.19.0", default-features = false, features = [
     "std",
     "renderer-software",
     "system-tray",
-    "unstable-fontique-011",
+    "unstable-fontique-012",
     "compat-1-2",
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "fs", "process"] }
@@ -189,7 +189,7 @@ ashpd = { version = "0.11", default-features = false, features = ["async-std"] }
 zbus = { version = "5", default-features = false, features = ["async-io"] }
 landlock = "0.4.7"
 seccompiler = "0.5"
-slint = { version = "1.18.1", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
+slint = { version = "1.19.0", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
 # Integrated window controls follow live desktop settings from the portal
 # stream and ask X11 window managers for their window menu. Both crates are
 # already part of the Linux build through ashpd and winit.
@@ -204,7 +204,7 @@ wayland-protocols = { version = "0.32", default-features = false, features = ["c
 
 # Integrated window frames use winit window attributes and native window events.
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))'.dependencies]
-slint = { version = "1.18.1", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
+slint = { version = "1.19.0", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
 
 # The integrated title bar adjusts the native window, which winit cannot
 # change after creation, and the chosen app icon replaces the Dock icon.
@@ -270,12 +270,12 @@ auto_link_exclude_list = [
 # These do not appear as normal Rust paths on every host, so dependency
 # scanners need the explicit exceptions.
 [package.metadata.cargo-machete]
-ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "winresource", "cc", "cfg_aliases", "rspolib", "windows-core"]
+ignored = ["fontique_0_12", "wayland-backend", "slint-build", "winresource", "cc", "cfg_aliases", "rspolib", "windows-core"]
 
 # tests/text_fit.rs measures laid-out text through Slint's item tree, which
 # only the internal crate exposes. It must stay on the version `slint` uses.
 [dev-dependencies]
-i-slint-core = { version = "=1.18.1", default-features = false }
+i-slint-core = { version = "=1.19.0", default-features = false }
 # src/updates.rs tests its schedule on tokio's paused clock.
 tokio = { version = "1", features = ["macros", "test-util"] }
 # src/platform/web_authentication.rs, which only iOS builds otherwise.
@@ -287,7 +287,7 @@ cfg_aliases = "0.2"
 # Reads the translation catalogs as Slint does, for notification words
 # without the window (build.rs).
 rspolib = "0.1.2"
-slint-build = "1.18.1"
+slint-build = "1.19.0"
 winresource = "0.1"
 
 [profile.release]

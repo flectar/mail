@@ -13,6 +13,7 @@ use slint::platform::{
 use std::{cell::RefCell, ops::ControlFlow, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { SettingsDialog } from "../ui/dialogs/settings-dialog.slint";
 
     export component AccountFormHarness inherits Window {

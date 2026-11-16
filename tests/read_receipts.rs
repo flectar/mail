@@ -13,6 +13,7 @@ use slint::platform::{
 use std::{cell::Cell, ops::ControlFlow, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { ReadReceipts, ReceiptRequestBar, ReturnedReceipt, ReturnedReceiptList } from "../ui/read-receipts.slint";
     export { ReadReceipts, ReturnedReceipt }
 
