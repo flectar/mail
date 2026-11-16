@@ -1,0 +1,139 @@
+import { Button } from "../components/button.slint";
+import { LineEdit } from "../components/controls.slint";
+import { SettingsSelect } from "../components/settings-components.slint";
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { SavedSearchUi } from "../saved-searches.slint";
+
+// Saving a search to the sidebar, changing one, or taking one out. Taking one
+// out leaves its mail where it is, which the dialog says.
+export component SavedSearchDialog inherits Rectangle {
+    private property <string> stage: SavedSearchUi.stage;
+    private property <string> heading: root.stage == "save" ? @tr("Save search")
+        : root.stage == "edit" ? @tr("Edit saved search")
+        : @tr("Delete saved search?");
+
+    background: #00000066;
+    accessible-role: groupbox;
+    accessible-label: root.heading;
+
+    TouchArea { }
+
+    FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                SavedSearchUi.close();
+                return accept;
+            }
+            reject
+        }
+
+        Rectangle {
+            width: min(440px, parent.width - 32px);
+            height: card.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: AppTheme.border;
+            background: AppTheme.surface;
+
+            card := VerticalLayout {
+                padding: 22px;
+                padding-top: 20px;
+                spacing: 12px;
+
+                Text {
+                    text: root.heading;
+                    color: AppTheme.title;
+                    font-size: TypeScale.heading;
+                    font-weight: 700;
+                    wrap: word-wrap;
+                }
+
+                if root.stage == "delete" : Text {
+                    text: @tr("“{}” leaves the sidebar. The mail it finds stays where it is.", SavedSearchUi.name);
+                    color: AppTheme.secondary;
+                    font-size: TypeScale.secondary;
+                    wrap: word-wrap;
+                }
+
+                if root.stage != "delete" : VerticalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: @tr("Name");
+                        color: AppTheme.secondary;
+                        font-size: TypeScale.secondary;
+                    }
+                    LineEdit {
+                        text <=> SavedSearchUi.name;
+                        input-label: @tr("Name");
+                        init => { self.focus(); }
+                        accepted => { SavedSearchUi.submit(); }
+                    }
+                }
+
+                if root.stage != "delete" : VerticalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: @tr("Search for");
+                        color: AppTheme.secondary;
+                        font-size: TypeScale.secondary;
+                    }
+                    LineEdit {
+                        text <=> SavedSearchUi.query;
+                        input-label: @tr("Search for");
+                        show-leading-icon: true;
+                        leading-icon: @image-url("../icons/lucide/outline/search.svg");
+                        accepted => { SavedSearchUi.submit(); }
+                    }
+                }
+
+                if root.stage != "delete" && SavedSearchUi.profiles.length > 0 : VerticalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: @tr("Show in");
+                        color: AppTheme.secondary;
+                        font-size: TypeScale.secondary;
+                    }
+                    SettingsSelect {
+                        choices: SavedSearchUi.profiles;
+                        selected-index <=> SavedSearchUi.profile-index;
+                    }
+                }
+
+                if SavedSearchUi.error != "" : Text {
+                    text: SavedSearchUi.error;
+                    color: AppTheme.destructive;
+                    font-size: TypeScale.secondary;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    padding-top: 8px;
+                    spacing: 8px;
+                    Rectangle { horizontal-stretch: 1; }
+                    Button {
+                        text: @tr("Cancel");
+                        clicked => { SavedSearchUi.close(); }
+                    }
+                    Button {
+                        text: root.stage == "delete" ? @tr("Delete") : @tr("Save");
+                        destructive: root.stage == "delete";
+                        primary: root.stage != "delete";
+                        enabled: root.stage == "delete"
+                            || (SavedSearchUi.name != "" && SavedSearchUi.query != "");
+                        accessible-id: "saved-search-dialog-confirm";
+                        clicked => {
+                            if root.stage == "delete" {
+                                SavedSearchUi.confirm-delete();
+                            } else {
+                                SavedSearchUi.submit();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

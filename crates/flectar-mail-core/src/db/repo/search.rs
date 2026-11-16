@@ -980,6 +980,50 @@ pub fn found_messages(conn: &Connection, message_ids: &[i64]) -> Result<Vec<Mess
     super::threads::get_message_summaries(conn, &ordered)
 }
 
+/// How many conversations, or with `conversations` false how many messages,
+/// have unread mail that `q` matches: a saved search's badge. As in the mail
+/// list, a query that matches nothing with every word counts with any of them.
+pub fn unread_matches(conn: &Connection, q: &ParsedQuery, conversations: bool) -> Result<i64> {
+    let mut query = q.clone();
+    if !q.fts.is_empty() && q.fts_or != q.fts && count_matches(conn, q, None)? == 0 {
+        query.fts = query.fts_or.clone();
+    }
+    let counted = if conversations {
+        "COUNT(DISTINCT m.thread_id)"
+    } else {
+        "COUNT(*)"
+    };
+    count_matches(conn, &query, Some(counted))
+}
+
+/// `counted` of the unread messages `q` matches, or without it whether `q`
+/// matches any message at all, as 1 or 0.
+fn count_matches(conn: &Connection, q: &ParsedQuery, counted: Option<&str>) -> Result<i64> {
+    let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let (fts_join, matching) = chronological_matching(q, &mut bind);
+    let Some(matches) = match_clause(q, matching, &mut bind) else {
+        return Ok(0);
+    };
+    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned(), matches];
+    if counted.is_some() {
+        where_clauses.push("m.is_read = 0".to_owned());
+    }
+    append_account_clauses(q, &mut where_clauses, &mut bind);
+    let found = format!(
+        "FROM messages m {fts_join} WHERE {}",
+        where_clauses.join(" AND ")
+    );
+    let sql = match counted {
+        Some(counted) => format!("SELECT {counted} {found}"),
+        None => format!("SELECT EXISTS(SELECT 1 {found})"),
+    };
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        bind.iter().map(|value| value.as_ref()).collect();
+    Ok(conn
+        .prepare_cached(&sql)?
+        .query_row(params_ref.as_slice(), |row| row.get(0))?)
+}
+
 fn hydrate(conn: &Connection, thread_ids: &[i64]) -> Result<Vec<ThreadSummary>> {
     // One IN query; get_summaries preserves the fused ranking order.
     super::threads::get_summaries(conn, thread_ids)
