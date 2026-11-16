@@ -1960,8 +1960,34 @@ async fn a_server_that_keeps_mail_unread_stops_the_marking() {
 /// brings mail not kept here, with the matches kept here that it passes.
 #[tokio::test]
 async fn a_server_search_keeps_what_it_finds_and_goes_on_where_it_stopped() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
     use chrono::TimeZone;
     let (_dir, ctx, config) = fixture().await;
+    // A rule that would mark it read: found mail isn't new mail.
+    ctx.db
+        .write(|conn| {
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: None,
+                    name: "Sender".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::From,
+                        op: RuleOp::Is,
+                        value: "sender@mail.example".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::MarkRead],
+                    stop: false,
+                },
+                0,
+            )
+        })
+        .await
+        .unwrap();
     let at = |day| chrono::Utc.with_ymd_and_hms(2020, 3, day, 9, 0, 0).unwrap();
     let emails = vec![
         received(email("e3", "t3"), at(3)),
@@ -2029,6 +2055,18 @@ async fn a_server_search_keeps_what_it_finds_and_goes_on_where_it_stopped() {
         .await
         .unwrap();
     assert_eq!(kept, ["e3", "e2", "e1"]);
+    let read = ctx
+        .db
+        .read(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM messages WHERE is_read = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(read, 0);
 
     // Searched again, the first page has nothing new, so the search goes on
     // to the end of the results and brings what it passed.

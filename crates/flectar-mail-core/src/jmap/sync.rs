@@ -1078,7 +1078,7 @@ async fn sync_emails(
         );
         let (next, persisted) = tokio::join!(
             pages.next(c),
-            persist_emails(ctx, config, emails, full, insert_after, live_since)
+            persist_emails(ctx, config, emails, full, insert_after, live_since, true)
         );
         persisted?;
         fetched = next?;
@@ -1165,7 +1165,9 @@ fn first(values: Option<&[String]>) -> Option<String> {
 
 /// Stores a page of headers. A full sync also records each message as
 /// stored, so an interrupted run need not fetch it again. An Email received
-/// before `insert_after` only updates a message already here.
+/// before `insert_after` only updates a message already here. `sort` says
+/// whether mail new here can be new mail that rules sort (#238): what a
+/// search on the server finds never is.
 async fn persist_emails(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -1173,6 +1175,7 @@ async fn persist_emails(
     full_sync: bool,
     insert_after: Option<i64>,
     live_since: i64,
+    sort: bool,
 ) -> Result<()> {
     let account_id = config.id;
     let (thread_ids, notified_threads, stale_paths) = ctx
@@ -1536,7 +1539,8 @@ async fn persist_emails(
                 let turned_away = inserted && crate::turn_away(&tx, local_id)?;
                 // Then rules sort new mail. What they file away or mark read
                 // stays silent.
-                let arrived = inserted
+                let arrived = sort
+                    && inserted
                     && !turned_away
                     && (!full_sync || caught_up_at.is_some_and(|at| date >= at));
                 let sorted = if arrived {
@@ -3216,8 +3220,9 @@ async fn search_server(
     }
     for chunk in missing.chunks(max_objects_in_get(c).max(1)) {
         let (emails, _) = fetch_headers(c, chunk).await.map_err(client::map_error)?;
-        // Found mail notifies of nothing, whenever it arrived.
-        persist_emails(ctx, config, emails, false, None, i64::MAX).await?;
+        // Found mail notifies of nothing, whenever it arrived, and rules
+        // leave it as it is.
+        persist_emails(ctx, config, emails, false, None, i64::MAX, false).await?;
     }
     let message_ids = ctx
         .db
