@@ -1,3 +1,4 @@
+import { SavedSearchUi } from "../saved-searches.slint";
 import { SidebarRowSurface, SidebarStyle } from "sidebar-row.slint";
 import { AccountProblem, AccountStatus, MailDragApi } from "../models.slint";
 import { AccountStatusPanel, AccountStatusText } from "account-status.slint";
@@ -138,6 +139,9 @@ export component SidebarItem inherits SidebarRowSurface {
     in property <string> label-account-name: "";
     in property <bool> mail-drop-enabled: false;
     in property <bool> mail-drop-copies: false;
+    // A saved search, whose menu edits, moves and deletes it (#243). Its id
+    // is `label-id`.
+    in property <bool> saved-search: false;
     in property <color> sidebar-background;
     in property <color> selection-background;
     in property <color> accent-color;
@@ -211,7 +215,7 @@ export component SidebarItem inherits SidebarRowSurface {
 
     // Folder and label actions. Rows without any keep the area disabled.
     row-menu := ContextMenuArea {
-        enabled: root.interactive && (root.can-mark-all-read || root.folder-menu-enabled || root.can-empty-trash || root.label-manageable);
+        enabled: root.interactive && (root.can-mark-all-read || root.folder-menu-enabled || root.can-empty-trash || root.label-manageable || root.saved-search);
         width: parent.width;
         height: parent.height;
         Menu {
@@ -250,6 +254,22 @@ export component SidebarItem inherits SidebarRowSurface {
             if root.label-manageable: MenuItem {
                 title: root.label-is-global ? @tr("Delete global label") : @tr("Delete label from {}", root.label-account-name);
                 activated => { root.delete-label(root.label-id, root.label-path, root.label-account-name, root.label-is-global, root.has-children); }
+            }
+            if root.saved-search: MenuItem {
+                title: @tr("Edit saved search…");
+                activated => { SavedSearchUi.start-edit(root.label-id); }
+            }
+            if root.saved-search: MenuItem {
+                title: @tr("Move up");
+                activated => { SavedSearchUi.move(root.label-id, -1); }
+            }
+            if root.saved-search: MenuItem {
+                title: @tr("Move down");
+                activated => { SavedSearchUi.move(root.label-id, 1); }
+            }
+            if root.saved-search: MenuItem {
+                title: @tr("Delete saved search…");
+                activated => { SavedSearchUi.start-delete(root.label-id); }
             }
         }
 
