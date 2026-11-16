@@ -75,8 +75,11 @@ preview and their ids. Pass the cursor from the result to get older ones.",
         name: "search_messages",
         title: "Search messages",
         description: "Finds messages in the folders agents may read, newest first. The query \
-takes words and phrases in quotes, and from:, to:, subject:, has:attachment, is:unread and \
-is:starred. Pass the cursor from the result to get older matches.",
+takes words and phrases in quotes, OR in capitals, parentheses, a dash to leave out a part, and \
+from:, to:, subject:, filename:, has:attachment, is:unread, is:starred, after: and before: \
+with YYYY/MM/DD dates, newer_than: and older_than: with 7d, 2m or 1y, and larger: and \
+smaller: with sizes such as 5M, as in Gmail. Pass the cursor from the result to get older \
+matches.",
         input_schema: search_messages,
         effect: READS,
     },

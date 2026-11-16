@@ -874,7 +874,17 @@ pub struct Core {
     /// background tells of it instead (see [`Core::announce_missed`]).
     /// `None` once the user has seen the Inbox.
     missed_since: Arc<std::sync::Mutex<Option<std::collections::BTreeMap<i64, i64>>>>,
+    /// What searches of the servers found, so that the same search here shows
+    /// it with its own matches. Only the last few searches are kept, and none
+    /// past a restart.
+    server_found: Arc<std::sync::Mutex<ServerFound>>,
 }
+
+/// Searches of the servers and the messages each found, newest search first.
+type ServerFound = std::collections::VecDeque<(String, Vec<i64>)>;
+
+/// How many searches' server results [`Core`] keeps.
+const SERVER_FOUND_SEARCHES: usize = 8;
 
 impl Core {
     #[cfg(desktop)]
@@ -975,6 +985,7 @@ impl Core {
             transfers: Arc::new(tokio::sync::Notify::new()),
             accounts_started: Arc::new(tokio::sync::watch::Sender::new(false)),
             missed_since: Arc::new(std::sync::Mutex::new(Some(missed_since))),
+            server_found: Arc::default(),
         };
 
         // Finish any destructive operation interrupted between the mail and
@@ -1739,6 +1750,36 @@ impl Core {
                 }
                 config.settings.message_format = format;
                 config.settings.plain_text_replies = plain_text_replies;
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
+        Ok(())
+    }
+
+    /// Whether new messages from account `account_id` ask for a read
+    /// receipt (RFC 8098), which each message can still change.
+    pub async fn set_account_read_receipt_requests(
+        &self,
+        account_id: i64,
+        request: bool,
+    ) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                if config.mail_protocol == MailProtocol::Local {
+                    return Err(CoreError::Other(
+                        "mail kept on this device is never sent".into(),
+                    ));
+                }
+                config.settings.request_read_receipts = request;
                 repo::accounts::set_settings(&tx, account_id, &config.settings)?;
                 tx.commit()?;
                 Ok(config.settings)
@@ -3185,6 +3226,10 @@ impl Core {
             .nth(1)
             .unwrap_or("localhost")
             .to_owned();
+        let receipt_to = self
+            .db
+            .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+            .await?;
         let (_, raw) = crate::mime::build_message_owned(crate::mime::OutgoingMessage {
             from: detail.from.clone(),
             reply_to: None,
@@ -3199,6 +3244,7 @@ impl Core {
             message_id: None,
             message_id_domain: &domain,
             attachments,
+            receipt_to: &receipt_to,
         })?;
         Ok(raw)
     }
@@ -3866,6 +3912,7 @@ impl Core {
                         in_reply_to_message_id: None,
                         in_reply_to_header: None,
                         attachments: Vec::new(),
+                        request_read_receipt: false,
                     })
                     .await?;
                 let queued = self
@@ -5479,11 +5526,18 @@ impl Core {
                     None => None,
                 };
 
+                // A requested read receipt goes to the From address.
+                let receipt_to = if args.request_read_receipt {
+                    vec![sender.clone()]
+                } else {
+                    Vec::new()
+                };
                 let draft_id = match in_place {
                     Some(id) => {
                         let updated = tx.execute(
                             "UPDATE messages SET subject = ?2, to_json = ?3, cc_json = ?4,
-                                    bcc_json = ?5, date = ?6, from_name = ?7, from_addr = ?8
+                                    bcc_json = ?5, date = ?6, from_name = ?7, from_addr = ?8,
+                                    receipt_to = ?11
                               WHERE id = ?1 AND account_id = ?9 AND is_draft = 1
                                 AND (?10 IS NULL OR date = (SELECT saved_at FROM agent_drafts
                                                             WHERE draft_id = ?1))",
@@ -5498,6 +5552,9 @@ impl Core {
                                 sender.email,
                                 args.account_id,
                                 agent.as_deref(),
+                                (!receipt_to.is_empty())
+                                    .then(|| serde_json::to_string(&receipt_to))
+                                    .transpose()?,
                             ],
                         )?;
                         if updated != 1 {
@@ -5543,7 +5600,7 @@ impl Core {
                             list_id: None,
                             sender_addr: None,
                             sender_verification: Default::default(),
-                            receipt_to: Vec::new(),
+                            receipt_to,
                             receipt_confirm: false,
                             receipt_handled: false,
                         };
@@ -5694,7 +5751,7 @@ impl Core {
                                 m.to_json, m.cc_json, m.bcc_json, m.subject,
                                 COALESCE(b.text_body, ''), b.html_body,
                                 COALESCE(dm.mode, 'new'), dm.in_reply_to_message_id,
-                                m.is_draft, dm.in_reply_to_header
+                                m.is_draft, dm.in_reply_to_header, m.receipt_to IS NOT NULL
                          FROM messages m
                          LEFT JOIN message_bodies b ON b.message_id = m.id
                          LEFT JOIN drafts_meta dm ON dm.message_id = m.id
@@ -5722,6 +5779,7 @@ impl Core {
                                     in_reply_to_message_id: row.get(10)?,
                                     in_reply_to_header: row.get(12)?,
                                     attachments: Vec::new(),
+                                    request_read_receipt: row.get(13)?,
                                 },
                                 is_draft,
                             ))
@@ -7832,6 +7890,7 @@ impl Core {
                     filename: "invite.ics".into(),
                     mime_type: Some(format!("text/calendar; method={method}; charset=UTF-8")),
                 }],
+                request_read_receipt: false,
             })
             .await?;
         // The draft staged its own copy; the temp file can go.
@@ -8249,7 +8308,7 @@ impl Core {
         cursor: Option<models::SearchCursor>,
         limit: i64,
     ) -> Result<models::SearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_id = account_id;
         self.search_chronological_parsed(parsed, cursor, limit)
             .await
@@ -8264,10 +8323,87 @@ impl Core {
         cursor: Option<models::SearchCursor>,
         limit: i64,
     ) -> Result<models::SearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_ids = Some(account_ids);
         self.search_chronological_parsed(parsed, cursor, limit)
             .await
+    }
+
+    /// Searches the servers of the accounts with `account_ids` for `query`,
+    /// past the mail this device keeps: up to `limit` messages each, newest
+    /// first, going on from `cursors`. An account without a cursor starts
+    /// from its newest mail. What the servers find is kept here as headers,
+    /// its bodies fetched when opened, and comes back as the conversations it
+    /// is in and as messages. The same search of the mail list shows it from
+    /// then on, with its own matches. POP3 accounts and mail on this device
+    /// have no server to search.
+    pub async fn search_server(
+        &self,
+        query: String,
+        account_ids: Vec<i64>,
+        cursors: Vec<(i64, models::ServerSearchCursor)>,
+        limit: usize,
+    ) -> Result<models::ServerSearchPage> {
+        let mut page = models::ServerSearchPage::default();
+        let Some(tree) = search::parse(&query).tree else {
+            return Ok(page);
+        };
+        let limit = limit.clamp(1, 100);
+        let accounts = self.db.read(|conn| repo::accounts::list(conn)).await?;
+        let mut searches = Vec::new();
+        {
+            let handles = self.handles.read().await;
+            for account_id in account_ids {
+                let searchable = accounts.iter().any(|account| {
+                    account.id == account_id
+                        && !matches!(
+                            account.mail_protocol,
+                            MailProtocol::Pop3 | MailProtocol::Local
+                        )
+                });
+                if !searchable {
+                    page.unsearchable.push(account_id);
+                    continue;
+                }
+                let Some(handle) = handles.get(&account_id).cloned() else {
+                    page.failed
+                        .push((account_id, "The account isn't connected.".to_owned()));
+                    continue;
+                };
+                let cursor = cursors
+                    .iter()
+                    .find(|(id, _)| *id == account_id)
+                    .map(|(_, cursor)| cursor.clone())
+                    .unwrap_or_default();
+                let tree = tree.clone();
+                searches.push(async move {
+                    (account_id, handle.search_server(tree, cursor, limit).await)
+                });
+            }
+        }
+        let mut message_ids = Vec::new();
+        for (account_id, result) in futures::future::join_all(searches).await {
+            match result {
+                Ok(hits) => {
+                    message_ids.extend(hits.message_ids);
+                    if let Some(next) = hits.next {
+                        page.cursors.push((account_id, next));
+                    }
+                }
+                Err(error) => page.failed.push((account_id, error.to_string())),
+            }
+        }
+        self.remember_found(&query, &message_ids);
+        (page.threads, page.messages) = self
+            .db
+            .read(move |conn| {
+                Ok((
+                    repo::search::found_threads(conn, &message_ids)?,
+                    repo::search::found_messages(conn, &message_ids)?,
+                ))
+            })
+            .await?;
+        Ok(page)
     }
 
     /// Cursor-paginated chronological search as single messages, for mail
@@ -8279,7 +8415,7 @@ impl Core {
         cursor: Option<MessageSearchCursor>,
         limit: i64,
     ) -> Result<MessageSearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_id = account_id;
         self.search_messages_parsed(parsed, cursor, limit).await
     }
@@ -8293,9 +8429,46 @@ impl Core {
         cursor: Option<MessageSearchCursor>,
         limit: i64,
     ) -> Result<MessageSearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_ids = Some(account_ids);
         self.search_messages_parsed(parsed, cursor, limit).await
+    }
+
+    /// `query` parsed for the mail list's search, with what searches of the
+    /// servers found for it.
+    fn parse_search(&self, query: &str) -> search::ParsedQuery {
+        let mut parsed = search::parse(query);
+        let found = self
+            .server_found
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, ids)) = found.iter().find(|(search, _)| search == query.trim()) {
+            parsed.found = ids.clone();
+        }
+        parsed
+    }
+
+    /// Keeps what a search of the servers found for `query`, with what it
+    /// found before, as the newest search.
+    fn remember_found(&self, query: &str, message_ids: &[i64]) {
+        let mut found = self
+            .server_found
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let query = query.trim();
+        let mut ids = found
+            .iter()
+            .position(|(search, _)| search == query)
+            .and_then(|index| found.remove(index))
+            .map(|(_, ids)| ids)
+            .unwrap_or_default();
+        for id in message_ids {
+            if !ids.contains(id) {
+                ids.push(*id);
+            }
+        }
+        found.push_front((query.to_owned(), ids));
+        found.truncate(SERVER_FOUND_SEARCHES);
     }
 
     async fn search_messages_parsed(
@@ -12165,6 +12338,7 @@ mod message_by_header_id_tests {
             in_reply_to_message_id,
             in_reply_to_header: Some(header.into()),
             attachments: Vec::new(),
+            request_read_receipt: false,
         };
         let headers = |id| {
             let core = &core;
@@ -12288,7 +12462,53 @@ mod draft_staging_tests {
                 filename: filename.into(),
                 mime_type: None,
             }],
+            request_read_receipt: false,
         }
+    }
+
+    #[tokio::test]
+    async fn a_draft_keeps_its_read_receipt_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let source = temp.path().join("note.txt");
+        tokio::fs::write(&source, b"note").await.unwrap();
+        let asking = SaveDraftArgs {
+            request_read_receipt: true,
+            ..draft_args(None, &source, "note.txt")
+        };
+        let id = core.save_draft(asking.clone()).await.unwrap();
+        let draft = core.get_draft(id).await.unwrap();
+        assert!(draft.request_read_receipt);
+        // The receipt goes to the address the draft is from.
+        let to = core
+            .db
+            .read(move |conn| repo::messages::receipt_to(conn, id))
+            .await
+            .unwrap();
+        assert_eq!(to.len(), 1);
+        assert_eq!(
+            Some(&to[0].email),
+            draft.from.as_ref().map(|from| &from.email)
+        );
+
+        // Saved again without, it asks no more.
+        core.save_draft(SaveDraftArgs {
+            draft_id: Some(id),
+            request_read_receipt: false,
+            ..draft
+        })
+        .await
+        .unwrap();
+        assert!(!core.get_draft(id).await.unwrap().request_read_receipt);
     }
 
     #[tokio::test]
@@ -12341,6 +12561,7 @@ mod draft_staging_tests {
             in_reply_to_message_id: Some(parent),
             in_reply_to_header: None,
             attachments: Vec::new(),
+            request_read_receipt: false,
         };
         let thread_of = |message_id: i64| {
             let core = core.clone();

@@ -177,7 +177,31 @@ pub(crate) enum PriorityFetchCmd {
         attachment_id: i64,
         complete: oneshot::Sender<std::result::Result<Vec<u8>, String>>,
     },
+    /// Search the account's server past the mail kept here.
+    Search {
+        tree: crate::search::Expr,
+        cursor: ServerSearchCursor,
+        limit: usize,
+        complete: oneshot::Sender<std::result::Result<ServerHits, String>>,
+    },
 }
+
+/// What a server search of one account found: its messages, kept here as
+/// their headers, newest first, and where the search goes on from unless it
+/// found all there is.
+#[derive(Debug)]
+pub(crate) struct ServerHits {
+    pub message_ids: Vec<i64>,
+    pub next: Option<ServerSearchCursor>,
+}
+
+/// How long a server search may take, a slow server's whole folder list
+/// included.
+const SERVER_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// How many pages of a server's results one page of a server search goes
+/// through for mail not kept here, when the newest are kept here already.
+pub(crate) const SERVER_SEARCH_PAGES: usize = 20;
 
 impl AccountHandle {
     pub fn send(&self, cmd: SyncCmd) -> bool {
@@ -262,6 +286,34 @@ impl AccountHandle {
             .await
             .map_err(|_| CoreError::Other("downloading the message again timed out".into()))?
             .map_err(|_| CoreError::Other("mail worker stopped".into()))?
+            .map_err(CoreError::Other)
+    }
+
+    /// Searches the account's server for `tree` from `cursor`: the newest
+    /// `limit` messages it finds, kept here as their headers.
+    pub(crate) async fn search_server(
+        &self,
+        tree: crate::search::Expr,
+        cursor: ServerSearchCursor,
+        limit: usize,
+    ) -> Result<ServerHits> {
+        let (tx, rx) = oneshot::channel();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.body_tx.send(PriorityFetchCmd::Search {
+                tree,
+                cursor,
+                limit,
+                complete: tx,
+            }),
+        )
+        .await
+        .map_err(|_| CoreError::Other("the mail reader is busy".into()))?
+        .map_err(|_| CoreError::Other("the mail reader stopped".into()))?;
+        tokio::time::timeout(SERVER_SEARCH_TIMEOUT, rx)
+            .await
+            .map_err(|_| CoreError::Network("the server took too long to search".into()))?
+            .map_err(|_| CoreError::Other("the mail reader stopped".into()))?
             .map_err(CoreError::Other)
     }
 
@@ -594,6 +646,48 @@ async fn run_body_fetcher(
                     match fetch_attachment_bytes(&ctx, active_session, attachment_id).await {
                         Ok(bytes) => {
                             result = Ok(bytes);
+                            break;
+                        }
+                        Err(error) => {
+                            result = Err(error);
+                            if let Some(value) = session.take() {
+                                imap::logout(value).await;
+                            }
+                        }
+                    }
+                }
+                let _ = complete.send(result.map_err(|error| error.to_string()));
+                continue;
+            }
+            PriorityFetchCmd::Search {
+                tree,
+                cursor,
+                limit,
+                complete,
+            } => {
+                let mut result = Err(CoreError::Other("the server search did not run".into()));
+                for _ in 0..2 {
+                    if session.is_none() {
+                        match connect(&ctx, &config).await {
+                            Ok(value) => session = Some(value),
+                            Err(error) => {
+                                result = Err(error);
+                                break;
+                            }
+                        }
+                    }
+                    let Some(active_session) = session.as_mut() else {
+                        break;
+                    };
+                    match search_server(&ctx, &config, active_session, &tree, &cursor, limit).await
+                    {
+                        Ok(hits) => {
+                            result = Ok(hits);
+                            break;
+                        }
+                        // The server refused the search itself: asking again won't help.
+                        Err(error @ CoreError::ImapRefused(_)) => {
+                            result = Err(error);
                             break;
                         }
                         Err(error) => {
@@ -2710,6 +2804,10 @@ async fn extend_history(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum NewHeaders {
     Insert,
+    /// Mail a server search found, kept like any other, with the folder's scan
+    /// position where the live sync left it: it may be past mail the sync
+    /// hasn't fetched yet.
+    Found,
     /// Mail fetched only to link waiting local messages with the same
     /// Message-ID. Nothing else about it is kept, and the folder's scan
     /// position stays where the live sync left it.
@@ -3043,6 +3141,205 @@ async fn reconcile_mailbox(
         }
     }
     Ok(())
+}
+
+/// One folder's matches for a page of a server search, below where the last
+/// page stopped in it.
+struct FolderMatches {
+    /// Those not kept here, newest UID first and a page of them at most, each
+    /// with when the server got it.
+    queue: std::collections::VecDeque<(u32, i64)>,
+    /// The server matched more of those than the queue holds.
+    truncated: bool,
+    /// Those kept here, as (UID, message id), newest first.
+    kept: Vec<(u32, i64)>,
+}
+
+/// Searches the account's folders on its IMAP server for `tree`, below where
+/// `cursor` left each folder: the newest `limit` matches not kept here, which
+/// are fetched as their headers and kept, and the matches kept here already
+/// that the page passes. Their bodies come when opened.
+async fn search_server(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Session,
+    tree: &crate::search::Expr,
+    cursor: &ServerSearchCursor,
+    limit: usize,
+) -> Result<ServerHits> {
+    use crate::search::server::{self, Folders, ImapSearch};
+    let criteria = match server::imap(tree, &chrono::Local) {
+        ImapSearch::Nothing => {
+            return Ok(ServerHits {
+                message_ids: Vec::new(),
+                next: None,
+            });
+        }
+        ImapSearch::Criteria { criteria, utf8 } if utf8 => format!("CHARSET UTF-8 {criteria}"),
+        ImapSearch::Criteria { criteria, .. } => criteria,
+    };
+    let scope = server::imap_folders(tree);
+    let account_id = config.id;
+    let folders = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await?
+        .into_iter()
+        .filter(|folder| folder.selectable)
+        .filter(|folder| match &scope {
+            Folders::Roles(roles) => folder
+                .role
+                .as_deref()
+                .is_some_and(|role| roles.contains(&role)),
+            Folders::All => true,
+            Folders::Usual => !matches!(folder.role.as_deref(), Some("trash" | "spam")),
+        })
+        .collect::<Vec<_>>();
+
+    // One UID SEARCH covers one folder.
+    let mut matches = Vec::with_capacity(folders.len());
+    for folder in &folders {
+        let below = cursor
+            .below
+            .iter()
+            .find(|(id, _)| *id == folder.id)
+            .map(|(_, uid)| *uid);
+        match imap::select(session, &folder.path).await {
+            Ok(_) => {}
+            // A folder the server won't open has nothing to find.
+            Err(CoreError::ImapRefused(reply)) => {
+                tracing::debug!(account_id, folder = %folder.path, %reply, "search skips a folder");
+                matches.push(FolderMatches {
+                    queue: Default::default(),
+                    truncated: false,
+                    kept: Vec::new(),
+                });
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
+        let mut uids = imap::uid_search_matching(session, &criteria).await?;
+        uids.retain(|uid| below.is_none_or(|below| *uid < below));
+        let folder_id = folder.id;
+        let wanted = uids.clone();
+        let kept_ids = ctx
+            .db
+            .read(move |conn| repo::messages::by_uids(conn, folder_id, &wanted))
+            .await?;
+        let kept = uids
+            .iter()
+            .filter_map(|uid| Some((*uid, *kept_ids.get(uid)?)))
+            .collect::<Vec<_>>();
+        let mut missing = uids
+            .into_iter()
+            .filter(|uid| !kept_ids.contains_key(uid))
+            .collect::<Vec<_>>();
+        let truncated = missing.len() > limit;
+        missing.truncate(limit);
+        let dates = if missing.is_empty() {
+            HashMap::new()
+        } else {
+            imap::fetch_internal_dates(session, &imap::normalized_uid_set(&missing)?)
+                .await?
+                .into_iter()
+                .collect::<HashMap<_, _>>()
+        };
+        // One expunged since the SEARCH has nothing to show.
+        let queue = missing
+            .into_iter()
+            .filter_map(|uid| Some((uid, dates.get(&uid)?.unwrap_or_default())))
+            .collect();
+        matches.push(FolderMatches {
+            queue,
+            truncated,
+            kept,
+        });
+    }
+
+    // The newest new mail of every folder's, one page of it. Each folder
+    // gives its own in UID order, so a page stops in a folder at one UID and
+    // the next page goes on below it without missing any.
+    let mut taken: Vec<Vec<u32>> = folders.iter().map(|_| Vec::new()).collect();
+    for _ in 0..limit {
+        let Some(newest) = matches
+            .iter()
+            .enumerate()
+            .filter_map(|(index, found)| {
+                found.queue.front().map(|(uid, date)| (index, *date, *uid))
+            })
+            .max_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)))
+            .map(|(index, ..)| index)
+        else {
+            break;
+        };
+        if let Some((uid, _)) = matches[newest].queue.pop_front() {
+            taken[newest].push(uid);
+        }
+    }
+
+    // What the page passed in each folder: all of it once nothing new is
+    // left there, else down to the last new message it took. The matches
+    // kept here among that come with the page.
+    let mut message_ids = Vec::new();
+    let mut below = cursor.below.clone();
+    let mut more = false;
+    for ((folder, found), uids) in folders.iter().zip(&matches).zip(&taken) {
+        let exhausted = found.queue.is_empty() && !found.truncated;
+        more |= !exhausted;
+        let lowest = if exhausted {
+            found
+                .kept
+                .iter()
+                .map(|(uid, _)| *uid)
+                .chain(uids.iter().copied())
+                .min()
+        } else {
+            uids.last().copied()
+        };
+        let Some(lowest) = lowest else { continue };
+        message_ids.extend(
+            found
+                .kept
+                .iter()
+                .filter(|(uid, _)| *uid >= lowest)
+                .map(|(_, message_id)| *message_id),
+        );
+        match below.iter_mut().find(|(id, _)| *id == folder.id) {
+            Some((_, uid)) => *uid = (*uid).min(lowest),
+            None => below.push((folder.id, lowest)),
+        }
+    }
+
+    // The new mail comes as its headers.
+    for (folder, uids) in folders.iter().zip(taken) {
+        if uids.is_empty() {
+            continue;
+        }
+        match imap::select(session, &folder.path).await {
+            Ok(_) => {}
+            Err(CoreError::ImapRefused(_)) => continue,
+            Err(error) => return Err(error),
+        }
+        let headers = imap::fetch_headers(session, &imap::normalized_uid_set(&uids)?).await?;
+        let (thread_ids, _) =
+            store_headers(ctx, config, folder, headers, None, NewHeaders::Found).await?;
+        let folder_id = folder.id;
+        let stored = ctx
+            .db
+            .read(move |conn| repo::messages::by_uids(conn, folder_id, &uids))
+            .await?;
+        message_ids.extend(stored.into_values());
+        if !thread_ids.is_empty() {
+            ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+        }
+    }
+    Ok(ServerHits {
+        message_ids,
+        next: more.then(|| ServerSearchCursor {
+            below,
+            ..ServerSearchCursor::default()
+        }),
+    })
 }
 
 /// One unit of backfill-pool work: a single folder's chunk of UIDs, pulled in

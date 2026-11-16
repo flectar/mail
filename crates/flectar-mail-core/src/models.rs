@@ -433,6 +433,10 @@ pub struct AccountSettings {
     /// when new messages start formatted.
     #[serde(default = "plain_text_replies_default")]
     pub plain_text_replies: bool,
+    /// New messages ask for a read receipt (RFC 8098), which each message
+    /// can still change.
+    #[serde(default)]
+    pub request_read_receipts: bool,
 }
 
 const fn plain_text_replies_default() -> bool {
@@ -452,6 +456,7 @@ impl AccountSettings {
             keep_on_server: KeepOnServer::Always,
             message_format: MessageFormat::Formatted,
             plain_text_replies: plain_text_replies_default(),
+            request_read_receipts: false,
         }
     }
 }
@@ -1474,6 +1479,36 @@ pub struct SearchPage {
     pub next_cursor: Option<SearchCursor>,
 }
 
+/// Where a server search of one account goes on from: Gmail's page token, how
+/// many results JMAP gave already, or for IMAP each folder with the UID its
+/// next results are below.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerSearchCursor {
+    pub page_token: Option<String>,
+    pub position: u64,
+    pub below: Vec<(i64, u32)>,
+}
+
+/// A page of what accounts' servers found for a search, past what this
+/// device keeps: the conversations of the messages found, newest first. The
+/// messages are kept here, their bodies fetched when opened.
+#[derive(Debug, Clone, Default)]
+pub struct ServerSearchPage {
+    pub threads: Vec<ThreadSummary>,
+    /// The messages themselves, newest first, for lists without
+    /// conversations.
+    pub messages: Vec<MessageSummary>,
+    /// Where each account's search goes on from. An account that found all
+    /// its server has isn't here.
+    pub cursors: Vec<(i64, ServerSearchCursor)>,
+    /// Accounts whose servers can't be searched: POP3, and mail kept only on
+    /// this device.
+    pub unsearchable: Vec<i64>,
+    /// Accounts whose search failed, with why.
+    pub failed: Vec<(i64, String)>,
+}
+
 /// Stable keyset cursor for the message timeline, in either order; the
 /// message id breaks ties between messages with the same date.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1699,6 +1734,10 @@ pub struct SaveDraftArgs {
     pub in_reply_to_header: Option<String>,
     #[serde(default)]
     pub attachments: Vec<DraftAttachmentIn>,
+    /// The message asks for a read receipt (Disposition-Notification-To,
+    /// RFC 8098), sent to its From address.
+    #[serde(default)]
+    pub request_read_receipt: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

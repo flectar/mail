@@ -6,10 +6,12 @@ use crate::db::repo::messages::NewMessage;
 use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
 use crate::jmap::client::{self, ConnectedClient};
-use crate::models::{AccountConfig, Address, MailProtocol, SenderDeliveryStatus, now_ms, roles};
+use crate::models::{
+    AccountConfig, Address, MailProtocol, SenderDeliveryStatus, ServerSearchCursor, now_ms, roles,
+};
 use crate::sync::engine::{
-    PriorityFetchCmd, SyncCmd, SyncCtx, caught_up, configured_sync_interval, set_state,
-    set_state_error,
+    PriorityFetchCmd, SERVER_SEARCH_PAGES, ServerHits, SyncCmd, SyncCtx, caught_up,
+    configured_sync_interval, set_state, set_state_error,
 };
 use futures::{FutureExt, Stream, StreamExt};
 use jmap_client::core::error::MethodErrorType;
@@ -2444,6 +2446,10 @@ async fn build_draft_message(
         .rsplit_once('@')
         .map(|(_, value)| value)
         .unwrap_or("localhost");
+    let receipt_to = ctx
+        .db
+        .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+        .await?;
     let outgoing = crate::mime::OutgoingMessage {
         from: detail.from.clone(),
         reply_to,
@@ -2458,6 +2464,7 @@ async fn build_draft_message(
         message_id: stored_message_id.as_deref(),
         message_id_domain: domain,
         attachments: outgoing_attachments,
+        receipt_to: &receipt_to,
     };
     let security_recipients = outgoing
         .to
@@ -2504,6 +2511,11 @@ async fn save_draft_action(
         .or(action.message_id)
         .ok_or_else(|| CoreError::Jmap("draft save has no draftId".into()))?;
     let (message_id, raw) = build_draft_message(ctx, config, c, draft_id).await?;
+    let asks_receipt = !ctx
+        .db
+        .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+        .await?
+        .is_empty();
     let draft_mailbox =
         ensure_role_mailbox(ctx, config.id, c, roles::DRAFTS, "Drafts", Role::Drafts).await?;
     if !action_is_inflight(ctx, action.id).await? {
@@ -2545,7 +2557,14 @@ async fn save_draft_action(
         .account_id(&c.account_id)
         .email(blob_id)
         .mailbox_ids([draft_mailbox])
-        .keywords(["$draft", "$seen"])
+        // A message that asks for a read receipt is marked as answered, so
+        // no client sends one for its draft or its sent copy (RFC 3503
+        // sections 3.3 and 3.4, RFC 9007).
+        .keywords(if asks_receipt {
+            vec!["$draft", "$seen", MDN_SENT]
+        } else {
+            vec!["$draft", "$seen"]
+        })
         .received_at(now_ms() / 1000);
     let create_id = import.create_id();
     let imported = c
@@ -3046,8 +3065,129 @@ async fn body_actor(ctx: SyncCtx, config: AccountConfig, mut rx: mpsc::Receiver<
                     });
                 let _ = complete.send(result);
             }
+            PriorityFetchCmd::Search {
+                tree,
+                cursor,
+                limit,
+                complete,
+            } => {
+                let result = search_server(&ctx, &config, &mut session, &tree, &cursor, limit)
+                    .await
+                    .map_err(|error| {
+                        session = None;
+                        error.to_string()
+                    });
+                let _ = complete.send(result);
+            }
         }
     }
+}
+
+/// Searches the account's mail on its JMAP server for `tree` from `cursor`:
+/// the newest `limit` emails it finds that aren't kept here, which are
+/// fetched as their headers and kept, and the ones kept here already that it
+/// passes. Their bodies come when opened.
+async fn search_server(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Option<ConnectedClient>,
+    tree: &crate::search::Expr,
+    cursor: &ServerSearchCursor,
+    limit: usize,
+) -> Result<ServerHits> {
+    use crate::search::server::{JmapSearch, jmap};
+    let account_id = config.id;
+    let folders = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await?;
+    let mailboxes = folders
+        .iter()
+        .filter_map(|folder| Some((folder.role.as_deref()?, folder.jmap_id.clone()?)))
+        .collect::<HashMap<_, _>>();
+    let filter = match jmap(tree, &mailboxes) {
+        JmapSearch::Nothing => {
+            return Ok(ServerHits {
+                message_ids: Vec::new(),
+                next: None,
+            });
+        }
+        JmapSearch::Filter(filter) => filter,
+    };
+    let c = body_session(ctx, config, session).await?;
+    // The server's results a page at a time, until a page of them isn't kept
+    // here or they end.
+    let mut position = cursor.position;
+    let mut ids = Vec::new();
+    let mut missing = Vec::new();
+    let mut more = true;
+    for _ in 0..SERVER_SEARCH_PAGES {
+        let at = i32::try_from(position)
+            .map_err(|_| CoreError::Jmap("the search went past its last result".into()))?;
+        let mut request = c.request();
+        let query = request
+            .query_email()
+            .account_id(&c.account_id)
+            .position(at)
+            .limit(limit)
+            .sort([jmap_client::email::query::Comparator::received_at().descending()]);
+        if let Some(filter) = filter.clone() {
+            query.filter(filter);
+        }
+        let mut response: QueryResponse =
+            c.send_single(request).await.map_err(client::map_error)?;
+        // A server whose most is fewer gives that many and says so.
+        let page = response.limit().map_or(limit, |most| most.min(limit));
+        let batch = response.take_ids();
+        position += batch.len() as u64;
+        let ended = batch.is_empty() || batch.len() < page;
+        let wanted = batch.clone();
+        missing.extend(
+            ctx.db
+                .read(move |conn| {
+                    let mut missing = Vec::new();
+                    for id in wanted {
+                        if repo::messages::by_jmap_id(conn, account_id, &id)?.is_none() {
+                            missing.push(id);
+                        }
+                    }
+                    Ok(missing)
+                })
+                .await?,
+        );
+        ids.extend(batch);
+        if ended {
+            more = false;
+            break;
+        }
+        if missing.len() >= limit {
+            break;
+        }
+    }
+    for chunk in missing.chunks(max_objects_in_get(c).max(1)) {
+        let (emails, _) = fetch_headers(c, chunk).await.map_err(client::map_error)?;
+        // Found mail notifies of nothing, whenever it arrived.
+        persist_emails(ctx, config, emails, false, None, i64::MAX).await?;
+    }
+    let message_ids = ctx
+        .db
+        .read(move |conn| {
+            let mut message_ids = Vec::with_capacity(ids.len());
+            for id in &ids {
+                if let Some(row) = repo::messages::by_jmap_id(conn, account_id, id)? {
+                    message_ids.push(row.id);
+                }
+            }
+            Ok(message_ids)
+        })
+        .await?;
+    Ok(ServerHits {
+        message_ids,
+        next: more.then(|| ServerSearchCursor {
+            position,
+            ..ServerSearchCursor::default()
+        }),
+    })
 }
 
 /// The body worker's session: connected when first needed, and again after a

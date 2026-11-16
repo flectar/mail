@@ -112,6 +112,20 @@ pub fn by_folder_uid(conn: &Connection, folder_id: i64, uid: i64) -> Result<Opti
         .optional()?)
 }
 
+/// Who message `id` asks to send its read receipt to (Disposition-
+/// Notification-To, RFC 8098): for a draft, its own request.
+pub fn receipt_to(conn: &Connection, id: i64) -> Result<Vec<Address>> {
+    let json: Option<String> = conn.query_row(
+        "SELECT receipt_to FROM messages WHERE id = ?1",
+        params![id],
+        |row| row.get(0),
+    )?;
+    Ok(match json {
+        Some(json) => serde_json::from_str(&json)?,
+        None => Vec::new(),
+    })
+}
+
 /// The In-Reply-To and References a draft's message carries: from the stored
 /// message it replies to, or from the Message-ID kept for a reply to one that
 /// is not stored here.
@@ -1558,6 +1572,26 @@ pub fn uids_in_folder(conn: &Connection, folder_id: i64) -> Result<Vec<(i64, i64
         .query_map(params![folder_id], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
+}
+
+/// The messages kept here of these UIDs in a folder, each one's id by UID.
+pub fn by_uids(
+    conn: &Connection,
+    folder_id: i64,
+    uids: &[u32],
+) -> Result<std::collections::HashMap<u32, i64>> {
+    let mut stmt =
+        conn.prepare_cached("SELECT id FROM messages WHERE folder_id = ?1 AND uid = ?2")?;
+    let mut found = std::collections::HashMap::new();
+    for uid in uids {
+        if let Some(id) = stmt
+            .query_row(params![folder_id, uid], |row| row.get::<_, i64>(0))
+            .optional()?
+        {
+            found.insert(*uid, id);
+        }
+    }
+    Ok(found)
 }
 
 pub fn max_uid_in_folder(conn: &Connection, folder_id: i64) -> Result<i64> {

@@ -154,6 +154,10 @@ pub(crate) async fn run(ctx: SyncCtx, mut config: AccountConfig, mut inputs: Inp
                         "attachments of POP3 mail are read from the stored message".into(),
                     ));
                 }
+                // POP3 has no search: the core doesn't ask.
+                Some(PriorityFetchCmd::Search { complete, .. }) => {
+                    let _ = complete.send(Err("POP3 servers can't search".into()));
+                }
             },
             request = inputs.restores.recv() => match request {
                 None => return,

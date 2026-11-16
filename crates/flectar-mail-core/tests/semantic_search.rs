@@ -5,7 +5,7 @@
 
 use flectar_mail_core::db::repo;
 use flectar_mail_core::embed::store::VectorIndex;
-use flectar_mail_core::search::ParsedQuery;
+use flectar_mail_core::search::{Filter, ParsedQuery};
 use rusqlite::Connection;
 
 const MODEL: &str = "test";
@@ -98,7 +98,7 @@ fn operator_filters_apply_to_semantic_hits() {
 
     // is:starred excludes msg101 (not starred), so the semantic hit is dropped.
     let q = ParsedQuery {
-        is_starred: Some(true),
+        filters: vec![Filter::Starred],
         ..Default::default()
     };
     let out = repo::search::hybrid(&conn, &q, &hits, 20).unwrap();

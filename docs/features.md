@@ -4,6 +4,7 @@ A closer look at what the [README](../README.md) summarizes.
 
 - [Conversation threads](#conversation-threads)
 - [Tabs](#tabs)
+- [Search](#search)
 - [Checking for mail](#checking-for-mail)
 - [New-mail notifications](#new-mail-notifications)
 - [Profiles and account colors](#profiles-and-account-colors)
@@ -100,6 +101,35 @@ Settings → General.
   <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-tabs-light.png">
   <img src="../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail with tabs for several conversations, the calendar, contacts, and files">
 </picture>
+
+## Search
+
+The search field finds mail stored on this device. Every word has to match,
+in the subject, the sender and recipients, or the text, and a word also finds
+the longer words it starts. Put words in quotes to find them as a phrase. When
+nothing has every word, the list shows mail with any of them.
+
+Operators narrow a search, as in Gmail:
+
+- `from:` and `to:` match a name or address, and `subject:` and `body:` a word
+  in that part.
+- `is:unread`, `is:starred` and `has:attachment` keep those messages, and
+  `filename:pdf` messages with an attachment whose name has that text.
+- `in:inbox`, `in:sent`, `in:drafts`, `in:archive`, `in:spam` and `in:trash`
+  search one kind of folder. Trash and Spam are left out unless a search names
+  them, and `in:anywhere` takes them in too.
+- `after:2026/01/31` and `before:2026/02/28` keep mail received from the start
+  of that day, or before it, in your time zone. `newer_than:7d` and
+  `older_than:1y` count back from now in days (`d`), months (`m`) or years
+  (`y`).
+- `larger:5M` and `smaller:100K` keep mail of at least, or under, that many
+  bytes, with `K`, `M` and `G` for thousands, millions and billions.
+
+`OR` in capitals finds either part, as in `from:ana OR from:ben`, and binds
+tighter than the space between parts, so `invoice OR receipt 2026` finds either
+word in mail that has 2026. Parentheses group parts, and a dash before a word,
+a phrase, an operator or a group leaves out what it matches, as in
+`-from:billing` or `-(draft OR old)`.
 
 ## Checking for mail
 
@@ -535,6 +565,14 @@ A receipt says only that the message was shown on your screen, as the
 standard puts it (RFC 8098). Sending one or ignoring the request answers it for
 good, and IMAP and JMAP servers usually keep that answer, so your other devices
 don't ask again.
+
+To ask for a receipt yourself, choose **Request a read receipt** under **More
+options** next to **Discard** in the composer. The message then asks to send
+the receipt to the address it's from. **Request read receipts** in the
+account's mail settings, under the message format, makes new messages from
+that account ask by default. Recipients and their mail programs are free to
+ignore the request, and many do. The copy in Sent is marked as answered where
+the server keeps that, so no mail program answers your own copy.
 
 When a receipt comes back for a message you sent, the message lists it under
 **Read receipts** at its end, after any attachments, with when it was sent:
