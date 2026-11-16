@@ -562,6 +562,7 @@ pub(super) fn render_current(
             state.server_only_note(),
             state.list_order,
         );
+        server_search::add_row(&mut list_projection, &state);
         add_earlier_row(&mut list_projection, state.window_start);
         let (previous_email_id, next_email_id) = adjacent_message_ids(visible, selected_id);
         (
@@ -590,6 +591,7 @@ pub(super) fn render_current(
         mail_list_entry_key,
         same_mail_list_entry,
     );
+    server_search::show(app, &state.borrow());
     app.set_mail_selection_count(checked_ids.len() as i32);
     refresh_sidebar(state);
     app.set_selected_scope_title(mailbox_scope_title(scope, &mailboxes, &labels).into());
@@ -1275,6 +1277,7 @@ pub(super) fn refresh_rows_only(
             state.server_only_note(),
             state.list_order,
         );
+        server_search::add_row(&mut list_projection, &state);
         add_earlier_row(&mut list_projection, state.window_start);
         (
             selected_id,
@@ -1309,6 +1312,7 @@ pub(super) fn refresh_rows_only(
         mail_list_entry_key,
         same_mail_list_entry,
     );
+    server_search::show(app, &state.borrow());
     app.set_mail_selection_count(checked_ids.len() as i32);
     app.set_selected_account_uses_labels(selected_email.as_ref().is_some_and(|email| {
         state.borrow().connected_accounts.iter().any(|account| {
