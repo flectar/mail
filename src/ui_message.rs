@@ -50,6 +50,11 @@ impl UiMessage {
         }
     }
 
+    /// The source text, before any arguments go in.
+    pub(crate) fn key(&self) -> &'static str {
+        self.key
+    }
+
     /// The source text with its arguments, as shown without a translation.
     #[cfg(test)]
     pub(crate) fn english(&self) -> String {

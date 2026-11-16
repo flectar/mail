@@ -15,6 +15,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Text formatting](#text-formatting)
 - [Spell check](#spell-check)
 - [Undo](#undo)
+- [Before sending](#before-sending)
 - [Undo send](#undo-send)
 - [Unsubscribing](#unsubscribing)
 - [Blocking senders](#blocking-senders)
@@ -504,6 +505,16 @@ or star it, a notice at the bottom of the window says what changed, with
 **Undo**. Undo, or Ctrl+Z (Command-Z on a Mac) while the notice shows, puts the
 mail back as it was, also when the change already reached the server. Permanent
 deletion, labels, and moving or copying mail to another account can't be undone.
+
+## Before sending
+
+**Send** asks first when a message has no subject, with **Send without
+subject** and **Add a subject**. It also asks when a message mentions a file,
+with a word such as attached or enclosed or a file name such as report.pdf, but
+has none attached. **Attach files…** then opens the file picker, and **Send
+anyway** sends the message as it is. Only what you wrote counts, so quoted
+text, your signature and links don't. Each language has its own words, and the
+English ones always count.
 
 ## Undo send
 

@@ -46,6 +46,12 @@ export global ComposerUi {
     in property <bool> attaching-files: false;
     // The message goes out as plain text only.
     in property <bool> plain-text: false;
+    // What sending asks first: "subject", or "attachment" with the keyword the
+    // message mentions. Answered "send", "attach" or "cancel".
+    in-out property <bool> send-check-open: false;
+    in property <string> send-check;
+    in property <string> send-check-keyword;
+    callback answer-send-check(string);
     in property <[EmailTemplateRow]> templates: [];
     in property <LocalizedMessage> message;
     in property <bool> notice-is-error: false;
@@ -205,6 +211,10 @@ export component BoundComposer inherits EmailComposer {
     request-receipt <=> ComposerUi.request-receipt;
     attaching-files: ComposerUi.attaching-files;
     plain-text: ComposerUi.plain-text;
+    send-check-open <=> ComposerUi.send-check-open;
+    send-check: ComposerUi.send-check;
+    send-check-keyword: ComposerUi.send-check-keyword;
+    answer-send-check(answer) => { ComposerUi.answer-send-check(answer); }
     from-label <=> ComposerUi.from-label;
     notice-is-error: ComposerUi.notice-is-error;
     selection-start: ComposerUi.selection-start;

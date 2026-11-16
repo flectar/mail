@@ -411,8 +411,8 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:232 ui/app.slint:1382 ui/components/composer-fields.slint:91
-#: ui/app.slint:232 ui/app.slint:1382 ui/components/composer-fields.slint:91 ui/components/email-composer.slint:58
+#: ui/app.slint:232 ui/app.slint:1383 ui/components/composer-fields.slint:91
+#: ui/app.slint:232 ui/app.slint:1383 ui/components/composer-fields.slint:91 ui/components/email-composer.slint:59
 msgid "No connected account"
 msgstr ""
 
@@ -2146,7 +2146,7 @@ msgstr ""
 msgid "{} wrote:"
 msgstr ""
 
-#: ui/app.slint:728 ui/components/email-composer.slint:893
+#: ui/app.slint:728 ui/components/email-composer.slint:900
 msgid "Forwarded message"
 msgstr ""
 
@@ -2359,7 +2359,7 @@ msgstr ""
 msgid "Uploading… {}%"
 msgstr ""
 
-#: ui/app.slint:779 ui/app.slint:809
+#: ui/app.slint:779 ui/app.slint:810
 msgid "{} · until {}"
 msgstr ""
 
@@ -2402,360 +2402,370 @@ msgid "Fill in {} or send again."
 msgstr ""
 
 #: ui/app.slint:789
-msgid "Email template inserted, but its usage could not be saved: {}"
+msgctxt ""
+"Comma-separated words that suggest a message has a file attached. Keep the "
+"English ones out: they always count."
+msgid ""
+"attach, attached, attaching, attachment, attachments, enclosed, enclosure, "
+"CV, résumé, cover "
+"letter, .pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx, .odt, .ods, .odp, .rtf, .zip"
 msgstr ""
 
 #: ui/app.slint:790
-msgid "Choose a supported account type and connection security."
+msgid "Email template inserted, but its usage could not be saved: {}"
 msgstr ""
 
 #: ui/app.slint:791
-msgid "IMAP port must be between 1 and 65535."
+msgid "Choose a supported account type and connection security."
 msgstr ""
 
 #: ui/app.slint:792
-msgid "POP3 port must be between 1 and 65535."
+msgid "IMAP port must be between 1 and 65535."
 msgstr ""
 
 #: ui/app.slint:793
-msgid "SMTP port must be between 1 and 65535."
+msgid "POP3 port must be between 1 and 65535."
 msgstr ""
 
 #: ui/app.slint:794
-msgid "Local mail data is unavailable. Retry startup."
+msgid "SMTP port must be between 1 and 65535."
 msgstr ""
 
 #: ui/app.slint:795
-msgid "Discovering JMAP and checking capabilities…"
+msgid "Local mail data is unavailable. Retry startup."
 msgstr ""
 
 #: ui/app.slint:796
-msgid "Certificate imported. Connect to verify the server."
+msgid "Discovering JMAP and checking capabilities…"
 msgstr ""
 
 #: ui/app.slint:797
-msgid "Could not load account preferences: {}"
+msgid "Certificate imported. Connect to verify the server."
 msgstr ""
 
 #: ui/app.slint:798
+msgid "Could not load account preferences: {}"
+msgstr ""
+
+#: ui/app.slint:799
 msgid ""
 "Your edited signature was preserved. Choose No signature to keep it as "
 "message text before inserting another."
 msgstr ""
 
-#: ui/app.slint:799
+#: ui/app.slint:800
 msgid "Certificate import failed: {}"
 msgstr ""
 
-#: ui/app.slint:800
+#: ui/app.slint:801
 msgid "Testing IMAP and SMTP connections…"
 msgstr ""
 
-#: ui/app.slint:801
+#: ui/app.slint:802
 msgid "Testing POP3 and SMTP connections…"
 msgstr ""
 
-#: ui/app.slint:806
+#: ui/app.slint:807
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
 msgstr ""
 
-#: ui/app.slint:807
+#: ui/app.slint:808
 msgid "{n} account"
 msgid_plural "{n} accounts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:808
+#: ui/app.slint:809
 msgid "{} · from {}"
 msgstr ""
 
-#: ui/app.slint:810
+#: ui/app.slint:811
 msgid ""
 "POP3 accounts can't have automatic replies from Flectar Mail. Your "
 "provider's webmail may offer them."
 msgstr ""
 
-#: ui/app.slint:811
+#: ui/app.slint:812
 msgid ""
 "Flectar Mail can't set this account's automatic replies yet. Your provider's "
 "webmail can."
 msgstr ""
 
-#: ui/app.slint:812
+#: ui/app.slint:813
 msgid ""
 "Gmail answers each sender once, and again after four days. Mailing lists and "
 "spam get no reply."
 msgstr ""
 
-#: ui/app.slint:813
+#: ui/app.slint:814
 msgid "Outlook answers each sender once while replies are on."
 msgstr ""
 
-#: ui/app.slint:814
+#: ui/app.slint:815
 msgid ""
 "Your server answers each sender once every few days, and never mailing lists."
 msgstr ""
 
-#: ui/app.slint:815
+#: ui/app.slint:816
 msgid ""
 "Your server answers each sender once, and again after four days. Mailing "
 "lists and spam get no reply."
 msgstr ""
 
-#: ui/app.slint:816
+#: ui/app.slint:817
 msgid ""
 "Flectar Mail found no way to set automatic replies on this account's server. "
 "Your provider's webmail may offer them."
 msgstr ""
 
-#: ui/app.slint:817
+#: ui/app.slint:818
 msgid "Checking whether this account's server can send automatic replies…"
 msgstr ""
 
-#: ui/app.slint:818
+#: ui/app.slint:819
 msgid "Couldn't check this account's server: {}"
 msgstr ""
 
-#: ui/app.slint:819
+#: ui/app.slint:820
 msgid "Outlook needs a last day with a first day."
 msgstr ""
 
-#: ui/app.slint:820
+#: ui/app.slint:821
 msgid "Senders who aren't in your contacts get no reply."
 msgstr ""
 
-#: ui/app.slint:821
+#: ui/app.slint:822
 msgid ""
 "Senders outside your organization who aren't in your contacts get no reply."
 msgstr ""
 
-#: ui/app.slint:822
+#: ui/app.slint:823
 msgid "Write the first day as YYYY-MM-DD."
 msgstr ""
 
-#: ui/app.slint:823
+#: ui/app.slint:824
 msgid "Write the last day as YYYY-MM-DD."
 msgstr ""
 
-#: ui/app.slint:824
+#: ui/app.slint:825
 msgid "The last day comes before the first."
 msgstr ""
 
-#: ui/app.slint:825
+#: ui/app.slint:826
 msgid "Write the message to send."
 msgstr ""
 
-#: ui/app.slint:826
+#: ui/app.slint:827
 msgid "Allow Flectar Mail to change Gmail settings in your browser."
 msgstr ""
 
-#: ui/app.slint:827
+#: ui/app.slint:828
 msgid "Saved."
 msgstr ""
 
-#: ui/app.slint:828
+#: ui/app.slint:829
 msgid "Could not save automatic replies: {}"
 msgstr ""
 
-#: ui/app.slint:829 ui/dialogs/settings-dialog.slint:2359
-#: ui/app.slint:829 ui/dialogs/settings-dialog.slint:2359 ui/dialogs/settings-dialog.slint:2402
-#: ui/app.slint:829 ui/dialogs/settings-dialog.slint:2359 ui/dialogs/settings-dialog.slint:2402 ui/views/onboarding-view.slint:163
-#: ui/app.slint:829 ui/dialogs/settings-dialog.slint:2359 ui/dialogs/settings-dialog.slint:2402 ui/views/onboarding-view.slint:163
+#: ui/app.slint:830 ui/dialogs/settings-dialog.slint:2359
+#: ui/app.slint:830 ui/dialogs/settings-dialog.slint:2359 ui/dialogs/settings-dialog.slint:2402
+#: ui/app.slint:830 ui/dialogs/settings-dialog.slint:2359 ui/dialogs/settings-dialog.slint:2402 ui/views/onboarding-view.slint:163
+#: ui/app.slint:830 ui/dialogs/settings-dialog.slint:2359 ui/dialogs/settings-dialog.slint:2402 ui/views/onboarding-view.slint:163
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
 
-#: ui/app.slint:830
+#: ui/app.slint:831
 msgid "Choose Gmail or Outlook OAuth."
 msgstr ""
 
-#: ui/app.slint:831
+#: ui/app.slint:832
 msgid "Complete sign-in in your browser, or choose Cancel here."
 msgstr ""
 
-#: ui/app.slint:832
+#: ui/app.slint:833
 msgid "Cancelling browser sign-in…"
 msgstr ""
 
-#: ui/app.slint:833
+#: ui/app.slint:834
 msgid "Finishing browser sign-in…"
 msgstr ""
 
-#: ui/app.slint:834
+#: ui/app.slint:835
 msgid "Could not use that browser address: {}"
 msgstr ""
 
-#: ui/app.slint:835
+#: ui/app.slint:836
 msgid "Calendar core is unavailable."
 msgstr ""
 
-#: ui/app.slint:836
+#: ui/app.slint:837
 msgid "Account no longer exists."
 msgstr ""
 
-#: ui/app.slint:837
+#: ui/app.slint:838
 msgid "Authorize calendar access in your browser."
 msgstr ""
 
-#: ui/app.slint:838
+#: ui/app.slint:839
 msgid "OAuth app keys saved."
 msgstr ""
 
-#: ui/app.slint:839
+#: ui/app.slint:840
 msgid "{} OAuth settings saved."
 msgstr ""
 
-#: ui/app.slint:840
+#: ui/app.slint:841
 msgid "OAuth settings failed: {}"
 msgstr ""
 
-#: ui/app.slint:841
+#: ui/app.slint:842
 msgid "Mail refresh failed: {}"
 msgstr ""
 
-#: ui/app.slint:842
+#: ui/app.slint:843
 msgid "Mail filter failed: {}"
 msgstr ""
 
-#: ui/app.slint:843
+#: ui/app.slint:844
 msgid "Mail pagination failed: {}"
 msgstr ""
 
-#: ui/app.slint:844
+#: ui/app.slint:845
 msgid "Could not mark message as read: {}"
 msgstr ""
 
-#: ui/app.slint:845 ui/views/mail-reading-pane.slint:202
-#: ui/app.slint:845 ui/views/mail-reading-pane.slint:202 ui/views/mail-reading-pane.slint:1396
+#: ui/app.slint:846 ui/views/mail-reading-pane.slint:202
+#: ui/app.slint:846 ui/views/mail-reading-pane.slint:202 ui/views/mail-reading-pane.slint:1396
 msgid "Loading message…"
 msgstr ""
 
-#: ui/app.slint:909 ui/components/workspace-navigation.slint:787
-#: ui/app.slint:909 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
-#: ui/app.slint:909 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
+#: ui/app.slint:910 ui/components/workspace-navigation.slint:787
+#: ui/app.slint:910 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
+#: ui/app.slint:910 ui/components/workspace-navigation.slint:787 ui/tray.slint:13 ui/tray.slint:14
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1597 ui/app.slint:1610
+#: ui/app.slint:1598 ui/app.slint:1611
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:2521
+#: ui/app.slint:2522
 msgid "Drop to start a new message"
 msgstr ""
 
-#: ui/app.slint:2529 ui/components/email-composer.slint:1154
+#: ui/app.slint:2530 ui/components/email-composer.slint:1199
 msgid "Pictures go in the text, and other files are attached."
 msgstr ""
 
-#: ui/app.slint:2597
+#: ui/app.slint:2598
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2597 ui/views/files-view.slint:578
+#: ui/app.slint:2598 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:2601
+#: ui/app.slint:2602
 msgid "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2602
+#: ui/app.slint:2603
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2604
+#: ui/app.slint:2605
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2605
+#: ui/app.slint:2606
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2606 ui/app.slint:2632 ui/components/calendar.slint:1043
-#: ui/app.slint:2606 ui/app.slint:2632 ui/components/calendar.slint:1043
+#: ui/app.slint:2607 ui/app.slint:2633 ui/components/calendar.slint:1043
+#: ui/app.slint:2607 ui/app.slint:2633 ui/components/calendar.slint:1043
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:2607
+#: ui/app.slint:2608
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2607 ui/views/files-view.slint:660
-#: ui/app.slint:2607 ui/views/files-view.slint:660
+#: ui/app.slint:2608 ui/views/files-view.slint:660
+#: ui/app.slint:2608 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2629
+#: ui/app.slint:2630
 msgid "Mark all as read?"
 msgstr ""
 
-#: ui/app.slint:2631
+#: ui/app.slint:2632
 msgid "All unread messages in {} will be marked as read."
 msgstr ""
 
-#: ui/app.slint:2633
+#: ui/app.slint:2634
 msgid "Mark all as read"
 msgstr ""
 
-#: ui/app.slint:2652
+#: ui/app.slint:2653
 msgid "Replace changes made elsewhere?"
 msgstr ""
 
-#: ui/app.slint:2653
+#: ui/app.slint:2654
 msgid "Run replies before your filters?"
 msgstr ""
 
-#: ui/app.slint:2656
+#: ui/app.slint:2657
 msgid ""
 "The automatic replies script Flectar Mail keeps on your server was changed "
 "outside Flectar Mail."
 msgstr ""
 
-#: ui/app.slint:2657
+#: ui/app.slint:2658
 msgid ""
 "Your server runs this filter script of yours. Flectar Mail would run the "
 "automatic replies first, then your script, unchanged."
 msgstr ""
 
-#: ui/app.slint:2659
+#: ui/app.slint:2660
 msgid "Saving replaces those changes with what you set here."
 msgstr ""
 
-#: ui/app.slint:2660
+#: ui/app.slint:2661
 msgid "Your filters keep running, also once replies are off."
 msgstr ""
 
-#: ui/app.slint:2661
+#: ui/app.slint:2662
 msgid "Replace changes"
 msgstr ""
 
-#: ui/app.slint:2661
+#: ui/app.slint:2662
 msgid "Run both"
 msgstr ""
 
-#: ui/app.slint:2845
+#: ui/app.slint:2846
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:2851
+#: ui/app.slint:2852
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:2864
+#: ui/app.slint:2865
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:2867
+#: ui/app.slint:2868
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:2872
+#: ui/app.slint:2873
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:2880 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2881 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 
@@ -3016,6 +3026,7 @@ msgstr ""
 msgid "Add sender address"
 msgstr ""
 
+#: ui/components/account-mail-preferences.slint:216
 #: ui/components/account-mail-preferences.slint:216
 #: ui/components/account-mail-preferences.slint:216
 #: ui/components/account-mail-preferences.slint:216
@@ -4267,16 +4278,16 @@ msgstr ""
 msgid "Blind carbon copy"
 msgstr ""
 
-#: ui/components/composer-fields.slint:494
+#: ui/components/composer-fields.slint:498
 msgctxt "signature"
 msgid "Name"
 msgstr ""
 
-#: ui/components/composer-fields.slint:506
+#: ui/components/composer-fields.slint:510
 msgid "Signature name, for example Work"
 msgstr ""
 
-#: ui/components/composer-fields.slint:506
+#: ui/components/composer-fields.slint:510
 msgid "What is this email about?"
 msgstr ""
 
@@ -4322,101 +4333,133 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
-#: ui/components/email-composer.slint:444
-#: ui/components/email-composer.slint:444
+#: ui/components/email-composer.slint:451
+#: ui/components/email-composer.slint:451
 msgid "From"
 msgstr ""
 
-#: ui/components/email-composer.slint:445
+#: ui/components/email-composer.slint:452
 msgid "Verified sender identity"
 msgstr ""
 
-#: ui/components/email-composer.slint:566
+#: ui/components/email-composer.slint:573
 msgid "Write your message…"
 msgstr ""
 
-#: ui/components/email-composer.slint:740
+#: ui/components/email-composer.slint:747
 msgid "No suggestions"
 msgstr ""
 
-#: ui/components/email-composer.slint:744
+#: ui/components/email-composer.slint:751
 msgid "Add to dictionary"
 msgstr ""
 
-#: ui/components/email-composer.slint:748 ui/read-receipts.slint:97
+#: ui/components/email-composer.slint:755 ui/read-receipts.slint:97
 msgid "Ignore"
 msgstr ""
 
-#: ui/components/email-composer.slint:753
+#: ui/components/email-composer.slint:760
 msgid "Image size"
 msgstr ""
 
-#: ui/components/email-composer.slint:760
+#: ui/components/email-composer.slint:767
 msgid "Alt text…"
 msgstr ""
 
-#: ui/components/email-composer.slint:768
+#: ui/components/email-composer.slint:775
 msgid "Cut"
 msgstr ""
 
-#: ui/components/email-composer.slint:778
+#: ui/components/email-composer.slint:785
 msgid "Paste"
 msgstr ""
 
-#: ui/components/email-composer.slint:783
+#: ui/components/email-composer.slint:790
 msgid "Paste as plain text"
 msgstr ""
 
-#: ui/components/email-composer.slint:788
+#: ui/components/email-composer.slint:795
 msgid "Select all"
 msgstr ""
 
-#: ui/components/email-composer.slint:794
+#: ui/components/email-composer.slint:801
 msgid "Spelling"
 msgstr ""
 
-#: ui/components/email-composer.slint:796
-#: ui/components/email-composer.slint:796
+#: ui/components/email-composer.slint:803
+#: ui/components/email-composer.slint:803
 msgid "Check spelling"
 msgstr ""
 
-#: ui/components/email-composer.slint:810
+#: ui/components/email-composer.slint:817
 msgid "No dictionaries installed"
 msgstr ""
 
-#: ui/components/email-composer.slint:893
+#: ui/components/email-composer.slint:900
 msgid "Quoted text"
 msgstr ""
 
-#: ui/components/email-composer.slint:899
+#: ui/components/email-composer.slint:906
 msgid "Hide the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:899
+#: ui/components/email-composer.slint:906
 msgid "Show the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:910
+#: ui/components/email-composer.slint:917
 msgid "Edit the quoted message as text"
 msgstr ""
 
-#: ui/components/email-composer.slint:921
+#: ui/components/email-composer.slint:928
 msgid "Remove the forwarded message"
 msgstr ""
 
-#: ui/components/email-composer.slint:921
+#: ui/components/email-composer.slint:928
 msgid "Remove the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:952
+#: ui/components/email-composer.slint:959
 msgid "Add the forwarded message back"
 msgstr ""
 
-#: ui/components/email-composer.slint:952
+#: ui/components/email-composer.slint:959
 msgid "Add the quoted text back"
 msgstr ""
 
-#: ui/components/email-composer.slint:1146
+#: ui/components/email-composer.slint:1117
+msgid "Send without a subject?"
+msgstr ""
+
+#: ui/components/email-composer.slint:1117
+msgid "Did you mean to attach a file?"
+msgstr ""
+
+#: ui/components/email-composer.slint:1119
+msgid "People see the subject first, in their list of mail."
+msgstr ""
+
+#: ui/components/email-composer.slint:1120
+msgid "The message mentions “{}”, but has no file attached."
+msgstr ""
+
+#: ui/components/email-composer.slint:1122
+msgid "Send without subject"
+msgstr ""
+
+#: ui/components/email-composer.slint:1122
+msgid "Send anyway"
+msgstr ""
+
+#: ui/components/email-composer.slint:1123
+msgid "Add a subject"
+msgstr ""
+
+#: ui/components/email-composer.slint:1124
+msgid "Attach files…"
+msgstr ""
+
+#: ui/components/email-composer.slint:1191
 msgid "Drop to add to your message"
 msgstr ""
 
