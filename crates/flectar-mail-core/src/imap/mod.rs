@@ -1190,7 +1190,8 @@ fn section_fetch_query(paths: &[(String, Vec<u32>)]) -> String {
     )
 }
 
-fn normalized_uid_set(uids: &[u32]) -> Result<String> {
+/// `uids` in any order as one UID set, runs of them as ranges.
+pub(crate) fn normalized_uid_set(uids: &[u32]) -> Result<String> {
     if uids.contains(&0) {
         return Err(CoreError::Imap("IMAP UID must be greater than zero".into()));
     }
@@ -1335,6 +1336,30 @@ async fn fetch_flags_inner(
     Ok(out)
 }
 
+/// When the server got each message of `uid_set`, in milliseconds.
+pub async fn fetch_internal_dates(
+    session: &mut Session,
+    uid_set: &str,
+) -> Result<Vec<(u32, Option<i64>)>> {
+    with_deadline("UID FETCH dates", METADATA_TIMEOUT, async {
+        let mut out = Vec::new();
+        {
+            let mut stream = session
+                .uid_fetch(uid_set, "(UID INTERNALDATE)")
+                .await
+                .map_err(command_error)?;
+            while let Some(item) = stream.next().await {
+                let fetch = item.map_err(command_error)?;
+                if let Some(uid) = fetch.uid {
+                    out.push((uid, fetch.internal_date().map(|d| d.timestamp_millis())));
+                }
+            }
+        }
+        Ok(out)
+    })
+    .await
+}
+
 /// Full raw RFC 5322 bytes of one message.
 pub async fn fetch_full(session: &mut Session, uid: u32) -> Result<Option<Vec<u8>>> {
     with_deadline(
@@ -1409,6 +1434,20 @@ async fn uid_search_all_inner(session: &mut Session) -> Result<Vec<u32>> {
     let mut v: Vec<u32> = set.into_iter().collect();
     v.sort_unstable();
     Ok(v)
+}
+
+/// UIDs of the selected folder's messages that `criteria` match, newest
+/// first. The criteria come from a search's translation, with any
+/// `CHARSET` in front.
+pub async fn uid_search_matching(session: &mut Session, criteria: &str) -> Result<Vec<u32>> {
+    with_deadline("UID SEARCH", METADATA_TIMEOUT, async {
+        let set = session.uid_search(criteria).await.map_err(command_error)?;
+        let mut uids: Vec<u32> = set.into_iter().collect();
+        uids.sort_unstable_by(|a, b| b.cmp(a));
+        uids.dedup();
+        Ok(uids)
+    })
+    .await
 }
 
 /// UIDs visible in the selected folder, excluding messages awaiting expunge.

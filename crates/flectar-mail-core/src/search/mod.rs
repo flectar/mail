@@ -11,6 +11,8 @@
 //! before a group or an operator negates it. A query with any of these becomes one boolean
 //! [`Expr`] instead of the all-terms query, which keeps its relaxed any-term fallback.
 
+pub(crate) mod server;
+
 use chrono::{DateTime, Months, NaiveDate, TimeZone};
 
 /// Lowercase and strip diacritics for accent-insensitive matching, so that
@@ -42,6 +44,9 @@ pub struct ParsedQuery {
     /// expression. It stands in for `fts`, `fts_not` and `filters`, which stay
     /// empty, and leaves out semantic search, whose matches it can't check.
     pub expression: Option<Expr>,
+    /// The whole query as one expression, plain or boolean, for searching a
+    /// server with.
+    pub tree: Option<Expr>,
     /// Scope results to a single account. `None` searches every account. Not
     /// parsed from the query string - set by the caller from the UI's active
     /// account selection.
@@ -52,6 +57,10 @@ pub struct ParsedQuery {
     /// Scope results to messages in any of these folders, such as the ones an
     /// AI agent may see; an empty set matches nothing. Set by the caller.
     pub folder_ids: Option<Vec<i64>>,
+    /// Messages a search of the servers found for this query. They match too,
+    /// whether or not the copy kept here has what the server matched, such as
+    /// a body not fetched yet. Set by the caller.
+    pub found: Vec<i64>,
 }
 
 /// What an operator keeps: messages from or to an address, in a folder of a
@@ -85,10 +94,15 @@ pub enum Filter {
 pub struct Text {
     /// The FTS5 match expression.
     pub fts: String,
-    /// The words as typed, for the embedding query.
-    words: String,
+    /// The words as typed, for the embedding query and for servers.
+    pub words: String,
     /// The words folded, to boost senders they name: unscoped text only.
     sender: Option<String>,
+    /// The part of the message the words are in: `subject`, `body`, or
+    /// anywhere.
+    pub column: Option<&'static str>,
+    /// Quoted: the words in that order, rather than words starting so.
+    pub phrase: bool,
 }
 
 /// A boolean search expression.
@@ -418,6 +432,8 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
                         fts: fts_col_term(Some(column), &clean),
                         words: clean,
                         sender: None,
+                        column: Some(column),
+                        phrase: false,
                     })
                 })
             }
@@ -430,6 +446,8 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
                         fts: fts_term(&clean),
                         words: clean,
                         sender: None,
+                        column: None,
+                        phrase: false,
                     })))
                 })
             }
@@ -441,6 +459,8 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
                         fts: fts_term(&clean),
                         sender: Some(fold(&clean)),
                         words: clean,
+                        column: None,
+                        phrase: false,
                     })
                 })
             }
@@ -474,12 +494,16 @@ fn phrase_text(column: Option<&'static str>, phrase: &str) -> Option<Text> {
             fts: format!("{column}:\"{phrase}\""),
             words: phrase,
             sender: None,
+            column: Some(column),
+            phrase: true,
         },
         // Sender-boost only applies to unscoped free text.
         None => Text {
             fts: format!("\"{phrase}\""),
             sender: Some(fold(&phrase)),
             words: phrase,
+            column: None,
+            phrase: true,
         },
     })
 }
@@ -557,7 +581,10 @@ pub fn parse_at<Tz: TimeZone>(input: &str, now: &DateTime<Tz>) -> ParsedQuery {
         now,
     };
     let items = parser.sequence(false);
-    let mut q = ParsedQuery::default();
+    let mut q = ParsedQuery {
+        tree: all_of(items.clone()),
+        ..ParsedQuery::default()
+    };
     if !items.iter().all(Expr::plain) {
         // A boolean query: its parts can't join into one all-terms match.
         if let Some(expression) = all_of(items) {
@@ -639,6 +666,8 @@ mod tests {
             fts: fts.to_owned(),
             words: String::new(),
             sender: None,
+            column: None,
+            phrase: false,
         })
     }
 

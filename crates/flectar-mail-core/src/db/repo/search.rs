@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::models::{
-    MessageCursor, MessageSearchCursor, MessageSearchPage, SearchCursor, SearchPage, ThreadSummary,
-    roles,
+    MessageCursor, MessageSearchCursor, MessageSearchPage, MessageSummary, SearchCursor,
+    SearchPage, ThreadSummary, roles,
 };
 use crate::search::{Expr, Filter, ParsedQuery};
 use rusqlite::{Connection, params};
@@ -221,11 +221,7 @@ fn append_operator_clauses(
         // refetch. `in:trash` / `in:spam` / `in:anywhere` opt back in.
         // Gated on there being a real matcher so an empty query still returns
         // nothing (rather than every non-trash thread) via the caller's guard.
-        where_clauses.push(format!(
-            "NOT EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role IN ('{}','{}'))",
-            roles::TRASH,
-            roles::SPAM
-        ));
+        where_clauses.push(outside_trash_and_spam());
     }
     // `exclude:`/`-term`: drop messages whose FTS content matches any excluded
     // term. Applied here (not in the FTS MATCH string) so it works uniformly
@@ -238,6 +234,61 @@ fn append_operator_clauses(
             bind.len()
         ));
     }
+}
+
+/// Where a message has to match a chronological search: `matching`, the
+/// query's own clauses, or for a message a server search found, the parts
+/// this device can check without its body. Trash and Spam stay out unless
+/// named. `None` when the query matches nothing.
+fn match_clause(
+    q: &ParsedQuery,
+    matching: Vec<String>,
+    bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+) -> Option<String> {
+    let matching = (!matching.is_empty()).then(|| format!("({})", matching.join(" AND ")));
+    if q.found.is_empty() {
+        return matching;
+    }
+    let ids = q
+        .found
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    // Ids come from our own database, so they're inlined rather than bound.
+    let mut found = vec![format!("m.id IN ({ids})")];
+    for filter in &q.filters {
+        // What the server matched in text, attachments and file names needs
+        // the body, but flags, folders, dates and sizes are kept here.
+        if matches!(
+            filter,
+            Filter::Unread
+                | Filter::Starred
+                | Filter::In(_)
+                | Filter::Before(_)
+                | Filter::After(_)
+                | Filter::Larger(_)
+                | Filter::Smaller(_)
+        ) {
+            found.push(filter_clause(filter, bind));
+        }
+    }
+    if !q.names_folder() && q.folder_ids.is_none() {
+        found.push(outside_trash_and_spam());
+    }
+    let found = format!("({})", found.join(" AND "));
+    Some(match matching {
+        Some(matching) => format!("({matching} OR {found})"),
+        None => found,
+    })
+}
+
+fn outside_trash_and_spam() -> String {
+    format!(
+        "NOT EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role IN ('{}','{}'))",
+        roles::TRASH,
+        roles::SPAM
+    )
 }
 
 /// Lexical branch: thread ids ranked by bm25 + recency, capped at `cap`.
@@ -652,6 +703,33 @@ pub fn chronological_page(
     Ok(page)
 }
 
+/// The query's own clauses for a chronological search, and the join its
+/// full-text match needs. With mail a server search found, which needn't
+/// match here, the full-text match is a condition instead of a join.
+fn chronological_matching(
+    q: &ParsedQuery,
+    bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+) -> (&'static str, Vec<String>) {
+    let mut matching = Vec::new();
+    let fts_join = if q.fts.is_empty() {
+        ""
+    } else {
+        bind.push(Box::new(q.fts.clone()));
+        if q.found.is_empty() {
+            matching.push(format!("messages_fts MATCH ?{}", bind.len()));
+            "JOIN messages_fts ON messages_fts.rowid = m.id"
+        } else {
+            matching.push(format!(
+                "m.id IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?{})",
+                bind.len()
+            ));
+            ""
+        }
+    };
+    append_operator_clauses(q, &mut matching, bind);
+    (fts_join, matching)
+}
+
 /// Only the first `limit + 1` distinct threads beyond the cursor are needed.
 /// A thread's first occurrence is its newest matching message, so scanning
 /// from the top makes the cursor safe even when older messages also match.
@@ -661,22 +739,15 @@ fn chronological_page_for_query(
     cursor: Option<SearchCursor>,
     limit: i64,
 ) -> Result<SearchPage> {
-    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned()];
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let fts_join = if q.fts.is_empty() {
-        ""
-    } else {
-        bind.push(Box::new(q.fts.clone()));
-        where_clauses.push(format!("messages_fts MATCH ?{}", bind.len()));
-        "JOIN messages_fts ON messages_fts.rowid = m.id"
-    };
-    append_operator_clauses(q, &mut where_clauses, &mut bind);
-    if where_clauses.len() == 1 {
+    let (fts_join, matching) = chronological_matching(q, &mut bind);
+    let Some(matches) = match_clause(q, matching, &mut bind) else {
         return Ok(SearchPage {
             threads: Vec::new(),
             next_cursor: None,
         });
-    }
+    };
+    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned(), matches];
     append_account_clauses(q, &mut where_clauses, &mut bind);
 
     let sql = format!(
@@ -766,22 +837,15 @@ fn chronological_message_page_for_query(
     limit: i64,
     relaxed: bool,
 ) -> Result<MessageSearchPage> {
-    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned()];
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let fts_join = if q.fts.is_empty() {
-        ""
-    } else {
-        bind.push(Box::new(q.fts.clone()));
-        where_clauses.push(format!("messages_fts MATCH ?{}", bind.len()));
-        "JOIN messages_fts ON messages_fts.rowid = m.id"
-    };
-    append_operator_clauses(q, &mut where_clauses, &mut bind);
-    if where_clauses.len() == 1 {
+    let (fts_join, matching) = chronological_matching(q, &mut bind);
+    let Some(matches) = match_clause(q, matching, &mut bind) else {
         return Ok(MessageSearchPage {
             messages: Vec::new(),
             next_cursor: None,
         });
-    }
+    };
+    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned(), matches];
     append_account_clauses(q, &mut where_clauses, &mut bind);
     if let Some(cursor) = cursor {
         bind.push(Box::new(cursor.date));
@@ -868,6 +932,52 @@ pub fn fuse(
         .map(|(id, _)| id)
         .collect();
     hydrate(conn, &top)
+}
+
+/// The conversations of messages a server search found, newest first by the
+/// newest found message in each.
+pub fn found_threads(conn: &Connection, message_ids: &[i64]) -> Result<Vec<ThreadSummary>> {
+    if message_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Ids come from our own database, so they're inlined rather than bound.
+    let id_list = message_ids
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut stmt = conn.prepare(&format!(
+        "SELECT thread_id FROM messages
+         WHERE id IN ({id_list}) AND thread_id IS NOT NULL
+         GROUP BY thread_id
+         ORDER BY MAX(date) DESC, thread_id DESC"
+    ))?;
+    let thread_ids = stmt
+        .query_map([], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    hydrate(conn, &thread_ids)
+}
+
+/// The messages a server search found, newest first, for lists that show
+/// each message on its own.
+pub fn found_messages(conn: &Connection, message_ids: &[i64]) -> Result<Vec<MessageSummary>> {
+    if message_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let id_list = message_ids
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id FROM messages
+         WHERE id IN ({id_list}) AND thread_id IS NOT NULL
+         ORDER BY date DESC, id DESC"
+    ))?;
+    let ordered = stmt
+        .query_map([], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    super::threads::get_message_summaries(conn, &ordered)
 }
 
 fn hydrate(conn: &Connection, thread_ids: &[i64]) -> Result<Vec<ThreadSummary>> {
