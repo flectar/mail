@@ -195,6 +195,7 @@ def build(sources):
             "Original line-based controls at active weight."),
         "stack": Recipe("layers-3", group(solid(p("layers-3", 0)), lines("layers-3", 1, 2, width=2.5)),
             "Solid top layer; original lower layer contours at active weight."),
+        "filter": Recipe("filter", solid(p("filter", 0)), "Original closed funnel silhouette."),
         "star": Recipe("star", solid(p("star", 0)), "Original closed star silhouette."),
         "tag": Recipe("tag", cut(solid(p("tag", 0)), solid(p("tag", 1), width=2)),
             "Solid tag; hole includes the original circle's stroke footprint."),

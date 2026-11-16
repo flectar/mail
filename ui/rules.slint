@@ -1,0 +1,70 @@
+// Rules that sort new mail as it arrives in an Inbox (#238): the list in
+// Settings and the editor (src/rules.rs).
+
+// A rule in the list, in the order rules are tried.
+export struct RuleRow {
+    id: int,
+    name: string,
+    // The account's address, or "" for every account.
+    account: string,
+    enabled: bool,
+    // Something keeps it from running as written, such as a folder it moves
+    // mail to that is gone.
+    problem: bool,
+}
+
+// A condition in the editor. `field` indexes the fields and `op` that
+// field's comparisons, as the editor lists them. The editor binds both ways
+// to these rows.
+export struct RuleConditionRow {
+    field: int,
+    op: int,
+    value: string,
+}
+
+// An action in the editor. `kind` indexes the actions as the editor lists
+// them, and `target` the folders or labels it puts mail in.
+export struct RuleActionRow {
+    kind: int,
+    target: int,
+}
+
+export global MailRules {
+    in property <[RuleRow]> rows;
+
+    // The editor, open for the rule `editing-id`, or 0 for a new one.
+    in-out property <bool> editing;
+    in property <int> editing-id;
+    in-out property <string> name;
+    // "All accounts" first, then each account that receives mail.
+    in property <[string]> accounts;
+    in-out property <int> account;
+    // 0: all of the conditions, 1: any of them.
+    in-out property <int> match;
+    in property <[RuleConditionRow]> conditions;
+    in property <[RuleActionRow]> actions;
+    // The rule's account's folders and the labels it can use. A rule for
+    // every account files only into labels of this device.
+    in property <[string]> folders;
+    in property <[string]> labels;
+    // The account keeps a message in several folders (JMAP), so it can
+    // copy mail too.
+    in property <bool> can-copy;
+    in-out property <bool> stop;
+    in property <string> error;
+    in property <bool> busy;
+
+    callback create();
+    callback edit(int);
+    callback close();
+    callback save();
+    callback delete();
+    callback toggle(int, bool);
+    // Move the rule up (-1) or down (1).
+    callback move(int, int);
+    callback choose-account(int);
+    callback add-condition();
+    callback remove-condition(int);
+    callback add-action();
+    callback remove-action(int);
+}

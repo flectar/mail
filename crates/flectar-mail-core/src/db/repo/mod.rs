@@ -22,6 +22,7 @@ pub mod messages;
 pub mod notifications;
 pub mod pop3;
 pub mod returned_receipts;
+pub mod rules;
 pub mod search;
 pub mod sender_identities;
 pub mod settings;

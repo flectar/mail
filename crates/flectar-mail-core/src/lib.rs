@@ -39,6 +39,7 @@ pub mod pop3;
 pub mod queue;
 mod read_receipts;
 pub mod route;
+pub mod rules;
 pub mod scheduler;
 pub mod search;
 pub mod sender_identities;
@@ -4087,6 +4088,41 @@ impl Core {
     /// Every blocked sender, alphabetically.
     pub async fn blocked_senders(&self) -> Result<Vec<BlockedSender>> {
         self.db.read(|conn| repo::blocked::list(conn)).await
+    }
+
+    /// Every rule that sorts new mail, in the order they are tried (#238).
+    pub async fn mail_rules(&self) -> Result<Vec<MailRule>> {
+        self.db.read(|conn| repo::rules::list(conn)).await
+    }
+
+    /// Save `rule`, a new one (id 0) or a changed one, once it checks out. A
+    /// new rule goes last. Rules sort mail that arrives from then on.
+    pub async fn save_mail_rule(&self, rule: MailRule) -> Result<MailRule> {
+        self.db
+            .write(move |conn| {
+                rules::check(conn, &rule)?;
+                repo::rules::save(conn, &rule, now_ms())
+            })
+            .await
+    }
+
+    pub async fn delete_mail_rule(&self, id: i64) -> Result<()> {
+        self.db
+            .write(move |conn| repo::rules::delete(conn, id))
+            .await
+    }
+
+    pub async fn set_mail_rule_enabled(&self, id: i64, enabled: bool) -> Result<()> {
+        self.db
+            .write(move |conn| repo::rules::set_enabled(conn, id, enabled, now_ms()))
+            .await
+    }
+
+    /// Try the rules in the order of `ids` from now on.
+    pub async fn reorder_mail_rules(&self, ids: Vec<i64>) -> Result<()> {
+        self.db
+            .write(move |conn| repo::rules::reorder(conn, &ids))
+            .await
     }
 
     /// When a mail-list row's timeline puts it, which a page that starts at
@@ -10987,6 +11023,20 @@ fn apply_thread_action(
     params: Option<&ActionParams>,
 ) -> Result<Vec<(i64, i64)>> {
     let tx = conn.transaction()?;
+    let out = apply_thread_action_in(&tx, thread_id, only, kind, params)?;
+    tx.commit()?;
+    Ok(out)
+}
+
+/// [`apply_thread_action`] inside a transaction the caller commits, such as
+/// a sync's, where rules act on mail as it arrives (#238).
+pub(crate) fn apply_thread_action_in(
+    tx: &rusqlite::Transaction,
+    thread_id: i64,
+    only: Option<&[i64]>,
+    kind: ActionKind,
+    params: Option<&ActionParams>,
+) -> Result<Vec<(i64, i64)>> {
     let mut out: Vec<(i64, i64)> = Vec::new();
 
     let (account_id, mail_protocol): (i64, MailProtocol) = tx.query_row(
@@ -11067,7 +11117,7 @@ fn apply_thread_action(
                     continue;
                 }
                 let aid = repo::actions::enqueue(
-                    &tx,
+                    tx,
                     account_id,
                     kind.as_str(),
                     Some(*id),
@@ -11082,10 +11132,10 @@ fn apply_thread_action(
             let target_read = kind == ActionKind::MarkRead;
             for (id, _f, _u, is_read, _s, _role) in &msgs {
                 if *is_read != target_read {
-                    repo::messages::set_read(&tx, *id, target_read)?;
+                    repo::messages::set_read(tx, *id, target_read)?;
                     let payload = scoped(serde_json::json!({}));
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         kind.as_str(),
                         Some(*id),
@@ -11100,9 +11150,9 @@ fn apply_thread_action(
         ActionKind::Star if message_only => {
             for (id, _f, _u, _r, is_starred, _role) in &msgs {
                 if !*is_starred {
-                    repo::messages::set_starred(&tx, *id, true)?;
+                    repo::messages::set_starred(tx, *id, true)?;
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         "star",
                         Some(*id),
@@ -11118,13 +11168,12 @@ fn apply_thread_action(
             // Star the latest message only (thread-level star).
             if let Some((id, _f, _u, _r, is_starred, _role)) = msgs.iter().max_by_key(|m| m.0) {
                 if *is_starred {
-                    repo::threads::recompute(&tx, thread_id)?;
-                    tx.commit()?;
+                    repo::threads::recompute(tx, thread_id)?;
                     return Ok(out);
                 }
-                repo::messages::set_starred(&tx, *id, true)?;
+                repo::messages::set_starred(tx, *id, true)?;
                 let aid = repo::actions::enqueue(
-                    &tx,
+                    tx,
                     account_id,
                     "star",
                     Some(*id),
@@ -11138,9 +11187,9 @@ fn apply_thread_action(
         ActionKind::Unstar => {
             for (id, _f, _u, _r, is_starred, _role) in &msgs {
                 if *is_starred {
-                    repo::messages::set_starred(&tx, *id, false)?;
+                    repo::messages::set_starred(tx, *id, false)?;
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         "unstar",
                         Some(*id),
@@ -11159,9 +11208,9 @@ fn apply_thread_action(
                 _ => (roles::SPAM, "spam"),
             };
             // Gmail-style fallback: archiving with no Archive folder moves to All Mail.
-            let target = folder_of(&tx, account_id, target_role)?
+            let target = folder_of(tx, account_id, target_role)?
                 .or(if kind == ActionKind::Archive {
-                    folder_of(&tx, account_id, roles::ALL)?
+                    folder_of(tx, account_id, roles::ALL)?
                 } else {
                     None
                 })
@@ -11175,7 +11224,7 @@ fn apply_thread_action(
                 };
                 if movable && f.is_some() {
                     let aid = enqueue_move(
-                        &tx,
+                        tx,
                         account_id,
                         thread_id,
                         *id,
@@ -11191,12 +11240,12 @@ fn apply_thread_action(
             }
             // Archiving also clears snooze, once the whole conversation has
             // left the inbox.
-            if !message_only || !thread_in_inbox(&tx, thread_id)? {
-                repo::snoozes::clear(&tx, thread_id)?;
+            if !message_only || !thread_in_inbox(tx, thread_id)? {
+                repo::snoozes::clear(tx, thread_id)?;
             }
         }
         ActionKind::Unarchive | ActionKind::NotSpam => {
-            let target = folder_of(&tx, account_id, roles::INBOX)?
+            let target = folder_of(tx, account_id, roles::INBOX)?
                 .ok_or_else(|| CoreError::NotFound("no inbox folder".into()))?;
             let from_role = if kind == ActionKind::Unarchive {
                 roles::ARCHIVE
@@ -11208,7 +11257,7 @@ fn apply_thread_action(
                     && f.is_some()
                 {
                     let aid = enqueue_move(
-                        &tx,
+                        tx,
                         account_id,
                         thread_id,
                         *id,
@@ -11227,7 +11276,7 @@ fn apply_thread_action(
             let target = params
                 .and_then(|p| p.target_folder_id)
                 .ok_or_else(|| CoreError::Other("move requires targetFolderId".into()))?;
-            let target_folder = repo::folders::get(&tx, target)?
+            let target_folder = repo::folders::get(tx, target)?
                 .ok_or_else(|| CoreError::NotFound(format!("folder {target}")))?;
             if target_folder.account_id != account_id {
                 return Err(CoreError::Other(
@@ -11237,7 +11286,7 @@ fn apply_thread_action(
             for (id, f, u, _r, _s, _role) in &msgs {
                 if f.is_some() && *f != Some(target) {
                     let aid = enqueue_move(
-                        &tx,
+                        tx,
                         account_id,
                         thread_id,
                         *id,
@@ -11253,14 +11302,14 @@ fn apply_thread_action(
             }
             // The Move to picker lists these folders first.
             if !out.is_empty() {
-                repo::folders::mark_moved_to(&tx, target, now_ms())?;
+                repo::folders::mark_moved_to(tx, target, now_ms())?;
             }
         }
         ActionKind::Copy => {
             let target = params
                 .and_then(|p| p.target_folder_id)
                 .ok_or_else(|| CoreError::Other("copy requires targetFolderId".into()))?;
-            let target_folder = repo::folders::get(&tx, target)?
+            let target_folder = repo::folders::get(tx, target)?
                 .ok_or_else(|| CoreError::NotFound(format!("folder {target}")))?;
             if target_folder.account_id != account_id {
                 return Err(CoreError::Other(
@@ -11285,7 +11334,7 @@ fn apply_thread_action(
                 )? > 0;
                 if added {
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         "copy",
                         Some(*id),
@@ -11297,7 +11346,7 @@ fn apply_thread_action(
                 }
             }
             if !out.is_empty() {
-                repo::folders::mark_moved_to(&tx, target, now_ms())?;
+                repo::folders::mark_moved_to(tx, target, now_ms())?;
             }
         }
         ActionKind::Snooze => {
@@ -11305,9 +11354,9 @@ fn apply_thread_action(
                 .and_then(|p| p.wake_at)
                 .ok_or_else(|| CoreError::Other("snooze requires wakeAt".into()))?;
             let orig = msgs.iter().find_map(|(_, f, ..)| *f);
-            repo::snoozes::set(&tx, thread_id, account_id, wake_at, orig)?;
+            repo::snoozes::set(tx, thread_id, account_id, wake_at, orig)?;
             let aid = repo::actions::enqueue(
-                &tx,
+                tx,
                 account_id,
                 "snooze",
                 None,
@@ -11318,9 +11367,9 @@ fn apply_thread_action(
             out.push((aid, account_id));
         }
         ActionKind::Unsnooze => {
-            repo::snoozes::clear(&tx, thread_id)?;
+            repo::snoozes::clear(tx, thread_id)?;
             let aid = repo::actions::enqueue(
-                &tx,
+                tx,
                 account_id,
                 "unsnooze",
                 None,
@@ -11334,7 +11383,7 @@ fn apply_thread_action(
             let label_id = params
                 .and_then(|p| p.label_id)
                 .ok_or_else(|| CoreError::Other("label action requires labelId".into()))?;
-            let label = repo::labels::get(&tx, label_id)?
+            let label = repo::labels::get(tx, label_id)?
                 .ok_or_else(|| CoreError::NotFound(format!("label {label_id}")))?;
             if let Some(owner_account_id) = label.owner_account_id
                 && owner_account_id != account_id
@@ -11349,9 +11398,9 @@ fn apply_thread_action(
                 scoped(serde_json::json!({ "labelId": label_id, "keyword": label.keyword }));
             for (id, ..) in &msgs {
                 if add {
-                    repo::labels::add_to_message(&tx, *id, label_id)?;
+                    repo::labels::add_to_message(tx, *id, label_id)?;
                 } else {
-                    repo::labels::remove_from_message(&tx, *id, label_id)?;
+                    repo::labels::remove_from_message(tx, *id, label_id)?;
                 }
                 // Auto labels are local-only: mutate membership but never push
                 // their keyword to IMAP (server reconcile also skips them).
@@ -11359,7 +11408,7 @@ fn apply_thread_action(
                     continue;
                 }
                 let aid = repo::actions::enqueue(
-                    &tx,
+                    tx,
                     account_id,
                     kind.as_str(),
                     Some(*id),
@@ -11375,8 +11424,7 @@ fn apply_thread_action(
         }
     }
 
-    repo::threads::recompute(&tx, thread_id)?;
-    tx.commit()?;
+    repo::threads::recompute(tx, thread_id)?;
     Ok(out)
 }
 

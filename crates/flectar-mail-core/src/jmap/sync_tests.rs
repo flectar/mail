@@ -588,6 +588,73 @@ async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
 }
 
 #[tokio::test]
+async fn rules_sort_new_mail_but_not_what_a_first_sync_finds() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let (_dir, ctx, config) = fixture().await;
+    ctx.db
+        .write(|conn| {
+            conn.execute(
+                "INSERT INTO folders (id, account_id, path, role, jmap_id)
+                 VALUES (3, 1, 'Lists', NULL, 'lists-remote')",
+                [],
+            )?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(1),
+                    name: "Lists".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::From,
+                        op: RuleOp::Is,
+                        value: "sender@mail.example".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::Move { folder: 3 }],
+                    stop: false,
+                },
+                0,
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let folder_of = |jmap_id: &'static str| {
+        let ctx = ctx.clone();
+        async move {
+            ctx.db
+                .read(move |conn| {
+                    Ok(repo::messages::by_jmap_id(conn, 1, jmap_id)?
+                        .and_then(|message| message.folder_id))
+                })
+                .await
+                .unwrap()
+        }
+    };
+    let (connected, task) = server(vec![email("old", "conversation-old")], None, None).await;
+    run_sync(&ctx, &config, &connected).await.unwrap();
+    task.abort();
+    assert_eq!(folder_of("old").await, Some(1));
+
+    let changes = json!({"created": ["new"], "updated": [], "destroyed": []});
+    let (connected, task) = server(
+        vec![
+            email("old", "conversation-old"),
+            email("new", "conversation-new"),
+        ],
+        Some(changes),
+        None,
+    )
+    .await;
+    run_sync(&ctx, &config, &connected).await.unwrap();
+    task.abort();
+    assert_eq!(folder_of("old").await, Some(1));
+    assert_eq!(folder_of("new").await, Some(3));
+}
+
+#[tokio::test]
 async fn live_inbox_arrivals_queue_notifications() {
     let (_dir, ctx, config) = fixture().await;
     ctx.db
@@ -1893,8 +1960,34 @@ async fn a_server_that_keeps_mail_unread_stops_the_marking() {
 /// brings mail not kept here, with the matches kept here that it passes.
 #[tokio::test]
 async fn a_server_search_keeps_what_it_finds_and_goes_on_where_it_stopped() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
     use chrono::TimeZone;
     let (_dir, ctx, config) = fixture().await;
+    // A rule that would mark it read: found mail isn't new mail.
+    ctx.db
+        .write(|conn| {
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: None,
+                    name: "Sender".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::From,
+                        op: RuleOp::Is,
+                        value: "sender@mail.example".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::MarkRead],
+                    stop: false,
+                },
+                0,
+            )
+        })
+        .await
+        .unwrap();
     let at = |day| chrono::Utc.with_ymd_and_hms(2020, 3, day, 9, 0, 0).unwrap();
     let emails = vec![
         received(email("e3", "t3"), at(3)),
@@ -1962,6 +2055,18 @@ async fn a_server_search_keeps_what_it_finds_and_goes_on_where_it_stopped() {
         .await
         .unwrap();
     assert_eq!(kept, ["e3", "e2", "e1"]);
+    let read = ctx
+        .db
+        .read(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM messages WHERE is_read = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(read, 0);
 
     // Searched again, the first page has nothing new, so the search goes on
     // to the end of the results and brings what it passed.

@@ -1078,7 +1078,7 @@ async fn sync_emails(
         );
         let (next, persisted) = tokio::join!(
             pages.next(c),
-            persist_emails(ctx, config, emails, full, insert_after, live_since)
+            persist_emails(ctx, config, emails, full, insert_after, live_since, true)
         );
         persisted?;
         fetched = next?;
@@ -1165,7 +1165,9 @@ fn first(values: Option<&[String]>) -> Option<String> {
 
 /// Stores a page of headers. A full sync also records each message as
 /// stored, so an interrupted run need not fetch it again. An Email received
-/// before `insert_after` only updates a message already here.
+/// before `insert_after` only updates a message already here. `sort` says
+/// whether mail new here can be new mail that rules sort (#238): what a
+/// search on the server finds never is.
 async fn persist_emails(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -1173,6 +1175,7 @@ async fn persist_emails(
     full_sync: bool,
     insert_after: Option<i64>,
     live_since: i64,
+    sort: bool,
 ) -> Result<()> {
     let account_id = config.id;
     let (thread_ids, notified_threads, stale_paths) = ctx
@@ -1187,6 +1190,19 @@ async fn persist_emails(
             // Threads queued for a new-mail notification, once each.
             let mut notified_threads = Vec::new();
             let mut stale_paths = Vec::new();
+            // Rules sort new mail (#238): what changes report, and what a
+            // full sync after the changes ran out finds received since the
+            // account last caught up. A first full sync finds only history.
+            let sorter = crate::rules::Sorter::load(&tx, account_id)?;
+            let caught_up_at = if full_sync {
+                tx.query_row(
+                    "SELECT caught_up_at FROM accounts WHERE id = ?1",
+                    params![account_id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )?
+            } else {
+                None
+            };
 
             for email in emails {
                 let remote_id = email
@@ -1335,7 +1351,10 @@ async fn persist_emails(
                             repo::contacts::harvest(&tx, account_id, address, true, date)?;
                         }
                     }
-                } else if inserted
+                }
+                // The sender of new incoming mail is learned once rules have
+                // sorted it, unless they throw it away.
+                let learn_sender = if inserted
                     && !is_outgoing
                     && settings.collect_incoming_contacts
                     && date >= incoming_learning_since
@@ -1345,8 +1364,10 @@ async fn persist_emails(
                     && !crate::mime::robot_sender(&sender.email)
                     && !repo::blocked::is_blocked(&tx, &sender.email.to_ascii_lowercase())?
                 {
-                    repo::contacts::harvest(&tx, account_id, sender, false, date)?;
-                }
+                    Some(sender.clone())
+                } else {
+                    None
+                };
                 let mut pending_keywords = false;
                 let mut pending_mailboxes = false;
                 let local_id;
@@ -1516,8 +1537,25 @@ async fn persist_emails(
                 // Mail from a blocked sender goes to Spam as it arrives, once
                 // its mailboxes are in place.
                 let turned_away = inserted && crate::turn_away(&tx, local_id)?;
+                // Then rules sort new mail. What they file away or mark read
+                // stays silent.
+                let arrived = sort
+                    && inserted
+                    && !turned_away
+                    && (!full_sync || caught_up_at.is_some_and(|at| date >= at));
+                let sorted = if arrived {
+                    sorter.arrived(&tx, local_id)?
+                } else {
+                    Default::default()
+                };
+                if !sorted.unwanted
+                    && let Some(sender) = &learn_sender
+                {
+                    repo::contacts::harvest(&tx, account_id, sender, false, date)?;
+                }
                 if let Some(audible) = announce
                     && !turned_away
+                    && !sorted.silent()
                     && !notified_threads.contains(&thread_id)
                 {
                     repo::notifications::enqueue(&tx, local_id, audible)?;
@@ -3182,8 +3220,9 @@ async fn search_server(
     }
     for chunk in missing.chunks(max_objects_in_get(c).max(1)) {
         let (emails, _) = fetch_headers(c, chunk).await.map_err(client::map_error)?;
-        // Found mail notifies of nothing, whenever it arrived.
-        persist_emails(ctx, config, emails, false, None, i64::MAX).await?;
+        // Found mail notifies of nothing, whenever it arrived, and rules
+        // leave it as it is.
+        persist_emails(ctx, config, emails, false, None, i64::MAX, false).await?;
     }
     let message_ids = ctx
         .db

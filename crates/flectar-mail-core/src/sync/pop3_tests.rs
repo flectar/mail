@@ -772,6 +772,79 @@ async fn a_blocked_senders_mail_goes_to_junk_unannounced() {
 }
 
 #[tokio::test]
+async fn rules_sort_mail_after_the_first_download() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let fixture = fixture(vec![recent("a", "Report: backlog")]).await;
+    fixture
+        .ctx
+        .db
+        .write(|conn| {
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: None,
+                    name: "Reports".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::Subject,
+                        op: RuleOp::StartsWith,
+                        value: "report:".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::Archive],
+                    stop: false,
+                },
+                0,
+            )
+        })
+        .await
+        .unwrap();
+    let archived = || async {
+        fixture
+            .ctx
+            .db
+            .read(|conn| {
+                let mut statement = conn.prepare(
+                    "SELECT m.subject FROM messages m JOIN folders f ON f.id = m.folder_id
+                     WHERE f.role = 'archive' ORDER BY m.id",
+                )?;
+                Ok(statement
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<Vec<String>>>()?)
+            })
+            .await
+            .unwrap()
+    };
+    // The first download is history.
+    fixture.sync().await.unwrap();
+    assert_eq!(fixture.inbox().await, ["Report: backlog"]);
+
+    fixture
+        .server
+        .lock()
+        .unwrap()
+        .maildrop
+        .push(recent("b", "Report: fresh"));
+    fixture.sync().await.unwrap();
+    assert_eq!(fixture.inbox().await, ["Report: backlog"]);
+    assert_eq!(archived().await, ["Report: fresh"]);
+    assert_eq!(fixture.queued_notifications().await, 0);
+
+    // Mail that came while the app was closed is new mail too.
+    fixture.restart();
+    fixture
+        .server
+        .lock()
+        .unwrap()
+        .maildrop
+        .push(recent("c", "Report: while closed"));
+    fixture.sync().await.unwrap();
+    assert_eq!(archived().await, ["Report: fresh", "Report: while closed"]);
+}
+
+#[tokio::test]
 async fn deleting_mail_here_completes_at_once_and_never_downloads_it_again() {
     let fixture = fixture(vec![recent("a", "Gone")]).await;
     fixture.sync().await.unwrap();
