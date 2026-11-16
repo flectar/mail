@@ -20,6 +20,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Undo send](#undo-send)
 - [Unsubscribing](#unsubscribing)
 - [Blocking senders](#blocking-senders)
+- [Rules](#rules)
 - [Importance](#importance)
 - [Read receipts](#read-receipts)
 - [Calendar invitations](#calendar-invitations)
@@ -562,6 +563,22 @@ mail in the inbox until Flectar Mail checks for mail.
 
 **Unblock sender** in the same menu, or **Unblock** in Settings → Contacts →
 Blocked senders, stops it. Mail already in Spam stays there.
+
+## Rules
+
+Rules sort new mail as it arrives in an Inbox. Make them in Settings → Rules,
+where Flectar Mail tries them from the top. A rule looks at the sender, the
+recipients, the subject, the mailing list or the size, and needs all or any of
+its conditions. Text is compared without regard to case, and a condition can
+also match a regular expression. The rule then moves, labels, stars, archives,
+trashes or junks the mail, or marks it read. Accounts that keep a message in
+several folders, such as JMAP accounts, can copy it too. Moving mail out of the
+Inbox ends the rules for it, and **Stop here** ends them after any rule.
+
+Flectar Mail runs rules on this device as it receives mail and before it
+notifies, so mail a rule moves away or marks read stays silent. Mail that came
+while the app was closed is sorted when it next checks for mail. What it finds
+when it first downloads an account stays where it is.
 
 ## Importance
 
