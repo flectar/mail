@@ -789,6 +789,7 @@ async fn rules_sort_mail_after_the_first_download() {
                     match_all: true,
                     conditions: vec![RuleCondition {
                         field: RuleField::Subject,
+                        header: String::new(),
                         op: RuleOp::StartsWith,
                         value: "report:".into(),
                         negate: false,
@@ -842,6 +843,82 @@ async fn rules_sort_mail_after_the_first_download() {
         .push(recent("c", "Report: while closed"));
     fixture.sync().await.unwrap();
     assert_eq!(archived().await, ["Report: fresh", "Report: while closed"]);
+}
+
+#[tokio::test]
+async fn rules_on_any_header_and_the_body_sort_pop3_mail_at_once() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let fixture = fixture(vec![recent("a", "Backlog")]).await;
+    fixture.sync().await.unwrap();
+    fixture
+        .ctx
+        .db
+        .write(|conn| {
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: None,
+                    name: "Bulk".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![
+                        RuleCondition {
+                            field: RuleField::Header,
+                            header: "X-Mailer".into(),
+                            op: RuleOp::Contains,
+                            value: "bulk".into(),
+                            negate: false,
+                        },
+                        RuleCondition {
+                            field: RuleField::Body,
+                            header: String::new(),
+                            op: RuleOp::Contains,
+                            value: "sale".into(),
+                            negate: false,
+                        },
+                    ],
+                    actions: vec![RuleAction::Archive],
+                    stop: false,
+                },
+                0,
+            )
+        })
+        .await
+        .unwrap();
+    let bulk = |id: &str, mailer: &str| Stored {
+        uidl: format!("uidl-{id}"),
+        raw: format!(
+            "Message-ID: <{id}@example.com>\r\nFrom: Shop <shop@example.com>\r\n\
+             To: Me <me@example.com>\r\nSubject: Offers\r\nDate: {}\r\n\
+             X-Mailer: {mailer}\r\nContent-Type: text/plain\r\n\r\nA sale today.\r\n",
+            chrono::Utc::now().to_rfc2822()
+        )
+        .into_bytes(),
+    };
+    {
+        let mut server = fixture.server.lock().unwrap();
+        server.maildrop.push(bulk("b", "BulkMailer 2"));
+        server.maildrop.push(bulk("c", "Desk"));
+    }
+    fixture.sync().await.unwrap();
+    let archived = fixture
+        .ctx
+        .db
+        .read(|conn| {
+            let mut statement = conn.prepare(
+                "SELECT m.message_id FROM messages m JOIN folders f ON f.id = m.folder_id
+                 WHERE f.role = 'archive'",
+            )?;
+            Ok(statement
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(archived, ["b@example.com"]);
+    // Nothing waits: the whole message came.
+    assert_eq!(fixture.queued_notifications().await, 1);
 }
 
 #[tokio::test]

@@ -1404,6 +1404,10 @@ pub struct MailRule {
 #[serde(rename_all = "camelCase")]
 pub struct RuleCondition {
     pub field: RuleField,
+    /// The header a [`RuleField::Header`] condition looks at, such as
+    /// "X-Spam-Flag".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub header: String,
     pub op: RuleOp,
     /// The text to look for, the pattern, or the size in KB.
     #[serde(default)]
@@ -1429,6 +1433,12 @@ pub enum RuleField {
     MailingList,
     /// The message's size in KB.
     Size,
+    /// A header the condition names.
+    Header,
+    /// The message's text.
+    Body,
+    /// Whether files are attached.
+    Attachments,
 }
 
 /// How a [`RuleCondition`] compares. Text is compared without regard to
@@ -1442,7 +1452,8 @@ pub enum RuleOp {
     EndsWith,
     /// A regular expression, found anywhere in the text.
     Matches,
-    /// The field is there at all, as mailing list mail has a List-Id.
+    /// The field is there at all, as mailing list mail has a List-Id and
+    /// some mail has files attached.
     Exists,
     /// A size larger than the value.
     Over,

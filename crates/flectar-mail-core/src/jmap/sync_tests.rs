@@ -608,6 +608,7 @@ async fn rules_sort_new_mail_but_not_what_a_first_sync_finds() {
                     match_all: true,
                     conditions: vec![RuleCondition {
                         field: RuleField::From,
+                        header: String::new(),
                         op: RuleOp::Is,
                         value: "sender@mail.example".into(),
                         negate: false,
@@ -652,6 +653,70 @@ async fn rules_sort_new_mail_but_not_what_a_first_sync_finds() {
     task.abort();
     assert_eq!(folder_of("old").await, Some(1));
     assert_eq!(folder_of("new").await, Some(3));
+}
+
+#[tokio::test]
+async fn rules_on_the_body_fetch_it_with_the_new_mail() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let (_dir, ctx, config) = fixture().await;
+    ctx.db
+        .write(|conn| {
+            conn.execute_batch(
+                "INSERT INTO jmap_sync_state(account_id,email_state) VALUES(1,'state-0');
+                 INSERT INTO folders (id, account_id, path, role, jmap_id)
+                   VALUES (3, 1, 'Lists', NULL, 'lists-remote');",
+            )?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(1),
+                    name: "Bodies".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::Body,
+                        header: String::new(),
+                        op: RuleOp::Contains,
+                        // What the stand-in server sends as every body.
+                        value: "body".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::Move { folder: 3 }],
+                    stop: false,
+                },
+                0,
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let now = chrono::Utc::now();
+    let changes = json!({"created": ["new"], "updated": [], "destroyed": []});
+    let (connected, task) = server(
+        vec![received(email("new", "conversation-new"), now)],
+        Some(changes),
+        None,
+    )
+    .await;
+    run_live_sync(&ctx, &config, &connected, now.timestamp_millis() - 60_000)
+        .await
+        .unwrap();
+    task.abort();
+    ctx.db
+        .read(|conn| {
+            let message = repo::messages::by_jmap_id(conn, 1, "new")?.unwrap();
+            assert_eq!(message.folder_id, Some(3));
+            assert_eq!(message.body_state, "cached");
+            let notified: i64 =
+                conn.query_row("SELECT COUNT(*) FROM notification_outbox", [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(notified, 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -1976,6 +2041,7 @@ async fn a_server_search_keeps_what_it_finds_and_goes_on_where_it_stopped() {
                     match_all: true,
                     conditions: vec![RuleCondition {
                         field: RuleField::From,
+                        header: String::new(),
                         op: RuleOp::Is,
                         value: "sender@mail.example".into(),
                         negate: false,

@@ -1683,6 +1683,19 @@ pub fn missing_bodies_since(
     missing_bodies_at(conn, folder_id, limit, now_ms(), cutoff_ms)
 }
 
+/// `folder_id`'s messages, with their UIDs, whose rules wait for a body
+/// not yet here (#238).
+pub fn rules_waiting_in(conn: &Connection, folder_id: i64) -> Result<Vec<(i64, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, uid FROM messages
+         WHERE folder_id = ?1 AND uid IS NOT NULL AND rules_waiting IS NOT NULL
+           AND body_state <> 'cached'
+         ORDER BY uid",
+    )?;
+    let rows = stmt.query_map(params![folder_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 /// One newest-first page for background body planning. The `(date, id)`
 /// cursor remains stable when many messages have the same timestamp.
 pub fn missing_bodies_page_since(

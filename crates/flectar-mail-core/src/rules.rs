@@ -6,18 +6,31 @@
 //! Rules are tried top to bottom. A rule's actions mark and label first,
 //! then copy, then file the mail away, and filing it away ends the rules for
 //! that message, as Stop does.
+//!
+//! A rule on the body, or on attachments where sync learns of them with the
+//! body, can't tell at once. The rules stop at it and the message waits,
+//! with its notification held back, until sync has fetched the body and
+//! [`resume`] goes on, as Thunderbird applies filters that need the body once
+//! it is downloaded.
 
 use crate::db::repo;
 use crate::error::{CoreError, Result};
 use crate::models::{
     ActionKind, ActionParams, Address, MailProtocol, MailRule, RuleAction, RuleCondition,
-    RuleField, RuleOp,
+    RuleField, RuleOp, now_ms,
 };
 use regex::{Regex, RegexBuilder};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde::{Deserialize, Serialize};
 
 /// The most a rule's pattern may compile to, so one can't stall sync.
 const PATTERN_SIZE_LIMIT: usize = 1 << 20;
+
+/// How much of a message's text rules look at.
+const BODY_LIMIT: usize = 1 << 20;
+
+/// How long rules wait for a body before they settle without it.
+pub(crate) const WAIT_LIMIT_MS: i64 = 5 * 60 * 1000;
 
 fn pattern(value: &str) -> std::result::Result<Regex, regex::Error> {
     RegexBuilder::new(value)
@@ -45,13 +58,43 @@ fn kilobytes(value: &str) -> Option<i64> {
 pub fn op_fits(field: RuleField, op: RuleOp) -> bool {
     match field {
         RuleField::Size => matches!(op, RuleOp::Over | RuleOp::Under),
-        RuleField::MailingList => !matches!(op, RuleOp::Over | RuleOp::Under),
+        RuleField::MailingList | RuleField::Header => !matches!(op, RuleOp::Over | RuleOp::Under),
+        RuleField::Body => matches!(op, RuleOp::Contains | RuleOp::Matches),
+        RuleField::Attachments => op == RuleOp::Exists,
         RuleField::From
         | RuleField::To
         | RuleField::Cc
         | RuleField::ToOrCc
         | RuleField::Subject => !matches!(op, RuleOp::Over | RuleOp::Under | RuleOp::Exists),
     }
+}
+
+/// Whether `name` can name a header in a rule: letters, digits and dashes,
+/// which every server takes in a request for named headers.
+pub fn is_valid_header_name(name: &str) -> bool {
+    (1..=64).contains(&name.len())
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+/// The headers `account_id`'s rules test, which the fetch of its new mail
+/// brings along.
+pub(crate) fn header_names(conn: &Connection, account_id: i64) -> Result<Vec<String>> {
+    let mut names = Vec::<String>::new();
+    for rule in repo::rules::enabled_for(conn, account_id)? {
+        for condition in rule.conditions {
+            if condition.field == RuleField::Header
+                && is_valid_header_name(&condition.header)
+                && !names
+                    .iter()
+                    .any(|known| known.eq_ignore_ascii_case(&condition.header))
+            {
+                names.push(condition.header);
+            }
+        }
+    }
+    Ok(names)
 }
 
 /// Whether `action` files mail away, out of the Inbox.
@@ -86,6 +129,9 @@ pub(crate) fn check(conn: &Connection, rule: &MailRule) -> Result<()> {
     for condition in &rule.conditions {
         if !op_fits(condition.field, condition.op) {
             return invalid("a condition compares in a way its field can't");
+        }
+        if condition.field == RuleField::Header && !is_valid_header_name(&condition.header) {
+            return invalid("a header name isn't valid");
         }
         match condition.op {
             RuleOp::Exists => {}
@@ -148,7 +194,7 @@ pub(crate) fn check(conn: &Connection, rule: &MailRule) -> Result<()> {
     Ok(())
 }
 
-/// What rules can test about a message as it arrives.
+/// What rules can test about a message.
 #[derive(Debug, Default)]
 pub(crate) struct Facts {
     pub subject: String,
@@ -159,6 +205,21 @@ pub(crate) struct Facts {
     pub list_id: Option<String>,
     /// In bytes.
     pub size: Option<i64>,
+    /// Header fields, names and values. None until they are known.
+    pub headers: Option<Vec<(String, String)>>,
+    /// The message's text, lowercase. None until its body is here.
+    pub body: Option<String>,
+    /// Whether files are attached. None until that is known.
+    pub attachments: Option<bool>,
+}
+
+/// `text` lowercase, at most [`BODY_LIMIT`] of it.
+fn body_text(text: &str) -> String {
+    let mut end = text.len().min(BODY_LIMIT);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_lowercase()
 }
 
 /// A condition ready to test: its text lowercase, its pattern compiled.
@@ -231,6 +292,31 @@ impl Test {
                     _ => false,
                 })
             }
+            RuleField::Header => {
+                let mut values = facts
+                    .headers
+                    .as_ref()?
+                    .iter()
+                    .filter(|(name, _)| name.eq_ignore_ascii_case(&self.condition.header))
+                    .map(|(_, value)| value.as_str());
+                match self.condition.op {
+                    RuleOp::Exists => values.next().is_some(),
+                    _ => values.any(|value| self.text_holds(value)),
+                }
+            }
+            // The text is lowercase already, and patterns ignore case.
+            RuleField::Body => {
+                let body = facts.body.as_deref()?;
+                match self.condition.op {
+                    RuleOp::Contains => body.contains(&self.value),
+                    RuleOp::Matches => self
+                        .pattern
+                        .as_ref()
+                        .is_some_and(|pattern| pattern.is_match(body)),
+                    _ => false,
+                }
+            }
+            RuleField::Attachments => facts.attachments?,
         };
         Some(tested != self.condition.negate)
     }
@@ -275,6 +361,9 @@ pub(crate) struct Sorted {
     pub read: bool,
     /// It went to Trash or Junk.
     pub unwanted: bool,
+    /// A rule waits for its body: [`hold`] its notification, and fetch the
+    /// body for [`resume`].
+    pub waiting: bool,
 }
 
 impl Sorted {
@@ -283,6 +372,164 @@ impl Sorted {
     pub fn silent(&self) -> bool {
         self.filed || self.read
     }
+}
+
+/// What sync knows of a message it just stored, beyond the stored row.
+#[derive(Debug, Default)]
+pub(crate) struct Arrival {
+    /// Its header fields as fetched: the usual ones and those rules name.
+    pub headers: Option<Vec<(String, String)>>,
+    /// Its text, when the whole message came (POP3).
+    pub text: Option<String>,
+    /// Whether the row's attachment flag is known yet. IMAP and Gmail learn
+    /// it with the body.
+    pub attachments_known: bool,
+}
+
+/// Where rules stopped for a message's body, kept on the message.
+#[derive(Debug, Serialize, Deserialize)]
+struct Waiting {
+    /// The rule to go on from.
+    rule: i64,
+    /// The notification held back for the rules, and whether it may play a
+    /// sound.
+    #[serde(default)]
+    announce: Option<bool>,
+    /// The header fields sync fetched with it, which the body may lack.
+    #[serde(default)]
+    headers: Option<Vec<(String, String)>>,
+    since: i64,
+}
+
+fn waiting(conn: &Connection, message_id: i64) -> Result<Option<Waiting>> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT rules_waiting FROM messages WHERE id = ?1",
+            [message_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(json.and_then(|json| serde_json::from_str(&json).ok()))
+}
+
+fn set_waiting(conn: &Connection, message_id: i64, waiting: Option<&Waiting>) -> Result<()> {
+    let json = waiting.map(serde_json::to_string).transpose()?;
+    conn.execute(
+        "UPDATE messages SET rules_waiting = ?2 WHERE id = ?1",
+        params![message_id, json],
+    )?;
+    Ok(())
+}
+
+/// Hold back the notification of `message_id` while a rule waits for its
+/// body. [`resume`] shows it unless the rules file the message away or mark
+/// it read. `audible` is whether it may play a sound.
+pub(crate) fn hold(conn: &Connection, message_id: i64, audible: bool) -> Result<()> {
+    if let Some(mut waiting) = waiting(conn, message_id)? {
+        waiting.announce = Some(audible);
+        set_waiting(conn, message_id, Some(&waiting))?;
+    }
+    Ok(())
+}
+
+/// What going on with the rules did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Resumed {
+    pub thread_id: i64,
+    /// The held notification was queued, so the notification dispatcher
+    /// should be woken for the thread.
+    pub announced: bool,
+}
+
+/// Go on with the rules that waited for `message_id`'s body, now stored,
+/// from the rule that stopped them. What still can't be told doesn't match.
+/// Then the notification they held back shows, unless they filed the
+/// message away or marked it read, or it left the Inbox or was read
+/// meanwhile. None when no rule waited.
+pub(crate) fn resume(tx: &Transaction, message_id: i64) -> Result<Option<Resumed>> {
+    settle(tx, message_id, true)
+}
+
+/// Settle the rules that waited for a body that didn't come: what can't be
+/// told doesn't match, and the held notification shows.
+pub(crate) fn give_up(tx: &Transaction, message_id: i64) -> Result<Option<Resumed>> {
+    settle(tx, message_id, false)
+}
+
+fn settle(tx: &Transaction, message_id: i64, with_body: bool) -> Result<Option<Resumed>> {
+    let Some(waiting) = waiting(tx, message_id)? else {
+        return Ok(None);
+    };
+    set_waiting(tx, message_id, None)?;
+    let account_id: i64 = tx.query_row(
+        "SELECT account_id FROM messages WHERE id = ?1",
+        [message_id],
+        |row| row.get(0),
+    )?;
+    let Some((thread_id, mut facts, attachments)) = inbox_facts(tx, account_id, message_id)? else {
+        return Ok(None);
+    };
+    facts.headers = waiting.headers;
+    if with_body {
+        let stored: Option<(Option<String>, Option<String>)> = tx
+            .query_row(
+                "SELECT text_body, html_body FROM message_bodies WHERE message_id = ?1",
+                [message_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        facts.body = stored.and_then(|(text, html)| {
+            crate::mime::body_text(text.as_deref(), html.as_deref()).map(|text| body_text(&text))
+        });
+        facts.attachments = Some(attachments);
+    }
+    let sorter = Sorter::load(tx, account_id)?;
+    // From the rule that waited, or from the top when it is gone.
+    let start = sorter
+        .rules
+        .iter()
+        .position(|compiled| compiled.rule.id == waiting.rule)
+        .unwrap_or(0);
+    let (sorted, _) = run(
+        tx,
+        account_id,
+        thread_id,
+        message_id,
+        &facts,
+        &sorter.rules[start..],
+        true,
+    )?;
+    let unread = tx.query_row(
+        "SELECT is_read = 0 FROM messages WHERE id = ?1",
+        [message_id],
+        |row| row.get::<_, bool>(0),
+    )?;
+    let announced = match waiting.announce {
+        Some(audible) if unread && !sorted.silent() => {
+            repo::notifications::enqueue(tx, message_id, audible)?;
+            true
+        }
+        _ => false,
+    };
+    Ok(Some(Resumed {
+        thread_id,
+        announced,
+    }))
+}
+
+/// The messages of `account_id` whose rules have waited since before
+/// `before` (milliseconds since the epoch).
+pub(crate) fn overdue(conn: &Connection, account_id: i64, before: i64) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare(
+        "SELECT id FROM messages
+         WHERE account_id = ?1 AND rules_waiting IS NOT NULL
+           AND COALESCE(json_extract(rules_waiting, '$.since'), 0) < ?2",
+    )?;
+    let ids = stmt
+        .query_map(params![account_id, before], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    Ok(ids)
 }
 
 /// An account's rules, loaded once for the mail one sync transaction stores.
@@ -303,59 +550,118 @@ impl Sorter {
     }
 
     /// Sort `message_id`, which sync just stored as new mail, when it is
-    /// incoming mail in the Inbox.
-    pub(crate) fn arrived(&self, tx: &Transaction, message_id: i64) -> Result<Sorted> {
+    /// incoming mail in the Inbox. A rule that needs the body leaves it
+    /// waiting (see [`Sorted::waiting`]).
+    pub(crate) fn arrived(
+        &self,
+        tx: &Transaction,
+        message_id: i64,
+        arrival: Arrival,
+    ) -> Result<Sorted> {
         if self.rules.is_empty() {
             return Ok(Sorted::default());
         }
-        let Some((thread_id, facts)) = inbox_facts(tx, self.account_id, message_id)? else {
+        let Some((thread_id, mut facts, attachments)) =
+            inbox_facts(tx, self.account_id, message_id)?
+        else {
             return Ok(Sorted::default());
         };
-        let mut sorted = Sorted::default();
-        for compiled in &self.rules {
-            if compiled.matches(&facts) != Some(true) {
-                continue;
-            }
-            tracing::info!(
-                account_id = self.account_id,
-                message_id,
-                rule = compiled.rule.id,
-                "receive: a rule matched new mail"
-            );
-            let mut actions = compiled.rule.actions.iter().collect::<Vec<_>>();
-            // Marks and labels, then copies, then filing away.
-            actions.sort_by_key(|action| match action {
-                RuleAction::Copy { .. } => 1,
-                action if files_away(action) => 2,
-                _ => 0,
-            });
-            for action in actions {
-                if apply(tx, thread_id, message_id, action)? {
-                    match action {
-                        RuleAction::MarkRead => sorted.read = true,
-                        RuleAction::Trash | RuleAction::Junk => {
-                            sorted.filed = true;
-                            sorted.unwanted = true;
-                        }
-                        action if files_away(action) => sorted.filed = true,
-                        _ => {}
-                    }
-                }
-            }
-            if compiled.rule.stop || sorted.filed {
-                break;
-            }
-        }
-        Ok(sorted)
+        facts.headers = arrival.headers;
+        facts.body = arrival.text.as_deref().map(body_text);
+        facts.attachments = arrival.attachments_known.then_some(attachments);
+        let (sorted, waiting_rule) = run(
+            tx,
+            self.account_id,
+            thread_id,
+            message_id,
+            &facts,
+            &self.rules,
+            false,
+        )?;
+        let Some(rule) = waiting_rule else {
+            return Ok(sorted);
+        };
+        set_waiting(
+            tx,
+            message_id,
+            Some(&Waiting {
+                rule,
+                announce: None,
+                headers: facts.headers,
+                since: now_ms(),
+            }),
+        )?;
+        Ok(Sorted {
+            waiting: true,
+            ..sorted
+        })
     }
 }
 
-/// The message's facts, when it is incoming mail in the account's Inbox.
-fn inbox_facts(tx: &Transaction, account_id: i64, message_id: i64) -> Result<Option<(i64, Facts)>> {
+/// Try `rules` on the message in order. When one can't tell yet, the rules
+/// stop there and its id comes back, unless `settle` takes what isn't known
+/// as not matching.
+fn run(
+    tx: &Transaction,
+    account_id: i64,
+    thread_id: i64,
+    message_id: i64,
+    facts: &Facts,
+    rules: &[Compiled],
+    settle: bool,
+) -> Result<(Sorted, Option<i64>)> {
+    let mut sorted = Sorted::default();
+    for compiled in rules {
+        match compiled.matches(facts) {
+            Some(true) => {}
+            Some(false) => continue,
+            None if settle => continue,
+            None => return Ok((sorted, Some(compiled.rule.id))),
+        }
+        tracing::info!(
+            account_id,
+            message_id,
+            rule = compiled.rule.id,
+            "receive: a rule matched new mail"
+        );
+        let mut actions = compiled.rule.actions.iter().collect::<Vec<_>>();
+        // Marks and labels, then copies, then filing away.
+        actions.sort_by_key(|action| match action {
+            RuleAction::Copy { .. } => 1,
+            action if files_away(action) => 2,
+            _ => 0,
+        });
+        for action in actions {
+            if apply(tx, thread_id, message_id, action)? {
+                match action {
+                    RuleAction::MarkRead => sorted.read = true,
+                    RuleAction::Trash | RuleAction::Junk => {
+                        sorted.filed = true;
+                        sorted.unwanted = true;
+                    }
+                    action if files_away(action) => sorted.filed = true,
+                    _ => {}
+                }
+            }
+        }
+        if compiled.rule.stop || sorted.filed {
+            break;
+        }
+    }
+    Ok((sorted, None))
+}
+
+/// The message's facts from its row, with its thread and its attachment
+/// flag, when it is incoming mail in the account's Inbox.
+fn inbox_facts(
+    tx: &Transaction,
+    account_id: i64,
+    message_id: i64,
+) -> Result<Option<(i64, Facts, bool)>> {
     Ok(tx
         .query_row(
             "SELECT m.thread_id, m.subject, m.from_name, m.from_addr, m.to_json, m.cc_json,
-                    m.list_id, m.size
+                    m.list_id, m.size, m.has_attachments
              FROM messages m
              WHERE m.id = ?1 AND m.account_id = ?2 AND m.thread_id IS NOT NULL
                AND m.is_draft = 0 AND m.is_outgoing = 0
@@ -382,7 +688,9 @@ fn inbox_facts(tx: &Transaction, account_id: i64, message_id: i64) -> Result<Opt
                         cc: repo::parse_addrs(&row.get::<_, String>(5)?, 5)?,
                         list_id: row.get(6)?,
                         size: row.get(7)?,
+                        ..Facts::default()
                     },
+                    row.get(8)?,
                 ))
             },
         )

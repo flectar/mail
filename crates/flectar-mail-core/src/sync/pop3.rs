@@ -821,6 +821,8 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
         .map_err(|error| CoreError::Other(error.to_string()))?;
     let path = new_original_path(ctx, account_id);
     crate::file_io::write_durable(&path, &raw, "POP3 message").await?;
+    // Rules on any header read them from the original (#238).
+    let header_fields = candidate.arrival.then(|| crate::mime::header_fields(&raw));
     drop(raw);
     let calendar_events = ingest::calendar_parts(&parsed);
     let path_string = path.to_string_lossy().into_owned();
@@ -872,7 +874,16 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
             // stays silent.
             if !crate::turn_away(tx, imported.message_id)? {
                 let sorted = if arrival {
-                    crate::rules::Sorter::load(tx, account_id)?.arrived(tx, imported.message_id)?
+                    // The whole message is here: nothing waits.
+                    crate::rules::Sorter::load(tx, account_id)?.arrived(
+                        tx,
+                        imported.message_id,
+                        crate::rules::Arrival {
+                            headers: header_fields,
+                            text: parsed.text.clone(),
+                            attachments_known: true,
+                        },
+                    )?
                 } else {
                     Default::default()
                 };

@@ -211,6 +211,22 @@ impl Importer {
         Ok(())
     }
 
+    /// Hold back the notification [`Self::announce`] would queue while a
+    /// rule waits for the message's body (see `crate::rules::hold`).
+    pub(crate) fn hold(&self, conn: &Connection, imported: &Imported, live: bool) -> Result<()> {
+        if !arrival_eligible(
+            live,
+            imported.is_read,
+            imported.is_outgoing,
+            imported.arrival_ms,
+            now_ms(),
+        ) {
+            return Ok(());
+        }
+        let audible = chime_worthy(imported.is_automated, &imported.from_email);
+        crate::rules::hold(conn, imported.message_id, audible)
+    }
+
     /// Queue the notification for a live arrival: mail that reached the
     /// mailbox while the account was being followed, rather than history
     /// caught up on.
