@@ -402,6 +402,10 @@ export component LineEdit inherits Rectangle {
     in property <image> leading-icon;
     in property <color> leading-icon-color: AppTheme.secondary;
     in property <length> trailing-content-width: 0px;
+    // Outlined and filled like a form field, or at rest only its text and
+    // icon on what is behind it, as the search field in a toolbar. Focus and
+    // invalid input still draw the outline.
+    in property <bool> outlined: true;
     private property <length> text-inset: root.show-leading-icon ? 40px : 12px;
     // Password fields can be shown while typing (NIST SP 800-63B-4
     // 3.1.1.2), on desktop only: a shown password is plain text to the input
@@ -428,10 +432,10 @@ export component LineEdit inherits Rectangle {
     height: 36px;
     min-width: 80px;
     border-radius: LayoutMetrics.corner-radius - 2px;
-    border-width: 1px;
+    border-width: root.outlined || root.invalid || editor.has-focus ? 1px : 0px;
     border-color: root.invalid ? AppTheme.destructive
         : editor.has-focus ? AppTheme.accent : AppTheme.input-border;
-    background: AppTheme.input-bg;
+    background: root.outlined ? AppTheme.input-bg : transparent;
     opacity: root.enabled ? 1 : 0.5;
 
     Text {
