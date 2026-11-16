@@ -12,6 +12,7 @@ import {
 } from "workspace-layout.slint";
 import { LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 import { LocalMailUi } from "../local-mail.slint";
+import { SavedSearchUi } from "../saved-searches.slint";
 import { Updates } from "../updates.slint";
 import { TypeScale } from "../typography.slint";
 
@@ -383,7 +384,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         folder-id: -1;
                         mail-drop-enabled: true;
                         icon: @image-url("../icons/lucide/filled/inbox-flectar.svg");
-                        selected: root.selected-scope == "Unified Inbox";
+                        // A saved search runs in the inbox's scope but has its own row.
+                        selected: root.selected-scope == "Unified Inbox" && SavedSearchUi.selected-id < 0;
                         row-height: 32px;
                         sidebar-background: root.background-color;
                         selection-background: root.selection-background;
@@ -578,6 +580,50 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         delete-label(id, name, account, global, has-children) => {
                             root.request-delete-label(id, name, account, global, has-children);
                         }
+                    }
+
+                    if entry.kind == SidebarRowKind.saved-searches-section: SidebarSectionHeader {
+                        x: 0px;
+                        interactive: entry.show_row;
+                        y: 0px;
+                        width: parent.width;
+                        label: @tr("Saved searches");
+                        label-font-weight: 500;
+                        folder-row-style: true;
+                        sidebar-background: root.background-color;
+                        hover-background: root.hover-background;
+                        body-color: root.body-color;
+                        muted-color: root.muted-color;
+                        icon: @image-url("../icons/lucide/filled/search.svg");
+                        icon-color: root.monochrome-icons ? root.body-color : MailIconPalette.folders;
+                        open: entry.open;
+                        toggled(open) => { root.toggle-section(entry.key, open); }
+                    }
+
+                    // A saved search runs its query in the accounts in view.
+                    if entry.kind == SidebarRowKind.saved-search: SidebarItem {
+                        x: 0px;
+                        interactive: entry.show_row;
+                        y: 0px;
+                        width: parent.width;
+                        label: entry.label.name;
+                        accessible-name: @tr("Saved search {}", entry.label.name);
+                        count: entry.label.count;
+                        label-has-emoji: entry.label.name_has_emoji;
+                        left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
+                        label-id: entry.label.id;
+                        saved-search: true;
+                        icon: @image-url("../icons/lucide/filled/search.svg");
+                        selected: SavedSearchUi.selected-id == entry.label.id;
+                        sidebar-background: root.background-color;
+                        selection-background: root.selection-background;
+                        accent-color: root.accent-color;
+                        body-color: root.body-color;
+                        muted-color: root.muted-color;
+                        icon-color: root.monochrome-icons
+                            ? (SavedSearchUi.selected-id == entry.label.id ? root.accent-color : root.muted-color)
+                            : MailIconPalette.folders;
+                        clicked(scope) => { SavedSearchUi.open(entry.label.id); }
                     }
 
                     if entry.kind == SidebarRowKind.accounts-heading: WorkspaceMiniHeading {

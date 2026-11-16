@@ -91,6 +91,7 @@ mod renderer_preferences;
 mod rendering_report;
 mod retained_model;
 mod rich_compose;
+mod saved_searches;
 mod settings_controller;
 pub mod spelling;
 pub use spelling::{SpellingHost, SpellingSession};
@@ -676,6 +677,8 @@ struct InboxState {
     sidebar_badges: SidebarBadges,
     /// Unread mail only on the server of the scope it was counted for.
     server_only: Option<(Scope, u32)>,
+    /// The searches the sidebar keeps, with their unread mail.
+    saved_searches: Vec<mail::SavedSearchEntry>,
     mail_work: Option<mail_work::MailWork>,
     collapsed_folder_ids: HashSet<i64>,
     collapsed_sidebar_sections: HashSet<String>,
@@ -1252,6 +1255,7 @@ impl InboxState {
             unified_mailboxes: Vec::new(),
             sidebar_badges: SidebarBadges::default(),
             server_only: None,
+            saved_searches: Vec::new(),
             mail_work: None,
             collapsed_folder_ids: HashSet::new(),
             collapsed_sidebar_sections: HashSet::from([
@@ -1367,6 +1371,7 @@ impl InboxState {
         self.mailboxes = metadata.mailboxes;
         self.unified_mailboxes = metadata.unified_mailboxes;
         self.sidebar_badges = metadata.sidebar_badges;
+        self.saved_searches = metadata.saved_searches;
         self.inbox_count = metadata.inbox_count;
         self.server_only = Some((metadata.scope, metadata.server_only_unread));
         self.server_only_note() != note
@@ -6334,6 +6339,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     link_services::install(&app, &state, &runtime, platform.external_urls.clone());
     read_receipts::install(&app, &state, &runtime);
     block_sender::install(&app, &state, &runtime);
+    saved_searches::install(&app, &state, &runtime);
     invitation::install(&app, &state, &calendar_state, &runtime);
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);

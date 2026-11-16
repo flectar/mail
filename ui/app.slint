@@ -56,12 +56,15 @@ import { BoundComposer, ComposerUi } from "components/composer-ui.slint";
 import { ComposerText } from "components/composer-fields.slint";
 export { ComposerUi } from "components/composer-ui.slint";
 import { FolderDialog } from "dialogs/folder-dialog.slint";
+import { SavedSearchDialog } from "dialogs/saved-search-dialog.slint";
+import { SavedSearchUi } from "saved-searches.slint";
 export { MovePickerUi, MoveTargetRow } from "dialogs/move-dialog.slint";
 import { MoveDialog, MovePickerUi } from "dialogs/move-dialog.slint";
 import { ConfirmationDialog } from "components/confirmation-dialog.slint";
 import { SettingsDialog } from "dialogs/settings-dialog.slint";
 import { AccountImport, ImportDialog } from "dialogs/import-dialog.slint";
 export { LocalMailUi } from "local-mail.slint";
+export { SavedSearchUi } from "saved-searches.slint";
 export { Numbers } from "numbers.slint";
 import { LocalMailUi } from "local-mail.slint";
 export { AccountImport, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportMailRow, ImportProfileRow } from "dialogs/import-dialog.slint";
@@ -725,6 +728,9 @@ export global I18n {
         if (key == "On {}, {} wrote:") { return @tr("On {}, {} wrote:", argument, second-argument); }
         if (key == "{} wrote:") { return @tr("{} wrote:", argument); }
         if (key == "Forwarded message") { return @tr("Forwarded message"); }
+        if (key == "All profiles") { return @tr("All profiles"); }
+        if (key == "A saved search named “{}” already exists.") { return @tr("A saved search named “{}” already exists.", argument); }
+        if (key == "Couldn't save the search: {}") { return @tr("Couldn't save the search: {}", argument); }
         if (key == "From: {}") { return @tr("forwarded message header" => "From: {}", argument); }
         if (key == "Date: {}") { return @tr("forwarded message header" => "Date: {}", argument); }
         if (key == "Subject: {}") { return @tr("forwarded message header" => "Subject: {}", argument); }
@@ -2695,6 +2701,14 @@ export component AppWindow inherits Window {
         height: root.content-height;
         z: 15000;
         compact: root.compact-layout;
+    }
+
+    if SavedSearchUi.stage != "" : SavedSearchDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        z: 15000;
     }
 
     if root.folder-dialog-open : FolderDialog {
