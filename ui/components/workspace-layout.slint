@@ -401,6 +401,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
             search-edit := LineEdit {
                 width: parent.width;
                 height: parent.height;
+                outlined: false;
                 text <=> root.text;
                 placeholder-text: root.placeholder-text;
                 show-leading-icon: true;

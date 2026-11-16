@@ -4377,11 +4377,11 @@ msgstr ""
 msgid "Select"
 msgstr ""
 
-#: ui/components/controls.slint:492
+#: ui/components/controls.slint:496
 msgid "Hide password"
 msgstr ""
 
-#: ui/components/controls.slint:492
+#: ui/components/controls.slint:496
 msgid "Show password"
 msgstr ""
 
@@ -5381,7 +5381,7 @@ msgstr ""
 msgid "Leave out what matches"
 msgstr ""
 
-#: ui/components/search-tips.slint:48 ui/components/workspace-layout.slint:456
+#: ui/components/search-tips.slint:48 ui/components/workspace-layout.slint:457
 msgid "Search tips"
 msgstr ""
 
@@ -5788,11 +5788,11 @@ msgstr ""
 msgid "Save palette"
 msgstr ""
 
-#: ui/components/workspace-layout.slint:441
+#: ui/components/workspace-layout.slint:442
 msgid "Newest first"
 msgstr ""
 
-#: ui/components/workspace-layout.slint:448
+#: ui/components/workspace-layout.slint:449
 msgid "Oldest first"
 msgstr ""
 
