@@ -217,6 +217,7 @@ impl Controller {
             match_all: true,
             conditions: vec![RuleCondition {
                 field: RuleField::From,
+                header: String::new(),
                 op: RuleOp::Contains,
                 value: String::new(),
                 negate: false,
@@ -236,6 +237,7 @@ impl Controller {
                     let field = condition.field;
                     RuleConditionRow {
                         field: index_of(&FIELDS, &field),
+                        header: condition.header.as_str().into(),
                         op: index_of(&ops(field), &(condition.op, condition.negate)),
                         value: condition.value.as_str().into(),
                     }
@@ -319,6 +321,7 @@ impl Controller {
     fn add_condition(&self) {
         self.conditions.push(RuleConditionRow {
             field: 0,
+            header: SharedString::new(),
             op: 0,
             value: SharedString::new(),
         });
@@ -359,6 +362,15 @@ impl Controller {
             let ops = ops(field);
             let (op, negate) = ops[usize::try_from(row.op).unwrap_or(0).min(ops.len() - 1)];
             let value = row.value.trim().to_owned();
+            let header = row.header.trim().to_owned();
+            if field == RuleField::Header
+                && !flectar_mail_core::rules::is_valid_header_name(&header)
+            {
+                return Err(UiMessage::detail(
+                    "Condition {}: name a header, such as X-Spam-Flag.",
+                    number,
+                ));
+            }
             match op {
                 RuleOp::Exists => {}
                 RuleOp::Over | RuleOp::Under => {
@@ -388,6 +400,11 @@ impl Controller {
             }
             conditions.push(RuleCondition {
                 field,
+                header: if field == RuleField::Header {
+                    header
+                } else {
+                    String::new()
+                },
                 op,
                 // A pattern is kept as written; spaces can matter in it.
                 value: if op == RuleOp::Matches {

@@ -167,6 +167,7 @@ mod tests {
             match_all: true,
             conditions: vec![RuleCondition {
                 field: RuleField::From,
+                header: String::new(),
                 op: RuleOp::Contains,
                 value: "news".into(),
                 negate: false,

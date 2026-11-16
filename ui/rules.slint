@@ -18,6 +18,8 @@ export struct RuleRow {
 // to these rows.
 export struct RuleConditionRow {
     field: int,
+    // The header a Header condition looks at.
+    header: string,
     op: int,
     value: string,
 }

@@ -952,19 +952,54 @@ const HEADER_FIELDS: &str = "BODY.PEEK[HEADER.FIELDS (MESSAGE-ID X-FLECTAR-SUBMI
 
 /// Fetch envelope headers + flags for a UID set (e.g. "100:200" or "5,7,9").
 pub async fn fetch_headers(session: &mut Session, uid_set: &str) -> Result<Vec<FetchedHeader>> {
+    fetch_headers_with(session, uid_set, &[]).await
+}
+
+/// [`fetch_headers`] with the headers `extra` too, such as those the
+/// account's rules test (#238). Names are letters, digits and dashes.
+pub async fn fetch_headers_with(
+    session: &mut Session,
+    uid_set: &str,
+    extra: &[String],
+) -> Result<Vec<FetchedHeader>> {
     with_deadline(
         "UID FETCH headers",
         METADATA_TIMEOUT,
-        fetch_headers_inner(session, uid_set),
+        fetch_headers_inner(session, uid_set, extra),
     )
     .await
 }
 
-async fn fetch_headers_inner(session: &mut Session, uid_set: &str) -> Result<Vec<FetchedHeader>> {
+/// The header section a fetch of headers asks for, with `extra` headers.
+fn header_section(extra: &[String]) -> String {
+    let names = extra
+        .iter()
+        .filter(|name| {
+            !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+        .map(|name| format!(" {}", name.to_ascii_uppercase()))
+        .collect::<String>();
+    match HEADER_FIELDS.strip_suffix(")]") {
+        Some(start) if !names.is_empty() => format!("{start}{names})]"),
+        _ => HEADER_FIELDS.to_owned(),
+    }
+}
+
+async fn fetch_headers_inner(
+    session: &mut Session,
+    uid_set: &str,
+    extra: &[String],
+) -> Result<Vec<FetchedHeader>> {
     // Keep header sync independent from BODYSTRUCTURE: an incompatible MIME
     // response must not prevent historical headers from being stored. MIME
     // plans are fetched separately when preparing or opening message bodies.
-    let query = format!("(UID FLAGS INTERNALDATE RFC822.SIZE {HEADER_FIELDS})");
+    let query = format!(
+        "(UID FLAGS INTERNALDATE RFC822.SIZE {})",
+        header_section(extra)
+    );
     let mut out = Vec::new();
     {
         let mut stream = session

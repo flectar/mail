@@ -4,6 +4,7 @@ use crate::db::testutil;
 fn condition(field: RuleField, op: RuleOp, value: &str) -> RuleCondition {
     RuleCondition {
         field,
+        header: String::new(),
         op,
         value: value.into(),
         negate: false,
@@ -45,6 +46,7 @@ fn facts() -> Facts {
         cc: vec![address(Some("Alex Doe"), "alex@team.dev")],
         list_id: Some("digest.example.com".into()),
         size: Some(300 * 1024),
+        ..Facts::default()
     }
 }
 
@@ -172,7 +174,7 @@ fn sort(conn: &mut rusqlite::Connection, rules: &[MailRule], message_id: i64) ->
     let tx = conn.transaction().unwrap();
     let sorted = Sorter::load(&tx, 1)
         .unwrap()
-        .arrived(&tx, message_id)
+        .arrived(&tx, message_id, Arrival::default())
         .unwrap();
     tx.commit().unwrap();
     sorted
@@ -220,7 +222,8 @@ fn a_rule_marks_then_files_new_inbox_mail_and_ends_the_rules() {
         Sorted {
             filed: true,
             read: true,
-            unwanted: false
+            unwanted: false,
+            waiting: false,
         }
     );
     assert!(sorted.silent());
@@ -376,4 +379,241 @@ fn a_rule_is_checked_when_it_is_saved() {
         vec![condition(RuleField::MailingList, RuleOp::Exists, "")],
         vec![RuleAction::Archive]
     )));
+}
+
+fn header(name: &str, op: RuleOp, value: &str) -> RuleCondition {
+    RuleCondition {
+        header: name.into(),
+        ..condition(RuleField::Header, op, value)
+    }
+}
+
+#[test]
+fn headers_the_body_and_attachments_count_once_they_are_known() {
+    use RuleOp::*;
+    let unknown = Facts::default();
+    let known = Facts {
+        headers: Some(vec![
+            ("X-Spam-Flag".into(), "YES".into()),
+            ("Received".into(), "from a".into()),
+            ("received".into(), "from b".into()),
+        ]),
+        body: Some(body_text("Click to UNSUBSCRIBE here")),
+        attachments: Some(false),
+        ..Facts::default()
+    };
+    let check = |condition: RuleCondition| {
+        let test = Test::new(&condition);
+        (test.holds(&unknown), test.holds(&known))
+    };
+    assert_eq!(check(header("x-spam-flag", Is, "yes")), (None, Some(true)));
+    assert_eq!(check(header("X-Spam-Flag", Exists, "")), (None, Some(true)));
+    assert_eq!(
+        check(not(header("X-Missing", Exists, ""))),
+        (None, Some(true))
+    );
+    // Any of a header's copies counts.
+    assert_eq!(
+        check(header("Received", EndsWith, " b")),
+        (None, Some(true))
+    );
+    assert_eq!(
+        check(condition(RuleField::Body, Contains, "Unsubscribe")),
+        (None, Some(true))
+    );
+    assert_eq!(
+        check(condition(RuleField::Body, Matches, r"click\s+to")),
+        (None, Some(true))
+    );
+    assert_eq!(
+        check(condition(RuleField::Attachments, Exists, "")),
+        (None, Some(false))
+    );
+    assert_eq!(
+        check(not(condition(RuleField::Attachments, Exists, ""))),
+        (None, Some(true))
+    );
+}
+
+#[test]
+fn header_names_and_the_new_fields_are_checked() {
+    assert!(is_valid_header_name("X-Spam-Flag"));
+    assert!(!is_valid_header_name(""));
+    assert!(!is_valid_header_name("X Spam"));
+    assert!(!is_valid_header_name("X-Spam:"));
+    assert!(!is_valid_header_name(&"x".repeat(65)));
+    assert!(op_fits(RuleField::Body, RuleOp::Contains));
+    assert!(!op_fits(RuleField::Body, RuleOp::StartsWith));
+    assert!(op_fits(RuleField::Attachments, RuleOp::Exists));
+    assert!(!op_fits(RuleField::Attachments, RuleOp::Is));
+    assert!(op_fits(RuleField::Header, RuleOp::Exists));
+
+    let (conn, _) = mailbox("news@example.com", "Digest");
+    let rejected = |condition: RuleCondition| {
+        check(&conn, &rule(vec![condition], vec![RuleAction::Star])).is_err()
+    };
+    assert!(rejected(header("X Spam", RuleOp::Exists, "")));
+    assert!(rejected(header("", RuleOp::Exists, "")));
+    assert!(!rejected(header("X-Spam-Flag", RuleOp::Is, "YES")));
+}
+
+fn waiting_json(conn: &rusqlite::Connection, message_id: i64) -> Option<String> {
+    conn.query_row(
+        "SELECT rules_waiting FROM messages WHERE id = ?1",
+        [message_id],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+fn notified(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM notification_outbox", [], |row| {
+        row.get(0)
+    })
+    .unwrap()
+}
+
+#[test]
+fn a_rule_on_the_body_waits_for_it_then_goes_on() {
+    let (mut conn, message_id) = mailbox("news@example.com", "Weekly digest");
+    for rule in [
+        rule(
+            vec![condition(RuleField::Subject, RuleOp::Contains, "digest")],
+            vec![RuleAction::Star],
+        ),
+        rule(
+            vec![condition(RuleField::Body, RuleOp::Contains, "unsubscribe")],
+            vec![RuleAction::Move { folder: 5 }],
+        ),
+        rule(
+            vec![condition(RuleField::From, RuleOp::Contains, "news")],
+            vec![RuleAction::MarkRead],
+        ),
+    ] {
+        repo::rules::save(&conn, &rule, 1).unwrap();
+    }
+    let tx = conn.transaction().unwrap();
+    let sorted = Sorter::load(&tx, 1)
+        .unwrap()
+        .arrived(&tx, message_id, Arrival::default())
+        .unwrap();
+    // The first rule ran; the second needs the body.
+    assert!(sorted.waiting && !sorted.silent());
+    hold(&tx, message_id, true).unwrap();
+    tx.commit().unwrap();
+    let (folder, read, starred, _) = state(&conn, message_id);
+    assert_eq!((folder, read, starred), (1, false, true));
+    assert!(waiting_json(&conn, message_id).is_some());
+
+    repo::messages::store_body(
+        &conn,
+        message_id,
+        None,
+        Some("<p>To stop these, <a href=x>Unsubscribe</a></p>"),
+        None,
+        false,
+        None,
+    )
+    .unwrap();
+    let tx = conn.transaction().unwrap();
+    let resumed = resume(&tx, message_id).unwrap().unwrap();
+    tx.commit().unwrap();
+    // Filed away, so the third rule doesn't run and nothing notifies.
+    assert!(!resumed.announced);
+    let (folder, read, _, _) = state(&conn, message_id);
+    assert_eq!((folder, read), (5, false));
+    assert_eq!(notified(&conn), 0);
+    assert_eq!(waiting_json(&conn, message_id), None);
+
+    // Done once: resuming again does nothing.
+    let tx = conn.transaction().unwrap();
+    assert_eq!(resume(&tx, message_id).unwrap(), None);
+}
+
+#[test]
+fn the_held_notification_shows_when_the_rules_leave_the_mail_be() {
+    let (mut conn, message_id) = mailbox("news@example.com", "Weekly digest");
+    repo::rules::save(
+        &conn,
+        &rule(
+            vec![condition(RuleField::Body, RuleOp::Contains, "unsubscribe")],
+            vec![RuleAction::Trash],
+        ),
+        1,
+    )
+    .unwrap();
+    let tx = conn.transaction().unwrap();
+    let sorted = Sorter::load(&tx, 1)
+        .unwrap()
+        .arrived(&tx, message_id, Arrival::default())
+        .unwrap();
+    assert!(sorted.waiting);
+    hold(&tx, message_id, false).unwrap();
+    tx.commit().unwrap();
+    repo::messages::store_body(&conn, message_id, Some("Hello"), None, None, false, None).unwrap();
+    let tx = conn.transaction().unwrap();
+    let resumed = resume(&tx, message_id).unwrap().unwrap();
+    tx.commit().unwrap();
+    assert!(resumed.announced);
+    assert_eq!(notified(&conn), 1);
+    assert_eq!(state(&conn, message_id).0, 1);
+}
+
+#[test]
+fn rules_that_wait_too_long_settle_without_the_body() {
+    let (mut conn, message_id) = mailbox("news@example.com", "Weekly digest");
+    repo::rules::save(
+        &conn,
+        &rule(
+            vec![not(condition(RuleField::Attachments, RuleOp::Exists, ""))],
+            vec![RuleAction::Archive],
+        ),
+        1,
+    )
+    .unwrap();
+    let tx = conn.transaction().unwrap();
+    let sorted = Sorter::load(&tx, 1)
+        .unwrap()
+        .arrived(&tx, message_id, Arrival::default())
+        .unwrap();
+    assert!(sorted.waiting);
+    hold(&tx, message_id, true).unwrap();
+    tx.commit().unwrap();
+    // Not yet too long.
+    assert!(overdue(&conn, 1, 0).unwrap().is_empty());
+    let overdue = overdue(&conn, 1, now_ms() + 1).unwrap();
+    assert_eq!(overdue, [message_id]);
+    let tx = conn.transaction().unwrap();
+    let resumed = give_up(&tx, message_id).unwrap().unwrap();
+    tx.commit().unwrap();
+    // What can't be told doesn't match: it stays, and notifies.
+    assert!(resumed.announced);
+    assert_eq!(state(&conn, message_id).0, 1);
+
+    // With the attachments known at arrival, as on JMAP, nothing waits.
+    let (mut conn, message_id) = mailbox("news@example.com", "Weekly digest");
+    repo::rules::save(
+        &conn,
+        &rule(
+            vec![not(condition(RuleField::Attachments, RuleOp::Exists, ""))],
+            vec![RuleAction::Archive],
+        ),
+        1,
+    )
+    .unwrap();
+    let tx = conn.transaction().unwrap();
+    let sorted = Sorter::load(&tx, 1)
+        .unwrap()
+        .arrived(
+            &tx,
+            message_id,
+            Arrival {
+                attachments_known: true,
+                ..Arrival::default()
+            },
+        )
+        .unwrap();
+    tx.commit().unwrap();
+    assert!(sorted.filed && !sorted.waiting);
+    assert_eq!(waiting_json(&conn, message_id), None);
 }

@@ -2879,6 +2879,34 @@ fn returned_receipt(
     )
 }
 
+/// Every header field in `raw`, a header block or a whole message, by name
+/// and value: text as decoded, any other value as written, unfolded. For
+/// rules on any header (#238).
+pub fn header_fields(raw: &[u8]) -> Vec<(String, String)> {
+    let Some(message) = mail_parser::MessageParser::default().parse_headers(raw) else {
+        return Vec::new();
+    };
+    message
+        .headers()
+        .iter()
+        .map(|header| {
+            let value = match header.value() {
+                mail_parser::HeaderValue::Text(text) => text.to_string(),
+                mail_parser::HeaderValue::TextList(list) => list.join(", "),
+                _ => {
+                    let (start, end) =
+                        (header.offset_start() as usize, header.offset_end() as usize);
+                    let written = raw.get(start..end.max(start)).unwrap_or_default();
+                    String::from_utf8_lossy(written).into_owned()
+                }
+            };
+            // Unfolded, as a header of no known kind keeps its line breaks.
+            let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+            (header.name().to_owned(), value)
+        })
+        .collect()
+}
+
 /// Parse only headers (from a HEADER.FIELDS fetch).
 pub fn parse_header_block(raw: &[u8]) -> Result<ParsedHeaders> {
     let msg = mail_parser::MessageParser::default()
@@ -3710,6 +3738,23 @@ mod tests {
         let part = parsed.attachments().next().unwrap();
         assert_eq!(part.attachment_name(), Some("é-large.bin"));
         assert_eq!(part.contents(), message.attachments[0].bytes);
+    }
+
+    #[test]
+    fn header_fields_list_every_header_unfolded_and_decoded() {
+        let raw = b"Subject: =?utf-8?q?R=C3=A9sum=C3=A9?=\r\nX-Spam-Flag: YES\r\nX-Folded: one\r\n two\r\nTo: Ana <ana@test.dev>\r\n\r\nbody";
+        let fields = header_fields(raw);
+        let value = |name: &str| {
+            fields
+                .iter()
+                .find(|(field, _)| field.eq_ignore_ascii_case(name))
+                .map(|(_, value)| value.as_str())
+        };
+        assert_eq!(value("subject"), Some("Résumé"));
+        assert_eq!(value("x-spam-flag"), Some("YES"));
+        assert_eq!(value("X-Folded"), Some("one two"));
+        assert_eq!(value("To"), Some("Ana <ana@test.dev>"));
+        assert_eq!(value("X-Missing"), None);
     }
 
     #[test]
