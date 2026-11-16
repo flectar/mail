@@ -12,6 +12,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Frameless window](#frameless-window)
 - [Calendar, contacts, and files](#calendar-contacts-and-files)
 - [Signatures and OpenPGP](#signatures-and-openpgp)
+- [Automatic replies](#automatic-replies)
 - [Text formatting](#text-formatting)
 - [Spell check](#spell-check)
 - [Undo](#undo)
