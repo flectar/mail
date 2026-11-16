@@ -51,6 +51,7 @@ fn args(attachment: Option<DraftAttachmentIn>) -> SaveDraftArgs {
         in_reply_to_header: None,
         attachments: attachment.into_iter().collect(),
         request_read_receipt: false,
+        importance: Default::default(),
     }
 }
 

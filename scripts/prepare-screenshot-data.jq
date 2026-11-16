@@ -132,6 +132,7 @@ def favicon_path(address):
 | (.thread_messages // [] | length) as $thread_count
 | .emails |= map(
     .has_replied = (.has_replied // false)
+    | .high_importance = (.high_importance // false)
     | .account_uses_labels = (.account_uses_labels // false)
     | .verification_code = (.verification_code // "")
     | .verification_code_spelled = (.verification_code_spelled // "")

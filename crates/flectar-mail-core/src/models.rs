@@ -1033,6 +1033,8 @@ pub struct ThreadSummary {
     pub is_starred: bool,
     pub has_attachments: bool,
     pub has_replied: bool,
+    /// A message of the conversation was sent with high importance.
+    pub high_importance: bool,
     pub snoozed_until: Option<i64>,
     /// Ids of labels present on any message in the thread.
     pub labels: Vec<i64>,
@@ -1079,6 +1081,8 @@ pub struct MessageSummary {
     pub has_attachments: bool,
     /// A sent reply refers to this message.
     pub has_replied: bool,
+    /// The message was sent with high importance.
+    pub high_importance: bool,
     /// When the message's conversation is snoozed until.
     pub snoozed_until: Option<i64>,
     pub labels: Vec<i64>,
@@ -1738,6 +1742,39 @@ pub struct SaveDraftArgs {
     /// RFC 8098), sent to its From address.
     #[serde(default)]
     pub request_read_receipt: bool,
+    /// How important the message says it is.
+    #[serde(default)]
+    pub importance: Importance,
+}
+
+/// How important a message's sender marked it, from its Importance or
+/// X-Priority header, or what a draft asks for (#236).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Importance {
+    Low,
+    #[default]
+    Normal,
+    High,
+}
+
+impl Importance {
+    /// As stored: -1, 0 or 1.
+    pub const fn as_i64(self) -> i64 {
+        match self {
+            Self::Low => -1,
+            Self::Normal => 0,
+            Self::High => 1,
+        }
+    }
+
+    pub const fn from_i64(value: i64) -> Self {
+        match value {
+            ..=-1 => Self::Low,
+            0 => Self::Normal,
+            _ => Self::High,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

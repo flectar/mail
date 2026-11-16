@@ -1095,6 +1095,7 @@ async fn create_draft(
                 in_reply_to_header: None,
                 attachments: Vec::new(),
                 request_read_receipt: false,
+                importance: Default::default(),
             },
             agent.to_owned(),
         )

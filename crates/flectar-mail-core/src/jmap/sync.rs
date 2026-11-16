@@ -934,6 +934,10 @@ fn header_properties() -> Vec<EmailProperty> {
         EmailProperty::Header(Header::as_text("Auto-Submitted", false)),
         EmailProperty::Header(Header::as_text("List-Id", false)),
         EmailProperty::Header(Header::as_text("Precedence", false)),
+        EmailProperty::Header(Header::as_text("Importance", false)),
+        EmailProperty::Header(Header::as_text("X-Priority", false)),
+        EmailProperty::Header(Header::as_text("X-MSMail-Priority", false)),
+        EmailProperty::Header(Header::as_text("Priority", false)),
     ]
     .into_iter()
     .chain(RECEIPT_HEADERS.map(|name| EmailProperty::Header(Header::as_raw(name, true))))
@@ -1470,6 +1474,12 @@ async fn persist_emails(
                         receipt_to,
                         receipt_confirm,
                         receipt_handled: receipt_answered,
+                        importance: crate::mime::importance(
+                            header_text(&email, "Importance"),
+                            header_text(&email, "X-Priority"),
+                            header_text(&email, "X-MSMail-Priority"),
+                            header_text(&email, "Priority"),
+                        ),
                     };
                     local_id = repo::messages::insert(&tx, &new, thread_id)?;
                     repo::messages::set_jmap_remote(
@@ -2446,9 +2456,14 @@ async fn build_draft_message(
         .rsplit_once('@')
         .map(|(_, value)| value)
         .unwrap_or("localhost");
-    let receipt_to = ctx
+    let (receipt_to, importance) = ctx
         .db
-        .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+        .read(move |conn| {
+            Ok((
+                repo::messages::receipt_to(conn, draft_id)?,
+                repo::messages::importance(conn, draft_id)?,
+            ))
+        })
         .await?;
     let outgoing = crate::mime::OutgoingMessage {
         from: detail.from.clone(),
@@ -2465,6 +2480,7 @@ async fn build_draft_message(
         message_id_domain: domain,
         attachments: outgoing_attachments,
         receipt_to: &receipt_to,
+        importance,
     };
     let security_recipients = outgoing
         .to

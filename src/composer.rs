@@ -6,7 +6,7 @@
 use super::*;
 use crate::rich_compose::{EditMark, EditState};
 use flectar_mail_core::models::{
-    Address, AttachmentMeta, SaveDraftArgs, SenderIdentity, Settings, Signature,
+    Address, AttachmentMeta, Importance, SaveDraftArgs, SenderIdentity, Settings, Signature,
 };
 use slint::SharedString;
 #[cfg(desktop)]
@@ -552,6 +552,7 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_link_sharing(from.get_link_sharing());
     to.set_plain_text(from.get_plain_text());
     to.set_request_receipt(from.get_request_receipt());
+    to.set_importance(from.get_importance());
     to.set_templates(from.get_templates());
     to.set_message(from.get_message());
     to.set_notice_is_error(from.get_notice_is_error());
@@ -1094,6 +1095,7 @@ impl Composers {
         ui.set_bcc(compose_addresses(&draft.bcc).into());
         ui.set_subject(draft.subject.clone().into());
         ui.set_request_receipt(draft.request_read_receipt);
+        ui.set_importance(i32::try_from(draft.importance.as_i64()).unwrap_or_default());
         session.opened_subject.borrow_mut().clear();
 
         *session.files.borrow_mut() = draft
@@ -1427,6 +1429,7 @@ impl ComposeSession {
         apply_compose_contacts(&ui, &[]);
         ui.set_sending(false);
         ui.set_mode("new".into());
+        ui.set_importance(0);
         ui.set_to("".into());
         ui.set_cc("".into());
         ui.set_bcc("".into());
@@ -3191,6 +3194,7 @@ impl ComposeSession {
             in_reply_to_message_id: intent.in_reply_to_message_id,
             in_reply_to_header: intent.in_reply_to_header.as_deref(),
             request_read_receipt: ui.get_request_receipt(),
+            importance: Importance::from_i64(i64::from(ui.get_importance())),
         };
         if send {
             let queued = composers
@@ -4081,6 +4085,7 @@ mod tests {
             in_reply_to_header: None,
             attachments: Vec::new(),
             request_read_receipt: false,
+            importance: Default::default(),
         };
         assert!(composers.show_review(draft.clone(), "Claude"));
         assert_eq!(open_windows(), 1);

@@ -1166,9 +1166,14 @@ async fn send_action(
         });
     }
 
-    let receipt_to = ctx
+    let (receipt_to, importance) = ctx
         .db
-        .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+        .read(move |conn| {
+            Ok((
+                repo::messages::receipt_to(conn, draft_id)?,
+                repo::messages::importance(conn, draft_id)?,
+            ))
+        })
         .await?;
     let out = crate::mime::OutgoingMessage {
         from: from.clone(),
@@ -1185,6 +1190,7 @@ async fn send_action(
         message_id_domain: &domain,
         attachments,
         receipt_to: &receipt_to,
+        importance,
     };
     let attachment_count = out.attachments.len();
     let security_recipients = out

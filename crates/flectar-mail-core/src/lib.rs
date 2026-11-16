@@ -3226,9 +3226,14 @@ impl Core {
             .nth(1)
             .unwrap_or("localhost")
             .to_owned();
-        let receipt_to = self
+        let (receipt_to, importance) = self
             .db
-            .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+            .read(move |conn| {
+                Ok((
+                    repo::messages::receipt_to(conn, draft_id)?,
+                    repo::messages::importance(conn, draft_id)?,
+                ))
+            })
             .await?;
         let (_, raw) = crate::mime::build_message_owned(crate::mime::OutgoingMessage {
             from: detail.from.clone(),
@@ -3245,6 +3250,7 @@ impl Core {
             message_id_domain: &domain,
             attachments,
             receipt_to: &receipt_to,
+            importance,
         })?;
         Ok(raw)
     }
@@ -3913,6 +3919,7 @@ impl Core {
                         in_reply_to_header: None,
                         attachments: Vec::new(),
                         request_read_receipt: false,
+                        importance: Default::default(),
                     })
                     .await?;
                 let queued = self
@@ -5537,7 +5544,7 @@ impl Core {
                         let updated = tx.execute(
                             "UPDATE messages SET subject = ?2, to_json = ?3, cc_json = ?4,
                                     bcc_json = ?5, date = ?6, from_name = ?7, from_addr = ?8,
-                                    receipt_to = ?11
+                                    receipt_to = ?11, importance = ?12
                               WHERE id = ?1 AND account_id = ?9 AND is_draft = 1
                                 AND (?10 IS NULL OR date = (SELECT saved_at FROM agent_drafts
                                                             WHERE draft_id = ?1))",
@@ -5555,6 +5562,7 @@ impl Core {
                                 (!receipt_to.is_empty())
                                     .then(|| serde_json::to_string(&receipt_to))
                                     .transpose()?,
+                                args.importance.as_i64(),
                             ],
                         )?;
                         if updated != 1 {
@@ -5603,6 +5611,7 @@ impl Core {
                             receipt_to,
                             receipt_confirm: false,
                             receipt_handled: false,
+                            importance: args.importance,
                         };
                         let id = repo::messages::insert(&tx, &nm, tid)?;
                         let in_reply_to_header = args
@@ -5751,7 +5760,8 @@ impl Core {
                                 m.to_json, m.cc_json, m.bcc_json, m.subject,
                                 COALESCE(b.text_body, ''), b.html_body,
                                 COALESCE(dm.mode, 'new'), dm.in_reply_to_message_id,
-                                m.is_draft, dm.in_reply_to_header, m.receipt_to IS NOT NULL
+                                m.is_draft, dm.in_reply_to_header, m.receipt_to IS NOT NULL,
+                                m.importance
                          FROM messages m
                          LEFT JOIN message_bodies b ON b.message_id = m.id
                          LEFT JOIN drafts_meta dm ON dm.message_id = m.id
@@ -5780,6 +5790,7 @@ impl Core {
                                     in_reply_to_header: row.get(12)?,
                                     attachments: Vec::new(),
                                     request_read_receipt: row.get(13)?,
+                                    importance: Importance::from_i64(row.get(14)?),
                                 },
                                 is_draft,
                             ))
@@ -7891,6 +7902,7 @@ impl Core {
                     mime_type: Some(format!("text/calendar; method={method}; charset=UTF-8")),
                 }],
                 request_read_receipt: false,
+                importance: Default::default(),
             })
             .await?;
         // The draft staged its own copy; the temp file can go.
@@ -12520,6 +12532,7 @@ mod message_by_header_id_tests {
             in_reply_to_header: Some(header.into()),
             attachments: Vec::new(),
             request_read_receipt: false,
+            importance: Default::default(),
         };
         let headers = |id| {
             let core = &core;
@@ -12644,6 +12657,7 @@ mod draft_staging_tests {
                 mime_type: None,
             }],
             request_read_receipt: false,
+            importance: Default::default(),
         }
     }
 
@@ -12664,6 +12678,7 @@ mod draft_staging_tests {
         tokio::fs::write(&source, b"note").await.unwrap();
         let asking = SaveDraftArgs {
             request_read_receipt: true,
+            importance: Default::default(),
             ..draft_args(None, &source, "note.txt")
         };
         let id = core.save_draft(asking.clone()).await.unwrap();
@@ -12685,11 +12700,26 @@ mod draft_staging_tests {
         core.save_draft(SaveDraftArgs {
             draft_id: Some(id),
             request_read_receipt: false,
+            importance: Default::default(),
             ..draft
         })
         .await
         .unwrap();
         assert!(!core.get_draft(id).await.unwrap().request_read_receipt);
+
+        // So does how important it says it is.
+        let draft = core.get_draft(id).await.unwrap();
+        assert_eq!(draft.importance, Importance::Normal);
+        core.save_draft(SaveDraftArgs {
+            importance: Importance::High,
+            ..draft
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            core.get_draft(id).await.unwrap().importance,
+            Importance::High
+        );
     }
 
     #[tokio::test]
@@ -12743,6 +12773,7 @@ mod draft_staging_tests {
             in_reply_to_header: None,
             attachments: Vec::new(),
             request_read_receipt: false,
+            importance: Default::default(),
         };
         let thread_of = |message_id: i64| {
             let core = core.clone();

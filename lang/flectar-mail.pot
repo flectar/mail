@@ -412,7 +412,7 @@ msgid "New address-book entry"
 msgstr ""
 
 #: ui/app.slint:235 ui/app.slint:1389 ui/components/composer-fields.slint:91
-#: ui/app.slint:235 ui/app.slint:1389 ui/components/composer-fields.slint:91 ui/components/email-composer.slint:59
+#: ui/app.slint:235 ui/app.slint:1389 ui/components/composer-fields.slint:91 ui/components/email-composer.slint:60
 msgid "No connected account"
 msgstr ""
 
@@ -464,8 +464,8 @@ msgstr[1] ""
 #. Local mail has no archive or spam.
 #: ui/app.slint:253 ui/dialogs/move-dialog.slint:45
 #: ui/app.slint:253 ui/dialogs/move-dialog.slint:45
-#: ui/app.slint:253 ui/dialogs/move-dialog.slint:45 ui/views/mail-list-pane.slint:1641
-#: ui/app.slint:253 ui/dialogs/move-dialog.slint:45 ui/views/mail-list-pane.slint:1641 ui/views/mail-reading-pane.slint:381
+#: ui/app.slint:253 ui/dialogs/move-dialog.slint:45 ui/views/mail-list-pane.slint:1656
+#: ui/app.slint:253 ui/dialogs/move-dialog.slint:45 ui/views/mail-list-pane.slint:1656 ui/views/mail-reading-pane.slint:381
 msgid "Archive"
 msgstr ""
 
@@ -2146,7 +2146,7 @@ msgstr ""
 msgid "{} wrote:"
 msgstr ""
 
-#: ui/app.slint:731 ui/components/email-composer.slint:900
+#: ui/app.slint:731 ui/components/email-composer.slint:901
 msgid "Forwarded message"
 msgstr ""
 
@@ -2350,8 +2350,8 @@ msgstr ""
 msgid "Email template inserted."
 msgstr ""
 
-#: ui/app.slint:780 ui/components/composer-actions.slint:895
-#: ui/app.slint:780 ui/components/composer-actions.slint:895
+#: ui/app.slint:780 ui/components/composer-actions.slint:897
+#: ui/app.slint:780 ui/components/composer-actions.slint:897
 msgid "Share files by link"
 msgstr ""
 
@@ -2667,7 +2667,7 @@ msgstr ""
 msgid "Drop to start a new message"
 msgstr ""
 
-#: ui/app.slint:2536 ui/components/email-composer.slint:1199
+#: ui/app.slint:2536 ui/components/email-composer.slint:1201
 msgid "Pictures go in the text, and other files are attached."
 msgstr ""
 
@@ -4101,128 +4101,136 @@ msgid_plural "{n} photos, {0}"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/components/composer-actions.slint:844
+#: ui/components/composer-actions.slint:846
 msgid "Save signature"
 msgstr ""
 
-#: ui/components/composer-actions.slint:865
+#: ui/components/composer-actions.slint:867
 msgid "Sending…"
 msgstr ""
 
-#: ui/components/composer-actions.slint:865
+#: ui/components/composer-actions.slint:867
 msgid "Send"
 msgstr ""
 
-#: ui/components/composer-actions.slint:882
-#: ui/components/composer-actions.slint:882
+#: ui/components/composer-actions.slint:884
+#: ui/components/composer-actions.slint:884
 msgid "Attach files"
 msgstr ""
 
-#: ui/components/composer-actions.slint:917
+#: ui/components/composer-actions.slint:919
 msgid "Save draft"
 msgstr ""
 
-#: ui/components/composer-actions.slint:937
+#: ui/components/composer-actions.slint:939
 msgid "More options"
 msgstr ""
 
-#: ui/components/composer-actions.slint:943
+#: ui/components/composer-actions.slint:945
 msgid "Request a read receipt"
 msgstr ""
 
-#: ui/components/composer-actions.slint:954
-#: ui/components/composer-actions.slint:954
-#: ui/components/composer-actions.slint:954
+#: ui/components/composer-actions.slint:951 ui/views/mail-list-pane.slint:1162
+msgid "High importance"
+msgstr ""
+
+#: ui/components/composer-actions.slint:957
+msgid "Low importance"
+msgstr ""
+
+#: ui/components/composer-actions.slint:968
+#: ui/components/composer-actions.slint:968
+#: ui/components/composer-actions.slint:968
 msgid "Discard"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1012
+#: ui/components/composer-actions.slint:1026
 msgctxt "image"
 msgid "Size"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1020
-#: ui/components/composer-actions.slint:1020
+#: ui/components/composer-actions.slint:1034
+#: ui/components/composer-actions.slint:1034
 msgctxt "image size"
 msgid "Small"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1021
-#: ui/components/composer-actions.slint:1021
+#: ui/components/composer-actions.slint:1035
+#: ui/components/composer-actions.slint:1035
 msgctxt "image size"
 msgid "Medium"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1022
-#: ui/components/composer-actions.slint:1022
+#: ui/components/composer-actions.slint:1036
+#: ui/components/composer-actions.slint:1036
 msgctxt "image size"
 msgid "Large"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1023
-#: ui/components/composer-actions.slint:1023
+#: ui/components/composer-actions.slint:1037
+#: ui/components/composer-actions.slint:1037
 msgctxt "image size"
 msgid "Original size"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1028
-#: ui/components/composer-actions.slint:1028
-#: ui/components/composer-actions.slint:1028
+#: ui/components/composer-actions.slint:1042
+#: ui/components/composer-actions.slint:1042
+#: ui/components/composer-actions.slint:1042
 msgid "Alt text"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1043
+#: ui/components/composer-actions.slint:1057
 msgid "Remove image"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1192
+#: ui/components/composer-actions.slint:1206
 msgid ""
 "Screen readers read it in place of the image. Leave it empty if the image is "
 "only decoration."
 msgstr ""
 
-#: ui/components/composer-actions.slint:1213
+#: ui/components/composer-actions.slint:1227
 msgid "Describe the image"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1259
-#: ui/components/composer-actions.slint:1259
+#: ui/components/composer-actions.slint:1273
+#: ui/components/composer-actions.slint:1273
 msgid "Apply"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1308
+#: ui/components/composer-actions.slint:1322
 msgid "Edit link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1308
+#: ui/components/composer-actions.slint:1322
 msgid "Add link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1319
+#: ui/components/composer-actions.slint:1333
 msgid "The selected text will open this address."
 msgstr ""
 
-#: ui/components/composer-actions.slint:1340 ui/views/contacts-view.slint:803
+#: ui/components/composer-actions.slint:1354 ui/views/contacts-view.slint:803
 msgid "https://example.com"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1435
+#: ui/components/composer-actions.slint:1449
 msgid "Discard changes to this signature?"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1435
+#: ui/components/composer-actions.slint:1449
 msgid "Discard this draft?"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1446
+#: ui/components/composer-actions.slint:1460
 msgid "What you changed since it was last saved won't be kept."
 msgstr ""
 
-#: ui/components/composer-actions.slint:1446
+#: ui/components/composer-actions.slint:1460
 msgid "The message and its attachments will be removed from this composer."
 msgstr ""
 
-#: ui/components/composer-actions.slint:1457
+#: ui/components/composer-actions.slint:1471
 msgid "Keep"
 msgstr ""
 
@@ -4347,133 +4355,133 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
-#: ui/components/email-composer.slint:451
-#: ui/components/email-composer.slint:451
+#: ui/components/email-composer.slint:452
+#: ui/components/email-composer.slint:452
 msgid "From"
 msgstr ""
 
-#: ui/components/email-composer.slint:452
+#: ui/components/email-composer.slint:453
 msgid "Verified sender identity"
 msgstr ""
 
-#: ui/components/email-composer.slint:573
+#: ui/components/email-composer.slint:574
 msgid "Write your message…"
 msgstr ""
 
-#: ui/components/email-composer.slint:747
+#: ui/components/email-composer.slint:748
 msgid "No suggestions"
 msgstr ""
 
-#: ui/components/email-composer.slint:751
+#: ui/components/email-composer.slint:752
 msgid "Add to dictionary"
 msgstr ""
 
-#: ui/components/email-composer.slint:755 ui/read-receipts.slint:97
+#: ui/components/email-composer.slint:756 ui/read-receipts.slint:97
 msgid "Ignore"
 msgstr ""
 
-#: ui/components/email-composer.slint:760
+#: ui/components/email-composer.slint:761
 msgid "Image size"
 msgstr ""
 
-#: ui/components/email-composer.slint:767
+#: ui/components/email-composer.slint:768
 msgid "Alt text…"
 msgstr ""
 
-#: ui/components/email-composer.slint:775
+#: ui/components/email-composer.slint:776
 msgid "Cut"
 msgstr ""
 
-#: ui/components/email-composer.slint:785
+#: ui/components/email-composer.slint:786
 msgid "Paste"
 msgstr ""
 
-#: ui/components/email-composer.slint:790
+#: ui/components/email-composer.slint:791
 msgid "Paste as plain text"
 msgstr ""
 
-#: ui/components/email-composer.slint:795
+#: ui/components/email-composer.slint:796
 msgid "Select all"
 msgstr ""
 
-#: ui/components/email-composer.slint:801
+#: ui/components/email-composer.slint:802
 msgid "Spelling"
 msgstr ""
 
-#: ui/components/email-composer.slint:803
-#: ui/components/email-composer.slint:803
+#: ui/components/email-composer.slint:804
+#: ui/components/email-composer.slint:804
 msgid "Check spelling"
 msgstr ""
 
-#: ui/components/email-composer.slint:817
+#: ui/components/email-composer.slint:818
 msgid "No dictionaries installed"
 msgstr ""
 
-#: ui/components/email-composer.slint:900
+#: ui/components/email-composer.slint:901
 msgid "Quoted text"
 msgstr ""
 
-#: ui/components/email-composer.slint:906
+#: ui/components/email-composer.slint:907
 msgid "Hide the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:906
+#: ui/components/email-composer.slint:907
 msgid "Show the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:917
+#: ui/components/email-composer.slint:918
 msgid "Edit the quoted message as text"
 msgstr ""
 
-#: ui/components/email-composer.slint:928
+#: ui/components/email-composer.slint:929
 msgid "Remove the forwarded message"
 msgstr ""
 
-#: ui/components/email-composer.slint:928
+#: ui/components/email-composer.slint:929
 msgid "Remove the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:959
+#: ui/components/email-composer.slint:960
 msgid "Add the forwarded message back"
 msgstr ""
 
-#: ui/components/email-composer.slint:959
+#: ui/components/email-composer.slint:960
 msgid "Add the quoted text back"
 msgstr ""
 
-#: ui/components/email-composer.slint:1117
+#: ui/components/email-composer.slint:1119
 msgid "Send without a subject?"
 msgstr ""
 
-#: ui/components/email-composer.slint:1117
+#: ui/components/email-composer.slint:1119
 msgid "Did you mean to attach a file?"
 msgstr ""
 
-#: ui/components/email-composer.slint:1119
+#: ui/components/email-composer.slint:1121
 msgid "People see the subject first, in their list of mail."
 msgstr ""
 
-#: ui/components/email-composer.slint:1120
+#: ui/components/email-composer.slint:1122
 msgid "The message mentions “{}”, but has no file attached."
 msgstr ""
 
-#: ui/components/email-composer.slint:1122
+#: ui/components/email-composer.slint:1124
 msgid "Send without subject"
 msgstr ""
 
-#: ui/components/email-composer.slint:1122
+#: ui/components/email-composer.slint:1124
 msgid "Send anyway"
 msgstr ""
 
-#: ui/components/email-composer.slint:1123
+#: ui/components/email-composer.slint:1125
 msgid "Add a subject"
 msgstr ""
 
-#: ui/components/email-composer.slint:1124
+#: ui/components/email-composer.slint:1126
 msgid "Attach files…"
 msgstr ""
 
-#: ui/components/email-composer.slint:1191
+#: ui/components/email-composer.slint:1193
 msgid "Drop to add to your message"
 msgstr ""
 
@@ -5208,7 +5216,7 @@ msgstr ""
 msgid "Hide until the next version"
 msgstr ""
 
-#: ui/components/sidebar.slint:189 ui/views/mail-list-pane.slint:1772
+#: ui/components/sidebar.slint:189 ui/views/mail-list-pane.slint:1787
 msgid "New email"
 msgstr ""
 
@@ -9541,19 +9549,19 @@ msgstr ""
 msgid "Open in new tabs"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:996 ui/views/mail-list-pane.slint:1636
+#: ui/views/mail-list-pane.slint:996 ui/views/mail-list-pane.slint:1651
 msgid "Open in new tab"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1001 ui/views/mail-list-pane.slint:1643
-#: ui/views/mail-list-pane.slint:1001 ui/views/mail-list-pane.slint:1643 ui/views/mail-reading-pane.slint:382
-#: ui/views/mail-list-pane.slint:1001 ui/views/mail-list-pane.slint:1643 ui/views/mail-reading-pane.slint:382 ui/views/mail-reading-pane.slint:425
+#: ui/views/mail-list-pane.slint:1001 ui/views/mail-list-pane.slint:1658
+#: ui/views/mail-list-pane.slint:1001 ui/views/mail-list-pane.slint:1658 ui/views/mail-reading-pane.slint:382
+#: ui/views/mail-list-pane.slint:1001 ui/views/mail-list-pane.slint:1658 ui/views/mail-reading-pane.slint:382 ui/views/mail-reading-pane.slint:425
 msgid "Move to…"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1008 ui/views/mail-list-pane.slint:1650
-#: ui/views/mail-list-pane.slint:1008 ui/views/mail-list-pane.slint:1650 ui/views/mail-reading-pane.slint:383
-#: ui/views/mail-list-pane.slint:1008 ui/views/mail-list-pane.slint:1650 ui/views/mail-reading-pane.slint:383 ui/views/mail-reading-pane.slint:426
+#: ui/views/mail-list-pane.slint:1008 ui/views/mail-list-pane.slint:1665
+#: ui/views/mail-list-pane.slint:1008 ui/views/mail-list-pane.slint:1665 ui/views/mail-reading-pane.slint:383
+#: ui/views/mail-list-pane.slint:1008 ui/views/mail-list-pane.slint:1665 ui/views/mail-reading-pane.slint:383 ui/views/mail-reading-pane.slint:426
 msgid "Copy to…"
 msgstr ""
 
@@ -9563,24 +9571,24 @@ msgstr ""
 msgid "Forward as attachment"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1019 ui/views/mail-list-pane.slint:1639
-#: ui/views/mail-list-pane.slint:1019 ui/views/mail-list-pane.slint:1639 ui/views/mail-reading-pane.slint:380
-#: ui/views/mail-list-pane.slint:1019 ui/views/mail-list-pane.slint:1639 ui/views/mail-reading-pane.slint:380 ui/views/mail-reading-pane.slint:424
-#: ui/views/mail-list-pane.slint:1019 ui/views/mail-list-pane.slint:1639 ui/views/mail-reading-pane.slint:380 ui/views/mail-reading-pane.slint:424
+#: ui/views/mail-list-pane.slint:1019 ui/views/mail-list-pane.slint:1654
+#: ui/views/mail-list-pane.slint:1019 ui/views/mail-list-pane.slint:1654 ui/views/mail-reading-pane.slint:380
+#: ui/views/mail-list-pane.slint:1019 ui/views/mail-list-pane.slint:1654 ui/views/mail-reading-pane.slint:380 ui/views/mail-reading-pane.slint:424
+#: ui/views/mail-list-pane.slint:1019 ui/views/mail-list-pane.slint:1654 ui/views/mail-reading-pane.slint:380 ui/views/mail-reading-pane.slint:424
 msgid "Mark as unread"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1020 ui/views/mail-list-pane.slint:1638
-#: ui/views/mail-list-pane.slint:1020 ui/views/mail-list-pane.slint:1638 ui/views/mail-reading-pane.slint:372
-#: ui/views/mail-list-pane.slint:1020 ui/views/mail-list-pane.slint:1638 ui/views/mail-reading-pane.slint:372 ui/views/mail-reading-pane.slint:416
-#: ui/views/mail-list-pane.slint:1020 ui/views/mail-list-pane.slint:1638 ui/views/mail-reading-pane.slint:372 ui/views/mail-reading-pane.slint:416
+#: ui/views/mail-list-pane.slint:1020 ui/views/mail-list-pane.slint:1653
+#: ui/views/mail-list-pane.slint:1020 ui/views/mail-list-pane.slint:1653 ui/views/mail-reading-pane.slint:372
+#: ui/views/mail-list-pane.slint:1020 ui/views/mail-list-pane.slint:1653 ui/views/mail-reading-pane.slint:372 ui/views/mail-reading-pane.slint:416
+#: ui/views/mail-list-pane.slint:1020 ui/views/mail-list-pane.slint:1653 ui/views/mail-reading-pane.slint:372 ui/views/mail-reading-pane.slint:416
 msgid "Star message"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1021 ui/views/mail-list-pane.slint:1638
-#: ui/views/mail-list-pane.slint:1021 ui/views/mail-list-pane.slint:1638 ui/views/mail-reading-pane.slint:372
-#: ui/views/mail-list-pane.slint:1021 ui/views/mail-list-pane.slint:1638 ui/views/mail-reading-pane.slint:372 ui/views/mail-reading-pane.slint:416
-#: ui/views/mail-list-pane.slint:1021 ui/views/mail-list-pane.slint:1638 ui/views/mail-reading-pane.slint:372 ui/views/mail-reading-pane.slint:416
+#: ui/views/mail-list-pane.slint:1021 ui/views/mail-list-pane.slint:1653
+#: ui/views/mail-list-pane.slint:1021 ui/views/mail-list-pane.slint:1653 ui/views/mail-reading-pane.slint:372
+#: ui/views/mail-list-pane.slint:1021 ui/views/mail-list-pane.slint:1653 ui/views/mail-reading-pane.slint:372 ui/views/mail-reading-pane.slint:416
+#: ui/views/mail-list-pane.slint:1021 ui/views/mail-list-pane.slint:1653 ui/views/mail-reading-pane.slint:372 ui/views/mail-reading-pane.slint:416
 msgid "Remove star"
 msgstr ""
 
@@ -9600,37 +9608,37 @@ msgstr ""
 msgid "Replied"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1363
+#: ui/views/mail-list-pane.slint:1378
 msgid "{} messages in this conversation"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1455
+#: ui/views/mail-list-pane.slint:1470
 msgid "Account: {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1628
+#: ui/views/mail-list-pane.slint:1643
 msgid "Deselect {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1657 ui/views/mail-reading-pane.slint:340
-#: ui/views/mail-list-pane.slint:1657 ui/views/mail-reading-pane.slint:340 ui/views/mail-reading-pane.slint:387
-#: ui/views/mail-list-pane.slint:1657 ui/views/mail-reading-pane.slint:340 ui/views/mail-reading-pane.slint:387 ui/views/mail-reading-pane.slint:427
+#: ui/views/mail-list-pane.slint:1672 ui/views/mail-reading-pane.slint:340
+#: ui/views/mail-list-pane.slint:1672 ui/views/mail-reading-pane.slint:340 ui/views/mail-reading-pane.slint:387
+#: ui/views/mail-list-pane.slint:1672 ui/views/mail-reading-pane.slint:340 ui/views/mail-reading-pane.slint:387 ui/views/mail-reading-pane.slint:427
 msgid "Delete permanently…"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1737 ui/views/onboarding-view.slint:141
+#: ui/views/mail-list-pane.slint:1752 ui/views/onboarding-view.slint:141
 msgid "Opening your mailbox…"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1737
+#: ui/views/mail-list-pane.slint:1752
 msgid "Nothing here"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1739
+#: ui/views/mail-list-pane.slint:1754
 msgid "Try another folder or search term."
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1739
+#: ui/views/mail-list-pane.slint:1754
 msgid "No mail on this device matches."
 msgstr ""
 

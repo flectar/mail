@@ -249,6 +249,7 @@ impl Controller {
             in_reply_to_header: None,
             attachments: Vec::new(),
             request_read_receipt: false,
+            importance: Default::default(),
         });
     }
 

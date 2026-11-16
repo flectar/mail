@@ -73,18 +73,22 @@ const METADATA_HEADERS: &[&str] = &[
     "Disposition-Notification-Options",
     "Disposition-Notification-To",
     "From",
+    "Importance",
     "In-Reply-To",
     "List-Id",
     "List-Unsubscribe",
     "List-Unsubscribe-Post",
     "Message-ID",
     "Precedence",
+    "Priority",
     "References",
     "Reply-To",
     "Return-Path",
     "Sender",
     "Subject",
     "To",
+    "X-MSMail-Priority",
+    "X-Priority",
 ];
 
 type RemoteDraftAttachment = (Option<String>, Option<String>, String, Option<String>);
@@ -2163,6 +2167,7 @@ async fn store_resources(
                         // Gmail keeps no keywords for it; this device
                         // records the answer.
                         receipt_handled: false,
+                        importance: resource.headers.importance,
                     };
                     let id = repo::messages::insert(&tx, &message, thread_id)?;
                     tx.execute(
@@ -3309,9 +3314,14 @@ async fn prepare_draft(
         .nth(1)
         .unwrap_or("localhost")
         .to_owned();
-    let receipt_to = ctx
+    let (receipt_to, importance) = ctx
         .db
-        .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+        .read(move |conn| {
+            Ok((
+                repo::messages::receipt_to(conn, draft_id)?,
+                repo::messages::importance(conn, draft_id)?,
+            ))
+        })
         .await?;
     let outgoing = crate::mime::OutgoingMessage {
         from,
@@ -3328,6 +3338,7 @@ async fn prepare_draft(
         message_id_domain: &domain,
         attachments,
         receipt_to: &receipt_to,
+        importance,
     };
     let security_recipients = outgoing
         .to

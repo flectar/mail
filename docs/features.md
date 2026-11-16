@@ -19,6 +19,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Undo send](#undo-send)
 - [Unsubscribing](#unsubscribing)
 - [Blocking senders](#blocking-senders)
+- [Importance](#importance)
 - [Read receipts](#read-receipts)
 - [Calendar invitations](#calendar-invitations)
 - [AI agents](#ai-agents)
@@ -569,6 +570,14 @@ mail in the inbox until Flectar Mail checks for mail.
 
 **Unblock sender** in the same menu, or **Unblock** in Settings → Contacts →
 Blocked senders, stops it. Mail already in Spam stays there.
+
+## Importance
+
+**High importance** and **Low importance** under **More options** in the
+composer mark how important a message is, and a draft keeps the choice. The
+message carries it in the Importance and X-Priority headers, which Outlook,
+Thunderbird and webmail read. Mail that arrives marked high importance shows a
+red mark in the mail list, also for a conversation with such a message in it.
 
 ## Read receipts
 
