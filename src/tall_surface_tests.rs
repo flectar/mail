@@ -1,6 +1,7 @@
-//! Slint's software renderer (CPU mode) panics when it paints a rectangle
-//! reaching past ±32767 physical pixels (#35). Surfaces that grow with their
-//! content must keep painting what is on screen, and only that.
+//! Surfaces that grow with their content, such as a long server diagnostic or
+//! hundreds of sender identities. Before Slint 1.19, the software renderer
+//! (CPU mode) panicked when it painted a rectangle reaching past ±32767
+//! physical pixels (#35).
 use super::*;
 use slint::Rgb8Pixel;
 use slint::platform::{
@@ -19,9 +20,8 @@ slint::slint! {
     #[edition = "1.19"]
     import { ScrollView } from "std-widgets.slint";
     import { CopyableDiagnostic } from "../ui/components/copyable-diagnostic.slint";
-    import { OnScreenSurface } from "../ui/components/on-screen-surface.slint";
 
-    component Panel inherits OnScreenSurface {
+    component Panel inherits Rectangle {
         in property <int> rows;
         background: #00ff00;
         border-radius: 10px;
@@ -46,7 +46,7 @@ slint::slint! {
             content-width: self.visible-width;
             content-height: column.preferred-height;
             column := VerticalLayout {
-                status-box := OnScreenSurface {
+                status-box := Rectangle {
                     height: max(36px, status-text.preferred-height + 16px);
                     background: #ff0000;
                     border-radius: 8px;
@@ -65,10 +65,44 @@ slint::slint! {
             }
         }
     }
+
+    // Avatars and attachment thumbnails clip to their rounded corners, and a
+    // long message or thread scrolls them far out of view.
+    export component RoundedClips inherits Window {
+        in property <length> scroll-y;
+        width: 400px;
+        height: 300px;
+        background: #ffffff;
+        Flickable {
+            content-height: 40400px;
+            content-y: root.scroll-y;
+            far := Rectangle {
+                x: 20px;
+                y: 20000px;
+                width: 100px;
+                height: 40px;
+                border-radius: 8px;
+                clip: true;
+                background: #ff0000;
+            }
+            tall := Rectangle {
+                x: 140px;
+                y: 50px;
+                width: 200px;
+                height: 40000px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #000000;
+                clip: true;
+                background: #0000ff;
+                Rectangle { background: #00ff00; }
+            }
+        }
+    }
 }
 
 #[test]
-fn tall_surfaces_paint_only_what_is_on_screen() {
+fn tall_surfaces_paint_with_the_software_renderer() {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
     slint::platform::set_platform(Box::new(Headless(window.clone()))).unwrap();
     let ui = TallSurfaces::new().unwrap();
@@ -206,4 +240,54 @@ fn account_cards_paint_long_sync_errors() {
     }
     assert!(app.get_settings_open());
     app.hide().unwrap();
+}
+
+#[test]
+fn rounded_clips_paint_far_out_of_view() {
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(Headless(window.clone()))).unwrap();
+    let ui = RoundedClips::new().unwrap();
+    ui.window()
+        .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 2.0 });
+    let (width, height) = (800, 600);
+    ui.window()
+        .set_size(slint::PhysicalSize::new(width, height));
+    ui.show().unwrap();
+    let mut pixels = vec![Rgb8Pixel::default(); (width * height) as usize];
+    let mut paint_at = |scroll_y: f32| {
+        ui.set_scroll_y(scroll_y);
+        ui.window().request_redraw();
+        window.draw_if_needed(|r| {
+            r.render(&mut pixels, width as usize);
+        });
+        pixels.clone()
+    };
+    let at = |frame: &[Rgb8Pixel], x: u32, y: u32| {
+        let pixel = frame[(y * width + x) as usize];
+        (pixel.r, pixel.g, pixel.b)
+    };
+    let white = (255, 255, 255);
+    let green = (0, 255, 0);
+    // The small clip 40000 physical pixels below, and the top of the tall one,
+    // whose corner stays rounded.
+    let top = paint_at(0.0);
+    assert_eq!(at(&top, 500, 400), green);
+    assert_eq!(
+        at(&top, 280, 100),
+        white,
+        "the tall clip's corner must stay rounded"
+    );
+    // Inside the tall clip, both of its ends out of range.
+    let middle = paint_at(-20000.0);
+    assert_eq!(at(&middle, 500, 300), green);
+    assert_eq!(at(&middle, 270, 300), white);
+    // Its bottom end, which ends at 500 physical pixels.
+    let bottom = paint_at(-39800.0);
+    assert_eq!(at(&bottom, 500, 300), green);
+    assert_eq!(
+        at(&bottom, 280, 499),
+        white,
+        "the tall clip's corner must stay rounded"
+    );
+    ui.hide().unwrap();
 }

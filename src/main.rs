@@ -66,8 +66,6 @@ pub use notifications::{
 };
 mod number_format;
 mod oauth_browser;
-#[cfg(test)]
-mod on_screen_surface_tests;
 pub mod pdf_preview;
 mod photo_shrink;
 pub mod platform;
@@ -102,6 +100,8 @@ mod single_instance;
 mod startup;
 mod startup_metrics;
 mod tabs;
+#[cfg(test)]
+mod tall_surface_tests;
 mod text_size;
 mod theme;
 mod ui_dispatch;
