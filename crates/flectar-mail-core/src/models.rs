@@ -1379,6 +1379,100 @@ pub struct BlockResult {
     pub moved: usize,
 }
 
+/// A rule that sorts new mail as it arrives in an Inbox (#238). Rules are
+/// tried top to bottom.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailRule {
+    /// 0 for a rule not saved yet.
+    pub id: i64,
+    /// The account whose mail it sorts, or None for every account's.
+    pub account_id: Option<i64>,
+    pub name: String,
+    pub enabled: bool,
+    /// Whether mail must meet every condition, or any one.
+    pub match_all: bool,
+    pub conditions: Vec<RuleCondition>,
+    pub actions: Vec<RuleAction>,
+    /// Whether later rules leave alone the mail this one matched. Filing
+    /// mail away (move, archive, trash, junk) always ends the rules.
+    pub stop: bool,
+}
+
+/// What one condition of a [`MailRule`] tests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleCondition {
+    pub field: RuleField,
+    pub op: RuleOp,
+    /// The text to look for, the pattern, or the size in KB.
+    #[serde(default)]
+    pub value: String,
+    /// Whether the condition holds when the test fails, as in "doesn't
+    /// contain".
+    #[serde(default)]
+    pub negate: bool,
+}
+
+/// The part of a message a [`RuleCondition`] tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuleField {
+    /// The sender's address or name.
+    From,
+    To,
+    Cc,
+    /// Any recipient in To or Cc.
+    ToOrCc,
+    Subject,
+    /// The List-Id of mailing list mail.
+    MailingList,
+    /// The message's size in KB.
+    Size,
+}
+
+/// How a [`RuleCondition`] compares. Text is compared without regard to
+/// case, an address by its email and by its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuleOp {
+    Contains,
+    Is,
+    StartsWith,
+    EndsWith,
+    /// A regular expression, found anywhere in the text.
+    Matches,
+    /// The field is there at all, as mailing list mail has a List-Id.
+    Exists,
+    /// A size larger than the value.
+    Over,
+    /// A size smaller than the value.
+    Under,
+}
+
+/// What a [`MailRule`] does with mail it matches. Mail is marked and
+/// labeled first, then copied, then filed away.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RuleAction {
+    /// Into one of the rule's account's folders.
+    Move {
+        folder: i64,
+    },
+    /// Into one more folder, where a message can be in several (JMAP).
+    Copy {
+        folder: i64,
+    },
+    Label {
+        label: i64,
+    },
+    MarkRead,
+    Star,
+    Archive,
+    Trash,
+    Junk,
+}
+
 /// How the user can leave a mailing list, for the confirmation shown before
 /// anything is sent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

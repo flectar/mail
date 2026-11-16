@@ -1625,7 +1625,7 @@ async fn run_cycle(
     // Give queued mutations one bounded turn before checking Inbox. This keeps
     // an Inbox catch-up from starving moves while the following Inbox pass
     // ensures a large mutation queue cannot starve newly arrived mail.
-    let action_slice = queue::execute_due(ctx, config, session).await?;
+    let mut action_slice = queue::execute_due(ctx, config, session).await?;
 
     // Every fifth cycle re-checks read state and removals in every folder:
     // STATUS does not report stars, labels, or a message read while another
@@ -1676,6 +1676,17 @@ async fn run_cycle(
         if !inbox_forward_remaining {
             caught_up(ctx, account_id, started).await;
         }
+    }
+
+    // Rules and blocked senders file away mail that just arrived. Move it on
+    // the server in this pass, not after the next wait for new mail.
+    if !action_slice.due_remaining
+        && ctx
+            .db
+            .read(move |conn| repo::actions::has_due_except_send(conn, account_id, now_ms()))
+            .await?
+    {
+        action_slice = queue::execute_due(ctx, config, session).await?;
     }
 
     // A manual Sync Now resolves at the foreground Inbox boundary. Finish any
@@ -2818,6 +2829,11 @@ enum NewHeaders {
 /// refreshes, of the newly inserted messages and of those that moved to the
 /// folder of their server copy, `fresh` only for threads that queued a
 /// notification for an unread, incoming, recent message.
+///
+/// `notify_min_uid` is set for the Inbox's forward scan, whose new mail is
+/// what rules sort (#238), as Thunderbird filters UIDs past the highest it
+/// has seen. Mail from that UID on arrived while the account was followed,
+/// and may notify.
 async fn store_headers(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -2837,6 +2853,9 @@ async fn store_headers(
         .write(move |conn| {
             let tx = conn.transaction()?;
             let mut importer = super::ingest::Importer::new(&tx, account_id)?;
+            let sorter = notify_min_uid
+                .map(|_| crate::rules::Sorter::load(&tx, account_id))
+                .transpose()?;
             let mut max_uid: i64 = 0;
             let mut inserted = 0u32;
             let mut moved_threads = Vec::new();
@@ -2976,11 +2995,19 @@ async fn store_headers(
                 if crate::turn_away(&tx, msg_id)? {
                     continue;
                 }
-                importer.learn_contacts(&tx, &parsed, &imported)?;
+                // Then rules sort it. What they file away or mark read stays
+                // silent.
+                let sorted = match &sorter {
+                    Some(sorter) => sorter.arrived(&tx, msg_id)?,
+                    None => Default::default(),
+                };
+                if !sorted.unwanted {
+                    importer.learn_contacts(&tx, &parsed, &imported)?;
+                }
                 // Only mail past the inbox watermark arrived while this
                 // account was being followed.
                 let live = notify_min_uid.is_some_and(|min_uid| fh.uid >= min_uid);
-                importer.announce(&tx, &imported, live)?;
+                importer.announce(&tx, &imported, live && !sorted.silent())?;
             }
 
             if max_uid > 0 && new_headers == NewHeaders::Insert {

@@ -588,6 +588,73 @@ async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
 }
 
 #[tokio::test]
+async fn rules_sort_new_mail_but_not_what_a_first_sync_finds() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let (_dir, ctx, config) = fixture().await;
+    ctx.db
+        .write(|conn| {
+            conn.execute(
+                "INSERT INTO folders (id, account_id, path, role, jmap_id)
+                 VALUES (3, 1, 'Lists', NULL, 'lists-remote')",
+                [],
+            )?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(1),
+                    name: "Lists".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::From,
+                        op: RuleOp::Is,
+                        value: "sender@mail.example".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::Move { folder: 3 }],
+                    stop: false,
+                },
+                0,
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let folder_of = |jmap_id: &'static str| {
+        let ctx = ctx.clone();
+        async move {
+            ctx.db
+                .read(move |conn| {
+                    Ok(repo::messages::by_jmap_id(conn, 1, jmap_id)?
+                        .and_then(|message| message.folder_id))
+                })
+                .await
+                .unwrap()
+        }
+    };
+    let (connected, task) = server(vec![email("old", "conversation-old")], None, None).await;
+    run_sync(&ctx, &config, &connected).await.unwrap();
+    task.abort();
+    assert_eq!(folder_of("old").await, Some(1));
+
+    let changes = json!({"created": ["new"], "updated": [], "destroyed": []});
+    let (connected, task) = server(
+        vec![
+            email("old", "conversation-old"),
+            email("new", "conversation-new"),
+        ],
+        Some(changes),
+        None,
+    )
+    .await;
+    run_sync(&ctx, &config, &connected).await.unwrap();
+    task.abort();
+    assert_eq!(folder_of("old").await, Some(1));
+    assert_eq!(folder_of("new").await, Some(3));
+}
+
+#[tokio::test]
 async fn live_inbox_arrivals_queue_notifications() {
     let (_dir, ctx, config) = fixture().await;
     ctx.db

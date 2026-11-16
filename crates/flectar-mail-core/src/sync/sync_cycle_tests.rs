@@ -754,6 +754,90 @@ async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
 }
 
 #[tokio::test]
+async fn rules_sort_new_inbox_mail_and_what_they_file_away_stays_silent() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let (_dir, ctx, config, folder) = deleted_mail_context(1).await;
+    let (account_id, inbox) = (config.id, folder.id);
+    let news = ctx
+        .db
+        .write(move |conn| {
+            let news = repo::folders::upsert(conn, account_id, "News", Some("/"), None)?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(account_id),
+                    name: "News".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::Subject,
+                        op: RuleOp::Is,
+                        value: "message 60".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::Move { folder: news }],
+                    stop: false,
+                },
+                0,
+            )?;
+            Ok(news)
+        })
+        .await
+        .unwrap();
+    let (updated, fresh) = store_headers(
+        &ctx,
+        &config,
+        &folder,
+        vec![deletion_header(60, false), deletion_header(61, false)],
+        Some(1),
+        NewHeaders::Insert,
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.len(), 2);
+    // Only the mail the rule left in the Inbox notifies.
+    assert_eq!(fresh.len(), 1);
+    ctx.db
+        .read(move |conn| {
+            let filed = repo::messages::get_row(
+                conn,
+                conn.query_row(
+                    "SELECT id FROM messages WHERE message_id = 'deletion-60@example.test'",
+                    [],
+                    |row| row.get(0),
+                )?,
+            )?
+            .unwrap();
+            assert_eq!(filed.folder_id, Some(news));
+            let kind: String = conn.query_row(
+                "SELECT kind FROM pending_actions WHERE message_id = ?1",
+                [filed.id],
+                |row| row.get(0),
+            )?;
+            assert_eq!(kind, "move");
+            assert!(repo::messages::by_folder_uid(conn, inbox, 61)?.is_some());
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // What a history pass finds stays where the server has it.
+    let mut old = deletion_header(40, false);
+    old.header_bytes = b"Message-ID: <old-40@example.test>\r\nFrom: sender@example.test\r\nSubject: Message 60\r\n\r\n".to_vec();
+    store_headers(&ctx, &config, &folder, vec![old], None, NewHeaders::Insert)
+        .await
+        .unwrap();
+    ctx.db
+        .read(move |conn| {
+            assert!(repo::messages::by_folder_uid(conn, inbox, 40)?.is_some());
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn reload_removes_deleted_messages_even_outside_flag_window() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();

@@ -39,6 +39,7 @@ pub mod pop3;
 pub mod queue;
 mod read_receipts;
 pub mod route;
+pub mod rules;
 pub mod scheduler;
 pub mod search;
 pub mod sender_identities;
@@ -4087,6 +4088,41 @@ impl Core {
     /// Every blocked sender, alphabetically.
     pub async fn blocked_senders(&self) -> Result<Vec<BlockedSender>> {
         self.db.read(|conn| repo::blocked::list(conn)).await
+    }
+
+    /// Every rule that sorts new mail, in the order they are tried (#238).
+    pub async fn mail_rules(&self) -> Result<Vec<MailRule>> {
+        self.db.read(|conn| repo::rules::list(conn)).await
+    }
+
+    /// Save `rule`, a new one (id 0) or a changed one, once it checks out. A
+    /// new rule goes last. Rules sort mail that arrives from then on.
+    pub async fn save_mail_rule(&self, rule: MailRule) -> Result<MailRule> {
+        self.db
+            .write(move |conn| {
+                rules::check(conn, &rule)?;
+                repo::rules::save(conn, &rule, now_ms())
+            })
+            .await
+    }
+
+    pub async fn delete_mail_rule(&self, id: i64) -> Result<()> {
+        self.db
+            .write(move |conn| repo::rules::delete(conn, id))
+            .await
+    }
+
+    pub async fn set_mail_rule_enabled(&self, id: i64, enabled: bool) -> Result<()> {
+        self.db
+            .write(move |conn| repo::rules::set_enabled(conn, id, enabled, now_ms()))
+            .await
+    }
+
+    /// Try the rules in the order of `ids` from now on.
+    pub async fn reorder_mail_rules(&self, ids: Vec<i64>) -> Result<()> {
+        self.db
+            .write(move |conn| repo::rules::reorder(conn, &ids))
+            .await
     }
 
     /// When a mail-list row's timeline puts it, which a page that starts at

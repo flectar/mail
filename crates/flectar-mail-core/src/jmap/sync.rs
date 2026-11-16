@@ -1187,6 +1187,19 @@ async fn persist_emails(
             // Threads queued for a new-mail notification, once each.
             let mut notified_threads = Vec::new();
             let mut stale_paths = Vec::new();
+            // Rules sort new mail (#238): what changes report, and what a
+            // full sync after the changes ran out finds received since the
+            // account last caught up. A first full sync finds only history.
+            let sorter = crate::rules::Sorter::load(&tx, account_id)?;
+            let caught_up_at = if full_sync {
+                tx.query_row(
+                    "SELECT caught_up_at FROM accounts WHERE id = ?1",
+                    params![account_id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )?
+            } else {
+                None
+            };
 
             for email in emails {
                 let remote_id = email
@@ -1335,7 +1348,10 @@ async fn persist_emails(
                             repo::contacts::harvest(&tx, account_id, address, true, date)?;
                         }
                     }
-                } else if inserted
+                }
+                // The sender of new incoming mail is learned once rules have
+                // sorted it, unless they throw it away.
+                let learn_sender = if inserted
                     && !is_outgoing
                     && settings.collect_incoming_contacts
                     && date >= incoming_learning_since
@@ -1345,8 +1361,10 @@ async fn persist_emails(
                     && !crate::mime::robot_sender(&sender.email)
                     && !repo::blocked::is_blocked(&tx, &sender.email.to_ascii_lowercase())?
                 {
-                    repo::contacts::harvest(&tx, account_id, sender, false, date)?;
-                }
+                    Some(sender.clone())
+                } else {
+                    None
+                };
                 let mut pending_keywords = false;
                 let mut pending_mailboxes = false;
                 let local_id;
@@ -1516,8 +1534,24 @@ async fn persist_emails(
                 // Mail from a blocked sender goes to Spam as it arrives, once
                 // its mailboxes are in place.
                 let turned_away = inserted && crate::turn_away(&tx, local_id)?;
+                // Then rules sort new mail. What they file away or mark read
+                // stays silent.
+                let arrived = inserted
+                    && !turned_away
+                    && (!full_sync || caught_up_at.is_some_and(|at| date >= at));
+                let sorted = if arrived {
+                    sorter.arrived(&tx, local_id)?
+                } else {
+                    Default::default()
+                };
+                if !sorted.unwanted
+                    && let Some(sender) = &learn_sender
+                {
+                    repo::contacts::harvest(&tx, account_id, sender, false, date)?;
+                }
                 if let Some(audible) = announce
                     && !turned_away
+                    && !sorted.silent()
                     && !notified_threads.contains(&thread_id)
                 {
                     repo::notifications::enqueue(&tx, local_id, audible)?;
