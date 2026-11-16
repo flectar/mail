@@ -314,6 +314,16 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
                 .and_then(|local| i32::try_from(local.account_id).ok()),
         )
     };
+    if !filtering {
+        crate::saved_searches::place(
+            &mut rows,
+            &state.saved_searches,
+            &state.collapsed_sidebar_sections,
+            state
+                .local_mail
+                .and_then(|local| i32::try_from(local.account_id).ok()),
+        );
+    }
     set_label_badges(&mut rows, &state.labels, &state.sidebar_badges);
     // Model notifications can synchronously inspect application state.
     let model = Rc::clone(&state.sidebar_rows);

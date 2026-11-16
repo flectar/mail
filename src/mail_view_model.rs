@@ -595,6 +595,7 @@ pub(super) fn render_current(
     app.set_mail_selection_count(checked_ids.len() as i32);
     refresh_sidebar(state);
     app.set_selected_scope_title(mailbox_scope_title(scope, &mailboxes, &labels).into());
+    saved_searches::show(app, &state.borrow());
     app.set_trash_view(is_trash_scope(scope));
     app.set_mail_oldest_first(state.borrow().list_order == ListOrder::OldestFirst);
     app.set_selected_scope(scope.into());
@@ -1430,6 +1431,7 @@ pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxSta
 
     refresh_sidebar(state);
     app.set_selected_scope_title(mailbox_scope_title(scope, &mailboxes, &labels).into());
+    saved_searches::show(app, &state.borrow());
     app.set_trash_view(is_trash_scope(scope));
     app.set_mail_oldest_first(state.borrow().list_order == ListOrder::OldestFirst);
     app.set_selected_scope(scope.into());
