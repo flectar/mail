@@ -2,7 +2,8 @@
 //! #239), for accounts that offer it without JMAP Sieve. Servers with JMAP
 //! Sieve, such as Stalwart and Cyrus, keep the response as a Sieve script of
 //! their own: saving one there turns the user's own filters off, or is
-//! refused, so those accounts wait for a script of the app's own.
+//! refused, so those accounts keep replies in the app's own script
+//! (`jmap::sieve`).
 
 use super::client::{ConnectedClient, map_error};
 use crate::error::Result;

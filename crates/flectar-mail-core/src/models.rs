@@ -1269,6 +1269,27 @@ impl AutoReply {
     }
 }
 
+/// What saving automatic replies did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoReplySaved {
+    /// The replies as the server keeps them now.
+    Done(AutoReply),
+    /// Nothing changed: the user must allow this first.
+    Ask(AutoReplyQuestion),
+}
+
+/// What saving automatic replies would change on a server that runs Sieve
+/// scripts, beyond the replies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoReplyQuestion {
+    /// The server runs the user's own filter script, named here. The replies
+    /// would run first, then that script, unchanged.
+    RunBefore(String),
+    /// The app's script on the server was changed elsewhere since the app
+    /// wrote it. Saving replaces those changes.
+    ReplaceChanges,
+}
+
 /// Something an AI agent did through the local MCP server, without message
 /// content.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

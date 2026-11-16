@@ -366,7 +366,7 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
             // from retaining memory.
             let (pool_tx, pool_rx) = mpsc::channel(1);
             let (hist_tx, hist_rx) = mpsc::channel(1);
-            let joins = vec![
+            let mut joins = vec![
                 tokio::spawn(run_send_dispatcher(
                     ctx.clone(),
                     config.clone(),
@@ -388,13 +388,18 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
                     settings_rx.clone(),
                 )),
                 tokio::spawn(run_history_backfill(
-                    ctx,
-                    config,
+                    ctx.clone(),
+                    config.clone(),
                     hist_rx,
                     pool_tx,
                     settings_rx,
                 )),
             ];
+            // Other IMAP servers may keep automatic replies in a Sieve
+            // script. Microsoft keeps them in the mailbox settings.
+            if config.provider == Provider::Generic {
+                joins.push(tokio::spawn(crate::sieve::watch(ctx, config)));
+            }
             (joins, Some(send_tx), None)
         }
         MailProtocol::Pop3 => {
