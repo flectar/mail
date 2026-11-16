@@ -16,6 +16,7 @@ export { AgentAccess, AgentAccount, AgentActivityEntry, AgentFolder } from "agen
 export { Notice } from "notice.slint";
 export { Unsubscribe } from "unsubscribe.slint";
 export { BlockSender } from "block-sender.slint";
+export { MailRules, RuleActionRow, RuleConditionRow, RuleRow } from "rules.slint";
 export { Invitation } from "invitation.slint";
 export { InvitationSettings } from "invitation-settings.slint";
 import { AppIcon, AppIconVariant } from "app-icon.slint";
@@ -293,6 +294,18 @@ export global I18n {
     }
 
     ui-message-settings(key, argument, second-argument, third-argument) => {
+        if (key == "All accounts") { return @tr("All accounts"); }
+        if (key == "Name this rule.") { return @tr("Name this rule."); }
+        if (key == "Condition {}: give a size in KB.") { return @tr("Condition {}: give a size in KB.", argument); }
+        if (key == "Condition {}: this isn't a valid regular expression.") { return @tr("Condition {}: this isn't a valid regular expression.", argument); }
+        if (key == "Condition {}: fill in what to look for.") { return @tr("Condition {}: fill in what to look for.", argument); }
+        if (key == "Choose one account to move or copy mail into its folders.") { return @tr("Choose one account to move or copy mail into its folders."); }
+        if (key == "Action {}: this account keeps each message in one folder, so it can't copy mail.") { return @tr("Action {}: this account keeps each message in one folder, so it can't copy mail.", argument); }
+        if (key == "Action {}: choose a folder.") { return @tr("Action {}: choose a folder.", argument); }
+        if (key == "Action {}: choose a label.") { return @tr("Action {}: choose a label.", argument); }
+        if (key == "A rule can move mail out of the Inbox only once. Keep one of moving, archiving, trash and spam.") { return @tr("A rule can move mail out of the Inbox only once. Keep one of moving, archiving, trash and spam."); }
+        if (key == "Could not save the rule: {}") { return @tr("Could not save the rule: {}", argument); }
+        if (key == "Could not delete the rule: {}") { return @tr("Could not delete the rule: {}", argument); }
         if (key == "Notification preferences are active for this session.") { return @tr("Notification preferences are active for this session."); }
         if (key == "Notification preferences saved.") { return @tr("Notification preferences saved."); }
         if (key == "Update preference saved.") { return @tr("Update preference saved."); }

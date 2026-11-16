@@ -42,6 +42,7 @@ mod mail_drop_tests;
 mod mail_groups;
 mod mail_navigation;
 mod mail_render_projection;
+mod mail_rules;
 mod mail_scope;
 mod mail_setup;
 mod mail_view_model;
@@ -4700,6 +4701,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     app.set_startup_ready(true);
                     mailto_links::open_pending_soon(&app);
                     block_sender::refresh();
+                    mail_rules::refresh();
                     app.invoke_product_changed(app.get_active_view());
                     app.global::<TabsUi>().invoke_restore_active();
                     app.set_startup_failed(false);
@@ -6340,6 +6342,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     read_receipts::install(&app, &state, &runtime);
     block_sender::install(&app, &state, &runtime);
     server_search::install(&app, &state, &runtime);
+    mail_rules::install(&app, &state, &runtime);
     invitation::install(&app, &state, &calendar_state, &runtime);
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);

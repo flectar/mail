@@ -10,9 +10,9 @@ use flectar_mail_core::{
         ConnectCaldavArgs, ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage,
         CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, ForwardedMessage, Importance,
         InvitationCard, Label, ListOrder, ListOwner, MailGrouping, MailHistory, MailProfile,
-        MailProtocol, MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor,
-        MessageSummary, PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs,
-        QueueSendResult, RsvpEventArgs, SaveDraftArgs, SearchCursor, SenderIdentity,
+        MailProtocol, MailRule, MailboxBadgeCounts, MessageCursor, MessageDetail,
+        MessageSearchCursor, MessageSummary, PerformActionArgs, PortableAccountConfig, Provider,
+        QueueSendArgs, QueueSendResult, RsvpEventArgs, SaveDraftArgs, SearchCursor, SenderIdentity,
         ServerSearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary, UnsubscribeOffer,
         UnsubscribeOutcome, View, normalized_workspace_list_pane_width, roles,
     },
@@ -2432,6 +2432,64 @@ impl CoreMailSource {
             .blocked_senders()
             .await
             .map(|senders| senders.into_iter().map(|sender| sender.address).collect())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Every rule that sorts new mail, in order (#238).
+    pub async fn mail_rules(&self) -> Result<Vec<MailRule>, String> {
+        self.core
+            .mail_rules()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// What a rule can name: the accounts, their folders and the labels.
+    pub async fn rule_choices(
+        &self,
+    ) -> Result<(Vec<Account>, Vec<FolderInfo>, Vec<Label>), String> {
+        let accounts = self
+            .core
+            .list_accounts()
+            .await
+            .map_err(|error| error.to_string())?;
+        let folders = self
+            .core
+            .list_folders(None)
+            .await
+            .map_err(|error| error.to_string())?;
+        let labels = self
+            .core
+            .list_labels()
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok((accounts, folders, labels))
+    }
+
+    pub async fn save_mail_rule(&self, rule: MailRule) -> Result<MailRule, String> {
+        self.core
+            .save_mail_rule(rule)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn delete_mail_rule(&self, id: i64) -> Result<(), String> {
+        self.core
+            .delete_mail_rule(id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_mail_rule_enabled(&self, id: i64, enabled: bool) -> Result<(), String> {
+        self.core
+            .set_mail_rule_enabled(id, enabled)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn reorder_mail_rules(&self, ids: Vec<i64>) -> Result<(), String> {
+        self.core
+            .reorder_mail_rules(ids)
+            .await
             .map_err(|error| error.to_string())
     }
 
