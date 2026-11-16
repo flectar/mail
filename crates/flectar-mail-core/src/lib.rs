@@ -874,7 +874,17 @@ pub struct Core {
     /// background tells of it instead (see [`Core::announce_missed`]).
     /// `None` once the user has seen the Inbox.
     missed_since: Arc<std::sync::Mutex<Option<std::collections::BTreeMap<i64, i64>>>>,
+    /// What searches of the servers found, so that the same search here shows
+    /// it with its own matches. Only the last few searches are kept, and none
+    /// past a restart.
+    server_found: Arc<std::sync::Mutex<ServerFound>>,
 }
+
+/// Searches of the servers and the messages each found, newest search first.
+type ServerFound = std::collections::VecDeque<(String, Vec<i64>)>;
+
+/// How many searches' server results [`Core`] keeps.
+const SERVER_FOUND_SEARCHES: usize = 8;
 
 impl Core {
     #[cfg(desktop)]
@@ -975,6 +985,7 @@ impl Core {
             transfers: Arc::new(tokio::sync::Notify::new()),
             accounts_started: Arc::new(tokio::sync::watch::Sender::new(false)),
             missed_since: Arc::new(std::sync::Mutex::new(Some(missed_since))),
+            server_found: Arc::default(),
         };
 
         // Finish any destructive operation interrupted between the mail and
@@ -8249,7 +8260,7 @@ impl Core {
         cursor: Option<models::SearchCursor>,
         limit: i64,
     ) -> Result<models::SearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_id = account_id;
         self.search_chronological_parsed(parsed, cursor, limit)
             .await
@@ -8264,10 +8275,87 @@ impl Core {
         cursor: Option<models::SearchCursor>,
         limit: i64,
     ) -> Result<models::SearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_ids = Some(account_ids);
         self.search_chronological_parsed(parsed, cursor, limit)
             .await
+    }
+
+    /// Searches the servers of the accounts with `account_ids` for `query`,
+    /// past the mail this device keeps: up to `limit` messages each, newest
+    /// first, going on from `cursors`. An account without a cursor starts
+    /// from its newest mail. What the servers find is kept here as headers,
+    /// its bodies fetched when opened, and comes back as the conversations it
+    /// is in and as messages. The same search of the mail list shows it from
+    /// then on, with its own matches. POP3 accounts and mail on this device
+    /// have no server to search.
+    pub async fn search_server(
+        &self,
+        query: String,
+        account_ids: Vec<i64>,
+        cursors: Vec<(i64, models::ServerSearchCursor)>,
+        limit: usize,
+    ) -> Result<models::ServerSearchPage> {
+        let mut page = models::ServerSearchPage::default();
+        let Some(tree) = search::parse(&query).tree else {
+            return Ok(page);
+        };
+        let limit = limit.clamp(1, 100);
+        let accounts = self.db.read(|conn| repo::accounts::list(conn)).await?;
+        let mut searches = Vec::new();
+        {
+            let handles = self.handles.read().await;
+            for account_id in account_ids {
+                let searchable = accounts.iter().any(|account| {
+                    account.id == account_id
+                        && !matches!(
+                            account.mail_protocol,
+                            MailProtocol::Pop3 | MailProtocol::Local
+                        )
+                });
+                if !searchable {
+                    page.unsearchable.push(account_id);
+                    continue;
+                }
+                let Some(handle) = handles.get(&account_id).cloned() else {
+                    page.failed
+                        .push((account_id, "The account isn't connected.".to_owned()));
+                    continue;
+                };
+                let cursor = cursors
+                    .iter()
+                    .find(|(id, _)| *id == account_id)
+                    .map(|(_, cursor)| cursor.clone())
+                    .unwrap_or_default();
+                let tree = tree.clone();
+                searches.push(async move {
+                    (account_id, handle.search_server(tree, cursor, limit).await)
+                });
+            }
+        }
+        let mut message_ids = Vec::new();
+        for (account_id, result) in futures::future::join_all(searches).await {
+            match result {
+                Ok(hits) => {
+                    message_ids.extend(hits.message_ids);
+                    if let Some(next) = hits.next {
+                        page.cursors.push((account_id, next));
+                    }
+                }
+                Err(error) => page.failed.push((account_id, error.to_string())),
+            }
+        }
+        self.remember_found(&query, &message_ids);
+        (page.threads, page.messages) = self
+            .db
+            .read(move |conn| {
+                Ok((
+                    repo::search::found_threads(conn, &message_ids)?,
+                    repo::search::found_messages(conn, &message_ids)?,
+                ))
+            })
+            .await?;
+        Ok(page)
     }
 
     /// Cursor-paginated chronological search as single messages, for mail
@@ -8279,7 +8367,7 @@ impl Core {
         cursor: Option<MessageSearchCursor>,
         limit: i64,
     ) -> Result<MessageSearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_id = account_id;
         self.search_messages_parsed(parsed, cursor, limit).await
     }
@@ -8293,9 +8381,46 @@ impl Core {
         cursor: Option<MessageSearchCursor>,
         limit: i64,
     ) -> Result<MessageSearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_ids = Some(account_ids);
         self.search_messages_parsed(parsed, cursor, limit).await
+    }
+
+    /// `query` parsed for the mail list's search, with what searches of the
+    /// servers found for it.
+    fn parse_search(&self, query: &str) -> search::ParsedQuery {
+        let mut parsed = search::parse(query);
+        let found = self
+            .server_found
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, ids)) = found.iter().find(|(search, _)| search == query.trim()) {
+            parsed.found = ids.clone();
+        }
+        parsed
+    }
+
+    /// Keeps what a search of the servers found for `query`, with what it
+    /// found before, as the newest search.
+    fn remember_found(&self, query: &str, message_ids: &[i64]) {
+        let mut found = self
+            .server_found
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let query = query.trim();
+        let mut ids = found
+            .iter()
+            .position(|(search, _)| search == query)
+            .and_then(|index| found.remove(index))
+            .map(|(_, ids)| ids)
+            .unwrap_or_default();
+        for id in message_ids {
+            if !ids.contains(id) {
+                ids.push(*id);
+            }
+        }
+        found.push_front((query.to_owned(), ids));
+        found.truncate(SERVER_FOUND_SEARCHES);
     }
 
     async fn search_messages_parsed(

@@ -363,7 +363,8 @@ impl MockJmap {
                 let limit = args["limit"]
                     .as_u64()
                     .map_or(usize::MAX, |limit| limit as usize);
-                let ids = self
+                let position = args["position"].as_u64().unwrap_or(0) as usize;
+                let matching = self
                     .emails
                     .iter()
                     .filter(|email| {
@@ -380,12 +381,16 @@ impl MockJmap {
                             })
                     })
                     .map(|email| &email["id"])
+                    .collect::<Vec<_>>();
+                let ids = matching
+                    .iter()
+                    .skip(position)
                     .take(limit)
                     .collect::<Vec<_>>();
                 json!({
                     "accountId": "mail-account", "queryState": "query-0",
-                    "canCalculateChanges": false, "position": 0,
-                    "total": ids.len(), "ids": ids
+                    "canCalculateChanges": false, "position": position,
+                    "total": matching.len(), "ids": ids
                 })
             }
             "Email/set" => {
@@ -1882,4 +1887,100 @@ async fn a_server_that_keeps_mail_unread_stops_the_marking() {
     assert!(matches!(result, Err(CoreError::Jmap(_))), "{result:?}");
     assert_eq!(mock.calls("Email/set").len(), 1);
     mock.task.abort();
+}
+
+/// A server search keeps what it finds and goes on where it stopped. A page
+/// brings mail not kept here, with the matches kept here that it passes.
+#[tokio::test]
+async fn a_server_search_keeps_what_it_finds_and_goes_on_where_it_stopped() {
+    use chrono::TimeZone;
+    let (_dir, ctx, config) = fixture().await;
+    let at = |day| chrono::Utc.with_ymd_and_hms(2020, 3, day, 9, 0, 0).unwrap();
+    let emails = vec![
+        received(email("e3", "t3"), at(3)),
+        received(email("e2", "t2"), at(2)),
+        received(email("e1", "t1"), at(1)),
+    ];
+    let mock = MockJmap {
+        emails,
+        max_objects_in_get: 10,
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    let mut session = Some(mock.connected);
+    let tree = crate::search::parse("invoice from:sender").tree.unwrap();
+    let first = search_server(&ctx, &config, &mut session, &tree, &Default::default(), 2)
+        .await
+        .unwrap();
+    assert_eq!(first.message_ids.len(), 2);
+    let next = first
+        .next
+        .clone()
+        .expect("a page that came full may have more");
+    assert_eq!(next.position, 2);
+
+    // The server got the query newest first, and the fixture's one folder,
+    // the inbox, leaves nothing to keep out.
+    let calls = mock.calls.lock().unwrap().clone();
+    let query = &calls
+        .iter()
+        .find(|(method, _)| method == "Email/query")
+        .unwrap()
+        .1;
+    assert_eq!(
+        query["filter"],
+        json!({"operator": "AND", "conditions": [{"text": "invoice"}, {"from": "sender"}]})
+    );
+    assert_eq!(
+        query["sort"],
+        json!([{"property": "receivedAt", "isAscending": false}])
+    );
+    assert_eq!(
+        (query["position"].clone(), query["limit"].clone()),
+        (json!(0), json!(2))
+    );
+
+    let second = search_server(&ctx, &config, &mut session, &tree, &next, 2)
+        .await
+        .unwrap();
+    assert_eq!(second.message_ids.len(), 1);
+    assert!(
+        second.next.is_none(),
+        "a page short of full found all there is"
+    );
+
+    // Each found email is kept once, newest first as the server gave them.
+    let kept = ctx
+        .db
+        .read(|conn| {
+            let mut stmt = conn.prepare("SELECT jmap_id FROM messages ORDER BY date DESC")?;
+            Ok(stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(kept, ["e3", "e2", "e1"]);
+
+    // Searched again, the first page has nothing new, so the search goes on
+    // to the end of the results and brings what it passed.
+    let again = search_server(&ctx, &config, &mut session, &tree, &Default::default(), 2)
+        .await
+        .unwrap();
+    let mut found = [first.message_ids, second.message_ids].concat();
+    found.sort_unstable();
+    let mut found_again = again.message_ids;
+    found_again.sort_unstable();
+    assert_eq!(found_again, found);
+    assert!(again.next.is_none());
+    let positions = mock
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(method, _)| method == "Email/query")
+        .map(|(_, query)| query["position"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(positions, [json!(0), json!(2), json!(0), json!(2)]);
 }

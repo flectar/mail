@@ -6,10 +6,12 @@ use crate::db::repo::messages::NewMessage;
 use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
 use crate::jmap::client::{self, ConnectedClient};
-use crate::models::{AccountConfig, Address, MailProtocol, SenderDeliveryStatus, now_ms, roles};
+use crate::models::{
+    AccountConfig, Address, MailProtocol, SenderDeliveryStatus, ServerSearchCursor, now_ms, roles,
+};
 use crate::sync::engine::{
-    PriorityFetchCmd, SyncCmd, SyncCtx, caught_up, configured_sync_interval, set_state,
-    set_state_error,
+    PriorityFetchCmd, SERVER_SEARCH_PAGES, ServerHits, SyncCmd, SyncCtx, caught_up,
+    configured_sync_interval, set_state, set_state_error,
 };
 use futures::{FutureExt, Stream, StreamExt};
 use jmap_client::core::error::MethodErrorType;
@@ -3046,8 +3048,129 @@ async fn body_actor(ctx: SyncCtx, config: AccountConfig, mut rx: mpsc::Receiver<
                     });
                 let _ = complete.send(result);
             }
+            PriorityFetchCmd::Search {
+                tree,
+                cursor,
+                limit,
+                complete,
+            } => {
+                let result = search_server(&ctx, &config, &mut session, &tree, &cursor, limit)
+                    .await
+                    .map_err(|error| {
+                        session = None;
+                        error.to_string()
+                    });
+                let _ = complete.send(result);
+            }
         }
     }
+}
+
+/// Searches the account's mail on its JMAP server for `tree` from `cursor`:
+/// the newest `limit` emails it finds that aren't kept here, which are
+/// fetched as their headers and kept, and the ones kept here already that it
+/// passes. Their bodies come when opened.
+async fn search_server(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Option<ConnectedClient>,
+    tree: &crate::search::Expr,
+    cursor: &ServerSearchCursor,
+    limit: usize,
+) -> Result<ServerHits> {
+    use crate::search::server::{JmapSearch, jmap};
+    let account_id = config.id;
+    let folders = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await?;
+    let mailboxes = folders
+        .iter()
+        .filter_map(|folder| Some((folder.role.as_deref()?, folder.jmap_id.clone()?)))
+        .collect::<HashMap<_, _>>();
+    let filter = match jmap(tree, &mailboxes) {
+        JmapSearch::Nothing => {
+            return Ok(ServerHits {
+                message_ids: Vec::new(),
+                next: None,
+            });
+        }
+        JmapSearch::Filter(filter) => filter,
+    };
+    let c = body_session(ctx, config, session).await?;
+    // The server's results a page at a time, until a page of them isn't kept
+    // here or they end.
+    let mut position = cursor.position;
+    let mut ids = Vec::new();
+    let mut missing = Vec::new();
+    let mut more = true;
+    for _ in 0..SERVER_SEARCH_PAGES {
+        let at = i32::try_from(position)
+            .map_err(|_| CoreError::Jmap("the search went past its last result".into()))?;
+        let mut request = c.request();
+        let query = request
+            .query_email()
+            .account_id(&c.account_id)
+            .position(at)
+            .limit(limit)
+            .sort([jmap_client::email::query::Comparator::received_at().descending()]);
+        if let Some(filter) = filter.clone() {
+            query.filter(filter);
+        }
+        let mut response: QueryResponse =
+            c.send_single(request).await.map_err(client::map_error)?;
+        // A server whose most is fewer gives that many and says so.
+        let page = response.limit().map_or(limit, |most| most.min(limit));
+        let batch = response.take_ids();
+        position += batch.len() as u64;
+        let ended = batch.is_empty() || batch.len() < page;
+        let wanted = batch.clone();
+        missing.extend(
+            ctx.db
+                .read(move |conn| {
+                    let mut missing = Vec::new();
+                    for id in wanted {
+                        if repo::messages::by_jmap_id(conn, account_id, &id)?.is_none() {
+                            missing.push(id);
+                        }
+                    }
+                    Ok(missing)
+                })
+                .await?,
+        );
+        ids.extend(batch);
+        if ended {
+            more = false;
+            break;
+        }
+        if missing.len() >= limit {
+            break;
+        }
+    }
+    for chunk in missing.chunks(max_objects_in_get(c).max(1)) {
+        let (emails, _) = fetch_headers(c, chunk).await.map_err(client::map_error)?;
+        // Found mail notifies of nothing, whenever it arrived.
+        persist_emails(ctx, config, emails, false, None, i64::MAX).await?;
+    }
+    let message_ids = ctx
+        .db
+        .read(move |conn| {
+            let mut message_ids = Vec::with_capacity(ids.len());
+            for id in &ids {
+                if let Some(row) = repo::messages::by_jmap_id(conn, account_id, id)? {
+                    message_ids.push(row.id);
+                }
+            }
+            Ok(message_ids)
+        })
+        .await?;
+    Ok(ServerHits {
+        message_ids,
+        next: more.then(|| ServerSearchCursor {
+            position,
+            ..ServerSearchCursor::default()
+        }),
+    })
 }
 
 /// The body worker's session: connected when first needed, and again after a
