@@ -490,6 +490,7 @@ impl crate::Core {
                             flagged,
                             internal_date: date_ms
                                 .and_then(chrono::DateTime::from_timestamp_millis),
+                            ..Default::default()
                         },
                     )
                     .await

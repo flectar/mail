@@ -123,6 +123,13 @@ pub(super) struct ComposeSession {
     templated: Cell<bool>,
     /// The placeholders the message was last sent with, which sending warned about.
     placeholder_warning: RefCell<Vec<String>>,
+    /// The user said to send without a subject, or without the file the
+    /// message mentions (#236), while sending goes on.
+    subject_confirmed: Cell<bool>,
+    attachment_confirmed: Cell<bool>,
+    /// The subject a reply or forward started with, which mentions files of
+    /// the original rather than the user's.
+    opened_subject: RefCell<String>,
     /// Until the sending account's preference chooses how the message starts: whether it
     /// answers or forwards a plain-text message.
     format_pending: Cell<Option<bool>>,
@@ -544,6 +551,7 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_links(from.get_links());
     to.set_link_sharing(from.get_link_sharing());
     to.set_plain_text(from.get_plain_text());
+    to.set_request_receipt(from.get_request_receipt());
     to.set_templates(from.get_templates());
     to.set_message(from.get_message());
     to.set_notice_is_error(from.get_notice_is_error());
@@ -694,6 +702,9 @@ impl Composers {
             plain_edit: RefCell::default(),
             templated: Cell::new(false),
             placeholder_warning: RefCell::default(),
+            subject_confirmed: Cell::new(false),
+            attachment_confirmed: Cell::new(false),
+            opened_subject: RefCell::default(),
             format_pending: Cell::new(Some(false)),
             disposed: Cell::new(false),
             #[cfg(desktop)]
@@ -898,6 +909,7 @@ impl Composers {
         ui.set_to(prepared.to.into());
         ui.set_cc(prepared.cc.into());
         ui.set_bcc("".into());
+        *session.opened_subject.borrow_mut() = prepared.subject.clone();
         ui.set_subject(prepared.subject.into());
         let quote = {
             let mut document = session.document.borrow_mut();
@@ -1081,6 +1093,8 @@ impl Composers {
         ui.set_cc(compose_addresses(&draft.cc).into());
         ui.set_bcc(compose_addresses(&draft.bcc).into());
         ui.set_subject(draft.subject.clone().into());
+        ui.set_request_receipt(draft.request_read_receipt);
+        session.opened_subject.borrow_mut().clear();
 
         *session.files.borrow_mut() = draft
             .attachments
@@ -1401,6 +1415,9 @@ impl ComposeSession {
     fn clear_fields(&self, host: &HostRef) {
         let ui = host.ui();
         host.preferences().invoke_composer_reset();
+        self.reset_send_checks();
+        self.opened_subject.borrow_mut().clear();
+        ui.set_send_check_open(false);
         ui.set_editor_tiles(ModelRc::default());
         apply_compose_files(&ui, &[]);
         ui.set_links(ModelRc::default());
@@ -1761,6 +1778,12 @@ impl ComposeSession {
         ui.on_save(move |account_id, to, cc, bcc, subject, body, send| {
             if let Some(session) = weak.upgrade() {
                 session.save(account_id, &to, &cc, &bcc, &subject, &body, send);
+            }
+        });
+        let weak = self.reference();
+        ui.on_answer_send_check(move |answer| {
+            if let Some(session) = weak.upgrade() {
+                session.answer_send_check(&answer);
             }
         });
         let weak = self.reference();
@@ -2413,6 +2436,71 @@ impl ComposeSession {
         self.render_quote(&host);
     }
 
+    /// What sending asks first, if anything: whether to send without a
+    /// subject, then without the file the message mentions, as the first
+    /// keyword it mentions. Only what the user wrote counts.
+    fn send_check(
+        &self,
+        app: &AppWindow,
+        subject: &str,
+        body: &str,
+    ) -> Option<(&'static str, String)> {
+        if !self.subject_confirmed.get() && subject.trim().is_empty() {
+            return Some(("subject", String::new()));
+        }
+        let carries_files = !self.files.borrow().is_empty()
+            || !self.links.borrow().is_empty()
+            || self.document.borrow().images().next().is_some();
+        if self.attachment_confirmed.get() || carries_files {
+            return None;
+        }
+        let own_subject =
+            (subject.trim() != self.opened_subject.borrow().trim()).then_some(subject);
+        let text =
+            attachment_reminder::own_text(own_subject, body, self.signature.borrow().as_deref());
+        let keywords = attachment_reminder::keywords();
+        let local = translated(app, &keywords);
+        attachment_reminder::mentioned(&text, &[keywords.key(), local.as_str()])
+            .map(|keyword| ("attachment", keyword))
+    }
+
+    /// Sends on, attaches files, or goes back to the message, as the user
+    /// answered what sending asked.
+    fn answer_send_check(self: &Rc<Self>, answer: &str) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        match answer {
+            "send" => {
+                if ui.get_send_check() == "subject" {
+                    self.subject_confirmed.set(true);
+                } else {
+                    self.attachment_confirmed.set(true);
+                }
+                self.save(
+                    ui.get_account_id(),
+                    &ui.get_to(),
+                    &ui.get_cc(),
+                    &ui.get_bcc(),
+                    &ui.get_subject(),
+                    &ui.get_body(),
+                    true,
+                );
+            }
+            "attach" => {
+                self.reset_send_checks();
+                self.pick_attachments();
+            }
+            _ => self.reset_send_checks(),
+        }
+    }
+
+    fn reset_send_checks(&self) {
+        self.subject_confirmed.set(false);
+        self.attachment_confirmed.set(false);
+    }
+
     fn pick_attachments(self: &Rc<Self>) {
         let Some(composers) = self.composers() else {
             return;
@@ -2997,6 +3085,14 @@ impl ComposeSession {
             );
             return;
         }
+        // A message without a subject, or that mentions a file it doesn't
+        // carry, goes once the user says so (#236).
+        if send && let Some((check, keyword)) = self.send_check(&app, subject, body) {
+            ui.set_send_check(check.into());
+            ui.set_send_check_keyword(keyword.into());
+            ui.set_send_check_open(true);
+            return;
+        }
         let Some(core) = composers.core() else {
             let message = UiMessage::plain("Connect an account before saving or sending mail.");
             ui.set_notice(message.clone(), true);
@@ -3094,6 +3190,7 @@ impl ComposeSession {
             mode: intent.mode.as_str(),
             in_reply_to_message_id: intent.in_reply_to_message_id,
             in_reply_to_header: intent.in_reply_to_header.as_deref(),
+            request_read_receipt: ui.get_request_receipt(),
         };
         if send {
             let queued = composers
@@ -3543,6 +3640,10 @@ impl ComposeSession {
         };
         // How the message starts, before its signature goes in to match.
         self.choose_starting_format(&config.settings);
+        // A draft, and a message edited as new, keep their own request.
+        if !matches!(ui.get_mode().as_str(), "draft" | "edit_as_new") {
+            ui.set_request_receipt(config.settings.request_read_receipts);
+        }
         let requested = preferences.get_composer_sender_email().to_string();
         let identities = account_mail_preferences::selectable_identities(identities, &requested);
         let sender_choices = identities
@@ -3979,6 +4080,7 @@ mod tests {
             in_reply_to_message_id: None,
             in_reply_to_header: None,
             attachments: Vec::new(),
+            request_read_receipt: false,
         };
         assert!(composers.show_review(draft.clone(), "Claude"));
         assert_eq!(open_windows(), 1);
@@ -4136,6 +4238,69 @@ mod tests {
         assert_eq!(notice.key, "Fill in {} or send again.");
         assert_eq!(notice.argument, "{{company}}");
         send();
+        assert_eq!(
+            ui.get_message().key,
+            "Connect an account before saving or sending mail."
+        );
+    }
+
+    #[test]
+    fn sending_asks_about_a_missing_subject_then_a_mentioned_file() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.invoke_open_compose("ana@example.test".into());
+        let session = composers.in_app().unwrap();
+        let host = session.host().unwrap();
+        let ui = host.ui();
+        host.preferences().set_composer_preferences_ready(true);
+        ui.set_subject(" ".into());
+        ui.set_body("I've attached the plan.\n> The report is attached".into());
+        let send = || {
+            session.save(
+                1,
+                &ui.get_to(),
+                "",
+                "",
+                &ui.get_subject(),
+                &ui.get_body(),
+                true,
+            );
+        };
+
+        send();
+        assert!(ui.get_send_check_open());
+        assert_eq!(ui.get_send_check(), "subject");
+        // Sent without a subject, it asks about the file the message mentions.
+        session.answer_send_check("send");
+        assert_eq!(ui.get_send_check(), "attachment");
+        assert_eq!(ui.get_send_check_keyword(), "attached");
+        // Going back asks both again next time.
+        session.answer_send_check("cancel");
+        send();
+        assert_eq!(ui.get_send_check(), "subject");
+
+        // With a subject, and sent anyway, the message goes, which with no
+        // account connected it can't.
+        ui.set_subject("Plan".into());
+        send();
+        assert_eq!(ui.get_send_check(), "attachment");
+        session.answer_send_check("send");
+        assert_eq!(
+            ui.get_message().key,
+            "Connect an account before saving or sending mail."
+        );
+
+        // A quoted mention isn't the user's, so it asks nothing.
+        session.reset_send_checks();
+        ui.set_send_check_open(false);
+        ui.set_notice(UiMessage::EMPTY, false);
+        ui.set_body("Thanks!\n> The report is attached".into());
+        send();
+        assert!(!ui.get_send_check_open());
         assert_eq!(
             ui.get_message().key,
             "Connect an account before saving or sending mail."

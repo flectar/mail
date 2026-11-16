@@ -101,6 +101,7 @@ fn main() {
                     message_id: Some("probe@example.test"),
                     message_id_domain: "example.test",
                     attachments: Vec::new(),
+                    receipt_to: &[],
                 };
                 mime::build_message_owned(message).unwrap().1
             }

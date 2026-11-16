@@ -12,9 +12,9 @@ use flectar_mail_core::{
         InvitationCard, Label, ListOrder, ListOwner, MailGrouping, MailHistory, MailProfile,
         MailProtocol, MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor,
         MessageSummary, PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs,
-        QueueSendResult, RsvpEventArgs, SaveDraftArgs, SearchCursor, SenderIdentity, Settings,
-        Snippet, ThreadCursor, ThreadSummary, UnsubscribeOffer, UnsubscribeOutcome, View,
-        normalized_workspace_list_pane_width, roles,
+        QueueSendResult, RsvpEventArgs, SaveDraftArgs, SearchCursor, SenderIdentity,
+        ServerSearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary, UnsubscribeOffer,
+        UnsubscribeOutcome, View, normalized_workspace_list_pane_width, roles,
     },
 };
 #[cfg(test)]
@@ -218,6 +218,8 @@ pub struct ComposeMessage<'a> {
     pub in_reply_to_message_id: Option<i64>,
     /// The Message-ID answered when that message is not stored here.
     pub in_reply_to_header: Option<&'a str>,
+    /// The message asks for a read receipt.
+    pub request_read_receipt: bool,
 }
 
 /// The latest concrete message in a selected thread, with the addressing data
@@ -256,6 +258,18 @@ pub struct MailPage {
     pub next_cursor: Option<MailCursor>,
     pub account_count: usize,
     pub unified_mailboxes: Vec<MailboxEntry>,
+}
+
+/// What a search of the servers found, for the mail list.
+pub struct ServerFound {
+    /// The list rows it found: conversations, or messages in a list without
+    /// them.
+    pub rows: Vec<i32>,
+    /// Where each account's search goes on from. An account that found all
+    /// its server has isn't here.
+    pub cursors: Vec<(i64, ServerSearchCursor)>,
+    /// The accounts whose search failed, with why.
+    pub failed: Vec<(i64, String)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -588,6 +602,39 @@ impl CoreMailSource {
     /// the first visible frame.
     pub fn notify_ui_ready(&self) {
         self.core.notify_ui_ready();
+    }
+
+    /// Searches the servers of `accounts` for `query`, past the mail kept
+    /// here, going on from `cursors`. The list's search shows what they find
+    /// from then on.
+    pub async fn search_server(
+        &self,
+        query: String,
+        accounts: Vec<i64>,
+        cursors: Vec<(i64, ServerSearchCursor)>,
+    ) -> Result<ServerFound, String> {
+        let page = self
+            .core
+            .search_server(query, accounts, cursors, crate::server_search::PAGE)
+            .await
+            .map_err(|error| error.to_string())?;
+        let rows = match self.grouping() {
+            MailGrouping::Conversations => page
+                .threads
+                .iter()
+                .filter_map(|thread| i32::try_from(thread.id).ok())
+                .collect(),
+            MailGrouping::Messages => page
+                .messages
+                .iter()
+                .filter_map(|message| i32::try_from(message.id).ok())
+                .collect(),
+        };
+        Ok(ServerFound {
+            rows,
+            cursors: page.cursors,
+            failed: page.failed,
+        })
     }
 
     pub async fn load_page(
@@ -2928,6 +2975,7 @@ fn compose_args(
         in_reply_to_message_id: message.in_reply_to_message_id,
         in_reply_to_header: message.in_reply_to_header.map(str::to_owned),
         attachments: message.attachments.to_vec(),
+        request_read_receipt: message.request_read_receipt,
     })
 }
 
@@ -4659,6 +4707,7 @@ mod tests {
             mode: "new",
             in_reply_to_message_id: None,
             in_reply_to_header: None,
+            request_read_receipt: false,
         };
         let draft = compose_args(message(), false).unwrap();
 
@@ -4685,6 +4734,7 @@ mod tests {
                 mode: "reply",
                 in_reply_to_message_id: Some(99),
                 in_reply_to_header: None,
+                request_read_receipt: true,
             },
             true,
         )
@@ -4695,6 +4745,7 @@ mod tests {
         assert_eq!(draft.body_text, "Hello Maya");
         assert_eq!(draft.mode, "reply");
         assert_eq!(draft.in_reply_to_message_id, Some(99));
+        assert!(draft.request_read_receipt);
         assert_eq!(
             draft.body_html.as_deref(),
             Some("<div>Hello <strong>Maya</strong></div>")

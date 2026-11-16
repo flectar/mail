@@ -6,6 +6,7 @@ import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } 
 import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerPhotos, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, ImageResizeFrame, LinkEditor } from "composer-actions.slint";
 import { EmailTemplates } from "email-templates.slint";
 import { TypeScale } from "../typography.slint";
+import { ConfirmationDialog } from "confirmation-dialog.slint";
 import { IconButton } from "controls.slint";
 
 
@@ -49,6 +50,7 @@ export component EmailComposer inherits Rectangle {
     in property <string> photo-size: "";
     in property <string> photo-full-size: "";
     in-out property <bool> shrink-photos: false;
+    in-out property <bool> request-receipt: false;
     in property <bool> shrinking-photos: false;
     // A forward's files are still on their way, which sending and saving wait for.
     in property <bool> attaching-files: false;
@@ -132,6 +134,12 @@ export component EmailComposer inherits Rectangle {
     callback pop-out;
     callback back-requested;
     callback submit(bool);
+    // What sending asks first: "subject", or "attachment" with the keyword
+    // the message mentions. Answered "send", "attach" or "cancel".
+    in-out property <bool> send-check-open: false;
+    in property <string> send-check;
+    in property <string> send-check-keyword;
+    callback answer-send-check(string);
     callback save-signature();
     callback pick-attachments;
     callback insert-images;
@@ -489,7 +497,7 @@ export component EmailComposer inherits Rectangle {
             background: root.subtle-border-color;
         }
 
-        ComposerSubject {
+        subject-row := ComposerSubject {
             subject <=> root.subject;
             naming-signature: root.signature-mode;
             accent-color: root.accent-color;
@@ -1093,7 +1101,46 @@ export component EmailComposer inherits Rectangle {
             pick-attachments => { root.pick-attachments(); }
             link-sharing: root.link-sharing;
             share-by-link => { root.share-by-link(); }
+            request-receipt <=> root.request-receipt;
             request-close => { root.request-close(); }
+        }
+    }
+
+    // What sending asks first (#236): to send without a subject, or without
+    // the file the message mentions.
+    ConfirmationDialog {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open <=> root.send-check-open;
+        title: root.send-check == "subject" ? @tr("Send without a subject?") : @tr("Did you mean to attach a file?");
+        description: root.send-check == "subject"
+            ? @tr("People see the subject first, in their list of mail.")
+            : @tr("The message mentions “{}”, but has no file attached.", root.send-check-keyword);
+        detail: "";
+        confirm-label: root.send-check == "subject" ? @tr("Send without subject") : @tr("Send anyway");
+        cancel-label: root.send-check == "subject" ? @tr("Add a subject") : @tr("Cancel");
+        action-label: root.send-check == "attachment" ? @tr("Attach files…") : "";
+        destructive: false;
+        icon: root.send-check == "subject"
+            ? @image-url("../icons/lucide/outline/alert-circle.svg")
+            : @image-url("../icons/lucide/outline/paperclip.svg");
+        surface: root.background-color;
+        dialog-border-color: root.frame-border-color;
+        title-color: root.title-color;
+        body-color: root.body-color;
+        muted-color: root.muted-color;
+        confirmed => { root.answer-send-check("send"); }
+        cancelled => {
+            if root.send-check == "subject" {
+                subject-row.focus-subject();
+            }
+            root.answer-send-check("cancel");
+        }
+        action => {
+            root.send-check-open = false;
+            root.answer-send-check("attach");
         }
     }
 

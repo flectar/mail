@@ -44,6 +44,7 @@ async fn deliver(session: &mut imap::Session, subject: &str, age: Days, seen: bo
             seen,
             flagged: false,
             internal_date: Some(received),
+            ..Default::default()
         },
     )
     .await
