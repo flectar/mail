@@ -239,6 +239,22 @@ pub(super) fn server_only_entry(count: u32) -> MailListEntry {
     }
 }
 
+/// Ends a list of search results whose rows are all here: the search of the
+/// servers past them. It is a header, which keyboard navigation passes over.
+pub(super) fn server_search_entry() -> MailListEntry {
+    MailListEntry {
+        is_header: true,
+        group_key: "server-search".into(),
+        group_kind: "server-search".into(),
+        group_count: 0,
+        expanded: false,
+        show_row: false,
+        reveal_row: false,
+        email_index: -1,
+        email: EmailRow::default(),
+    }
+}
+
 fn message_entry(
     row: &EmailRow,
     index: usize,

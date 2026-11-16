@@ -128,7 +128,20 @@ Operators narrow a search, as in Gmail:
 tighter than the space between parts, so `invoice OR receipt 2026` finds either
 word in mail that has 2026. Parentheses group parts, and a dash before a word,
 a phrase, an operator or a group leaves out what it matches, as in
-`-from:billing` or `-(draft OR old)`.
+`-from:billing` or `-(draft OR old)`. **Search tips** in the menu beside the
+search field lists them.
+
+At the end of the results, **Search on server** asks the servers of the
+accounts in view for mail this device doesn't have: mail older than it keeps,
+or in folders it doesn't download. Each account's server brings up to 25 such
+messages, newest first, with any of its matches here that it passed on the
+way, and **Search further** brings the next. The messages come as their
+headers, and a message's text when it's opened. The list then shows them with
+the results here, in date order, until Flectar Mail quits. IMAP, JMAP and
+Gmail accounts can be searched this way, but not POP3 accounts or mail kept
+only on this device. IMAP servers can't look for attachments or file names,
+so with `has:attachment` or `filename:` their results also have mail without
+them.
 
 ## Checking for mail
 

@@ -1,0 +1,17 @@
+// Searching the servers past the mail this device keeps, from the end of a
+// search's results (src/server_search.rs).
+export global ServerSearchUi {
+    // Where the search of the list's search is: "" (no server to search),
+    // "offer", "searching", "more", "done" or "failed".
+    in property <string> stage;
+    // How many conversations or messages the servers found that the list
+    // didn't have.
+    in property <int> found;
+    // How many accounts the last search failed for, and the first one's
+    // address and why.
+    in property <int> failed-count;
+    in property <string> failed-account;
+    in property <string> error;
+    // Search the servers, or search them further.
+    callback search();
+}
