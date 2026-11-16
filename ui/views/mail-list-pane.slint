@@ -16,6 +16,9 @@ import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { SavedSearchUi } from "../saved-searches.slint";
+import { ServerSearchUi } from "../server-search.slint";
+import { ActivitySpinner } from "../components/activity-spinner.slint";
+import { SearchTips } from "../components/search-tips.slint";
 import { ImportActivity } from "../dialogs/import-dialog.slint";
 import { AutoReplyActivity } from "../auto-replies.slint";
 import { MovePickerUi } from "../dialogs/move-dialog.slint";
@@ -336,6 +339,75 @@ component ServerOnlyNote inherits Rectangle {
                 text: @tr("Change mail history");
                 accessible-id: "mail-list-mail-history";
                 clicked => { root.open-mail-history(); }
+            }
+        }
+    }
+}
+
+// Ends a list of search results whose rows are all here, or sits under an
+// empty one's message: searching the servers past the mail this device
+// keeps, and how that went.
+component ServerSearchRow inherits Rectangle {
+    in property <color> text-color;
+    in property <color> divider-color;
+    // Below rows, centred under a divider; under an empty list's message, in
+    // line with it.
+    in property <bool> below-rows: true;
+    private property <string> stage: ServerSearchUi.stage;
+    private property <string> caption: root.stage == "failed"
+        ? (ServerSearchUi.failed-count == 1
+            ? @tr("Couldn't search {}: {}", ServerSearchUi.failed-account, ServerSearchUi.error)
+            : @tr("Couldn't search {n} account." | "Couldn't search {n} accounts." % ServerSearchUi.failed-count))
+        : (root.stage == "more" || root.stage == "done") && ServerSearchUi.found > 0
+            ? @tr("Found {n} more on the server." | "Found {n} more on the server." % ServerSearchUi.found)
+        : root.stage == "done" ? @tr("Nothing more on the server.")
+        : "";
+    private property <string> action: root.stage == "offer" ? @tr("Search on server")
+        : root.stage == "more" ? @tr("Search further")
+        : root.stage == "failed" ? @tr("Try again")
+        : "";
+
+    if root.below-rows : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: LayoutMetrics.divider-width;
+        background: root.divider-color;
+        accessible-role: none;
+    }
+    VerticalLayout {
+        alignment: center;
+        padding-left: root.below-rows ? 16px : 0px;
+        padding-right: root.below-rows ? 16px : 0px;
+        spacing: 10px;
+        if root.caption != "" : Text {
+            text: root.caption;
+            color: root.text-color;
+            font-size: TypeScale.secondary;
+            horizontal-alignment: root.below-rows ? center : left;
+            wrap: word-wrap;
+        }
+        if root.stage == "searching" : HorizontalLayout {
+            alignment: root.below-rows ? center : start;
+            spacing: 8px;
+            ActivitySpinner {
+                y: (parent.height - self.height) / 2;
+                color: root.text-color;
+            }
+            Text {
+                text: @tr("Searching the server…");
+                color: root.text-color;
+                font-size: TypeScale.secondary;
+                vertical-alignment: center;
+            }
+        }
+        if root.action != "" : HorizontalLayout {
+            alignment: root.below-rows ? center : start;
+            Button {
+                width: self.content-width;
+                text: root.action;
+                accessible-id: "mail-list-search-server";
+                clicked => { ServerSearchUi.search(); }
             }
         }
     }
@@ -785,6 +857,7 @@ export component MailListPane inherits FocusScope {
                             filter-tooltip: @tr("Filter and sort mail");
                             filter-accessible-id: "mail-filter-button";
                             show-save-search: true;
+                            show-search-tips: true;
                             refresh-enabled: !root.sync_in_progress;
                             refresh-tooltip: root.sync_in_progress ? @tr("Synchronizing mail") : @tr("Check for new mail");
                             refresh-accessible-id: "mail-refresh-button";
@@ -806,6 +879,32 @@ export component MailListPane inherits FocusScope {
                             }
                             refresh => { root.sync_mail(); }
                             save-search => { SavedSearchUi.start-save(); }
+                            search-tips => { search-tips-popup.show(); }
+                        }
+
+                        search-tips-popup := PopupWindow {
+                            // Under the search field's end, inside the list.
+                            x: max(8px, search-toolbar.x + search-toolbar.width - self.width);
+                            y: parent.height;
+                            width: min(360px, parent.width - 16px);
+                            height: tips.height;
+                            close-policy: close-on-click-outside;
+                            forward-focus: tips-keys;
+
+                            tips-keys := FocusScope {
+                                key-pressed(event) => {
+                                    if event.text == Key.Escape {
+                                        search-tips-popup.close();
+                                        return accept;
+                                    }
+                                    reject
+                                }
+
+                                tips := SearchTips {
+                                    width: parent.width;
+                                    room: max(160px, root.height - search-tips-popup.y - 16px);
+                                }
+                            }
                         }
                     }
 
@@ -1030,7 +1129,9 @@ export component MailListPane inherits FocusScope {
                                 private property <float> touch-start-y: 0;
                                 width: max(0px, mail-list-scroll.visible-width - LayoutMetrics.list-scrollbar-gutter);
                                 height: entry.is_header
-                                    ? (entry.group_kind == "server-only" ? 100px : entry.group_kind == "earlier" ? 56px : root.compact ? 44px : 40px)
+                                    ? (entry.group_kind == "server-only" ? 100px : entry.group_kind == "earlier" ? 56px
+                                        : entry.group_kind == "server-search" ? (ServerSearchUi.stage == "failed" || (ServerSearchUi.stage == "more" && ServerSearchUi.found > 0) ? 100px : 64px)
+                                        : root.compact ? 44px : 40px)
                                     : entry.show_row && (mail-row.reveal-ready || !MotionSettings.movement)
                                         ? root.message-row-height : 0px;
                                 border-radius: 6px;
@@ -1573,7 +1674,13 @@ export component MailListPane inherits FocusScope {
                                     divider-color: root.border-subtle;
                                     show-earlier => { root.load_earlier(); }
                                 }
-                                if entry.is_header && entry.group_kind != "server-only" && entry.group_kind != "earlier" : MailGroupHeader {
+                                if entry.is_header && entry.group_kind == "server-search" : ServerSearchRow {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text-color: root.secondary-text;
+                                    divider-color: root.border-subtle;
+                                }
+                                if entry.is_header && entry.group_kind != "server-only" && entry.group_kind != "earlier" && entry.group_kind != "server-search" : MailGroupHeader {
                                     width: parent.width;
                                     height: parent.height;
                                     title: root.group-title(entry.group_kind);
@@ -1619,14 +1726,28 @@ export component MailListPane inherits FocusScope {
                             x: LayoutMetrics.list-row-inset;
                             y: 0px;
                             width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
-                            height: min(parent.height, 120px);
+                            height: min(parent.height, ServerSearchUi.stage == "" ? 120px : 220px);
                             background: root.surface;
                             VerticalBox {
+                                alignment: start;
                                 padding-top: 28px;
                                 padding-left: 20px;
+                                padding-right: 20px;
                                 spacing: 4px;
                                 Text { text: root.loading ? @tr("Opening your mailbox…") : @tr("Nothing here"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
-                                if !root.loading : Text { text: @tr("Try another folder or search term."); color: root.muted-text; font-size: TypeScale.secondary; }
+                                if !root.loading : Text {
+                                    text: ServerSearchUi.stage == "" ? @tr("Try another folder or search term.") : @tr("No mail on this device matches.");
+                                    color: root.muted-text;
+                                    font-size: TypeScale.secondary;
+                                    wrap: word-wrap;
+                                }
+                                // A search of the servers may find older mail.
+                                if ServerSearchUi.stage != "" : ServerSearchRow {
+                                    height: ServerSearchUi.stage == "failed" || (ServerSearchUi.stage == "more" && ServerSearchUi.found > 0) ? 84px : 56px;
+                                    below-rows: false;
+                                    text-color: root.secondary-text;
+                                    divider-color: root.border-subtle;
+                                }
                             }
                         }
 
