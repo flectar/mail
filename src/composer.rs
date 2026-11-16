@@ -544,6 +544,7 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_links(from.get_links());
     to.set_link_sharing(from.get_link_sharing());
     to.set_plain_text(from.get_plain_text());
+    to.set_request_receipt(from.get_request_receipt());
     to.set_templates(from.get_templates());
     to.set_message(from.get_message());
     to.set_notice_is_error(from.get_notice_is_error());
@@ -1081,6 +1082,7 @@ impl Composers {
         ui.set_cc(compose_addresses(&draft.cc).into());
         ui.set_bcc(compose_addresses(&draft.bcc).into());
         ui.set_subject(draft.subject.clone().into());
+        ui.set_request_receipt(draft.request_read_receipt);
 
         *session.files.borrow_mut() = draft
             .attachments
@@ -3094,6 +3096,7 @@ impl ComposeSession {
             mode: intent.mode.as_str(),
             in_reply_to_message_id: intent.in_reply_to_message_id,
             in_reply_to_header: intent.in_reply_to_header.as_deref(),
+            request_read_receipt: ui.get_request_receipt(),
         };
         if send {
             let queued = composers
@@ -3543,6 +3546,10 @@ impl ComposeSession {
         };
         // How the message starts, before its signature goes in to match.
         self.choose_starting_format(&config.settings);
+        // A draft, and a message edited as new, keep their own request.
+        if !matches!(ui.get_mode().as_str(), "draft" | "edit_as_new") {
+            ui.set_request_receipt(config.settings.request_read_receipts);
+        }
         let requested = preferences.get_composer_sender_email().to_string();
         let identities = account_mail_preferences::selectable_identities(identities, &requested);
         let sender_choices = identities
@@ -3979,6 +3986,7 @@ mod tests {
             in_reply_to_message_id: None,
             in_reply_to_header: None,
             attachments: Vec::new(),
+            request_read_receipt: false,
         };
         assert!(composers.show_review(draft.clone(), "Claude"));
         assert_eq!(open_windows(), 1);

@@ -3309,6 +3309,10 @@ async fn prepare_draft(
         .nth(1)
         .unwrap_or("localhost")
         .to_owned();
+    let receipt_to = ctx
+        .db
+        .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+        .await?;
     let outgoing = crate::mime::OutgoingMessage {
         from,
         reply_to,
@@ -3323,6 +3327,7 @@ async fn prepare_draft(
         message_id: stored_message_id.as_deref(),
         message_id_domain: &domain,
         attachments,
+        receipt_to: &receipt_to,
     };
     let security_recipients = outgoing
         .to

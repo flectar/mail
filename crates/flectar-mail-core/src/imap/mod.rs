@@ -1702,6 +1702,8 @@ pub async fn append_with_receipt(
 pub struct AppendOptions {
     pub seen: bool,
     pub flagged: bool,
+    /// `$MDNSent`: a read receipt the message asks for is answered.
+    pub mdn_sent: bool,
     /// The message's internal date, instead of the time it is appended.
     pub internal_date: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -1720,6 +1722,9 @@ pub async fn append_message(
     }
     if options.flagged {
         flags.push("\\Flagged");
+    }
+    if options.mdn_sent {
+        flags.push(MDN_SENT);
     }
     let flags = if flags.is_empty() {
         String::new()

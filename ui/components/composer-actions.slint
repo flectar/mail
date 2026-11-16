@@ -821,6 +821,8 @@ export component ComposerFooter inherits Rectangle {
     // A storage service is there to send files by link from.
     in property <bool> link-sharing: false;
     callback share-by-link();
+    // The message asks for a read receipt.
+    in-out property <bool> request-receipt: false;
     callback request-close();
 
             height: 54px;
@@ -882,7 +884,7 @@ export component ComposerFooter inherits Rectangle {
             }
 
             link-button := IconButton {
-                visible: root.link-sharing && root.attachment-picker-supported && !root.signature;
+                visible: root.link-sharing && root.attachment-picker-supported && !root.signature && !root.compact;
                 x: attach-button.x + attach-button.width + (root.compact ? 0px : 2px);
                 y: attach-button.y;
                 width: attach-button.width;
@@ -908,7 +910,7 @@ export component ComposerFooter inherits Rectangle {
 
             save-draft := Button {
                 visible: !root.signature;
-                x: parent.width - (root.compact ? 54px : 90px) - self.width;
+                x: more-menu.x - (root.compact ? 6px : 12px) - self.width;
                 y: 11px;
                 width: max(root.compact ? 104px : 112px, self.content-width);
                 height: 32px;
@@ -917,8 +919,46 @@ export component ComposerFooter inherits Rectangle {
                 clicked => { root.submit(false); }
             }
 
-            IconButton {
+            // Options of the message that most messages leave as they are. Phones keep
+            // the bar's rarer buttons here too.
+            more-menu := ContextMenuArea {
                 visible: !root.signature;
+                x: root.compact ? parent.width - 48px : discard.x - 2px - self.width;
+                y: root.compact ? 5px : 11px;
+                width: root.compact ? 44px : 32px;
+                height: root.compact ? 44px : 32px;
+
+                IconButton {
+                    width: parent.width;
+                    height: parent.height;
+                    icon: @image-url("../icons/lucide/outline/kebab-horizontal.svg");
+                    icon-color: root.secondary-color;
+                    hover-background: root.control-hover-color;
+                    tooltip-text: @tr("More options");
+                    clicked => { more-menu.show({ x: 0px, y: -4px }); }
+                }
+
+                Menu {
+                    MenuItem {
+                        title: @tr("Request a read receipt");
+                        checkable: true;
+                        checked: root.request-receipt;
+                        activated => { root.request-receipt = !root.request-receipt; }
+                    }
+                    if root.compact && root.link-sharing && root.attachment-picker-supported : MenuItem {
+                        title: @tr("Share files by link");
+                        activated => { root.share-by-link(); }
+                    }
+                    if root.compact : MenuSeparator {}
+                    if root.compact : MenuItem {
+                        title: @tr("Discard");
+                        activated => { root.request-close(); }
+                    }
+                }
+            }
+
+            discard := IconButton {
+                visible: !root.signature && !root.compact;
                 x: parent.width - (root.compact ? 48px : 78px);
                 y: root.compact ? 5px : 11px;
                 width: root.compact ? 44px : 32px;

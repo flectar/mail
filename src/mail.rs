@@ -218,6 +218,8 @@ pub struct ComposeMessage<'a> {
     pub in_reply_to_message_id: Option<i64>,
     /// The Message-ID answered when that message is not stored here.
     pub in_reply_to_header: Option<&'a str>,
+    /// The message asks for a read receipt.
+    pub request_read_receipt: bool,
 }
 
 /// The latest concrete message in a selected thread, with the addressing data
@@ -2973,6 +2975,7 @@ fn compose_args(
         in_reply_to_message_id: message.in_reply_to_message_id,
         in_reply_to_header: message.in_reply_to_header.map(str::to_owned),
         attachments: message.attachments.to_vec(),
+        request_read_receipt: message.request_read_receipt,
     })
 }
 
@@ -4704,6 +4707,7 @@ mod tests {
             mode: "new",
             in_reply_to_message_id: None,
             in_reply_to_header: None,
+            request_read_receipt: false,
         };
         let draft = compose_args(message(), false).unwrap();
 
@@ -4730,6 +4734,7 @@ mod tests {
                 mode: "reply",
                 in_reply_to_message_id: Some(99),
                 in_reply_to_header: None,
+                request_read_receipt: true,
             },
             true,
         )
@@ -4740,6 +4745,7 @@ mod tests {
         assert_eq!(draft.body_text, "Hello Maya");
         assert_eq!(draft.mode, "reply");
         assert_eq!(draft.in_reply_to_message_id, Some(99));
+        assert!(draft.request_read_receipt);
         assert_eq!(
             draft.body_html.as_deref(),
             Some("<div>Hello <strong>Maya</strong></div>")

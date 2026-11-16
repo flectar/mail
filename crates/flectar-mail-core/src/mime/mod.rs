@@ -2889,6 +2889,9 @@ pub struct OutgoingMessage<'a> {
     pub message_id: Option<&'a str>,
     pub message_id_domain: &'a str,
     pub attachments: Vec<OutgoingAttachment>,
+    /// Who the message asks to send a read receipt to
+    /// (Disposition-Notification-To, RFC 8098), if anyone.
+    pub receipt_to: &'a [Address],
 }
 
 /// An image extracted from the HTML body, to be sent as an inline CID part.
@@ -3465,6 +3468,9 @@ fn build_message_with_attachments<'a>(
     }
     if !out.bcc.is_empty() {
         builder = builder.bcc(addresses(out.bcc));
+    }
+    if !out.receipt_to.is_empty() {
+        builder = builder.header("Disposition-Notification-To", addresses(out.receipt_to));
     }
     for att in &attachments {
         if att
@@ -4164,6 +4170,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_message_asks_for_a_read_receipt_at_the_address_given() {
+        let me = [Address {
+            name: Some("Me".into()),
+            email: "me@example.com".into(),
+        }];
+        let asking = OutgoingMessage {
+            receipt_to: &me,
+            ..outgoing("Hi", None)
+        };
+        let (_, raw) = build_message(&asking).unwrap();
+        let text = String::from_utf8(raw).unwrap();
+        let header = text
+            .lines()
+            .find(|line| line.starts_with("Disposition-Notification-To: "))
+            .unwrap_or_default();
+        assert!(header.ends_with("<me@example.com>"), "{text}");
+        let (_, raw) = build_message(&outgoing("Hi", None)).unwrap();
+        assert!(
+            !String::from_utf8(raw)
+                .unwrap()
+                .contains("Disposition-Notification-To")
+        );
+    }
+
     fn outgoing<'a>(text: &'a str, html: Option<&'a str>) -> OutgoingMessage<'a> {
         OutgoingMessage {
             from: Address {
@@ -4182,6 +4213,7 @@ mod tests {
             message_id: None,
             message_id_domain: "example.com",
             attachments: Vec::new(),
+            receipt_to: &[],
         }
     }
 
