@@ -112,6 +112,20 @@ pub fn by_folder_uid(conn: &Connection, folder_id: i64, uid: i64) -> Result<Opti
         .optional()?)
 }
 
+/// Who message `id` asks to send its read receipt to (Disposition-
+/// Notification-To, RFC 8098): for a draft, its own request.
+pub fn receipt_to(conn: &Connection, id: i64) -> Result<Vec<Address>> {
+    let json: Option<String> = conn.query_row(
+        "SELECT receipt_to FROM messages WHERE id = ?1",
+        params![id],
+        |row| row.get(0),
+    )?;
+    Ok(match json {
+        Some(json) => serde_json::from_str(&json)?,
+        None => Vec::new(),
+    })
+}
+
 /// The In-Reply-To and References a draft's message carries: from the stored
 /// message it replies to, or from the Message-ID kept for a reply to one that
 /// is not stored here.

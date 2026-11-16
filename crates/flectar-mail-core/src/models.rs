@@ -433,6 +433,10 @@ pub struct AccountSettings {
     /// when new messages start formatted.
     #[serde(default = "plain_text_replies_default")]
     pub plain_text_replies: bool,
+    /// New messages ask for a read receipt (RFC 8098), which each message
+    /// can still change.
+    #[serde(default)]
+    pub request_read_receipts: bool,
 }
 
 const fn plain_text_replies_default() -> bool {
@@ -452,6 +456,7 @@ impl AccountSettings {
             keep_on_server: KeepOnServer::Always,
             message_format: MessageFormat::Formatted,
             plain_text_replies: plain_text_replies_default(),
+            request_read_receipts: false,
         }
     }
 }
@@ -1729,6 +1734,10 @@ pub struct SaveDraftArgs {
     pub in_reply_to_header: Option<String>,
     #[serde(default)]
     pub attachments: Vec<DraftAttachmentIn>,
+    /// The message asks for a read receipt (Disposition-Notification-To,
+    /// RFC 8098), sent to its From address.
+    #[serde(default)]
+    pub request_read_receipt: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
