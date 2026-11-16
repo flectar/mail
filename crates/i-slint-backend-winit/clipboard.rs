@@ -132,12 +132,12 @@ pub fn create_clipboard(
     _display_handle: &winit::raw_window_handle::DisplayHandle<'_>,
     _event_loop_proxy: &winit::event_loop::EventLoopProxy<crate::SlintEvent>,
 ) -> ClipboardPair {
-    cfg_if::cfg_if! {
-        if #[cfg(all(
+    core::cfg_select! {
+        all(
             unix,
             not(any(target_vendor = "apple", target_os = "android", target_os = "emscripten")),
             any(feature = "x11", feature = "wayland")
-        ))] {
+        ) => {
             // On Wayland, use the event loop's own connection: the core wl_data_device protocol
             // works on every compositor and in sandboxes, unlike the data-control protocol that
             // a separate connection needs.
@@ -169,10 +169,12 @@ pub fn create_clipboard(
                 make(arboard::LinuxClipboardKind::Clipboard),
                 make(arboard::LinuxClipboardKind::Primary),
             )
-        } else if #[cfg(target_os = "ios")] {
+        }
+        target_os = "ios" => {
             // iOS exposes a single general pasteboard; the selection clipboard is a no-op.
             (Box::new(crate::ios::UiPasteboardClipboard), Box::new(SilentClipboardContext))
-        } else if #[cfg(any(target_os = "windows", target_os = "macos"))] {
+        }
+        any(target_os = "windows", target_os = "macos") => {
             (
                 arboard::Clipboard::new().map_or(
                     Box::new(SilentClipboardContext) as Box<dyn ClipboardProvider>,
@@ -180,7 +182,8 @@ pub fn create_clipboard(
                 ),
                 Box::new(SilentClipboardContext),
             )
-        } else {
+        }
+        _ => {
             (Box::new(SilentClipboardContext), Box::new(SilentClipboardContext))
         }
     }

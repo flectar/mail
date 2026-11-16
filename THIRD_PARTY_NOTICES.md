@@ -6,19 +6,24 @@ authors.
 
 ## Slint
 
-Slint 1.18 is copyright © SixtyFPS GmbH and Slint contributors. Flectar Mail
+Slint 1.19 is copyright © SixtyFPS GmbH and Slint contributors. Flectar Mail
 uses Slint under the `GPL-3.0-only` option offered by the Slint crates. The
 license text is in [`LICENSES/GPL-3.0-only.txt`](LICENSES/GPL-3.0-only.txt), and
 the upstream source is <https://github.com/slint-ui/slint>. The locally patched
-`i-slint-backend-winit` 1.18.1 crate retains its upstream license texts in
+`i-slint-backend-winit` 1.19.0 crate retains its upstream license texts in
 [`crates/i-slint-backend-winit/LICENSES`](crates/i-slint-backend-winit/LICENSES).
-Its Wayland clipboard backport, source checksum, and removal condition are
+Its Wayland file drop patch, source checksum, and removal condition are
 documented in [`patches/slint-winit/README.md`](patches/slint-winit/README.md).
-The locally patched `i-slint-backend-android-activity` 1.18.1 crate likewise
+The locally patched `i-slint-backend-android-activity` 1.19.0 crate likewise
 retains its upstream license texts in
 [`crates/i-slint-backend-android-activity/LICENSES`](crates/i-slint-backend-android-activity/LICENSES),
 and its pointer scroll backport is documented in
 [`patches/slint-android-activity/README.md`](patches/slint-android-activity/README.md).
+The locally patched `i-slint-renderer-software` 1.19.0 crate retains its
+upstream license texts in
+[`crates/i-slint-renderer-software/LICENSES`](crates/i-slint-renderer-software/LICENSES),
+and its clip fix is documented in
+[`patches/slint-renderer-software/README.md`](patches/slint-renderer-software/README.md).
 
 ## smithay-clipboard
 
@@ -43,15 +48,13 @@ checksums, and patch order are recorded in
 
 ## Parley emoji presentation
 
-Blitz uses upstream Parley 0.12.0; Slint still uses locally patched Parley
-0.11.1. Both are used under the Apache-2.0 option. The `parley_emoji`
-sequence detector includes the fix from
-[Parley PR #811](https://github.com/linebender/parley/pull/811), based on
-[Christian Hansen's c-emoji](https://github.com/chansen/c-emoji), and is
-licensed under MIT. Its copyright and license are included in
+Slint and Blitz use Parley 0.12.0 under the Apache-2.0 option. Its
+`parley_emoji` sequence detector, from
+[Parley PR #811](https://github.com/linebender/parley/pull/811), is based on
+[Christian Hansen's c-emoji](https://github.com/chansen/c-emoji) and licensed
+under MIT. Its copyright and license are included in
 [`LICENSES/Parley-Emoji-MIT.txt`](LICENSES/Parley-Emoji-MIT.txt).
-Published packages and checksums are pinned in `Cargo.lock`. The backport
-retained for Slint is documented in [`patches/parley/README.md`](patches/parley/README.md).
+Published packages and checksums are pinned in `Cargo.lock`.
 
 ## Candle
 

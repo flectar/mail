@@ -7,6 +7,7 @@ use slint::{ComponentHandle, Model, ModelRc, Rgb8Pixel, VecModel};
 use std::{cell::Cell, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { Palette } from "std-widgets.slint";
     import { CalendarAgendaRow, CalendarAgendaFilterRow, CalendarEventRow } from "../ui/models.slint";
     import { CalendarAgenda, CalendarAgendaFilter } from "../ui/components/calendar-agenda.slint";

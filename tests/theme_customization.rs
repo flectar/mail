@@ -6,6 +6,7 @@ use slint::{Color, ComponentHandle, Rgb8Pixel};
 use std::{cell::Cell, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { Palette } from "std-widgets.slint";
     import { ThemeEditor } from "../ui/components/theme-editor.slint";
     import { Button } from "../ui/components/button.slint";

@@ -46,9 +46,8 @@ reader supplies `img { max-width: 100% }` in its user-agent stylesheet to
 preserve fitted images. Sender CSS can override that default.
 
 Parley 0.12's published `parley_engine` includes the emoji-presentation state
-machine previously backported locally. Slint still depends on Parley 0.11.1, so
-its existing backport and verifier remain in place until Slint adopts a fixed
-version too.
+machine previously backported locally. Slint 1.19 uses Parley 0.12 too, so no
+Parley backport remains.
 
 ## Beta.4 rebase
 

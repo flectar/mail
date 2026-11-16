@@ -16,6 +16,7 @@ impl Platform for Headless {
 }
 
 slint::slint! {
+    #[edition = "1.19"]
     import { ScrollView } from "std-widgets.slint";
     import { CopyableDiagnostic } from "../ui/components/copyable-diagnostic.slint";
     import { OnScreenSurface } from "../ui/components/on-screen-surface.slint";

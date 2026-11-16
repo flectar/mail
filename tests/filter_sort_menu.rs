@@ -12,6 +12,7 @@ use slint::platform::{
 use std::{ops::ControlFlow, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { WorkspaceSearchToolbar } from "../ui/components/workspace-layout.slint";
 
     export component SortHarness inherits Window {
@@ -91,7 +92,7 @@ fn span(item: &ItemRc) -> (f32, f32) {
     (top, top + geometry.size.height)
 }
 
-/// Click the middle of `item`. Menu items in Slint 1.18 take clicks; they
+/// Click the middle of `item`. Menu items in Slint 1.19 take clicks; they
 /// have no default accessibility action.
 fn click(window: &slint::Window, item: &ItemRc) {
     let geometry = item.geometry();

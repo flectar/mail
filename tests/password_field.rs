@@ -13,6 +13,7 @@ use slint::platform::{
 use std::{ops::ControlFlow, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { LineEdit } from "../ui/components/controls.slint";
     export { WindowChrome } from "../ui/window-chrome.slint";
 

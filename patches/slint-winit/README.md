@@ -1,37 +1,32 @@
-# Wayland clipboard backport
+# Wayland file drops in the winit backend
 
-Slint 1.18 replaced copypasta with arboard
-([Slint #12373](https://github.com/slint-ui/slint/pull/12373)). On Wayland,
-arboard needs the data-control protocol on a connection of its own. GNOME and
-COSMIC do not offer it by default, and compositors hide it from sandboxed
-clients. arboard then falls back to X11, which a Flatpak with
-`--socket=fallback-x11` does not have on Wayland. Slint silently uses a no-op
-clipboard, so copy and paste do nothing (Mail #108).
+Slint 1.19 still runs on winit 0.30, which doesn't report files dragged onto a
+window on Wayland. Files dragged from a file manager onto Flectar Mail did
+nothing there, in the Flatpak too. The clipboard's own data device takes those
+drags instead (see `patches/smithay-clipboard/README.md`), and this patch hands
+them to the window as the `HoveredFile`, `HoveredFileCancelled` and
+`DroppedFile` events winit gives on other platforms. Slint's own winit 0.31
+branch reports them natively.
 
 ## Sources and adaptation
 
-`crates/i-slint-backend-winit` is the published 1.18.1 archive, revision
-`372cf0ee5577c3dfec309a45e7b778ba4e81b734`, plus three patches.
-`0001-wayland-clipboard.patch` is
-[Slint #14248](https://github.com/slint-ui/slint/pull/14248) at
-`cb91c1927cd8c17649ba445d28d3a0c2a0041238`, adapted to 1.18.1's `cfg_if`
-block and normalized manifest. On Wayland, smithay-clipboard uses the event
-loop's own `wl_display` with the core `wl_data_device` and primary-selection
-protocols, which every compositor offers to sandboxed clients too. arboard
-stays for X11. The upstream changelog and lockfile hunks are omitted.
-`0002-dependency-scanner.patch` lists five dependencies that the release
+`crates/i-slint-backend-winit` is the published 1.19.0 archive, revision
+`e436f546f71481d786cbc2a74316b1be1ef678c1`, plus two patches.
+`0001-dependency-scanner.patch` lists five dependencies that the release
 declares but does not import, so `cargo machete` can scan the crate.
-`0003-wayland-file-drops.patch` is ours. winit 0.30 doesn't report files
-dragged onto a window on Wayland, so the clipboard's data device takes them
-(see `patches/smithay-clipboard/README.md`) and the event loop hands them to
-the window as the `HoveredFile`, `HoveredFileCancelled` and `DroppedFile`
-events winit gives on other platforms. Slint's own winit 0.31 branch reports
-them natively.
+`0002-wayland-file-drops.patch` is ours. It gives the clipboard a drop handler
+that sends each drag to the event loop, which finds the window by its Wayland
+surface and dispatches the winit events. For a drop with a document portal key,
+the handler asks the FileTransfer portal for files a sandboxed app can read.
 `Cargo.toml.orig` is kept unchanged for provenance. The standalone lockfile is
-omitted; both application lockfiles resolve the patched manifest.
+omitted, and the application lockfiles resolve the patched manifest.
 
-smithay-clipboard is pinned to 0.7.2, which uses SCTK 0.19 like winit 0.30.
-Version 0.7.3 moved to SCTK 0.20 and would build a second copy.
+Slint 1.19 reaches the Wayland clipboard through smithay-clipboard on the event
+loop's own connection
+([Slint #14248](https://github.com/slint-ui/slint/pull/14248)), which Flectar
+Mail carried as a backport for Slint 1.18 (Mail #108). smithay-clipboard is
+pinned to 0.7.2, which uses SCTK 0.19 like winit 0.30. Version 0.7.3 moved to
+SCTK 0.20 and would build a second copy.
 
 The reader's rich-text copy and primary selection still go through arboard
 (`src/reader_clipboard.rs`). Where arboard has no backend, rich copy falls back
@@ -44,11 +39,11 @@ python3 scripts/verify-slint-winit.py
 ```
 
 The verifier downloads the checksum-pinned archive, checks its revision,
-applies the patch, and compares every file with the vendored crate. It also
-checks the desktop/Android patch wiring, that both lockfiles resolve the local
-crate for Slint 1.18.1, and the smithay-clipboard pin.
+applies the patches, and compares every file with the vendored crate. It also
+checks that the root, Android and OpenHarmony workspaces patch the crate, that
+their lockfiles resolve it locally for Slint 1.19.0, and the smithay-clipboard
+pin.
 
-When a Slint release includes #14248, remove the vendored crate, this
-directory, both manifest patches, the `.gitignore` and `.gitattributes`
-entries, the verifier, and its CI step. Then update both lockfiles and
-`packaging/flatpak/cargo-sources.json`.
+When Flectar Mail moves to a Slint release on winit 0.31, remove the vendored
+crate together with smithay-clipboard, as `patches/smithay-clipboard/README.md`
+lists.

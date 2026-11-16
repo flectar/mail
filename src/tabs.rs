@@ -2634,6 +2634,7 @@ mod tests {
     #[cfg(desktop)]
     mod listed {
         slint::slint! {
+            #[edition = "1.19"]
             export { Shortcuts } from "../ui/shortcuts.slint";
             export component ShortcutList inherits Window {}
         }

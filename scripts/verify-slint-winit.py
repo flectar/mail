@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reconstruct the pinned Slint winit clipboard backport."""
+"""Reconstruct the pinned Slint winit backend with its Wayland file drop patch."""
 
 import hashlib
 import io
@@ -54,7 +54,11 @@ def main():
             if expected.get(name) != actual.get(name):
                 raise RuntimeError(f"Vendored source differs: crates/{CRATE}/{name}")
 
-    for manifest, prefix in [("Cargo.toml", ""), ("platform/android/Cargo.toml", "../../")]:
+    for manifest, prefix in [
+        ("Cargo.toml", ""),
+        ("platform/android/Cargo.toml", "../../"),
+        ("platform/ohos/Cargo.toml", "../../"),
+    ]:
         patches = tomllib.loads((ROOT / manifest).read_text())["patch"]["crates-io"]
         if patches.get(CRATE) != {"path": f"{prefix}crates/{CRATE}"}:
             raise RuntimeError(f"Missing Slint winit patch in {manifest}")
@@ -66,15 +70,15 @@ def main():
 
         backend = resolved(CRATE)
         if len(backend) != 1 or backend[0]["version"] != version or "source" in backend[0]:
-            raise RuntimeError(f"{lockfile}: {CRATE} must resolve to the local backport")
+            raise RuntimeError(f"{lockfile}: {CRATE} must resolve to the local crate")
         if [p["version"] for p in resolved("slint")] != [version]:
-            raise RuntimeError(f"{lockfile}: the backport targets Slint {version}")
+            raise RuntimeError(f"{lockfile}: the patched crate targets Slint {version}")
         # smithay-clipboard 0.7.3 moved to SCTK 0.20; 0.7.2 shares winit's SCTK 0.19.
         if [p["version"] for p in resolved("smithay-clipboard")] != [metadata["smithay_clipboard"]]:
             raise RuntimeError(f"{lockfile}: smithay-clipboard must stay on SCTK 0.19")
         if len(resolved("smithay-client-toolkit")) != 1:
             raise RuntimeError(f"{lockfile}: expected a single smithay-client-toolkit")
-    print("Slint winit source checksum, clipboard backport, manifests, and lockfiles verified.")
+    print("Slint winit source checksum, file drop patch, manifests, and lockfiles verified.")
 
 
 if __name__ == "__main__":

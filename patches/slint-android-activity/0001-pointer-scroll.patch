@@ -1,16 +1,17 @@
 diff --git a/crates/i-slint-backend-android-activity/androidwindowadapter.rs b/crates/i-slint-backend-android-activity/androidwindowadapter.rs
+index 78c8aae..52403a0 100644
 --- a/crates/i-slint-backend-android-activity/androidwindowadapter.rs
 +++ b/crates/i-slint-backend-android-activity/androidwindowadapter.rs
 @@ -6,7 +6,7 @@
  use super::*;
  use crate::javahelper::{JavaHelper, print_jni_error};
  use android_activity::input::{
--    ButtonState, InputEvent, KeyAction, Keycode, MotionAction, MotionEvent,
-+    Axis, ButtonState, InputEvent, KeyAction, Keycode, MotionAction, MotionEvent,
+-    ButtonState, InputEvent, KeyAction, KeyMapChar, Keycode, MotionAction, MotionEvent,
++    Axis, ButtonState, InputEvent, KeyAction, KeyMapChar, Keycode, MotionAction, MotionEvent,
  };
  use android_activity::{InputStatus, MainEvent, PollEvent};
  use i_slint_core::SharedString;
-@@ -440,7 +440,27 @@
+@@ -558,7 +558,27 @@ impl AndroidWindowAdapter {
                              }
                              InputStatus::Handled
                          }
