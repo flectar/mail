@@ -156,6 +156,8 @@ export struct EmailRow {
     starred: bool,
     has_attachments: bool,
     has_replied: bool,
+    // Sent with high importance (#236), for a marker in the list.
+    high_importance: bool,
     message_count: int,
     label_summary: string,
     labels: [MailLabelRow],

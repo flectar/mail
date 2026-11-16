@@ -114,6 +114,7 @@ async fn seed(db: &Db, port: u16) -> (i64, i64) {
             receipt_to: Vec::new(),
             receipt_confirm: false,
             receipt_handled: false,
+            importance: Default::default(),
         };
         repo::messages::insert(conn, &msg, thread_id)?;
         repo::threads::recompute(conn, thread_id)?;
@@ -220,6 +221,7 @@ async fn offline_actions_queue_locally_and_survive_restart() {
             in_reply_to_header: None,
             attachments: vec![],
             request_read_receipt: false,
+            importance: Default::default(),
         })
         .await
         .expect("save draft offline");

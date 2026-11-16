@@ -8,7 +8,7 @@ use flectar_mail_core::{
         Account, AccountConfig, ActionKind, ActionParams, ActionTarget, AddPasswordAccountArgs,
         Address, BlockOffer, BlockResult, CalendarConnection, CalendarEvent, CardDavConnection,
         ConnectCaldavArgs, ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage,
-        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, ForwardedMessage,
+        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, ForwardedMessage, Importance,
         InvitationCard, Label, ListOrder, ListOwner, MailGrouping, MailHistory, MailProfile,
         MailProtocol, MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor,
         MessageSummary, PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs,
@@ -47,6 +47,8 @@ pub struct EmailFixture {
     pub has_attachments: bool,
     #[serde(default)]
     pub has_replied: bool,
+    #[serde(default)]
+    pub high_importance: bool,
     #[serde(skip)]
     pub html: String,
 }
@@ -86,6 +88,7 @@ pub struct MailMessage {
     pub message_count: i64,
     pub attachments: Vec<flectar_mail_core::models::AttachmentMeta>,
     pub has_replied: bool,
+    pub high_importance: bool,
     pub is_outgoing: bool,
     pub labels: Vec<i64>,
     pub html: Option<String>,
@@ -146,6 +149,7 @@ impl MailMessage {
             message_count: 1,
             attachments: Vec::new(),
             has_replied: email.has_replied,
+            high_importance: email.high_importance,
             is_outgoing: false,
             labels: Vec::new(),
             html: Some(email.html.to_owned()),
@@ -220,6 +224,7 @@ pub struct ComposeMessage<'a> {
     pub in_reply_to_header: Option<&'a str>,
     /// The message asks for a read receipt.
     pub request_read_receipt: bool,
+    pub importance: Importance,
 }
 
 /// The latest concrete message in a selected thread, with the addressing data
@@ -2931,6 +2936,7 @@ fn compose_args(
         in_reply_to_header: message.in_reply_to_header.map(str::to_owned),
         attachments: message.attachments.to_vec(),
         request_read_receipt: message.request_read_receipt,
+        importance: message.importance,
     })
 }
 
@@ -3687,6 +3693,7 @@ fn summary_to_message(
         message_count: thread.message_count.max(1),
         attachments: Vec::new(),
         has_replied: thread.has_replied,
+        high_importance: thread.high_importance,
         is_outgoing: false,
         labels: thread.labels,
         html: None,
@@ -3798,6 +3805,7 @@ fn message_summary_to_message(
         message_count: 1,
         attachments: Vec::new(),
         has_replied: message.has_replied,
+        high_importance: message.high_importance,
         is_outgoing: message.is_outgoing,
         labels: message.labels,
         html: None,
@@ -3910,6 +3918,7 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
             Vec::new()
         },
         has_replied: row.has_replied,
+        high_importance: row.high_importance,
         is_outgoing: message.is_outgoing,
         labels: row.labels.clone(),
         html,
@@ -4160,7 +4169,7 @@ mod tests {
     };
     use crate::mail_scope::{LabelKind, Scope, StandardMailbox};
     use flectar_mail_core::models::{
-        Account, ActionTarget, Address, AuthKind, FolderInfo, Label, MailProtocol,
+        Account, ActionTarget, Address, AuthKind, FolderInfo, Importance, Label, MailProtocol,
         MailboxBadgeCounts, MessageSummary, Provider, ThreadSummary, View,
     };
     use std::collections::HashMap;
@@ -4492,6 +4501,7 @@ mod tests {
             is_outgoing: outgoing,
             has_attachments: false,
             has_replied: false,
+            high_importance: false,
             snoozed_until: None,
             labels: vec![3],
             verification_code: None,
@@ -4573,6 +4583,7 @@ mod tests {
             is_starred: false,
             has_attachments: false,
             has_replied: true,
+            high_importance: false,
             snoozed_until: None,
             labels: Vec::new(),
             verification_code: Some("482913".into()),
@@ -4663,6 +4674,7 @@ mod tests {
             in_reply_to_message_id: None,
             in_reply_to_header: None,
             request_read_receipt: false,
+            importance: Importance::Normal,
         };
         let draft = compose_args(message(), false).unwrap();
 
@@ -4690,6 +4702,7 @@ mod tests {
                 in_reply_to_message_id: Some(99),
                 in_reply_to_header: None,
                 request_read_receipt: true,
+                importance: Importance::High,
             },
             true,
         )
@@ -4701,6 +4714,7 @@ mod tests {
         assert_eq!(draft.mode, "reply");
         assert_eq!(draft.in_reply_to_message_id, Some(99));
         assert!(draft.request_read_receipt);
+        assert_eq!(draft.importance, Importance::High);
         assert_eq!(
             draft.body_html.as_deref(),
             Some("<div>Hello <strong>Maya</strong></div>")

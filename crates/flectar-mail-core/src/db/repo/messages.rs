@@ -46,6 +46,7 @@ pub struct NewMessage {
     pub receipt_confirm: bool,
     /// A receipt was already sent or declined ($MDNSent, RFC 3503).
     pub receipt_handled: bool,
+    pub importance: Importance,
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +125,15 @@ pub fn receipt_to(conn: &Connection, id: i64) -> Result<Vec<Address>> {
         Some(json) => serde_json::from_str(&json)?,
         None => Vec::new(),
     })
+}
+
+/// How important message `id` says it is: for a draft, what it asks for.
+pub fn importance(conn: &Connection, id: i64) -> Result<Importance> {
+    Ok(Importance::from_i64(conn.query_row(
+        "SELECT importance FROM messages WHERE id = ?1",
+        params![id],
+        |row| row.get(0),
+    )?))
 }
 
 /// The In-Reply-To and References a draft's message carries: from the stored
@@ -364,8 +374,8 @@ pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> 
             subject, from_name, from_addr, to_json, cc_json, bcc_json, date, internal_date,
             is_read, is_starred, is_draft, is_outgoing, is_automated, has_attachments, size, snippet,
             list_unsubscribe, list_unsubscribe_post, sender_addr, sender_verification,
-            verification_code, list_id, receipt_to, receipt_confirm, receipt_handled)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)",
+            verification_code, list_id, receipt_to, receipt_confirm, receipt_handled, importance)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33)",
         params![
             m.account_id,
             thread_id,
@@ -401,6 +411,7 @@ pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> 
                 .transpose()?,
             m.receipt_confirm as i64,
             m.receipt_handled as i64,
+            m.importance.as_i64(),
         ],
     )?;
     let id = conn.last_insert_rowid();
@@ -1857,6 +1868,7 @@ mod tests {
             receipt_to: Vec::new(),
             receipt_confirm: false,
             receipt_handled: false,
+            importance: Importance::Normal,
         }
     }
 

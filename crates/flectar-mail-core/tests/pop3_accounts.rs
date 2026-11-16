@@ -326,6 +326,7 @@ async fn a_pop3_account_downloads_files_and_sends_mail_on_this_device() {
             in_reply_to_header: None,
             attachments: Vec::new(),
             request_read_receipt: false,
+            importance: Default::default(),
         })
         .await
         .unwrap();
@@ -386,6 +387,7 @@ async fn a_pop3_account_downloads_files_and_sends_mail_on_this_device() {
         in_reply_to_header: None,
         attachments: Vec::new(),
         request_read_receipt: false,
+        importance: Default::default(),
     })
     .await
     .unwrap();

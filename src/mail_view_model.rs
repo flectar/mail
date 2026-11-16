@@ -1069,6 +1069,7 @@ pub(super) fn make_rows<M: std::borrow::Borrow<MailMessage>>(
                 starred: email.starred,
                 has_attachments: email.has_attachments,
                 has_replied: email.has_replied,
+                high_importance: email.high_importance,
                 message_count: i32::try_from(email.message_count)
                     .unwrap_or(i32::MAX)
                     .max(1),
@@ -1986,6 +1987,7 @@ mod tests {
             has_attachments: false,
             message_count: 1,
             has_replied: false,
+            high_importance: false,
             is_outgoing: false,
             labels: Vec::new(),
             html: None,

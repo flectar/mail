@@ -273,6 +273,7 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
                     receipt_to: Vec::new(),
                     receipt_confirm: false,
                     receipt_handled: false,
+                    importance: Default::default(),
                 },
                 thread_id,
             )?;
@@ -1519,6 +1520,7 @@ fn seed_unread(
             receipt_to: Vec::new(),
             receipt_confirm: false,
             receipt_handled: false,
+            importance: Default::default(),
         },
         thread_id,
     )?;

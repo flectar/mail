@@ -152,6 +152,7 @@ impl Importer {
             receipt_to: headers.receipt_to.clone(),
             receipt_confirm: headers.receipt_confirm,
             receipt_handled: delivery.receipt_handled,
+            importance: headers.importance,
         };
         let message_id = repo::messages::insert(conn, &message, thread_id)?;
         if !self.thread_ids.contains(&thread_id) {

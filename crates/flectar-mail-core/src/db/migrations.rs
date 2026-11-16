@@ -61,6 +61,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/042_agent_undo.sql")),
     Migration::Plain(include_str!("migrations/043_cloud_link_services.sql")),
     Migration::Plain(include_str!("migrations/044_auto_replies.sql")),
+    Migration::Plain(include_str!("migrations/045_message_importance.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

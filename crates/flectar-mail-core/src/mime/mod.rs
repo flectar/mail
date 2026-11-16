@@ -2,7 +2,7 @@
 //! message construction (mail-builder).
 
 use crate::error::{CoreError, Result};
-use crate::models::{Address, SenderVerification};
+use crate::models::{Address, Importance, SenderVerification};
 use mail_parser::MimeHeaders;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,8 @@ pub struct ParsedHeaders {
     /// (RFC 6522) of report-type disposition-notification. False when the
     /// fetch left Content-Type out.
     pub disposition_report: bool,
+    /// How important the sender marked the message.
+    pub importance: Importance,
 }
 
 #[derive(Debug, Clone)]
@@ -2500,7 +2502,47 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
         receipt_to,
         receipt_confirm,
         disposition_report,
+        importance: importance(
+            raw_header(msg, "Importance").as_deref(),
+            raw_header(msg, "X-Priority").as_deref(),
+            raw_header(msg, "X-MSMail-Priority").as_deref(),
+            raw_header(msg, "Priority").as_deref(),
+        ),
     }
+}
+
+/// How important a message's sender marked it, from the headers mail
+/// programs use for it: Importance (RFC 2156), which Outlook reads first,
+/// then the first digit of X-Priority, then X-MSMail-Priority, then
+/// Priority, whose "non-urgent" also says "urgent".
+pub fn importance(
+    importance: Option<&str>,
+    x_priority: Option<&str>,
+    x_msmail_priority: Option<&str>,
+    priority: Option<&str>,
+) -> Importance {
+    let word = |value: Option<&str>| value.map(|value| value.trim().to_ascii_lowercase());
+    let level = |value: Option<String>| match value.as_deref() {
+        Some("high") => Some(Importance::High),
+        Some("low") => Some(Importance::Low),
+        Some("normal") => Some(Importance::Normal),
+        _ => None,
+    };
+    level(word(importance))
+        .or_else(|| match word(x_priority)?.chars().next()? {
+            '1' | '2' => Some(Importance::High),
+            '3' => Some(Importance::Normal),
+            '4' | '5' => Some(Importance::Low),
+            _ => None,
+        })
+        .or_else(|| level(word(x_msmail_priority)))
+        .or_else(|| match word(priority)?.as_str() {
+            "non-urgent" => Some(Importance::Low),
+            "urgent" => Some(Importance::High),
+            "normal" => Some(Importance::Normal),
+            _ => None,
+        })
+        .unwrap_or_default()
 }
 
 /// A read receipt request (RFC 8098 section 2): where the receipt goes, and
@@ -2892,6 +2934,7 @@ pub struct OutgoingMessage<'a> {
     /// Who the message asks to send a read receipt to
     /// (Disposition-Notification-To, RFC 8098), if anyone.
     pub receipt_to: &'a [Address],
+    pub importance: Importance,
 }
 
 /// An image extracted from the HTML body, to be sent as an inline CID part.
@@ -3471,6 +3514,21 @@ fn build_message_with_attachments<'a>(
     }
     if !out.receipt_to.is_empty() {
         builder = builder.header("Disposition-Notification-To", addresses(out.receipt_to));
+    }
+    // Importance for Outlook, X-Priority for Thunderbird and webmail, which
+    // read only that. Normal needs neither.
+    let importance = match out.importance {
+        Importance::High => Some(("High", "2 (High)")),
+        Importance::Low => Some(("Low", "4 (Low)")),
+        Importance::Normal => None,
+    };
+    if let Some((importance, priority)) = importance {
+        builder = builder
+            .header(
+                "Importance",
+                mail_builder::headers::raw::Raw::new(importance),
+            )
+            .header("X-Priority", mail_builder::headers::raw::Raw::new(priority));
     }
     for att in &attachments {
         if att
@@ -4171,6 +4229,61 @@ mod tests {
     }
 
     #[test]
+    fn importance_reads_outlooks_header_first_then_the_others() {
+        assert_eq!(
+            importance(Some("High"), Some("5"), None, None),
+            Importance::High
+        );
+        assert_eq!(
+            importance(None, Some("1 (Highest)"), None, None),
+            Importance::High
+        );
+        assert_eq!(
+            importance(None, Some(" 4 (Low)"), None, None),
+            Importance::Low
+        );
+        assert_eq!(
+            importance(None, Some("3"), Some("High"), None),
+            Importance::Normal
+        );
+        assert_eq!(importance(None, None, Some("low"), None), Importance::Low);
+        assert_eq!(
+            importance(None, None, None, Some("non-urgent")),
+            Importance::Low
+        );
+        assert_eq!(
+            importance(None, None, None, Some("Urgent")),
+            Importance::High
+        );
+        assert_eq!(
+            importance(Some("soon"), Some("x"), None, None),
+            Importance::Normal
+        );
+        let headers =
+            parse_header_block(b"Subject: Now\r\nX-Priority: 1 (Highest)\r\n\r\n").unwrap();
+        assert_eq!(headers.importance, Importance::High);
+    }
+
+    #[test]
+    fn importance_goes_out_for_outlook_and_thunderbird_alike() {
+        let high = OutgoingMessage {
+            importance: Importance::High,
+            ..outgoing("Hi", None)
+        };
+        let text = String::from_utf8(build_message(&high).unwrap().1).unwrap();
+        assert!(text.contains("Importance: High\r\n"), "{text}");
+        assert!(text.contains("X-Priority: 2 (High)\r\n"), "{text}");
+        let low = OutgoingMessage {
+            importance: Importance::Low,
+            ..outgoing("Hi", None)
+        };
+        let text = String::from_utf8(build_message(&low).unwrap().1).unwrap();
+        assert!(text.contains("Importance: Low\r\n") && text.contains("X-Priority: 4 (Low)\r\n"));
+        let text = String::from_utf8(build_message(&outgoing("Hi", None)).unwrap().1).unwrap();
+        assert!(!text.contains("Importance") && !text.contains("X-Priority"));
+    }
+
+    #[test]
     fn a_message_asks_for_a_read_receipt_at_the_address_given() {
         let me = [Address {
             name: Some("Me".into()),
@@ -4214,6 +4327,7 @@ mod tests {
             message_id_domain: "example.com",
             attachments: Vec::new(),
             receipt_to: &[],
+            importance: Importance::Normal,
         }
     }
 

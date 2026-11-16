@@ -1054,7 +1054,8 @@ export component MailListPane inherits FocusScope {
                                         + (mail-data.verification_code == "" ? ""
                                             : ", " + @tr("Verification code {}", mail-data.verification_code_spelled))
                                         + (mail-data.has_attachments ? ", " + @tr("Has attachments") : "")
-                                        + (mail-data.has_replied ? ", " + @tr("Replied") : "");
+                                        + (mail-data.has_replied ? ", " + @tr("Replied") : "")
+                                        + (mail-data.high_importance ? ", " + @tr("High importance") : "");
                                     accessible-id: "mail-row-" + mail-data.id;
                                     accessible-item-index: entry.email_index;
                                     accessible-item-selectable: true;
@@ -1220,16 +1221,30 @@ export component MailListPane inherits FocusScope {
                                                     vertical-alignment: center;
                                                 }
                                                 sender-indicators := HorizontalLayout {
+                                                    property <int> shown: (mail-data.high_importance ? 1 : 0)
+                                                        + (mail-data.has_attachments ? 1 : 0)
+                                                        + (mail-data.has_replied && mail-data.message_count <= 1 ? 1 : 0);
                                                     x: mail-data.message_count > 1
                                                         ? thread-count.x - self.width - (self.width > 0px ? 8px : 0px)
                                                         : sender-time.x - self.width - 8px;
                                                     y: 0px;
-                                                    width: mail-data.has_attachments && mail-data.has_replied && mail-data.message_count <= 1 ? 32px
-                                                        : mail-data.has_attachments || (mail-data.has_replied && mail-data.message_count <= 1) ? 14px : 0px;
+                                                    width: self.shown == 0 ? 0px : self.shown * 14px + (self.shown - 1) * 4px;
                                                     height: root.dense ? 44px : root.sender-line;
                                                     spacing: 4px;
                                                     cross-axis-alignment: center;
 
+                                                    // Sent with high importance, as a red mark the way
+                                                    // Outlook shows it.
+                                                    if mail-data.high_importance : Text {
+                                                        width: 14px;
+                                                        text: "!";
+                                                        color: AppTheme.destructive;
+                                                        font-size: TypeScale.body;
+                                                        font-weight: 800;
+                                                        horizontal-alignment: center;
+                                                        vertical-alignment: center;
+                                                        accessible-role: none;
+                                                    }
                                                     if mail-data.has_attachments : Image {
                                                         width: 14px;
                                                         height: 14px;
@@ -1288,7 +1303,7 @@ export component MailListPane inherits FocusScope {
                                                             ? max(0px, account-label.x - 8px)
                                                         : mail-data.message_count > 1
                                                             ? max(0px, (sender-indicators.width > 0px ? sender-indicators.x : thread-count.x) - 8px)
-                                                        : mail-data.has_attachments || mail-data.has_replied
+                                                        : mail-data.has_attachments || mail-data.has_replied || mail-data.high_importance
                                                             ? max(0px, sender-indicators.x - 8px)
                                                             : max(0px, sender-time.x - 22px);
                                                     height: root.dense ? 44px : root.sender-line;

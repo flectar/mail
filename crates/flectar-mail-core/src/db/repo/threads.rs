@@ -19,6 +19,7 @@ fn summary_from_row(row: &Row) -> rusqlite::Result<ThreadSummary> {
         is_starred: row.get::<_, i64>("starred_count")? > 0,
         has_attachments: row.get::<_, i64>("attachment_count")? > 0,
         has_replied: row.get::<_, i64>("has_replied")? > 0,
+        high_importance: row.get::<_, i64>("important_count")? > 0,
         snoozed_until: row.get("snoozed_until")?,
         labels: parse_id_list(
             &row.get::<_, Option<String>>("label_ids")?
@@ -59,7 +60,7 @@ const SUMMARY_SELECT: &str = "
            (SELECT COALESCE(m.local_subject_prefix, '') || m.subject
               FROM messages m WHERE m.thread_id = t.id ORDER BY m.date DESC LIMIT 1) AS subject,
            t.snippet, t.participants_json, t.last_message_at, t.message_count,
-           t.unread_count, t.starred_count, t.attachment_count,
+           t.unread_count, t.starred_count, t.attachment_count, t.important_count,
            EXISTS (
                SELECT 1 FROM messages reply
                JOIN message_refs mr ON mr.message_id = reply.id
@@ -205,6 +206,7 @@ pub fn recompute(conn: &Connection, thread_id: i64) -> Result<()> {
             unread_count    = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND is_read = 0 AND is_draft = 0),
             starred_count   = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND is_starred = 1),
             attachment_count= (SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND has_attachments = 1),
+            important_count = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND importance > 0),
             snippet         = COALESCE((SELECT snippet FROM messages WHERE thread_id = ?1 ORDER BY date DESC LIMIT 1), '')
          WHERE id = ?1",
         params![thread_id],
@@ -608,6 +610,7 @@ fn message_summary_from_row(row: &Row) -> rusqlite::Result<MessageSummary> {
         is_outgoing: row.get::<_, i64>("is_outgoing")? != 0,
         has_attachments: row.get::<_, i64>("has_attachments")? != 0,
         has_replied: row.get::<_, i64>("has_replied")? != 0,
+        high_importance: row.get::<_, i64>("importance")? > 0,
         snoozed_until: row.get("snoozed_until")?,
         labels: parse_id_list(
             &row.get::<_, Option<String>>("label_ids")?
@@ -642,7 +645,7 @@ const MESSAGE_SUMMARY_SELECT: &str = "
              AS account_addresses,
            COALESCE(m.local_subject_prefix, '') || m.subject AS subject,
            m.snippet, m.from_name, m.from_addr, m.to_json, m.date,
-           m.is_read, m.is_starred, m.is_draft, m.is_outgoing, m.has_attachments,
+           m.is_read, m.is_starred, m.is_draft, m.is_outgoing, m.has_attachments, m.importance,
            (m.message_id IS NOT NULL AND EXISTS (
                SELECT 1 FROM message_refs mr
                JOIN messages reply ON reply.id = mr.message_id
