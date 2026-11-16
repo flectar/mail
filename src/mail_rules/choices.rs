@@ -5,8 +5,9 @@ use flectar_mail_core::models::{
     Account, FolderInfo, Label, MailRule, RuleAction, RuleField, RuleOp,
 };
 
-/// The fields the editor lists, in its order.
-pub(super) const FIELDS: [RuleField; 7] = [
+/// The fields the editor lists, in its order. Those that need the whole
+/// message come last.
+pub(super) const FIELDS: [RuleField; 10] = [
     RuleField::From,
     RuleField::To,
     RuleField::Cc,
@@ -14,6 +15,9 @@ pub(super) const FIELDS: [RuleField; 7] = [
     RuleField::Subject,
     RuleField::MailingList,
     RuleField::Size,
+    RuleField::Header,
+    RuleField::Body,
+    RuleField::Attachments,
 ];
 
 /// How text compares, in the editor's order: the comparison and whether it
@@ -33,10 +37,19 @@ pub(super) const TEXT_OPS: [(RuleOp, bool); 8] = [
 pub(super) fn ops(field: RuleField) -> Vec<(RuleOp, bool)> {
     match field {
         RuleField::Size => vec![(RuleOp::Over, false), (RuleOp::Under, false)],
-        RuleField::MailingList => [(RuleOp::Exists, false), (RuleOp::Exists, true)]
-            .into_iter()
-            .chain(TEXT_OPS)
-            .collect(),
+        RuleField::MailingList | RuleField::Header => {
+            [(RuleOp::Exists, false), (RuleOp::Exists, true)]
+                .into_iter()
+                .chain(TEXT_OPS)
+                .collect()
+        }
+        RuleField::Body => vec![
+            (RuleOp::Contains, false),
+            (RuleOp::Contains, true),
+            (RuleOp::Matches, false),
+            (RuleOp::Matches, true),
+        ],
+        RuleField::Attachments => vec![(RuleOp::Exists, false), (RuleOp::Exists, true)],
         _ => TEXT_OPS.to_vec(),
     }
 }
@@ -189,6 +202,16 @@ mod tests {
             7
         );
         assert_eq!(index_of(&KINDS, &Kind::Copy), 7);
+        // The Slint editor names fields and comparisons by these places.
+        assert_eq!(index_of(&FIELDS, &RuleField::MailingList), 5);
+        assert_eq!(index_of(&FIELDS, &RuleField::Size), 6);
+        assert_eq!(index_of(&FIELDS, &RuleField::Header), 7);
+        assert_eq!(index_of(&FIELDS, &RuleField::Body), 8);
+        assert_eq!(index_of(&FIELDS, &RuleField::Attachments), 9);
+        assert_eq!(
+            index_of(&ops(RuleField::Body), &(RuleOp::Matches, false)),
+            2
+        );
     }
 
     #[test]

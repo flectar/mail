@@ -18,6 +18,9 @@ export global RuleChoices {
         @tr("rule field" => "Subject"),
         @tr("rule field" => "Mailing list"),
         @tr("rule field" => "Size"),
+        @tr("rule field" => "Header"),
+        @tr("rule field" => "Body"),
+        @tr("rule field" => "Attachments"),
     ];
     out property <[string]> text-ops: [
         @tr("rule comparison" => "contains"),
@@ -45,6 +48,17 @@ export global RuleChoices {
     out property <[string]> size-ops: [
         @tr("rule comparison" => "is over"),
         @tr("rule comparison" => "is under"),
+    ];
+    out property <[string]> body-ops: [
+        @tr("rule comparison" => "contains"),
+        @tr("rule comparison" => "doesn't contain"),
+        @tr("rule comparison" => "matches pattern"),
+        @tr("rule comparison" => "doesn't match pattern"),
+    ];
+    // Whether files are attached: "Attachments: some".
+    out property <[string]> attachment-ops: [
+        @tr("rule comparison" => "some"),
+        @tr("rule comparison" => "none"),
     ];
     // Copying mail is last, for accounts that keep a message in several
     // folders.
@@ -111,13 +125,24 @@ component RuleCondition inherits Rectangle {
     in property <bool> removable;
     // Bound both ways to the condition's row.
     in-out property <int> field;
+    in-out property <string> header;
     in-out property <int> op;
     in-out property <string> value;
-    private property <[string]> ops: root.field == 6 ? RuleChoices.size-ops
-        : root.field == 5 ? RuleChoices.list-ops : RuleChoices.text-ops;
-    // Whether there is a mailing list needs no text.
-    private property <bool> needs-value: !(root.field == 5 && root.op < 2);
-    private property <bool> pattern: root.field == 5 ? root.op >= 8 : root.op >= 6;
+    // Fields by their place in RuleChoices.fields.
+    private property <bool> size: root.field == 6;
+    private property <bool> named-header: root.field == 7;
+    private property <bool> body: root.field == 8;
+    private property <bool> attachments: root.field == 9;
+    // A mailing list and a header start with whether there is one.
+    private property <bool> presence: root.field == 5 || root.named-header;
+    private property <[string]> ops: root.size ? RuleChoices.size-ops
+        : root.presence ? RuleChoices.list-ops
+        : root.body ? RuleChoices.body-ops
+        : root.attachments ? RuleChoices.attachment-ops : RuleChoices.text-ops;
+    private property <bool> needs-value: !root.attachments && !(root.presence && root.op < 2);
+    private property <bool> pattern: root.presence ? root.op >= 8
+        : root.body ? root.op >= 2
+        : !root.size && !root.attachments && root.op >= 6;
 
     height: layout.preferred-height;
     accessible-role: groupbox;
@@ -138,28 +163,60 @@ component RuleCondition inherits Rectangle {
                     root.value = "";
                 }
             }
-            RuleSelect {
+            // A header condition names its header first, and compares on
+            // the next line.
+            if root.named-header : LineEdit {
+                height: 36px;
+                horizontal-stretch: 1;
+                text <=> root.header;
+                placeholder-text: @tr("Header, such as X-Spam-Flag");
+                input-label: @tr("Header of condition {}", root.index + 1);
+            }
+            if !root.named-header : RuleSelect {
                 width: root.compact ? (parent.width - 52px) / 2 : 170px;
                 model: root.ops;
                 current-index <=> root.op;
                 accessible-label: @tr("Comparison of condition {}", root.index + 1);
             }
-            if !root.compact && root.needs-value : RuleValue {
+            if !root.compact && !root.named-header && root.needs-value : RuleValue {
                 index: root.index;
-                size: root.field == 6;
+                size: root.size;
                 pattern: root.pattern;
                 value <=> root.value;
             }
-            if !root.compact && !root.needs-value : Rectangle { horizontal-stretch: 1; }
+            if !root.compact && !root.named-header && !root.needs-value : Rectangle {
+                horizontal-stretch: 1;
+            }
             RemoveButton {
                 interactive: root.removable;
                 tooltip-text: @tr("Remove condition {}", root.index + 1);
                 clicked => { MailRules.remove-condition(root.index); }
             }
         }
-        if root.compact && root.needs-value : RuleValue {
+        if root.named-header : HorizontalLayout {
+            spacing: 8px;
+            // Under the header's name, in the columns of the other
+            // conditions' comparisons and values.
+            if !root.compact : Rectangle { width: 140px; }
+            RuleSelect {
+                width: root.compact ? (parent.width - 8px) / 2 : 170px;
+                model: root.ops;
+                current-index <=> root.op;
+                accessible-label: @tr("Comparison of condition {}", root.index + 1);
+            }
+            if root.needs-value : RuleValue {
+                index: root.index;
+                size: false;
+                pattern: root.pattern;
+                value <=> root.value;
+            }
+            if !root.needs-value : Rectangle { horizontal-stretch: 1; }
+            // In line with the values of single-line conditions.
+            if !root.compact : Rectangle { width: 36px; }
+        }
+        if root.compact && !root.named-header && root.needs-value : RuleValue {
             index: root.index;
-            size: root.field == 6;
+            size: root.size;
             pattern: root.pattern;
             value <=> root.value;
         }
@@ -339,6 +396,7 @@ export component RuleEditor inherits Rectangle {
                     for row[index] in MailRules.conditions : RuleCondition {
                         index: index;
                         field <=> row.field;
+                        header <=> row.header;
                         op <=> row.op;
                         value <=> row.value;
                         compact: root.narrow;
