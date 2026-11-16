@@ -3,7 +3,7 @@ use crate::models::{
     MessageCursor, MessageSearchCursor, MessageSearchPage, SearchCursor, SearchPage, ThreadSummary,
     roles,
 };
-use crate::search::ParsedQuery;
+use crate::search::{Expr, Filter, ParsedQuery};
 use rusqlite::{Connection, params};
 use std::collections::HashMap;
 
@@ -40,12 +40,8 @@ pub fn index_message(conn: &Connection, message_id: i64) -> Result<()> {
 /// default Trash/Spam exclusion should apply.
 fn has_positive_selector(q: &ParsedQuery) -> bool {
     !q.fts.is_empty()
-        || q.from.is_some()
-        || q.to.is_some()
-        || q.in_folder.is_some()
-        || q.is_unread == Some(true)
-        || q.is_starred == Some(true)
-        || q.has_attachment == Some(true)
+        || q.filters.iter().any(|filter| *filter != Filter::Anywhere)
+        || q.expression.as_ref().is_some_and(Expr::selects)
 }
 
 /// Append the caller's account scope over the `m` alias. It narrows a search
@@ -114,38 +110,115 @@ pub(crate) fn account_set_clause(
     format!("{column} IN ({placeholders})")
 }
 
-/// Append `from:`/`to:`/`in:`/`is:`/`has:` predicates over the `m` alias.
-/// Placeholders are `?n` keyed off the running `bind` length, so this composes
-/// with any binds already pushed by the caller.
+/// One operator's predicate over the `m` alias, binding its value. Placeholders
+/// are `?n` keyed off the running `bind` length, so this composes with any
+/// binds already pushed by the caller. `in:anywhere` keeps every message.
+fn filter_clause(filter: &Filter, bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>) -> String {
+    match filter {
+        Filter::From(from) => {
+            bind.push(Box::new(format!("%{}%", from.to_lowercase())));
+            format!(
+                "(LOWER(COALESCE(m.from_addr,'')) LIKE ?{n} OR LOWER(COALESCE(m.from_name,'')) LIKE ?{n})",
+                n = bind.len()
+            )
+        }
+        Filter::To(to) => {
+            bind.push(Box::new(format!("%{}%", to.to_lowercase())));
+            format!("LOWER(m.to_json) LIKE ?{}", bind.len())
+        }
+        Filter::In(role) => {
+            bind.push(Box::new(*role));
+            format!(
+                "EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = ?{})",
+                bind.len()
+            )
+        }
+        Filter::Anywhere => "1".to_owned(),
+        Filter::Unread => "m.is_read = 0".to_owned(),
+        Filter::Starred => "m.is_starred = 1".to_owned(),
+        Filter::HasAttachment => "m.has_attachments = 1".to_owned(),
+        Filter::Before(at) => {
+            bind.push(Box::new(*at));
+            format!("m.date < ?{}", bind.len())
+        }
+        Filter::After(at) => {
+            bind.push(Box::new(*at));
+            format!("m.date >= ?{}", bind.len())
+        }
+        // A message whose size isn't known matches neither.
+        Filter::Larger(size) => {
+            bind.push(Box::new(*size));
+            format!("m.size >= ?{}", bind.len())
+        }
+        Filter::Smaller(size) => {
+            bind.push(Box::new(*size));
+            format!("m.size < ?{}", bind.len())
+        }
+        Filter::Filename(name) => {
+            let escaped = name
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            bind.push(Box::new(format!("%{escaped}%")));
+            format!(
+                "EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id
+                         AND LOWER(COALESCE(a.filename,'')) LIKE ?{} ESCAPE '\\')",
+                bind.len()
+            )
+        }
+    }
+}
+
+/// A boolean query's predicate over the `m` alias: words through the full-text
+/// index, operators as in [`filter_clause`].
+fn expression_clause(expression: &Expr, bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>) -> String {
+    let join =
+        |parts: &[Expr], connector: &str, bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>| {
+            let parts = parts
+                .iter()
+                .map(|part| expression_clause(part, bind))
+                .collect::<Vec<_>>();
+            format!("({})", parts.join(connector))
+        };
+    match expression {
+        Expr::Text(text) => {
+            bind.push(Box::new(text.fts.clone()));
+            format!(
+                "m.id IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?{})",
+                bind.len()
+            )
+        }
+        Expr::Filter(filter) => filter_clause(filter, bind),
+        Expr::Not(inner) => format!("NOT {}", expression_clause(inner, bind)),
+        Expr::And(parts) => join(parts, " AND ", bind),
+        Expr::Or(parts) => join(parts, " OR ", bind),
+    }
+}
+
+/// Append the query's operators, or its boolean expression, as predicates over
+/// the `m` alias.
 fn append_operator_clauses(
     q: &ParsedQuery,
     where_clauses: &mut Vec<String>,
     bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
 ) {
-    if let Some(from) = &q.from {
-        bind.push(Box::new(format!("%{}%", from.to_lowercase())));
-        where_clauses.push(format!(
-            "(LOWER(COALESCE(m.from_addr,'')) LIKE ?{n} OR LOWER(COALESCE(m.from_name,'')) LIKE ?{n})",
-            n = bind.len()
-        ));
+    for filter in &q.filters {
+        if *filter != Filter::Anywhere {
+            let clause = filter_clause(filter, bind);
+            where_clauses.push(clause);
+        }
     }
-    if let Some(to) = &q.to {
-        bind.push(Box::new(format!("%{}%", to.to_lowercase())));
-        where_clauses.push(format!("LOWER(m.to_json) LIKE ?{}", bind.len()));
+    if let Some(expression) = &q.expression {
+        let clause = expression_clause(expression, bind);
+        where_clauses.push(clause);
     }
-    if let Some(role) = &q.in_folder {
-        bind.push(Box::new(role.clone()));
-        where_clauses.push(format!(
-            "EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = ?{})",
-            bind.len()
-        ));
-    } else if has_positive_selector(q) && q.folder_ids.is_none() {
+    if !q.names_folder() && has_positive_selector(q) && q.folder_ids.is_none() {
         // A folder scope names its folders, Trash and Spam only when meant.
         // No explicit `in:` scope: keep Trash and Spam out of results, the same
         // way the inbox and folder views do. Without this, a `from:`/keyword
         // search matches messages in every folder, so triaging a result (trash,
         // spam) leaves it matching the query and it reappears on the next
-        // refetch. `in:trash` / `in:spam` set `in_folder` and opt back in.
+        // refetch. `in:trash` / `in:spam` / `in:anywhere` opt back in.
         // Gated on there being a real matcher so an empty query still returns
         // nothing (rather than every non-trash thread) via the caller's guard.
         where_clauses.push(format!(
@@ -153,15 +226,6 @@ fn append_operator_clauses(
             roles::TRASH,
             roles::SPAM
         ));
-    }
-    if q.is_unread == Some(true) {
-        where_clauses.push("m.is_read = 0".into());
-    }
-    if q.is_starred == Some(true) {
-        where_clauses.push("m.is_starred = 1".into());
-    }
-    if q.has_attachment == Some(true) {
-        where_clauses.push("m.has_attachments = 1".into());
     }
     // `exclude:`/`-term`: drop messages whose FTS content matches any excluded
     // term. Applied here (not in the FTS MATCH string) so it works uniformly
@@ -870,6 +934,94 @@ mod tests {
 
         // ...but an explicit `in:trash` opts back in.
         assert_eq!(ids("in:trash from:sender"), vec![thread_id]);
+    }
+
+    #[test]
+    fn dates_sizes_file_names_and_boolean_queries_filter_matches() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let (old, old_message) = testutil::seed_message(&c, "ana@test.dev", "Budget 2023", false);
+        let (new, new_message) = testutil::seed_message(&c, "ben@test.dev", "Budget 2026", false);
+        let noon = |year| {
+            chrono::NaiveDate::from_ymd_opt(year, 6, 1)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_millis()
+        };
+        c.execute(
+            "UPDATE messages SET date = ?1, size = 5000 WHERE id = ?2",
+            params![noon(2023), old_message],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE messages SET date = ?1, size = 2000000 WHERE id = ?2",
+            params![noon(2026), new_message],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO attachments (message_id, filename) VALUES (?1, 'Plan_2026.PDF')",
+            params![new_message],
+        )
+        .unwrap();
+        for message in [old_message, new_message] {
+            index_message(&c, message).unwrap();
+        }
+        let ids = |query: &str| {
+            chronological(&c, &crate::search::parse(query), 20)
+                .unwrap()
+                .iter()
+                .map(|thread| thread.id)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(ids("budget after:2024/01/01"), vec![new]);
+        assert_eq!(ids("budget before:2024/01/01"), vec![old]);
+        assert_eq!(ids("larger:1M"), vec![new]);
+        assert_eq!(ids("smaller:10K"), vec![old]);
+        assert_eq!(ids("filename:pdf"), vec![new]);
+        // An underscore in the name is itself, not any letter.
+        assert_eq!(ids("filename:plan_2026"), vec![new]);
+        assert!(ids("filename:plan_2023").is_empty());
+        // Either sender, newest first.
+        assert_eq!(ids("from:ana OR from:ben"), vec![new, old]);
+        assert_eq!(ids("budget -from:ben"), vec![old]);
+        assert_eq!(ids("(from:ana OR filename:pdf) budget"), vec![new, old]);
+        assert!(ids("budget -(from:ana OR larger:1M)").is_empty());
+        // Words in a boolean query still go through the full-text index.
+        assert_eq!(ids("2023 OR zzzzzz"), vec![old]);
+        assert!(ids("2023 zzzzzz OR yyyyyy").is_empty());
+    }
+
+    #[test]
+    fn in_anywhere_and_boolean_folder_scopes_reach_trash() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        c.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (5,1,'Trash','trash')",
+            [],
+        )
+        .unwrap();
+        let (thread_id, message_id) =
+            testutil::seed_message(&c, "sender@test.dev", "Hello there", false);
+        c.execute(
+            "UPDATE messages SET folder_id = 5 WHERE id = ?1",
+            params![message_id],
+        )
+        .unwrap();
+        let ids = |query: &str| {
+            search(&c, &crate::search::parse(query), 20)
+                .unwrap()
+                .iter()
+                .map(|thread| thread.id)
+                .collect::<Vec<_>>()
+        };
+        assert!(ids("from:sender").is_empty());
+        // A boolean query without a folder leaves Trash out too.
+        assert!(ids("from:sender OR from:nobody").is_empty());
+        assert_eq!(ids("in:anywhere from:sender"), vec![thread_id]);
+        assert_eq!(ids("in:trash OR in:spam"), vec![thread_id]);
     }
 
     #[test]
