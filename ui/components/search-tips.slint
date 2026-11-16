@@ -1,0 +1,79 @@
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+
+// One way to narrow a search: what to type, and what it keeps.
+struct SearchTip {
+    syntax: string,
+    meaning: string,
+}
+
+// What the search field takes besides words, as docs/features.md describes
+// it. The operators are Gmail's, so they stay in English.
+export component SearchTips inherits Rectangle {
+    // How tall the panel may grow before it scrolls.
+    in property <length> room: 600px;
+    private property <[SearchTip]> tips: [
+        { syntax: "from:ana    to:ben", meaning: @tr("From or to a name or address") },
+        { syntax: "subject:plan    body:plan", meaning: @tr("A word in the subject or in the text") },
+        { syntax: "\"next week\"", meaning: @tr("Words next to each other") },
+        { syntax: "is:unread    is:starred", meaning: @tr("Unread or starred mail") },
+        { syntax: "has:attachment    filename:pdf", meaning: @tr("With attachments, or with one by its name") },
+        { syntax: "in:sent    in:anywhere", meaning: @tr("In one kind of folder, or anywhere with Trash and Spam") },
+        { syntax: "after:2026/01/31    before:2026/03/01", meaning: @tr("Received from that day on, or before it") },
+        { syntax: "newer_than:7d    older_than:1y", meaning: @tr("Received in the last days (d), months (m) or years (y), or before") },
+        { syntax: "larger:5M    smaller:100K", meaning: @tr("At least, or under, that size") },
+        { syntax: "invoice OR receipt", meaning: @tr("Either one") },
+        { syntax: "-from:billing    -(draft OR old)", meaning: @tr("Leave out what matches") },
+    ];
+
+    width: 360px;
+    height: min(root.room, content.preferred-height);
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: AppTheme.border;
+    background: AppTheme.surface-raised;
+    drop-shadow-blur: 18px;
+    drop-shadow-offset-y: 5px;
+    drop-shadow-color: #0000002e;
+    clip: true;
+
+    Flickable {
+        content-height: content.preferred-height;
+
+        content := VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+
+            Text {
+                text: @tr("Search tips");
+                color: AppTheme.heading;
+                font-size: TypeScale.body;
+                font-weight: 700;
+            }
+
+            for tip in root.tips : VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: tip.syntax;
+                    color: AppTheme.body;
+                    font-size: TypeScale.secondary;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: tip.meaning;
+                    color: AppTheme.secondary;
+                    font-size: TypeScale.secondary;
+                    wrap: word-wrap;
+                }
+            }
+
+            Text {
+                text: @tr("Search on server, at the end of the results, finds mail that isn't on this device.");
+                color: AppTheme.muted;
+                font-size: TypeScale.secondary;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

@@ -1278,6 +1278,27 @@ impl AutoReply {
     }
 }
 
+/// What saving automatic replies did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoReplySaved {
+    /// The replies as the server keeps them now.
+    Done(AutoReply),
+    /// Nothing changed: the user must allow this first.
+    Ask(AutoReplyQuestion),
+}
+
+/// What saving automatic replies would change on a server that runs Sieve
+/// scripts, beyond the replies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoReplyQuestion {
+    /// The server runs the user's own filter script, named here. The replies
+    /// would run first, then that script, unchanged.
+    RunBefore(String),
+    /// The app's script on the server was changed elsewhere since the app
+    /// wrote it. Saving replaces those changes.
+    ReplaceChanges,
+}
+
 /// Something an AI agent did through the local MCP server, without message
 /// content.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1460,6 +1481,36 @@ pub struct SearchCursor {
 pub struct SearchPage {
     pub threads: Vec<ThreadSummary>,
     pub next_cursor: Option<SearchCursor>,
+}
+
+/// Where a server search of one account goes on from: Gmail's page token, how
+/// many results JMAP gave already, or for IMAP each folder with the UID its
+/// next results are below.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerSearchCursor {
+    pub page_token: Option<String>,
+    pub position: u64,
+    pub below: Vec<(i64, u32)>,
+}
+
+/// A page of what accounts' servers found for a search, past what this
+/// device keeps: the conversations of the messages found, newest first. The
+/// messages are kept here, their bodies fetched when opened.
+#[derive(Debug, Clone, Default)]
+pub struct ServerSearchPage {
+    pub threads: Vec<ThreadSummary>,
+    /// The messages themselves, newest first, for lists without
+    /// conversations.
+    pub messages: Vec<MessageSummary>,
+    /// Where each account's search goes on from. An account that found all
+    /// its server has isn't here.
+    pub cursors: Vec<(i64, ServerSearchCursor)>,
+    /// Accounts whose servers can't be searched: POP3, and mail kept only on
+    /// this device.
+    pub unsearchable: Vec<i64>,
+    /// Accounts whose search failed, with why.
+    pub failed: Vec<(i64, String)>,
 }
 
 /// Stable keyset cursor for the message timeline, in either order; the

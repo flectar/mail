@@ -14,6 +14,15 @@ export global AutoReplies {
     in property <int> account-id;
     callback turn-off(int);
     callback open-settings();
+
+    // What saving asks before it changes the filters an IMAP server runs:
+    // "run-before" when the server runs the user's own filter script, named
+    // in question-script, or "replace" when the app's script there was
+    // changed elsewhere.
+    in-out property <bool> question-open;
+    in property <string> question;
+    in property <string> question-script;
+    callback answer(bool);
 }
 
 export component AutoReplyActivity inherits Rectangle {

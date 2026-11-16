@@ -1585,6 +1585,26 @@ pub fn uids_in_folder(conn: &Connection, folder_id: i64) -> Result<Vec<(i64, i64
     Ok(rows)
 }
 
+/// The messages kept here of these UIDs in a folder, each one's id by UID.
+pub fn by_uids(
+    conn: &Connection,
+    folder_id: i64,
+    uids: &[u32],
+) -> Result<std::collections::HashMap<u32, i64>> {
+    let mut stmt =
+        conn.prepare_cached("SELECT id FROM messages WHERE folder_id = ?1 AND uid = ?2")?;
+    let mut found = std::collections::HashMap::new();
+    for uid in uids {
+        if let Some(id) = stmt
+            .query_row(params![folder_id, uid], |row| row.get::<_, i64>(0))
+            .optional()?
+        {
+            found.insert(*uid, id);
+        }
+    }
+    Ok(found)
+}
+
 pub fn max_uid_in_folder(conn: &Connection, folder_id: i64) -> Result<i64> {
     Ok(conn.query_row(
         "SELECT COALESCE(MAX(uid), 0) FROM messages WHERE folder_id = ?1",

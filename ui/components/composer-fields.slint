@@ -484,6 +484,10 @@ export component ComposerSubject inherits Rectangle {
     in property <color> muted-color;
     in property <color> title-color;
 
+    public function focus-subject() {
+        subject-input.focus();
+    }
+
             height: 42px;
             background: root.background-color;
 

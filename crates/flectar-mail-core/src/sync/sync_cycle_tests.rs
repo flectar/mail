@@ -1971,3 +1971,187 @@ async fn history_backfill_goes_on_past_a_refused_folder() {
         .count();
     assert_eq!(sign_ins, 1, "{commands:?}");
 }
+
+/// A server search brings a page of mail not kept here at a time, newest
+/// first across the folders it covers, with the matches kept here that the
+/// page passes. A page stops in each folder at one UID and the next goes on
+/// below it, so no match is missed or found twice. Found mail isn't new
+/// mail: the folders' sync positions stay where they were.
+#[tokio::test]
+async fn a_server_search_pages_through_the_folders_newest_first() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    // Each folder's matches and the day in March 2020 the server got them.
+    let inbox: &[(u32, u32)] = &[(30, 5), (20, 3), (10, 1)];
+    let archive: &[(u32, u32)] = &[(7, 4), (5, 2)];
+    let mut selected = "";
+    let server = serve(listener, commands.clone(), move |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 IDLE\r\n{tag} OK capability\r\n"),
+            "SELECT" => {
+                selected = ["INBOX", "Archive"]
+                    .into_iter()
+                    .find(|name| command.contains(&format!("\"{name}\"")))
+                    .unwrap_or_else(|| panic!("searched another folder: {command:?}"));
+                format!(
+                    "* 40 EXISTS\r\n* OK [UIDVALIDITY 7] valid\r\n\
+                     * OK [UIDNEXT 41] next\r\n{tag} OK [READ-WRITE] selected\r\n"
+                )
+            }
+            "UID" if fields[2] == "SEARCH" => {
+                assert_eq!(
+                    command.trim_end(),
+                    format!("{tag} UID SEARCH (TEXT \"invoice\" FROM \"ana\")")
+                );
+                let found = if selected == "INBOX" { inbox } else { archive };
+                let uids = found.iter().map(|(uid, _)| uid.to_string());
+                format!(
+                    "* SEARCH {}\r\n{tag} OK searched\r\n",
+                    uids.collect::<Vec<_>>().join(" ")
+                )
+            }
+            "UID" if fields[2] == "FETCH" => {
+                let found = if selected == "INBOX" { inbox } else { archive };
+                let asked = fields[3]
+                    .split(',')
+                    .map(|uid| uid.parse::<u32>().unwrap())
+                    .collect::<Vec<_>>();
+                let mut response = String::new();
+                for (index, (uid, day)) in found
+                    .iter()
+                    .filter(|(uid, _)| asked.contains(uid))
+                    .enumerate()
+                {
+                    let arrived = format!("INTERNALDATE \"{day:02}-Mar-2020 10:00:00 +0000\"");
+                    if command.contains("HEADER.FIELDS") {
+                        let header = format!(
+                            "Message-ID: <{selected}-{uid}@example.test>\r\n\
+                             From: Ana <ana@example.test>\r\n\
+                             To: reader@example.test\r\n\
+                             Subject: Invoice {uid}\r\n\
+                             Date: {day} Mar 2020 10:00:00 +0000\r\n\r\n"
+                        );
+                        response.push_str(&format!(
+                            "* {} FETCH (UID {uid} FLAGS (\\Seen) {arrived} RFC822.SIZE 200 \
+                             BODY[HEADER.FIELDS (MESSAGE-ID FROM TO SUBJECT DATE)] {{{}}}\r\n\
+                             {header})\r\n",
+                            index + 1,
+                            header.len()
+                        ));
+                    } else {
+                        response
+                            .push_str(&format!("* {} FETCH (UID {uid} {arrived})\r\n", index + 1));
+                    }
+                }
+                format!("{response}{tag} OK fetched\r\n")
+            }
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+
+    let (_dir, ctx, config, inbox_folder) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let inbox_id = inbox_folder.id;
+    let (archive_id, kept_id) = ctx
+        .db
+        .write(move |conn| {
+            let archive_id = repo::folders::upsert(
+                conn,
+                account_id,
+                "Archive",
+                Some("/"),
+                Some(roles::ARCHIVE),
+            )?;
+            // Left out unless a search names it.
+            repo::folders::upsert(conn, account_id, "Trash", Some("/"), Some(roles::TRASH))?;
+            let kept_id = seed_unread(conn, account_id, inbox_id, 30)?;
+            Ok((archive_id, kept_id))
+        })
+        .await
+        .unwrap();
+
+    let tree = crate::search::parse("invoice from:ana").tree.unwrap();
+    let mut session = connect(&ctx, &config).await.unwrap();
+    let first = search_server(
+        &ctx,
+        &config,
+        &mut session,
+        &tree,
+        &ServerSearchCursor::default(),
+        3,
+    )
+    .await
+    .unwrap();
+    let next = first
+        .next
+        .clone()
+        .expect("the search stopped after one page");
+    let mut below = next.below.clone();
+    below.sort_unstable();
+    // Archive has nothing new left.
+    let mut expected = vec![(inbox_id, 20), (archive_id, 5)];
+    expected.sort_unstable();
+    assert_eq!(below, expected);
+    let second = search_server(&ctx, &config, &mut session, &tree, &next, 3)
+        .await
+        .unwrap();
+    assert_eq!(second.next, None);
+    imap::logout(session).await;
+    server.await.unwrap();
+
+    let commands = commands.lock().unwrap().clone();
+    let mut headers_fetched = commands
+        .iter()
+        .filter(|command| command.contains("HEADER.FIELDS"))
+        .map(|command| command.split_whitespace().nth(3).unwrap())
+        .collect::<Vec<_>>();
+    headers_fetched.sort_unstable();
+    // 30 is kept here already.
+    assert_eq!(headers_fetched, ["10", "20", "5,7"]);
+    assert!(
+        selected_folders(&commands)
+            .iter()
+            .all(|name| *name != "Trash")
+    );
+
+    assert!(first.message_ids.contains(&kept_id));
+    let (first_found, second_found, archive_seen) = ctx
+        .db
+        .read(move |conn| {
+            let place = |ids: &[i64]| -> crate::Result<Vec<(i64, i64)>> {
+                let mut places = ids
+                    .iter()
+                    .map(|id| {
+                        let row = repo::messages::get_row(conn, *id)?.unwrap();
+                        Ok((row.folder_id.unwrap(), row.uid.unwrap()))
+                    })
+                    .collect::<crate::Result<Vec<_>>>()?;
+                places.sort_unstable();
+                Ok(places)
+            };
+            Ok((
+                place(&first.message_ids)?,
+                place(&second.message_ids)?,
+                repo::folders::get(conn, archive_id)?.unwrap().last_seen_uid,
+            ))
+        })
+        .await
+        .unwrap();
+    // The newest three not kept here, and 30 on the way.
+    let mut expected = vec![
+        (inbox_id, 30),
+        (inbox_id, 20),
+        (archive_id, 7),
+        (archive_id, 5),
+    ];
+    expected.sort_unstable();
+    assert_eq!(first_found, expected);
+    assert_eq!(second_found, [(inbox_id, 10)]);
+    assert_eq!(
+        archive_seen, 0,
+        "found mail moved the folder's sync position"
+    );
+}

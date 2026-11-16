@@ -12,9 +12,9 @@ use flectar_mail_core::{
         InvitationCard, Label, ListOrder, ListOwner, MailGrouping, MailHistory, MailProfile,
         MailProtocol, MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor,
         MessageSummary, PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs,
-        QueueSendResult, RsvpEventArgs, SaveDraftArgs, SearchCursor, SenderIdentity, Settings,
-        Snippet, ThreadCursor, ThreadSummary, UnsubscribeOffer, UnsubscribeOutcome, View,
-        normalized_workspace_list_pane_width, roles,
+        QueueSendResult, RsvpEventArgs, SaveDraftArgs, SearchCursor, SenderIdentity,
+        ServerSearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary, UnsubscribeOffer,
+        UnsubscribeOutcome, View, normalized_workspace_list_pane_width, roles,
     },
 };
 #[cfg(test)]
@@ -263,6 +263,18 @@ pub struct MailPage {
     pub next_cursor: Option<MailCursor>,
     pub account_count: usize,
     pub unified_mailboxes: Vec<MailboxEntry>,
+}
+
+/// What a search of the servers found, for the mail list.
+pub struct ServerFound {
+    /// The list rows it found: conversations, or messages in a list without
+    /// them.
+    pub rows: Vec<i32>,
+    /// Where each account's search goes on from. An account that found all
+    /// its server has isn't here.
+    pub cursors: Vec<(i64, ServerSearchCursor)>,
+    /// The accounts whose search failed, with why.
+    pub failed: Vec<(i64, String)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -595,6 +607,39 @@ impl CoreMailSource {
     /// the first visible frame.
     pub fn notify_ui_ready(&self) {
         self.core.notify_ui_ready();
+    }
+
+    /// Searches the servers of `accounts` for `query`, past the mail kept
+    /// here, going on from `cursors`. The list's search shows what they find
+    /// from then on.
+    pub async fn search_server(
+        &self,
+        query: String,
+        accounts: Vec<i64>,
+        cursors: Vec<(i64, ServerSearchCursor)>,
+    ) -> Result<ServerFound, String> {
+        let page = self
+            .core
+            .search_server(query, accounts, cursors, crate::server_search::PAGE)
+            .await
+            .map_err(|error| error.to_string())?;
+        let rows = match self.grouping() {
+            MailGrouping::Conversations => page
+                .threads
+                .iter()
+                .filter_map(|thread| i32::try_from(thread.id).ok())
+                .collect(),
+            MailGrouping::Messages => page
+                .messages
+                .iter()
+                .filter_map(|message| i32::try_from(message.id).ok())
+                .collect(),
+        };
+        Ok(ServerFound {
+            rows,
+            cursors: page.cursors,
+            failed: page.failed,
+        })
     }
 
     pub async fn load_page(

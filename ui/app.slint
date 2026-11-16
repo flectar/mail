@@ -62,10 +62,12 @@ import { ConfirmationDialog } from "components/confirmation-dialog.slint";
 import { SettingsDialog } from "dialogs/settings-dialog.slint";
 import { AccountImport, ImportDialog } from "dialogs/import-dialog.slint";
 export { LocalMailUi } from "local-mail.slint";
+export { ServerSearchUi } from "server-search.slint";
 export { Numbers } from "numbers.slint";
 import { LocalMailUi } from "local-mail.slint";
 export { AccountImport, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportMailRow, ImportProfileRow } from "dialogs/import-dialog.slint";
 export { AutoReplies } from "auto-replies.slint";
+import { AutoReplies } from "auto-replies.slint";
 export { ThemeDraft } from "components/theme-editor.slint";
 import { ThemeDraft } from "components/theme-editor.slint";
 import { MailView } from "views/mail-view.slint";
@@ -784,6 +786,7 @@ export global I18n {
         if (key == "Could not save the large files preference: {}") { return @tr("Could not save the large files preference: {}", argument); }
         if (key == "Fill in {} before sending.") { return @tr("Fill in {} before sending.", argument); }
         if (key == "Fill in {} or send again.") { return @tr("Fill in {} or send again.", argument); }
+        if (key == "attach, attached, attaching, attachment, attachments, enclosed, enclosure, CV, résumé, cover letter, .pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx, .odt, .ods, .odp, .rtf, .zip") { return @tr("Comma-separated words that suggest a message has a file attached. Keep the English ones out: they always count." => "attach, attached, attaching, attachment, attachments, enclosed, enclosure, CV, résumé, cover letter, .pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx, .odt, .ods, .odp, .rtf, .zip"); }
         if (key == "Email template inserted, but its usage could not be saved: {}") { return @tr("Email template inserted, but its usage could not be saved: {}", argument); }
         if (key == "Choose a supported account type and connection security.") { return @tr("Choose a supported account type and connection security."); }
         if (key == "IMAP port must be between 1 and 65535.") { return @tr("IMAP port must be between 1 and 65535."); }
@@ -810,6 +813,10 @@ export global I18n {
         if (key == "Gmail answers each sender once, and again after four days. Mailing lists and spam get no reply.") { return @tr("Gmail answers each sender once, and again after four days. Mailing lists and spam get no reply."); }
         if (key == "Outlook answers each sender once while replies are on.") { return @tr("Outlook answers each sender once while replies are on."); }
         if (key == "Your server answers each sender once every few days, and never mailing lists.") { return @tr("Your server answers each sender once every few days, and never mailing lists."); }
+        if (key == "Your server answers each sender once, and again after four days. Mailing lists and spam get no reply.") { return @tr("Your server answers each sender once, and again after four days. Mailing lists and spam get no reply."); }
+        if (key == "Flectar Mail found no way to set automatic replies on this account's server. Your provider's webmail may offer them.") { return @tr("Flectar Mail found no way to set automatic replies on this account's server. Your provider's webmail may offer them."); }
+        if (key == "Checking whether this account's server can send automatic replies…") { return @tr("Checking whether this account's server can send automatic replies…"); }
+        if (key == "Couldn't check this account's server: {}") { return @tr("Couldn't check this account's server: {}", argument); }
         if (key == "Outlook needs a last day with a first day.") { return @tr("Outlook needs a last day with a first day."); }
         if (key == "Senders who aren't in your contacts get no reply.") { return @tr("Senders who aren't in your contacts get no reply."); }
         if (key == "Senders outside your organization who aren't in your contacts get no reply.") { return @tr("Senders outside your organization who aren't in your contacts get no reply."); }
@@ -2633,6 +2640,37 @@ export component AppWindow inherits Window {
         body-color: root.body-text;
         muted-color: root.muted-text;
         confirmed => { root.mark_all_read(root.mark-all-read-scope); }
+    }
+
+    if AutoReplies.question-open : ConfirmationDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        z: 16000;
+        open <=> AutoReplies.question-open;
+        title: AutoReplies.question == "replace"
+            ? @tr("Replace changes made elsewhere?")
+            : @tr("Run replies before your filters?");
+        subject: AutoReplies.question == "replace" ? "" : AutoReplies.question-script;
+        description: AutoReplies.question == "replace"
+            ? @tr("The automatic replies script Flectar Mail keeps on your server was changed outside Flectar Mail.")
+            : @tr("Your server runs this filter script of yours. Flectar Mail would run the automatic replies first, then your script, unchanged.");
+        detail: AutoReplies.question == "replace"
+            ? @tr("Saving replaces those changes with what you set here.")
+            : @tr("Your filters keep running, also once replies are off.");
+        confirm-label: AutoReplies.question == "replace" ? @tr("Replace changes") : @tr("Run both");
+        destructive: AutoReplies.question == "replace";
+        icon: AutoReplies.question == "replace"
+            ? @image-url("icons/lucide/outline/pencil.svg")
+            : @image-url("icons/lucide/outline/list-filter.svg");
+        surface: root.surface;
+        dialog-border-color: root.border;
+        title-color: root.title-color;
+        body-color: root.body-text;
+        muted-color: root.muted-text;
+        confirmed => { AutoReplies.answer(true); }
+        cancelled => { AutoReplies.answer(false); }
     }
 
     if AccountImport.open : ImportDialog {

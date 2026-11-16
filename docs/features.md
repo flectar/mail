@@ -4,6 +4,7 @@ A closer look at what the [README](../README.md) summarizes.
 
 - [Conversation threads](#conversation-threads)
 - [Tabs](#tabs)
+- [Search](#search)
 - [Checking for mail](#checking-for-mail)
 - [New-mail notifications](#new-mail-notifications)
 - [Profiles and account colors](#profiles-and-account-colors)
@@ -14,6 +15,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Text formatting](#text-formatting)
 - [Spell check](#spell-check)
 - [Undo](#undo)
+- [Before sending](#before-sending)
 - [Undo send](#undo-send)
 - [Unsubscribing](#unsubscribing)
 - [Blocking senders](#blocking-senders)
@@ -100,6 +102,48 @@ Settings → General.
   <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-tabs-light.png">
   <img src="../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail with tabs for several conversations, the calendar, contacts, and files">
 </picture>
+
+## Search
+
+The search field finds mail stored on this device. Every word has to match,
+in the subject, the sender and recipients, or the text, and a word also finds
+the longer words it starts. Put words in quotes to find them as a phrase. When
+nothing has every word, the list shows mail with any of them.
+
+Operators narrow a search, as in Gmail:
+
+- `from:` and `to:` match a name or address, and `subject:` and `body:` a word
+  in that part.
+- `is:unread`, `is:starred` and `has:attachment` keep those messages, and
+  `filename:pdf` messages with an attachment whose name has that text.
+- `in:inbox`, `in:sent`, `in:drafts`, `in:archive`, `in:spam` and `in:trash`
+  search one kind of folder. Trash and Spam are left out unless a search names
+  them, and `in:anywhere` takes them in too.
+- `after:2026/01/31` and `before:2026/02/28` keep mail received from the start
+  of that day, or before it, in your time zone. `newer_than:7d` and
+  `older_than:1y` count back from now in days (`d`), months (`m`) or years
+  (`y`).
+- `larger:5M` and `smaller:100K` keep mail of at least, or under, that many
+  bytes, with `K`, `M` and `G` for thousands, millions and billions.
+
+`OR` in capitals finds either part, as in `from:ana OR from:ben`, and binds
+tighter than the space between parts, so `invoice OR receipt 2026` finds either
+word in mail that has 2026. Parentheses group parts, and a dash before a word,
+a phrase, an operator or a group leaves out what it matches, as in
+`-from:billing` or `-(draft OR old)`. **Search tips** in the menu beside the
+search field lists them.
+
+At the end of the results, **Search on server** asks the servers of the
+accounts in view for mail this device doesn't have: mail older than it keeps,
+or in folders it doesn't download. Each account's server brings up to 25 such
+messages, newest first, with any of its matches here that it passed on the
+way, and **Search further** brings the next. The messages come as their
+headers, and a message's text when it's opened. The list then shows them with
+the results here, in date order, until Flectar Mail quits. IMAP, JMAP and
+Gmail accounts can be searched this way, but not POP3 accounts or mail kept
+only on this device. IMAP servers can't look for attachments or file names,
+so with `has:attachment` or `filename:` their results also have mail without
+them.
 
 ## Checking for mail
 
@@ -288,10 +332,20 @@ closed. Syncing reads them back, so replies set on the web show too, and a
 strip over the mail list says when they're on, with Turn off.
 
 JMAP accounts whose server offers automatic replies, such as Fastmail, set
-them the same way, with a subject and days, for every sender. A JMAP server
-that also runs mail filters keeps automatic replies in a filter script of its
-own, which would turn your filters off, so those accounts and other IMAP and
-POP3 accounts get automatic replies from their provider's webmail for now.
+them the same way, with a subject and days, for every sender.
+
+IMAP accounts whose server runs mail filters through ManageSieve, as Dovecot,
+Cyrus and Stalwart servers can, set them the same way, with a subject and
+days, for every sender, and so do JMAP accounts on servers that run mail
+filters, such as Stalwart and Cyrus. The server answers each sender once, and
+again after four days, and skips mailing lists, newsletters and spam. Flectar
+Mail keeps the replies in a filter script of its own, named flectar-mail,
+which other devices read back, and never edits your own filter scripts. When
+the server already runs one, Flectar Mail asks first, then sends the replies
+and runs your script after them, unchanged, and turning replies off leaves
+your script running alone again. It won't combine them with a script that
+sends replies of its own. Other IMAP accounts and POP3 accounts get automatic
+replies from their provider's webmail.
 
 ## Text formatting
 
@@ -452,6 +506,16 @@ or star it, a notice at the bottom of the window says what changed, with
 **Undo**. Undo, or Ctrl+Z (Command-Z on a Mac) while the notice shows, puts the
 mail back as it was, also when the change already reached the server. Permanent
 deletion, labels, and moving or copying mail to another account can't be undone.
+
+## Before sending
+
+**Send** asks first when a message has no subject, with **Send without
+subject** and **Add a subject**. It also asks when a message mentions a file,
+with a word such as attached or enclosed or a file name such as report.pdf, but
+has none attached. **Attach files…** then opens the file picker, and **Send
+anyway** sends the message as it is. Only what you wrote counts, so quoted
+text, your signature and links don't. Each language has its own words, and the
+English ones always count.
 
 ## Undo send
 
