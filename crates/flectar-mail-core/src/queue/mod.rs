@@ -434,7 +434,7 @@ async fn complete_on_device(ctx: &SyncCtx, action: &repo::actions::PendingAction
         }
         "archive" | "unarchive" | "trash" | "spam" | "not_spam" | "move" | "mark_read"
         | "mark_unread" | "mark_folder_read" | "star" | "unstar" | "add_label" | "remove_label"
-        | "snooze" | "unsnooze" => Ok(()),
+        | "snooze" | "unsnooze" | "show_in" => Ok(()),
         other => {
             tracing::warn!("action kind {other} has nothing to do on this device");
             Ok(())
@@ -530,7 +530,8 @@ async fn execute_on_imap(
         "append_sent" => append_sent_action(ctx, config, session, action).await,
         "remove_transferred" => remove_transferred(ctx, config, session, action).await,
         // Local-only kinds recorded for undo history.
-        "snooze" | "unsnooze" => Ok(()),
+        // Tabs are this device's alone.
+        "snooze" | "unsnooze" | "show_in" => Ok(()),
         other => {
             tracing::warn!("unknown action kind {other}");
             Ok(())

@@ -2392,12 +2392,10 @@ async fn store_resources(
                 repo::threads::recompute(&tx, thread_id)?;
             }
             if settings.auto_labels_enabled {
-                let splits = repo::splits::list(&tx)?;
                 for &thread_id in &outcome.touched_threads {
                     if repo::threads::get_summary(&tx, thread_id)?.is_some() {
                         crate::route::route_thread_deterministic(
                             &tx,
-                            &splits,
                             settings.ai_categorize,
                             thread_id,
                         )?;
@@ -3886,7 +3884,7 @@ async fn apply_action(
             }
             return super::finish_permanent_delete(ctx, action.message_id).await;
         }
-        "snooze" | "unsnooze" => return Ok(()),
+        "snooze" | "unsnooze" | "show_in" => return Ok(()),
         // Gmail keeps no mark for an answered request; this device recorded
         // it. Gmail files what it sends in Sent, as it does every message.
         "read_receipt" => {

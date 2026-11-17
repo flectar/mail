@@ -258,11 +258,9 @@ pub fn delete(conn: &Connection, id: i64) -> Result<()> {
         "UPDATE threads SET routed_tab = NULL WHERE routed_tab = ?1",
         params![key],
     )?;
-    // A rule that routed matches into this category would dangle (and fail the
-    // message_labels foreign key on the next route); revert those rules to their
-    // own tab.
+    // Threads a rule or the user put there are free to go elsewhere.
     conn.execute(
-        "UPDATE split_rules SET target = NULL WHERE target = ?1",
+        "UPDATE threads SET pinned_tab = NULL WHERE pinned_tab = ?1",
         params![key],
     )?;
     conn.execute("DELETE FROM labels WHERE id = ?1", params![id])?;
@@ -531,9 +529,10 @@ mod tests {
     }
 
     #[test]
-    fn delete_reverts_rules_that_targeted_the_category() {
-        use crate::db::repo::splits;
+    fn delete_frees_conversations_put_in_the_category() {
         let c = testutil::conn();
+        testutil::seed_account(&c);
+        let (thread, _) = testutil::seed_message(&c, "a@shop.example", "Sale", true);
         let auto_id = c
             .query_row(
                 "SELECT id FROM labels WHERE keyword = 'FlectarMailAutoMarketing'",
@@ -541,25 +540,20 @@ mod tests {
                 |r| r.get::<_, i64>(0),
             )
             .unwrap();
-        // A rule that routes matches into that category.
-        let rule = splits::save(
-            &c,
-            None,
-            "promos",
-            0,
-            &crate::models::SplitRuleQuery {
-                senders: Some(vec!["shop.example".into()]),
-                ..Default::default()
-            },
-            Some(&format!("label:{auto_id}")),
-        )
-        .unwrap();
+        // A rule put the conversation there.
+        crate::route::pin_tab(&c, thread, Some(&format!("label:{auto_id}"))).unwrap();
 
         delete(&c, auto_id).unwrap();
 
-        // The rule survives but reverts to its own tab (no dangling target).
-        let got = splits::get(&c, rule.id).unwrap().unwrap();
-        assert_eq!(got.target, None);
+        // Routing may put it anywhere again.
+        let pinned: Option<String> = c
+            .query_row(
+                "SELECT pinned_tab FROM threads WHERE id = ?1",
+                [thread],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pinned, None);
     }
 
     /// Regression: server reconcile must never strip local-only auto labels.
