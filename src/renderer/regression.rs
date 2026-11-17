@@ -1524,3 +1524,17 @@ fn synthetic_italics_lean_forward_on_the_cpu_renderer() {
         );
     }
 }
+
+#[test]
+fn slant_axis_italics_lean_forward() {
+    // The bundled Google Sans Flex has no italic face and no `ital` axis, so
+    // its italics come from its `slnt` axis.
+    for scale in [1.0, 2.0] {
+        let ctx = create_email_font_ctx_with_system_fonts(false);
+        let (top, bottom) = italic_left_edges(ctx, "'Google Sans Flex'", "l", scale);
+        assert!(
+            top > bottom + 4,
+            "the italic l doesn't lean forward at {scale}x, its left edge is at {top} near the top and {bottom} near the bottom"
+        );
+    }
+}
