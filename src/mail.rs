@@ -13,8 +13,9 @@ use flectar_mail_core::{
         MailProtocol, MailRule, MailboxBadgeCounts, MessageCursor, MessageDetail,
         MessageSearchCursor, MessageSummary, PerformActionArgs, PortableAccountConfig, Provider,
         QueueSendArgs, QueueSendResult, RsvpEventArgs, SaveDraftArgs, SearchCursor, SenderIdentity,
-        ServerSearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary, UnsubscribeOffer,
-        UnsubscribeOutcome, View, normalized_workspace_list_pane_width, roles,
+        ServerRules, ServerRulesAnswer, ServerSearchCursor, Settings, Snippet, ThreadCursor,
+        ThreadSummary, UnsubscribeOffer, UnsubscribeOutcome, View,
+        normalized_workspace_list_pane_width, roles,
     },
 };
 #[cfg(test)]
@@ -2613,6 +2614,28 @@ impl CoreMailSource {
             MailTarget::Thread(thread_id) => self.core.rule_from_thread(thread_id).await,
         }
         .map_err(|error| error.to_string())
+    }
+
+    /// Where each account's rules run, as last checked.
+    pub async fn server_rules(&self) -> Result<Vec<ServerRules>, String> {
+        self.core
+            .server_rules()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Put account `account_id`'s rules on its server now, with the user's
+    /// `answer` to what the last try asked.
+    pub async fn put_rules_on_server(
+        &self,
+        account_id: i64,
+        answer: Option<ServerRulesAnswer>,
+    ) -> Result<(), String> {
+        self.core
+            .put_rules_on_server(account_id, answer)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     /// Take back the actions of one gesture. False when none could be.

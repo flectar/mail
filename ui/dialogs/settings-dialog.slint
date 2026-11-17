@@ -2212,11 +2212,51 @@ export component SettingsDialog inherits Rectangle {
 
                             SettingsPageTitle { label: @tr("Rules"); title-color: root.title-color; }
                             Text {
-                                height: max(root.compact ? 52px : 34px, self.preferred-height);
-                                text: @tr("Rules sort new mail as it arrives in an Inbox, trying them from the top. Flectar Mail runs them on this device while it's open.");
+                                height: max(root.compact ? 86px : 51px, self.preferred-height);
+                                text: @tr("Rules sort new mail as it arrives in an Inbox, trying them from the top. Where the server can run a rule, it does, so the rule works while Flectar Mail is closed. Other rules run while Flectar Mail is open.");
                                 color: root.secondary-text;
                                 font-size: TypeScale.secondary;
                                 wrap: word-wrap;
+                            }
+                            // What a server needs before it runs the rules.
+                            for notice in MailRules.notices : Rectangle {
+                                height: notice-layout.preferred-height;
+                                background: root.accent-soft;
+                                border-radius: 8px;
+                                notice-layout := GridLayout {
+                                    padding: 12px;
+                                    spacing: 12px;
+                                    Text {
+                                        row: 0;
+                                        col: 0;
+                                        horizontal-stretch: 1;
+                                        vertical-alignment: center;
+                                        text: notice.kind == "run-before" ? @tr("The server for {} runs your filter script “{}”. Flectar Mail can run its rules there too, before that script, so they work while Flectar Mail is closed.", notice.account, notice.detail)
+                                            : notice.kind == "others" && notice.has-rules ? @tr("The server for {} runs rules saved on another device, so the rules here run while Flectar Mail is open.", notice.account)
+                                            : notice.kind == "others" ? @tr("The server for {} runs rules saved on another device.", notice.account)
+                                            : notice.kind == "edited" ? @tr("The script Flectar Mail keeps on the server for {} was changed elsewhere, so the rules here run while Flectar Mail is open.", notice.account)
+                                            : @tr("The rules couldn't go to the server for {}. {}", notice.account, notice.detail);
+                                        color: root.body-text;
+                                        font-size: TypeScale.secondary;
+                                        wrap: word-wrap;
+                                    }
+                                    // Below the text on a phone, beside it otherwise.
+                                    HorizontalLayout {
+                                        row: root.compact ? 1 : 0;
+                                        col: root.compact ? 0 : 1;
+                                        horizontal-stretch: 0;
+                                        alignment: start;
+                                        Button {
+                                            width: self.content-width;
+                                            text: notice.kind == "run-before" ? @tr("Run rules there")
+                                                : notice.kind == "others" && notice.has-rules ? @tr("Replace them")
+                                                : notice.kind == "others" ? @tr("Remove them")
+                                                : notice.kind == "edited" ? @tr("Replace the changes")
+                                                : @tr("Try again");
+                                            clicked => { MailRules.notice-action(notice.account-id); }
+                                        }
+                                    }
+                                }
                             }
                             HorizontalBox {
                                 padding: 0px;
@@ -2272,12 +2312,28 @@ export component SettingsDialog inherits Rectangle {
                                                     font-weight: 600;
                                                     overflow: elide;
                                                 }
+                                                // Where the rule runs shows beside its accounts, or
+                                                // below them on a phone.
+                                                private property <bool> place-below: root.compact && rule.enabled && !rule.problem && rule.place != "";
                                                 Text {
+                                                    private property <string> accounts: rule.account == "" ? @tr("All accounts") : rule.account;
                                                     text: rule.problem ? @tr("A folder or label it uses is gone. Edit the rule to choose another.")
-                                                        : rule.account == "" ? @tr("All accounts") : rule.account;
+                                                        : !rule.enabled || root.compact ? self.accounts
+                                                        : rule.place == "server" ? @tr("{} · On the server", self.accounts)
+                                                        : rule.place == "some" ? @tr("{} · On some servers", self.accounts)
+                                                        : rule.place == "app" ? @tr("{} · On this device", self.accounts)
+                                                        : self.accounts;
                                                     color: rule.problem ? AppTheme.destructive : root.faint-text;
                                                     font-size: TypeScale.caption;
                                                     wrap: rule.problem ? word-wrap : no-wrap;
+                                                    overflow: elide;
+                                                }
+                                                if place-below : Text {
+                                                    text: rule.place == "server" ? @tr("On the server")
+                                                        : rule.place == "some" ? @tr("On some servers")
+                                                        : @tr("On this device");
+                                                    color: root.faint-text;
+                                                    font-size: TypeScale.caption;
                                                     overflow: elide;
                                                 }
                                             }

@@ -463,6 +463,23 @@ export component RuleEditor inherits Rectangle {
                         control-label: @tr("Stop here");
                     }
                 }
+                // Where the rule runs, as saved.
+                if MailRules.place != "" : Text {
+                    text: MailRules.place == "server" ? @tr("Runs on the server, so it works while Flectar Mail is closed.")
+                        : MailRules.place == "some" ? @tr("Runs on the server for some of its accounts, and while Flectar Mail is open for the others.")
+                        : MailRules.place-why == "pattern" ? @tr("Runs while Flectar Mail is open, as the server can't look for patterns the way Flectar Mail does.")
+                        : MailRules.place-why == "attachments" ? @tr("Runs while Flectar Mail is open, as the server can't tell attachments the way Flectar Mail does.")
+                        : MailRules.place-why == "case" ? @tr("Runs while Flectar Mail is open, as the server can't ignore the case of this text.")
+                        : MailRules.place-why == "name" ? @tr("Runs while Flectar Mail is open, as the server can't compare names. To compare addresses there, include the @, as in @example.com.")
+                        : MailRules.place-why == "folder" ? @tr("Runs while Flectar Mail is open, as the server can't file mail into one of its folders.")
+                        : MailRules.place-why == "label" ? @tr("Runs while Flectar Mail is open, as the server can't keep one of its labels.")
+                        : MailRules.place-why == "unsupported" ? @tr("Runs while Flectar Mail is open, as the server can't do all it asks.")
+                        : MailRules.place-why == "after" ? @tr("Runs while Flectar Mail is open, as a rule above it does, and the server runs its rules first.")
+                        : @tr("Runs while Flectar Mail is open.");
+                    color: AppTheme.secondary;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
                 if MailRules.error != "" : Text {
                     text: MailRules.error;
                     color: AppTheme.destructive;
