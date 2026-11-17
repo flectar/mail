@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reconstruct the pinned Slint winit backend with its Wayland file drop patch."""
+"""Reconstruct the pinned Slint winit backend with its patches."""
 
 import hashlib
 import io
@@ -78,7 +78,7 @@ def main():
             raise RuntimeError(f"{lockfile}: smithay-clipboard must stay on SCTK 0.19")
         if len(resolved("smithay-client-toolkit")) != 1:
             raise RuntimeError(f"{lockfile}: expected a single smithay-client-toolkit")
-    print("Slint winit source checksum, file drop patch, manifests, and lockfiles verified.")
+    print("Slint winit source checksum, patches, manifests, and lockfiles verified.")
 
 
 if __name__ == "__main__":

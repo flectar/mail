@@ -1749,14 +1749,33 @@ pub fn prepare_email_html(html: &str) -> Result<PreparedEmail, String> {
 /// wholesale-replaced on updates, so the logic can't be shared by extracting
 /// a helper there. Keep the two in sync by hand if either changes.
 fn build_email_font_ctx() -> parley::FontContext {
-    thread_local! { static FONTS: parley::FontContext = create_email_font_ctx(); }
-    FONTS.with(Clone::clone)
-}
-fn create_email_font_ctx() -> parley::FontContext {
-    create_email_font_ctx_with_system_fonts(!cfg!(target_arch = "wasm32"))
+    thread_local! {
+        static FONTS: std::cell::RefCell<EmailFontCtx> = std::cell::RefCell::new(
+            create_email_font_ctx_with_han_fallback(!cfg!(target_arch = "wasm32")),
+        );
+    }
+    FONTS.with(|fonts| {
+        let EmailFontCtx { font_ctx, han } = &mut *fonts.borrow_mut();
+        if let Some(han) = han {
+            han.follow(&mut font_ctx.collection);
+        }
+        font_ctx.clone()
+    })
 }
 
+/// The email `FontContext` and, with system fonts, its Han fallback, which
+/// follows the UI language.
+struct EmailFontCtx {
+    font_ctx: parley::FontContext,
+    han: Option<crate::han_fallback::HanFallback>,
+}
+
+#[cfg(test)]
 fn create_email_font_ctx_with_system_fonts(system_fonts: bool) -> parley::FontContext {
+    create_email_font_ctx_with_han_fallback(system_fonts).font_ctx
+}
+
+fn create_email_font_ctx_with_han_fallback(system_fonts: bool) -> EmailFontCtx {
     use parley::fontique::{
         Blob, Collection, CollectionOptions, FallbackKey, GenericFamily, Script, SourceCache,
     };
@@ -1768,6 +1787,10 @@ fn create_email_font_ctx_with_system_fonts(system_fonts: bool) -> parley::FontCo
             system_fonts,
         }),
     };
+    // Ask for each CJK language's family before anything else queries the
+    // Han fallback; installed below, after the platform faces.
+    let han_fonts =
+        system_fonts.then(|| crate::han_fallback::HanFonts::discover(&mut font_ctx.collection));
     font_ctx
         .collection
         .register_fonts(Blob::new(Arc::new(blitz_dom::BULLET_FONT) as _), None);
@@ -1870,7 +1893,10 @@ fn create_email_font_ctx_with_system_fonts(system_fonts: bool) -> parley::FontCo
             .set_fallbacks(key, fallbacks.into_iter());
     }
 
-    font_ctx
+    let han = han_fonts.map(|fonts| {
+        crate::han_fallback::HanFallback::install_discovered(fonts, &mut font_ctx.collection)
+    });
+    EmailFontCtx { font_ctx, han }
 }
 
 /// Render a complete message the way the reader paints it, using only the

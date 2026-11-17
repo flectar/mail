@@ -145,7 +145,16 @@ impl DerefMut for LazyComposeEditor {
 
 impl Default for CosmicComposeEditor {
     fn default() -> Self {
-        let mut font_system = FontSystem::new();
+        // FontSystem::new with the UI's Han fallback ahead of cosmic-text's,
+        // which picks a single family by the system language.
+        let mut db = cosmic_text::fontdb::Database::new();
+        db.load_system_fonts();
+        db.set_monospace_family("Noto Sans Mono");
+        db.set_sans_serif_family("Open Sans");
+        db.set_serif_family("DejaVu Serif");
+        let locale = sys_locale::get_locale().unwrap_or_else(|| "en-US".to_owned());
+        let fallback = crate::han_fallback::ComposeFallback::new(&locale);
+        let mut font_system = FontSystem::new_with_locale_and_db_and_fallback(locale, db, fallback);
         // The composer is rasterized by cosmic-text rather than Slint, so it
         // must register the same bundled UI font independently. System fonts
         // remain available as fallbacks for glyphs outside the font's coverage.

@@ -141,6 +141,107 @@ fn issue_23_gpu_paints_text_digits_with_color_emoji_installed() {
     assert!(dark_pixels > 100);
 }
 
+/// Fonts built like Calibri, whose outlines come with monochrome bitmap
+/// strikes. See resources/test-fonts/README.md.
+fn bitmap_strike_fonts() -> [(parley::fontique::Blob<u8>, &'static str); 2] {
+    use parley::fontique::Blob;
+    [
+        (
+            Blob::new(Arc::new(
+                include_bytes!("../../resources/test-fonts/BitmapStrikes-EBDT.ttf").as_slice(),
+            ) as _),
+            "Flectar EBDT Strikes Test",
+        ),
+        (
+            Blob::new(Arc::new(
+                include_bytes!("../../resources/test-fonts/BitmapStrikes-CBDT.ttf").as_slice(),
+            ) as _),
+            "Flectar CBDT Strikes Test",
+        ),
+    ]
+}
+
+fn prepare_with_font(font: &parley::fontique::Blob<u8>, family: &str) -> PreparedEmail {
+    let mut ctx = create_email_font_ctx_with_system_fonts(false);
+    ctx.collection.register_fonts(font.clone(), None);
+    prepare_email_html_with_font_ctx(
+        &format!(
+            r#"<body style="margin:0;background:#fff"><div style="font-family:'{family}';font-size:16px;color:#000">FE</div></body>"#
+        ),
+        ctx,
+    )
+    .unwrap()
+}
+
+#[test]
+fn issue_342_bitmap_strikes_draw_from_outlines() {
+    for (font, family) in bitmap_strike_fonts() {
+        let mut prepared = prepare_with_font(&font, family);
+        let frame = render_prepared_cpu(&mut prepared, 120, 40, 1.0).unwrap();
+        let dark_pixels = frame.tiles[0]
+            .image
+            .to_rgba8()
+            .unwrap()
+            .as_slice()
+            .iter()
+            .filter(|p| p.a > 0 && p.r < 100 && p.g < 100 && p.b < 100)
+            .count();
+        assert!(
+            dark_pixels > 30,
+            "{family}: the CPU renderer drew {dark_pixels} dark pixels"
+        );
+
+        // Vello's GPU scene dropped glyphs with a byte-aligned mask and drew
+        // bit-aligned ones white, instead of drawing their outlines.
+        #[cfg(feature = "gpu-renderer")]
+        {
+            let mut scene = vello::Scene::new();
+            paint_scene(
+                &mut VelloScenePainter::new(&mut scene),
+                &mut prepared.document,
+                1.0,
+                120,
+                40,
+                0,
+                0,
+            );
+            let resources = &scene.encoding().resources;
+            let outlines: usize = resources
+                .glyph_runs
+                .iter()
+                .filter(|run| run.font.data.id() == font.id())
+                .map(|run| run.glyphs.len())
+                .sum();
+            assert_eq!(outlines, 2, "{family}: F and E must be drawn from outlines");
+        }
+    }
+}
+
+#[cfg(feature = "gpu-renderer")]
+#[test]
+#[ignore = "requires a working WGPU adapter"]
+fn issue_342_gpu_paints_bitmap_strike_fonts() {
+    for (font, family) in bitmap_strike_fonts() {
+        let mut prepared = prepare_with_font(&font, family);
+        prepared.document.resolve(0.0);
+        let pixels = render_to_buffer::<anyrender_vello::VelloImageRenderer, _>(
+            |scene| paint_scene(scene, &mut prepared.document, 1.0, 120, 40, 0, 0),
+            120,
+            40,
+        );
+        let dark_pixels = pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|p| p[3] > 0 && p[0] < 100 && p[1] < 100 && p[2] < 100)
+            .count();
+        assert!(
+            dark_pixels > 30,
+            "{family}: the GPU drew {dark_pixels} dark pixels"
+        );
+    }
+}
+
 #[test]
 fn default_link_color_preserves_sender_styles() {
     use blitz_dom::util::ToColorColor;

@@ -10181,19 +10181,6 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/vello/vello-0.11.0.crate",
-        "sha256": "913abde56cab6131b62c0cc69b1a93b671d3c34b3097beb3714fd1dc93be8115",
-        "dest": "cargo/vendor/vello-0.11.0"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"913abde56cab6131b62c0cc69b1a93b671d3c34b3097beb3714fd1dc93be8115\", \"files\": {}}",
-        "dest": "cargo/vendor/vello-0.11.0",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/vello_common/vello_common-0.3.0.crate",
         "sha256": "73c2fbe53548bcd25c8ff42f75a93770a8611a16b37bee56d7ef7b44e36027f1",
         "dest": "cargo/vendor/vello_common-0.3.0"

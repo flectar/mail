@@ -1911,6 +1911,7 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
+ "objc2-core-text",
  "objc2-foundation 0.3.2",
  "objc2-security",
  "objc2-service-management",
@@ -1939,6 +1940,7 @@ dependencies = [
  "tokio",
  "tracing",
  "unicode-properties",
+ "unicode-script",
  "unicode-segmentation",
  "url",
  "vello",
@@ -7474,8 +7476,6 @@ dependencies = [
 [[package]]
 name = "vello"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "913abde56cab6131b62c0cc69b1a93b671d3c34b3097beb3714fd1dc93be8115"
 dependencies = [
  "bytemuck",
  "futures-intrusive",

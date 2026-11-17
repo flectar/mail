@@ -25,6 +25,17 @@ upstream license texts in
 and its clip fix is documented in
 [`patches/slint-renderer-software/README.md`](patches/slint-renderer-software/README.md).
 
+## Vello
+
+Flectar Mail's GPU renderer paints mail with Vello, copyright © the Vello
+Authors and used under its `MIT` option. The locally patched `vello` 0.11.0
+crate retains its license texts in
+[`crates/vello/LICENSE-MIT`](crates/vello/LICENSE-MIT) and
+[`crates/vello/LICENSE-APACHE`](crates/vello/LICENSE-APACHE). The upstream
+source is <https://github.com/linebender/vello>. Its bitmap strike fix, source
+checksum, and removal condition are documented in
+[`patches/vello/README.md`](patches/vello/README.md).
+
 ## smithay-clipboard
 
 Slint's winit backend uses the locally patched `smithay-clipboard` 0.7.2 crate
@@ -138,6 +149,10 @@ recorded in `ui/icons/lucide/sources.json` and `ui/icons/lucide/solid_recipes.py
 The bundled Google Sans Flex font is distributed under the SIL Open Font
 License 1.1. Its license, provenance, and checksum are retained in
 [`resources/fonts/google-sans-flex`](resources/fonts/google-sans-flex).
+
+Renderer regression tests also use two fonts derived from it under SIL OFL
+1.1, with bitmap strikes added. Their license and reproduction instructions
+are retained in [`resources/test-fonts`](resources/test-fonts).
 
 ## Noto Emoji
 

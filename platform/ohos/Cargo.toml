@@ -45,3 +45,5 @@ i-slint-renderer-software = { path = "../../crates/i-slint-renderer-software" }
 # variable fonts without an italic face, such as the bundled Google Sans Flex,
 # stay upright; see patches/fontique/README.md.
 fontique = { path = "../../crates/fontique" }
+# Vello drops Calibri's letters on the GPU; see patches/vello/README.md.
+vello = { path = "../../crates/vello" }

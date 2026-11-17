@@ -1,0 +1,75 @@
+diff --git a/crates/vello/src/scene.rs b/crates/vello/src/scene.rs
+index a6a91e5..ec22471 100644
+--- a/crates/vello/src/scene.rs
++++ b/crates/vello/src/scene.rs
+@@ -604,8 +604,7 @@ impl<'a> DrawGlyphs<'a> {
+     pub fn draw(mut self, style: impl Into<StyleRef<'a>>, glyphs: impl Iterator<Item = Glyph>) {
+         let font_index = self.run.font.index;
+         let font = skrifa::FontRef::from_index(self.run.font.data.as_ref(), font_index).unwrap();
+-        let bitmaps = font.bitmap_strikes();
+-        if font.colr().is_ok() && font.cpal().is_ok() || !bitmaps.is_empty() {
++        if font.colr().is_ok() && font.cpal().is_ok() || drawn_bitmap_strikes(&font).is_some() {
+             self.try_draw_colr(style.into(), glyphs);
+         } else {
+             // Shortcut path - no need to test each glyph for a colr outline
+@@ -657,8 +656,10 @@ impl<'a> DrawGlyphs<'a> {
+         );
+ 
+         let color_collection = font.color_glyphs();
+-        let bitmaps = font.bitmap_strikes();
+-        let is_apple_color_emoji = bitmaps.format() == Some(BitmapFormat::Sbix)
++        let bitmaps = drawn_bitmap_strikes(&font);
++        let outlines = font.outline_glyphs();
++        let is_apple_color_emoji = bitmaps.as_ref().and_then(|bitmaps| bitmaps.format())
++            == Some(BitmapFormat::Sbix)
+             && font
+                 .localized_strings(skrifa::string::StringId::POSTSCRIPT_NAME)
+                 .any(|name| name.chars().eq("AppleColorEmoji".chars()));
+@@ -679,12 +680,20 @@ impl<'a> DrawGlyphs<'a> {
+                         final_glyph = Some((EmojiLikeGlyph::Colr(color), *glyph));
+                         false
+                     }
+-                    None => match bitmaps.glyph_for_size(Size::new(ppem), glyph_id) {
+-                        Some(bitmap) => {
++                    None => match bitmaps
++                        .as_ref()
++                        .and_then(|bitmaps| bitmaps.glyph_for_size(Size::new(ppem), glyph_id))
++                    {
++                        // A glyph with an outline draws it rather than a monochrome or
++                        // grayscale mask, as Skia does unless embedded bitmaps are enabled.
++                        Some(bitmap)
++                            if !matches!(bitmap.data, bitmap::BitmapData::Mask(_))
++                                || outlines.get(glyph_id).is_none() =>
++                        {
+                             final_glyph = Some((EmojiLikeGlyph::Bitmap(bitmap), *glyph));
+                             false
+                         }
+-                        None => true,
++                        _ => true,
+                     },
+                 }
+             });
+@@ -929,6 +938,23 @@ enum EmojiLikeGlyph<'a> {
+     Bitmap(bitmap::BitmapGlyph<'a>),
+     Colr(ColorGlyph<'a>),
+ }
++
++/// The bitmap strikes that may stand in for the font's glyphs.
++///
++/// Monochrome and grayscale `EBDT` strikes in a font with outlines, such as
++/// Calibri's, are meant for a few exact sizes drawn without antialiasing, so
++/// the outlines are drawn instead, as Skia does unless embedded bitmaps are
++/// enabled.
++fn drawn_bitmap_strikes<'a>(font: &skrifa::FontRef<'a>) -> Option<bitmap::BitmapStrikes<'a>> {
++    let strikes = font.bitmap_strikes();
++    if strikes.is_empty()
++        || strikes.format() == Some(BitmapFormat::Ebdt) && font.outline_glyphs().format().is_some()
++    {
++        return None;
++    }
++    Some(strikes)
++}
++
+ const BOUND: f64 = 100_000.;
+ // Hack: If we don't have a clip box, we guess a rectangle we hope is big enough
+ const DEFAULT_CLIP_RECT: Rect = Rect::new(-BOUND, -BOUND, BOUND, BOUND);
