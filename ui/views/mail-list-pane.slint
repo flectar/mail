@@ -18,6 +18,7 @@ import { LocalMailUi } from "../local-mail.slint";
 import { SavedSearchUi } from "../saved-searches.slint";
 import { ServerSearchUi } from "../server-search.slint";
 import { ActivitySpinner } from "../components/activity-spinner.slint";
+import { PullToRefresh } from "../components/pull-to-refresh.slint";
 import { SearchTips } from "../components/search-tips.slint";
 import { ImportActivity } from "../dialogs/import-dialog.slint";
 import { AutoReplyActivity } from "../auto-replies.slint";
@@ -505,6 +506,8 @@ export component MailListPane inherits FocusScope {
     callback load_more();
     callback load_earlier();
     callback sync_mail();
+    // Checks the accounts in view for new mail, as F5 does.
+    callback check_mail_in_view();
     callback open_folders();
     callback open_compose();
     callback message_action_for_email(int, string);
@@ -1027,9 +1030,15 @@ export component MailListPane inherits FocusScope {
                     ImportActivity { compact: root.compact; }
                     AutoReplyActivity { compact: root.compact; }
 
-                    Rectangle {
+                    PullToRefresh {
                         vertical-stretch: 1;
                         background: root.surface;
+                        // On phones, pulling the list down from its top checks the
+                        // accounts in view, as F5 does on a keyboard.
+                        enabled: root.compact && !root.loading && root.search_query == "";
+                        at-top: mail-list-scroll.content-y >= -1px;
+                        refreshing: root.sync_in_progress;
+                        refresh => { root.check_mail_in_view(); }
 
                         list-keyboard := FocusVisibleScope {
                             width: parent.width;
