@@ -581,7 +581,8 @@ recipients, the subject, the mailing list, the size, any header such as
 X-Spam-Flag, the body or the attachments, and needs all or any of its
 conditions. Text is compared without regard to case, and a condition can also
 match a regular expression. The rule then moves, labels, stars, archives,
-trashes or junks the mail, or marks it read. Accounts that keep a message in
+trashes or junks the mail, marks it read, or shows it under Important, Other or
+another category, where the conversation stays. Accounts that keep a message in
 several folders, such as JMAP accounts, can copy it too. Moving mail out of the
 Inbox ends the rules for it, and **Stop here** ends them after any rule.
 

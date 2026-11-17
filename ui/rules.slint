@@ -75,6 +75,8 @@ export global MailRules {
     // every account files only into labels of this device.
     in property <[string]> folders;
     in property <[string]> labels;
+    // The Inbox's categories a rule can show mail in.
+    in property <[string]> tabs;
     // The account keeps a message in several folders (JMAP), so it can
     // copy mail too.
     in property <bool> can-copy;
