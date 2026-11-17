@@ -104,6 +104,8 @@ flectar-spell = { path = "crates/flectar-spell" }
 fontique_0_12 = { package = "fontique", version = "=0.12.0", features = ["fontconfig-dlopen"] }
 chrono.workspace = true
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
+# The script type of cosmic-text's font fallback lists (src/han_fallback.rs).
+unicode-script = "0.5"
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
 # Reads photos at a half, a quarter or an eighth of their size, to shrink them and to show
 # them in the composer (src/photo_shrink.rs).
@@ -223,6 +225,9 @@ objc2-service-management = { version = "0.3", default-features = false, features
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
 block2 = { version = "0.6", default-features = false, features = ["std"] }
+# Warms CoreText's Han font lookups off the UI thread (src/han_fallback.rs).
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFDictionary", "CFString"] }
+objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFont", "CTFontDescriptor"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSError", "NSSet", "NSString"] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNNotification", "UNNotificationAction", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter", "UNError"] }
 

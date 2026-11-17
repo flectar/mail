@@ -31,6 +31,7 @@ pub mod documents;
 mod email_document;
 pub mod favicon;
 mod files_controller;
+mod han_fallback;
 mod import_controller;
 mod invitation;
 mod keyboard_keys;
@@ -1232,6 +1233,8 @@ fn apply_language(app: &AppWindow, preference: &str) {
     };
     number_format::set_language(selected);
     spelling::apply_display_language(language_mode);
+    // Before the translation, whose text is laid out again with these fonts.
+    han_fallback::set_ui_language(selected, slint::fontique_012::shared_collection);
     if let Err(error) = slint::select_bundled_translation(selected) {
         eprintln!("could not select {selected} translation: {error}");
     }
@@ -1786,6 +1789,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let benchmark_disable_background =
         std::env::var("FLECTAR_BENCHMARK_DISABLE_SYNC").as_deref() == Ok("1");
     normalize_appimage_environment();
+    // Overlaps the system's font lookups with the rest of startup.
+    han_fallback::warm_up();
 
     // Created before the backend: claiming the profile uses its reactor, and
     // a launch that only forwards to a running instance should exit before
@@ -1892,8 +1897,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     ))]
     slint::set_xdg_app_id("com.flectar.mail")?;
 
-    // Register the deterministic emoji face before any initial text is measured.
+    // Register the deterministic emoji face and the Han fallback before any
+    // initial text is measured.
     configure_emoji_font_fallback()?;
+    han_fallback::install_ui(&mut slint::fontique_012::shared_collection());
 
     // Construct the window before opening or migrating either database. Seed
     // the presentation preferences visible in the inert mailbox shell from
