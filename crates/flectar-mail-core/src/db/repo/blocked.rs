@@ -1,6 +1,6 @@
 //! Senders whose mail goes to Spam (#227). Sync turns away what they send to
 //! an inbox (see `crate::turn_away`), and blocking one moves what is in an
-//! inbox now.
+//! inbox now. Flectar Mail Sync carries the list to the user's other devices.
 use crate::error::Result;
 use crate::models::BlockedSender;
 use rusqlite::{Connection, params};
@@ -27,6 +27,18 @@ pub fn block(conn: &Connection, address: &str, now: i64) -> Result<bool> {
          ON CONFLICT(address) DO NOTHING",
         params![address, now],
     )? == 1)
+}
+
+/// Block `address` as another device did at `blocked_at`, keeping that time
+/// so every device has the same entry. False when it already was blocked.
+pub fn put(conn: &Connection, address: &str, blocked_at: i64) -> Result<bool> {
+    let known = is_blocked(conn, address)?;
+    conn.execute(
+        "INSERT INTO blocked_senders (address, blocked_at) VALUES (?1, ?2)
+         ON CONFLICT(address) DO UPDATE SET blocked_at = excluded.blocked_at",
+        params![address, blocked_at],
+    )?;
+    Ok(!known)
 }
 
 /// Stop blocking `address`. False when it wasn't blocked.

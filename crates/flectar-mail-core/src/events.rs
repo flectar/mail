@@ -161,6 +161,9 @@ pub enum CoreEvent {
     AccountsChanged {
         removed: Vec<i64>,
     },
+    /// Another device blocked a sender, or stopped blocking one, through
+    /// Flectar Mail Sync.
+    BlockedSendersChanged,
     /// Where Flectar Mail Sync stands on this device.
     DeviceSync(crate::device_sync::DeviceSyncStatus),
     /// Progress of adding a device to Flectar Mail Sync, in the pairing the call

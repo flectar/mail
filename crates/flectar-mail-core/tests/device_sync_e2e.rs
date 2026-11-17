@@ -512,6 +512,69 @@ async fn a_profile_takes_an_account_that_arrives_with_it() {
     assert_eq!(profile(&laptop).await, 2);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn blocked_senders_follow_the_user_to_every_device() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let laptop = start_core(laptop_dir.path()).await;
+    let phone = start_core(phone_dir.path()).await;
+    let blocked = |core: &Core| {
+        let core = core.clone();
+        async move {
+            core.blocked_senders()
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|sender| sender.address)
+                .collect::<Vec<_>>()
+        }
+    };
+
+    // Each device blocked someone before it had sync.
+    laptop.block_sender("News@Example.com").await.unwrap();
+    phone.block_sender("ads@example.com").await.unwrap();
+    laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+    let mut laptop_events = laptop.bus.subscribe();
+    join_with_code(&laptop, &phone, &server.url).await;
+
+    // The phone takes the laptop's list and keeps its own, which goes to the
+    // laptop.
+    assert!(phone.device_sync_run().await.unwrap());
+    phone.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    let both = ["ads@example.com", "news@example.com"];
+    assert_eq!(blocked(&phone).await, both);
+    assert_eq!(blocked(&laptop).await, both);
+    let mut told = false;
+    loop {
+        match laptop_events.try_recv() {
+            Ok(event) => told |= matches!(event, CoreEvent::BlockedSendersChanged),
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
+            Err(_) => break,
+        }
+    }
+    assert!(told, "the app hears of the change");
+
+    // Unblocked on the phone, the sender is unblocked on the laptop too.
+    phone.unblock_sender("news@example.com").await.unwrap();
+    phone.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    assert_eq!(blocked(&laptop).await, ["ads@example.com"]);
+
+    // Blocked again on the laptop, it is blocked on the phone again.
+    laptop.block_sender("news@example.com").await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    phone.device_sync_run().await.unwrap();
+    assert_eq!(blocked(&phone).await, both);
+}
+
 async fn high_seq(core: &Core) -> i64 {
     core.db
         .read(|conn| {

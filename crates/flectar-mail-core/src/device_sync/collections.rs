@@ -1,10 +1,11 @@
 //! What syncs, and how the app's items become records and back.
 //!
 //! Each item is one record. Accounts carry their per-account preferences;
-//! preferences, signatures and profiles are named records (their record ids
-//! derive from their key), templates, snoozes, scheduled sends and reply
-//! reminders are records under their own sync id, and each device describes
-//! itself in a `device` record under its own device id.
+//! preferences, signatures, profiles and blocked senders are named records
+//! (their record ids derive from their key, so two devices that block the
+//! same sender write the same record), templates, snoozes, scheduled sends
+//! and reply reminders are records under their own sync id, and each device
+//! describes itself in a `device` record under its own device id.
 
 use super::store::{Incoming, RecordId, body_hash, set_local_hash};
 use crate::db::repo;
@@ -28,6 +29,7 @@ pub(crate) const SNOOZE: &str = "snooze";
 pub(crate) const SCHEDULED: &str = "scheduled";
 pub(crate) const REMINDER: &str = "reminder";
 pub(crate) const SIGN_IN: &str = "signin";
+pub(crate) const BLOCK: &str = "block";
 
 /// The largest template body that syncs.
 const MAX_TEMPLATE_BYTES: usize = 192 * 1024;
@@ -46,7 +48,7 @@ const MAX_BODY_BYTES: usize = 250 * 1024;
 pub(crate) fn schema(collection: &str) -> Option<u32> {
     match collection {
         PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE | SNOOZE | SCHEDULED
-        | REMINDER | SIGN_IN => Some(1),
+        | REMINDER | SIGN_IN | BLOCK => Some(1),
         _ => None,
     }
 }
@@ -152,8 +154,14 @@ pub(crate) fn profile_name(id: &str) -> String {
     format!("{PROFILE}:{id}")
 }
 
-/// Every name the app's items currently need an id for.
-pub(crate) fn names_needed(settings: &Settings) -> Vec<String> {
+/// A blocked sender's name: its address, in the form the block list keeps.
+pub(crate) fn block_name(address: &str) -> String {
+    format!("{BLOCK}:{address}")
+}
+
+/// Every name the app's items currently need an id for: `blocked` lists the
+/// blocked senders' addresses.
+pub(crate) fn names_needed(settings: &Settings, blocked: &[String]) -> Vec<String> {
     SYNCED_PREFERENCES
         .iter()
         .map(|key| pref_name(key))
@@ -164,6 +172,7 @@ pub(crate) fn names_needed(settings: &Settings) -> Vec<String> {
                 .map(|s| signature_name(&s.id)),
         )
         .chain(settings.mail_profiles.iter().map(|p| profile_name(&p.id)))
+        .chain(blocked.iter().map(|address| block_name(address)))
         .collect()
 }
 
@@ -378,6 +387,21 @@ pub(crate) fn snapshot(
         }
     }
 
+    // Each device turns away what blocked senders mail it later, so the list
+    // goes everywhere; what one device already moved to Spam moved on the
+    // mail server.
+    for blocked in repo::blocked::list(conn)? {
+        if let Some(id) = names.get(&block_name(&blocked.address)) {
+            records.insert(
+                id,
+                entry(
+                    BLOCK,
+                    json!({"address": blocked.address, "blockedAt": blocked.blocked_at}),
+                ),
+            );
+        }
+    }
+
     let mut snoozes = conn.prepare(
         "SELECT s.sync_id, a.sync_id, s.anchor, s.wake_at FROM synced_snoozes s
          JOIN accounts a ON a.id = s.account_id WHERE a.sync_id IS NOT NULL",
@@ -583,6 +607,8 @@ pub(crate) struct Applied {
     /// Conversations whose state changed here, such as one another device
     /// snoozed: the mail lists show them again.
     pub threads_changed: Vec<i64>,
+    /// Another device blocked a sender, or stopped blocking one.
+    pub blocked_changed: bool,
     /// Records taken on or left alone: see [`settle`].
     pub settled: Vec<RecordId>,
 }
@@ -597,7 +623,7 @@ fn readable(entry: &Entry) -> bool {
 fn order(collection: &str, deleted: bool) -> (u8, bool) {
     let rank = match collection {
         ACCOUNT => 0,
-        PREF | SIGNATURE | PROFILE | TEMPLATE | SNOOZE | SCHEDULED | REMINDER => 1,
+        PREF | SIGNATURE | PROFILE | TEMPLATE | SNOOZE | SCHEDULED | REMINDER | BLOCK => 1,
         _ => 2,
     };
     (rank, deleted)
@@ -868,6 +894,7 @@ fn apply_put(
         SCHEDULED => apply_scheduled(conn, id, &entry.body, applied),
         REMINDER => apply_reminder(conn, id, &entry.body, applied),
         SIGN_IN => apply_sign_in(conn, id, &entry.body),
+        BLOCK => apply_block(conn, &entry.body, applied),
         // Other devices describe themselves; the app reads them from the
         // mirror, and only each device writes its own.
         DEVICE => Ok(Outcome::Ignored),
@@ -1242,6 +1269,25 @@ fn apply_snooze(
 /// replied.
 /// Another device's password or sign-in: kept sealed until the install step
 /// moves it into the credential store (sign_ins.rs).
+/// A sender blocked on another device: this device turns away what they
+/// mail it from now on. Mail from them already in an inbox here stays there,
+/// as the device that blocked them moved what it had, and moving it again
+/// here could not be undone from there.
+fn apply_block(conn: &Connection, body: &Value, applied: &mut Applied) -> Result<Outcome> {
+    let (Some(address), Some(blocked_at)) = (
+        body.get("address")
+            .and_then(Value::as_str)
+            .and_then(repo::blocked::normalized),
+        body.get("blockedAt").and_then(Value::as_i64),
+    ) else {
+        return Ok(Outcome::Ignored);
+    };
+    if repo::blocked::put(conn, &address, blocked_at)? {
+        applied.blocked_changed = true;
+    }
+    Ok(Outcome::Applied)
+}
+
 fn apply_sign_in(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outcome> {
     let Some(record) = super::sign_ins::parse(body) else {
         return Ok(Outcome::Ignored);
@@ -1549,6 +1595,19 @@ fn apply_delete(
         REMINDER => {
             if let Some(thread) = repo::reply_reminders::delete(conn, &sync_id_hex(id))? {
                 applied.threads_changed.push(thread);
+            }
+        }
+        // Unblocked on another device. What is in Spam stays, as when this
+        // device unblocks.
+        BLOCK => {
+            if let Some(address) = previous
+                .body
+                .get("address")
+                .and_then(Value::as_str)
+                .and_then(repo::blocked::normalized)
+                && repo::blocked::unblock(conn, &address)?
+            {
+                applied.blocked_changed = true;
             }
         }
         // Turned off, or its account went. Credentials already stored here
@@ -2758,5 +2817,151 @@ mod tests {
                 "{key} is not a settings field"
             );
         }
+    }
+
+    /// Apply `incoming` as a run would, with nothing edited here meanwhile.
+    fn apply_incoming(conn: &Connection, id: RecordId, change: Incoming) -> Applied {
+        let local = snapshot(
+            conn,
+            &Names::default(),
+            &BTreeMap::new(),
+            ([1; 16], json!({})),
+        )
+        .unwrap();
+        apply(
+            conn,
+            &BTreeMap::from([(id, change)]),
+            &BTreeMap::new(),
+            &local,
+            &local,
+        )
+        .unwrap()
+    }
+
+    fn blocked(conn: &Connection) -> Vec<(String, i64)> {
+        repo::blocked::list(conn)
+            .unwrap()
+            .into_iter()
+            .map(|sender| (sender.address, sender.blocked_at))
+            .collect()
+    }
+
+    #[test]
+    fn blocked_senders_are_records_named_by_their_address() {
+        let conn = testutil::conn();
+        repo::blocked::block(&conn, "news@example.com", 10).unwrap();
+        repo::blocked::block(&conn, "ads@example.com", 20).unwrap();
+        let news = [8u8; 16];
+        let mut names = Names::default();
+        names.insert(block_name("news@example.com"), news);
+        assert_eq!(
+            names_needed(&Settings::default(), &["news@example.com".into()])
+                .last()
+                .map(String::as_str),
+            Some("block:news@example.com")
+        );
+        let records = snapshot(&conn, &names, &BTreeMap::new(), ([1; 16], json!({}))).unwrap();
+        assert_eq!(
+            records[&news],
+            entry(
+                BLOCK,
+                json!({"address": "news@example.com", "blockedAt": 10})
+            )
+        );
+        // One whose id isn't known yet waits for the next run.
+        assert_eq!(
+            records
+                .values()
+                .filter(|record| record.collection == BLOCK)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_sender_blocked_on_another_device_is_blocked_here() {
+        let conn = testutil::conn();
+        let id = [8u8; 16];
+        let applied = apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: None,
+                next: Some(entry(
+                    BLOCK,
+                    json!({"address": "News@Example.COM", "blockedAt": 42}),
+                )),
+            },
+        );
+        assert!(applied.blocked_changed);
+        assert_eq!(applied.settled, vec![id]);
+        assert_eq!(blocked(&conn), vec![("news@example.com".to_owned(), 42)]);
+
+        // Already blocked here, it takes the other device's time, so both
+        // devices have the same record and neither uploads it again.
+        repo::blocked::block(&conn, "ads@example.com", 5).unwrap();
+        let ads = [9u8; 16];
+        let applied = apply_incoming(
+            &conn,
+            ads,
+            Incoming {
+                previous: None,
+                next: Some(entry(
+                    BLOCK,
+                    json!({"address": "ads@example.com", "blockedAt": 3}),
+                )),
+            },
+        );
+        assert!(!applied.blocked_changed, "nothing new to show");
+        let mut names = Names::default();
+        names.insert(block_name("ads@example.com"), ads);
+        let records = snapshot(&conn, &names, &BTreeMap::new(), ([1; 16], json!({}))).unwrap();
+        assert_eq!(records[&ads].body["blockedAt"], 3);
+
+        // Something that isn't an address is left alone.
+        let applied = apply_incoming(
+            &conn,
+            [10u8; 16],
+            Incoming {
+                previous: None,
+                next: Some(entry(
+                    BLOCK,
+                    json!({"address": "not an address", "blockedAt": 1}),
+                )),
+            },
+        );
+        assert!(!applied.blocked_changed);
+        assert_eq!(blocked(&conn).len(), 2);
+    }
+
+    #[test]
+    fn a_sender_unblocked_on_another_device_is_unblocked_here() {
+        let conn = testutil::conn();
+        repo::blocked::block(&conn, "news@example.com", 10).unwrap();
+        let record = entry(
+            BLOCK,
+            json!({"address": "news@example.com", "blockedAt": 10}),
+        );
+        let applied = apply_incoming(
+            &conn,
+            [8u8; 16],
+            Incoming {
+                previous: Some(record.clone()),
+                next: None,
+            },
+        );
+        assert!(applied.blocked_changed);
+        assert!(blocked(&conn).is_empty());
+
+        // Unblocked here already: nothing changes.
+        let applied = apply_incoming(
+            &conn,
+            [8u8; 16],
+            Incoming {
+                previous: Some(record),
+                next: None,
+            },
+        );
+        assert!(!applied.blocked_changed);
     }
 }

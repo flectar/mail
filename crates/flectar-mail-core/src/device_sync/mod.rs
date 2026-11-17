@@ -1045,8 +1045,15 @@ impl Core {
 
         let names = {
             let settings = self.get_settings().await?;
+            let blocked: Vec<String> = self
+                .db
+                .read(|conn| crate::db::repo::blocked::list(conn))
+                .await?
+                .into_iter()
+                .map(|sender| sender.address)
+                .collect();
             let mut names = service.names.lock().await;
-            for name in collections::names_needed(&settings) {
+            for name in collections::names_needed(&settings, &blocked) {
                 if !names.contains(&name) {
                     let id = client.named_record_id(&name).await;
                     match id {
@@ -1197,6 +1204,9 @@ impl Core {
         }
         if applied.settings_changed {
             self.bus.emit(CoreEvent::SettingsChanged);
+        }
+        if applied.blocked_changed {
+            self.bus.emit(CoreEvent::BlockedSendersChanged);
         }
         if !applied.threads_changed.is_empty() {
             self.bus.emit(CoreEvent::MailUpdated {

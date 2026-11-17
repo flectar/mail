@@ -4196,6 +4196,10 @@ impl Core {
             }
         };
         tracing::info!(moved, "blocked a sender");
+        // The block follows the user to their other devices.
+        if newly_blocked {
+            self.device_sync_now();
+        }
         Ok(BlockResult {
             address,
             action_ids,
@@ -4208,9 +4212,14 @@ impl Core {
         let Some(address) = repo::blocked::normalized(address) else {
             return Ok(());
         };
-        self.db
-            .write(move |conn| repo::blocked::unblock(conn, &address).map(drop))
-            .await
+        let unblocked = self
+            .db
+            .write(move |conn| repo::blocked::unblock(conn, &address))
+            .await?;
+        if unblocked {
+            self.device_sync_now();
+        }
+        Ok(())
     }
 
     /// Every blocked sender, alphabetically.
