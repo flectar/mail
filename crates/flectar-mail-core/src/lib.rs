@@ -10,6 +10,7 @@ pub mod autolabel;
 pub mod caldav;
 pub mod calendar;
 pub mod carddav;
+mod cleanup;
 pub mod config;
 pub mod db;
 pub mod embed;
@@ -1238,6 +1239,12 @@ impl Core {
         {
             let c = core.clone();
             tokio::spawn(async move { c.transfer_loop().await });
+        }
+
+        // Trash and Junk emptied of what sat there too long, as the user set.
+        {
+            let c = core.clone();
+            tokio::spawn(async move { c.cleanup_loop().await });
         }
 
         Ok(core)
@@ -11198,15 +11205,17 @@ pub(crate) fn apply_thread_action_in(
     match kind {
         ActionKind::DeletePermanently => {
             for (id, f, u, _r, _s, role) in &msgs {
-                let in_trash = role == roles::TRASH
+                // Only mail already thrown away, in Trash or Junk.
+                let thrown_away = role == roles::TRASH
+                    || role == roles::SPAM
                     || tx.query_row(
                         "SELECT EXISTS(SELECT 1 FROM message_folders mf
                      JOIN folders folder ON folder.id = mf.folder_id
-                     WHERE mf.message_id = ?1 AND folder.role = 'trash')",
+                     WHERE mf.message_id = ?1 AND folder.role IN ('trash', 'spam'))",
                         rusqlite::params![id],
                         |row| row.get::<_, bool>(0),
                     )?;
-                if !in_trash {
+                if !thrown_away {
                     continue;
                 }
                 let already_queued: bool = tx.query_row(

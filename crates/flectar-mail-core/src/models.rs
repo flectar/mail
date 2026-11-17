@@ -2662,6 +2662,13 @@ pub struct Settings {
     /// What to do when a message asks for a read receipt.
     #[serde(default)]
     pub read_receipts: ReadReceiptPolicy,
+    /// For how many days mail stays in Trash before Flectar Mail deletes
+    /// it for good, counted from when it went there. 0 keeps it.
+    #[serde(default)]
+    pub empty_trash_after_days: u32,
+    /// The same for Junk.
+    #[serde(default)]
+    pub empty_junk_after_days: u32,
     /// Named application palette: "default" | "teal" | "green" | "purple" | "custom".
     #[serde(default = "default_theme_preset")]
     pub theme_preset: String,
@@ -3098,6 +3105,8 @@ impl Default for Settings {
             reduce_motion: ReduceMotion::default(),
             interface_text_size: InterfaceTextSize::default(),
             read_receipts: ReadReceiptPolicy::default(),
+            empty_trash_after_days: 0,
+            empty_junk_after_days: 0,
             theme_preset: default_theme_preset(),
             custom_theme: CustomTheme::default(),
             show_avatars: true,
