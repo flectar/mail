@@ -161,6 +161,15 @@ pub(crate) fn check(conn: &Connection, rule: &MailRule) -> Result<()> {
     {
         return invalid("it files mail away more than once");
     }
+    if rule
+        .actions
+        .iter()
+        .filter(|action| matches!(action, RuleAction::ShowIn { .. }))
+        .count()
+        > 1
+    {
+        return invalid("it shows mail in more than one tab");
+    }
     for action in &rule.actions {
         match action {
             RuleAction::Move { folder } | RuleAction::Copy { folder } => {
@@ -182,6 +191,18 @@ pub(crate) fn check(conn: &Connection, rule: &MailRule) -> Result<()> {
                     .ok_or_else(|| CoreError::NotFound(format!("label {label}")))?;
                 if label.owner_account_id.is_some() && label.owner_account_id != rule.account_id {
                     return invalid("a label belongs to another account");
+                }
+            }
+            RuleAction::ShowIn { tab } => {
+                let tab_exists = match tab.as_str() {
+                    "important" | "other" => true,
+                    tab => match tab.strip_prefix("label:").and_then(|id| id.parse().ok()) {
+                        Some(id) => repo::labels::get(conn, id)?.is_some_and(|label| label.is_auto),
+                        None => false,
+                    },
+                };
+                if !tab_exists {
+                    return invalid("a tab isn't one of the Inbox's");
                 }
             }
             RuleAction::MarkRead
@@ -707,6 +728,9 @@ fn apply(
     message_id: i64,
     action: &RuleAction,
 ) -> Result<Option<Vec<i64>>> {
+    if let RuleAction::ShowIn { tab } = action {
+        return show_in(tx, thread_id, message_id, tab).map(|action_id| Some(vec![action_id]));
+    }
     let params = |target_folder_id, label_id| {
         Some(ActionParams {
             wake_at: None,
@@ -723,6 +747,7 @@ fn apply(
         RuleAction::Archive => (ActionKind::Archive, None),
         RuleAction::Trash => (ActionKind::Trash, None),
         RuleAction::Junk => (ActionKind::Spam, None),
+        RuleAction::ShowIn { .. } => unreachable!("shown in a tab above"),
     };
     match crate::apply_thread_action_in(tx, thread_id, Some(&[message_id]), kind, params.as_ref()) {
         Ok(queued) => Ok(Some(
@@ -734,6 +759,27 @@ fn apply(
             Ok(None)
         }
     }
+}
+
+/// Puts the conversation of `message_id` in Inbox tab `tab` for good, and
+/// keeps where it was, so Undo can put it back. Only this device has tabs, so
+/// the action is done once queued.
+fn show_in(tx: &Transaction, thread_id: i64, message_id: i64, tab: &str) -> Result<i64> {
+    let (account_id, pinned, routed): (i64, Option<String>, Option<String>) = tx.query_row(
+        "SELECT account_id, pinned_tab, routed_tab FROM threads WHERE id = ?1",
+        [thread_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    crate::route::pin_tab(tx, thread_id, Some(tab))?;
+    repo::actions::enqueue(
+        tx,
+        account_id,
+        "show_in",
+        Some(message_id),
+        Some(thread_id),
+        &serde_json::json!({"tab": tab, "pinned": pinned, "routed": routed}),
+        None,
+    )
 }
 
 /// A new rule for mail like `message_id`: for the list it came from, when

@@ -694,3 +694,93 @@ fn a_rule_made_from_a_message_is_for_its_list_or_its_sender() {
         )]
     );
 }
+
+fn tabs(conn: &rusqlite::Connection, message_id: i64) -> (Option<String>, Option<String>) {
+    conn.query_row(
+        "SELECT t.routed_tab, t.pinned_tab FROM threads t
+         JOIN messages m ON m.thread_id = t.id WHERE m.id = ?1",
+        [message_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_rule_shows_mail_in_a_category_where_it_stays_until_undone() {
+    let (mut conn, message) = mailbox("deals@shop.example", "50% off");
+    let news: i64 = conn
+        .query_row(
+            "SELECT id FROM labels WHERE keyword = 'FlectarMailAutoNews'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let news_tab = format!("label:{news}");
+    let show_in_news = rule(
+        vec![condition(
+            RuleField::From,
+            RuleOp::EndsWith,
+            "@shop.example",
+        )],
+        vec![RuleAction::ShowIn {
+            tab: news_tab.clone(),
+        }],
+    );
+    // Only a tab the Inbox has.
+    for tab in ["important", "other", news_tab.as_str()] {
+        let fine = MailRule {
+            actions: vec![RuleAction::ShowIn { tab: tab.into() }],
+            ..show_in_news.clone()
+        };
+        assert!(check(&conn, &fine).is_ok(), "{tab}");
+    }
+    for tab in ["label:9999", "split:1", "inbox"] {
+        let wrong = MailRule {
+            actions: vec![RuleAction::ShowIn { tab: tab.into() }],
+            ..show_in_news.clone()
+        };
+        assert!(check(&conn, &wrong).is_err(), "{tab}");
+    }
+    let twice = MailRule {
+        actions: vec![
+            RuleAction::ShowIn {
+                tab: "important".into(),
+            },
+            RuleAction::ShowIn {
+                tab: "other".into(),
+            },
+        ],
+        ..show_in_news.clone()
+    };
+    assert!(check(&conn, &twice).is_err());
+
+    sort(&mut conn, &[show_in_news], message);
+    assert_eq!(
+        tabs(&conn, message),
+        (Some(news_tab.clone()), Some(news_tab.clone()))
+    );
+    // A later sort keeps it there, the AI's too.
+    let thread: i64 = conn
+        .query_row(
+            "SELECT thread_id FROM messages WHERE id = ?1",
+            [message],
+            |row| row.get(0),
+        )
+        .unwrap();
+    crate::route::route_thread_deterministic(&conn, true, thread).unwrap();
+    assert_eq!(tabs(&conn, message).0, Some(news_tab));
+    // Undo puts it back where it was, for routing to choose again.
+    let action = repo::actions::get(
+        &conn,
+        conn.query_row(
+            "SELECT id FROM pending_actions WHERE kind = 'show_in'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    crate::revert_action(&mut conn, &action).unwrap();
+    assert_eq!(tabs(&conn, message), (None, None));
+}

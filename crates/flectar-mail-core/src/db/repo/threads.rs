@@ -272,7 +272,6 @@ pub fn get_summaries(conn: &Connection, thread_ids: &[i64]) -> Result<Vec<Thread
 pub enum TabFilter {
     Important,
     Other,
-    Split(i64),
     AutoLabel(i64),
     ManualLabel(i64),
 }
@@ -436,10 +435,6 @@ fn build_filter(
             "(t.routed_tab = 'other'
               OR ((t.routed_tab IS NULL OR t.routed_tab = 'pending') AND ({AUTO_BUCKET})))"
         )),
-        Some(TabFilter::Split(id)) => {
-            bind.push(Box::new(format!("split:{id}")));
-            where_clauses.push(format!("t.routed_tab = ?{}", bind.len()));
-        }
         Some(TabFilter::AutoLabel(id)) => {
             bind.push(Box::new(format!("label:{id}")));
             where_clauses.push(format!("t.routed_tab = ?{}", bind.len()));

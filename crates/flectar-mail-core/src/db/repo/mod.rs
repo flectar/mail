@@ -29,7 +29,6 @@ pub mod server_rules;
 pub mod settings;
 pub mod snippets;
 pub mod snoozes;
-pub mod splits;
 pub mod sync_failures;
 pub mod threads;
 pub mod transfers;

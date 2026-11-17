@@ -70,6 +70,7 @@ export global RuleChoices {
         @tr("Archive"),
         @tr("Move to trash"),
         @tr("Move to spam"),
+        @tr("Show in category"),
     ];
     out property <[string]> actions-with-copy: [
         @tr("Move to folder"),
@@ -79,6 +80,7 @@ export global RuleChoices {
         @tr("Archive"),
         @tr("Move to trash"),
         @tr("Move to spam"),
+        @tr("Show in category"),
         @tr("Copy to folder"),
     ];
 }
@@ -231,9 +233,12 @@ component RuleAction inherits Rectangle {
     in-out property <int> kind;
     in-out property <int> target;
     // Moves and copies file into folders, labels into labels.
-    private property <bool> to-folder: root.kind == 0 || root.kind == 7;
+    private property <bool> to-folder: root.kind == 0 || root.kind == 8;
     private property <bool> to-label: root.kind == 1;
-    private property <[string]> targets: root.to-folder ? MailRules.folders : MailRules.labels;
+    private property <bool> to-tab: root.kind == 7;
+    private property <bool> has-target: root.to-folder || root.to-label || root.to-tab;
+    private property <[string]> targets: root.to-folder ? MailRules.folders
+        : root.to-tab ? MailRules.tabs : MailRules.labels;
     private property <string> no-target: root.to-folder
         ? @tr("Choose one account to use its folders.") : @tr("No labels yet.");
 
@@ -252,13 +257,13 @@ component RuleAction inherits Rectangle {
                 accessible-label: @tr("Action {}", root.index + 1);
                 selected => { root.target = 0; }
             }
-            if !root.compact && (root.to-folder || root.to-label) && root.targets.length > 0 : RuleSelect {
+            if !root.compact && root.has-target && root.targets.length > 0 : RuleSelect {
                 horizontal-stretch: 1;
                 model: root.targets;
                 current-index <=> root.target;
                 accessible-label: root.to-folder ? @tr("Folder of action {}", root.index + 1) : @tr("Label of action {}", root.index + 1);
             }
-            if !root.compact && (root.to-folder || root.to-label) && root.targets.length == 0 : Text {
+            if !root.compact && root.has-target && root.targets.length == 0 : Text {
                 horizontal-stretch: 1;
                 text: root.no-target;
                 color: AppTheme.secondary;
@@ -273,12 +278,12 @@ component RuleAction inherits Rectangle {
                 clicked => { MailRules.remove-action(root.index); }
             }
         }
-        if root.compact && (root.to-folder || root.to-label) && root.targets.length > 0 : RuleSelect {
+        if root.compact && root.has-target && root.targets.length > 0 : RuleSelect {
             model: root.targets;
             current-index <=> root.target;
             accessible-label: root.to-folder ? @tr("Folder of action {}", root.index + 1) : @tr("Label of action {}", root.index + 1);
         }
-        if root.compact && (root.to-folder || root.to-label) && root.targets.length == 0 : Text {
+        if root.compact && root.has-target && root.targets.length == 0 : Text {
             text: root.no-target;
             color: AppTheme.secondary;
             font-size: TypeScale.secondary;

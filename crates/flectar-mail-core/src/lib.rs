@@ -2980,7 +2980,6 @@ impl Core {
                     "DELETE FROM contact_entries;
                      DELETE FROM contacts;
                      DELETE FROM snippets;
-                     DELETE FROM split_rules;
                      DELETE FROM route_cache;
                      DELETE FROM ai_usage_events;
                      DELETE FROM app_settings;",
@@ -3507,7 +3506,6 @@ impl Core {
             match split_id {
                 Some(-1) => Some(TabFilter::Important),
                 Some(-2) => Some(TabFilter::Other),
-                Some(id) if id > 0 => Some(TabFilter::Split(id)),
                 _ => None,
             }
         })
@@ -3552,7 +3550,6 @@ impl Core {
             match split_id {
                 Some(-1) => Some(TabFilter::Important),
                 Some(-2) => Some(TabFilter::Other),
-                Some(id) if id > 0 => Some(TabFilter::Split(id)),
                 _ => None,
             }
         };
@@ -8141,23 +8138,16 @@ impl Core {
                 ..AiAutomationPlan::default()
             });
         }
-        let (settings, labels, splits) = self
+        let (settings, labels) = self
             .db
-            .read(|conn| {
-                Ok((
-                    repo::settings::get(conn)?,
-                    repo::labels::list(conn)?,
-                    repo::splits::list(conn)?,
-                ))
-            })
+            .read(|conn| Ok((repo::settings::get(conn)?, repo::labels::list(conn)?)))
             .await?;
         let cfg = self.ai_config_from(&settings, Scenario::Categorize).await?;
-        let messages = route::automation_planner_prompt(prompt, &labels, &splits);
+        let messages = route::automation_planner_prompt(prompt, &labels);
         let output = ai::chat(&cfg, messages).await?;
         Ok(route::validate_automation_plan(
             route::parse_automation_plan(&output),
             &labels,
-            &splits,
         ))
     }
 
@@ -9012,101 +9002,6 @@ impl Core {
             .await
     }
 
-    pub async fn list_splits(&self) -> Result<Vec<SplitRule>> {
-        self.db.read(|conn| repo::splits::list(conn)).await
-    }
-
-    /// First split rule (in position order) that matches a thread, if any.
-    /// `threads.routed_tab` can't answer this for rules with a `target` (they
-    /// write the target's route key, not `split:<id>`), so re-run the matcher.
-    pub async fn find_matching_split(&self, thread_id: i64) -> Result<Option<SplitRule>> {
-        self.db
-            .read(move |conn| {
-                for rule in repo::splits::list(conn)? {
-                    if route::split_matches(conn, thread_id, &rule.query)? {
-                        return Ok(Some(rule));
-                    }
-                }
-                Ok(None)
-            })
-            .await
-    }
-
-    pub async fn save_split(
-        &self,
-        id: Option<i64>,
-        name: String,
-        position: i64,
-        query: SplitRuleQuery,
-        target: Option<String>,
-    ) -> Result<SplitRule> {
-        let saved = self
-            .db
-            .write(move |conn| {
-                repo::splits::save(conn, id, &name, position, &query, target.as_deref())
-            })
-            .await?;
-        // Rules changed: re-resolve every thread and drop the AI cache so edited
-        // routing takes effect. AI (if any) runs in the background afterwards.
-        self.reroute_all_sync().await?;
-        Ok(saved)
-    }
-
-    pub async fn delete_split(&self, id: i64) -> Result<()> {
-        self.db
-            .write(move |conn| repo::splits::delete(conn, id))
-            .await?;
-        // A deleted rule's threads must fall back to the AI/heuristic/defaults.
-        self.reroute_all_sync().await?;
-        Ok(())
-    }
-
-    /// Persist a single shared tab order across custom splits and auto-label
-    /// tabs. `order` lists every reorderable tab top-to-bottom as `(kind, id)`
-    /// where `kind` is `"split"` or `"label"`; its index becomes the row's
-    /// `position`. Built-in Important/Other are pinned and never included.
-    ///
-    /// Only re-resolves routing when the splits' relative priority actually
-    /// changed (moving an auto-label around can't affect first-match-wins), so a
-    /// pure label move stays cheap.
-    pub async fn reorder_tabs(&self, order: Vec<(String, i64)>) -> Result<()> {
-        let split_order_changed = self
-            .db
-            .write(move |conn| {
-                let tx = conn.transaction()?;
-                let split_ids = |tx: &rusqlite::Transaction| -> rusqlite::Result<Vec<i64>> {
-                    tx.prepare("SELECT id FROM split_rules ORDER BY position, id")?
-                        .query_map([], |r| r.get(0))?
-                        .collect()
-                };
-                let before = split_ids(&tx)?;
-                for (i, (kind, id)) in order.iter().enumerate() {
-                    let pos = i as i64;
-                    match kind.as_str() {
-                        "split" => tx.execute(
-                            "UPDATE split_rules SET position = ?2 WHERE id = ?1",
-                            rusqlite::params![id, pos],
-                        )?,
-                        "label" => tx.execute(
-                            "UPDATE labels SET position = ?2 WHERE id = ?1",
-                            rusqlite::params![id, pos],
-                        )?,
-                        _ => 0,
-                    };
-                }
-                let after = split_ids(&tx)?;
-                tx.commit()?;
-                Ok(before != after)
-            })
-            .await?;
-        if split_order_changed {
-            self.reroute_all_sync().await?;
-        } else {
-            self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
-        }
-        Ok(())
-    }
-
     pub async fn list_labels(&self) -> Result<Vec<Label>> {
         self.db.read(|conn| repo::labels::list(conn)).await
     }
@@ -9135,7 +9030,8 @@ impl Core {
                 if !valid {
                     return Err(CoreError::Other("invalid mail category destination".into()));
                 }
-                route::apply_tab(conn, thread_id, Some(&target))
+                // Where the user put it, it stays, as a rule's tab does.
+                route::pin_tab(conn, thread_id, Some(&target))
             })
             .await?;
         self.bus.emit(CoreEvent::MailUpdated {
@@ -9355,7 +9251,8 @@ impl Core {
                      (SELECT id FROM labels WHERE is_auto = 1)",
                     [],
                 )?;
-                tx.execute("UPDATE threads SET routed_tab = NULL", [])?;
+                // A tab a rule or the user chose stays, others go.
+                tx.execute("UPDATE threads SET routed_tab = pinned_tab", [])?;
                 tx.execute(
                     "UPDATE messages SET local_subject_prefix = '', local_body_note = ''",
                     [],
@@ -9363,7 +9260,6 @@ impl Core {
                 let settings = repo::settings::get(&tx)?;
                 let mut n = 0i64;
                 if settings.auto_labels_enabled {
-                    let splits = repo::splits::list(&tx)?;
                     let ids: Vec<i64> = {
                         let mut stmt = tx.prepare("SELECT id FROM threads")?;
 
@@ -9371,12 +9267,7 @@ impl Core {
                             .collect::<rusqlite::Result<Vec<_>>>()?
                     };
                     for id in ids {
-                        route::route_thread_deterministic(
-                            &tx,
-                            &splits,
-                            settings.ai_categorize,
-                            id,
-                        )?;
+                        route::route_thread_deterministic(&tx, settings.ai_categorize, id)?;
                         n += 1;
                     }
                 }
@@ -9561,14 +9452,6 @@ impl Core {
             })
             .await?;
 
-        // Threads that just gained a label may now satisfy a label-based split
-        // rule, so re-check their split routing once the labels are written.
-        let relabeled: Vec<i64> = action_plans
-            .iter()
-            .filter(|(_, actions)| actions.iter().any(|a| a.kind == "add_label"))
-            .map(|(tid, _)| *tid)
-            .collect();
-
         // Mailbox mutations reuse the normal optimistic + queued action path,
         // so IMAP state, retries, and UI refreshes behave exactly like a click.
         for (thread_id, actions) in action_plans {
@@ -9613,17 +9496,6 @@ impl Core {
                     );
                 }
             }
-        }
-        if !relabeled.is_empty() {
-            self.db
-                .write(move |conn| {
-                    let splits = repo::splits::list(conn)?;
-                    for tid in relabeled {
-                        route::reapply_splits_only(conn, &splits, tid)?;
-                    }
-                    Ok(())
-                })
-                .await?;
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
         Ok(count)
@@ -10819,18 +10691,17 @@ fn valid_automation_route(conn: &rusqlite::Connection, target: &str) -> Result<b
     if matches!(target, "important" | "other") {
         return Ok(true);
     }
-    let (table, id) = if let Some(id) = target.strip_prefix("split:") {
-        ("split_rules", id)
-    } else if let Some(id) = target.strip_prefix("label:") {
-        ("labels", id)
-    } else {
+    let Some(id) = target
+        .strip_prefix("label:")
+        .and_then(|id| id.parse::<i64>().ok())
+    else {
         return Ok(false);
     };
-    let Some(id) = id.parse::<i64>().ok() else {
-        return Ok(false);
-    };
-    let sql = format!("SELECT EXISTS (SELECT 1 FROM {table} WHERE id = ?1)");
-    Ok(conn.query_row(&sql, rusqlite::params![id], |row| row.get::<_, i64>(0))? != 0)
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM labels WHERE id = ?1 AND is_auto = 1)",
+        rusqlite::params![id],
+        |row| row.get::<_, i64>(0),
+    )? != 0)
 }
 
 /// The conversations of `message_ids`, each with its messages, in the order
@@ -12496,6 +12367,17 @@ fn revert_action(
             }
         }
         "unsnooze" => { /* nothing sensible to restore */ }
+        // Back in the tab it was in, or chosen by routing again.
+        "show_in" => {
+            if let Some(thread_id) = thread_id {
+                let pinned = action.payload["pinned"].as_str();
+                tx.execute(
+                    "UPDATE threads SET pinned_tab = ?2 WHERE id = ?1",
+                    rusqlite::params![thread_id, pinned],
+                )?;
+                route::apply_tab(&tx, thread_id, action.payload["routed"].as_str())?;
+            }
+        }
         "send" => { /* cancel already handled if pending; sent mail can't be unsent */ }
         _ => {}
     }

@@ -66,6 +66,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/047_rules_waiting.sql")),
     Migration::Plain(include_str!("migrations/048_server_rules.sql")),
     Migration::Plain(include_str!("migrations/049_folder_since.sql")),
+    Migration::Plain(include_str!("migrations/050_rule_tabs.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -401,7 +402,6 @@ mod tests {
             "server_rules",
             "snippets",
             "snoozes",
-            "split_rules",
             "sync_failures",
             "threads",
         ]
@@ -1242,16 +1242,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(queued_label_id, bindings[1].1);
-        let split_label_ids: String = conn
+        // Split rules made way for rules that show mail in a tab (050).
+        let split_rules: bool = conn
             .query_row(
-                "SELECT json_extract(query_json, '$.labels')
-                   FROM split_rules WHERE id = 9",
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'split_rules')",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        let split_label_ids: Vec<i64> = serde_json::from_str(&split_label_ids).unwrap();
-        assert_eq!(split_label_ids, vec![bindings[0].1, bindings[1].1, 999]);
+        assert!(!split_rules);
         let automation_states: String = conn
             .query_row(
                 "SELECT json_extract(value, '$.aiAutomationRules')

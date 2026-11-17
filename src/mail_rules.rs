@@ -23,6 +23,8 @@ struct Editor {
     /// The folders and labels the editor shows now, by their place.
     folders: Vec<i64>,
     labels: Vec<i64>,
+    /// The categories the editor shows, by key.
+    tabs: Vec<String>,
 }
 
 struct Controller {
@@ -449,6 +451,7 @@ impl Controller {
                             index_of(&editor.folders, folder)
                         }
                         RuleAction::Label { label } => index_of(&editor.labels, label),
+                        RuleAction::ShowIn { tab } => index_of(&editor.tabs, tab),
                         _ => 0,
                     },
                 })
@@ -479,8 +482,19 @@ impl Controller {
                 .collect::<Vec<_>>(),
         )));
         ui.set_can_copy(copies);
+        let tabs = editor.choices.tabs();
+        ui.set_tabs(ModelRc::new(VecModel::from(
+            tabs.iter()
+                .map(|(key, name)| match name {
+                    Some(name) => SharedString::from(name.as_str()),
+                    None if key == "important" => translated(app, &UiMessage::plain("Important")),
+                    None => translated(app, &UiMessage::plain("Other")),
+                })
+                .collect::<Vec<_>>(),
+        )));
         editor.folders = folders.into_iter().map(|(id, _)| id).collect();
         editor.labels = labels.into_iter().map(|(id, _)| id).collect();
+        editor.tabs = tabs.into_iter().map(|(key, _)| key).collect();
     }
 
     /// Another account: what it can file into, by the same names where it
@@ -710,6 +724,9 @@ impl Controller {
                 Kind::Archive => RuleAction::Archive,
                 Kind::Trash => RuleAction::Trash,
                 Kind::Junk => RuleAction::Junk,
+                Kind::ShowIn => RuleAction::ShowIn {
+                    tab: editor.tabs.get(target).cloned().unwrap_or_else(|| "important".into()),
+                },
             });
         }
         if actions
