@@ -2966,19 +2966,6 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/fontique/fontique-0.12.0.crate",
-        "sha256": "bbf1df16263783918b7da396077521f92b729ef7c429444dfcf03581f1448b77",
-        "dest": "cargo/vendor/fontique-0.12.0"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"bbf1df16263783918b7da396077521f92b729ef7c429444dfcf03581f1448b77\", \"files\": {}}",
-        "dest": "cargo/vendor/fontique-0.12.0",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/foreign-types/foreign-types-0.5.0.crate",
         "sha256": "d737d9aa519fb7b749cbc3b962edcf310a8dd1f4b67c91c4f83975dbdd17d965",
         "dest": "cargo/vendor/foreign-types-0.5.0"

@@ -2247,6 +2247,7 @@ dependencies = [
  "image",
  "jpeg-decoder",
  "keyboard-types",
+ "kurbo",
  "landlock",
  "libc",
  "objc2 0.6.5",
@@ -2260,6 +2261,7 @@ dependencies = [
  "objc2-user-notifications 0.3.2",
  "parley",
  "pdfium-render",
+ "peniko",
  "percent-encoding",
  "pulldown-cmark",
  "reqwest",
@@ -2468,8 +2470,6 @@ dependencies = [
 [[package]]
 name = "fontique"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbf1df16263783918b7da396077521f92b729ef7c429444dfcf03581f1448b77"
 dependencies = [
  "hashbrown 0.17.1",
  "linebender_resource_handle",
