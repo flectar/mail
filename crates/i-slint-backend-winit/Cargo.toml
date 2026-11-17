@@ -479,4 +479,5 @@ features = [
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
     "Win32_System_Threading",
+    "Win32_System_Performance",
 ]
