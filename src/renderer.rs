@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod appearance_tests;
+mod cpu_scene;
 mod interaction;
 #[cfg(test)]
 mod regression;
@@ -1464,7 +1465,7 @@ fn render_cpu_tile_cached(
     renderer.render(
         |scene| {
             paint_scene_cached(
-                scene,
+                &mut cpu_scene::CpuScene(scene),
                 &mut email.document,
                 scale_factor as f64,
                 physical_width,

@@ -70,6 +70,10 @@ pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdf
 anyrender = "0.14"
 anyrender_vello = { version = "0.15", optional = true }
 anyrender_vello_cpu = "0.18"
+# AnyRender's geometry and paint types, for the scene adapter in
+# src/renderer/cpu_scene.rs.
+kurbo = "0.13.1"
+peniko = "0.6"
 # Email templates use CSS floats and legacy table/image align attributes.
 # Keep float layout enabled on every platform, including minimal builds.
 blitz-dom = { version = "=0.3.0-beta.4", features = ["floats"] }
