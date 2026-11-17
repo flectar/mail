@@ -24,6 +24,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Importance](#importance)
 - [Read receipts](#read-receipts)
 - [Calendar invitations](#calendar-invitations)
+- [Translation](#translation)
 - [AI agents](#ai-agents)
 - [Storage and backups](#storage-and-backups)
 - [Importing accounts and mail](#importing-accounts-and-mail)
@@ -701,6 +702,29 @@ In the calendar, an invitation waiting for your answer is outlined, and
 declined or cancelled events are faded with their title struck through. An
 invitation reminds you of itself only once you accept it or answer **Maybe**,
 so one you haven't answered, such as calendar spam, stays quiet.
+
+## Translation
+
+Flectar Mail translates messages in other languages through a service you
+choose in Settings → Translation. DeepL works with your own API key,
+LibreTranslate with your own server or libretranslate.com, and any server with
+the OpenAI chat API, such as Ollama or LM Studio on your computer, with the
+model you name. Nothing is sent anywhere until you translate a message, or ask
+for a language to be translated always.
+
+When a message is in a language you don't read, a bar above it offers to
+translate it. Flectar Mail finds the language on your device, and counts the
+app's language and your system's languages as the ones you read. The bar's menu
+translates a language always, or never offers it again. **Translate message**
+in a message's menu works on any message. The translation shows in place of
+the message, links and formatting included, and **Show original** brings the
+message back. Translations stay on your device for 15 days, so a message opened
+again isn't sent again, and search never sees them.
+
+With a free DeepL key, DeepL may keep the text it translates and use it to
+train its models. With a paid key, it deletes the text once it's translated. A
+LibreTranslate server or a model's server receives the text of what you
+translate.
 
 ## AI agents
 
