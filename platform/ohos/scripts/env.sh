@@ -13,7 +13,7 @@
 
 OHOS_SDK_ROOT="${OHOS_SDK_ROOT:-$HOME/.harmonybrew/opt/ohos-sdk}"
 OHOS_SDK_ROOT="${OHOS_SDK_ROOT%/}"
-OHOS_SDK_NATIVE="${OHOS_SDK_NATIVE:-$HOME/.harmonybrew/opt/ohos-sdk-native}"
+OHOS_SDK_NATIVE="${OHOS_SDK_NATIVE:-$OHOS_SDK_ROOT/native}"
 export OHOS_SDK_ROOT OHOS_SDK_NATIVE
 
 # The login environment may still name an older SDK package in these legacy
