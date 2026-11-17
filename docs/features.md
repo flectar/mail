@@ -576,6 +576,12 @@ trashes or junks the mail, or marks it read. Accounts that keep a message in
 several folders, such as JMAP accounts, can copy it too. Moving mail out of the
 Inbox ends the rules for it, and **Stop here** ends them after any rule.
 
+**Run on Inbox…** in the editor runs a rule on the mail already in an Inbox. It
+first says how many messages the rule matches there, and Undo takes it back.
+Mail whose body isn't downloaded yet can't be checked by a rule on the body.
+**Create rule…** in a message's menu starts a rule for the mailing list the
+message came from, or for its sender.
+
 Flectar Mail runs rules on this device as it receives mail and before it
 notifies, so mail a rule moves away or marks read stays silent. A rule on the
 body, or on attachments where the server tells of them only with the body,
