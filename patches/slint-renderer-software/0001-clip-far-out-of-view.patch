@@ -1,0 +1,40 @@
+diff --git a/crates/i-slint-renderer-software/lib.rs b/crates/i-slint-renderer-software/lib.rs
+index 3657b6e..863d90e 100644
+--- a/crates/i-slint-renderer-software/lib.rs
++++ b/crates/i-slint-renderer-software/lib.rs
+@@ -2040,7 +2040,11 @@ impl<B: target_pixel_buffer::TargetPixelBuffer> ProcessScene for RenderToBuffer<
+         rounded_clips: &[RoundedClip],
+     ) {
+         if hook_can_draw(rounded_clips, || {
+-            args.geometry().round_out().cast().intersection(&clip).unwrap_or_default()
++            // Clipped before the cast to `i16`, which a rectangle far out of view exceeds.
++            args.geometry()
++                .round_out()
++                .intersection(&clip.cast())
++                .map_or_else(Default::default, |rect| rect.cast())
+         }) && self.buffer.draw_rectangle(args, &self.dirty_region.intersection(&clip))
+         {
+             return;
+@@ -2512,8 +2516,20 @@ impl<'a, T: ProcessScene> SceneBuilder<'a, T> {
+             inset(radius.bottom_right),
+             inset(radius.bottom_left),
+         );
+-        (!radius.is_zero())
+-            .then(|| RoundedClip { rect: geom.round().cast().inflate(-border, -border), radius })
++        if radius.is_zero() {
++            return None;
++        }
++        // An item scrolled far out of view lies past the range of `i16`. Only the part of it
++        // within a corner's reach of the current clip can change what is drawn, so the rect
++        // is cut to that before it's converted. Nothing in view leaves an empty clip.
++        let largest =
++            radius.top_left.max(radius.top_right).max(radius.bottom_right).max(radius.bottom_left);
++        let reach = largest as f32 + border as f32 + 1.;
++        let rect = self
++            .physical_clip()
++            .and_then(|clip| geom.round().intersection(&clip.cast().inflate(reach, reach)))
++            .map_or_else(PhysicalRect::zero, |rect| rect.cast().inflate(-border, -border));
++        Some(RoundedClip { rect, radius })
+     }
+ 
+     fn draw_image_impl(

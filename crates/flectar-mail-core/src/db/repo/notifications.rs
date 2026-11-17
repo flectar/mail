@@ -158,7 +158,7 @@ pub fn enqueue_missed(
 pub enum RoutedTab {
     /// AI classification is still in flight; the caller should wait and re-check.
     Pending,
-    /// Resolved route key: "important" | "other" | "split:<id>" | "label:<id>".
+    /// Resolved route key: "important" | "other" | "label:<id>".
     Resolved(String),
 }
 

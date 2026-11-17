@@ -262,6 +262,12 @@ impl ComposeSession {
         let ui = host.ui();
         let spelling = crate::spelling::service().filter(|spelling| spelling.available());
         let scale = host.window().scale_factor();
+        // A right click on an image selects it, for the menu to offer what images have.
+        if let (Some((x, y)), false) = (point, tapped) {
+            self.select_from_surface(&host, |editor, _, _, scale, _, _| {
+                editor.image_selection_at(x, y, scale)
+            });
+        }
         let word = spelling.as_ref().filter(|s| s.enabled()).and_then(|_| {
             let document = self.document.borrow();
             let mut editor = self.editor.borrow_mut();

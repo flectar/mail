@@ -3,11 +3,14 @@
 //! [`CoreEvent`]s to the Slint UI.
 
 pub mod accounts;
+pub mod agents;
 pub mod ai;
+mod auto_replies;
 pub mod autolabel;
 pub mod caldav;
 pub mod calendar;
 pub mod carddav;
+mod cleanup;
 pub mod config;
 pub mod db;
 pub mod embed;
@@ -22,9 +25,11 @@ mod http_body;
 pub mod imap;
 mod invitation_card;
 pub mod jmap;
+pub mod links;
 pub mod mail_import;
 pub mod mail_security;
 pub mod mailto;
+mod mark_all_read;
 mod mbox;
 pub mod migration;
 pub mod mime;
@@ -33,10 +38,14 @@ pub mod net;
 pub mod oauth;
 pub mod pop3;
 pub mod queue;
+mod read_receipts;
 pub mod route;
+pub mod rules;
 pub mod scheduler;
 pub mod search;
 pub mod sender_identities;
+mod server_rules;
+mod sieve;
 pub mod signatures;
 pub mod smtp;
 pub mod sync;
@@ -65,6 +74,29 @@ const MAX_INLINE_CID_BYTES_PER_IMAGE: usize = 8 * 1024 * 1024;
 const MAX_INLINE_CID_BYTES_PER_MESSAGE: usize = 16 * 1024 * 1024;
 const MAX_INLINE_CID_BYTES_PER_THREAD: usize = 32 * 1024 * 1024;
 const MAX_INLINE_CID_IMAGES_PER_MESSAGE: usize = 32;
+
+/// How much of a message's inline images go into its HTML at most.
+#[derive(Clone, Copy)]
+struct InlineImageLimits {
+    image: usize,
+    message: usize,
+    images: usize,
+}
+
+impl InlineImageLimits {
+    /// For reading mail.
+    const READER: Self = Self {
+        image: MAX_INLINE_CID_BYTES_PER_IMAGE,
+        message: MAX_INLINE_CID_BYTES_PER_MESSAGE,
+        images: MAX_INLINE_CID_IMAGES_PER_MESSAGE,
+    };
+    /// For a draft to edit, which holds as much as it can send.
+    const DRAFT: Self = Self {
+        image: MAX_DRAFT_ATTACHMENT_BYTES,
+        message: MAX_DRAFT_ATTACHMENT_BYTES,
+        images: MAX_INLINE_CID_IMAGES_PER_MESSAGE,
+    };
+}
 const MAX_DRAFT_ATTACHMENTS: usize = 32;
 const MAX_DRAFT_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 const MAX_DRAFT_BODY_BYTES: usize = 8 * 1024 * 1024;
@@ -160,6 +192,56 @@ fn normalize_mail_profile_color(value: &str) -> Result<String> {
         ));
     }
     Ok(value.to_ascii_uppercase())
+}
+
+/// The subscribed folders among `path` and its subfolders. Subscriptions
+/// only help other clients, so failing to read them leaves none.
+async fn subscriptions_in_tree(
+    session: &mut imap::Session,
+    path: &str,
+    delimiter: &str,
+) -> Vec<String> {
+    let prefix = format!("{path}{delimiter}");
+    let mut subscribed = Vec::new();
+    for pattern in [path.to_owned(), format!("{prefix}*")] {
+        match imap::list_subscribed(session, &pattern).await {
+            // Wildcards in the folder's own name match more than it.
+            Ok(names) => subscribed.extend(
+                names
+                    .into_iter()
+                    .filter(|name| name == path || name.starts_with(&prefix)),
+            ),
+            Err(error) => {
+                tracing::warn!(%error, "could not read the subscriptions of a folder");
+                return Vec::new();
+            }
+        }
+    }
+    subscribed.sort();
+    subscribed.dedup();
+    subscribed
+}
+
+/// Subscribe to the renamed folders that were subscribed under their old
+/// names, and drop those. RFC 9051 leaves a RENAME's subscriptions to the
+/// server, and many keep the old names, so the folders would drop out of
+/// clients that show only subscribed folders. Failing never fails the rename.
+async fn move_subscriptions(
+    session: &mut imap::Session,
+    subscribed: &[String],
+    old_path: &str,
+    new_path: &str,
+) {
+    for old in subscribed {
+        let new = format!("{new_path}{}", &old[old_path.len()..]);
+        if let Err(error) = imap::subscribe(session, &new).await {
+            tracing::warn!(%error, "could not subscribe to a renamed folder");
+        }
+        // A server that moved the subscription itself has none left here.
+        if let Err(error) = imap::unsubscribe(session, old).await {
+            tracing::debug!(%error, "old folder name kept no subscription");
+        }
+    }
 }
 
 fn validate_folder_leaf(value: &str) -> Result<String> {
@@ -777,11 +859,19 @@ mod calendar_oauth_scope_tests {
 pub struct ThreadPageRequest {
     pub cursor: Option<ThreadCursor>,
     pub limit: i64,
+    /// Which end of the timeline comes first. A cursor continues in the order
+    /// of the page that gave it.
+    pub order: ListOrder,
 }
 
+/// A page newest first.
 impl From<(Option<ThreadCursor>, i64)> for ThreadPageRequest {
     fn from((cursor, limit): (Option<ThreadCursor>, i64)) -> Self {
-        Self { cursor, limit }
+        Self {
+            cursor,
+            limit,
+            order: ListOrder::NewestFirst,
+        }
     }
 }
 
@@ -789,6 +879,8 @@ impl From<(Option<ThreadCursor>, i64)> for ThreadPageRequest {
 pub struct MessagePageRequest {
     pub cursor: Option<MessageCursor>,
     pub limit: i64,
+    /// Which end of the timeline comes first, as for threads.
+    pub order: ListOrder,
 }
 
 #[derive(Clone)]
@@ -835,7 +927,17 @@ pub struct Core {
     /// background tells of it instead (see [`Core::announce_missed`]).
     /// `None` once the user has seen the Inbox.
     missed_since: Arc<std::sync::Mutex<Option<std::collections::BTreeMap<i64, i64>>>>,
+    /// What searches of the servers found, so that the same search here shows
+    /// it with its own matches. Only the last few searches are kept, and none
+    /// past a restart.
+    server_found: Arc<std::sync::Mutex<ServerFound>>,
 }
+
+/// Searches of the servers and the messages each found, newest search first.
+type ServerFound = std::collections::VecDeque<(String, Vec<i64>)>;
+
+/// How many searches' server results [`Core`] keeps.
+const SERVER_FOUND_SEARCHES: usize = 8;
 
 impl Core {
     #[cfg(desktop)]
@@ -936,6 +1038,7 @@ impl Core {
             transfers: Arc::new(tokio::sync::Notify::new()),
             accounts_started: Arc::new(tokio::sync::watch::Sender::new(false)),
             missed_since: Arc::new(std::sync::Mutex::new(Some(missed_since))),
+            server_found: Arc::default(),
         };
 
         // Finish any destructive operation interrupted between the mail and
@@ -1186,6 +1289,12 @@ impl Core {
         {
             let c = core.clone();
             tokio::spawn(async move { c.transfer_loop().await });
+        }
+
+        // Trash and Junk emptied of what sat there too long, as the user set.
+        {
+            let c = core.clone();
+            tokio::spawn(async move { c.cleanup_loop().await });
         }
 
         Ok(core)
@@ -1676,6 +1785,104 @@ impl Core {
             handle.update_settings(settings);
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        Ok(())
+    }
+
+    /// Choose whether an IMAP account lists and syncs only the folders the
+    /// user subscribed to. Its sync reads the folder list again at once.
+    pub async fn set_account_subscribed_folders_only(
+        &self,
+        account_id: i64,
+        enabled: bool,
+    ) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                match config.mail_protocol {
+                    MailProtocol::Imap => {}
+                    MailProtocol::Gmail
+                    | MailProtocol::Jmap
+                    | MailProtocol::Pop3
+                    | MailProtocol::Local => {
+                        return Err(CoreError::Other(
+                            "only IMAP accounts have folder subscriptions".into(),
+                        ));
+                    }
+                }
+                config.settings.subscribed_folders_only = enabled;
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
+        Ok(())
+    }
+
+    /// Choose how an account's messages start: formatted or as plain text, and whether
+    /// replies and forwards to plain-text messages start in plain text.
+    pub async fn set_account_message_format(
+        &self,
+        account_id: i64,
+        format: MessageFormat,
+        plain_text_replies: bool,
+    ) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                if config.mail_protocol == MailProtocol::Local {
+                    return Err(CoreError::Other(
+                        "mail kept on this device is never sent".into(),
+                    ));
+                }
+                config.settings.message_format = format;
+                config.settings.plain_text_replies = plain_text_replies;
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
+        Ok(())
+    }
+
+    /// Whether new messages from account `account_id` ask for a read
+    /// receipt (RFC 8098), which each message can still change.
+    pub async fn set_account_read_receipt_requests(
+        &self,
+        account_id: i64,
+        request: bool,
+    ) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                if config.mail_protocol == MailProtocol::Local {
+                    return Err(CoreError::Other(
+                        "mail kept on this device is never sent".into(),
+                    ));
+                }
+                config.settings.request_read_receipts = request;
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
         Ok(())
     }
 
@@ -2311,12 +2518,18 @@ impl Core {
             .ok_or_else(|| CoreError::NotFound("account".into()))?;
         // Only OAuth mailboxes reauth through the browser; password/IMAP
         // accounts recover by re-entering credentials in the account editor.
+        let google_scopes;
         let consent_extra: &[&str] = match account.provider {
             Provider::Microsoft => &[
                 oauth::providers::MS_ONLINE_MEETINGS_SCOPE,
                 oauth::providers::MS_CALENDARS_SCOPE,
             ],
-            Provider::Gmail => &[],
+            // Asking again for what else the account uses keeps it: Android asks Google
+            // for what the sign-in lists.
+            Provider::Gmail => {
+                google_scopes = self.google_scopes_in_use(account_id).await?;
+                &google_scopes
+            }
             Provider::Generic => return Err(CoreError::Auth("not an oauth provider".into())),
         };
         credentials::check_available_async(self.credentials.clone()).await?;
@@ -2853,7 +3066,6 @@ impl Core {
                     "DELETE FROM contact_entries;
                      DELETE FROM contacts;
                      DELETE FROM snippets;
-                     DELETE FROM split_rules;
                      DELETE FROM route_cache;
                      DELETE FROM ai_usage_events;
                      DELETE FROM app_settings;",
@@ -3108,6 +3320,15 @@ impl Core {
             .nth(1)
             .unwrap_or("localhost")
             .to_owned();
+        let (receipt_to, importance) = self
+            .db
+            .read(move |conn| {
+                Ok((
+                    repo::messages::receipt_to(conn, draft_id)?,
+                    repo::messages::importance(conn, draft_id)?,
+                ))
+            })
+            .await?;
         let (_, raw) = crate::mime::build_message_owned(crate::mime::OutgoingMessage {
             from: detail.from.clone(),
             reply_to: None,
@@ -3122,6 +3343,8 @@ impl Core {
             message_id: None,
             message_id_domain: &domain,
             attachments,
+            receipt_to: &receipt_to,
+            importance,
         })?;
         Ok(raw)
     }
@@ -3244,7 +3467,11 @@ impl Core {
         folder_id: Option<i64>,
         page: ThreadPageRequest,
     ) -> Result<ThreadPage> {
-        let ThreadPageRequest { cursor, limit } = page;
+        let ThreadPageRequest {
+            cursor,
+            limit,
+            order,
+        } = page;
         let tab = self.tab_filter(split_id, label_id).await?;
         self.db
             .read(move |conn| {
@@ -3258,6 +3485,7 @@ impl Core {
                         folder_id,
                         cursor,
                         limit: limit.clamp(1, 200),
+                        order,
                     },
                 )
             })
@@ -3313,7 +3541,11 @@ impl Core {
         folder_id: Option<i64>,
         page: MessagePageRequest,
     ) -> Result<MessagePage> {
-        let MessagePageRequest { cursor, limit } = page;
+        let MessagePageRequest {
+            cursor,
+            limit,
+            order,
+        } = page;
         let tab = self.tab_filter(split_id, label_id).await?;
         self.db
             .read(move |conn| {
@@ -3327,6 +3559,7 @@ impl Core {
                         folder_id,
                         cursor: None,
                         limit: limit.clamp(1, 200),
+                        order,
                     },
                     cursor,
                 )
@@ -3359,7 +3592,6 @@ impl Core {
             match split_id {
                 Some(-1) => Some(TabFilter::Important),
                 Some(-2) => Some(TabFilter::Other),
-                Some(id) if id > 0 => Some(TabFilter::Split(id)),
                 _ => None,
             }
         })
@@ -3404,7 +3636,6 @@ impl Core {
             match split_id {
                 Some(-1) => Some(TabFilter::Important),
                 Some(-2) => Some(TabFilter::Other),
-                Some(id) if id > 0 => Some(TabFilter::Split(id)),
                 _ => None,
             }
         };
@@ -3420,6 +3651,7 @@ impl Core {
                         folder_id,
                         cursor: None,
                         limit: 1,
+                        order: ListOrder::NewestFirst,
                     },
                 )
             })
@@ -3572,7 +3804,10 @@ impl Core {
                     .await
                     .remove(&message_id)
             } else {
-                Some(self.inline_cid_images(message_id, html).await)
+                Some(
+                    self.inline_cid_images(message_id, html, InlineImageLimits::READER)
+                        .await,
+                )
             };
         }
         Ok(detail)
@@ -3649,6 +3884,53 @@ impl Core {
             return Ok(Some(id));
         }
         Ok(None)
+    }
+
+    /// Answer the read receipt `message_id` asks for (RFC 8098): send it, or
+    /// decline it. Either answer is final, and is recorded on the server
+    /// where it keeps one ($MDNSent), so no other device asks again. Does
+    /// nothing when the message asks for no receipt that may be answered, or
+    /// was answered meanwhile. A receipt that needs the user's agreement
+    /// isn't sent without it.
+    pub async fn answer_read_receipt(&self, message_id: i64, answer: ReceiptAnswer) -> Result<()> {
+        let answered = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let detail = repo::messages::detail(&tx, message_id)?;
+                let Some(request) = detail.receipt_request else {
+                    return Ok(None);
+                };
+                let (send, user_agreed) = match answer {
+                    ReceiptAnswer::Send { user_agreed } => (true, user_agreed),
+                    ReceiptAnswer::Decline => (false, false),
+                };
+                if send && !user_agreed && request.needs_confirmation {
+                    return Err(CoreError::Other(
+                        "this read receipt can only go with the user's agreement".into(),
+                    ));
+                }
+                repo::messages::mark_receipt_handled(&tx, message_id)?;
+                repo::actions::enqueue(
+                    &tx,
+                    detail.account_id,
+                    "read_receipt",
+                    Some(message_id),
+                    Some(detail.thread_id),
+                    &serde_json::json!({ "send": send, "userAgreed": user_agreed }),
+                    None,
+                )?;
+                tx.commit()?;
+                Ok(Some((detail.account_id, detail.thread_id)))
+            })
+            .await?;
+        if let Some((account_id, thread_id)) = answered {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: vec![thread_id],
+            });
+            self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+        }
+        Ok(())
     }
 
     /// How the user can leave the list `message_id` came from, worked out
@@ -3728,6 +4010,8 @@ impl Core {
                         in_reply_to_message_id: None,
                         in_reply_to_header: None,
                         attachments: Vec::new(),
+                        request_read_receipt: false,
+                        importance: Default::default(),
                     })
                     .await?;
                 let queued = self
@@ -3897,11 +4181,179 @@ impl Core {
         self.db.read(|conn| repo::blocked::list(conn)).await
     }
 
+    /// Every rule that sorts new mail, in the order they are tried (#238).
+    pub async fn mail_rules(&self) -> Result<Vec<MailRule>> {
+        self.db.read(|conn| repo::rules::list(conn)).await
+    }
+
+    /// Save `rule`, a new one (id 0) or a changed one, once it checks out. A
+    /// new rule goes last. Rules sort mail that arrives from then on.
+    pub async fn save_mail_rule(&self, rule: MailRule) -> Result<MailRule> {
+        let (saved, before) = self
+            .db
+            .write(move |conn| {
+                rules::check(conn, &rule)?;
+                let before = repo::rules::get(conn, rule.id)?.map(|before| before.account_id);
+                Ok((repo::rules::save(conn, &rule, now_ms())?, before))
+            })
+            .await?;
+        // A rule moved to another account leaves the first one's server.
+        match before {
+            Some(before) if before != saved.account_id => self.rules_changed(None),
+            _ => self.rules_changed(saved.account_id),
+        }
+        Ok(saved)
+    }
+
+    pub async fn delete_mail_rule(&self, id: i64) -> Result<()> {
+        let account_id = self
+            .db
+            .write(move |conn| {
+                let account_id = repo::rules::get(conn, id)?.and_then(|rule| rule.account_id);
+                repo::rules::delete(conn, id)?;
+                Ok(account_id)
+            })
+            .await?;
+        self.rules_changed(account_id);
+        Ok(())
+    }
+
+    pub async fn set_mail_rule_enabled(&self, id: i64, enabled: bool) -> Result<()> {
+        let account_id = self
+            .db
+            .write(move |conn| {
+                repo::rules::set_enabled(conn, id, enabled, now_ms())?;
+                Ok(repo::rules::get(conn, id)?.and_then(|rule| rule.account_id))
+            })
+            .await?;
+        self.rules_changed(account_id);
+        Ok(())
+    }
+
+    /// Try the rules in the order of `ids` from now on.
+    pub async fn reorder_mail_rules(&self, ids: Vec<i64>) -> Result<()> {
+        self.db
+            .write(move |conn| repo::rules::reorder(conn, &ids))
+            .await?;
+        self.rules_changed(None);
+        Ok(())
+    }
+
+    /// The Inbox mail `rule` matches now, saved or not, to tell the user
+    /// before running it on that mail.
+    pub async fn mail_rule_matches(&self, rule: MailRule) -> Result<rules::InboxMatches> {
+        self.db
+            .read(move |conn| {
+                rules::check(conn, &rule)?;
+                rules::inbox_matches(conn, &rule)
+            })
+            .await
+    }
+
+    /// Run `rule` on the Inbox mail it matches now, as the user would act on
+    /// each message: the actions it queued, for Undo.
+    pub async fn run_mail_rule(&self, rule: MailRule) -> Result<Vec<i64>> {
+        let (action_ids, thread_ids, accounts) = self
+            .db
+            .write(move |conn| {
+                rules::check(conn, &rule)?;
+                let found = rules::inbox_matches(conn, &rule)?;
+                let tx = conn.transaction()?;
+                let action_ids = rules::run_on(&tx, &rule, &found.message_ids)?;
+                let mut thread_ids = Vec::new();
+                let mut accounts = Vec::new();
+                for &message_id in &found.message_ids {
+                    let (thread_id, account_id): (Option<i64>, i64) = tx.query_row(
+                        "SELECT thread_id, account_id FROM messages WHERE id = ?1",
+                        [message_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?;
+                    thread_ids.extend(thread_id.filter(|id| !thread_ids.contains(id)));
+                    if !accounts.contains(&account_id) {
+                        accounts.push(account_id);
+                    }
+                }
+                tx.commit()?;
+                Ok((action_ids, thread_ids, accounts))
+            })
+            .await?;
+        if !thread_ids.is_empty() {
+            self.bus.emit(CoreEvent::MailUpdated { thread_ids });
+        }
+        for account_id in accounts {
+            self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+        }
+        Ok(action_ids)
+    }
+
+    /// A new rule for mail like `message_id`, not saved yet: for the list
+    /// it came from, when it came from one, otherwise for its sender.
+    pub async fn rule_from_message(&self, message_id: i64) -> Result<MailRule> {
+        self.db
+            .read(move |conn| rules::draft_for(conn, message_id))
+            .await
+    }
+
+    /// [`Self::rule_from_message`] for the newest message of conversation
+    /// `thread_id` that someone else sent.
+    pub async fn rule_from_thread(&self, thread_id: i64) -> Result<MailRule> {
+        self.db
+            .read(move |conn| {
+                let message_id: i64 = conn
+                    .query_row(
+                        "SELECT id FROM messages
+                         WHERE thread_id = ?1 AND is_outgoing = 0 AND is_draft = 0
+                         ORDER BY date DESC, id DESC LIMIT 1",
+                        [thread_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .ok_or_else(|| CoreError::NotFound(format!("mail in thread {thread_id}")))?;
+                rules::draft_for(conn, message_id)
+            })
+            .await
+    }
+
+    /// When a mail-list row's timeline puts it, which a page that starts at
+    /// the row pages from: a conversation's latest message, or a message's
+    /// own date. None for a row that is gone.
+    pub async fn row_time(&self, grouping: MailGrouping, id: i64) -> Result<Option<i64>> {
+        self.db
+            .read(move |conn| repo::threads::row_time(conn, grouping, id))
+            .await
+    }
+
+    /// The app's keys for the mail lists shown oldest first. Every other list
+    /// is newest first.
+    pub async fn oldest_first_lists(&self) -> Result<Vec<String>> {
+        self.db
+            .read(|conn| repo::list_orders::oldest_first(conn))
+            .await
+    }
+
+    /// Show the mail list with the app's `key` in `order` from now on.
+    /// `owner` is what the list belongs to; the saved order goes with it.
+    pub async fn set_list_order(
+        &self,
+        key: String,
+        owner: ListOwner,
+        order: ListOrder,
+    ) -> Result<()> {
+        self.db
+            .write(move |conn| repo::list_orders::set(conn, &key, owner, order))
+            .await
+    }
+
     /// Rewrite `src="cid:…"` references in a message body to `data:` URIs built
     /// from its inline attachments so embedded images render in the native
     /// HTML renderer. No-op when the body has no cid: references. On any
     /// failure the original HTML is returned unchanged.
-    async fn inline_cid_images(&self, message_id: i64, html: String) -> String {
+    async fn inline_cid_images(
+        &self,
+        message_id: i64,
+        html: String,
+        limits: InlineImageLimits,
+    ) -> String {
         if !html.contains("cid:") {
             return html;
         }
@@ -3936,9 +4388,9 @@ impl Core {
             _ => return html,
         };
         let mut fetched = Vec::new();
-        let mut remaining = MAX_INLINE_CID_BYTES_PER_MESSAGE;
+        let mut remaining = limits.message;
         for (attachment_id, content_id, mime, declared_size, file_path) in atts {
-            if fetched.len() == MAX_INLINE_CID_IMAGES_PER_MESSAGE || remaining == 0 {
+            if fetched.len() == limits.images || remaining == 0 {
                 break;
             }
             let normalized = crate::mime::normalize_cid(&content_id);
@@ -3949,7 +4401,7 @@ impl Core {
             {
                 continue;
             }
-            let max_bytes = MAX_INLINE_CID_BYTES_PER_IMAGE.min(remaining);
+            let max_bytes = limits.image.min(remaining);
             let declared_size = declared_size.and_then(|size| usize::try_from(size).ok());
             if declared_size.is_some_and(|size| size > max_bytes)
                 || (file_path.is_none() && declared_size.is_none())
@@ -4314,6 +4766,11 @@ impl Core {
                     .unwrap_or(encoded_leaf);
                 let mut session = self.connect_folder_imap(&config).await?;
                 imap::create_folder(&mut session, &remote_name).await?;
+                // Clients that show only subscribed folders, this one among
+                // them, list it then.
+                if let Err(error) = imap::subscribe(&mut session, &remote_name).await {
+                    tracing::warn!(account_id, %error, "could not subscribe to a new folder");
+                }
                 imap::logout(session).await;
                 self.db
                     .write(move |conn| {
@@ -4473,7 +4930,9 @@ impl Core {
                     .map(|parent| format!("{parent}{delimiter}{encoded}"))
                     .unwrap_or(encoded);
                 let mut session = self.connect_folder_imap(&config).await?;
+                let subscribed = subscriptions_in_tree(&mut session, &old_name, &delimiter).await;
                 imap::rename_folder(&mut session, &old_name, &new_name).await?;
+                move_subscriptions(&mut session, &subscribed, &old_name, &new_name).await;
                 imap::logout(session).await;
                 self.db
                     .write(move |conn| {
@@ -4505,6 +4964,8 @@ impl Core {
             }
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        // Rules that file into it name it anew on the server.
+        self.rules_changed(Some(account_id));
         Ok(())
     }
 
@@ -4569,6 +5030,11 @@ impl Core {
                 let mut session = self.connect_folder_imap(&config).await?;
                 for candidate in &tree {
                     imap::delete_folder(&mut session, &candidate.path).await?;
+                    // A server keeps the subscription of a deleted folder,
+                    // which would list a folder made later under its name.
+                    if let Err(error) = imap::unsubscribe(&mut session, &candidate.path).await {
+                        tracing::debug!(%error, "deleted folder kept its subscription");
+                    }
                 }
                 imap::logout(session).await;
                 sync::delete_folder_tree(&self.sync_ctx(), account_id, folder.path, delimiter)
@@ -4581,6 +5047,8 @@ impl Core {
             }
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        // Rules that filed into it stay on this device.
+        self.rules_changed(Some(account_id));
         Ok(())
     }
 
@@ -4646,6 +5114,72 @@ impl Core {
             &config.settings.connection,
         )
         .await
+    }
+
+    /// Mark everything a mail list shows as read. A list that is whole
+    /// mailboxes, such as an Inbox, a folder or a Gmail label, is marked on
+    /// the server too, mail older than this device keeps included, through
+    /// what the last check knew of: mail that arrived since stays unread. A
+    /// list that shows part of a mailbox, such as a split inbox half or
+    /// Starred, marks the messages this device keeps that it shows.
+    ///
+    /// The list is the one [`Core::list_threads`] shows for the same
+    /// arguments; `account_ids` limits it to a set of accounts, such as a
+    /// mail profile's.
+    pub async fn mark_all_read(
+        &self,
+        view: View,
+        split_id: Option<i64>,
+        account_id: Option<i64>,
+        account_ids: Option<Vec<i64>>,
+        label_id: Option<i64>,
+        folder_id: Option<i64>,
+    ) -> Result<ActionResult> {
+        let args = repo::threads::ListArgs {
+            view,
+            tab: self.tab_filter(split_id, label_id).await?,
+            account_id,
+            account_ids,
+            folder_id,
+            cursor: None,
+            limit: 1,
+            order: ListOrder::NewestFirst,
+        };
+        let now = now_ms();
+        let outcome = self
+            .db
+            .write(move |conn| mark_all_read::apply(conn, &args, now))
+            .await?;
+        match outcome {
+            mark_all_read::Outcome::Whole {
+                threads,
+                accounts,
+                action_ids,
+            } => {
+                if !threads.is_empty() {
+                    self.bus.emit(CoreEvent::MailUpdated {
+                        thread_ids: threads,
+                    });
+                }
+                for account_id in accounts {
+                    self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+                }
+                Ok(ActionResult { action_ids })
+            }
+            mark_all_read::Outcome::Part(message_ids) if message_ids.is_empty() => {
+                Ok(ActionResult {
+                    action_ids: Vec::new(),
+                })
+            }
+            mark_all_read::Outcome::Part(message_ids) => {
+                self.perform_action(PerformActionArgs {
+                    kind: ActionKind::MarkRead,
+                    target: ActionTarget::Messages(message_ids),
+                    params: None,
+                })
+                .await
+            }
+        }
     }
 
     pub async fn perform_action(&self, args: PerformActionArgs) -> Result<ActionResult> {
@@ -5040,6 +5574,18 @@ impl Core {
     }
 
     pub async fn save_draft(&self, args: SaveDraftArgs) -> Result<i64> {
+        self.save_draft_as(args, None).await
+    }
+
+    /// Saves a draft the user wrote, or with `agent`, one an AI agent wrote
+    /// (#237). An agent's draft stays the agent's until anyone else saves it,
+    /// and an agent changes a draft only while it is its own, checked in the
+    /// same transaction as the save.
+    pub(crate) async fn save_draft_as(
+        &self,
+        args: SaveDraftArgs,
+        agent: Option<String>,
+    ) -> Result<i64> {
         // Resolve the visible From address independently of the authenticated
         // account identity. Only provider-discovered, verified identities can
         // cross this boundary; the canonical provider display name is stored.
@@ -5060,14 +5606,28 @@ impl Core {
                 "a draft can contain at most {MAX_DRAFT_ATTACHMENTS} attachments"
             )));
         }
+        // Images in the HTML go out as parts of their own, so they count with
+        // the attachments rather than the text.
+        let embedded = args
+            .body_html
+            .as_deref()
+            .map(crate::mime::embedded_images)
+            .unwrap_or_default();
         let body_bytes = args
             .body_text
             .len()
-            .saturating_add(args.body_html.as_ref().map_or(0, String::len));
+            .saturating_add(args.body_html.as_ref().map_or(0, String::len))
+            .saturating_sub(embedded.source_bytes);
         if body_bytes > MAX_DRAFT_BODY_BYTES {
             return Err(CoreError::Other(format!(
                 "draft body exceeds the {} MiB safety limit",
                 MAX_DRAFT_BODY_BYTES / (1024 * 1024)
+            )));
+        }
+        if embedded.image_bytes > MAX_DRAFT_ATTACHMENT_BYTES {
+            return Err(CoreError::Other(format!(
+                "a draft's images and attachments can take at most {} MiB",
+                MAX_DRAFT_ATTACHMENT_BYTES / (1024 * 1024)
             )));
         }
         // A save replaces the open draft, in place while it is still this
@@ -5099,6 +5659,10 @@ impl Core {
             (Some(id), Some((_, true))) => (None, Some(id)),
             _ => (None, None),
         };
+        // An agent changes a draft only in place, never moving or recreating it.
+        if agent.is_some() && args.draft_id.is_some() && in_place.is_none() {
+            return Err(CoreError::NotFound("draft".into()));
+        }
         let staging_root = self.paths.draft_attachments_dir();
         let reusable_paths = if let Some(draft_id) = in_place {
             self.db
@@ -5122,7 +5686,7 @@ impl Core {
         let mut staged: Vec<crate::models::DraftAttachmentIn> =
             Vec::with_capacity(args.attachments.len());
         let mut created_paths: Vec<String> = Vec::new();
-        let mut staged_bytes = 0usize;
+        let mut staged_bytes = embedded.image_bytes;
         for att in &args.attachments {
             let remaining = MAX_DRAFT_ATTACHMENT_BYTES.saturating_sub(staged_bytes);
             let staged_attachment = stage_draft_attachment(
@@ -5210,12 +5774,21 @@ impl Core {
                     None => None,
                 };
 
+                // A requested read receipt goes to the From address.
+                let receipt_to = if args.request_read_receipt {
+                    vec![sender.clone()]
+                } else {
+                    Vec::new()
+                };
                 let draft_id = match in_place {
                     Some(id) => {
                         let updated = tx.execute(
                             "UPDATE messages SET subject = ?2, to_json = ?3, cc_json = ?4,
-                                    bcc_json = ?5, date = ?6, from_name = ?7, from_addr = ?8
-                              WHERE id = ?1 AND account_id = ?9 AND is_draft = 1",
+                                    bcc_json = ?5, date = ?6, from_name = ?7, from_addr = ?8,
+                                    receipt_to = ?11, importance = ?12
+                              WHERE id = ?1 AND account_id = ?9 AND is_draft = 1
+                                AND (?10 IS NULL OR date = (SELECT saved_at FROM agent_drafts
+                                                            WHERE draft_id = ?1))",
                             rusqlite::params![
                                 id,
                                 args.subject,
@@ -5226,6 +5799,11 @@ impl Core {
                                 sender.name,
                                 sender.email,
                                 args.account_id,
+                                agent.as_deref(),
+                                (!receipt_to.is_empty())
+                                    .then(|| serde_json::to_string(&receipt_to))
+                                    .transpose()?,
+                                args.importance.as_i64(),
                             ],
                         )?;
                         if updated != 1 {
@@ -5271,6 +5849,10 @@ impl Core {
                             list_id: None,
                             sender_addr: None,
                             sender_verification: Default::default(),
+                            receipt_to,
+                            receipt_confirm: false,
+                            receipt_handled: false,
+                            importance: args.importance,
                         };
                         let id = repo::messages::insert(&tx, &nm, tid)?;
                         let in_reply_to_header = args
@@ -5366,6 +5948,10 @@ impl Core {
                 } else {
                     None
                 };
+                match &agent {
+                    Some(agent) => repo::agent_drafts::record(&tx, draft_id, agent)?,
+                    None => repo::agent_drafts::forget(&tx, draft_id)?,
+                }
                 tx.commit()?;
                 Ok((draft_id, thread_id, sync_remote_account, old_paths))
             })
@@ -5415,7 +6001,8 @@ impl Core {
                                 m.to_json, m.cc_json, m.bcc_json, m.subject,
                                 COALESCE(b.text_body, ''), b.html_body,
                                 COALESCE(dm.mode, 'new'), dm.in_reply_to_message_id,
-                                m.is_draft, dm.in_reply_to_header
+                                m.is_draft, dm.in_reply_to_header, m.receipt_to IS NOT NULL,
+                                m.importance
                          FROM messages m
                          LEFT JOIN message_bodies b ON b.message_id = m.id
                          LEFT JOIN drafts_meta dm ON dm.message_id = m.id
@@ -5443,6 +6030,8 @@ impl Core {
                                     in_reply_to_message_id: row.get(10)?,
                                     in_reply_to_header: row.get(12)?,
                                     attachments: Vec::new(),
+                                    request_read_receipt: row.get(13)?,
+                                    importance: Importance::from_i64(row.get(14)?),
                                 },
                                 is_draft,
                             ))
@@ -5500,6 +6089,16 @@ impl Core {
                 },
                 mime_type: None,
             });
+        }
+        // A draft saved on another device arrives with its images as inline
+        // parts, which its HTML names by Content-ID. They go back into the
+        // HTML as embedded data, as the composer keeps them, and a save
+        // stores them that way.
+        if let Some(html) = draft.body_html.take() {
+            draft.body_html = Some(
+                self.inline_cid_images(draft_id, html, InlineImageLimits::DRAFT)
+                    .await,
+            );
         }
         Ok(draft)
     }
@@ -7172,10 +7771,15 @@ impl Core {
 
         credentials::check_available_async(self.credentials.clone()).await?;
 
+        // Asking for what else the account uses as well keeps it on Android.
+        let mut scopes = self.google_scopes_in_use(account_id).await?;
+        if !scopes.contains(&oauth::providers::GOOGLE_CALENDAR_SCOPE) {
+            scopes.push(oauth::providers::GOOGLE_CALENDAR_SCOPE);
+        }
         let outcome = tokio::select! {
             r = oauth::flow::authorize_with_broker(
                 Provider::Gmail,
-                &[oauth::providers::GOOGLE_CALENDAR_SCOPE],
+                &scopes,
                 Some(&account.email),
                 self.oauth_redirects.clone(),
                 open_url,
@@ -7538,6 +8142,8 @@ impl Core {
                     filename: "invite.ics".into(),
                     mime_type: Some(format!("text/calendar; method={method}; charset=UTF-8")),
                 }],
+                request_read_receipt: false,
+                importance: Default::default(),
             })
             .await?;
         // The draft staged its own copy; the temp file can go.
@@ -7630,23 +8236,16 @@ impl Core {
                 ..AiAutomationPlan::default()
             });
         }
-        let (settings, labels, splits) = self
+        let (settings, labels) = self
             .db
-            .read(|conn| {
-                Ok((
-                    repo::settings::get(conn)?,
-                    repo::labels::list(conn)?,
-                    repo::splits::list(conn)?,
-                ))
-            })
+            .read(|conn| Ok((repo::settings::get(conn)?, repo::labels::list(conn)?)))
             .await?;
         let cfg = self.ai_config_from(&settings, Scenario::Categorize).await?;
-        let messages = route::automation_planner_prompt(prompt, &labels, &splits);
+        let messages = route::automation_planner_prompt(prompt, &labels);
         let output = ai::chat(&cfg, messages).await?;
         Ok(route::validate_automation_plan(
             route::parse_automation_plan(&output),
             &labels,
-            &splits,
         ))
     }
 
@@ -7955,7 +8554,7 @@ impl Core {
         cursor: Option<models::SearchCursor>,
         limit: i64,
     ) -> Result<models::SearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_id = account_id;
         self.search_chronological_parsed(parsed, cursor, limit)
             .await
@@ -7970,10 +8569,87 @@ impl Core {
         cursor: Option<models::SearchCursor>,
         limit: i64,
     ) -> Result<models::SearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_ids = Some(account_ids);
         self.search_chronological_parsed(parsed, cursor, limit)
             .await
+    }
+
+    /// Searches the servers of the accounts with `account_ids` for `query`,
+    /// past the mail this device keeps: up to `limit` messages each, newest
+    /// first, going on from `cursors`. An account without a cursor starts
+    /// from its newest mail. What the servers find is kept here as headers,
+    /// its bodies fetched when opened, and comes back as the conversations it
+    /// is in and as messages. The same search of the mail list shows it from
+    /// then on, with its own matches. POP3 accounts and mail on this device
+    /// have no server to search.
+    pub async fn search_server(
+        &self,
+        query: String,
+        account_ids: Vec<i64>,
+        cursors: Vec<(i64, models::ServerSearchCursor)>,
+        limit: usize,
+    ) -> Result<models::ServerSearchPage> {
+        let mut page = models::ServerSearchPage::default();
+        let Some(tree) = search::parse(&query).tree else {
+            return Ok(page);
+        };
+        let limit = limit.clamp(1, 100);
+        let accounts = self.db.read(|conn| repo::accounts::list(conn)).await?;
+        let mut searches = Vec::new();
+        {
+            let handles = self.handles.read().await;
+            for account_id in account_ids {
+                let searchable = accounts.iter().any(|account| {
+                    account.id == account_id
+                        && !matches!(
+                            account.mail_protocol,
+                            MailProtocol::Pop3 | MailProtocol::Local
+                        )
+                });
+                if !searchable {
+                    page.unsearchable.push(account_id);
+                    continue;
+                }
+                let Some(handle) = handles.get(&account_id).cloned() else {
+                    page.failed
+                        .push((account_id, "The account isn't connected.".to_owned()));
+                    continue;
+                };
+                let cursor = cursors
+                    .iter()
+                    .find(|(id, _)| *id == account_id)
+                    .map(|(_, cursor)| cursor.clone())
+                    .unwrap_or_default();
+                let tree = tree.clone();
+                searches.push(async move {
+                    (account_id, handle.search_server(tree, cursor, limit).await)
+                });
+            }
+        }
+        let mut message_ids = Vec::new();
+        for (account_id, result) in futures::future::join_all(searches).await {
+            match result {
+                Ok(hits) => {
+                    message_ids.extend(hits.message_ids);
+                    if let Some(next) = hits.next {
+                        page.cursors.push((account_id, next));
+                    }
+                }
+                Err(error) => page.failed.push((account_id, error.to_string())),
+            }
+        }
+        self.remember_found(&query, &message_ids);
+        (page.threads, page.messages) = self
+            .db
+            .read(move |conn| {
+                Ok((
+                    repo::search::found_threads(conn, &message_ids)?,
+                    repo::search::found_messages(conn, &message_ids)?,
+                ))
+            })
+            .await?;
+        Ok(page)
     }
 
     /// Cursor-paginated chronological search as single messages, for mail
@@ -7985,7 +8661,7 @@ impl Core {
         cursor: Option<MessageSearchCursor>,
         limit: i64,
     ) -> Result<MessageSearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_id = account_id;
         self.search_messages_parsed(parsed, cursor, limit).await
     }
@@ -7999,9 +8675,46 @@ impl Core {
         cursor: Option<MessageSearchCursor>,
         limit: i64,
     ) -> Result<MessageSearchPage> {
-        let mut parsed = search::parse(&query);
+        let mut parsed = self.parse_search(&query);
         parsed.account_ids = Some(account_ids);
         self.search_messages_parsed(parsed, cursor, limit).await
+    }
+
+    /// `query` parsed for the mail list's search, with what searches of the
+    /// servers found for it.
+    fn parse_search(&self, query: &str) -> search::ParsedQuery {
+        let mut parsed = search::parse(query);
+        let found = self
+            .server_found
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, ids)) = found.iter().find(|(search, _)| search == query.trim()) {
+            parsed.found = ids.clone();
+        }
+        parsed
+    }
+
+    /// Keeps what a search of the servers found for `query`, with what it
+    /// found before, as the newest search.
+    fn remember_found(&self, query: &str, message_ids: &[i64]) {
+        let mut found = self
+            .server_found
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let query = query.trim();
+        let mut ids = found
+            .iter()
+            .position(|(search, _)| search == query)
+            .and_then(|index| found.remove(index))
+            .map(|(_, ids)| ids)
+            .unwrap_or_default();
+        for id in message_ids {
+            if !ids.contains(id) {
+                ids.push(*id);
+            }
+        }
+        found.push_front((query.to_owned(), ids));
+        found.truncate(SERVER_FOUND_SEARCHES);
     }
 
     async fn search_messages_parsed(
@@ -8387,101 +9100,6 @@ impl Core {
             .await
     }
 
-    pub async fn list_splits(&self) -> Result<Vec<SplitRule>> {
-        self.db.read(|conn| repo::splits::list(conn)).await
-    }
-
-    /// First split rule (in position order) that matches a thread, if any.
-    /// `threads.routed_tab` can't answer this for rules with a `target` (they
-    /// write the target's route key, not `split:<id>`), so re-run the matcher.
-    pub async fn find_matching_split(&self, thread_id: i64) -> Result<Option<SplitRule>> {
-        self.db
-            .read(move |conn| {
-                for rule in repo::splits::list(conn)? {
-                    if route::split_matches(conn, thread_id, &rule.query)? {
-                        return Ok(Some(rule));
-                    }
-                }
-                Ok(None)
-            })
-            .await
-    }
-
-    pub async fn save_split(
-        &self,
-        id: Option<i64>,
-        name: String,
-        position: i64,
-        query: SplitRuleQuery,
-        target: Option<String>,
-    ) -> Result<SplitRule> {
-        let saved = self
-            .db
-            .write(move |conn| {
-                repo::splits::save(conn, id, &name, position, &query, target.as_deref())
-            })
-            .await?;
-        // Rules changed: re-resolve every thread and drop the AI cache so edited
-        // routing takes effect. AI (if any) runs in the background afterwards.
-        self.reroute_all_sync().await?;
-        Ok(saved)
-    }
-
-    pub async fn delete_split(&self, id: i64) -> Result<()> {
-        self.db
-            .write(move |conn| repo::splits::delete(conn, id))
-            .await?;
-        // A deleted rule's threads must fall back to the AI/heuristic/defaults.
-        self.reroute_all_sync().await?;
-        Ok(())
-    }
-
-    /// Persist a single shared tab order across custom splits and auto-label
-    /// tabs. `order` lists every reorderable tab top-to-bottom as `(kind, id)`
-    /// where `kind` is `"split"` or `"label"`; its index becomes the row's
-    /// `position`. Built-in Important/Other are pinned and never included.
-    ///
-    /// Only re-resolves routing when the splits' relative priority actually
-    /// changed (moving an auto-label around can't affect first-match-wins), so a
-    /// pure label move stays cheap.
-    pub async fn reorder_tabs(&self, order: Vec<(String, i64)>) -> Result<()> {
-        let split_order_changed = self
-            .db
-            .write(move |conn| {
-                let tx = conn.transaction()?;
-                let split_ids = |tx: &rusqlite::Transaction| -> rusqlite::Result<Vec<i64>> {
-                    tx.prepare("SELECT id FROM split_rules ORDER BY position, id")?
-                        .query_map([], |r| r.get(0))?
-                        .collect()
-                };
-                let before = split_ids(&tx)?;
-                for (i, (kind, id)) in order.iter().enumerate() {
-                    let pos = i as i64;
-                    match kind.as_str() {
-                        "split" => tx.execute(
-                            "UPDATE split_rules SET position = ?2 WHERE id = ?1",
-                            rusqlite::params![id, pos],
-                        )?,
-                        "label" => tx.execute(
-                            "UPDATE labels SET position = ?2 WHERE id = ?1",
-                            rusqlite::params![id, pos],
-                        )?,
-                        _ => 0,
-                    };
-                }
-                let after = split_ids(&tx)?;
-                tx.commit()?;
-                Ok(before != after)
-            })
-            .await?;
-        if split_order_changed {
-            self.reroute_all_sync().await?;
-        } else {
-            self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
-        }
-        Ok(())
-    }
-
     pub async fn list_labels(&self) -> Result<Vec<Label>> {
         self.db.read(|conn| repo::labels::list(conn)).await
     }
@@ -8510,7 +9128,8 @@ impl Core {
                 if !valid {
                     return Err(CoreError::Other("invalid mail category destination".into()));
                 }
-                route::apply_tab(conn, thread_id, Some(&target))
+                // Where the user put it, it stays, as a rule's tab does.
+                route::pin_tab(conn, thread_id, Some(&target))
             })
             .await?;
         self.bus.emit(CoreEvent::MailUpdated {
@@ -8730,7 +9349,8 @@ impl Core {
                      (SELECT id FROM labels WHERE is_auto = 1)",
                     [],
                 )?;
-                tx.execute("UPDATE threads SET routed_tab = NULL", [])?;
+                // A tab a rule or the user chose stays, others go.
+                tx.execute("UPDATE threads SET routed_tab = pinned_tab", [])?;
                 tx.execute(
                     "UPDATE messages SET local_subject_prefix = '', local_body_note = ''",
                     [],
@@ -8738,7 +9358,6 @@ impl Core {
                 let settings = repo::settings::get(&tx)?;
                 let mut n = 0i64;
                 if settings.auto_labels_enabled {
-                    let splits = repo::splits::list(&tx)?;
                     let ids: Vec<i64> = {
                         let mut stmt = tx.prepare("SELECT id FROM threads")?;
 
@@ -8746,12 +9365,7 @@ impl Core {
                             .collect::<rusqlite::Result<Vec<_>>>()?
                     };
                     for id in ids {
-                        route::route_thread_deterministic(
-                            &tx,
-                            &splits,
-                            settings.ai_categorize,
-                            id,
-                        )?;
+                        route::route_thread_deterministic(&tx, settings.ai_categorize, id)?;
                         n += 1;
                     }
                 }
@@ -8936,14 +9550,6 @@ impl Core {
             })
             .await?;
 
-        // Threads that just gained a label may now satisfy a label-based split
-        // rule, so re-check their split routing once the labels are written.
-        let relabeled: Vec<i64> = action_plans
-            .iter()
-            .filter(|(_, actions)| actions.iter().any(|a| a.kind == "add_label"))
-            .map(|(tid, _)| *tid)
-            .collect();
-
         // Mailbox mutations reuse the normal optimistic + queued action path,
         // so IMAP state, retries, and UI refreshes behave exactly like a click.
         for (thread_id, actions) in action_plans {
@@ -8988,17 +9594,6 @@ impl Core {
                     );
                 }
             }
-        }
-        if !relabeled.is_empty() {
-            self.db
-                .write(move |conn| {
-                    let splits = repo::splits::list(conn)?;
-                    for tid in relabeled {
-                        route::reapply_splits_only(conn, &splits, tid)?;
-                    }
-                    Ok(())
-                })
-                .await?;
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
         Ok(count)
@@ -9237,9 +9832,186 @@ impl Core {
                 if settings.mail_profiles.len() == before {
                     return Err(CoreError::NotFound(format!("mail profile {profile_id}")));
                 }
+                // Its saved searches stay, covering the accounts in view.
+                for saved in &mut settings.saved_searches {
+                    if saved.profile_id.as_deref() == Some(profile_id.as_str()) {
+                        saved.profile_id = None;
+                    }
+                }
                 retire_active_mail_profile(&mut settings);
                 repo::settings::set(conn, &settings)?;
                 Ok(settings)
+            })
+            .await
+    }
+
+    /// Keeps a search in the sidebar, or changes one kept there: its name,
+    /// what it searches for, and the profile whose accounts it covers.
+    pub async fn save_search(
+        &self,
+        id: Option<i64>,
+        name: String,
+        query: String,
+        profile_id: Option<String>,
+    ) -> Result<(Settings, SavedSearch)> {
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            return Err(CoreError::Other("a saved search needs a name".into()));
+        }
+        if name.chars().count() > 100 {
+            return Err(CoreError::Other(
+                "a saved search's name can have at most 100 characters".into(),
+            ));
+        }
+        let query = query.trim().to_owned();
+        if search::parse(&query).tree.is_none() {
+            return Err(CoreError::Other(
+                "a saved search needs something to search for".into(),
+            ));
+        }
+        let profile_id = profile_id
+            .map(|profile_id| profile_id.trim().to_owned())
+            .filter(|profile_id| !profile_id.is_empty());
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                if let Some(profile_id) = &profile_id
+                    && !settings
+                        .mail_profiles
+                        .iter()
+                        .any(|profile| &profile.id == profile_id)
+                {
+                    return Err(CoreError::NotFound(format!("mail profile {profile_id}")));
+                }
+                let duplicate = settings
+                    .saved_searches
+                    .iter()
+                    .any(|saved| Some(saved.id) != id && saved.name.eq_ignore_ascii_case(&name));
+                if duplicate {
+                    return Err(CoreError::Other(format!(
+                        "a saved search named {name:?} already exists"
+                    )));
+                }
+                let saved = if let Some(id) = id {
+                    let saved = settings
+                        .saved_searches
+                        .iter_mut()
+                        .find(|saved| saved.id == id)
+                        .ok_or_else(|| CoreError::NotFound(format!("saved search {id}")))?;
+                    saved.name = name;
+                    saved.query = query;
+                    saved.profile_id = profile_id;
+                    saved.clone()
+                } else {
+                    if settings.saved_searches.len() >= 100 {
+                        return Err(CoreError::Other(
+                            "no more than 100 searches can be saved".into(),
+                        ));
+                    }
+                    // Small ids, which the sidebar can carry.
+                    let id = settings
+                        .saved_searches
+                        .iter()
+                        .map(|saved| saved.id)
+                        .max()
+                        .unwrap_or(0)
+                        + 1;
+                    let saved = SavedSearch {
+                        id,
+                        name,
+                        query,
+                        profile_id,
+                    };
+                    settings.saved_searches.push(saved.clone());
+                    saved
+                };
+                repo::settings::set(conn, &settings)?;
+                Ok((settings, saved))
+            })
+            .await
+    }
+
+    /// Takes a search out of the sidebar. Its mail stays where it is.
+    pub async fn delete_saved_search(&self, id: i64) -> Result<Settings> {
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                let before = settings.saved_searches.len();
+                settings.saved_searches.retain(|saved| saved.id != id);
+                if settings.saved_searches.len() == before {
+                    return Err(CoreError::NotFound(format!("saved search {id}")));
+                }
+                repo::settings::set(conn, &settings)?;
+                Ok(settings)
+            })
+            .await
+    }
+
+    /// Moves a saved search to `index` in the sidebar's order, or to the end
+    /// past the last one.
+    pub async fn move_saved_search(&self, id: i64, index: usize) -> Result<Settings> {
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                let from = settings
+                    .saved_searches
+                    .iter()
+                    .position(|saved| saved.id == id)
+                    .ok_or_else(|| CoreError::NotFound(format!("saved search {id}")))?;
+                let saved = settings.saved_searches.remove(from);
+                let index = index.min(settings.saved_searches.len());
+                settings.saved_searches.insert(index, saved);
+                repo::settings::set(conn, &settings)?;
+                Ok(settings)
+            })
+            .await
+    }
+
+    /// Each saved search's unread conversations, or with `conversations`
+    /// false its unread messages, as (saved search, count), from the mail
+    /// kept here. A search with a profile covers that profile's accounts, and
+    /// one without covers `shown`, the accounts the mail view shows, or every
+    /// account with `None`. Mail kept only on this device counts in each.
+    pub async fn saved_search_counts(
+        &self,
+        conversations: bool,
+        shown: Option<Vec<i64>>,
+    ) -> Result<Vec<(i64, i64)>> {
+        self.db
+            .read(move |conn| {
+                let settings = repo::settings::get(conn)?;
+                let local_mail = repo::accounts::list(conn)?
+                    .into_iter()
+                    .find(|account| account.mail_protocol == MailProtocol::Local)
+                    .map(|account| account.id);
+                settings
+                    .saved_searches
+                    .iter()
+                    .map(|saved| {
+                        let mut parsed = search::parse(&saved.query);
+                        let profile = saved.profile_id.as_ref().and_then(|profile_id| {
+                            settings
+                                .mail_profiles
+                                .iter()
+                                .find(|profile| &profile.id == profile_id)
+                        });
+                        parsed.account_ids = match profile {
+                            Some(profile) => Some(
+                                profile
+                                    .account_ids
+                                    .iter()
+                                    .copied()
+                                    .chain(local_mail)
+                                    .collect(),
+                            ),
+                            None => shown.clone(),
+                        };
+                        Ok((
+                            saved.id,
+                            repo::search::unread_matches(conn, &parsed, conversations)?,
+                        ))
+                    })
+                    .collect()
             })
             .await
     }
@@ -10017,18 +10789,17 @@ fn valid_automation_route(conn: &rusqlite::Connection, target: &str) -> Result<b
     if matches!(target, "important" | "other") {
         return Ok(true);
     }
-    let (table, id) = if let Some(id) = target.strip_prefix("split:") {
-        ("split_rules", id)
-    } else if let Some(id) = target.strip_prefix("label:") {
-        ("labels", id)
-    } else {
+    let Some(id) = target
+        .strip_prefix("label:")
+        .and_then(|id| id.parse::<i64>().ok())
+    else {
         return Ok(false);
     };
-    let Some(id) = id.parse::<i64>().ok() else {
-        return Ok(false);
-    };
-    let sql = format!("SELECT EXISTS (SELECT 1 FROM {table} WHERE id = ?1)");
-    Ok(conn.query_row(&sql, rusqlite::params![id], |row| row.get::<_, i64>(0))? != 0)
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM labels WHERE id = ?1 AND is_auto = 1)",
+        rusqlite::params![id],
+        |row| row.get::<_, i64>(0),
+    )? != 0)
 }
 
 /// The conversations of `message_ids`, each with its messages, in the order
@@ -10331,6 +11102,20 @@ fn apply_thread_action(
     params: Option<&ActionParams>,
 ) -> Result<Vec<(i64, i64)>> {
     let tx = conn.transaction()?;
+    let out = apply_thread_action_in(&tx, thread_id, only, kind, params)?;
+    tx.commit()?;
+    Ok(out)
+}
+
+/// [`apply_thread_action`] inside a transaction the caller commits, such as
+/// a sync's, where rules act on mail as it arrives (#238).
+pub(crate) fn apply_thread_action_in(
+    tx: &rusqlite::Transaction,
+    thread_id: i64,
+    only: Option<&[i64]>,
+    kind: ActionKind,
+    params: Option<&ActionParams>,
+) -> Result<Vec<(i64, i64)>> {
     let mut out: Vec<(i64, i64)> = Vec::new();
 
     let (account_id, mail_protocol): (i64, MailProtocol) = tx.query_row(
@@ -10389,15 +11174,17 @@ fn apply_thread_action(
     match kind {
         ActionKind::DeletePermanently => {
             for (id, f, u, _r, _s, role) in &msgs {
-                let in_trash = role == roles::TRASH
+                // Only mail already thrown away, in Trash or Junk.
+                let thrown_away = role == roles::TRASH
+                    || role == roles::SPAM
                     || tx.query_row(
                         "SELECT EXISTS(SELECT 1 FROM message_folders mf
                      JOIN folders folder ON folder.id = mf.folder_id
-                     WHERE mf.message_id = ?1 AND folder.role = 'trash')",
+                     WHERE mf.message_id = ?1 AND folder.role IN ('trash', 'spam'))",
                         rusqlite::params![id],
                         |row| row.get::<_, bool>(0),
                     )?;
-                if !in_trash {
+                if !thrown_away {
                     continue;
                 }
                 let already_queued: bool = tx.query_row(
@@ -10411,7 +11198,7 @@ fn apply_thread_action(
                     continue;
                 }
                 let aid = repo::actions::enqueue(
-                    &tx,
+                    tx,
                     account_id,
                     kind.as_str(),
                     Some(*id),
@@ -10426,10 +11213,10 @@ fn apply_thread_action(
             let target_read = kind == ActionKind::MarkRead;
             for (id, _f, _u, is_read, _s, _role) in &msgs {
                 if *is_read != target_read {
-                    repo::messages::set_read(&tx, *id, target_read)?;
+                    repo::messages::set_read(tx, *id, target_read)?;
                     let payload = scoped(serde_json::json!({}));
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         kind.as_str(),
                         Some(*id),
@@ -10444,9 +11231,9 @@ fn apply_thread_action(
         ActionKind::Star if message_only => {
             for (id, _f, _u, _r, is_starred, _role) in &msgs {
                 if !*is_starred {
-                    repo::messages::set_starred(&tx, *id, true)?;
+                    repo::messages::set_starred(tx, *id, true)?;
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         "star",
                         Some(*id),
@@ -10462,13 +11249,12 @@ fn apply_thread_action(
             // Star the latest message only (thread-level star).
             if let Some((id, _f, _u, _r, is_starred, _role)) = msgs.iter().max_by_key(|m| m.0) {
                 if *is_starred {
-                    repo::threads::recompute(&tx, thread_id)?;
-                    tx.commit()?;
+                    repo::threads::recompute(tx, thread_id)?;
                     return Ok(out);
                 }
-                repo::messages::set_starred(&tx, *id, true)?;
+                repo::messages::set_starred(tx, *id, true)?;
                 let aid = repo::actions::enqueue(
-                    &tx,
+                    tx,
                     account_id,
                     "star",
                     Some(*id),
@@ -10482,9 +11268,9 @@ fn apply_thread_action(
         ActionKind::Unstar => {
             for (id, _f, _u, _r, is_starred, _role) in &msgs {
                 if *is_starred {
-                    repo::messages::set_starred(&tx, *id, false)?;
+                    repo::messages::set_starred(tx, *id, false)?;
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         "unstar",
                         Some(*id),
@@ -10503,9 +11289,9 @@ fn apply_thread_action(
                 _ => (roles::SPAM, "spam"),
             };
             // Gmail-style fallback: archiving with no Archive folder moves to All Mail.
-            let target = folder_of(&tx, account_id, target_role)?
+            let target = folder_of(tx, account_id, target_role)?
                 .or(if kind == ActionKind::Archive {
-                    folder_of(&tx, account_id, roles::ALL)?
+                    folder_of(tx, account_id, roles::ALL)?
                 } else {
                     None
                 })
@@ -10519,7 +11305,7 @@ fn apply_thread_action(
                 };
                 if movable && f.is_some() {
                     let aid = enqueue_move(
-                        &tx,
+                        tx,
                         account_id,
                         thread_id,
                         *id,
@@ -10535,12 +11321,12 @@ fn apply_thread_action(
             }
             // Archiving also clears snooze, once the whole conversation has
             // left the inbox.
-            if !message_only || !thread_in_inbox(&tx, thread_id)? {
-                repo::snoozes::clear(&tx, thread_id)?;
+            if !message_only || !thread_in_inbox(tx, thread_id)? {
+                repo::snoozes::clear(tx, thread_id)?;
             }
         }
         ActionKind::Unarchive | ActionKind::NotSpam => {
-            let target = folder_of(&tx, account_id, roles::INBOX)?
+            let target = folder_of(tx, account_id, roles::INBOX)?
                 .ok_or_else(|| CoreError::NotFound("no inbox folder".into()))?;
             let from_role = if kind == ActionKind::Unarchive {
                 roles::ARCHIVE
@@ -10552,7 +11338,7 @@ fn apply_thread_action(
                     && f.is_some()
                 {
                     let aid = enqueue_move(
-                        &tx,
+                        tx,
                         account_id,
                         thread_id,
                         *id,
@@ -10571,7 +11357,7 @@ fn apply_thread_action(
             let target = params
                 .and_then(|p| p.target_folder_id)
                 .ok_or_else(|| CoreError::Other("move requires targetFolderId".into()))?;
-            let target_folder = repo::folders::get(&tx, target)?
+            let target_folder = repo::folders::get(tx, target)?
                 .ok_or_else(|| CoreError::NotFound(format!("folder {target}")))?;
             if target_folder.account_id != account_id {
                 return Err(CoreError::Other(
@@ -10581,7 +11367,7 @@ fn apply_thread_action(
             for (id, f, u, _r, _s, _role) in &msgs {
                 if f.is_some() && *f != Some(target) {
                     let aid = enqueue_move(
-                        &tx,
+                        tx,
                         account_id,
                         thread_id,
                         *id,
@@ -10597,14 +11383,14 @@ fn apply_thread_action(
             }
             // The Move to picker lists these folders first.
             if !out.is_empty() {
-                repo::folders::mark_moved_to(&tx, target, now_ms())?;
+                repo::folders::mark_moved_to(tx, target, now_ms())?;
             }
         }
         ActionKind::Copy => {
             let target = params
                 .and_then(|p| p.target_folder_id)
                 .ok_or_else(|| CoreError::Other("copy requires targetFolderId".into()))?;
-            let target_folder = repo::folders::get(&tx, target)?
+            let target_folder = repo::folders::get(tx, target)?
                 .ok_or_else(|| CoreError::NotFound(format!("folder {target}")))?;
             if target_folder.account_id != account_id {
                 return Err(CoreError::Other(
@@ -10629,7 +11415,7 @@ fn apply_thread_action(
                 )? > 0;
                 if added {
                     let aid = repo::actions::enqueue(
-                        &tx,
+                        tx,
                         account_id,
                         "copy",
                         Some(*id),
@@ -10641,7 +11427,7 @@ fn apply_thread_action(
                 }
             }
             if !out.is_empty() {
-                repo::folders::mark_moved_to(&tx, target, now_ms())?;
+                repo::folders::mark_moved_to(tx, target, now_ms())?;
             }
         }
         ActionKind::Snooze => {
@@ -10649,9 +11435,9 @@ fn apply_thread_action(
                 .and_then(|p| p.wake_at)
                 .ok_or_else(|| CoreError::Other("snooze requires wakeAt".into()))?;
             let orig = msgs.iter().find_map(|(_, f, ..)| *f);
-            repo::snoozes::set(&tx, thread_id, account_id, wake_at, orig)?;
+            repo::snoozes::set(tx, thread_id, account_id, wake_at, orig)?;
             let aid = repo::actions::enqueue(
-                &tx,
+                tx,
                 account_id,
                 "snooze",
                 None,
@@ -10662,9 +11448,9 @@ fn apply_thread_action(
             out.push((aid, account_id));
         }
         ActionKind::Unsnooze => {
-            repo::snoozes::clear(&tx, thread_id)?;
+            repo::snoozes::clear(tx, thread_id)?;
             let aid = repo::actions::enqueue(
-                &tx,
+                tx,
                 account_id,
                 "unsnooze",
                 None,
@@ -10678,7 +11464,7 @@ fn apply_thread_action(
             let label_id = params
                 .and_then(|p| p.label_id)
                 .ok_or_else(|| CoreError::Other("label action requires labelId".into()))?;
-            let label = repo::labels::get(&tx, label_id)?
+            let label = repo::labels::get(tx, label_id)?
                 .ok_or_else(|| CoreError::NotFound(format!("label {label_id}")))?;
             if let Some(owner_account_id) = label.owner_account_id
                 && owner_account_id != account_id
@@ -10693,9 +11479,9 @@ fn apply_thread_action(
                 scoped(serde_json::json!({ "labelId": label_id, "keyword": label.keyword }));
             for (id, ..) in &msgs {
                 if add {
-                    repo::labels::add_to_message(&tx, *id, label_id)?;
+                    repo::labels::add_to_message(tx, *id, label_id)?;
                 } else {
-                    repo::labels::remove_from_message(&tx, *id, label_id)?;
+                    repo::labels::remove_from_message(tx, *id, label_id)?;
                 }
                 // Auto labels are local-only: mutate membership but never push
                 // their keyword to IMAP (server reconcile also skips them).
@@ -10703,7 +11489,7 @@ fn apply_thread_action(
                     continue;
                 }
                 let aid = repo::actions::enqueue(
-                    &tx,
+                    tx,
                     account_id,
                     kind.as_str(),
                     Some(*id),
@@ -10719,10 +11505,13 @@ fn apply_thread_action(
         }
     }
 
-    repo::threads::recompute(&tx, thread_id)?;
-    tx.commit()?;
+    repo::threads::recompute(tx, thread_id)?;
     Ok(out)
 }
+
+#[cfg(test)]
+#[path = "saved_search_tests.rs"]
+mod saved_search_tests;
 
 #[cfg(test)]
 mod sync_accounts_tests {
@@ -11676,6 +12465,17 @@ fn revert_action(
             }
         }
         "unsnooze" => { /* nothing sensible to restore */ }
+        // Back in the tab it was in, or chosen by routing again.
+        "show_in" => {
+            if let Some(thread_id) = thread_id {
+                let pinned = action.payload["pinned"].as_str();
+                tx.execute(
+                    "UPDATE threads SET pinned_tab = ?2 WHERE id = ?1",
+                    rusqlite::params![thread_id, pinned],
+                )?;
+                route::apply_tab(&tx, thread_id, action.payload["routed"].as_str())?;
+            }
+        }
         "send" => { /* cancel already handled if pending; sent mail can't be unsent */ }
         _ => {}
     }
@@ -11871,6 +12671,8 @@ mod message_by_header_id_tests {
             in_reply_to_message_id,
             in_reply_to_header: Some(header.into()),
             attachments: Vec::new(),
+            request_read_receipt: false,
+            importance: Default::default(),
         };
         let headers = |id| {
             let core = &core;
@@ -11994,7 +12796,70 @@ mod draft_staging_tests {
                 filename: filename.into(),
                 mime_type: None,
             }],
+            request_read_receipt: false,
+            importance: Default::default(),
         }
+    }
+
+    #[tokio::test]
+    async fn a_draft_keeps_its_read_receipt_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let source = temp.path().join("note.txt");
+        tokio::fs::write(&source, b"note").await.unwrap();
+        let asking = SaveDraftArgs {
+            request_read_receipt: true,
+            importance: Default::default(),
+            ..draft_args(None, &source, "note.txt")
+        };
+        let id = core.save_draft(asking.clone()).await.unwrap();
+        let draft = core.get_draft(id).await.unwrap();
+        assert!(draft.request_read_receipt);
+        // The receipt goes to the address the draft is from.
+        let to = core
+            .db
+            .read(move |conn| repo::messages::receipt_to(conn, id))
+            .await
+            .unwrap();
+        assert_eq!(to.len(), 1);
+        assert_eq!(
+            Some(&to[0].email),
+            draft.from.as_ref().map(|from| &from.email)
+        );
+
+        // Saved again without, it asks no more.
+        core.save_draft(SaveDraftArgs {
+            draft_id: Some(id),
+            request_read_receipt: false,
+            importance: Default::default(),
+            ..draft
+        })
+        .await
+        .unwrap();
+        assert!(!core.get_draft(id).await.unwrap().request_read_receipt);
+
+        // So does how important it says it is.
+        let draft = core.get_draft(id).await.unwrap();
+        assert_eq!(draft.importance, Importance::Normal);
+        core.save_draft(SaveDraftArgs {
+            importance: Importance::High,
+            ..draft
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            core.get_draft(id).await.unwrap().importance,
+            Importance::High
+        );
     }
 
     #[tokio::test]
@@ -12047,6 +12912,8 @@ mod draft_staging_tests {
             in_reply_to_message_id: Some(parent),
             in_reply_to_header: None,
             attachments: Vec::new(),
+            request_read_receipt: false,
+            importance: Default::default(),
         };
         let thread_of = |message_id: i64| {
             let core = core.clone();
@@ -12527,6 +13394,174 @@ mod send_confirmation_tests {
             })
             .await
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod read_receipt_answer_tests {
+    use super::*;
+
+    /// A message asking for a receipt at `receipt_to`; returns its id.
+    fn seed_request(conn: &rusqlite::Connection, receipt_to: &str, confirm: bool) -> i64 {
+        let (_, message_id) = db::testutil::seed_message(conn, "ana@example.com", "Plan", false);
+        conn.execute(
+            "UPDATE messages SET receipt_to = ?2, receipt_confirm = ?3,
+                 sender_verification = 'domain'
+             WHERE id = ?1",
+            rusqlite::params![
+                message_id,
+                format!("[{{\"name\":null,\"email\":\"{receipt_to}\"}}]"),
+                confirm as i64
+            ],
+        )
+        .unwrap();
+        message_id
+    }
+
+    async fn core_with_identity() -> (tempfile::TempDir, Core) {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                conn.execute(
+                    "INSERT OR REPLACE INTO sender_identities
+                         (account_id, email, is_primary, verification_status)
+                     VALUES (1, 'me@test.dev', 1, 'accepted')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        (temp, core)
+    }
+
+    #[tokio::test]
+    async fn an_answer_is_final_and_queued_for_the_server() {
+        let (_temp, core) = core_with_identity().await;
+        let message_id = core
+            .db
+            .write(|conn| Ok(seed_request(conn, "ana@example.com", false)))
+            .await
+            .unwrap();
+        let request = core
+            .db
+            .read(move |conn| repo::messages::detail(conn, message_id))
+            .await
+            .unwrap()
+            .receipt_request
+            .unwrap();
+        assert!(!request.needs_confirmation);
+
+        core.answer_read_receipt(message_id, ReceiptAnswer::Decline)
+            .await
+            .unwrap();
+        let (detail, actions) = core
+            .db
+            .read(move |conn| {
+                Ok((
+                    repo::messages::detail(conn, message_id)?,
+                    repo::actions::due(conn, 1, i64::MAX, 10)?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert!(detail.receipt_request.is_none(), "nothing asks again");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].kind, "read_receipt");
+        assert_eq!(actions[0].payload["send"], false);
+        // A second answer finds nothing left to answer.
+        core.answer_read_receipt(message_id, ReceiptAnswer::Send { user_agreed: true })
+            .await
+            .unwrap();
+        let actions = core
+            .db
+            .read(|conn| repo::actions::due(conn, 1, i64::MAX, 10))
+            .await
+            .unwrap();
+        assert_eq!(actions.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_request_that_needs_agreement_is_never_sent_on_its_own() {
+        let (_temp, core) = core_with_identity().await;
+        let message_id = core
+            .db
+            .write(|conn| Ok(seed_request(conn, "ana@example.com", true)))
+            .await
+            .unwrap();
+        assert!(
+            core.answer_read_receipt(message_id, ReceiptAnswer::Send { user_agreed: false })
+                .await
+                .is_err()
+        );
+        core.answer_read_receipt(message_id, ReceiptAnswer::Send { user_agreed: true })
+            .await
+            .unwrap();
+        let actions = core
+            .db
+            .read(|conn| repo::actions::due(conn, 1, i64::MAX, 10))
+            .await
+            .unwrap();
+        assert_eq!(actions[0].payload["send"], true);
+        assert_eq!(actions[0].payload["userAgreed"], true);
+    }
+
+    #[tokio::test]
+    async fn spam_lists_and_requests_back_to_the_account_ask_for_nothing() {
+        let (_temp, core) = core_with_identity().await;
+        let (own, spam, automated) = core
+            .db
+            .write(|conn| {
+                let own = seed_request(conn, "ME@test.dev", false);
+                let spam = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Junk', 'spam')",
+                    [],
+                )?;
+                conn.execute("UPDATE messages SET folder_id = 2 WHERE id = ?1", [spam])?;
+                let automated = seed_request(conn, "ana@example.com", false);
+                conn.execute("UPDATE messages SET is_automated = 1 WHERE id = ?1", [automated])?;
+                Ok((own, spam, automated))
+            })
+            .await
+            .unwrap();
+        for id in [own, spam, automated] {
+            let detail = core
+                .db
+                .read(move |conn| repo::messages::detail(conn, id))
+                .await
+                .unwrap();
+            assert!(detail.receipt_request.is_none(), "message {id}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unauthenticated_sender_needs_agreement() {
+        let (_temp, core) = core_with_identity().await;
+        let message_id = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "UPDATE messages SET sender_verification = '' WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        let request = core
+            .db
+            .read(move |conn| repo::messages::detail(conn, message_id))
+            .await
+            .unwrap()
+            .receipt_request
+            .unwrap();
+        assert!(request.needs_confirmation);
     }
 }
 

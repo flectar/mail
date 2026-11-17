@@ -17,6 +17,165 @@ pub(crate) const STRIKE: u8 = 1 << 3;
 pub(crate) const CODE: u8 = 1 << 4;
 /// What starts each line of a quote block in the document's text.
 pub(crate) const QUOTE_MARKER: &str = "│ ";
+/// Marks HTML the composer copied, which pastes back as it was.
+const COPIED_MARK: &str = "<!--flectar-mail-composer-->";
+/// The line a signature starts under, after a blank line, as mail has long marked them.
+pub(crate) const SIGNATURE_SEPARATOR: &str = "\n\n-- \n";
+/// Holds an image's place in the text, as in other rich text: its style carries the image.
+pub(crate) const IMAGE_PLACEHOLDER: char = '\u{fffc}';
+/// Images larger than this, in pixels across or down, aren't taken.
+const MAX_IMAGE_SIDE: u32 = 16_384;
+/// The narrowest an image can be made to show, in CSS pixels.
+const MIN_IMAGE_WIDTH: u32 = 16;
+
+/// An image in the text, as the file it goes out as.
+#[derive(Clone, Debug)]
+pub(crate) struct InlineImage {
+    /// Tells this image from others, also when two hold the same file.
+    pub(crate) id: u64,
+    pub(crate) data: Arc<[u8]>,
+    pub(crate) mime_type: &'static str,
+    /// Its size in pixels.
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    /// The width it's shown at in CSS pixels, when it isn't its own.
+    pub(crate) shown_width: Option<u32>,
+    /// What it shows, for readers who can't see it.
+    pub(crate) alt: Arc<str>,
+}
+
+impl InlineImage {
+    /// The image a PNG, JPEG, GIF or WebP file holds, or `None` for anything else.
+    pub(crate) fn from_file_bytes(data: Vec<u8>, alt: &str) -> Option<Self> {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        use image::{ImageDecoder, metadata::Orientation};
+        let (mime_type, width, height) = {
+            let reader = image::ImageReader::new(std::io::Cursor::new(&data))
+                .with_guessed_format()
+                .ok()?;
+            let mime_type = match reader.format()? {
+                image::ImageFormat::Png => "image/png",
+                image::ImageFormat::Jpeg => "image/jpeg",
+                image::ImageFormat::Gif => "image/gif",
+                image::ImageFormat::WebP => "image/webp",
+                _ => return None,
+            };
+            let mut decoder = reader.into_decoder().ok()?;
+            let (width, height) = decoder.dimensions();
+            // A photo turned on its side by the camera shows upright, as readers show it.
+            match decoder.orientation() {
+                Ok(
+                    Orientation::Rotate90
+                    | Orientation::Rotate270
+                    | Orientation::Rotate90FlipH
+                    | Orientation::Rotate270FlipH,
+                ) => (mime_type, height, width),
+                _ => (mime_type, width, height),
+            }
+        };
+        if width == 0 || height == 0 || width > MAX_IMAGE_SIDE || height > MAX_IMAGE_SIDE {
+            return None;
+        }
+        Some(Self {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            data: data.into(),
+            mime_type,
+            width,
+            height,
+            shown_width: None,
+            alt: alt.into(),
+        })
+    }
+
+    /// The image a `data:` URI holds, as the composer writes them.
+    pub(crate) fn from_data_uri(uri: &str, alt: &str) -> Option<Self> {
+        use base64::Engine;
+        let (_, encoded) = uri.strip_prefix("data:")?.split_once(";base64,")?;
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .ok()?;
+        Self::from_file_bytes(data, alt)
+    }
+
+    /// Its size as shown, in CSS pixels.
+    pub(crate) fn shown_size(&self) -> (u32, u32) {
+        let width = self.shown_width.unwrap_or(self.width).max(1);
+        let height =
+            (u64::from(self.height) * u64::from(width) / u64::from(self.width.max(1))).max(1);
+        (width, u32::try_from(height).unwrap_or(u32::MAX))
+    }
+
+    /// What plain text shows in its place.
+    fn description(&self) -> String {
+        if self.alt.trim().is_empty() {
+            "[image]".to_owned()
+        } else {
+            format!("[image: {}]", self.alt.trim())
+        }
+    }
+}
+
+/// The sizes an image can show at. Each changes only how wide it shows: the file stays as it
+/// is, so readers who zoom in still see all of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ImageSize {
+    Small,
+    Medium,
+    Large,
+    Original,
+}
+
+impl ImageSize {
+    pub(crate) const ALL: [Self; 4] = [Self::Small, Self::Medium, Self::Large, Self::Original];
+
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|size| size.name() == name)
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::Large => "large",
+            Self::Original => "original",
+        }
+    }
+
+    /// Its width in CSS pixels. A message's text is often about 600 pixels wide, so large
+    /// fills it, medium takes half, and small a quarter.
+    fn width(self) -> Option<u32> {
+        match self {
+            Self::Small => Some(160),
+            Self::Medium => Some(320),
+            Self::Large => Some(640),
+            Self::Original => None,
+        }
+    }
+
+    /// Whether an image `natural` pixels wide can show smaller at this size. Images never
+    /// grow past their own size.
+    pub(crate) fn fits(self, natural: u32) -> bool {
+        self.width().is_none_or(|width| width < natural)
+    }
+
+    /// The size `image` shows at, when it's one of these.
+    pub(crate) fn of(image: &InlineImage) -> Option<Self> {
+        match image.shown_width {
+            None => Some(Self::Original),
+            Some(width) => Self::ALL
+                .into_iter()
+                .find(|size| size.width() == Some(width)),
+        }
+    }
+}
+
+impl PartialEq for InlineImage {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.shown_width == other.shown_width && self.alt == other.alt
+    }
+}
+
+impl Eq for InlineImage {}
 
 /// `text` with its quote blocks written as plain-text mail quotes, in lines
 /// that start with `>`, for the plain-text part of a message being sent.
@@ -49,7 +208,155 @@ const MAX_TYPING_GROUP_BYTES: usize = 64;
 pub(crate) struct CharacterStyle {
     pub(crate) marks: u8,
     pub(crate) link: Option<Arc<str>>,
-    link_is_auto: bool,
+    /// The link was made from a web address typed in the text, and follows it as it's edited.
+    pub(crate) link_is_auto: bool,
+    /// The text color, or none for the reader's own.
+    pub(crate) color: Option<Rgb>,
+    /// The color behind the text.
+    pub(crate) highlight: Option<Rgb>,
+    pub(crate) size: TextSize,
+    pub(crate) family: FontFamily,
+    /// The alignment of the paragraph the character is in, which all of its characters share:
+    /// that of its first character after any list or quote marker.
+    pub(crate) align: Alignment,
+    /// The image an image placeholder shows.
+    pub(crate) image: Option<Arc<InlineImage>>,
+}
+
+/// A color as `0xRRGGBB`.
+pub(crate) type Rgb = u32;
+
+/// The text sizes the composer offers. Mail goes out with CSS size keywords, as other
+/// composers' `<font size>` steps do, so each reader scales them from their own normal size.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TextSize {
+    Small,
+    #[default]
+    Normal,
+    Large,
+    Huge,
+}
+
+impl TextSize {
+    pub(crate) const ALL: [Self; 4] = [Self::Small, Self::Normal, Self::Large, Self::Huge];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Normal => "normal",
+            Self::Large => "large",
+            Self::Huge => "huge",
+        }
+    }
+
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|size| size.name() == name)
+    }
+
+    /// The CSS keyword sent for it: 13, 24 and 32 pixels against the usual 16, as `<font
+    /// size>` 2, 5 and 6 are.
+    fn css(self) -> Option<&'static str> {
+        match self {
+            Self::Small => Some("small"),
+            Self::Normal => None,
+            Self::Large => Some("x-large"),
+            Self::Huge => Some("xx-large"),
+        }
+    }
+
+    fn from_css(value: &str) -> Option<Self> {
+        [Self::Small, Self::Large, Self::Huge]
+            .into_iter()
+            .find(|size| size.css() == Some(value))
+    }
+
+    /// Its size against normal text, as the keywords it's sent with are.
+    pub(crate) fn scale(self) -> f32 {
+        match self {
+            Self::Small => 13.0 / 16.0,
+            Self::Normal => 1.0,
+            Self::Large => 1.5,
+            Self::Huge => 2.0,
+        }
+    }
+}
+
+/// The font families the composer offers: none, which leaves each reader their own font as
+/// plain text does, or a serif or monospace one, sent with the font lists Thunderbird uses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum FontFamily {
+    #[default]
+    Default,
+    Serif,
+    Monospace,
+}
+
+impl FontFamily {
+    pub(crate) const ALL: [Self; 3] = [Self::Default, Self::Serif, Self::Monospace];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Serif => "serif",
+            Self::Monospace => "monospace",
+        }
+    }
+
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|family| family.name() == name)
+    }
+
+    fn css(self) -> Option<&'static str> {
+        match self {
+            Self::Default => None,
+            Self::Serif => Some("Times New Roman, Times, serif"),
+            Self::Monospace => Some("Courier New, Courier, monospace"),
+        }
+    }
+
+    fn from_css(value: &str) -> Option<Self> {
+        [Self::Serif, Self::Monospace]
+            .into_iter()
+            .find(|family| family.css() == Some(value))
+    }
+}
+
+/// How a paragraph lines up.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Alignment {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+impl Alignment {
+    pub(crate) const ALL: [Self; 3] = [Self::Left, Self::Center, Self::Right];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Center => "center",
+            Self::Right => "right",
+        }
+    }
+
+    fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|align| align.name() == name)
+    }
+}
+
+/// `#rrggbb` as a color.
+fn parse_rgb(value: &str) -> Option<Rgb> {
+    let hex = value.strip_prefix('#')?;
+    (hex.len() == 6 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| Rgb::from_str_radix(hex, 16).ok())
+        .flatten()
+}
+
+/// A color as CSS writes it in mail: `#rrggbb`, which every reader takes.
+pub(crate) fn css_rgb(color: Rgb) -> String {
+    format!("#{color:06x}")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,6 +459,15 @@ pub struct ActiveMarks {
     pub underline: bool,
     pub strike: bool,
     pub code: bool,
+    /// The text color all of the selection shares, which may be none, or nothing when it
+    /// mixes several.
+    pub(crate) color: Option<Option<Rgb>>,
+    pub(crate) highlight: Option<Option<Rgb>>,
+    /// The size all of the selection has, or none when it has several.
+    pub(crate) size: Option<TextSize>,
+    pub(crate) family: Option<FontFamily>,
+    /// The alignment of the paragraph the selection starts in.
+    pub(crate) align: Alignment,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -172,6 +488,9 @@ pub struct RichComposeDocument {
     styles: Vec<ComposeStyleRun>,
     typing_style: CharacterStyle,
     typing_override: Option<usize>,
+    /// The font and size of the default text style from Settings, which an empty message starts
+    /// in and removing formatting returns to.
+    base: CharacterStyle,
     selection: (i32, i32),
     undo: VecDeque<EditTransaction>,
     redo: VecDeque<EditTransaction>,
@@ -181,6 +500,8 @@ pub struct RichComposeDocument {
     text_changes: VecDeque<TextChange>,
     /// Positions in the text from this revision on can be followed through `text_changes`.
     text_changes_since: u64,
+    /// The revision when it was last opened or saved, to tell whether it changed since.
+    saved_revision: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -200,6 +521,43 @@ impl RichComposeDocument {
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Takes the text and formatting as they are for what was last opened or saved.
+    pub(crate) fn mark_saved(&mut self) {
+        self.saved_revision = self.revision;
+    }
+
+    /// Whether the text or its formatting changed since it was last opened or saved.
+    pub(crate) fn changed_since_saved(&self) -> bool {
+        self.revision != self.saved_revision
+    }
+
+    /// Opens a signature's HTML to write, the composer's own as it was and other HTML with
+    /// the formatting pasting keeps, with nothing to undo.
+    pub(crate) fn load_signature_html(&mut self, html: &str) -> ComposeSelection {
+        let selection = match signature_runs(html, &self.base) {
+            Some((text, styles)) => self.reopen(text, styles),
+            None => self.load("", 0, 0),
+        };
+        self.mark_saved();
+        selection
+    }
+
+    /// Sets the default text style's font and size. What's typed into an empty message starts
+    /// in it.
+    pub(crate) fn set_base_style(&mut self, family: FontFamily, size: TextSize) {
+        self.base = CharacterStyle {
+            family,
+            size,
+            ..CharacterStyle::default()
+        };
+        if self.text.is_empty() {
+            self.typing_style = CharacterStyle {
+                align: self.typing_style.align,
+                ..self.base.clone()
+            };
+        }
     }
 
     pub fn selection(&self) -> ComposeSelection {
@@ -357,9 +715,19 @@ impl RichComposeDocument {
                 std::slice::from_ref(&inserted),
             );
             let before = self.take_snapshot();
+            let marker_len = effective_text.len().saturating_sub(new_text.len());
             self.styles = styles;
             self.text = effective_text.into_owned();
+            if marker_len > 0 {
+                // The marker of a list item that Enter continues, which readers show in their
+                // usual text, as markers the toolbar adds come in.
+                let marker_end = valid_offset(&self.text, cursor);
+                self.edit_styles(marker_end - marker_len, marker_end, |style| {
+                    *style = CharacterStyle::default();
+                });
+            }
             self.auto_link_urls();
+            self.normalize_alignment(start..new_end);
             self.bump_revision();
             let selection = self.update_selection_internal(anchor, cursor, false);
             self.commit_edit_with_key(before, key_text);
@@ -386,17 +754,7 @@ impl RichComposeDocument {
         self.selection = (to_i32(anchor), to_i32(cursor));
 
         if anchor == cursor && self.typing_override != Some(cursor) {
-            self.typing_style = if self.text[..cursor]
-                .char_indices()
-                .next_back()
-                .is_some_and(|(_, character)| character != '\n')
-            {
-                self.style_at(cursor.saturating_sub(1))
-                    .cloned()
-                    .unwrap_or_default()
-            } else {
-                self.style_at(cursor).cloned().unwrap_or_default()
-            };
+            self.typing_style = self.typing_style_at(cursor);
             self.typing_override = None;
         } else if anchor != cursor {
             self.typing_override = None;
@@ -406,6 +764,48 @@ impl RichComposeDocument {
             start: to_i32(anchor),
             end: to_i32(cursor),
         }
+    }
+
+    /// The style of what's typed at `cursor`: that of the text before it, or at the start of a
+    /// line, list item or quote, of the text after it, past the marker. An empty last line goes
+    /// on in the style and alignment of the line above it, as pressing Enter does in a word
+    /// processor, but not in its link, and an empty message starts in the default text style.
+    fn typing_style_at(&self, cursor: usize) -> CharacterStyle {
+        // What's typed next to an image is text.
+        CharacterStyle {
+            image: None,
+            ..self.typing_style_near(cursor)
+        }
+    }
+
+    /// The style of the text around `cursor`, which typing there follows.
+    fn typing_style_near(&self, cursor: usize) -> CharacterStyle {
+        let line_start = self.text[..cursor].rfind('\n').map_or(0, |index| index + 1);
+        let line_end = self.text[cursor..]
+            .find('\n')
+            .map_or(self.text.len(), |index| cursor + index);
+        let content_start = line_start
+            + block_prefix_text(&self.text[line_start..line_end]).map_or(0, |(_, bytes)| bytes);
+        if cursor > content_start {
+            return self
+                .style_at(cursor - 1)
+                .cloned()
+                .unwrap_or_else(|| self.base.clone());
+        }
+        if let Some(style) = self.style_at(content_start) {
+            return style.clone();
+        }
+        line_start
+            .checked_sub(1)
+            .and_then(|line_end_above| self.style_at(line_end_above))
+            .map_or_else(
+                || self.base.clone(),
+                |style| CharacterStyle {
+                    link: None,
+                    link_is_auto: false,
+                    ..style.clone()
+                },
+            )
     }
 
     pub fn insert_text(&mut self, value: &str) -> ComposeSelection {
@@ -431,6 +831,7 @@ impl RichComposeDocument {
         self.styles = styles;
         self.text = text;
         self.auto_link_urls();
+        self.normalize_alignment(start..start + value.len());
         self.bump_revision();
         let caret = start.saturating_add(value.len());
         let selection = self.update_selection(to_i32(caret), to_i32(caret));
@@ -448,6 +849,248 @@ impl RichComposeDocument {
         caret: usize,
     ) -> ComposeSelection {
         self.replace_styled(range, text, CharacterStyle::default(), caret)
+    }
+
+    /// Pastes HTML from the clipboard over the selection, as one undoable edit with the caret
+    /// after it: text copied from a message being written as it was, and HTML from elsewhere
+    /// with the formatting `compose_paste` keeps. `None` when it holds no text, for the plain
+    /// text to go in instead.
+    pub fn paste_html(&mut self, html: &str) -> Option<ComposeSelection> {
+        let (mut text, mut runs) = if html.contains(COPIED_MARK) {
+            import_body_html(html)
+        } else {
+            crate::compose_paste::styled_text(html, &self.base)
+        }
+        .filter(|(text, _)| !text.trim().is_empty())?;
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let (start, end) = ordered(anchor, cursor);
+        // A list or quote marker belongs at the start of a line.
+        let line_start = self.text[..start].rfind('\n').map_or(0, |index| index + 1);
+        let first_line = &text[..text.find('\n').unwrap_or(text.len())];
+        if start != line_start
+            && let Some((_, marker)) = block_prefix_text(first_line)
+        {
+            text.drain(..marker);
+            runs.retain_mut(|run| {
+                run.range =
+                    run.range.start.saturating_sub(marker)..run.range.end.saturating_sub(marker);
+                !run.range.is_empty()
+            });
+        }
+        if text.is_empty() {
+            return None;
+        }
+        let caret = start + text.len();
+        Some(self.replace_runs(start..end, &text, &runs, caret))
+    }
+
+    /// Swaps the signature block `old`, which the text holds once, for the signature `html`
+    /// under a `-- ` line, in its formatting or as `plain` text, or puts that block at `at` when
+    /// there's no old one, as one undoable edit that leaves the caret where it was. Returns the
+    /// block it put in, which marks the signature for the next swap, or `None` when `html` holds
+    /// no text.
+    pub(crate) fn replace_signature(
+        &mut self,
+        old: Option<&str>,
+        at: usize,
+        html: Option<&str>,
+        plain: bool,
+    ) -> (ComposeSelection, Option<String>) {
+        let range =
+            match old.and_then(|old| self.text.find(old).map(|start| start..start + old.len())) {
+                Some(range) => range,
+                None => {
+                    let at = valid_offset(&self.text, to_i32(at));
+                    at..at
+                }
+            };
+        let signature =
+            html.and_then(|html| signature_runs(html, &self.base))
+                .map(|(text, runs)| {
+                    // A signature takes the message's font and size where it names none, as mail
+                    // apps' signatures match the default message font.
+                    let runs = runs
+                        .into_iter()
+                        .map(|mut run| {
+                            if run.style.family == FontFamily::Default {
+                                run.style.family = self.base.family;
+                            }
+                            if run.style.size == TextSize::Normal {
+                                run.style.size = self.base.size;
+                            }
+                            run
+                        })
+                        .collect::<Vec<_>>();
+                    if !plain {
+                        return (text, runs);
+                    }
+                    // In plain text, as plain text writes links and pictures.
+                    let (text, _) = plain_text_of(&text, &runs, false, 0);
+                    let run = ComposeStyleRun {
+                        range: 0..text.len(),
+                        style: self.base.clone(),
+                    };
+                    (text, vec![run])
+                });
+        let mut block = String::new();
+        let mut runs = Vec::new();
+        if let Some((text, signature_runs)) = signature {
+            block.push_str(SIGNATURE_SEPARATOR);
+            runs.push(ComposeStyleRun {
+                range: 0..SIGNATURE_SEPARATOR.len(),
+                style: self.base.clone(),
+            });
+            let shift = block.len();
+            block.push_str(&text);
+            runs.extend(signature_runs.into_iter().map(|run| ComposeStyleRun {
+                range: run.range.start + shift..run.range.end + shift,
+                style: run.style,
+            }));
+        }
+        if range.is_empty() && block.is_empty() {
+            return (self.selection(), None);
+        }
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let follow = |offset: usize| {
+            if offset <= range.start {
+                offset
+            } else if offset >= range.end {
+                offset - range.len() + block.len()
+            } else {
+                range.start
+            }
+        };
+        let (anchor, cursor) = (follow(anchor), follow(cursor));
+        let selection = self.replace_runs(range, &block, &runs, cursor);
+        let selection = if anchor == cursor {
+            selection
+        } else {
+            self.update_selection(to_i32(anchor), to_i32(cursor))
+        };
+        (selection, (!block.is_empty()).then_some(block))
+    }
+
+    /// Puts `image` in place of the selection, as one undoable edit with the caret after it,
+    /// in the paragraph's alignment and any link the text there has.
+    pub(crate) fn insert_image(&mut self, image: InlineImage) -> ComposeSelection {
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let (start, end) = ordered(anchor, cursor);
+        let style = CharacterStyle {
+            image: Some(Arc::new(image)),
+            ..self.typing_style.clone()
+        };
+        let mut placeholder = [0; 4];
+        let text = IMAGE_PLACEHOLDER.encode_utf8(&mut placeholder);
+        let caret = start + text.len();
+        self.replace_styled(start..end, text, style, caret)
+    }
+
+    /// The image the selection holds, when it holds that and nothing else, for its controls.
+    pub(crate) fn selected_image(&self) -> Option<&Arc<InlineImage>> {
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let (start, end) = ordered(anchor, cursor);
+        let mut selected = self.text[start..end].chars();
+        if selected.next() != Some(IMAGE_PLACEHOLDER) || selected.next().is_some() {
+            return None;
+        }
+        self.style_at(start)?.image.as_ref()
+    }
+
+    /// The images in the text, in order.
+    pub(crate) fn images(&self) -> impl Iterator<Item = &Arc<InlineImage>> {
+        self.styles
+            .iter()
+            .filter_map(|run| run.style.image.as_ref())
+    }
+
+    /// The text as mail read as plain text gets it: each link followed by its address where its
+    /// text doesn't show it, and each picture named in its place.
+    pub(crate) fn plain_text(&self) -> String {
+        plain_text_of(&self.text, &self.styles, true, 0).0
+    }
+
+    /// The text in `range` as [`Self::make_plain`] writes it.
+    pub(crate) fn plain_text_in(&self, range: Range<usize>) -> String {
+        let range = valid_offset(&self.text, to_i32(range.start))
+            ..valid_offset(&self.text, to_i32(range.end));
+        let runs = self
+            .styles
+            .iter()
+            .filter_map(|run| {
+                let start = run.range.start.max(range.start);
+                let end = run.range.end.min(range.end);
+                (start < end).then(|| ComposeStyleRun {
+                    range: start - range.start..end - range.start,
+                    style: run.style.clone(),
+                })
+            })
+            .collect::<Vec<_>>();
+        plain_text_of(&self.text[range], &runs, false, 0).0
+    }
+
+    /// Takes all formatting out of the text, as one undoable edit that keeps the caret in its
+    /// place: links keep their addresses after their text, and pictures leave their alt text.
+    /// `None` when the text has no formatting to take out.
+    pub(crate) fn make_plain(&mut self) -> Option<ComposeSelection> {
+        if self
+            .styles
+            .iter()
+            .all(|run| is_plain_style(&run.style, &self.base))
+        {
+            return None;
+        }
+        let caret = valid_offset(&self.text, self.selection.1);
+        let (text, caret) = plain_text_of(&self.text, &self.styles, false, caret);
+        let end = self.text.len();
+        Some(self.replace_styled(0..end, &text, self.base.clone(), caret))
+    }
+
+    /// The text as plain text shows it, each image as its description.
+    pub(crate) fn text_with_image_descriptions(&self) -> String {
+        let mut text = String::with_capacity(self.text.len());
+        let mut copied = 0;
+        for (offset, _) in self.text.match_indices(IMAGE_PLACEHOLDER) {
+            if let Some(image) = self.style_at(offset).and_then(|style| style.image.as_ref()) {
+                text.push_str(&self.text[copied..offset]);
+                text.push_str(&image.description());
+                copied = offset + IMAGE_PLACEHOLDER.len_utf8();
+            }
+        }
+        text.push_str(&self.text[copied..]);
+        text
+    }
+
+    /// The selection as HTML and as plain text, for the clipboard: the HTML pastes back into a
+    /// message as it was, and other apps read either.
+    pub fn selection_html(&self) -> Option<(String, String)> {
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let (start, end) = ordered(anchor, cursor);
+        if start == end {
+            return None;
+        }
+        let part = RichComposeDocument {
+            text: self.text[start..end].to_owned(),
+            styles: self
+                .styles
+                .iter()
+                .filter(|run| run.range.start < end && run.range.end > start)
+                .map(|run| ComposeStyleRun {
+                    range: run.range.start.max(start) - start..run.range.end.min(end) - start,
+                    style: run.style.clone(),
+                })
+                .collect(),
+            ..Self::default()
+        };
+        let html = part.body_html()?;
+        Some((
+            format!("{COPIED_MARK}{html}"),
+            with_plain_text_quotes(&part.text),
+        ))
     }
 
     /// Replaces the word at `range` with `text` in the word's formatting, as one undoable
@@ -469,12 +1112,19 @@ impl RichComposeDocument {
             range: 0..text.len(),
             style,
         };
-        let styles = replaced_style_runs(
-            &self.styles,
-            range.start,
-            range.end,
-            std::slice::from_ref(&inserted),
-        );
+        self.replace_runs(range, text, std::slice::from_ref(&inserted), caret)
+    }
+
+    /// Replaces `range` with `text` in the styles of `runs`, which cover it, as one undoable
+    /// edit, and puts the caret at `caret`.
+    fn replace_runs(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        runs: &[ComposeStyleRun],
+        caret: usize,
+    ) -> ComposeSelection {
+        let styles = replaced_style_runs(&self.styles, range.start, range.end, runs);
         let mut replaced = String::with_capacity(self.text.len() - range.len() + text.len());
         replaced.push_str(&self.text[..range.start]);
         replaced.push_str(text);
@@ -484,6 +1134,7 @@ impl RichComposeDocument {
         self.styles = styles;
         self.text = replaced;
         self.auto_link_urls();
+        self.normalize_alignment(range.start..range.start + text.len());
         self.bump_revision();
         let selection = self.update_selection(to_i32(caret), to_i32(caret));
         self.commit_edit(before);
@@ -508,16 +1159,83 @@ impl RichComposeDocument {
         let cursor = valid_offset(&self.text, cursor);
         let (start, end) = ordered(anchor, cursor);
 
-        match kind {
-            "bold" => self.toggle_mark(BOLD, start, end),
-            "italic" => self.toggle_mark(ITALIC, start, end),
-            "underline" => self.toggle_mark(UNDERLINE, start, end),
-            "strike" => self.toggle_mark(STRIKE, start, end),
-            "code" => self.toggle_mark(CODE, start, end),
-            "bullet" => return self.toggle_block(BlockKind::Bullet, start, end),
-            "number" => return self.toggle_block(BlockKind::Number, start, end),
-            "quote" => return self.toggle_block(BlockKind::Quote, start, end),
-            _ => {}
+        match kind.split_once(':') {
+            Some(("color", value)) => {
+                let color = parse_rgb(value);
+                self.set_text_style(start, end, |style| style.color = color);
+            }
+            Some(("highlight", value)) => {
+                let highlight = parse_rgb(value);
+                self.set_text_style(start, end, |style| style.highlight = highlight);
+            }
+            Some(("size", value)) => {
+                if let Some(size) = TextSize::from_name(value) {
+                    self.set_text_style(start, end, |style| style.size = size);
+                }
+            }
+            Some(("family", value)) => {
+                if let Some(family) = FontFamily::from_name(value) {
+                    self.set_text_style(start, end, |style| style.family = family);
+                }
+            }
+            Some(("align", value)) => {
+                if let Some(align) = Alignment::from_name(value) {
+                    self.set_alignment(start, end, align);
+                }
+            }
+            Some(("image-size", value)) => {
+                if let Some(size) = ImageSize::from_name(value) {
+                    self.edit_images(start, end, |image| {
+                        if size.fits(image.width) {
+                            image.shown_width = size.width();
+                        }
+                    });
+                }
+            }
+            // A width from dragging the image's corner, in CSS pixels.
+            Some(("image-width", value)) => {
+                if let Ok(width) = value.trim().parse::<u32>() {
+                    self.edit_images(start, end, |image| {
+                        image.shown_width =
+                            (width < image.width).then_some(width.max(MIN_IMAGE_WIDTH));
+                    });
+                }
+            }
+            Some(("image-alt", value)) => {
+                let alt: Arc<str> = value
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .into();
+                self.edit_images(start, end, |image| image.alt = alt.clone());
+            }
+            _ => match kind {
+                "bold" => self.toggle_mark(BOLD, start, end),
+                "italic" => self.toggle_mark(ITALIC, start, end),
+                "underline" => self.toggle_mark(UNDERLINE, start, end),
+                "strike" => self.toggle_mark(STRIKE, start, end),
+                "code" => self.toggle_mark(CODE, start, end),
+                // Back to the default text style, as Remove formatting leaves text in other
+                // composers: links and paragraphs' alignment stay.
+                "clear" => {
+                    let base = self.base.clone();
+                    self.set_text_style(start, end, |style| {
+                        *style = CharacterStyle {
+                            link: style.link.clone(),
+                            link_is_auto: style.link_is_auto,
+                            align: style.align,
+                            image: style.image.clone(),
+                            ..base.clone()
+                        };
+                    });
+                }
+                // What the selection holds goes, as a selected image's Remove button asks.
+                "delete" if start != end => return self.insert_text(""),
+                "bullet" => return self.toggle_block(BlockKind::Bullet, start, end),
+                "number" => return self.toggle_block(BlockKind::Number, start, end),
+                "quote" => return self.toggle_block(BlockKind::Quote, start, end),
+                _ => {}
+            },
         }
 
         self.selection = (to_i32(start), to_i32(end));
@@ -577,11 +1295,11 @@ impl RichComposeDocument {
         let anchor = valid_offset(&self.text, self.selection.0);
         let cursor = valid_offset(&self.text, self.selection.1);
         let (start, end) = ordered(anchor, cursor);
-        let marks = if start == end {
-            self.typing_style.marks
+        let typing = std::slice::from_ref(&self.typing_style);
+        let selected: Vec<&CharacterStyle> = if start == end {
+            typing.iter().collect()
         } else {
-            let mut relevant = self
-                .styles
+            self.styles
                 .iter()
                 .filter(|run| run.range.start < end && run.range.end > start)
                 .filter(|run| {
@@ -589,19 +1307,53 @@ impl RichComposeDocument {
                         .chars()
                         .any(|character| !character.is_whitespace())
                 })
-                .map(|run| run.style.marks);
-            relevant
-                .next()
-                .map(|first| relevant.fold(first, |common, value| common & value))
-                .unwrap_or_default()
+                .map(|run| &run.style)
+                .collect()
         };
+        let marks = selected
+            .iter()
+            .map(|style| style.marks)
+            .reduce(|common, value| common & value)
+            .unwrap_or_default();
+        /// The value every selected character shares, if they share one.
+        fn shared<T: PartialEq + Copy>(
+            styles: &[&CharacterStyle],
+            value: impl Fn(&CharacterStyle) -> T,
+        ) -> Option<T> {
+            let first = value(styles.first()?);
+            styles
+                .iter()
+                .all(|style| value(style) == first)
+                .then_some(first)
+        }
+        let line_start = self.text[..start].rfind('\n').map_or(0, |index| index + 1);
         ActiveMarks {
             bold: marks & BOLD != 0,
             italic: marks & ITALIC != 0,
             underline: marks & UNDERLINE != 0,
             strike: marks & STRIKE != 0,
             code: marks & CODE != 0,
+            color: shared(&selected, |style| style.color),
+            highlight: shared(&selected, |style| style.highlight),
+            size: shared(&selected, |style| style.size),
+            family: shared(&selected, |style| style.family),
+            align: if start == end && line_start == self.text.len() {
+                self.typing_style.align
+            } else {
+                self.paragraph_alignment(line_start)
+            },
         }
+    }
+
+    /// The alignment of the paragraph starting at `line_start`: that of its first character
+    /// after any list or quote marker, or of its line end when it holds nothing else.
+    pub(crate) fn paragraph_alignment(&self, line_start: usize) -> Alignment {
+        let line = &self.text[line_start..];
+        let line = &line[..line.find('\n').unwrap_or(line.len())];
+        let marker = block_prefix_text(line).map_or(0, |(_, bytes)| bytes);
+        self.style_at(line_start + marker)
+            .or_else(|| self.style_at(line_start))
+            .map_or_else(Alignment::default, |style| style.align)
     }
 
     pub fn active_link(&self) -> Option<&str> {
@@ -667,17 +1419,44 @@ impl RichComposeDocument {
     }
 
     pub fn body_html(&self) -> Option<String> {
-        self.html_for(&self.text)
+        self.html_for(&self.text, &self.styles)
     }
 
-    /// The HTML for the text without the blank lines it ends with: what the
-    /// user wrote, above the original a reply quotes.
-    pub fn body_html_above_quote(&self) -> Option<String> {
-        self.html_for(self.text.trim_end_matches(['\r', '\n']))
+    /// [`Self::body_html`], or the HTML for what the user wrote above the original a reply
+    /// quotes, without the blank lines the text ends with, with the images `file` gives
+    /// another file for written with that one, as photos go out shrunk. They show at the same
+    /// size.
+    pub(crate) fn body_html_with(
+        &self,
+        above_quote: bool,
+        file: impl Fn(&InlineImage) -> Option<Arc<[u8]>>,
+    ) -> Option<String> {
+        let styles = self
+            .styles
+            .iter()
+            .map(|run| {
+                let mut run = run.clone();
+                if let Some(image) = &run.style.image
+                    && let Some(data) = file(image)
+                {
+                    run.style.image = Some(Arc::new(InlineImage {
+                        data,
+                        ..InlineImage::clone(image)
+                    }));
+                }
+                run
+            })
+            .collect::<Vec<_>>();
+        let text = if above_quote {
+            self.text.trim_end_matches(['\r', '\n'])
+        } else {
+            &self.text
+        };
+        self.html_for(text, &styles)
     }
 
-    /// The HTML for `text`, the document's text or the start of it.
-    fn html_for(&self, text: &str) -> Option<String> {
+    /// The HTML for `text`, the document's text or the start of it, in `styles`.
+    fn html_for(&self, text: &str, styles: &[ComposeStyleRun]) -> Option<String> {
         if text.trim().is_empty() {
             return None;
         }
@@ -692,6 +1471,7 @@ impl RichComposeDocument {
             // Text pasted from Windows ends its lines with CRLF.
             let end = line_start + line.strip_suffix('\r').unwrap_or(line).len();
             let content = (line_start + skip).min(end)..end;
+            let align = self.paragraph_alignment(line_start);
             match block.map(|(block, _)| block) {
                 Some(LineBlock::Bullet) => {
                     if open != Some(OpenHtmlBlock::Bullets) {
@@ -699,8 +1479,8 @@ impl RichComposeDocument {
                         html.push_str("<ul>");
                         open = Some(OpenHtmlBlock::Bullets);
                     }
-                    html.push_str("<li>");
-                    append_inline_html(&mut html, &self.text, &self.styles, content);
+                    append_list_item_start(&mut html, align);
+                    append_inline_html(&mut html, &self.text, styles, content);
                     html.push_str("</li>");
                 }
                 Some(LineBlock::Number(number)) => {
@@ -718,8 +1498,8 @@ impl RichComposeDocument {
                         }
                     }
                     open = Some(OpenHtmlBlock::Numbers { next: number + 1 });
-                    html.push_str("<li>");
-                    append_inline_html(&mut html, &self.text, &self.styles, content);
+                    append_list_item_start(&mut html, align);
+                    append_inline_html(&mut html, &self.text, styles, content);
                     html.push_str("</li>");
                 }
                 Some(LineBlock::Quote) => {
@@ -728,11 +1508,11 @@ impl RichComposeDocument {
                         html.push_str("<blockquote>");
                         open = Some(OpenHtmlBlock::Quote);
                     }
-                    append_line_html(&mut html, &self.text, &self.styles, content);
+                    append_line_html(&mut html, &self.text, styles, content, align);
                 }
                 None => {
                     close_html_block(&mut html, &mut open);
-                    append_line_html(&mut html, &self.text, &self.styles, content);
+                    append_line_html(&mut html, &self.text, styles, content, align);
                 }
             }
             line_start += line.len() + 1;
@@ -751,6 +1531,15 @@ impl RichComposeDocument {
         Some(self.reopen(text.to_owned(), styles))
     }
 
+    /// Reopens HTML that another mail app wrote, for a message edited as new, with the
+    /// formatting and images pasting keeps. Returns `None`, leaving the document untouched,
+    /// when it holds no text.
+    pub fn load_foreign_html(&mut self, html: &str) -> Option<ComposeSelection> {
+        let (text, styles) = crate::compose_paste::styled_text(html, &self.base)
+            .filter(|(text, _)| !text.trim().is_empty())?;
+        Some(self.reopen(text, styles))
+    }
+
     /// Reopens the start of `text` that `html` holds, up to a line break:
     /// what the user wrote above the original a saved reply quotes. Returns
     /// how much of `text` that is, or `None`, leaving the document
@@ -762,7 +1551,8 @@ impl RichComposeDocument {
     }
 
     /// Loads `text` formatted with `styles` as a reopened message: nothing
-    /// to undo, and the caret at its end.
+    /// to undo, and the caret at its end. What's written next keeps the
+    /// default text style.
     fn reopen(&mut self, text: String, styles: Vec<ComposeStyleRun>) -> ComposeSelection {
         let revision = self.revision.wrapping_add(1);
         *self = Self {
@@ -770,9 +1560,11 @@ impl RichComposeDocument {
             styles,
             revision,
             text_changes_since: revision,
+            base: std::mem::take(&mut self.base),
             ..Self::default()
         };
         self.auto_link_urls();
+        self.normalize_alignment(0..self.text.len());
         let end = to_i32(self.text.len());
         self.update_selection(end, end)
     }
@@ -806,6 +1598,118 @@ impl RichComposeDocument {
         });
         self.bump_revision();
         self.commit_style_edit(start_byte, before);
+    }
+
+    /// Changes the images from `start_byte` to `end_byte` as one undoable edit.
+    fn edit_images(
+        &mut self,
+        start_byte: usize,
+        end_byte: usize,
+        mut edit: impl FnMut(&mut InlineImage),
+    ) {
+        // An edit that changes no image leaves nothing to undo.
+        let changes = self
+            .styles
+            .iter()
+            .filter(|run| run.range.start < end_byte && run.range.end > start_byte)
+            .filter_map(|run| run.style.image.as_ref())
+            .any(|image| {
+                let mut changed = InlineImage::clone(image);
+                edit(&mut changed);
+                changed != **image
+            });
+        if !changes {
+            return;
+        }
+        self.set_text_style(start_byte, end_byte, |style| {
+            if let Some(image) = &style.image {
+                let mut changed = InlineImage::clone(image);
+                edit(&mut changed);
+                if changed != **image {
+                    style.image = Some(Arc::new(changed));
+                }
+            }
+        });
+    }
+
+    /// Changes the style of the text from `start_byte` to `end_byte` as one undoable edit, or
+    /// of what's typed next at a caret.
+    fn set_text_style(
+        &mut self,
+        start_byte: usize,
+        end_byte: usize,
+        mut edit: impl FnMut(&mut CharacterStyle),
+    ) {
+        if start_byte == end_byte {
+            edit(&mut self.typing_style);
+            self.typing_override = Some(start_byte);
+            self.bump_revision();
+            return;
+        }
+        let before = self.begin_style_edit(start_byte..end_byte);
+        self.typing_override = None;
+        self.edit_styles(start_byte, end_byte, edit);
+        self.bump_revision();
+        self.commit_style_edit(start_byte, before);
+    }
+
+    /// Aligns every paragraph from `start_byte` to `end_byte`, or the caret's, as one undoable
+    /// edit. An empty last line has nothing to hold it, so what's typed there takes it.
+    fn set_alignment(&mut self, start_byte: usize, end_byte: usize, align: Alignment) {
+        let first = self.text[..start_byte]
+            .rfind('\n')
+            .map_or(0, |index| index + 1);
+        // A selection that ends where a paragraph starts leaves that paragraph alone.
+        let end_probe = if end_byte > start_byte && self.text[..end_byte].ends_with('\n') {
+            end_byte - 1
+        } else {
+            end_byte
+        };
+        let last = self.text[end_probe..]
+            .find('\n')
+            .map_or(self.text.len(), |index| end_probe + index + 1);
+        self.typing_style.align = align;
+        if first == last {
+            self.typing_override = Some(start_byte);
+            self.bump_revision();
+            return;
+        }
+        let before = self.begin_style_edit(first..last);
+        self.edit_styles(first, last, |style| style.align = align);
+        self.bump_revision();
+        self.commit_style_edit(first, before);
+    }
+
+    /// Gives every character of the paragraphs from `range.start` to `range.end` its
+    /// paragraph's alignment, after an edit that may have joined or split them.
+    fn normalize_alignment(&mut self, range: Range<usize>) {
+        let mut line_start = self.text[..range.start.min(self.text.len())]
+            .rfind('\n')
+            .map_or(0, |index| index + 1);
+        let mut changes = Vec::new();
+        while line_start < self.text.len() {
+            let line_end = self.text[line_start..]
+                .find('\n')
+                .map_or(self.text.len(), |index| line_start + index + 1);
+            let align = self.paragraph_alignment(line_start);
+            let first = self
+                .styles
+                .partition_point(|run| run.range.end <= line_start);
+            if self.styles[first..]
+                .iter()
+                .take_while(|run| run.range.start < line_end)
+                .any(|run| run.style.align != align)
+            {
+                changes.push((line_start..line_end, align));
+            }
+            if line_end > range.end {
+                break;
+            }
+            line_start = line_end;
+        }
+        for (line, align) in changes {
+            self.edit_styles(line.start, line.end, |style| style.align = align);
+        }
     }
 
     fn toggle_block(
@@ -857,9 +1761,13 @@ impl RichComposeDocument {
         let mut end = 0;
         for (index, line) in before.text.split('\n').enumerate() {
             if index > 0 {
+                // A line end keeps its style, which holds an empty paragraph's alignment.
                 let byte = text.len();
                 text.push('\n');
-                push_style_run(&mut styles, byte..text.len(), CharacterStyle::default());
+                let style = style_at_runs(&before.styles, source_start - 1)
+                    .cloned()
+                    .unwrap_or_default();
+                push_style_run(&mut styles, byte..text.len(), style);
             }
             if index == start_line {
                 start = text.len();
@@ -898,6 +1806,8 @@ impl RichComposeDocument {
         }
         self.text = text;
         self.styles = styles;
+        // Markers come in plain, and take their paragraphs' alignment.
+        self.normalize_alignment(start..end);
         self.bump_revision();
         self.selection = (to_i32(start), to_i32(end));
         self.commit_edit(before);
@@ -1534,19 +2444,96 @@ fn close_html_block(html: &mut String, open: &mut Option<OpenHtmlBlock>) {
     }
 }
 
+/// A centered or right-aligned paragraph is written with both the `align` attribute and
+/// `text-align`, as Outlook writes it: readers that drop one keep the other.
 fn append_line_html(
     output: &mut String,
     text: &str,
     styles: &[ComposeStyleRun],
     range: Range<usize>,
+    align: Alignment,
 ) {
-    output.push_str("<div>");
+    match align {
+        Alignment::Left => output.push_str("<div>"),
+        align => {
+            output.push_str("<div align=\"");
+            output.push_str(align.name());
+            output.push_str("\" style=\"text-align:");
+            output.push_str(align.name());
+            output.push_str("\">");
+        }
+    }
     if range.is_empty() {
         output.push_str("<br>");
     } else {
         append_inline_html(output, text, styles, range);
     }
     output.push_str("</div>");
+}
+
+/// An image as `<img>`, with its file in a `data:` URI, which goes out as an inline part. Its
+/// size goes in its attributes and in CSS, as some readers take only one, and it shrinks to fit
+/// narrower windows.
+fn append_image_html(output: &mut String, image: &InlineImage) {
+    use base64::Engine;
+    use std::fmt::Write;
+    let (width, height) = image.shown_size();
+    output.push_str("<img src=\"data:");
+    output.push_str(image.mime_type);
+    output.push_str(";base64,");
+    base64::engine::general_purpose::STANDARD.encode_string(&image.data, output);
+    output.push_str("\" alt=\"");
+    for character in image.alt.chars() {
+        append_html_char(output, character);
+    }
+    let _ = write!(
+        output,
+        "\" width=\"{width}\" height=\"{height}\" style=\"{}\">",
+        image_css(width)
+    );
+}
+
+/// The CSS for an image shown `width` pixels across.
+fn image_css(width: u32) -> String {
+    format!("width:{width}px;max-width:100%;height:auto")
+}
+
+fn append_list_item_start(output: &mut String, align: Alignment) {
+    match align {
+        Alignment::Left => output.push_str("<li>"),
+        align => {
+            output.push_str("<li style=\"text-align:");
+            output.push_str(align.name());
+            output.push_str("\">");
+        }
+    }
+}
+
+/// The CSS for a run's color, highlight, size and font, if it has any: what goes in the
+/// `style` of the span around it. Colors are `#rrggbb`, which every reader takes.
+fn run_css(style: &CharacterStyle) -> Option<String> {
+    let mut css = String::new();
+    let mut declare = |property: &str, value: &str| {
+        if !css.is_empty() {
+            css.push(';');
+        }
+        css.push_str(property);
+        css.push(':');
+        css.push_str(value);
+    };
+    if let Some(color) = style.color {
+        declare("color", &css_rgb(color));
+    }
+    if let Some(highlight) = style.highlight {
+        declare("background-color", &css_rgb(highlight));
+    }
+    if let Some(size) = style.size.css() {
+        declare("font-size", size);
+    }
+    if let Some(family) = style.family.css() {
+        declare("font-family", family);
+    }
+    (!css.is_empty()).then_some(css)
 }
 
 fn append_inline_html(
@@ -1594,6 +2581,26 @@ fn append_html_run(
         }
         output.push_str("\">");
     }
+    if let Some(image) = &style.image {
+        for character in text[range].chars() {
+            if character == IMAGE_PLACEHOLDER {
+                append_image_html(output, image);
+            } else {
+                append_html_char(output, character);
+            }
+        }
+        if style.link.is_some() {
+            output.push_str("</a>");
+        }
+        *after_space = false;
+        return;
+    }
+    let css = run_css(style);
+    if let Some(css) = &css {
+        output.push_str("<span style=\"");
+        output.push_str(css);
+        output.push_str("\">");
+    }
     let tags = [
         (BOLD, "strong"),
         (ITALIC, "em"),
@@ -1625,6 +2632,9 @@ fn append_html_run(
             output.push('>');
         }
     }
+    if css.is_some() {
+        output.push_str("</span>");
+    }
     if style.link.is_some() {
         output.push_str("</a>");
     }
@@ -1646,7 +2656,11 @@ enum HtmlToken {
         name: String,
         href: Option<String>,
         start: Option<String>,
-        styled: bool,
+        style: Option<String>,
+        align: Option<String>,
+        src: Option<String>,
+        alt: Option<String>,
+        width: Option<String>,
     },
     End(String),
     Text(String),
@@ -1673,7 +2687,11 @@ impl TokenSink for HtmlTokenSink {
                     name: tag.name.as_str().to_owned(),
                     href: attribute("href"),
                     start: attribute("start"),
-                    styled: attribute("style").is_some(),
+                    style: attribute("style"),
+                    align: attribute("align"),
+                    src: attribute("src"),
+                    alt: attribute("alt"),
+                    width: attribute("width"),
                 }
             }
             Token::CharacterTokens(text) => HtmlToken::Text(text.to_string()),
@@ -1712,6 +2730,8 @@ struct HtmlImport {
     styles: Vec<ComposeStyleRun>,
     marks: [u32; 5],
     links: Vec<Option<Arc<str>>>,
+    /// The styles of the spans the text is in, innermost last: none for a span without one.
+    spans: Vec<Option<SpanStyle>>,
     list: Option<ImportedList>,
     in_item: bool,
     in_quote: bool,
@@ -1719,6 +2739,57 @@ struct HtmlImport {
     line_open: bool,
     line_has_text: bool,
     pending_space: Option<CharacterStyle>,
+    /// The alignment of the paragraph being read, and of each line read so far.
+    align: Alignment,
+    line_aligns: Vec<Alignment>,
+}
+
+/// The color, highlight, size and font a span gives the text in it.
+#[derive(Clone, Copy, Default)]
+struct SpanStyle {
+    color: Option<Rgb>,
+    highlight: Option<Rgb>,
+    size: Option<TextSize>,
+    family: Option<FontFamily>,
+}
+
+impl SpanStyle {
+    /// The style `run_css` writes, or `None` for any other CSS.
+    fn from_saved_css(css: &str) -> Option<Self> {
+        let mut span = Self::default();
+        for declaration in css.split(';').filter(|part| !part.trim().is_empty()) {
+            let (property, value) = declaration.split_once(':')?;
+            let value = value.trim();
+            match property.trim() {
+                "color" => span.color = Some(parse_rgb(value)?),
+                "background-color" => span.highlight = Some(parse_rgb(value)?),
+                "font-size" => span.size = Some(TextSize::from_css(value)?),
+                "font-family" => span.family = Some(FontFamily::from_css(value)?),
+                _ => return None,
+            }
+        }
+        Some(span)
+    }
+}
+
+/// The alignment `append_line_html` writes for a paragraph, from its `align` attribute and
+/// `style`, or `None` for anything else.
+fn saved_alignment(align: Option<&str>, style: Option<&str>) -> Option<Alignment> {
+    let from_style = match style.map(str::trim) {
+        None => None,
+        Some(style) => {
+            let value = style.strip_prefix("text-align:")?.trim();
+            Some(Alignment::from_name(value).filter(|align| *align != Alignment::Left)?)
+        }
+    };
+    let from_attribute = match align {
+        None => None,
+        Some(value) => Some(Alignment::from_name(value.trim())?),
+    };
+    match (from_attribute, from_style) {
+        (Some(attribute), Some(style)) if attribute != style => None,
+        (attribute, style) => Some(style.or(attribute).unwrap_or_default()),
+    }
 }
 
 impl HtmlImport {
@@ -1728,11 +2799,60 @@ impl HtmlImport {
             .zip(self.marks)
             .filter(|(_, depth)| *depth > 0)
             .fold(0, |marks, (mark, _)| marks | mark);
+        let span = |value: fn(&SpanStyle) -> bool| {
+            self.spans.iter().rev().flatten().find(|span| value(span))
+        };
         CharacterStyle {
             marks,
             link: self.links.last().cloned().flatten(),
             link_is_auto: false,
+            color: span(|span| span.color.is_some()).and_then(|span| span.color),
+            highlight: span(|span| span.highlight.is_some()).and_then(|span| span.highlight),
+            size: span(|span| span.size.is_some())
+                .and_then(|span| span.size)
+                .unwrap_or_default(),
+            family: span(|span| span.family.is_some())
+                .and_then(|span| span.family)
+                .unwrap_or_default(),
+            align: Alignment::default(),
+            image: None,
         }
+    }
+
+    /// An image as `append_image_html` writes it.
+    fn image(
+        &mut self,
+        src: &str,
+        alt: Option<&str>,
+        width: Option<&str>,
+        style: Option<&str>,
+    ) -> Option<()> {
+        let mut image = InlineImage::from_data_uri(src, alt.unwrap_or_default())?;
+        let shown_width = match width {
+            Some(width) => width
+                .trim()
+                .parse::<u32>()
+                .ok()
+                .filter(|width| *width > 0)?,
+            None => image.width,
+        };
+        if style.is_some_and(|style| style.trim() != image_css(shown_width)) {
+            return None;
+        }
+        image.shown_width = (shown_width != image.width).then_some(shown_width);
+        if !self.line_open {
+            self.start_line();
+        }
+        if let Some(space) = self.pending_space.take() {
+            self.push(" ", space);
+        }
+        let style = CharacterStyle {
+            image: Some(Arc::new(image)),
+            ..self.style()
+        };
+        self.push(IMAGE_PLACEHOLDER.encode_utf8(&mut [0; 4]), style);
+        self.line_has_text = true;
+        Some(())
     }
 
     fn push(&mut self, text: &str, style: CharacterStyle) {
@@ -1746,6 +2866,7 @@ impl HtmlImport {
             self.push("\n", CharacterStyle::default());
         }
         self.lines += 1;
+        self.line_aligns.push(self.align);
         self.line_open = true;
         self.line_has_text = false;
         self.pending_space = None;
@@ -1789,12 +2910,48 @@ impl HtmlImport {
     fn token(&mut self, token: HtmlToken) -> Option<()> {
         match token {
             HtmlToken::Text(text) => self.characters(&text),
-            HtmlToken::Start { styled: true, .. } => return None,
             HtmlToken::Start {
-                name, href, start, ..
+                name,
+                src,
+                alt,
+                width,
+                style,
+                align,
+                ..
+            } if name == "img" => {
+                if align.is_some() {
+                    return None;
+                }
+                self.image(&src?, alt.as_deref(), width.as_deref(), style.as_deref())?;
+            }
+            HtmlToken::Start {
+                name, style, align, ..
+            } if (style.is_some() || align.is_some())
+                && !matches!(name.as_str(), "span" | "div" | "li") =>
+            {
+                return None;
+            }
+            HtmlToken::Start {
+                name,
+                href,
+                start,
+                style,
+                align,
+                ..
             } => match name.as_str() {
-                "html" | "head" | "body" | "meta" | "span" => {}
-                "div" if !self.in_item => self.end_line(),
+                "html" | "head" | "body" | "meta" => {}
+                "span" => {
+                    let span = match style {
+                        Some(css) => Some(SpanStyle::from_saved_css(&css)?),
+                        None => None,
+                    };
+                    self.spans.push(span);
+                }
+                "div" if !self.in_item => {
+                    self.end_line();
+                    self.align = saved_alignment(align.as_deref(), style.as_deref())?;
+                }
+                "div" if style.is_some() || align.is_some() => return None,
                 "br" if !self.in_item => {
                     if !self.line_open {
                         self.start_line();
@@ -1812,7 +2969,11 @@ impl HtmlImport {
                 }
                 "li" => {
                     let list = self.list?;
+                    if align.is_some() {
+                        return None;
+                    }
                     self.end_line();
+                    self.align = saved_alignment(None, style.as_deref())?;
                     self.start_line();
                     if list.ordered {
                         self.push(&format!("{}. ", list.next), CharacterStyle::default());
@@ -1844,11 +3005,18 @@ impl HtmlImport {
                 tag => self.marks[imported_mark(tag)?] += 1,
             },
             HtmlToken::End(name) => match name.as_str() {
-                "html" | "head" | "body" | "meta" | "span" | "br" => {}
-                "div" => self.end_line(),
+                "html" | "head" | "body" | "meta" | "br" => {}
+                "span" => {
+                    self.spans.pop();
+                }
+                "div" => {
+                    self.end_line();
+                    self.align = Alignment::default();
+                }
                 "li" => {
                     self.in_item = false;
                     self.end_line();
+                    self.align = Alignment::default();
                 }
                 "ul" | "ol" => {
                     self.list = None;
@@ -1875,6 +3043,31 @@ impl HtmlImport {
         if self.lines == 0 {
             return None;
         }
+        // Each line, with the line end after it, takes its paragraph's alignment.
+        let mut line_start = 0;
+        for align in std::mem::take(&mut self.line_aligns) {
+            let line_end = self.text[line_start..]
+                .find('\n')
+                .map_or(self.text.len(), |index| line_start + index + 1);
+            if align != Alignment::default() {
+                split_style_run_at(&mut self.styles, line_start);
+                split_style_run_at(&mut self.styles, line_end);
+                for run in &mut self.styles {
+                    if run.range.start >= line_start && run.range.end <= line_end {
+                        run.style.align = align;
+                    }
+                }
+            }
+            line_start = line_end;
+        }
+        self.styles.dedup_by(|next, previous| {
+            if previous.range.end == next.range.start && previous.style == next.style {
+                previous.range.end = next.range.end;
+                true
+            } else {
+                false
+            }
+        });
         // A link written over its own address was found by `auto_link_urls`
         // where it would link that address again; anywhere else the user
         // set it by hand.
@@ -1901,6 +3094,146 @@ impl HtmlImport {
         }
         Some((self.text, self.styles))
     }
+}
+
+/// A signature's text and formatting: the composer's own HTML as it wrote it, and other HTML
+/// with the formatting pasting keeps, without the blank space around it. `None` when it holds
+/// no text.
+fn signature_runs(html: &str, base: &CharacterStyle) -> Option<(String, Vec<ComposeStyleRun>)> {
+    import_body_html(html)
+        .or_else(|| crate::compose_paste::styled_text(html, base))
+        .map(|(text, runs)| trimmed_runs(text, runs))
+        .filter(|(text, _)| !text.is_empty())
+}
+
+/// Whether text in `style` reads the same as plain text in `base`: no marks, colors, other
+/// fonts, alignment, pictures, or links but those typed as addresses.
+fn is_plain_style(style: &CharacterStyle, base: &CharacterStyle) -> bool {
+    style.marks == 0
+        && style.color.is_none()
+        && style.highlight.is_none()
+        && style.size == base.size
+        && style.family == base.family
+        && style.align == Alignment::Left
+        && style.image.is_none()
+        && (style.link.is_none() || style.link_is_auto)
+}
+
+/// `text`, styled by `runs`, as plain text: each link followed by its address in angle brackets
+/// where its text doesn't show it, as mail apps write links in plain text, and each picture as
+/// its description, or as its alt text alone when `described` is false. Also where `offset` in
+/// `text` lands in it.
+fn plain_text_of(
+    text: &str,
+    runs: &[ComposeStyleRun],
+    described: bool,
+    offset: usize,
+) -> (String, usize) {
+    let mut plain = String::with_capacity(text.len());
+    let mut mapped = None;
+    let mut copy = |plain: &mut String, range: Range<usize>| {
+        if mapped.is_none() && (range.start..=range.end).contains(&offset) {
+            mapped = Some(plain.len() + offset - range.start);
+        }
+        plain.push_str(&text[range]);
+    };
+    let mut at = 0;
+    // Where the link being written started in `text`.
+    let mut link_start = 0;
+    for (index, run) in runs.iter().enumerate() {
+        let range = run.range.start.max(at)..run.range.end.min(text.len());
+        if range.start > at {
+            copy(&mut plain, at..range.start);
+        }
+        if range.is_empty() {
+            continue;
+        }
+        let continues_link = index > 0
+            && runs[index - 1].range.end == range.start
+            && runs[index - 1].style.link.is_some()
+            && runs[index - 1].style.link == run.style.link;
+        if !continues_link {
+            link_start = range.start;
+        }
+        match &run.style.image {
+            Some(image) => {
+                for (local, character) in text[range.clone()].char_indices() {
+                    if character == IMAGE_PLACEHOLDER {
+                        copy(&mut plain, range.start + local..range.start + local);
+                        if described {
+                            plain.push_str(&image.description());
+                        } else {
+                            plain.push_str(image.alt.trim());
+                        }
+                    } else {
+                        let start = range.start + local;
+                        copy(&mut plain, start..start + character.len_utf8());
+                    }
+                }
+            }
+            None => copy(&mut plain, range.clone()),
+        }
+        at = range.end;
+        // A link's address follows its last run.
+        if let Some(url) = &run.style.link {
+            let ends_link = runs.get(index + 1).is_none_or(|next| {
+                next.range.start != range.end || next.style.link.as_ref() != Some(url)
+            });
+            if ends_link && !shows_address(&text[link_start..range.end], url) {
+                plain.push_str(" <");
+                plain.push_str(url);
+                plain.push('>');
+            }
+        }
+    }
+    if at < text.len() {
+        copy(&mut plain, at..text.len());
+    }
+    let mapped = mapped.unwrap_or(plain.len());
+    (plain, mapped)
+}
+
+/// Whether a link's `text` already shows its `address`, as a typed address does.
+fn shows_address(text: &str, address: &str) -> bool {
+    fn bare(value: &str) -> &str {
+        let value = value.trim();
+        let value = ["mailto:", "https://", "http://"]
+            .iter()
+            .find_map(|scheme| {
+                value
+                    .get(..scheme.len())
+                    .filter(|start| start.eq_ignore_ascii_case(scheme))
+                    .map(|_| &value[scheme.len()..])
+            })
+            .unwrap_or(value);
+        value.strip_suffix('/').unwrap_or(value)
+    }
+    bare(text).eq_ignore_ascii_case(bare(address))
+}
+
+/// What a signature's HTML reads as, pictures named in their places, for its preview.
+pub(crate) fn signature_preview(html: &str) -> String {
+    let mut document = RichComposeDocument::default();
+    document.load_signature_html(html);
+    document.text_with_image_descriptions()
+}
+
+/// `text` without the blank space around it, and `runs` cut to what's left.
+fn trimmed_runs(text: String, runs: Vec<ComposeStyleRun>) -> (String, Vec<ComposeStyleRun>) {
+    let start = text.len() - text.trim_start().len();
+    let end = text.trim_end().len().max(start);
+    let runs = runs
+        .into_iter()
+        .filter_map(|run| {
+            let range =
+                run.range.start.clamp(start, end) - start..run.range.end.clamp(start, end) - start;
+            (!range.is_empty()).then_some(ComposeStyleRun {
+                range,
+                style: run.style,
+            })
+        })
+        .collect();
+    (text[start..end].to_owned(), runs)
 }
 
 fn import_body_html(html: &str) -> Option<(String, Vec<ComposeStyleRun>)> {
@@ -2632,7 +3965,7 @@ mod tests {
                 style: CharacterStyle {
                     marks: BOLD,
                     link: Some(link.clone()),
-                    link_is_auto: false,
+                    ..CharacterStyle::default()
                 },
             },
             ComposeStyleRun {
@@ -2640,7 +3973,7 @@ mod tests {
                 style: CharacterStyle {
                     marks: ITALIC,
                     link: Some(link.clone()),
-                    link_is_auto: false,
+                    ..CharacterStyle::default()
                 },
             },
         ];
@@ -3337,5 +4670,848 @@ mod tests {
         assert_ne!(bold.style.marks & BOLD, 0);
         document.history("undo");
         assert_eq!(document.text(), "We recieve it");
+    }
+
+    #[test]
+    fn colors_sizes_and_fonts_go_out_as_spans_and_reopen() {
+        let text = "Red big serif highlighted plain";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let at = |word: &str| {
+            let start = text.find(word).unwrap();
+            (start as i32, (start + word.len()) as i32)
+        };
+        let (start, end) = at("Red");
+        document.format("color:#d93025", text, start, end);
+        let (start, end) = at("big");
+        document.format("size:huge", text, start, end);
+        let (start, end) = at("serif");
+        document.format("family:serif", text, start, end);
+        let (start, end) = at("highlighted");
+        document.format("highlight:#fff475", text, start, end);
+        document.format("bold", text, start, end);
+        let html = document.body_html().unwrap();
+        assert_eq!(
+            html,
+            "<div><span style=\"color:#d93025\">Red</span> \
+             <span style=\"font-size:xx-large\">big</span> \
+             <span style=\"font-family:Times New Roman, Times, serif\">serif</span> \
+             <span style=\"background-color:#fff475\"><strong>highlighted</strong></span> \
+             plain</div>"
+        );
+        let reopened = reopened(&document);
+        assert_eq!(reopened.styles, document.styles);
+        assert_eq!(reopened.body_html().unwrap(), html);
+    }
+
+    #[test]
+    fn a_paragraph_keeps_its_alignment_through_typing_and_reopening() {
+        let mut document = RichComposeDocument::default();
+        document.load("Title", 5, 5);
+        document.format("align:center", "Title", 5, 5);
+        assert_eq!(document.active_marks().align, Alignment::Center);
+        // Enter at the end goes on centered, as in a word processor, and so does what's
+        // typed there.
+        document.synchronize_key_edit("Title\n", 6, 6, "\n");
+        assert_eq!(document.active_marks().align, Alignment::Center);
+        document.synchronize_key_edit("Title\nSub", 9, 9, "");
+        let centered = "<div align=\"center\" style=\"text-align:center\">";
+        assert_eq!(
+            document.body_html().unwrap(),
+            format!("{centered}Title</div>{centered}Sub</div>")
+        );
+        let reopened = reopened(&document);
+        assert_eq!(reopened.paragraph_alignment(6), Alignment::Center);
+        assert_eq!(reopened.body_html(), document.body_html());
+
+        // Undo takes the alignment back with the rest of the edit.
+        document.format("align:right", "Title\nSub", 0, 0);
+        assert_eq!(document.paragraph_alignment(0), Alignment::Right);
+        document.history("undo").unwrap();
+        assert_eq!(document.paragraph_alignment(0), Alignment::Center);
+    }
+
+    #[test]
+    fn joined_paragraphs_take_the_first_ones_alignment() {
+        let mut document = RichComposeDocument::default();
+        document.load("Left\nCentered", 0, 0);
+        document.format("align:center", "Left\nCentered", 6, 6);
+        assert_eq!(document.paragraph_alignment(5), Alignment::Center);
+        assert_eq!(document.paragraph_alignment(0), Alignment::Left);
+        // Backspace at the start of the second paragraph joins it to the first.
+        document.synchronize_key_edit("LeftCentered", 4, 4, "");
+        assert!(
+            document
+                .styles
+                .iter()
+                .all(|run| run.style.align == Alignment::Left)
+        );
+        assert_eq!(
+            document.body_html().as_deref(),
+            Some("<div>LeftCentered</div>")
+        );
+        assert_style_coverage(&document);
+    }
+
+    #[test]
+    fn lists_keep_their_paragraphs_alignment() {
+        let text = "One\nTwo";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        document.format("align:right", text, 0, text.len() as i32);
+        document.format("bullet", text, 0, text.len() as i32);
+        assert_eq!(document.text(), "• One\n• Two");
+        assert_eq!(
+            document.body_html().as_deref(),
+            Some(
+                "<ul><li style=\"text-align:right\">One</li>\
+                 <li style=\"text-align:right\">Two</li></ul>"
+            )
+        );
+        let reopened = reopened(&document);
+        assert_eq!(reopened.body_html(), document.body_html());
+        assert_style_coverage(&document);
+    }
+
+    #[test]
+    fn removing_formatting_keeps_links_and_alignment() {
+        let text = "See https://example.org now";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let all = text.len() as i32;
+        for kind in [
+            "bold",
+            "color:#d93025",
+            "highlight:#fff475",
+            "size:large",
+            "family:monospace",
+            "align:center",
+        ] {
+            document.format(kind, text, 0, all);
+        }
+        document.format("clear", text, 0, all);
+        assert_eq!(
+            document.body_html().as_deref(),
+            Some(
+                "<div align=\"center\" style=\"text-align:center\">See \
+                 <a href=\"https://example.org\">https://example.org</a> now</div>"
+            )
+        );
+        document.history("undo").unwrap();
+        assert!(
+            document
+                .body_html()
+                .unwrap()
+                .contains("font-family:Courier New")
+        );
+    }
+
+    #[test]
+    fn the_toolbar_shows_what_the_whole_selection_shares() {
+        let text = "ab cd";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        document.format("color:#1a73e8", text, 0, 5);
+        document.format("size:large", text, 0, 2);
+        document.update_selection(0, 5);
+        let active = document.active_marks();
+        assert_eq!(active.color, Some(Some(0x1a73e8)));
+        assert_eq!(active.highlight, Some(None));
+        assert_eq!(active.size, None);
+        assert_eq!(active.family, Some(FontFamily::Default));
+        document.update_selection(1, 1);
+        assert_eq!(document.active_marks().size, Some(TextSize::Large));
+        // At a caret, the next characters' style can change before they're typed.
+        document.update_selection(5, 5);
+        document.format("color:none", text, 5, 5);
+        assert_eq!(document.active_marks().color, Some(None));
+        // Text in several colors shares none.
+        document.format("color:#cc0000", text, 0, 2);
+        document.update_selection(0, 5);
+        assert_eq!(document.active_marks().color, None);
+    }
+
+    #[test]
+    fn messages_start_in_the_default_text_style() {
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Serif, TextSize::Large);
+        document.load("", 0, 0);
+        assert_eq!(document.active_marks().family, Some(FontFamily::Serif));
+        document.synchronize_key_edit("Hi", 2, 2, "i");
+        assert_eq!(
+            document.body_html().unwrap(),
+            "<div><span style=\"font-size:x-large;font-family:Times New Roman, Times, serif\">Hi</span></div>"
+        );
+
+        // Text a new message opens with, such as a signature, starts in it too.
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Monospace, TextSize::Normal);
+        document.load("\n\n-- \nAlex", 0, 0);
+        assert!(
+            document
+                .styles
+                .iter()
+                .all(|run| run.style.family == FontFamily::Monospace)
+        );
+        assert_eq!(document.active_marks().family, Some(FontFamily::Monospace));
+    }
+
+    #[test]
+    fn removing_formatting_returns_to_the_default_text_style() {
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Monospace, TextSize::Small);
+        document.load("abc", 3, 3);
+        for command in ["bold", "color:#cc0000", "size:huge", "family:serif"] {
+            document.format(command, "abc", 0, 3);
+        }
+        document.format("clear", "abc", 0, 3);
+        let [run] = &document.styles[..] else {
+            panic!("one run expected, got {:?}", document.styles);
+        };
+        assert_eq!(run.style, document.base);
+    }
+
+    #[test]
+    fn enter_at_the_end_goes_on_in_the_text_style_but_not_its_link() {
+        let mut document = RichComposeDocument::default();
+        document.load("Big", 3, 3);
+        document.format("size:huge", "Big", 0, 3);
+        document.format("color:#cc0000", "Big", 0, 3);
+        document.update_selection(3, 3);
+        document.synchronize_key_edit("Big\n", 4, 4, "\n");
+        document.synchronize_key_edit("Big\nx", 5, 5, "x");
+        let x = document.style_at(4).unwrap();
+        assert_eq!((x.size, x.color), (TextSize::Huge, Some(0xcc0000)));
+
+        let text = "See https://example.com";
+        let mut document = RichComposeDocument::default();
+        document.load(text, text.len() as i32, text.len() as i32);
+        assert!(document.style_at(text.len() - 1).unwrap().link.is_some());
+        let entered = format!("{text}\n");
+        let end = entered.len() as i32;
+        document.synchronize_key_edit(&entered, end, end, "\n");
+        assert_eq!(document.typing_style().link, None);
+    }
+
+    #[test]
+    fn list_items_type_in_their_text_style_after_plain_markers() {
+        let text = "• Big";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let content = text.find("Big").unwrap();
+        document.format("size:huge", text, content as i32, text.len() as i32);
+        // Right after the marker, typing goes on in the item's text.
+        document.update_selection(content as i32, content as i32);
+        assert_eq!(document.active_marks().size, Some(TextSize::Huge));
+
+        // Enter continues the list. The new marker is plain, as readers show markers, and
+        // what's typed after it goes on in the item's style.
+        let end = text.len() as i32;
+        document.update_selection(end, end);
+        document.synchronize_key_edit("• Big\n", end + 1, end + 1, "\n");
+        assert_eq!(document.text(), "• Big\n• ");
+        let marker = document.text().rfind('•').unwrap();
+        assert_eq!(document.style_at(marker).unwrap().size, TextSize::Normal);
+        assert_eq!(document.active_marks().size, Some(TextSize::Huge));
+        let typed = format!("{}x", document.text());
+        let caret = typed.len() as i32;
+        document.synchronize_key_edit(&typed, caret, caret, "x");
+        assert_eq!(
+            document.style_at(typed.len() - 1).unwrap().size,
+            TextSize::Huge
+        );
+        assert_eq!(
+            document.body_html().unwrap(),
+            "<ul><li><span style=\"font-size:xx-large\">Big</span></li>\
+             <li><span style=\"font-size:xx-large\">x</span></li></ul>"
+        );
+    }
+
+    #[test]
+    fn pasting_html_replaces_the_selection_as_one_undoable_edit() {
+        let mut document = RichComposeDocument::default();
+        document.load("Hello world", 0, 0);
+        document.update_selection(6, 11);
+        let selection = document
+            .paste_html("<b>there</b> <span style=\"color:#cc0000\">friend</span>")
+            .unwrap();
+        assert_eq!(document.text(), "Hello there friend");
+        assert_eq!(selection, ComposeSelection { start: 18, end: 18 });
+        assert_eq!(document.style_at(6).unwrap().marks, BOLD);
+        assert_eq!(document.style_at(12).unwrap().color, Some(0xcc0000));
+        assert_eq!(document.style_at(0).unwrap().marks, 0);
+        document.history("undo").unwrap();
+        assert_eq!(document.text(), "Hello world");
+        // HTML without text leaves the plain text to paste.
+        assert!(
+            document
+                .paste_html("<img src=\"https://example.com/a.png\">")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn html_from_other_apps_pastes_as_a_browser_shows_it() {
+        // Markup laid out on lines of its own, which only the composer's own copies aren't.
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document
+            .paste_html("<div>\n  Hello\n  <b>there</b>\n</div>\n<div>again</div>")
+            .unwrap();
+        assert_eq!(document.text(), "Hello there\nagain");
+        assert_eq!(document.style_at(6).unwrap().marks, BOLD);
+    }
+
+    #[test]
+    fn a_pasted_list_marker_stays_only_where_a_line_starts() {
+        let list = "<ul><li>first</li><li>second</li></ul>";
+        let mut document = RichComposeDocument::default();
+        document.load("Items: ", 7, 7);
+        document.paste_html(list).unwrap();
+        assert_eq!(document.text(), "Items: first\n• second");
+
+        let mut document = RichComposeDocument::default();
+        document.load("Items:\n", 7, 7);
+        document.paste_html(list).unwrap();
+        assert_eq!(document.text(), "Items:\n• first\n• second");
+    }
+
+    #[test]
+    fn copied_text_pastes_back_as_it_was() {
+        let text = "Title\nRed huge words\n• item\nEnd";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let at = |word: &str| {
+            let start = text.find(word).unwrap();
+            (start as i32, (start + word.len()) as i32)
+        };
+        let (start, end) = at("Title");
+        document.format("align:center", text, start, end);
+        let (start, end) = at("Red huge words");
+        document.format("color:#cc0000", text, start, end);
+        document.format("size:huge", text, start, end);
+        let (start, end) = at("item");
+        document.format("bold", text, start, end);
+        document.update_selection(0, text.len() as i32);
+        let (html, plain) = document.selection_html().unwrap();
+        assert_eq!(plain, text);
+
+        let mut pasted = RichComposeDocument::default();
+        pasted.load("", 0, 0);
+        pasted.paste_html(&html).unwrap();
+        assert_eq!(pasted.text(), text);
+        assert_eq!(pasted.styles, document.styles);
+
+        // Part of a line copies as just that part.
+        let (start, end) = at("huge words");
+        document.update_selection(start, end);
+        let (html, plain) = document.selection_html().unwrap();
+        assert_eq!(plain, "huge words");
+        assert_eq!(
+            html,
+            "<!--flectar-mail-composer--><div><span style=\"color:#cc0000;font-size:xx-large\">huge words</span></div>"
+        );
+        document.update_selection(3, 3);
+        assert!(document.selection_html().is_none());
+    }
+
+    /// A PNG `width` by `height` in one color, as a pasted screenshot might be.
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            width,
+            height,
+            image::Rgba([220, 40, 30, 255]),
+        ))
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+        bytes
+    }
+
+    #[test]
+    fn images_go_out_as_img_tags_and_reopen() {
+        let mut document = RichComposeDocument::default();
+        document.load("Before after", 7, 7);
+        let image = InlineImage::from_file_bytes(png(40, 20), "Q3 \"chart\"").unwrap();
+        assert_eq!(
+            (image.mime_type, image.width, image.height),
+            ("image/png", 40, 20)
+        );
+        document.insert_image(image);
+        assert_eq!(document.text(), "Before \u{fffc}after");
+        let html = document.body_html().unwrap();
+        assert!(
+            html.starts_with("<div>Before <img src=\"data:image/png;base64,"),
+            "{html}"
+        );
+        assert!(
+            html.ends_with(
+                "\" alt=\"Q3 &quot;chart&quot;\" width=\"40\" height=\"20\" \
+                 style=\"width:40px;max-width:100%;height:auto\">after</div>"
+            ),
+            "{html}"
+        );
+        let reopened = reopened(&document);
+        assert_eq!(reopened.text(), document.text());
+        assert_eq!(reopened.body_html().unwrap(), html);
+        let image = reopened.images().next().unwrap();
+        assert_eq!(
+            (image.width, image.height, &*image.alt),
+            (40, 20, "Q3 \"chart\"")
+        );
+
+        // Plain text names the image in its place.
+        assert_eq!(
+            document.text_with_image_descriptions(),
+            "Before [image: Q3 \"chart\"]after"
+        );
+        // Files that aren't images, and images in formats mail doesn't show, aren't taken.
+        assert!(InlineImage::from_file_bytes(b"not an image".to_vec(), "").is_none());
+    }
+
+    #[test]
+    fn plain_text_writes_out_link_addresses_and_names_pictures() {
+        let text = "See the plan, write to ana@example.org or go to example.org/a.";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let at = |part: &str| {
+            let start = text.find(part).unwrap() as i32;
+            (start, start + part.len() as i32)
+        };
+        let (start, end) = at("the plan");
+        document.set_link("https://example.org/plan", text, start, end);
+        let (start, end) = at("ana@example.org");
+        document.set_link("mailto:ana@example.org", text, start, end);
+        let (start, end) = at("example.org/a");
+        document.set_link("https://example.org/a/", text, start, end);
+        // A link partly bold is still one link.
+        let (start, _) = at("plan");
+        document.format("bold", text, start, start + 4);
+        document.update_selection(0, 0);
+        document.insert_image(InlineImage::from_file_bytes(png(4, 4), "Map").unwrap());
+        assert_eq!(
+            document.plain_text(),
+            "[image: Map]See the plan <https://example.org/plan>, write to ana@example.org or \
+             go to example.org/a."
+        );
+    }
+
+    #[test]
+    fn making_text_plain_takes_formatting_out_in_one_undoable_edit() {
+        let text = "Hi Ana\nThe plan is ready";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        assert_eq!(
+            document.make_plain(),
+            None,
+            "plain text has nothing to take out"
+        );
+        document.format("bold", text, 0, 2);
+        document.format("color:#c0392b", text, 3, 6);
+        let plan = text.find("plan").unwrap() as i32;
+        document.set_link("https://example.org/plan", text, plan, plan + 4);
+        document.update_selection(7, 7);
+        document.insert_image(InlineImage::from_file_bytes(png(4, 4), "Chart").unwrap());
+        document.insert_image(InlineImage::from_file_bytes(png(4, 4), "").unwrap());
+        let caret = document.selection();
+        let formatted_html = document.body_html();
+
+        let selection = document.make_plain().unwrap();
+        assert_eq!(
+            document.text(),
+            "Hi Ana\nChartThe plan <https://example.org/plan> is ready"
+        );
+        // The caret stays after the pictures' alt text.
+        let placeholders = 2 * IMAGE_PLACEHOLDER.len_utf8() as i32;
+        assert_eq!(
+            selection.start,
+            caret.start - placeholders + "Chart".len() as i32
+        );
+        assert!(
+            document
+                .style_runs()
+                .iter()
+                .all(|run| is_plain_style(&run.style, &document.base)),
+            "{:?}",
+            document.style_runs()
+        );
+        assert_eq!(document.make_plain(), None);
+        // Undo brings the formatting and the pictures back.
+        document.history("undo").unwrap();
+        assert_eq!(document.body_html(), formatted_html);
+    }
+
+    #[test]
+    fn plain_signatures_go_in_as_text() {
+        use base64::Engine;
+        let mut document = RichComposeDocument::default();
+        document.load("Thanks", 6, 6);
+        let logo = base64::engine::general_purpose::STANDARD.encode(png(4, 4));
+        let html = format!(
+            "<div><b>Zoë</b> · <a href=\"https://example.org\">Example</a><br>\
+             <img src=\"data:image/png;base64,{logo}\" alt=\"Logo\"></div>"
+        );
+        let (_, block) = document.replace_signature(None, 6, Some(&html), true);
+        let signature = "\n\n-- \nZoë · Example <https://example.org>\nLogo";
+        assert_eq!(document.text(), format!("Thanks{signature}"));
+        assert_eq!(block.as_deref(), Some(signature));
+        assert!(
+            document
+                .style_runs()
+                .iter()
+                .all(|run| is_plain_style(&run.style, &document.base))
+        );
+    }
+
+    #[test]
+    fn images_can_go_out_with_other_files_at_the_same_size() {
+        use base64::Engine;
+        let mut document = RichComposeDocument::default();
+        document.load("A\n\n", 1, 1);
+        document.insert_image(InlineImage::from_file_bytes(png(40, 20), "Chart").unwrap());
+        document.insert_image(InlineImage::from_file_bytes(png(30, 30), "").unwrap());
+        let swapped = document.images().next().unwrap().id;
+        let smaller: Arc<[u8]> = png(4, 2).into();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&smaller);
+        let swap = |image: &InlineImage| (image.id == swapped).then(|| Arc::clone(&smaller));
+        let html = document.body_html_with(false, swap).unwrap();
+        // The other file, at the size the image shows, and the image left as it was.
+        assert!(
+            html.contains(&format!(
+                "<img src=\"data:image/png;base64,{encoded}\" alt=\"Chart\" width=\"40\" \
+                 height=\"20\""
+            )),
+            "{html}"
+        );
+        assert_eq!(html.matches("<img ").count(), 2);
+        assert!(html.ends_with("<div><br></div><div><br></div>"), "{html}");
+        let above = document.body_html_with(true, swap).unwrap();
+        assert!(above.contains(&encoded) && !above.ends_with("<div><br></div>"));
+        // The document keeps its own files.
+        assert_eq!(
+            document.images().next().unwrap().data.len(),
+            png(40, 20).len()
+        );
+        assert_eq!(
+            document.body_html_with(false, |_| None),
+            document.body_html()
+        );
+    }
+
+    #[test]
+    fn images_show_at_a_chosen_size_and_carry_alt_text() {
+        let mut document = RichComposeDocument::default();
+        document.load("See ", 4, 4);
+        document.insert_image(InlineImage::from_file_bytes(png(1200, 600), "").unwrap());
+        document.insert_image(InlineImage::from_file_bytes(png(200, 100), "").unwrap());
+        let text = document.text().to_owned();
+        let first = 4..4 + IMAGE_PLACEHOLDER.len_utf8();
+        let second = first.end..text.len();
+
+        // Only a selection of one image has controls.
+        document.update_selection(first.start as i32, first.end as i32);
+        assert_eq!(
+            document.selected_image().map(|image| image.width),
+            Some(1200)
+        );
+        document.update_selection(0, text.len() as i32);
+        assert!(document.selected_image().is_none());
+        document.update_selection(4, 4);
+        assert!(document.selected_image().is_none());
+
+        let selected = |document: &RichComposeDocument, range: &std::ops::Range<usize>| {
+            document
+                .style_at(range.start)
+                .unwrap()
+                .image
+                .clone()
+                .unwrap()
+        };
+        document.format(
+            "image-size:medium",
+            &text,
+            first.start as i32,
+            first.end as i32,
+        );
+        let image = selected(&document, &first);
+        assert_eq!(image.shown_width, Some(320));
+        assert_eq!(ImageSize::of(&image), Some(ImageSize::Medium));
+        let html = document.body_html().unwrap();
+        assert!(
+            html.contains("width=\"320\" height=\"160\" style=\"width:320px;"),
+            "{html}"
+        );
+
+        // A size wider than the image leaves it as it is.
+        document.format(
+            "image-size:large",
+            &text,
+            second.start as i32,
+            second.end as i32,
+        );
+        assert_eq!(selected(&document, &second).shown_width, None);
+        assert!(!ImageSize::Large.fits(200) && ImageSize::Small.fits(200));
+
+        document.format(
+            "image-alt:  Sales   by month ",
+            &text,
+            first.start as i32,
+            first.end as i32,
+        );
+        assert_eq!(&*selected(&document, &first).alt, "Sales by month");
+        assert_eq!(
+            document.text_with_image_descriptions(),
+            "See [image: Sales by month][image]"
+        );
+        // Both reopen as they were.
+        let reopened = reopened(&document);
+        let image = reopened.images().next().unwrap();
+        assert_eq!(
+            (image.shown_width, &*image.alt),
+            (Some(320), "Sales by month")
+        );
+
+        // Each change undoes on its own, and back to its own size.
+        document.history("undo");
+        assert_eq!(&*selected(&document, &first).alt, "");
+        document.history("undo");
+        assert_eq!(selected(&document, &first).shown_width, None);
+        document.history("redo");
+        assert_eq!(selected(&document, &first).shown_width, Some(320));
+        document.format(
+            "image-size:original",
+            &text,
+            first.start as i32,
+            first.end as i32,
+        );
+        assert_eq!(selected(&document, &first).shown_width, None);
+    }
+
+    #[test]
+    fn dragging_an_image_corner_gives_it_a_width_of_its_own() {
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document.insert_image(InlineImage::from_file_bytes(png(1000, 500), "").unwrap());
+        let text = document.text().to_owned();
+        let end = text.len() as i32;
+        let shown = |document: &RichComposeDocument| document.images().next().unwrap().shown_width;
+        document.format("image-width:437", &text, 0, end);
+        assert_eq!(shown(&document), Some(437));
+        assert_eq!(ImageSize::of(document.images().next().unwrap()), None);
+        // Never past its own width, and never too small to find again.
+        document.format("image-width:1400", &text, 0, end);
+        assert_eq!(shown(&document), None);
+        document.format("image-width:3", &text, 0, end);
+        assert_eq!(shown(&document), Some(MIN_IMAGE_WIDTH));
+        document.format("image-width:wide", &text, 0, end);
+        assert_eq!(shown(&document), Some(MIN_IMAGE_WIDTH));
+        document.history("undo");
+        assert_eq!(shown(&document), None);
+    }
+
+    #[test]
+    fn reopened_messages_keep_the_default_text_style() {
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Serif, TextSize::Large);
+        document.load("Hello", 5, 5);
+        document.format("bold", "Hello", 0, 5);
+        let html = document.body_html().unwrap();
+
+        let mut reopened = RichComposeDocument::default();
+        reopened.set_base_style(FontFamily::Serif, TextSize::Large);
+        reopened.load_html(&html, "Hello").unwrap();
+        // Remove formatting goes back to it.
+        reopened.format("clear", "Hello", 0, 5);
+        let style = reopened.style_at(0).unwrap();
+        assert_eq!(
+            (style.family, style.size, style.marks),
+            (FontFamily::Serif, TextSize::Large, 0)
+        );
+    }
+
+    #[test]
+    fn messages_from_other_apps_reopen_with_their_formatting_and_images() {
+        use base64::Engine;
+        let png = base64::engine::general_purpose::STANDARD.encode(png(40, 20));
+        let html = format!(
+            "<div dir=\"ltr\"><div>Hi <b>Jamie</b>,</div><div><br></div>\
+             <div><img src=\"data:image/png;base64,{png}\" alt=\"Chart\" width=\"30\"><br></div>\
+             <ul><li>First</li><li>Second</li></ul></div>"
+        );
+        let mut document = RichComposeDocument::default();
+        document.set_base_style(FontFamily::Serif, TextSize::Normal);
+        // What the composer itself didn't write doesn't reopen as its own.
+        assert!(document.load_html(&html, "Hi Jamie,").is_none());
+        document.load_foreign_html(&html).unwrap();
+        assert_eq!(document.text(), "Hi Jamie,\n\n\u{fffc}\n• First\n• Second");
+        let jamie = document.text().find("Jamie").unwrap();
+        assert_eq!(document.style_at(jamie).unwrap().marks, BOLD);
+        let image = document.images().next().unwrap();
+        assert_eq!(
+            (image.width, image.shown_width, &*image.alt),
+            (40, Some(30), "Chart")
+        );
+        // Its usual font becomes the message's, and nothing is left to undo.
+        assert_eq!(document.style_at(0).unwrap().family, FontFamily::Serif);
+        assert!(document.history("undo").is_none());
+
+        let mut untouched = RichComposeDocument::default();
+        untouched.load("Kept", 4, 4);
+        assert!(untouched.load_foreign_html("<div><br></div>").is_none());
+        assert_eq!(untouched.text(), "Kept");
+    }
+
+    #[test]
+    fn signatures_go_in_with_their_formatting_and_swap_in_place() {
+        use base64::Engine;
+        let logo = base64::engine::general_purpose::STANDARD.encode(png(60, 20));
+        // One the composer wrote, with a picture, and an older plain one.
+        let mut source = RichComposeDocument::default();
+        source.load("Zoë Ortiz\nEngineer\n", 0, 0);
+        source.format("bold", "Zoë Ortiz\nEngineer\n", 0, "Zoë Ortiz".len() as i32);
+        let end = source.text().len() as i32;
+        source.update_selection(end, end);
+        source.insert_image(InlineImage::from_file_bytes(png(60, 20), "Logo").unwrap());
+        let rich = source.body_html().unwrap();
+        assert!(rich.contains(&logo[..20]));
+        let plain = "<div>Pat Lee<br>Support</div>";
+
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        let (selection, block) = document.replace_signature(None, 0, Some(&rich), false);
+        let block = block.unwrap();
+        assert_eq!(block, "\n\n-- \nZoë Ortiz\nEngineer\n\u{fffc}");
+        assert_eq!(document.text(), block);
+        // The caret stays above it, where the message is written.
+        assert_eq!((selection.start, selection.end), (0, 0));
+        let name = document.text().find("Zoë").unwrap();
+        assert_eq!(document.style_at(name).unwrap().marks, BOLD);
+        assert_eq!(&*document.images().next().unwrap().alt, "Logo");
+        assert_eq!(document.style_at(0).unwrap().marks, 0);
+
+        // Writing goes on above it, and another signature takes its place.
+        let written = format!("Hello{}", document.text());
+        document.synchronize(&written, 5, 5);
+        let (selection, swapped) = document.replace_signature(Some(&block), 0, Some(plain), false);
+        let swapped = swapped.unwrap();
+        assert_eq!(document.text(), "Hello\n\n-- \nPat Lee\nSupport");
+        assert_eq!(swapped, "\n\n-- \nPat Lee\nSupport");
+        assert_eq!((selection.start, selection.end), (5, 5));
+        assert!(document.images().next().is_none());
+
+        // One undo brings the first back, and no signature takes it out.
+        document.history("undo");
+        assert_eq!(document.text(), format!("Hello{block}"));
+        document.history("redo");
+        let (_, none) = document.replace_signature(Some(&swapped), 0, None, false);
+        assert_eq!((document.text(), none), ("Hello", None));
+        // Nothing to swap is no edit.
+        let (_, none) = document.replace_signature(None, 5, Some("<div> </div>"), false);
+        assert_eq!((document.text(), none), ("Hello", None));
+        document.history("undo");
+        assert_eq!(document.text(), format!("Hello{swapped}"));
+    }
+
+    #[test]
+    fn signatures_open_to_write_and_preview_with_their_pictures() {
+        // Written in the composer, plain unless formatted.
+        let mut written = RichComposeDocument::default();
+        written.load("Zoë Ortiz\n", 0, 0);
+        written.format("color:#0b5394", "Zoë Ortiz\n", 0, "Zoë Ortiz".len() as i32);
+        let end = written.text().len() as i32;
+        written.update_selection(end, end);
+        written.insert_image(InlineImage::from_file_bytes(png(60, 20), "Logo").unwrap());
+        let html = written.body_html().unwrap();
+
+        let mut editor = RichComposeDocument::default();
+        editor.load_signature_html(&html);
+        assert_eq!(editor.text(), "Zoë Ortiz\n\u{fffc}");
+        assert!(!editor.changed_since_saved());
+        assert!(editor.history("undo").is_none());
+        editor.format("bold", "Zoë Ortiz\n\u{fffc}", 0, 3);
+        assert!(editor.changed_since_saved());
+        editor.mark_saved();
+        assert!(!editor.changed_since_saved());
+
+        assert_eq!(signature_preview(&html), "Zoë Ortiz\n[image: Logo]");
+        assert_eq!(
+            signature_preview("<div>Pat Lee<br>Support</div>"),
+            "Pat Lee\nSupport"
+        );
+        assert_eq!(signature_preview("<div> </div>"), "");
+
+        // In a message, plain text takes the message's font and size, and set ones stay.
+        let mut message = RichComposeDocument::default();
+        message.set_base_style(FontFamily::Serif, TextSize::Large);
+        message.load("", 0, 0);
+        let (_, block) = message.replace_signature(None, 0, Some(&html), false);
+        assert!(block.is_some());
+        let name = message.text().find("Zoë").unwrap();
+        let style = message.style_at(name).unwrap();
+        assert_eq!(
+            (style.family, style.size, style.color),
+            (FontFamily::Serif, TextSize::Large, Some(0x0b5394))
+        );
+    }
+
+    #[test]
+    fn text_next_to_an_image_is_text() {
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document.insert_image(InlineImage::from_file_bytes(png(4, 4), "").unwrap());
+        let text = format!("{}x", document.text());
+        let end = text.len() as i32;
+        document.synchronize_key_edit(&text, end, end, "x");
+        assert_eq!(document.style_at(text.len() - 1).unwrap().image, None);
+        assert_eq!(document.images().count(), 1);
+
+        // Removing formatting leaves the image.
+        document.format("bold", &text, 0, end);
+        document.format("clear", &text, 0, end);
+        assert_eq!(document.images().count(), 1);
+
+        // Typing over it takes it out, and undo puts it back.
+        document.update_selection(0, 3);
+        let typed = "yx";
+        document.synchronize_key_edit(typed, 1, 1, "y");
+        assert_eq!(document.images().count(), 0);
+        document.history("undo").unwrap();
+        assert_eq!(document.images().count(), 1);
+    }
+
+    #[test]
+    fn only_the_styles_the_composer_writes_reopen() {
+        for (html, text) in [
+            ("<div><span style=\"color:red\">red</span></div>", "red"),
+            (
+                "<div><span style=\"color:rgb(1, 2, 3)\">rgb</span></div>",
+                "rgb",
+            ),
+            ("<div><span style=\"font-size:13px\">px</span></div>", "px"),
+            (
+                "<div><span style=\"font-family:Comic Sans MS\">comic</span></div>",
+                "comic",
+            ),
+            (
+                "<div style=\"text-align:justify\">justified</div>",
+                "justified",
+            ),
+            (
+                "<div align=\"center\" style=\"text-align:right\">mixed</div>",
+                "mixed",
+            ),
+            (
+                "<div><strong style=\"color:#d93025\">red</strong></div>",
+                "red",
+            ),
+        ] {
+            let mut document = RichComposeDocument::default();
+            document.load("unchanged", 0, 0);
+            assert_eq!(document.load_html(html, text), None, "{html}");
+            assert_eq!(document.text(), "unchanged");
+        }
     }
 }

@@ -6,14 +6,46 @@ authors.
 
 ## Slint
 
-Slint 1.18 is copyright © SixtyFPS GmbH and Slint contributors. Flectar Mail
+Slint 1.19 is copyright © SixtyFPS GmbH and Slint contributors. Flectar Mail
 uses Slint under the `GPL-3.0-only` option offered by the Slint crates. The
 license text is in [`LICENSES/GPL-3.0-only.txt`](LICENSES/GPL-3.0-only.txt), and
 the upstream source is <https://github.com/slint-ui/slint>. The locally patched
-`i-slint-backend-winit` 1.18.1 crate retains its upstream license texts in
+`i-slint-backend-winit` 1.19.0 crate retains its upstream license texts in
 [`crates/i-slint-backend-winit/LICENSES`](crates/i-slint-backend-winit/LICENSES).
-Its Wayland clipboard backport, source checksum, and removal condition are
+Its Wayland file drop patch, source checksum, and removal condition are
 documented in [`patches/slint-winit/README.md`](patches/slint-winit/README.md).
+The locally patched `i-slint-backend-android-activity` 1.19.0 crate likewise
+retains its upstream license texts in
+[`crates/i-slint-backend-android-activity/LICENSES`](crates/i-slint-backend-android-activity/LICENSES),
+and its pointer scroll backport is documented in
+[`patches/slint-android-activity/README.md`](patches/slint-android-activity/README.md).
+The locally patched `i-slint-renderer-software` 1.19.0 crate retains its
+upstream license texts in
+[`crates/i-slint-renderer-software/LICENSES`](crates/i-slint-renderer-software/LICENSES),
+and its clip fix is documented in
+[`patches/slint-renderer-software/README.md`](patches/slint-renderer-software/README.md).
+
+## Vello
+
+Flectar Mail's GPU renderer paints mail with Vello, copyright © the Vello
+Authors and used under its `MIT` option. The locally patched `vello` 0.11.0
+crate retains its license texts in
+[`crates/vello/LICENSE-MIT`](crates/vello/LICENSE-MIT) and
+[`crates/vello/LICENSE-APACHE`](crates/vello/LICENSE-APACHE). The upstream
+source is <https://github.com/linebender/vello>. Its bitmap strike fix, source
+checksum, and removal condition are documented in
+[`patches/vello/README.md`](patches/vello/README.md).
+
+## smithay-clipboard
+
+Slint's winit backend uses the locally patched `smithay-clipboard` 0.7.2 crate
+for the Wayland clipboard and, through its patch, for files dropped on a
+window. It is copyright © Smithay contributors and used under the MIT license,
+whose text it retains in
+[`crates/smithay-clipboard/LICENSE`](crates/smithay-clipboard/LICENSE). The
+upstream source is <https://github.com/smithay/smithay-clipboard>. The source
+checksum, the patch, and its removal condition are documented in
+[`patches/smithay-clipboard/README.md`](patches/smithay-clipboard/README.md).
 
 ## Blitz
 
@@ -27,15 +59,23 @@ checksums, and patch order are recorded in
 
 ## Parley emoji presentation
 
-Blitz uses upstream Parley 0.12.0; Slint still uses locally patched Parley
-0.11.1. Both are used under the Apache-2.0 option. The `parley_emoji`
-sequence detector includes the fix from
-[Parley PR #811](https://github.com/linebender/parley/pull/811), based on
-[Christian Hansen's c-emoji](https://github.com/chansen/c-emoji), and is
-licensed under MIT. Its copyright and license are included in
+Slint and Blitz use Parley 0.12.0 under the Apache-2.0 option. Its
+`parley_emoji` sequence detector, from
+[Parley PR #811](https://github.com/linebender/parley/pull/811), is based on
+[Christian Hansen's c-emoji](https://github.com/chansen/c-emoji) and licensed
+under MIT. Its copyright and license are included in
 [`LICENSES/Parley-Emoji-MIT.txt`](LICENSES/Parley-Emoji-MIT.txt).
-Published packages and checksums are pinned in `Cargo.lock`. The backport
-retained for Slint is documented in [`patches/parley/README.md`](patches/parley/README.md).
+Published packages and checksums are pinned in `Cargo.lock`.
+
+## fontique
+
+Slint, Parley and Flectar Mail share the locally patched `fontique` 0.12.0
+crate, which finds and matches fonts. It is copyright © the Parley Authors and,
+like Parley, used under the Apache-2.0 option, whose text it retains in
+[`crates/fontique/LICENSE-APACHE`](crates/fontique/LICENSE-APACHE). The upstream
+source is <https://github.com/linebender/parley>. The source checksum, the
+patch, and its removal condition are documented in
+[`patches/fontique/README.md`](patches/fontique/README.md).
 
 ## Candle
 
@@ -109,6 +149,10 @@ recorded in `ui/icons/lucide/sources.json` and `ui/icons/lucide/solid_recipes.py
 The bundled Google Sans Flex font is distributed under the SIL Open Font
 License 1.1. Its license, provenance, and checksum are retained in
 [`resources/fonts/google-sans-flex`](resources/fonts/google-sans-flex).
+
+Renderer regression tests also use two fonts derived from it under SIL OFL
+1.1, with bitmap strikes added. Their license and reproduction instructions
+are retained in [`resources/test-fonts`](resources/test-fonts).
 
 ## Noto Emoji
 

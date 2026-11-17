@@ -53,14 +53,28 @@ enum Reply {
 struct Server {
     port: u16,
     appends: Arc<AtomicUsize>,
+    /// The flags the last APPEND gave.
+    append_flags: Arc<std::sync::Mutex<String>>,
     task: tokio::task::JoinHandle<()>,
 }
 impl Server {
     async fn start(reply: Reply, existing: bool, marker_preserved: bool) -> Self {
+        Self::start_keeping(reply, existing, marker_preserved, false).await
+    }
+
+    /// A server whose Sent folder keeps new keywords when `keywords`.
+    async fn start_keeping(
+        reply: Reply,
+        existing: bool,
+        marker_preserved: bool,
+        keywords: bool,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let appends = Arc::new(AtomicUsize::new(0));
         let count = appends.clone();
+        let append_flags = Arc::new(std::sync::Mutex::new(String::new()));
+        let flags_seen = append_flags.clone();
         let task = tokio::spawn(async move {
             let tls = rustls::ServerConfig::builder_with_provider(Arc::new(
                 rustls::crypto::ring::default_provider(),
@@ -91,8 +105,13 @@ impl Server {
                         format!("* CAPABILITY IMAP4rev1 UIDPLUS\r\n{tag} OK capabilities\r\n")
                     } else if command.starts_with("SELECT ") {
                         // The receipt must win over UIDNEXT, including concurrent deliveries.
+                        let kept = if keywords {
+                            "* OK [PERMANENTFLAGS (\\Seen \\*)] kept\r\n"
+                        } else {
+                            ""
+                        };
                         format!(
-                            "* FLAGS (\\Seen)\r\n* 1 EXISTS\r\n* OK [UIDVALIDITY 7] valid\r\n* OK [UIDNEXT 40] next\r\n{tag} OK selected\r\n"
+                            "* FLAGS (\\Seen)\r\n* 1 EXISTS\r\n{kept}* OK [UIDVALIDITY 7] valid\r\n* OK [UIDNEXT 40] next\r\n{tag} OK selected\r\n"
                         )
                     } else if command.starts_with("UID SEARCH HEADER ") {
                         let found = stored
@@ -110,6 +129,11 @@ impl Server {
                             header.len()
                         )
                     } else if command.starts_with("APPEND ") {
+                        *flags_seen.lock().unwrap() = command
+                            .split_once('(')
+                            .and_then(|(_, rest)| rest.split_once(')'))
+                            .map(|(flags, _)| flags.to_owned())
+                            .unwrap_or_default();
                         if matches!(reply, Reply::Reject) {
                             stream
                                 .write_all(format!("{tag} NO [OVERQUOTA] rejected\r\n").as_bytes())
@@ -149,6 +173,7 @@ impl Server {
         Self {
             port,
             appends,
+            append_flags,
             task,
         }
     }
@@ -328,6 +353,25 @@ async fn sent_copy_policy_setting_preserves_other_account_settings() {
 }
 
 #[tokio::test]
+async fn message_format_setting_preserves_other_account_settings() {
+    let (_temp, core, _, _) = local_outgoing().await;
+    core.set_account_sent_copy_policy(1, SentCopyPolicy::Client)
+        .await
+        .unwrap();
+    core.set_account_message_format(1, MessageFormat::PlainText, false)
+        .await
+        .unwrap();
+    let settings = core
+        .db
+        .read(|c| Ok(repo::accounts::get_config(c, 1)?.unwrap().settings))
+        .await
+        .unwrap();
+    assert_eq!(settings.message_format, MessageFormat::PlainText);
+    assert!(!settings.plain_text_replies);
+    assert_eq!(settings.sent_copy_policy, SentCopyPolicy::Client);
+}
+
+#[tokio::test]
 async fn only_pop3_accounts_remove_mail_from_their_server() {
     let (_temp, core, _, _) = local_outgoing().await;
     let refused = core
@@ -341,4 +385,35 @@ async fn only_pop3_accounts_remove_mail_from_their_server() {
         .await
         .unwrap();
     assert_eq!(settings.keep_on_server, KeepOnServer::Always);
+}
+
+#[tokio::test]
+async fn a_copy_that_asks_for_a_receipt_is_kept_as_answered_where_the_folder_can() {
+    for keywords in [true, false] {
+        let (_temp, core, config, action) = local_outgoing().await;
+        let id = action.message_id.unwrap();
+        core.db
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE messages SET receipt_to = '[{\"email\":\"me@test.dev\"}]' WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let server = Server::start_keeping(Reply::Receipt, false, false, keywords).await;
+        let mut session = server.connect().await;
+        append_sent_action(&core.sync_ctx(), &config, &mut session, &action)
+            .await
+            .unwrap();
+        let flags = server.append_flags.lock().unwrap().clone();
+        // RFC 3503 section 3.3, only where PERMANENTFLAGS keeps the keyword.
+        let expected = if keywords {
+            "\\Seen $MDNSent"
+        } else {
+            "\\Seen"
+        };
+        assert_eq!(flags, expected, "keywords kept: {keywords}");
+    }
 }

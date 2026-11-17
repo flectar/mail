@@ -3,6 +3,18 @@
     "alert.svg": {
       "source": "triangle-alert"
     },
+    "alert-circle.svg": {
+      "source": "circle-alert"
+    },
+    "align-center.svg": {
+      "source": "text-align-center"
+    },
+    "align-left.svg": {
+      "source": "text-align-start"
+    },
+    "align-right.svg": {
+      "source": "text-align-end"
+    },
     "archive.svg": {
       "source": "archive"
     },
@@ -17,6 +29,9 @@
     },
     "book.svg": {
       "source": "book-open-text"
+    },
+    "bot.svg": {
+      "source": "bot"
     },
     "browser.svg": {
       "source": "app-window"
@@ -96,17 +111,26 @@
     "folder-move.svg": {
       "source": "folder-input"
     },
+    "font.svg": {
+      "source": "type"
+    },
     "forward.svg": {
       "source": "forward"
     },
     "gear.svg": {
       "source": "settings"
     },
+    "highlight.svg": {
+      "source": "highlighter"
+    },
     "history.svg": {
       "source": "history"
     },
     "info.svg": {
       "source": "info"
+    },
+    "insert-image.svg": {
+      "source": "image-plus"
     },
     "italic.svg": {
       "source": "italic"
@@ -131,6 +155,9 @@
     },
     "lock.svg": {
       "source": "lock-keyhole"
+    },
+    "mail-check.svg": {
+      "source": "mail-check"
     },
     "mail-open.svg": {
       "source": "mail-open"
@@ -165,6 +192,9 @@
     "redo.svg": {
       "source": "redo-2"
     },
+    "remove-formatting.svg": {
+      "source": "remove-formatting"
+    },
     "reply.svg": {
       "source": "reply"
     },
@@ -198,6 +228,12 @@
     "sync.svg": {
       "source": "refresh-cw"
     },
+    "text-color.svg": {
+      "source": "baseline"
+    },
+    "text-size.svg": {
+      "source": "a-large-small"
+    },
     "trash.svg": {
       "source": "trash-2"
     },
@@ -221,6 +257,10 @@
     }
   },
   "sources": {
+    "a-large-small": {
+      "path": "sources/a-large-small.svg",
+      "sha256": "4a043659b619eb1912da6dc070f2d1e33f1873e015c6177535e6e81cb0d90162"
+    },
     "app-window": {
       "path": "sources/app-window.svg",
       "sha256": "54dd72c452605d058e4ea053f5ca479e03c97a101aca0c7257dbd737ca8e0ae0"
@@ -237,6 +277,10 @@
       "path": "sources/ban.svg",
       "sha256": "7cdacf6d52ee1b4da0406b62bb738c9ff2c2acc98f097ff2916534887fcf280c"
     },
+    "baseline": {
+      "path": "sources/baseline.svg",
+      "sha256": "7b26d9724b0e7f2c98049e2a6fadec5c9c8048d86791ed1cac4e1e1097e1da16"
+    },
     "bell": {
       "path": "sources/bell.svg",
       "sha256": "5a53e47f042acc608da90edca964a918e656814dab4927c19051542c84df3fd0"
@@ -248,6 +292,10 @@
     "book-open-text": {
       "path": "sources/book-open-text.svg",
       "sha256": "745b3391ab4b93f641fafaf1f4f96c760f9c1dbff94316243b41287b218d6f43"
+    },
+    "bot": {
+      "path": "sources/bot.svg",
+      "sha256": "7e72f487e479e73c9203555408efcef64544cd0b8b8f18f07560517fe6326b2f"
     },
     "building-2": {
       "path": "sources/building-2.svg",
@@ -280,6 +328,10 @@
     "chevron-up": {
       "path": "sources/chevron-up.svg",
       "sha256": "4d22ff60442a449baab10caeacbe2613400a34ac14f9df805fedec2472c987a5"
+    },
+    "circle-alert": {
+      "path": "sources/circle-alert.svg",
+      "sha256": "3bbf2a6d6353e20d052a368f7a7101987747a419e6fb21020d9f59c92a693a17"
     },
     "circle-check": {
       "path": "sources/circle-check.svg",
@@ -409,9 +461,17 @@
       "path": "sources/forward.svg",
       "sha256": "ea4c6a34e7af10eed97a004a490a347436680a0c41e339c60f6b9baa1bb5a431"
     },
+    "highlighter": {
+      "path": "sources/highlighter.svg",
+      "sha256": "d71e283dc6768893a152fdf2a457cc01494c48e56865cb3efe61550261d2fc0d"
+    },
     "history": {
       "path": "sources/history.svg",
       "sha256": "fa003df2e3e870987f85934a1428e2db2aaa0ebfa9eea22955595b6795d25c4c"
+    },
+    "image-plus": {
+      "path": "sources/image-plus.svg",
+      "sha256": "b8a7081285364f81220606430707969e47b983a544d39225bc7ade6155fdc9c0"
     },
     "inbox": {
       "path": "sources/inbox.svg",
@@ -465,6 +525,10 @@
       "path": "sources/mail.svg",
       "sha256": "9d775f2e0be8e53777adb4ee6526c405c09ea657b1c000363ca70d1c149a4720"
     },
+    "mail-check": {
+      "path": "sources/mail-check.svg",
+      "sha256": "44b12a7533daf66252e0d6af2ceeb4f02ff61032d5923e458f969492a5164eb6"
+    },
     "mail-open": {
       "path": "sources/mail-open.svg",
       "sha256": "956ac99f10de1ea60b444ed7f4e7834a6604a2e57e4c71b349106def64ea5d9b"
@@ -517,6 +581,10 @@
       "path": "sources/refresh-cw.svg",
       "sha256": "86f4638bc1f35bfd73300159f6cf32d6c503d35499835cb2e25b46846c300fe3"
     },
+    "remove-formatting": {
+      "path": "sources/remove-formatting.svg",
+      "sha256": "622d1df5490792fb699b27c0c98c66bb38eb22757d027bf1b0dbaa7c68b70f56"
+    },
     "reply": {
       "path": "sources/reply.svg",
       "sha256": "6740b073a61ef0194e502f85052cfd2425c58df712e889d0d5e0bca80369f900"
@@ -565,6 +633,18 @@
       "path": "sources/tag.svg",
       "sha256": "62459c373affdfd4032289c27951fc516fc1d35d2bdc0e105588712e536915ee"
     },
+    "text-align-center": {
+      "path": "sources/text-align-center.svg",
+      "sha256": "627aeab560d05d95d76ec9232749292d16f309f5846f75c06029052e2b1cf526"
+    },
+    "text-align-end": {
+      "path": "sources/text-align-end.svg",
+      "sha256": "f33915725f1eb7ee1297a22952b8530bf7b0f8592c8527de01d2f122f2b39ad6"
+    },
+    "text-align-start": {
+      "path": "sources/text-align-start.svg",
+      "sha256": "158fdc7d0591bdf159614be6b9a512e0c405b49e2d3ee5752f30b0aa9b9384c2"
+    },
     "trash-2": {
       "path": "sources/trash-2.svg",
       "sha256": "23e1d407ef0a510e9d0fbc6547fea17f30a6dfab5c283e34c7c04bede4ac5af9"
@@ -572,6 +652,10 @@
     "triangle-alert": {
       "path": "sources/triangle-alert.svg",
       "sha256": "a97cf1230a9f3b9f57c7805ce75f3d518204467664b42444571f0651ec09bebc"
+    },
+    "type": {
+      "path": "sources/type.svg",
+      "sha256": "66f93e7ae1ea8dce78cfc8b86c58d43cff886c998367eb82391dfbadd431ff03"
     },
     "underline": {
       "path": "sources/underline.svg",

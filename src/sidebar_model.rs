@@ -186,6 +186,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         count,
         color,
         has_custom_color,
+        status,
     } = &a.mailbox;
     let other = &b.mailbox;
     a.key == b.key
@@ -216,6 +217,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         && *count == other.count
         && *color == other.color
         && *has_custom_color == other.has_custom_color
+        && *status == other.status
         && (!has_avatar || *avatar_image == other.avatar_image)
 }
 
@@ -257,7 +259,7 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
     let query = state.folder_filter.trim();
     let filtering = !query.is_empty();
     let no_collapsed_folders = HashSet::new();
-    let mailboxes = make_mailbox_rows(
+    let mut mailboxes = make_mailbox_rows(
         &state.mailboxes,
         &state.profile_avatar_images,
         &state.labels,
@@ -267,6 +269,12 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
             &state.collapsed_folder_ids
         },
     );
+    let statuses = crate::account_status::statuses(&state);
+    for mailbox in mailboxes.iter_mut().filter(|mailbox| mailbox.is_account) {
+        if let Some(status) = statuses.get(&mailbox.account_id) {
+            mailbox.status = status.clone();
+        }
+    }
     let account_names = mailboxes
         .iter()
         .filter(|mailbox| mailbox.is_account)
@@ -306,6 +314,16 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
                 .and_then(|local| i32::try_from(local.account_id).ok()),
         )
     };
+    if !filtering {
+        crate::saved_searches::place(
+            &mut rows,
+            &state.saved_searches,
+            &state.collapsed_sidebar_sections,
+            state
+                .local_mail
+                .and_then(|local| i32::try_from(local.account_id).ok()),
+        );
+    }
     set_label_badges(&mut rows, &state.labels, &state.sidebar_badges);
     // Model notifications can synchronously inspect application state.
     let model = Rc::clone(&state.sidebar_rows);
@@ -1754,7 +1772,7 @@ mod interaction_tests {
             }
             let animate = motion_for_click
                 .upgrade()
-                .is_some_and(|app| app.global::<MotionSettings>().get_enabled());
+                .is_some_and(|app| app.global::<MotionSettings>().get_movement());
             animation_for_click.reconcile(
                 &model_for_click,
                 make_sidebar_rows(

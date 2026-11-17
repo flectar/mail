@@ -19,6 +19,7 @@ fn summary_from_row(row: &Row) -> rusqlite::Result<ThreadSummary> {
         is_starred: row.get::<_, i64>("starred_count")? > 0,
         has_attachments: row.get::<_, i64>("attachment_count")? > 0,
         has_replied: row.get::<_, i64>("has_replied")? > 0,
+        high_importance: row.get::<_, i64>("important_count")? > 0,
         snoozed_until: row.get("snoozed_until")?,
         labels: parse_id_list(
             &row.get::<_, Option<String>>("label_ids")?
@@ -59,7 +60,7 @@ const SUMMARY_SELECT: &str = "
            (SELECT COALESCE(m.local_subject_prefix, '') || m.subject
               FROM messages m WHERE m.thread_id = t.id ORDER BY m.date DESC LIMIT 1) AS subject,
            t.snippet, t.participants_json, t.last_message_at, t.message_count,
-           t.unread_count, t.starred_count, t.attachment_count,
+           t.unread_count, t.starred_count, t.attachment_count, t.important_count,
            EXISTS (
                SELECT 1 FROM messages reply
                JOIN message_refs mr ON mr.message_id = reply.id
@@ -205,6 +206,7 @@ pub fn recompute(conn: &Connection, thread_id: i64) -> Result<()> {
             unread_count    = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND is_read = 0 AND is_draft = 0),
             starred_count   = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND is_starred = 1),
             attachment_count= (SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND has_attachments = 1),
+            important_count = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND importance > 0),
             snippet         = COALESCE((SELECT snippet FROM messages WHERE thread_id = ?1 ORDER BY date DESC LIMIT 1), '')
          WHERE id = ?1",
         params![thread_id],
@@ -270,7 +272,6 @@ pub fn get_summaries(conn: &Connection, thread_ids: &[i64]) -> Result<Vec<Thread
 pub enum TabFilter {
     Important,
     Other,
-    Split(i64),
     AutoLabel(i64),
     ManualLabel(i64),
 }
@@ -286,6 +287,27 @@ pub struct ListArgs {
     pub folder_id: Option<i64>,
     pub cursor: Option<ThreadCursor>,
     pub limit: i64,
+    /// Which end of the timeline pages start from. Cursors continue in the
+    /// order of the page that gave them.
+    pub order: ListOrder,
+}
+
+impl ListOrder {
+    /// The SQL direction of this order's timeline.
+    const fn direction(self) -> &'static str {
+        match self {
+            Self::NewestFirst => "DESC",
+            Self::OldestFirst => "ASC",
+        }
+    }
+
+    /// The comparison that keeps rows past a keyset cursor in this order.
+    const fn past(self) -> &'static str {
+        match self {
+            Self::NewestFirst => "<",
+            Self::OldestFirst => ">",
+        }
+    }
 }
 
 /// Important/Other follows the newest incoming message. Requiring every
@@ -413,10 +435,6 @@ fn build_filter(
             "(t.routed_tab = 'other'
               OR ((t.routed_tab IS NULL OR t.routed_tab = 'pending') AND ({AUTO_BUCKET})))"
         )),
-        Some(TabFilter::Split(id)) => {
-            bind.push(Box::new(format!("split:{id}")));
-            where_clauses.push(format!("t.routed_tab = ?{}", bind.len()));
-        }
         Some(TabFilter::AutoLabel(id)) => {
             bind.push(Box::new(format!("label:{id}")));
             where_clauses.push(format!("t.routed_tab = ?{}", bind.len()));
@@ -476,7 +494,8 @@ fn build_filter(
         bind.push(Box::new(cur.thread_id));
         let id_parameter = bind.len();
         where_clauses.push(format!(
-            "(t.last_message_at, t.id) < (?{timestamp_parameter}, ?{id_parameter})"
+            "(t.last_message_at, t.id) {} (?{timestamp_parameter}, ?{id_parameter})",
+            args.order.past()
         ));
     }
 
@@ -514,14 +533,25 @@ pub fn list(conn: &Connection, args: &ListArgs) -> Result<ThreadPage> {
 
 fn list_sql(args: &ListArgs) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
     let (where_sql, bind) = build_filter(args, MailGrouping::Conversations, true);
+    let direction = args.order.direction();
     (
         format!(
             "{SUMMARY_SELECT} {where_sql}
-             ORDER BY t.last_message_at DESC, t.id DESC LIMIT {}",
+             ORDER BY t.last_message_at {direction}, t.id {direction} LIMIT {}",
             args.limit + 1
         ),
         bind,
     )
+}
+
+/// When a list row's timeline puts it: a conversation's latest message, or
+/// a message's own date. None for a row that is gone.
+pub fn row_time(conn: &Connection, grouping: MailGrouping, id: i64) -> Result<Option<i64>> {
+    let sql = match grouping {
+        MailGrouping::Conversations => "SELECT last_message_at FROM threads WHERE id = ?1",
+        MailGrouping::Messages => "SELECT date FROM messages WHERE id = ?1",
+    };
+    Ok(conn.query_row(sql, [id], |row| row.get(0)).optional()?)
 }
 
 /// Query-plan details for the exact list shape, including its cursor/filter.
@@ -575,6 +605,7 @@ fn message_summary_from_row(row: &Row) -> rusqlite::Result<MessageSummary> {
         is_outgoing: row.get::<_, i64>("is_outgoing")? != 0,
         has_attachments: row.get::<_, i64>("has_attachments")? != 0,
         has_replied: row.get::<_, i64>("has_replied")? != 0,
+        high_importance: row.get::<_, i64>("importance")? > 0,
         snoozed_until: row.get("snoozed_until")?,
         labels: parse_id_list(
             &row.get::<_, Option<String>>("label_ids")?
@@ -609,7 +640,7 @@ const MESSAGE_SUMMARY_SELECT: &str = "
              AS account_addresses,
            COALESCE(m.local_subject_prefix, '') || m.subject AS subject,
            m.snippet, m.from_name, m.from_addr, m.to_json, m.date,
-           m.is_read, m.is_starred, m.is_draft, m.is_outgoing, m.has_attachments,
+           m.is_read, m.is_starred, m.is_draft, m.is_outgoing, m.has_attachments, m.importance,
            (m.message_id IS NOT NULL AND EXISTS (
                SELECT 1 FROM message_refs mr
                JOIN messages reply ON reply.id = mr.message_id
@@ -633,8 +664,8 @@ const MESSAGE_SUMMARY_SELECT: &str = "
     JOIN accounts a ON a.id = m.account_id
     LEFT JOIN snoozes s ON s.thread_id = m.thread_id";
 
-/// One page of the message timeline for the scope in `args`, newest first.
-/// `args.cursor` is ignored; messages page by `cursor`.
+/// One page of the message timeline for the scope in `args`, in
+/// `args.order`. `args.cursor` is ignored; messages page by `cursor`.
 pub fn list_messages(
     conn: &Connection,
     args: &ListArgs,
@@ -671,21 +702,49 @@ fn list_messages_sql(
         let date_parameter = bind.len();
         bind.push(Box::new(cursor.message_id));
         let id_parameter = bind.len();
-        let clause = format!("(m.date, m.id) < (?{date_parameter}, ?{id_parameter})");
+        let clause = format!(
+            "(m.date, m.id) {} (?{date_parameter}, ?{id_parameter})",
+            args.order.past()
+        );
         where_sql = if where_sql.is_empty() {
             format!("WHERE {clause}")
         } else {
             format!("{where_sql} AND {clause}")
         };
     }
+    let direction = args.order.direction();
     (
         format!(
             "{MESSAGE_SUMMARY_SELECT} {where_sql}
-             ORDER BY m.date DESC, m.id DESC LIMIT {}",
+             ORDER BY m.date {direction}, m.id {direction} LIMIT {}",
             args.limit + 1
         ),
         bind,
     )
+}
+
+/// The unread messages this device keeps that a mail list shows, newest
+/// first.
+pub fn unread_message_ids(conn: &Connection, args: &ListArgs) -> Result<Vec<i64>> {
+    let (where_sql, bind) = build_filter(args, MailGrouping::Messages, false);
+    let filter = if where_sql.is_empty() {
+        "WHERE m.is_read = 0".to_owned()
+    } else {
+        format!("{where_sql} AND m.is_read = 0")
+    };
+    let sql = format!(
+        "SELECT m.id FROM messages m
+         JOIN threads t ON t.id = m.thread_id
+         JOIN accounts a ON a.id = m.account_id
+         LEFT JOIN snoozes s ON s.thread_id = m.thread_id
+         {filter}
+         ORDER BY m.date DESC, m.id DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = bind.iter().map(|b| b.as_ref()).collect();
+    Ok(stmt
+        .query_map(params_ref.as_slice(), |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// Query-plan details for the message list, including its cursor and filter.
@@ -897,6 +956,7 @@ mod tests {
             folder_id: Some(1),
             cursor: None,
             limit: 2,
+            order: ListOrder::NewestFirst,
         };
         let page = list(&conn, &args).unwrap();
 
@@ -945,6 +1005,7 @@ mod tests {
                 folder_id: None,
                 cursor: None,
                 limit: 50,
+                order: ListOrder::NewestFirst,
             };
             let mut ids = list(&conn, &args)
                 .unwrap()
@@ -980,6 +1041,7 @@ mod tests {
                 folder_id: None,
                 cursor: None,
                 limit: 2,
+                order: ListOrder::NewestFirst,
             },
         )
         .unwrap();
@@ -993,6 +1055,7 @@ mod tests {
                 folder_id: None,
                 cursor: first.next_cursor,
                 limit: 2,
+                order: ListOrder::NewestFirst,
             },
         )
         .unwrap();
@@ -1025,6 +1088,7 @@ mod tests {
                 thread_id: i64::MAX,
             }),
             limit: 2,
+            order: ListOrder::NewestFirst,
         };
         let plan = list_query_plan(&conn, &args).unwrap();
         assert!(
@@ -1070,6 +1134,7 @@ mod tests {
             folder_id: None,
             cursor: None,
             limit: 50,
+            order: ListOrder::NewestFirst,
         }
     }
 
@@ -1207,5 +1272,149 @@ mod tests {
                 .any(|line| line.contains("idx_messages_account_recent")),
             "account pages seek the message timeline index: {plan:?}"
         );
+    }
+
+    #[test]
+    fn a_rows_time_is_its_place_in_the_timeline() {
+        let conn = crate::db::testutil::conn();
+        let threads = conversations_at_four_times(&conn);
+        let time = |grouping, id| row_time(&conn, grouping, id).unwrap();
+        assert_eq!(time(MailGrouping::Conversations, threads[3]), Some(1000));
+        assert_eq!(time(MailGrouping::Messages, 1), Some(3000));
+        assert_eq!(time(MailGrouping::Conversations, 404), None);
+        assert_eq!(time(MailGrouping::Messages, 404), None);
+    }
+
+    /// Four conversations whose latest mail came at 3000, 2000, 2000 and 1000,
+    /// in the order they were stored.
+    fn conversations_at_four_times(conn: &Connection) -> Vec<i64> {
+        crate::db::testutil::seed_account(conn);
+        let mut threads = Vec::new();
+        for (date, subject) in [
+            (3000, "one"),
+            (2000, "two"),
+            (2000, "three"),
+            (1000, "four"),
+        ] {
+            let (thread, message) =
+                crate::db::testutil::seed_message(conn, "a@b.dev", subject, false);
+            conn.execute(
+                "UPDATE messages SET date = ?1 WHERE id = ?2",
+                params![date, message],
+            )
+            .unwrap();
+            recompute(conn, thread).unwrap();
+            threads.push(thread);
+        }
+        threads
+    }
+
+    #[test]
+    fn oldest_first_pages_run_forward_from_the_oldest_conversation() {
+        let conn = crate::db::testutil::conn();
+        let threads = conversations_at_four_times(&conn);
+        let page = |cursor| {
+            list(
+                &conn,
+                &ListArgs {
+                    cursor,
+                    limit: 2,
+                    order: ListOrder::OldestFirst,
+                    ..scope(View::Inbox)
+                },
+            )
+            .unwrap()
+        };
+        let first = page(None);
+        let second = page(first.next_cursor);
+        let listed = first
+            .threads
+            .iter()
+            .chain(&second.threads)
+            .map(|thread| thread.id)
+            .collect::<Vec<_>>();
+        // The two at the same time keep the order of their ids.
+        assert_eq!(listed, [threads[3], threads[1], threads[2], threads[0]]);
+        assert!(second.next_cursor.is_none());
+
+        let plan = |order| {
+            list_query_plan(
+                &conn,
+                &ListArgs {
+                    account_id: Some(1),
+                    cursor: first.next_cursor,
+                    order,
+                    ..scope(View::Inbox)
+                },
+            )
+            .unwrap()
+        };
+        let oldest_first = plan(ListOrder::OldestFirst);
+        assert!(
+            oldest_first.iter().any(|line| {
+                line.contains("idx_threads_recent") && line.contains("last_message_at>?")
+            }),
+            "oldest first pages seek the timeline index: {oldest_first:?}"
+        );
+        // Reading the index from its other end is all that changes: no sort.
+        let newest_first = plan(ListOrder::NewestFirst)
+            .into_iter()
+            .map(|line| line.replace("last_message_at<?", "last_message_at>?"))
+            .collect::<Vec<_>>();
+        assert_eq!(oldest_first, newest_first);
+    }
+
+    #[test]
+    fn oldest_first_message_pages_run_forward_from_the_oldest_message() {
+        let conn = crate::db::testutil::conn();
+        conversations_at_four_times(&conn);
+        let dates = |cursor| {
+            let page = list_messages(
+                &conn,
+                &ListArgs {
+                    limit: 3,
+                    order: ListOrder::OldestFirst,
+                    ..scope(View::Inbox)
+                },
+                cursor,
+            )
+            .unwrap();
+            let dates = page
+                .messages
+                .iter()
+                .map(|message| (message.date, message.id))
+                .collect::<Vec<_>>();
+            (dates, page.next_cursor)
+        };
+        let (first, cursor) = dates(None);
+        let (second, last) = dates(cursor);
+        assert_eq!(first, [(1000, 4), (2000, 2), (2000, 3)]);
+        assert_eq!(second, [(3000, 1)]);
+        assert!(last.is_none());
+
+        let plan = |order| {
+            list_messages_query_plan(
+                &conn,
+                &ListArgs {
+                    account_id: Some(1),
+                    order,
+                    ..scope(View::Inbox)
+                },
+                cursor,
+            )
+            .unwrap()
+        };
+        let oldest_first = plan(ListOrder::OldestFirst);
+        assert!(
+            oldest_first
+                .iter()
+                .any(|line| line.contains("idx_messages_account_recent") && line.contains("date>?")),
+            "oldest first pages seek the message timeline index: {oldest_first:?}"
+        );
+        let newest_first = plan(ListOrder::NewestFirst)
+            .into_iter()
+            .map(|line| line.replace("date<?", "date>?"))
+            .collect::<Vec<_>>();
+        assert_eq!(oldest_first, newest_first);
     }
 }

@@ -36,15 +36,14 @@ use windows_sys::Win32::UI::Shell::{
     APPBARDATA, DefSubclassProc, RemoveWindowSubclass, SHAppBarMessage, SetWindowSubclass,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GWL_STYLE, GetClassNameW, GetClientRect, GetWindowLongW, HCBT_CREATEWND,
-    HHOOK, HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, HTTOP, HTTOPLEFT, HTTOPRIGHT,
-    IsZoomed, NCCALCSIZE_PARAMS, PostMessageW, SC_CLOSE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE,
-    SM_CXPADDEDBORDER, SM_CYSIZEFRAME, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, SetWindowsHookExW,
-    UnhookWindowsHookEx, WH_CBT, WM_DPICHANGED, WM_MOUSEMOVE, WM_NCCALCSIZE, WM_NCDESTROY,
-    WM_NCHITTEST,
-    WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE,
-    WM_SYSCOMMAND, WS_CAPTION,
+    CallNextHookEx, GWL_STYLE, GetClassNameW, GetClientRect, GetWindowLongW, HCBT_CREATEWND, HHOOK,
+    HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsZoomed,
+    NCCALCSIZE_PARAMS, PostMessageW, SC_CLOSE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE,
+    SM_CXPADDEDBORDER, SM_CYSIZEFRAME, SPI_SETCLIENTAREAANIMATION, SPI_SETHIGHCONTRAST,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
+    SetWindowPos, SetWindowsHookExW, UnhookWindowsHookEx, WH_CBT, WM_DPICHANGED, WM_MOUSEMOVE,
+    WM_NCCALCSIZE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN,
+    WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_SETTINGCHANGE, WM_SYSCOMMAND, WS_CAPTION,
 };
 
 /// Window class that identifies the main window during creation.
@@ -273,8 +272,16 @@ unsafe extern "system" fn subclass_proc(
         // SAFETY: the hook was installed by `prepare` on this thread.
         unsafe { UnhookWindowsHookEx(hook) };
     }
-    if message == super::taskbar_badge::button_created_message() || message == WM_DPICHANGED {
+    // SAFETY: the arguments of the message being processed.
+    let recoloured = message == WM_SETTINGCHANGE && unsafe { colours_changed(wparam, lparam) };
+    if message == super::taskbar_badge::button_created_message()
+        || message == WM_DPICHANGED
+        || recoloured
+    {
         super::taskbar_badge::apply(hwnd);
+    }
+    if message == WM_SETTINGCHANGE && wparam == SPI_SETCLIENTAREAANIMATION as WPARAM {
+        crate::motion::system_changed();
     }
     if message == WM_NCDESTROY {
         STATE.with(|state| state.hwnd.set(null_mut()));
@@ -288,6 +295,31 @@ unsafe extern "system" fn subclass_proc(
     }
     // SAFETY: forwarding to winit's window procedure.
     unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+}
+
+/// Whether a `WM_SETTINGCHANGE` with these arguments changed the colours of
+/// the taskbar's badges: the Windows mode or accent, which Windows announces
+/// as `ImmersiveColorSet`, or high contrast.
+///
+/// # Safety
+/// `lparam` is null or a NUL-terminated string, as the message passes.
+unsafe fn colours_changed(wparam: WPARAM, lparam: LPARAM) -> bool {
+    if wparam == SPI_SETHIGHCONTRAST as WPARAM {
+        return true;
+    }
+    let area = lparam as *const u16;
+    if area.is_null() {
+        return false;
+    }
+    let expected = "ImmersiveColorSet\0".encode_utf16();
+    for (index, wanted) in expected.enumerate() {
+        // SAFETY: the string is read only up to its NUL, or the first
+        // difference before it.
+        if unsafe { *area.add(index) } != wanted {
+            return false;
+        }
+    }
+    true
 }
 
 /// Show the unread count on the main window's taskbar button, and keep it

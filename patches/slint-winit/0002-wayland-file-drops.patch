@@ -1,0 +1,192 @@
+diff --git a/crates/i-slint-backend-winit/build.rs b/crates/i-slint-backend-winit/build.rs
+index 8e83e5d..2b00fa6 100644
+--- a/crates/i-slint-backend-winit/build.rs
++++ b/crates/i-slint-backend-winit/build.rs
+@@ -20,6 +20,7 @@ fn main() {
+        supports_vulkan: { all(enable_skia_wgpu, any(all(target_family = "unix", not(target_vendor = "apple")), all(any(target_vendor = "apple", target_family = "windows"), feature = "renderer-skia-vulkan"))) },
+        xdg_desktop_settings: { not(any(target_family = "windows", target_vendor = "apple", target_arch = "wasm32", target_os = "android")) },
+        muda: { all(feature = "muda", any(target_os = "windows", target_os = "macos")) },
++       wayland_file_drops: { all(feature = "wayland", not(any(target_family = "windows", target_vendor = "apple", target_arch = "wasm32", target_os = "android"))) },
+     }
+     println!("cargo:rustc-check-cfg=cfg(slint_nightly_test)");
+ }
+diff --git a/crates/i-slint-backend-winit/clipboard.rs b/crates/i-slint-backend-winit/clipboard.rs
+index a2cab76..1ff6b3e 100644
+--- a/crates/i-slint-backend-winit/clipboard.rs
++++ b/crates/i-slint-backend-winit/clipboard.rs
+@@ -130,6 +130,7 @@ impl ClipboardProvider for WaylandClipboard {
+ 
+ pub fn create_clipboard(
+     _display_handle: &winit::raw_window_handle::DisplayHandle<'_>,
++    _event_loop_proxy: &winit::event_loop::EventLoopProxy<crate::SlintEvent>,
+ ) -> ClipboardPair {
+     core::cfg_select! {
+         all(
+@@ -146,7 +147,11 @@ pub fn create_clipboard(
+             {
+                 // Safety: the display outlives the clipboard, stored next to the event loop.
+                 let display = wayland.display.as_ptr();
+-                let clipboard = unsafe { smithay_clipboard::Clipboard::new(display) };
++                // winit doesn't report files dragged onto a window on Wayland, so they come
++                // through the clipboard's own data device.
++                let drops = Box::new(WaylandDrops { event_loop_proxy: _event_loop_proxy.clone() });
++                let clipboard =
++                    unsafe { smithay_clipboard::Clipboard::with_drops(display, Some(drops)) };
+                 let clipboard = std::rc::Rc::new(clipboard);
+                 return (
+                     Box::new(WaylandClipboard { clipboard: clipboard.clone(), primary: false }),
+@@ -183,3 +188,47 @@ pub fn create_clipboard(
+         }
+     }
+ }
++
++/// Files dragged onto a window on Wayland, which the event loop turns into
++/// the window events winit gives for them on other platforms.
++#[cfg(wayland_file_drops)]
++struct WaylandDrops {
++    event_loop_proxy: winit::event_loop::EventLoopProxy<crate::SlintEvent>,
++}
++
++#[cfg(wayland_file_drops)]
++impl smithay_clipboard::DropHandler for WaylandDrops {
++    fn event(&mut self, event: smithay_clipboard::DropEvent) {
++        let event = crate::SlintEvent(crate::event_loop::CustomEvent::FileDrop(event));
++        let _ = self.event_loop_proxy.send_event(event);
++    }
++
++    fn retrieve_files(&mut self, key: &str) -> Option<Vec<std::path::PathBuf>> {
++        futures::executor::block_on(retrieve_portal_files(key))
++    }
++}
++
++/// The files a document portal transfer names, as this app can read them,
++/// which in a sandbox are its own copies of what the source named.
++#[cfg(wayland_file_drops)]
++async fn retrieve_portal_files(key: &str) -> Option<Vec<std::path::PathBuf>> {
++    let connection = zbus::connection::Builder::session()
++        .ok()?
++        .method_timeout(std::time::Duration::from_secs(5))
++        .build()
++        .await
++        .ok()?;
++    let options = std::collections::HashMap::<&str, zbus::zvariant::Value<'_>>::new();
++    let reply = connection
++        .call_method(
++            Some("org.freedesktop.portal.Documents"),
++            "/org/freedesktop/portal/documents",
++            Some("org.freedesktop.portal.FileTransfer"),
++            "RetrieveFiles",
++            &(key, options),
++        )
++        .await
++        .ok()?;
++    let files: Vec<String> = reply.body().deserialize().ok()?;
++    Some(files.into_iter().map(std::path::PathBuf::from).collect())
++}
+diff --git a/crates/i-slint-backend-winit/event_loop.rs b/crates/i-slint-backend-winit/event_loop.rs
+index 625255f..53066f8 100644
+--- a/crates/i-slint-backend-winit/event_loop.rs
++++ b/crates/i-slint-backend-winit/event_loop.rs
+@@ -37,6 +37,9 @@ pub enum CustomEvent {
+     Accesskit(accesskit_winit::Event),
+     #[cfg(muda)]
+     Muda(muda::MenuEvent),
++    /// Files dragged over or dropped on a window on Wayland, which winit doesn't report.
++    #[cfg(wayland_file_drops)]
++    FileDrop(smithay_clipboard::DropEvent),
+ }
+ 
+ impl std::fmt::Debug for CustomEvent {
+@@ -51,6 +54,8 @@ impl std::fmt::Debug for CustomEvent {
+             Self::Accesskit(a) => write!(f, "AccessKit({a:?})"),
+             #[cfg(muda)]
+             Self::Muda(e) => write!(f, "Muda({e:?})"),
++            #[cfg(wayland_file_drops)]
++            Self::FileDrop(e) => write!(f, "FileDrop({e:?})"),
+         }
+     }
+ }
+@@ -107,6 +112,36 @@ impl EventLoopState {
+     }
+ }
+ 
++#[cfg(wayland_file_drops)]
++impl EventLoopState {
++    /// Files dragged over or dropped on a window on Wayland, which winit
++    /// doesn't report there, as the window events it gives for them elsewhere.
++    fn file_drop(&mut self, event_loop: &ActiveEventLoop, drop: smithay_clipboard::DropEvent) {
++        use smithay_clipboard::DropEvent;
++        use winit::application::ApplicationHandler;
++        let Some(window_id) = self.shared_backend_data.window_for_wayland_surface(drop.surface())
++        else {
++            return;
++        };
++        match drop {
++            // A portal drag names its files only once they're dropped.
++            DropEvent::Enter { .. } => self.window_event(
++                event_loop,
++                window_id,
++                WindowEvent::HoveredFile(std::path::PathBuf::new()),
++            ),
++            DropEvent::Leave { .. } => {
++                self.window_event(event_loop, window_id, WindowEvent::HoveredFileCancelled)
++            }
++            DropEvent::Drop { paths, .. } => {
++                for path in paths {
++                    self.window_event(event_loop, window_id, WindowEvent::DroppedFile(path));
++                }
++            }
++        }
++    }
++}
++
+ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
+     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+         if matches!(
+@@ -169,6 +204,8 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
+ 
+     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: SlintEvent) {
+         match event.0 {
++            #[cfg(wayland_file_drops)]
++            CustomEvent::FileDrop(drop) => self.file_drop(event_loop, drop),
+             CustomEvent::UserEvent(user_callback) => {
+                 user_callback();
+                 // winit can run several user events, then sleep, without calling `new_events`.
+diff --git a/crates/i-slint-backend-winit/lib.rs b/crates/i-slint-backend-winit/lib.rs
+index 7459d15..e8bac0e 100644
+--- a/crates/i-slint-backend-winit/lib.rs
++++ b/crates/i-slint-backend-winit/lib.rs
+@@ -565,6 +565,7 @@ impl SharedBackendData {
+             &event_loop
+                 .display_handle()
+                 .map_err(|display_err| PlatformError::OtherError(display_err.into()))?,
++            &event_loop_proxy,
+         );
+         Ok(Self {
+             context: Default::default(),
+@@ -685,6 +686,25 @@ impl SharedBackendData {
+         self.active_windows.borrow().get(&id).and_then(|weakref| weakref.upgrade())
+     }
+ 
++    /// The window whose Wayland surface is the `wl_surface` at `surface`.
++    #[cfg(wayland_file_drops)]
++    pub(crate) fn window_for_wayland_surface(
++        &self,
++        surface: usize,
++    ) -> Option<winit::window::WindowId> {
++        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
++        let windows = self.active_windows.borrow().clone();
++        windows.into_iter().find_map(|(id, adapter)| {
++            let window = adapter.upgrade()?.winit_window()?;
++            match window.window_handle().ok()?.as_raw() {
++                RawWindowHandle::Wayland(handle) if handle.surface.as_ptr() as usize == surface => {
++                    Some(id)
++                }
++                _ => None,
++            }
++        })
++    }
++
+     /// Buffer a mouse move event for the given window, coalescing it with the previously buffered
+     /// one. A move buffered for another window is dispatched first, to keep the events in order.
+     pub(crate) fn buffer_mouse_move(

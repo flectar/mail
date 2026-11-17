@@ -141,6 +141,107 @@ fn issue_23_gpu_paints_text_digits_with_color_emoji_installed() {
     assert!(dark_pixels > 100);
 }
 
+/// Fonts built like Calibri, whose outlines come with monochrome bitmap
+/// strikes. See resources/test-fonts/README.md.
+fn bitmap_strike_fonts() -> [(parley::fontique::Blob<u8>, &'static str); 2] {
+    use parley::fontique::Blob;
+    [
+        (
+            Blob::new(Arc::new(
+                include_bytes!("../../resources/test-fonts/BitmapStrikes-EBDT.ttf").as_slice(),
+            ) as _),
+            "Flectar EBDT Strikes Test",
+        ),
+        (
+            Blob::new(Arc::new(
+                include_bytes!("../../resources/test-fonts/BitmapStrikes-CBDT.ttf").as_slice(),
+            ) as _),
+            "Flectar CBDT Strikes Test",
+        ),
+    ]
+}
+
+fn prepare_with_font(font: &parley::fontique::Blob<u8>, family: &str) -> PreparedEmail {
+    let mut ctx = create_email_font_ctx_with_system_fonts(false);
+    ctx.collection.register_fonts(font.clone(), None);
+    prepare_email_html_with_font_ctx(
+        &format!(
+            r#"<body style="margin:0;background:#fff"><div style="font-family:'{family}';font-size:16px;color:#000">FE</div></body>"#
+        ),
+        ctx,
+    )
+    .unwrap()
+}
+
+#[test]
+fn issue_342_bitmap_strikes_draw_from_outlines() {
+    for (font, family) in bitmap_strike_fonts() {
+        let mut prepared = prepare_with_font(&font, family);
+        let frame = render_prepared_cpu(&mut prepared, 120, 40, 1.0).unwrap();
+        let dark_pixels = frame.tiles[0]
+            .image
+            .to_rgba8()
+            .unwrap()
+            .as_slice()
+            .iter()
+            .filter(|p| p.a > 0 && p.r < 100 && p.g < 100 && p.b < 100)
+            .count();
+        assert!(
+            dark_pixels > 30,
+            "{family}: the CPU renderer drew {dark_pixels} dark pixels"
+        );
+
+        // Vello's GPU scene dropped glyphs with a byte-aligned mask and drew
+        // bit-aligned ones white, instead of drawing their outlines.
+        #[cfg(feature = "gpu-renderer")]
+        {
+            let mut scene = vello::Scene::new();
+            paint_scene(
+                &mut VelloScenePainter::new(&mut scene),
+                &mut prepared.document,
+                1.0,
+                120,
+                40,
+                0,
+                0,
+            );
+            let resources = &scene.encoding().resources;
+            let outlines: usize = resources
+                .glyph_runs
+                .iter()
+                .filter(|run| run.font.data.id() == font.id())
+                .map(|run| run.glyphs.len())
+                .sum();
+            assert_eq!(outlines, 2, "{family}: F and E must be drawn from outlines");
+        }
+    }
+}
+
+#[cfg(feature = "gpu-renderer")]
+#[test]
+#[ignore = "requires a working WGPU adapter"]
+fn issue_342_gpu_paints_bitmap_strike_fonts() {
+    for (font, family) in bitmap_strike_fonts() {
+        let mut prepared = prepare_with_font(&font, family);
+        prepared.document.resolve(0.0);
+        let pixels = render_to_buffer::<anyrender_vello::VelloImageRenderer, _>(
+            |scene| paint_scene(scene, &mut prepared.document, 1.0, 120, 40, 0, 0),
+            120,
+            40,
+        );
+        let dark_pixels = pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|p| p[3] > 0 && p[0] < 100 && p[1] < 100 && p[2] < 100)
+            .count();
+        assert!(
+            dark_pixels > 30,
+            "{family}: the GPU drew {dark_pixels} dark pixels"
+        );
+    }
+}
+
 #[test]
 fn default_link_color_preserves_sender_styles() {
     use blitz_dom::util::ToColorColor;
@@ -1468,5 +1569,73 @@ fn relative_resource_urls_do_not_fail_the_message() {
         let prepared = renderer.prepare_email_html(&html, false).unwrap();
         assert!(prepared.notice.is_none());
         assert!(prepared.plain_text.contains("Order shipped"));
+    }
+}
+
+/// Where the left edge of an italic `text` is, a quarter of the way down what
+/// it paints and a quarter of the way up, through the CPU renderer.
+fn italic_left_edges(
+    ctx: parley::FontContext,
+    font: &str,
+    text: &str,
+    scale: f32,
+) -> (usize, usize) {
+    let mut prepared = prepare_email_html_with_font_ctx(
+        &format!(
+            "<body style='margin:0;background:#fff'><p style=\"margin:0 0 0 40px;font:italic 120px {font};color:#000\">{text}</p></body>"
+        ),
+        ctx,
+    )
+    .unwrap();
+    let frame = render_prepared_cpu(&mut prepared, 240, 200, scale).unwrap();
+    let pixels = frame.tiles[0].image.to_rgba8().unwrap();
+    let left_edges: Vec<usize> = pixels
+        .as_slice()
+        .chunks(pixels.width() as usize)
+        .filter_map(|row| row.iter().position(|p| p.r < 80 && p.g < 80 && p.b < 80))
+        .collect();
+    assert!(
+        left_edges.len() > 40,
+        "{text} in {font} was not painted at {scale}x"
+    );
+    let quarter = left_edges.len() / 4;
+    (
+        left_edges[quarter],
+        left_edges[left_edges.len() - 1 - quarter],
+    )
+}
+
+#[test]
+fn synthetic_italics_lean_forward_on_the_cpu_renderer() {
+    // Noto Emoji has no italic face and no `ital` or `slnt` axis, so an italic
+    // square gets the skew of a synthetic italic.
+    use parley::fontique::Blob;
+    for scale in [1.0, 2.0] {
+        let mut ctx = create_email_font_ctx_with_system_fonts(false);
+        ctx.collection.register_fonts(
+            Blob::new(Arc::new(
+                include_bytes!("../../resources/fonts/noto-emoji/NotoEmoji[wght].ttf").as_slice(),
+            ) as _),
+            None,
+        );
+        let (top, bottom) = italic_left_edges(ctx, "'Noto Emoji'", "\u{2b1b}", scale);
+        assert!(
+            top > bottom + 4,
+            "the italic square leans backwards at {scale}x, its left edge is at {top} near the top and {bottom} near the bottom"
+        );
+    }
+}
+
+#[test]
+fn slant_axis_italics_lean_forward() {
+    // The bundled Google Sans Flex has no italic face and no `ital` axis, so
+    // its italics come from its `slnt` axis.
+    for scale in [1.0, 2.0] {
+        let ctx = create_email_font_ctx_with_system_fonts(false);
+        let (top, bottom) = italic_left_edges(ctx, "'Google Sans Flex'", "l", scale);
+        assert!(
+            top > bottom + 4,
+            "the italic l doesn't lean forward at {scale}x, its left edge is at {top} near the top and {bottom} near the bottom"
+        );
     }
 }

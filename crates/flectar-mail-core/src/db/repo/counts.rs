@@ -102,8 +102,6 @@ enum Tab {
     Other,
     /// A category, by label id.
     Category(i64),
-    /// A custom split, by id. It has no sidebar row.
-    Split(i64),
     /// A route nothing lists.
     Elsewhere,
 }
@@ -120,10 +118,7 @@ impl Tab {
                         .strip_prefix(prefix)
                         .and_then(|id| std::str::from_utf8(id).ok()?.parse().ok())
                 };
-                id(b"label:")
-                    .map(Self::Category)
-                    .or_else(|| id(b"split:").map(Self::Split))
-                    .unwrap_or(Self::Elsewhere)
+                id(b"label:").map(Self::Category).unwrap_or(Self::Elsewhere)
             }
             _ => Self::Elsewhere,
         }
@@ -161,7 +156,6 @@ struct Tally {
     /// Per account: each folder's count and the mailbox its role lists it in.
     folders: Vec<HashMap<i64, (i64, Option<Mailbox>)>>,
     labels: Vec<HashMap<i64, i64>>,
-    splits: Vec<HashMap<i64, i64>>,
     /// Unrouted inbox items, as (conversation, account index), waiting for
     /// `NEWEST_INCOMING_SQL` to tell Important from Other.
     unrouted: Vec<(i64, usize)>,
@@ -202,7 +196,6 @@ impl Tally {
         Ok(Self {
             folders: vec![HashMap::new(); counts.len()],
             labels: vec![HashMap::new(); counts.len()],
-            splits: vec![HashMap::new(); counts.len()],
             counts,
             positions,
             last_account: None,
@@ -258,7 +251,6 @@ impl Tally {
             Tab::Important => counts.important += 1,
             Tab::Other => counts.other += 1,
             Tab::Category(label) => *self.labels[index].entry(label).or_default() += 1,
-            Tab::Split(split) => *self.splits[index].entry(split).or_default() += 1,
             Tab::Elsewhere => {}
         }
     }
@@ -318,8 +310,7 @@ impl Tally {
             .into_iter()
             .zip(self.folders)
             .zip(self.labels)
-            .zip(self.splits)
-            .map(|(((mut counts, folders), labels), splits)| {
+            .map(|((mut counts, folders), labels)| {
                 counts.folders = sorted(
                     folders
                         .into_iter()
@@ -327,7 +318,6 @@ impl Tally {
                         .collect(),
                 );
                 counts.labels = sorted(labels.into_iter().collect());
-                counts.splits = sorted(splits.into_iter().collect());
                 counts
             })
             .collect()
@@ -468,8 +458,8 @@ pub fn notified_unread(badges: &[MailboxBadgeCounts], settings: &Settings) -> i6
         .sum()
 }
 
-/// The unread inbox mail one notification tab key ("important", "other",
-/// "label:<id>" or "split:<id>") stands for.
+/// The unread inbox mail one notification tab key ("important", "other" or
+/// "label:<id>") stands for.
 fn tab_unread(counts: &MailboxBadgeCounts, tab: &str) -> i64 {
     let find = |list: &[(i64, i64)], id: &str| {
         id.parse::<i64>()
@@ -480,11 +470,9 @@ fn tab_unread(counts: &MailboxBadgeCounts, tab: &str) -> i64 {
     match tab {
         "important" => counts.important,
         "other" => counts.other,
-        tab => match (tab.strip_prefix("label:"), tab.strip_prefix("split:")) {
-            (Some(label), _) => find(&counts.labels, label),
-            (_, Some(split)) => find(&counts.splits, split),
-            _ => 0,
-        },
+        tab => tab
+            .strip_prefix("label:")
+            .map_or(0, |label| find(&counts.labels, label)),
     }
 }
 
@@ -501,7 +489,6 @@ mod tests {
             important,
             other,
             labels: vec![(2, 4), (9, 50)],
-            splits: vec![(7, 3)],
             ..Default::default()
         };
         let badges = [counts(1, 10, 6, 1), counts(2, 20, 5, 2)];
@@ -519,7 +506,7 @@ mod tests {
         ]
         .map(String::from)
         .to_vec();
-        assert_eq!(notified_unread(&badges, &settings), 2 * (4 + 3) + 1 + 2);
+        assert_eq!(notified_unread(&badges, &settings), 2 * 4 + 1 + 2);
 
         // A scope from a newer version falls back to Important, as
         // notifications do.
@@ -764,6 +751,7 @@ mod tests {
         routed_thread(&conn, 2, Some("pending"), true);
         routed_thread(&conn, 3, Some("other"), false);
         routed_thread(&conn, 4, Some("label:2"), false);
+        // A route nothing lists any more, such as one to a deleted split.
         routed_thread(&conn, 5, Some("split:7"), false);
         // A human reply after a notification moves the conversation to
         // Important, and a notification after a reply to Other.
@@ -779,7 +767,6 @@ mod tests {
             assert_eq!(badges.important, 2 + per_message, "{grouping:?}");
             assert_eq!(badges.other, 3 + per_message, "{grouping:?}");
             assert_eq!(badges.labels, vec![(2, 1)], "{grouping:?}");
-            assert_eq!(badges.splits, vec![(7, 1)], "{grouping:?}");
         }
     }
 
@@ -943,6 +930,7 @@ mod tests {
                     folder_id,
                     cursor: None,
                     limit: 10_000,
+                    order: crate::models::ListOrder::NewestFirst,
                 };
                 if messages {
                     let page = threads::list_messages(&conn, &args, None).unwrap();

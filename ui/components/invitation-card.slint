@@ -93,9 +93,11 @@ export component InvitationCard inherits Rectangle {
         ? (Invitation.organizer == "" ? @tr("Your proposed change was declined") : @tr("{} declined your proposed change", Invitation.organizer))
         : Invitation.kind == "refresh" ? @tr("{} asked for the latest version of this event", Invitation.answered-by)
         : Invitation.organizer == "" ? @tr("Event") : @tr("Event from {}", Invitation.organizer);
-    private property <string> guests-text: Invitation.guests == 0 ? ""
-        : Invitation.accepted == 0 ? @tr("One guest" | "{n} guests" % Invitation.guests)
-        : @tr("One guest, {} accepted" | "{n} guests, {} accepted" % Invitation.guests, Invitation.accepted);
+    private property <string> guests-text: Invitation.guest-names == "" ? ""
+        : Invitation.more-guests == 0 ? @tr("With {}", Invitation.guest-names)
+        : @tr("With {} and one more" | "With {} and {n} more" % Invitation.more-guests, Invitation.guest-names);
+    private property <string> accepted-text: Invitation.accepted == 0 ? ""
+        : @tr("One accepted" | "{n} accepted" % Invitation.accepted);
     private property <string> when-text: Invitation.when == ""
         ? (Invitation.occurrence ? @tr("This occurrence") : Invitation.repeats ? @tr("Repeats") : "")
         : Invitation.occurrence ? @tr("{} · This occurrence", Invitation.when)
@@ -194,9 +196,10 @@ export component InvitationCard inherits Rectangle {
                     wrap: word-wrap;
                 }
                 if root.guests-text != "" : Text {
-                    text: root.guests-text;
+                    text: root.accepted-text == "" ? root.guests-text : root.guests-text + " · " + root.accepted-text;
                     color: AppTheme.secondary;
                     font-size: TypeScale.secondary;
+                    wrap: word-wrap;
                 }
             }
 

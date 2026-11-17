@@ -1,11 +1,12 @@
 import { AccountMailPreferences } from "account-mail-preferences.slint";
 import { SettingsSelectRow } from "settings-components.slint";
 import { ScrollView, VerticalBox } from "std-widgets.slint";
-import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow, SpellingLanguage } from "../models.slint";
+import { AccountRow, ComposeAttachment, ComposeLink, ComposeContact, ComposeEditorTile, EmailTemplateRow, SpellingLanguage } from "../models.slint";
 import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } from "composer-fields.slint";
-import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerToolbar, DiscardConfirmation, LinkEditor } from "composer-actions.slint";
+import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerPhotos, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, ImageResizeFrame, LinkEditor } from "composer-actions.slint";
 import { EmailTemplates } from "email-templates.slint";
 import { TypeScale } from "../typography.slint";
+import { ConfirmationDialog } from "confirmation-dialog.slint";
 import { IconButton } from "controls.slint";
 
 
@@ -26,12 +27,36 @@ export component EmailComposer inherits Rectangle {
     in-out property <string> subject;
     in-out property <string> body;
     in property <bool> sending: false;
+    in property <bool> drop-hint: false;
+    // An AI agent asked to send this draft: the note says who, above the
+    // message the user checks before sending.
+    in property <string> review-note: "";
+    // For a signature: whether its text or formatting changed since it opened, and the name
+    // it was saved with.
+    in property <bool> signature-edited: false;
+    in property <string> signature-saved-name: "";
     in property <[AccountRow]> accounts: [];
     in-out property <int> selected-account-id: -1;
     in property <[ComposeContact]> contact-suggestions: [];
     in property <[ComposeAttachment]> attachments: [];
+    in property <[ComposeLink]> links: [];
+    in property <bool> link-sharing: false;
     in property <[EmailTemplateRow]> templates: [];
     in property <string> attachment-summary: "";
+    // JPEG photos large enough to go out shrunk, in the text and attached: how many, their
+    // size as they go out and at full size, whether they go out shrunk, and whether they're
+    // being shrunk.
+    in property <int> photo-count: 0;
+    in property <string> photo-size: "";
+    in property <string> photo-full-size: "";
+    in-out property <bool> shrink-photos: false;
+    in-out property <bool> request-receipt: false;
+    in-out property <int> importance: 0;
+    in property <bool> shrinking-photos: false;
+    // A forward's files are still on their way, which sending and saving wait for.
+    in property <bool> attaching-files: false;
+    // The message goes out as plain text only.
+    in property <bool> plain-text: false;
     in-out property <string> from-label: @tr("No connected account");
     in property <string> notice: "";
     in property <bool> notice-is-error: false;
@@ -42,12 +67,26 @@ export component EmailComposer inherits Rectangle {
     in property <float> editor-caret-x: 0;
     in property <float> editor-caret-y: 0;
     in property <float> editor-caret-height: 18;
+    in property <bool> editor-image-shown: false;
+    in property <float> editor-image-x: 0;
+    in property <float> editor-image-y: 0;
+    in property <float> editor-image-width: 0;
+    in property <float> editor-image-height: 0;
     in property <bool> bold-active: false;
     in property <bool> italic-active: false;
     in property <bool> underline-active: false;
     in property <bool> strike-active: false;
     in property <bool> code-active: false;
     in property <string> active-link-url: "";
+    in property <string> active-color: "none";
+    in property <string> active-highlight: "none";
+    in property <string> active-size: "normal";
+    in property <string> active-family: "default";
+    in property <string> active-align: "left";
+    in property <string> active-image-size: "";
+    in property <string> active-image-alt: "";
+    in property <int> active-image-width: 0;
+    in property <int> active-image-shown-width: 0;
     in property <bool> can-pop-out: false;
     // "reply" or "forward" when the original goes below the editor.
     in property <string> quote: "";
@@ -96,9 +135,23 @@ export component EmailComposer inherits Rectangle {
     callback pop-out;
     callback back-requested;
     callback submit(bool);
+    // What sending asks first: "subject", or "attachment" with the keyword
+    // the message mentions. Answered "send", "attach" or "cancel".
+    in-out property <bool> send-check-open: false;
+    in property <string> send-check;
+    in property <string> send-check-keyword;
+    callback answer-send-check(string);
+    callback save-signature();
     callback pick-attachments;
+    callback insert-images;
     callback remove-attachment(int);
+    callback remove-link(int);
+    callback share-by-link();
+    callback shrink-photos-toggled(bool);
+    callback plain-text-chosen(bool);
     callback format-requested(string, string, int, int);
+    callback paste-requested(string, int, int) -> bool;
+    callback copy-requested(bool, string, int, int) -> bool;
     callback link-requested(string, string, int, int);
     callback body-edited(string, int, int, string);
     callback selection-changed(string, int, int);
@@ -112,6 +165,7 @@ export component EmailComposer inherits Rectangle {
     callback use-template(int) -> bool;
     callback save-template(int, string, string, string, string) -> bool;
     callback delete-template(int) -> bool;
+    pure callback splice-text(string, int, int, string) -> string;
     callback edit-quote();
     callback remove-quote();
     callback restore-quote();
@@ -130,6 +184,10 @@ export component EmailComposer inherits Rectangle {
     private property <string> link-url: "";
     private property <int> link-selection-start: 0;
     private property <int> link-selection-end: 0;
+    private property <bool> image-alt-open: false;
+    private property <string> image-alt: "";
+    private property <int> image-selection-start: 0;
+    private property <int> image-selection-end: 0;
     private property <bool> caret-visible: true;
     private property <string> pending-key-text: "";
     private property <bool> ime-edit-pending: false;
@@ -162,9 +220,36 @@ export component EmailComposer inherits Rectangle {
             body-input.focus();
         }
     }
-    private property <bool> has-content: root.to != "" || root.cc != "" || root.bcc != ""
-        || root.subject != "" || root.body != "" || root.attachments.length > 0 || root.quote != "";
-    private property <bool> can-send: !root.sending && root.selected-account-id > 0 && root.to != "" && (root.body != "" || root.quote != "") && AccountMailPreferences.composer-preferences-ready;
+    // A signature being written, in place of a message: "signature" mode.
+    private property <bool> signature-mode: root.mode == "signature";
+    private property <bool> has-content: root.signature-mode
+        ? root.signature-edited || root.subject != root.signature-saved-name
+        : root.to != "" || root.cc != "" || root.bcc != ""
+            || root.subject != "" || root.body != "" || root.attachments.length > 0 || root.quote != "";
+    // Photos going out shrunk are sent once they are.
+    private property <bool> can-send: !root.sending && !root.shrinking-photos && !root.attaching-files && root.selected-account-id > 0 && root.to != "" && (root.body != "" || root.quote != "") && AccountMailPreferences.composer-preferences-ready;
+
+    // Pastes what the clipboard holds with its formatting, or as plain text in the message's
+    // style when it holds none.
+    function paste-formatted() {
+        if (root.paste-requested(root.body, body-input.anchor-position-byte-offset, body-input.cursor-position_byte_offset)) {
+            body-input.set-selection-offsets(root.selection-start, root.selection-end);
+        } else {
+            body-input.paste();
+        }
+    }
+
+    // Copies or cuts the selection with its formatting, or as plain text where the clipboard
+    // takes only that.
+    function copy-formatted(cut: bool) {
+        if (root.copy-requested(cut, root.body, body-input.anchor-position-byte-offset, body-input.cursor-position_byte_offset)) {
+            body-input.set-selection-offsets(root.selection-start, root.selection-end);
+        } else if (cut) {
+            body-input.cut();
+        } else {
+            body-input.copy();
+        }
+    }
 
     function apply-format(kind: string) {
         if (kind == "link") {
@@ -185,6 +270,14 @@ export component EmailComposer inherits Rectangle {
         );
         body-input.set-selection-offsets(root.selection-start, root.selection-end);
         body-input.focus();
+    }
+
+    // Asks for the selected image's alt text.
+    function edit-image-alt() {
+        root.image-selection-start = root.selection-start;
+        root.image-selection-end = root.selection-end;
+        root.image-alt = root.active-image-alt;
+        root.image-alt-open = true;
     }
 
     function request-close() {
@@ -229,8 +322,8 @@ export component EmailComposer inherits Rectangle {
             // The typing proxy starts where the visible caret is.
             body-input.set-selection-offsets(root.selection-start, root.selection-end);
             root.editor-layout-changed();
-            // The recipients' row takes focus only while it is empty.
-            if root.to != "" {
+            // The recipients' row takes focus only while it is empty. A signature has none.
+            if root.to != "" || root.signature-mode {
                 body-input.focus();
             }
         }
@@ -307,7 +400,36 @@ export component EmailComposer inherits Rectangle {
             request-close => { root.request-close(); }
         }
 
-        ComposerFromRow {
+        if root.review-note != "" : Rectangle {
+            background: root.accent-background;
+            height: review-row.preferred-height;
+            accessible-role: text;
+            accessible-label: root.review-note;
+            review-row := HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 10px;
+                padding-bottom: 10px;
+                spacing: 10px;
+                Image {
+                    y: (parent.height - self.height) / 2;
+                    width: 18px;
+                    height: 18px;
+                    source: @image-url("../icons/lucide/filled/bot.svg");
+                    colorize: root.accent-color;
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.review-note;
+                    color: root.title-color;
+                    font-size: TypeScale.secondary;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if !root.signature-mode : ComposerFromRow {
             accounts: root.accounts;
             selected-account-id <=> root.selected-account-id;
             from-label <=> root.from-label;
@@ -325,7 +447,7 @@ export component EmailComposer inherits Rectangle {
             }
         }
 
-        SettingsSelectRow {
+        if !root.signature-mode : SettingsSelectRow {
             compact: root.compact;
             title: @tr("From");
             description: @tr("Verified sender identity");
@@ -339,7 +461,7 @@ export component EmailComposer inherits Rectangle {
             }
         }
 
-        SettingsSelectRow {
+        if !root.signature-mode : SettingsSelectRow {
             compact: root.compact;
             title: @tr("Signature");
             description: AccountMailPreferences.composer-security;
@@ -348,7 +470,7 @@ export component EmailComposer inherits Rectangle {
             title-color: root.title-color; description-color: root.secondary-color;
             selected(index, value) => { if AccountMailPreferences.composer-preferences-ready { AccountMailPreferences.composer-signature(index); } }
         }
-        recipients := ComposerRecipients {
+        if !root.signature-mode : ComposerRecipients {
             open: root.open;
             to <=> root.to;
             cc <=> root.cc;
@@ -371,13 +493,14 @@ export component EmailComposer inherits Rectangle {
             }
         }
 
-        Rectangle {
+        if !root.signature-mode : Rectangle {
             height: 1px;
             background: root.subtle-border-color;
         }
 
-        ComposerSubject {
+        subject-row := ComposerSubject {
             subject <=> root.subject;
+            naming-signature: root.signature-mode;
             accent-color: root.accent-color;
             background-color: root.background-color;
             muted-color: root.muted-color;
@@ -386,6 +509,10 @@ export component EmailComposer inherits Rectangle {
 
         ComposerToolbar {
             compact: root.compact;
+            templates-shown: !root.signature-mode;
+            plain-text: root.plain-text;
+            format-switch-shown: !root.signature-mode;
+            plain-text-chosen(plain) => { root.plain-text-chosen(plain); }
             accent-background: root.accent-background;
             accent-color: root.accent-color;
             control-hover-color: root.control-hover-color;
@@ -393,14 +520,21 @@ export component EmailComposer inherits Rectangle {
             raised-color: root.raised-color;
             secondary-color: root.secondary-color;
             subtle-border-color: root.subtle-border-color;
+            body-color: root.body-color;
             bold-active: root.bold-active;
             italic-active: root.italic-active;
             underline-active: root.underline-active;
             strike-active: root.strike-active;
             code-active: root.code-active;
+            active-color: root.active-color;
+            active-highlight: root.active-highlight;
+            active-size: root.active-size;
+            active-family: root.active-family;
+            active-align: root.active-align;
             link-active: root.active-link-url != "";
             can-link: root.selection-start != root.selection-end;
             apply-format(kind) => { root.apply-format(kind); }
+            insert-image => { root.insert-images(); }
             open-templates => { root.templates-open = true; }
             undo => {
                 root.history-requested("undo");
@@ -512,9 +646,46 @@ export component EmailComposer inherits Rectangle {
                             root.apply-format("strike");
                             return accept;
                         }
+                        // Paragraph alignment and removing formatting, with the keys webmail uses.
+                        if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.shift && event.text.to-lowercase() == "l") {
+                            root.apply-format("align:left");
+                            return accept;
+                        }
+                        if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.shift && event.text.to-lowercase() == "e") {
+                            root.apply-format("align:center");
+                            return accept;
+                        }
+                        if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.shift && event.text.to-lowercase() == "r") {
+                            root.apply-format("align:right");
+                            return accept;
+                        }
+                        if ((event.modifiers.control || event.modifiers.meta) && event.text == "\\") {
+                            root.apply-format("clear");
+                            return accept;
+                        }
+                        // Pasting keeps the clipboard's formatting, and with Shift as well pastes
+                        // plain text, as browsers and other mail apps do.
+                        if (((event.modifiers.control || event.modifiers.meta) && event.text.to-lowercase() == "v")
+                            || (event.modifiers.shift && event.text == Key.Insert)) {
+                            if (event.modifiers.shift && event.text != Key.Insert) {
+                                self.paste();
+                            } else {
+                                root.paste-formatted();
+                            }
+                            return accept;
+                        }
+                        if ((event.modifiers.control || event.modifiers.meta) && !event.modifiers.shift
+                            && (event.text.to-lowercase() == "c" || event.text.to-lowercase() == "x")) {
+                            root.copy-formatted(event.text.to-lowercase() == "x");
+                            return accept;
+                        }
                         if ((event.modifiers.control || event.modifiers.meta) && event.text.to-lowercase() == "z") {
                             root.history-requested(event.modifiers.shift ? "redo" : "undo");
                             self.set-selection-offsets(root.selection-start, root.selection-end);
+                            return accept;
+                        }
+                        if ((event.modifiers.control || event.modifiers.meta) && event.text == Key.Return && root.signature-mode) {
+                            root.save-signature();
                             return accept;
                         }
                         if ((event.modifiers.control || event.modifiers.meta) && event.text == Key.Return && root.can-send) {
@@ -585,20 +756,39 @@ export component EmailComposer inherits Rectangle {
                             title: @tr("Ignore");
                             activated => { root.spelling-ignore(); }
                         }
+                        // A selected image's size and alt text, as its bar offers them.
+                        if root.active-image-size != "" && !root.editor-menu-touch : Menu {
+                            title: @tr("Image size");
+                            MenuItem { title: @tr("image size" => "Small"); checkable: true; checked: root.active-image-size == "small"; enabled: root.active-image-width > 160; activated => { root.apply-format("image-size:small"); } }
+                            MenuItem { title: @tr("image size" => "Medium"); checkable: true; checked: root.active-image-size == "medium"; enabled: root.active-image-width > 320; activated => { root.apply-format("image-size:medium"); } }
+                            MenuItem { title: @tr("image size" => "Large"); checkable: true; checked: root.active-image-size == "large"; enabled: root.active-image-width > 640; activated => { root.apply-format("image-size:large"); } }
+                            MenuItem { title: @tr("image size" => "Original size"); checkable: true; checked: root.active-image-size == "original"; activated => { root.apply-format("image-size:original"); } }
+                        }
+                        if root.active-image-size != "" && !root.editor-menu-touch : MenuItem {
+                            title: @tr("Alt text…");
+                            enabled: !root.sending;
+                            activated => { root.edit-image-alt(); }
+                        }
+                        if root.active-image-size != "" && !root.editor-menu-touch : MenuSeparator {}
                         // A tapped word's menu holds only spelling, as phones offer.
                         if root.spelling-word != "" && !root.editor-menu-touch : MenuSeparator {}
                         if !root.editor-menu-touch : MenuItem {
                             title: @tr("Cut");
                             enabled: !root.sending && root.selection-start != root.selection-end;
-                            activated => { body-input.cut(); }
+                            activated => { root.copy-formatted(true); }
                         }
                         if !root.editor-menu-touch : MenuItem {
                             title: @tr("Copy");
                             enabled: root.selection-start != root.selection-end;
-                            activated => { body-input.copy(); }
+                            activated => { root.copy-formatted(false); }
                         }
                         if !root.editor-menu-touch : MenuItem {
                             title: @tr("Paste");
+                            enabled: !root.sending;
+                            activated => { root.paste-formatted(); }
+                        }
+                        if !root.editor-menu-touch : MenuItem {
+                            title: @tr("Paste as plain text");
                             enabled: !root.sending;
                             activated => { body-input.paste(); }
                         }
@@ -641,6 +831,8 @@ export component EmailComposer inherits Rectangle {
                                 body-input.focus();
                                 root.editor-menu-position = { x: self.mouse-x, y: self.mouse-y };
                                 root.editor-menu-requested(self.mouse-x / 1px, self.mouse-y / 1px);
+                                // A right click on an image selects it.
+                                body-input.set-selection-offsets(root.selection-start, root.selection-end);
                             }
                             if (event.button == PointerEventButton.left || event.kind == PointerEventKind.move || event.kind == PointerEventKind.cancel) {
                                 if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
@@ -809,12 +1001,55 @@ export component EmailComposer inherits Rectangle {
                         && root.caret-visible;
                     background: root.body-color;
                 }
+
+                // Corner handles where a pointer drags them. Phones scroll the message by
+                // dragging, so there a selected image's size menu sizes it.
+                if root.editor-image-shown && root.active-image-size != "" && !root.sending && !root.compact : ImageResizeFrame {
+                    x: 18px + root.editor-image-x * 1px;
+                    y: 14px + root.editor-image-y * 1px;
+                    image-width: root.editor-image-width * 1px;
+                    image-height: root.editor-image-height * 1px;
+                    shown-css-width: root.active-image-shown-width;
+                    natural-width: root.active-image-width;
+                    room: root.editor-width - root.editor-image-x * 1px;
+                    accent-color: root.accent-color;
+                    handle-color: root.background-color;
+                    resized(width) => { root.apply-format("image-width:" + width); }
+                }
+
+                // Over a selected image's lower left corner, or under an image too small to
+                // hold it, and moved up to stay in view.
+                if root.editor-image-shown && root.active-image-size != "" && !root.sending : ImageBar {
+                    private property <bool> inside: root.editor-image-width * 1px >= self.width + 16px
+                        && root.editor-image-height * 1px >= self.height + 16px;
+                    x: self.inside ? 18px + root.editor-image-x * 1px + 8px
+                        : max(18px, min(18px + root.editor-image-x * 1px, 18px + root.editor-width - self.width));
+                    y: max(
+                        14px + root.editor-image-y * 1px + (self.inside ? 8px : 0px),
+                        min(
+                            14px + (root.editor-image-y + root.editor-image-height) * 1px
+                                + (self.inside ? -self.height - 8px : 6px),
+                            body-scroll.visible-height - body-scroll.content-y - self.height - 8px,
+                            body-scroll.content-height - self.height - 4px,
+                        ),
+                    );
+                    active-size: root.active-image-size;
+                    image-width: root.active-image-width;
+                    body-color: root.body-color;
+                    control-hover-color: root.control-hover-color;
+                    raised-color: root.raised-color;
+                    secondary-color: root.secondary-color;
+                    subtle-border-color: root.subtle-border-color;
+                    apply-format(kind) => { root.apply-format(kind); }
+                    edit-alt => { root.edit-image-alt(); }
+                }
             }
         }
 
-        ComposerAttachments {
+        if !root.signature-mode : ComposerAttachments {
             compact: root.compact;
             attachments: root.attachments;
+            links: root.links;
             accent-color: root.accent-color;
             background-color: root.background-color;
             body-color: root.body-color;
@@ -823,6 +1058,21 @@ export component EmailComposer inherits Rectangle {
             raised-color: root.raised-color;
             subtle-border-color: root.subtle-border-color;
             remove-attachment(index) => { root.remove-attachment(index); }
+            remove-link(index) => { root.remove-link(index); }
+        }
+
+        if !root.signature-mode : ComposerPhotos {
+            compact: root.compact;
+            count: root.photo-count;
+            size: root.photo-size;
+            full-size: root.photo-full-size;
+            shrink <=> root.shrink-photos;
+            working: root.shrinking-photos;
+            body-color: root.body-color;
+            muted-color: root.muted-color;
+            raised-color: root.raised-color;
+            subtle-border-color: root.subtle-border-color;
+            toggled(on) => { root.shrink-photos-toggled(on); }
         }
 
         ComposerNotice {
@@ -839,14 +1089,60 @@ export component EmailComposer inherits Rectangle {
             can-send: root.can-send;
             has-content: root.has-content;
             sending: root.sending;
+            shrinking-photos: root.shrinking-photos;
+            attaching-files: root.attaching-files;
             control-hover-color: root.control-hover-color;
             muted-color: root.muted-color;
             raised-color: root.raised-color;
             secondary-color: root.secondary-color;
             subtle-border-color: root.subtle-border-color;
+            signature: root.signature-mode;
             submit(send-now) => { root.submit(send-now); }
+            save-signature => { root.save-signature(); }
             pick-attachments => { root.pick-attachments(); }
+            link-sharing: root.link-sharing;
+            share-by-link => { root.share-by-link(); }
+            request-receipt <=> root.request-receipt;
+            importance <=> root.importance;
             request-close => { root.request-close(); }
+        }
+    }
+
+    // What sending asks first (#236): to send without a subject, or without
+    // the file the message mentions.
+    ConfirmationDialog {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open <=> root.send-check-open;
+        title: root.send-check == "subject" ? @tr("Send without a subject?") : @tr("Did you mean to attach a file?");
+        description: root.send-check == "subject"
+            ? @tr("People see the subject first, in their list of mail.")
+            : @tr("The message mentions “{}”, but has no file attached.", root.send-check-keyword);
+        detail: "";
+        confirm-label: root.send-check == "subject" ? @tr("Send without subject") : @tr("Send anyway");
+        cancel-label: root.send-check == "subject" ? @tr("Add a subject") : @tr("Cancel");
+        action-label: root.send-check == "attachment" ? @tr("Attach files…") : "";
+        destructive: false;
+        icon: root.send-check == "subject"
+            ? @image-url("../icons/lucide/outline/alert-circle.svg")
+            : @image-url("../icons/lucide/outline/paperclip.svg");
+        surface: root.background-color;
+        dialog-border-color: root.frame-border-color;
+        title-color: root.title-color;
+        body-color: root.body-color;
+        muted-color: root.muted-color;
+        confirmed => { root.answer-send-check("send"); }
+        cancelled => {
+            if root.send-check == "subject" {
+                subject-row.focus-subject();
+            }
+            root.answer-send-check("cancel");
+        }
+        action => {
+            root.send-check-open = false;
+            root.answer-send-check("attach");
         }
     }
 
@@ -857,6 +1153,7 @@ export component EmailComposer inherits Rectangle {
         width: parent.width;
         height: parent.height;
         open: root.confirm-discard;
+        signature: root.signature-mode;
         background-color: root.background-color;
         frame-border-color: root.frame-border-color;
         secondary-color: root.secondary-color;
@@ -865,6 +1162,75 @@ export component EmailComposer inherits Rectangle {
         discard => {
             root.confirm-discard = false;
             root.close();
+        }
+    }
+
+    // Where files dragged from elsewhere go: pictures in the text, other files attached.
+    if root.drop-hint : Rectangle {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        height: parent.height - 16px;
+        z: 5000;
+        border-radius: 12px;
+        border-width: 2px;
+        border-color: root.accent-color;
+        background: root.background-color.with-alpha(0.92);
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 8px;
+            padding: 24px;
+
+            Image {
+                height: 32px;
+                source: @image-url("../icons/lucide/outline/paperclip.svg");
+                colorize: root.accent-color;
+                image-fit: contain;
+                accessible-role: none;
+            }
+            Text {
+                text: @tr("Drop to add to your message");
+                color: root.title-color;
+                font-size: TypeScale.heading-small;
+                font-weight: 700;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            Text {
+                text: @tr("Pictures go in the text, and other files are attached.");
+                color: root.muted-color;
+                font-size: TypeScale.secondary;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    ImageAltEditor {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        compact: root.compact;
+        open: root.image-alt-open;
+        alt <=> root.image-alt;
+        background-color: root.background-color;
+        body-color: root.body-color;
+        frame-border-color: root.frame-border-color;
+        muted-color: root.muted-color;
+        title-color: root.title-color;
+        accent-color: root.accent-color;
+        cancel => {
+            root.image-alt-open = false;
+            body-input.set-selection-offsets(root.image-selection-start, root.image-selection-end);
+            body-input.focus();
+        }
+        apply(alt) => {
+            root.image-alt-open = false;
+            root.format-requested("image-alt:" + alt, root.body, root.image-selection-start, root.image-selection-end);
+            body-input.set-selection-offsets(root.selection-start, root.selection-end);
+            body-input.focus();
         }
     }
 
@@ -926,6 +1292,7 @@ export component EmailComposer inherits Rectangle {
         use-template(id) => root.use-template(id);
         save-template(id, name, shortcut, subject, body) => root.save-template(id, name, shortcut, subject, body);
         delete-template(id) => root.delete-template(id);
+        splice-text(text, start, end, insert) => root.splice-text(text, start, end, insert);
     }
 
     // Freeze the exact draft snapshot being submitted. If delivery fails the

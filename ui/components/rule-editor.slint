@@ -1,0 +1,531 @@
+// The editor of a rule that sorts new mail (#238): its name and account,
+// the conditions mail must meet, and what to do with it (src/rules.rs).
+import { ComboBox, ScrollView } from "std-widgets.slint";
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { MailRules } from "../rules.slint";
+import { Button } from "button.slint";
+import { IconButton, LineEdit, Switch } from "controls.slint";
+import { FormField } from "settings-components.slint";
+
+// The parts of a message a condition tests, in MailRules' order.
+export global RuleChoices {
+    out property <[string]> fields: [
+        @tr("rule field" => "From"),
+        @tr("rule field" => "To"),
+        @tr("rule field" => "Cc"),
+        @tr("rule field" => "To or Cc"),
+        @tr("rule field" => "Subject"),
+        @tr("rule field" => "Mailing list"),
+        @tr("rule field" => "Size"),
+        @tr("rule field" => "Header"),
+        @tr("rule field" => "Body"),
+        @tr("rule field" => "Attachments"),
+    ];
+    out property <[string]> text-ops: [
+        @tr("rule comparison" => "contains"),
+        @tr("rule comparison" => "doesn't contain"),
+        @tr("rule comparison" => "is"),
+        @tr("rule comparison" => "isn't"),
+        @tr("rule comparison" => "starts with"),
+        @tr("rule comparison" => "ends with"),
+        @tr("rule comparison" => "matches pattern"),
+        @tr("rule comparison" => "doesn't match pattern"),
+    ];
+    // A mailing list's comparisons start with whether there is one.
+    out property <[string]> list-ops: [
+        @tr("rule comparison" => "exists"),
+        @tr("rule comparison" => "doesn't exist"),
+        @tr("rule comparison" => "contains"),
+        @tr("rule comparison" => "doesn't contain"),
+        @tr("rule comparison" => "is"),
+        @tr("rule comparison" => "isn't"),
+        @tr("rule comparison" => "starts with"),
+        @tr("rule comparison" => "ends with"),
+        @tr("rule comparison" => "matches pattern"),
+        @tr("rule comparison" => "doesn't match pattern"),
+    ];
+    out property <[string]> size-ops: [
+        @tr("rule comparison" => "is over"),
+        @tr("rule comparison" => "is under"),
+    ];
+    out property <[string]> body-ops: [
+        @tr("rule comparison" => "contains"),
+        @tr("rule comparison" => "doesn't contain"),
+        @tr("rule comparison" => "matches pattern"),
+        @tr("rule comparison" => "doesn't match pattern"),
+    ];
+    // Whether files are attached: "Attachments: some".
+    out property <[string]> attachment-ops: [
+        @tr("rule comparison" => "some"),
+        @tr("rule comparison" => "none"),
+    ];
+    // Copying mail is last, for accounts that keep a message in several
+    // folders.
+    out property <[string]> actions: [
+        @tr("Move to folder"),
+        @tr("Add label"),
+        @tr("Mark as read"),
+        @tr("Star message"),
+        @tr("Archive"),
+        @tr("Move to trash"),
+        @tr("Move to spam"),
+        @tr("Show in category"),
+    ];
+    out property <[string]> actions-with-copy: [
+        @tr("Move to folder"),
+        @tr("Add label"),
+        @tr("Mark as read"),
+        @tr("Star message"),
+        @tr("Archive"),
+        @tr("Move to trash"),
+        @tr("Move to spam"),
+        @tr("Show in category"),
+        @tr("Copy to folder"),
+    ];
+}
+
+component RuleSelect inherits ComboBox {
+    height: 36px;
+}
+
+// One value field of a condition, with "KB" after a size.
+component RuleValue inherits HorizontalLayout {
+    in property <int> index;
+    in property <bool> size;
+    in property <bool> pattern;
+    in-out property <string> value;
+    spacing: 8px;
+    horizontal-stretch: 1;
+    LineEdit {
+        height: 36px;
+        horizontal-stretch: 1;
+        text <=> root.value;
+        input-type: root.size ? InputType.number : InputType.text;
+        placeholder-text: root.size ? @tr("Size in KB") : root.pattern ? @tr("Regular expression") : "";
+        input-label: @tr("Value of condition {}", root.index + 1);
+    }
+    if root.size : Text {
+        text: @tr("KB");
+        color: AppTheme.secondary;
+        font-size: TypeScale.secondary;
+        vertical-alignment: center;
+    }
+}
+
+component RemoveButton inherits IconButton {
+    width: 36px;
+    height: 36px;
+    icon: @image-url("../icons/lucide/outline/x.svg");
+    icon-color: AppTheme.secondary;
+    ghost: true;
+}
+
+component RuleCondition inherits Rectangle {
+    in property <int> index;
+    in property <bool> compact;
+    in property <bool> removable;
+    // Bound both ways to the condition's row.
+    in-out property <int> field;
+    in-out property <string> header;
+    in-out property <int> op;
+    in-out property <string> value;
+    // Fields by their place in RuleChoices.fields.
+    private property <bool> size: root.field == 6;
+    private property <bool> named-header: root.field == 7;
+    private property <bool> body: root.field == 8;
+    private property <bool> attachments: root.field == 9;
+    // A mailing list and a header start with whether there is one.
+    private property <bool> presence: root.field == 5 || root.named-header;
+    private property <[string]> ops: root.size ? RuleChoices.size-ops
+        : root.presence ? RuleChoices.list-ops
+        : root.body ? RuleChoices.body-ops
+        : root.attachments ? RuleChoices.attachment-ops : RuleChoices.text-ops;
+    private property <bool> needs-value: !root.attachments && !(root.presence && root.op < 2);
+    private property <bool> pattern: root.presence ? root.op >= 8
+        : root.body ? root.op >= 2
+        : !root.size && !root.attachments && root.op >= 6;
+
+    height: layout.preferred-height;
+    accessible-role: groupbox;
+    accessible-label: @tr("Condition {}", root.index + 1);
+
+    layout := VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            RuleSelect {
+                width: root.compact ? (parent.width - 52px) / 2 : 140px;
+                model: RuleChoices.fields;
+                current-index <=> root.field;
+                accessible-label: @tr("Field of condition {}", root.index + 1);
+                // Another field compares in other ways, and a size isn't text.
+                selected => {
+                    root.op = 0;
+                    root.value = "";
+                }
+            }
+            // A header condition names its header first, and compares on
+            // the next line.
+            if root.named-header : LineEdit {
+                height: 36px;
+                horizontal-stretch: 1;
+                text <=> root.header;
+                placeholder-text: @tr("Header, such as X-Spam-Flag");
+                input-label: @tr("Header of condition {}", root.index + 1);
+            }
+            if !root.named-header : RuleSelect {
+                width: root.compact ? (parent.width - 52px) / 2 : 170px;
+                model: root.ops;
+                current-index <=> root.op;
+                accessible-label: @tr("Comparison of condition {}", root.index + 1);
+            }
+            if !root.compact && !root.named-header && root.needs-value : RuleValue {
+                index: root.index;
+                size: root.size;
+                pattern: root.pattern;
+                value <=> root.value;
+            }
+            if !root.compact && !root.named-header && !root.needs-value : Rectangle {
+                horizontal-stretch: 1;
+            }
+            RemoveButton {
+                interactive: root.removable;
+                tooltip-text: @tr("Remove condition {}", root.index + 1);
+                clicked => { MailRules.remove-condition(root.index); }
+            }
+        }
+        if root.named-header : HorizontalLayout {
+            spacing: 8px;
+            // Under the header's name, in the columns of the other
+            // conditions' comparisons and values.
+            if !root.compact : Rectangle { width: 140px; }
+            RuleSelect {
+                width: root.compact ? (parent.width - 8px) / 2 : 170px;
+                model: root.ops;
+                current-index <=> root.op;
+                accessible-label: @tr("Comparison of condition {}", root.index + 1);
+            }
+            if root.needs-value : RuleValue {
+                index: root.index;
+                size: false;
+                pattern: root.pattern;
+                value <=> root.value;
+            }
+            if !root.needs-value : Rectangle { horizontal-stretch: 1; }
+            // In line with the values of single-line conditions.
+            if !root.compact : Rectangle { width: 36px; }
+        }
+        if root.compact && !root.named-header && root.needs-value : RuleValue {
+            index: root.index;
+            size: root.size;
+            pattern: root.pattern;
+            value <=> root.value;
+        }
+    }
+}
+
+component RuleAction inherits Rectangle {
+    in property <int> index;
+    in property <bool> compact;
+    in property <bool> removable;
+    // Bound both ways to the action's row.
+    in-out property <int> kind;
+    in-out property <int> target;
+    // Moves and copies file into folders, labels into labels.
+    private property <bool> to-folder: root.kind == 0 || root.kind == 8;
+    private property <bool> to-label: root.kind == 1;
+    private property <bool> to-tab: root.kind == 7;
+    private property <bool> has-target: root.to-folder || root.to-label || root.to-tab;
+    private property <[string]> targets: root.to-folder ? MailRules.folders
+        : root.to-tab ? MailRules.tabs : MailRules.labels;
+    private property <string> no-target: root.to-folder
+        ? @tr("Choose one account to use its folders.") : @tr("No labels yet.");
+
+    height: layout.preferred-height;
+    accessible-role: groupbox;
+    accessible-label: @tr("Action {}", root.index + 1);
+
+    layout := VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            RuleSelect {
+                width: root.compact ? parent.width - 44px : 200px;
+                model: MailRules.can-copy ? RuleChoices.actions-with-copy : RuleChoices.actions;
+                current-index <=> root.kind;
+                accessible-label: @tr("Action {}", root.index + 1);
+                selected => { root.target = 0; }
+            }
+            if !root.compact && root.has-target && root.targets.length > 0 : RuleSelect {
+                horizontal-stretch: 1;
+                model: root.targets;
+                current-index <=> root.target;
+                accessible-label: root.to-folder ? @tr("Folder of action {}", root.index + 1) : @tr("Label of action {}", root.index + 1);
+            }
+            if !root.compact && root.has-target && root.targets.length == 0 : Text {
+                horizontal-stretch: 1;
+                text: root.no-target;
+                color: AppTheme.secondary;
+                font-size: TypeScale.secondary;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+            if !root.compact && !root.to-folder && !root.to-label : Rectangle { horizontal-stretch: 1; }
+            RemoveButton {
+                interactive: root.removable;
+                tooltip-text: @tr("Remove action {}", root.index + 1);
+                clicked => { MailRules.remove-action(root.index); }
+            }
+        }
+        if root.compact && root.has-target && root.targets.length > 0 : RuleSelect {
+            model: root.targets;
+            current-index <=> root.target;
+            accessible-label: root.to-folder ? @tr("Folder of action {}", root.index + 1) : @tr("Label of action {}", root.index + 1);
+        }
+        if root.compact && root.has-target && root.targets.length == 0 : Text {
+            text: root.no-target;
+            color: AppTheme.secondary;
+            font-size: TypeScale.secondary;
+            wrap: word-wrap;
+        }
+    }
+}
+
+export component RuleEditor inherits Rectangle {
+    in property <bool> compact;
+    callback close;
+    // A phone, or a window too narrow for a condition on one line.
+    private property <bool> narrow: root.compact || root.width < 520px;
+    private property <string> meets: @tr("When new mail meets");
+    private property <[string]> match-choices: [@tr("all of these conditions"), @tr("any of these conditions")];
+
+    background: AppTheme.surface;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: AppTheme.border-subtle;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-color: #00000055;
+    clip: true;
+    out property <length> content-height: content.preferred-height;
+
+    FocusScope {
+        forward-focus: name-field;
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.close();
+                return accept;
+            }
+            reject
+        }
+        ScrollView {
+            width: parent.width;
+            height: parent.height;
+            content-width: self.visible-width;
+            mouse-drag-pan-enabled: root.compact;
+            content := VerticalLayout {
+                width: root.width;
+                padding: 20px;
+                padding-bottom: 18px;
+                spacing: 14px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text {
+                        horizontal-stretch: 1;
+                        text: MailRules.editing-id == 0 ? @tr("New rule") : @tr("Edit rule");
+                        color: AppTheme.heading;
+                        font-size: TypeScale.heading;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    IconButton {
+                        width: 36px;
+                        height: 36px;
+                        icon: @image-url("../icons/lucide/outline/x.svg");
+                        icon-color: AppTheme.secondary;
+                        ghost: true;
+                        tooltip-text: @tr("Close");
+                        clicked => { root.close(); }
+                    }
+                }
+                name-field := FormField {
+                    label: @tr("Name");
+                    value <=> MailRules.name;
+                    placeholder: @tr("Newsletters or Receipts");
+                    label-color: AppTheme.secondary;
+                }
+                VerticalLayout {
+                    spacing: 5px;
+                    Text { text: @tr("Account"); color: AppTheme.secondary; font-size: TypeScale.caption; font-weight: 600; }
+                    RuleSelect {
+                        model: MailRules.accounts;
+                        current-index <=> MailRules.account;
+                        accessible-label: @tr("Account");
+                        selected => { MailRules.choose-account(self.current-index); }
+                    }
+                }
+                VerticalLayout {
+                    // Stacked conditions need more room between them.
+                    spacing: root.narrow ? 14px : 8px;
+                    if !root.narrow : HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: root.meets;
+                            color: AppTheme.heading;
+                            font-size: TypeScale.body;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                        RuleSelect {
+                            width: 220px;
+                            model: root.match-choices;
+                            current-index <=> MailRules.match;
+                            accessible-label: root.meets;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    if root.narrow : Text {
+                        text: root.meets;
+                        color: AppTheme.heading;
+                        font-size: TypeScale.body;
+                        font-weight: 600;
+                        wrap: word-wrap;
+                    }
+                    if root.narrow : RuleSelect {
+                        model: root.match-choices;
+                        current-index <=> MailRules.match;
+                        accessible-label: root.meets;
+                    }
+                    for row[index] in MailRules.conditions : RuleCondition {
+                        index: index;
+                        field <=> row.field;
+                        header <=> row.header;
+                        op <=> row.op;
+                        value <=> row.value;
+                        compact: root.narrow;
+                        removable: MailRules.conditions.length > 1;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button {
+                            width: self.content-width;
+                            text: @tr("Add condition");
+                            icon: @image-url("../icons/lucide/outline/plus.svg");
+                            has-icon: true;
+                            clicked => { MailRules.add-condition(); }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: @tr("Do this");
+                        color: AppTheme.heading;
+                        font-size: TypeScale.body;
+                        font-weight: 600;
+                    }
+                    for row[index] in MailRules.actions : RuleAction {
+                        index: index;
+                        kind <=> row.kind;
+                        target <=> row.target;
+                        compact: root.narrow;
+                        removable: MailRules.actions.length > 1;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button {
+                            width: self.content-width;
+                            text: @tr("Add action");
+                            icon: @image-url("../icons/lucide/outline/plus.svg");
+                            has-icon: true;
+                            clicked => { MailRules.add-action(); }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text {
+                            text: @tr("Stop here");
+                            color: AppTheme.heading;
+                            font-size: TypeScale.body;
+                            font-weight: 600;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: @tr("Later rules leave mail this rule matched alone. Moving mail out of the Inbox always stops them.");
+                            color: AppTheme.secondary;
+                            font-size: TypeScale.caption;
+                            wrap: word-wrap;
+                        }
+                    }
+                    Switch {
+                        checked <=> MailRules.stop;
+                        control-label: @tr("Stop here");
+                    }
+                }
+                // Where the rule runs, as saved.
+                if MailRules.place != "" : Text {
+                    text: MailRules.place == "server" ? @tr("Runs on the server, so it works while Flectar Mail is closed.")
+                        : MailRules.place == "some" ? @tr("Runs on the server for some of its accounts, and while Flectar Mail is open for the others.")
+                        : MailRules.place-why == "pattern" ? @tr("Runs while Flectar Mail is open, as the server can't look for patterns the way Flectar Mail does.")
+                        : MailRules.place-why == "attachments" ? @tr("Runs while Flectar Mail is open, as the server can't tell attachments the way Flectar Mail does.")
+                        : MailRules.place-why == "case" ? @tr("Runs while Flectar Mail is open, as the server can't ignore the case of this text.")
+                        : MailRules.place-why == "name" ? @tr("Runs while Flectar Mail is open, as the server can't compare names. To compare addresses there, include the @, as in @example.com.")
+                        : MailRules.place-why == "folder" ? @tr("Runs while Flectar Mail is open, as the server can't file mail into one of its folders.")
+                        : MailRules.place-why == "label" ? @tr("Runs while Flectar Mail is open, as the server can't keep one of its labels.")
+                        : MailRules.place-why == "unsupported" ? @tr("Runs while Flectar Mail is open, as the server can't do all it asks.")
+                        : MailRules.place-why == "after" ? @tr("Runs while Flectar Mail is open, as a rule above it does, and the server runs its rules first.")
+                        : @tr("Runs while Flectar Mail is open.");
+                    color: AppTheme.secondary;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+                if MailRules.error != "" : Text {
+                    text: MailRules.error;
+                    color: AppTheme.destructive;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    padding-top: 2px;
+                    Button {
+                        height: root.compact ? 44px : 34px;
+                        width: self.content-width;
+                        text: @tr("Run on Inbox…");
+                        enabled: !MailRules.busy;
+                        clicked => { MailRules.run(); }
+                    }
+                    if MailRules.editing-id != 0 : Button {
+                        height: root.compact ? 44px : 34px;
+                        width: self.content-width;
+                        text: @tr("Delete rule");
+                        destructive: true;
+                        enabled: !MailRules.busy;
+                        clicked => { MailRules.delete(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button {
+                        height: root.compact ? 44px : 34px;
+                        width: self.content-width;
+                        text: @tr("Cancel");
+                        clicked => { root.close(); }
+                    }
+                    Button {
+                        height: root.compact ? 44px : 34px;
+                        width: self.content-width;
+                        text: @tr("Save rule");
+                        primary: true;
+                        enabled: !MailRules.busy && MailRules.name != "";
+                        clicked => { MailRules.save(); }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,5 +1,6 @@
 import { abilityAccessCtrl, common, ConfigurationConstant, PermissionRequestResult, Permissions, Want, wantAgent } from '@kit.AbilityKit';
-import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
+import { accessibility } from '@kit.AccessibilityKit';
+import { BusinessError, deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { fileIo, fileUri, picker, statfs } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
 import { notificationManager } from '@kit.NotificationKit';
@@ -53,6 +54,7 @@ interface FlectarNativeModule {
   setColorScheme?: (dark: boolean) => void;
   suspendPreview?: () => void;
   memoryLevel?: (level: number) => void;
+  reduceMotion?: (reduced: boolean) => void;
   setClipboardText?: (text: string) => void;
 }
 
@@ -77,6 +79,11 @@ struct Index {
   private memoryLevelHandler: (level: number) => void = (level: number): void => {
     this.nativeModule?.memoryLevel?.(level);
   };
+  // Animation reduction in the accessibility settings, which apps can read
+  // from API 23.
+  private reduceMotionHandler: (reduced: boolean) => void = (reduced: boolean): void => {
+    this.nativeModule?.reduceMotion?.(reduced);
+  };
   private lastImeCursor: string = '';
   private pendingImeCursor: ImeCursor | undefined = undefined;
   private imeCursorRetries: number = 0;
@@ -97,6 +104,14 @@ struct Index {
       hilog.error(0x0000, LOG_TAG, 'could not read the system color mode: %{public}s',
         (error as BusinessError).message);
     }
+    if (deviceInfo.sdkApiVersion >= 23) {
+      try {
+        accessibility.onAnimationReduceStateChange(this.reduceMotionHandler);
+      } catch (error) {
+        hilog.error(0x0000, LOG_TAG, 'could not follow animation reduction: %{public}s',
+          (error as BusinessError).message);
+      }
+    }
   }
 
   onColorModeChanged(): void {
@@ -105,6 +120,7 @@ struct Index {
 
   onPageShow(): void {
     this.applySystemColorScheme(this.colorMode);
+    this.applyReduceMotion();
     this.observeWindow();
     this.refreshClipboard();
   }
@@ -133,6 +149,14 @@ struct Index {
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'background listener cleanup failed: %{public}s',
         (error as BusinessError).message);
+    }
+    if (deviceInfo.sdkApiVersion >= 23) {
+      try {
+        accessibility.offAnimationReduceStateChange(this.reduceMotionHandler);
+      } catch (error) {
+        hilog.error(0x0000, LOG_TAG, 'animation reduction listener cleanup failed: %{public}s',
+          (error as BusinessError).message);
+      }
     }
     try {
       this.systemPasteboard?.off('update', this.clipboardUpdateHandler);
@@ -235,6 +259,7 @@ struct Index {
       },
     });
     this.applySystemColorScheme(this.colorMode);
+    this.applyReduceMotion();
     this.observeWindow();
     this.installClipboardListener();
   }
@@ -641,6 +666,20 @@ struct Index {
     }
     this.observedWindow.off('windowRectChange', this.windowRectHandler);
     this.observedWindow = undefined;
+  }
+
+  private applyReduceMotion(): void {
+    if (this.nativeModule === undefined) {
+      return;
+    }
+    if (deviceInfo.sdkApiVersion >= 23) {
+      try {
+        this.nativeModule.reduceMotion?.(accessibility.isAnimationReduceEnabledSync());
+      } catch (error) {
+        hilog.error(0x0000, LOG_TAG, 'could not read animation reduction: %{public}s',
+          (error as BusinessError).message);
+      }
+    }
   }
 
   private applySystemColorScheme(mode: number): void {

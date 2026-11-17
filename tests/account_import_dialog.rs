@@ -6,6 +6,7 @@ use slint::{Model, ModelRc, VecModel};
 use std::{cell::RefCell, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { AccountImport, ImportActivity, ImportDialog } from "../ui/dialogs/import-dialog.slint";
     export { AccountImport, ImportAccountRow, ImportFindingRow, ImportProfileRow, ImportFailureRow, ImportMailRow } from "../ui/dialogs/import-dialog.slint";
 

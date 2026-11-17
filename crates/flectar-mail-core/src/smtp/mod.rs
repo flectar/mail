@@ -356,10 +356,26 @@ pub async fn send_raw(
     recipients: &[String],
     raw: &[u8],
 ) -> Result<()> {
+    send_raw_from(cfg, auth, Some(from), recipients, raw).await
+}
+
+/// Send a fully built message with `from` as the envelope sender, or the
+/// null one (`MAIL FROM:<>`) that notifications such as read receipts use,
+/// so nothing answers them in turn.
+pub async fn send_raw_from(
+    cfg: &AccountConfig,
+    auth: &SmtpAuth,
+    from: Option<&str>,
+    recipients: &[String],
+    raw: &[u8],
+) -> Result<()> {
     use lettre::address::Envelope;
     let from_addr = from
-        .parse()
-        .map_err(|e| CoreError::Smtp(format!("bad from address: {e}")))?;
+        .map(|from| {
+            from.parse()
+                .map_err(|e| CoreError::Smtp(format!("bad from address: {e}")))
+        })
+        .transpose()?;
     let mut tos = Vec::with_capacity(recipients.len());
     for r in recipients {
         tos.push(
@@ -367,7 +383,7 @@ pub async fn send_raw(
                 .map_err(|e| CoreError::Smtp(format!("bad recipient {r}: {e}")))?,
         );
     }
-    let envelope = Envelope::new(Some(from_addr), tos)
+    let envelope = Envelope::new(from_addr, tos)
         .map_err(|e| CoreError::Smtp(format!("Invalid message envelope: {e}")))?;
 
     tracing::debug!(

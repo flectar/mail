@@ -20,8 +20,8 @@ use flectar_mail_core::{
     config::Paths,
     events::{CoreEvent, TransferReport},
     models::{
-        Account, AccountConfig, CalendarConnection, CardDavConnection, MailGrouping, MessageCursor,
-        Settings, ThreadCursor, normalized_workspace_list_pane_width,
+        Account, AccountConfig, CalendarConnection, CardDavConnection, ListOrder, MailGrouping,
+        MessageCursor, Settings, ThreadCursor, normalized_workspace_list_pane_width,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -72,6 +72,8 @@ pub(crate) struct WarmStartMessage {
     #[serde(default)]
     pub(crate) has_replied: bool,
     #[serde(default)]
+    pub(crate) high_importance: bool,
+    #[serde(default)]
     pub(crate) labels: Vec<i64>,
     pub(crate) sender_verification: String,
     #[serde(default)]
@@ -103,6 +105,7 @@ impl From<&mail::MailMessage> for WarmStartMessage {
             has_attachments: message.has_attachments,
             message_count: message.message_count,
             has_replied: message.has_replied,
+            high_importance: message.high_importance,
             labels: message.labels.clone(),
             sender_verification: message.sender_verification.clone(),
             account_uses_labels: message.account_uses_labels,
@@ -133,6 +136,7 @@ impl From<WarmStartMessage> for mail::MailMessage {
             has_attachments: message.has_attachments,
             message_count: message.message_count.max(1),
             has_replied: message.has_replied,
+            high_importance: message.high_importance,
             is_outgoing: false,
             labels: message.labels,
             html: None,
@@ -145,6 +149,8 @@ impl From<WarmStartMessage> for mail::MailMessage {
             can_block: false,
             sender_blocked: false,
             invitation: None,
+            receipt: None,
+            returned_receipts: Vec::new(),
             verification_code: None,
             account_uses_labels: message.account_uses_labels,
             first_attachment: None,
@@ -280,6 +286,9 @@ pub(crate) struct WarmStartSnapshot {
     pub(crate) inbox_count: usize,
     /// Whether the saved rows are conversations or single messages.
     pub(crate) grouping: MailGrouping,
+    /// The order of the saved rows, which `next_cursor` continues.
+    #[serde(default)]
+    pub(crate) order: ListOrder,
     pub(crate) next_cursor: Option<WarmStartCursor>,
     pub(crate) accounts: Vec<Account>,
     /// The active profile's accounts, which the saved rows show.
@@ -294,6 +303,7 @@ pub(crate) struct WarmStartProjection<'a> {
     pub(crate) scope: Scope,
     pub(crate) inbox_count: usize,
     pub(crate) grouping: MailGrouping,
+    pub(crate) order: ListOrder,
     pub(crate) next_cursor: Option<WarmStartCursor>,
     pub(crate) accounts: &'a [Account],
     pub(crate) profile_accounts: Option<&'a [i64]>,
@@ -317,6 +327,7 @@ impl WarmStartSnapshot {
             scope: projection.scope,
             inbox_count: projection.inbox_count,
             grouping: projection.grouping,
+            order: projection.order,
             next_cursor: projection.next_cursor,
             accounts: projection
                 .accounts
@@ -367,6 +378,7 @@ pub(crate) fn apply_warm_start_snapshot(
     // The cache contains account summaries, not connection settings. Project
     // these directly: the full settings projection requires AccountConfig and
     // would filter every cached account out before the database has opened.
+    let now = chrono::Local::now();
     let account_rows = snapshot
         .accounts
         .iter()
@@ -376,6 +388,8 @@ pub(crate) fn apply_warm_start_snapshot(
                 .as_ref()
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or(&account.email);
+            let (checked_day, checked_at) =
+                crate::account_status::last_checked(account.caught_up_at, &now);
             Some(AccountRow {
                 id: i32::try_from(account.id).ok()?,
                 drag_key: account.id.to_string().into(),
@@ -385,6 +399,8 @@ pub(crate) fn apply_warm_start_snapshot(
                 mail_protocol: account.mail_protocol.as_str().into(),
                 status: account.sync_state.as_str().into(),
                 sync_error: account.sync_error.as_deref().unwrap_or_default().into(),
+                checked_day,
+                checked_at: checked_at.into(),
                 initials: avatar_initials(name).into(),
                 ..Default::default()
             })
@@ -402,6 +418,7 @@ pub(crate) fn apply_warm_start_snapshot(
         state.set_scope(snapshot.scope);
         state.inbox_count = snapshot.inbox_count;
         state.grouping = snapshot.grouping;
+        state.list_order = snapshot.order;
         state.next_cursor = snapshot.next_cursor.map(WarmStartCursor::mail_cursor);
         state.messages = snapshot
             .messages
@@ -588,6 +605,8 @@ pub(crate) struct PendingCoreUpdates {
     pub(crate) changed_threads: HashSet<i64>,
     pub(crate) all_mail_changed: bool,
     pub(crate) account_states: HashMap<i64, (String, Option<String>)>,
+    /// When each account's latest check caught its Inbox up.
+    pub(crate) caught_up: HashMap<i64, i64>,
     pub(crate) action_error: Option<String>,
     /// What became of the latest mail copied or moved to other accounts.
     pub(crate) transfers: Option<TransferReport>,
@@ -770,6 +789,14 @@ pub(crate) fn spawn_core_event_listener(
                         .insert(account_id, (sync_state, sync_error));
                     true
                 }
+                Ok(CoreEvent::AccountCaughtUp { account_id, at }) => {
+                    pending
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .caught_up
+                        .insert(account_id, at);
+                    true
+                }
                 Ok(CoreEvent::ActionState {
                     state,
                     error: Some(error),
@@ -839,6 +866,11 @@ pub(crate) fn refresh_oauth_availability(app: &AppWindow) {
 pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.global::<MessageColors>()
         .set_preference(settings.message_appearance.as_str().into());
+    crate::mail_rules::apply_cleanup(
+        app,
+        settings.empty_trash_after_days,
+        settings.empty_junk_after_days,
+    );
     app.global::<InvitationSettings>()
         .set_add(settings.add_invitations.as_str().into());
     refresh_oauth_availability(app);
@@ -866,7 +898,9 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
         _ => 5,
     });
     app.set_undo_send_seconds(i32::try_from(settings.undo_send_seconds.clamp(0, 30)).unwrap_or(10));
-    app.set_mark_read_on_open(settings.mark_read_on_open);
+    app.set_compose_font(settings.compose_font.as_str().into());
+    app.set_compose_text_size(settings.compose_text_size.as_str().into());
+    app.set_mark_read(settings.mark_read.as_str().into());
     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
     app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
     app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
@@ -884,6 +918,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.set_monochrome_sidebar_icons(settings.monochrome_sidebar_icons);
     crate::app_icon::apply(app, settings.app_icon);
     app.set_show_avatars(settings.show_avatars);
+    crate::apply_list_rows(app, settings);
     app.set_group_mail_by_date(settings.group_mail_by_date);
     app.set_show_tabs(settings.show_tabs);
     app.set_conversation_view(settings.conversation_view);
@@ -1092,6 +1127,7 @@ mod warm_start_tests {
             scope: Scope::UNIFIED_INBOX,
             inbox_count: 3,
             grouping: MailGrouping::Conversations,
+            order: ListOrder::NewestFirst,
             next_cursor: None,
             accounts: &[account()],
             profile_accounts: None,
@@ -1242,6 +1278,7 @@ mod warm_start_tests {
             sync_error: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
+            caught_up_at: None,
         }
     }
 
@@ -1267,6 +1304,7 @@ mod warm_start_tests {
             has_attachments: false,
             message_count: 2,
             has_replied: true,
+            high_importance: false,
             is_outgoing: false,
             labels: Vec::new(),
             html: Some("<p>body must not enter warm cache</p>".into()),
@@ -1278,6 +1316,8 @@ mod warm_start_tests {
             can_block: false,
             sender_blocked: false,
             invitation: None,
+            receipt: None,
+            returned_receipts: Vec::new(),
             verification_code: Some("48291375".into()),
             account_uses_labels: true,
             first_attachment: Some(flectar_mail_core::models::AttachmentMeta {
@@ -1324,6 +1364,7 @@ mod warm_start_tests {
             scope: PERSON_INBOX,
             inbox_count: 3,
             grouping: MailGrouping::Messages,
+            order: ListOrder::NewestFirst,
             next_cursor: Some(WarmStartCursor::Message(MessageCursor {
                 date: 123,
                 message_id: 9,
@@ -1406,6 +1447,7 @@ mod warm_start_tests {
             scope: Scope::UNIFIED_INBOX,
             inbox_count: messages.len(),
             grouping: MailGrouping::Conversations,
+            order: ListOrder::NewestFirst,
             next_cursor: None,
             accounts: &accounts,
             profile_accounts: None,

@@ -10,7 +10,7 @@ temporary_ui=""
 trap 'rm -rf "$temporary_dir"; test -z "$temporary_ui" || rm -f "$temporary_ui"' EXIT
 
 command -v slint-viewer >/dev/null 2>&1 || {
-  echo "slint-viewer 1.18+ is required" >&2
+  echo "slint-viewer 1.19+ is required" >&2
   exit 1
 }
 command -v cargo >/dev/null 2>&1 || {
@@ -22,7 +22,7 @@ command -v jq >/dev/null 2>&1 || {
   exit 1
 }
 
-slint-viewer --check "$ui"
+slint-viewer --edition 1.19 --check "$ui"
 
 # The PDF preview is an SVG fixture, not a rendered PDF. Derive its dark
 # paper, ink, rules, and accent colors. Real PDF previews retain the
@@ -133,6 +133,7 @@ render() {
 
   echo "Rendering $output_name.png"
   SLINT_SCALE_FACTOR=2 slint-viewer \
+    --edition 1.19 \
     --style "$style" \
     --size "${width}x${height}" \
     --load-data "$data_file" \

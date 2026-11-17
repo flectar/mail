@@ -1,17 +1,17 @@
 use crate::rich_compose::{
-    BOLD, CODE, CharacterStyle, ComposeSelection, Followed, ITALIC, RichComposeDocument, STRIKE,
-    UNDERLINE,
+    Alignment, BOLD, CODE, CharacterStyle, ComposeSelection, Followed, FontFamily,
+    IMAGE_PLACEHOLDER, ITALIC, InlineImage, Rgb, RichComposeDocument, STRIKE, TextSize, UNDERLINE,
 };
 use cosmic_text::{
-    Action, Attrs, AttrsList, BidiParagraphs, Buffer, BufferLine, Color as CosmicColor, Cursor,
-    Edit, Editor, Family, FontSystem, LineEnding, Metrics, Motion, PhysicalGlyph, Renderer, Scroll,
-    Selection, Shaping, Style, SwashCache, SwashContent, UnderlineStyle, Weight, Wrap,
+    Action, Align, Attrs, AttrsList, BidiParagraphs, Buffer, BufferLine, Color as CosmicColor,
+    Cursor, Edit, Editor, Family, FontSystem, LineEnding, Metrics, Motion, PhysicalGlyph, Renderer,
+    Scroll, Selection, Shaping, Style, SwashCache, SwashContent, UnderlineStyle, Weight, Wrap,
     fontdb::Source,
 };
 use slint::{Color, Image, Rgba8Pixel, SharedPixelBuffer};
 use std::{
     cell::OnceCell,
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     ops::{Deref, DerefMut, Range},
     sync::Arc,
     time::{Duration, Instant},
@@ -34,6 +34,11 @@ const MULTI_CLICK_DISTANCE: f32 = 5.0;
 // with a zero-width, transparent character. This is renderer-only and never
 // enters the editable document or its byte-offset mapping.
 const TRAILING_LINE_SENTINEL: &str = "\u{200b}";
+/// What an image's place holds in the layout: a zero-width space as wide and tall as the image,
+/// which then wraps, lines up and takes the caret as text does. It's as long as the image
+/// placeholder, so places in the text stay the same.
+const IMAGE_SPACE: &str = "\u{200b}";
+const _: () = assert!(IMAGE_SPACE.len() == IMAGE_PLACEHOLDER.len_utf8());
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ComposeEditorStyle {
@@ -58,6 +63,9 @@ pub struct RenderedComposeEditor {
     pub caret_x: f32,
     pub caret_y: f32,
     pub caret_height: f32,
+    /// Where the selected image shows, when the selection is one image: its left, top,
+    /// width and height.
+    pub image_box: Option<[f32; 4]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +75,8 @@ struct LayoutKey {
     scale_bits: u32,
     text_color: u32,
     link_color: u32,
+    /// How an empty last line lines up, which follows the caret.
+    last_line_align: Alignment,
 }
 
 /// Retained cosmic-text layout and raster cache for the composer body.
@@ -99,6 +109,11 @@ pub struct CosmicComposeEditor {
     pointer_down: bool,
     last_pointer_down: Option<(Instant, f32, f32)>,
     click_count: u8,
+    /// The images the layout shows, by the slot their space's metadata names.
+    layout_images: Vec<Arc<InlineImage>>,
+    /// Images decoded at the size they're shown, premultiplied RGBA, by image and size: only
+    /// the size each shows at now.
+    image_pixels: HashMap<(u64, u32, u32), Arc<[u8]>>,
 }
 
 /// Construct the font database only when a composer action needs its surface.
@@ -130,7 +145,16 @@ impl DerefMut for LazyComposeEditor {
 
 impl Default for CosmicComposeEditor {
     fn default() -> Self {
-        let mut font_system = FontSystem::new();
+        // FontSystem::new with the UI's Han fallback ahead of cosmic-text's,
+        // which picks a single family by the system language.
+        let mut db = cosmic_text::fontdb::Database::new();
+        db.load_system_fonts();
+        db.set_monospace_family("Noto Sans Mono");
+        db.set_sans_serif_family("Open Sans");
+        db.set_serif_family("DejaVu Serif");
+        let locale = sys_locale::get_locale().unwrap_or_else(|| "en-US".to_owned());
+        let fallback = crate::han_fallback::ComposeFallback::new(&locale);
+        let mut font_system = FontSystem::new_with_locale_and_db_and_fallback(locale, db, fallback);
         // The composer is rasterized by cosmic-text rather than Slint, so it
         // must register the same bundled UI font independently. System fonts
         // remain available as fallbacks for glyphs outside the font's coverage.
@@ -146,6 +170,7 @@ impl Default for CosmicComposeEditor {
         if let Some(fonts) = crate::platform::email_fonts() {
             font_system.db_mut().load_fonts_dir(fonts.dir);
         }
+        choose_generic_families(font_system.db_mut());
         let buffer = Buffer::new(
             &mut font_system,
             Metrics::new(FONT_SIZE_LOGICAL, LINE_HEIGHT_LOGICAL),
@@ -171,6 +196,8 @@ impl Default for CosmicComposeEditor {
             pointer_down: false,
             last_pointer_down: None,
             click_count: 0,
+            layout_images: Vec::new(),
+            image_pixels: HashMap::new(),
         }
     }
 }
@@ -248,6 +275,28 @@ impl CosmicComposeEditor {
             .iter()
             .find(|range| range.start <= caret && caret <= range.end)
             .cloned()
+    }
+
+    /// The selection of the image at a point of the editor, in logical pixels, as last
+    /// rendered.
+    pub fn image_selection_at(
+        &self,
+        x: f32,
+        y: f32,
+        scale_factor: f32,
+    ) -> Option<ComposeSelection> {
+        let scale_factor = scale_factor.max(1.0);
+        let (line, image) = self.image_at(x * scale_factor, y * scale_factor)?;
+        let offset = |index| {
+            self.visual_to_document_offset(cursor_to_global(
+                &self.visual_text,
+                Cursor::new(line, index),
+            ))
+        };
+        Some(ComposeSelection {
+            start: offset(image.start),
+            end: offset(image.end),
+        })
     }
 
     /// The underlined word at a point of the editor, in logical pixels, as last rendered.
@@ -398,12 +447,16 @@ impl CosmicComposeEditor {
             );
         }
 
+        let image_box = document
+            .selected_image()
+            .and_then(|_| self.image_box(selection, scale_factor));
         let rendered = RenderedComposeEditor {
             tiles: self.tiles.values().cloned().collect(),
             content_height: self.content_height_physical / scale_factor,
             caret_x,
             caret_y,
             caret_height,
+            image_box,
         };
         if let Some(timing_start) = timing_start {
             let tile_bytes = self
@@ -478,6 +531,17 @@ impl CosmicComposeEditor {
                         y: y_physical,
                     }
                 };
+                // A click on an image selects it, as other editors select pictures.
+                if let (false, 1, Some((line, image))) = (
+                    shift,
+                    self.click_count,
+                    self.image_at(x_physical as f32, y_physical as f32),
+                ) {
+                    self.editor
+                        .set_selection(Selection::Normal(Cursor::new(line, image.start)));
+                    self.editor.set_cursor(Cursor::new(line, image.end));
+                    return Some(self.selection_from_editor());
+                }
                 self.editor.action(&mut self.font_system, action);
             }
             "move" if self.pointer_down => {
@@ -580,14 +644,25 @@ impl CosmicComposeEditor {
         preedit_text: &str,
     ) -> bool {
         let physical_width = (logical_width.max(1.0) * scale_factor).ceil().max(1.0) as u32;
+        let text = document.text();
+        // An empty last line has no characters to hold its alignment: it lines up as typing
+        // there would, in the caret's alignment while the caret is on it.
+        let last_line_align = if valid_offset(text, selection.end) == text.len() {
+            document.typing_style().align
+        } else {
+            text.len()
+                .checked_sub(1)
+                .map_or_else(Alignment::default, |end| document.paragraph_alignment(end))
+        };
         let key = LayoutKey {
             revision: document.revision(),
             physical_width,
             scale_bits: scale_factor.to_bits(),
             text_color: style.text.as_argb_encoded(),
             link_color: style.link.as_argb_encoded(),
+            last_line_align,
         };
-        let preedit_offset = valid_offset(document.text(), selection.end);
+        let preedit_offset = valid_offset(text, selection.end);
         if self.layout_key == Some(key)
             && self.layout_preedit_text == preedit_text
             && (preedit_text.is_empty() || self.layout_preedit_offset == preedit_offset)
@@ -602,12 +677,20 @@ impl CosmicComposeEditor {
         let default_attrs = Attrs::new()
             .family(Family::Name(UI_FONT_FAMILY))
             .color(cosmic_color(style.text));
+        let look = TextLook {
+            dark: luminance(style.text) > 0.5,
+            metrics,
+            link: cosmic_color(style.link),
+            width: physical_width as f32,
+        };
+        let mut images = Vec::new();
         let mut spans = rich_spans(
             document,
             preedit_offset,
             preedit_text,
             &default_attrs,
-            cosmic_color(style.link),
+            look,
+            &mut images,
         );
         self.visual_text.clear();
         self.visual_text
@@ -622,7 +705,30 @@ impl CosmicComposeEditor {
             ));
         }
 
-        let lines = rich_lines(&spans, &default_attrs);
+        // Each paragraph lines up as the document says, found from where it starts in the text
+        // laid out, which holds any IME composition.
+        let align_at = |visual_start: usize| {
+            let start = if visual_start <= preedit_offset {
+                visual_start
+            } else {
+                visual_start
+                    .saturating_sub(preedit_text.len())
+                    .max(preedit_offset)
+            }
+            .min(text.len());
+            let align = if start == text.len() && (text.is_empty() || text.ends_with('\n')) {
+                last_line_align
+            } else {
+                let line_start = text[..start].rfind('\n').map_or(0, |index| index + 1);
+                document.paragraph_alignment(line_start)
+            };
+            match align {
+                Alignment::Left => None,
+                Alignment::Center => Some(Align::Center),
+                Alignment::Right => Some(Align::Right),
+            }
+        };
+        let lines = rich_lines(&spans, &default_attrs, align_at);
         let font_system = &mut self.font_system;
         self.editor.with_buffer_mut(|buffer| {
             buffer.set_metrics_and_size(metrics, Some(physical_width as f32), None);
@@ -646,6 +752,9 @@ impl CosmicComposeEditor {
                 .fold(metrics.line_height, f32::max)
         });
         self.layout_key = Some(key);
+        self.image_pixels
+            .retain(|(id, _, _), _| images.iter().any(|image| image.id == *id));
+        self.layout_images = images;
         self.layout_preedit_text.clear();
         self.layout_preedit_text.push_str(preedit_text);
         self.layout_preedit_offset = preedit_offset;
@@ -813,18 +922,27 @@ impl CosmicComposeEditor {
             return (0.0, 0.0, LINE_HEIGHT_LOGICAL);
         };
         let cursor = self.editor.cursor();
-        let line_height = self.editor.with_buffer(|buffer| {
-            buffer
-                .layout_runs()
-                .find(|run| {
-                    run.line_i == cursor.line
-                        && run.cursor_position(&cursor).is_some()
-                        && (run.line_top - y as f32).abs() < 0.5
-                })
-                .map_or(LINE_HEIGHT_LOGICAL * scale_factor, |run| run.line_height)
+        let (x, line_height) = self.editor.with_buffer(|buffer| {
+            let run = buffer.layout_runs().find(|run| {
+                run.line_i == cursor.line
+                    && run.cursor_position(&cursor).is_some()
+                    && (run.line_top - y as f32).abs() < 0.5
+            });
+            let Some(run) = run else {
+                return (x as f32, LINE_HEIGHT_LOGICAL * scale_factor);
+            };
+            // cosmic-text puts the caret at the start of a line with nothing on it, whatever
+            // its alignment.
+            let width = buffer.size().0.unwrap_or_default();
+            let x = match buffer.lines[cursor.line].align() {
+                Some(Align::Center) if run.glyphs.is_empty() => width / 2.0,
+                Some(Align::Right) if run.glyphs.is_empty() => width,
+                _ => x as f32,
+            };
+            (x, run.line_height)
         });
         (
-            x as f32 / scale_factor,
+            x / scale_factor,
             y as f32 / scale_factor,
             line_height / scale_factor,
         )
@@ -900,6 +1018,70 @@ impl CosmicComposeEditor {
             let mut canvas =
                 TileCanvas::new(width, tile_height, tile_start, pixels.make_mut_bytes());
             let editor = &self.editor;
+            // Images and highlights go behind the text and the selection.
+            let mut images = Vec::new();
+            editor.with_buffer(|buffer| {
+                let tile_end = tile_start.saturating_add(tile_height) as f32;
+                for run in buffer.layout_runs() {
+                    if run.line_top > tile_end {
+                        break;
+                    }
+                    if run.line_top + run.line_height < tile_start as f32 {
+                        continue;
+                    }
+                    for glyph in run.glyphs.iter() {
+                        if glyph.metadata & IMAGE != 0 {
+                            images.push((
+                                glyph.metadata & 0xff_ff_ff,
+                                glyph.x,
+                                glyph.w,
+                                run.line_top + run.line_height,
+                            ));
+                            continue;
+                        }
+                        if glyph.metadata & HIGHLIGHTED == 0 {
+                            continue;
+                        }
+                        let left = glyph.x.floor();
+                        canvas.rectangle(
+                            left as i32,
+                            run.line_top.floor() as i32,
+                            (glyph.x + glyph.w - left).ceil() as u32,
+                            run.line_height.ceil() as u32,
+                            cosmic_rgb((glyph.metadata & 0xff_ff_ff) as Rgb),
+                        );
+                    }
+                }
+            });
+            for (slot, x, width, bottom) in images {
+                let Some(image) = self.layout_images.get(slot) else {
+                    continue;
+                };
+                // Bottom up on its line, as images sit on the text's line in a message.
+                let width = width.round().max(1.0) as u32;
+                let height = (width as f32 * image.height as f32 / image.width.max(1) as f32)
+                    .round()
+                    .max(1.0) as u32;
+                let key = (image.id, width, height);
+                let pixels = match self.image_pixels.get(&key) {
+                    Some(pixels) => pixels.clone(),
+                    None => {
+                        // Only the size it shows at now is kept, as the window or the image
+                        // changes size.
+                        self.image_pixels.retain(|(id, _, _), _| *id != image.id);
+                        let pixels = decode_image(image, width, height);
+                        self.image_pixels.insert(key, pixels.clone());
+                        pixels
+                    }
+                };
+                canvas.image(
+                    x.round() as i32,
+                    (bottom - height as f32).round() as i32,
+                    width,
+                    height,
+                    &pixels,
+                );
+            }
             let mut renderer = TileRenderer {
                 font_system: &mut self.font_system,
                 swash_cache: &mut self.swash_cache,
@@ -927,6 +1109,56 @@ impl CosmicComposeEditor {
         Image::from_rgba8_premultiplied(pixels)
     }
 
+    /// Where the image that starts the selection shows, in logical pixels, as the tiles paint
+    /// it: on the bottom of its line.
+    fn image_box(&self, selection: ComposeSelection, scale_factor: f32) -> Option<[f32; 4]> {
+        if !self.layout_preedit_text.is_empty() {
+            return None;
+        }
+        let cursor = global_to_cursor(&self.visual_text, selection.start.min(selection.end));
+        self.editor.with_buffer(|buffer| {
+            buffer
+                .layout_runs()
+                .filter(|run| run.line_i == cursor.line)
+                .find_map(|run| {
+                    let glyph = run
+                        .glyphs
+                        .iter()
+                        .find(|glyph| glyph.metadata & IMAGE != 0 && glyph.start == cursor.index)?;
+                    let image = self.layout_images.get(glyph.metadata & 0xff_ff_ff)?;
+                    let width = glyph.w.round().max(1.0);
+                    let height = (width * image.height as f32 / image.width.max(1) as f32)
+                        .round()
+                        .max(1.0);
+                    let top = (run.line_top + run.line_height - height).round();
+                    Some([
+                        glyph.x.round() / scale_factor,
+                        top / scale_factor,
+                        width / scale_factor,
+                        height / scale_factor,
+                    ])
+                })
+        })
+    }
+
+    /// The image under a point of the layout, in physical pixels: its line, and its place in
+    /// the line.
+    fn image_at(&self, x: f32, y: f32) -> Option<(usize, Range<usize>)> {
+        self.editor.with_buffer(|buffer| {
+            buffer
+                .layout_runs()
+                .filter(|run| y >= run.line_top && y < run.line_top + run.line_height)
+                .find_map(|run| {
+                    run.glyphs
+                        .iter()
+                        .find(|glyph| {
+                            glyph.metadata & IMAGE != 0 && x >= glyph.x && x < glyph.x + glyph.w
+                        })
+                        .map(|glyph| (run.line_i, glyph.start..glyph.end))
+                })
+        })
+    }
+
     fn next_click_count(&mut self, x: f32, y: f32) -> u8 {
         let now = Instant::now();
         let repeated = self.last_pointer_down.is_some_and(|(previous, px, py)| {
@@ -943,21 +1175,81 @@ impl CosmicComposeEditor {
     }
 }
 
+/// Fonts for serif and monospace text in the editor, best first: those the message names for
+/// its readers, then ones systems ship that look like them.
+const SERIF_FONTS: [&str; 7] = [
+    "Times New Roman",
+    "Times",
+    "Liberation Serif",
+    "Tinos",
+    "Noto Serif",
+    "DejaVu Serif",
+    "Georgia",
+];
+const MONOSPACE_FONTS: [&str; 9] = [
+    "Courier New",
+    "Courier",
+    "Liberation Mono",
+    "Cousine",
+    "Menlo",
+    "Consolas",
+    "Noto Sans Mono",
+    "DejaVu Sans Mono",
+    "Droid Sans Mono",
+];
+
+/// Points the serif and monospace families at the first of their fonts installed. cosmic-text
+/// picks fonts of some Linux systems, which Windows and macOS don't have, and a family without
+/// its font falls back to another kind of type.
+fn choose_generic_families(db: &mut cosmic_text::fontdb::Database) {
+    let installed = |fonts: &[&'static str]| {
+        fonts.iter().copied().find(|font| {
+            db.faces().any(|face| {
+                face.families
+                    .iter()
+                    .any(|(family, _)| family.eq_ignore_ascii_case(font))
+            })
+        })
+    };
+    let (serif, monospace) = (installed(&SERIF_FONTS), installed(&MONOSPACE_FONTS));
+    if let Some(serif) = serif {
+        db.set_serif_family(serif);
+    }
+    if let Some(monospace) = monospace {
+        db.set_monospace_family(monospace);
+    }
+}
+
 fn rich_spans<'a>(
     document: &'a RichComposeDocument,
     preedit_offset: usize,
     preedit_text: &'a str,
     default_attrs: &Attrs<'static>,
-    link_color: CosmicColor,
+    look: TextLook,
+    images: &mut Vec<Arc<InlineImage>>,
 ) -> Vec<(&'a str, Attrs<'static>)> {
     let runs = document.style_runs();
     let mut spans = Vec::with_capacity(runs.len().saturating_add(2).max(1));
     let mut inserted_preedit = preedit_text.is_empty();
-    let preedit_attrs = character_attrs(default_attrs, document.typing_style(), link_color)
+    let preedit_attrs = character_attrs(default_attrs, document.typing_style(), look)
         .underline(UnderlineStyle::Single);
 
     for run in runs {
-        let attrs = character_attrs(default_attrs, &run.style, link_color);
+        if let Some(image) = &run.style.image {
+            // Each placeholder becomes the image's space. The IME composes between them.
+            let slot = images.len();
+            images.push(image.clone());
+            let attrs = image_attrs(default_attrs, image, look, slot);
+            for (offset, _) in document.text()[run.range.clone()].char_indices() {
+                if !inserted_preedit && preedit_offset <= run.range.start + offset {
+                    push_span(&mut spans, preedit_text, preedit_attrs.clone());
+                    inserted_preedit = true;
+                }
+                push_span(&mut spans, IMAGE_SPACE, attrs.clone());
+            }
+            continue;
+        }
+        let attrs = character_attrs(default_attrs, &run.style, look);
         if !inserted_preedit && preedit_offset <= run.range.start {
             push_span(&mut spans, preedit_text, preedit_attrs.clone());
             inserted_preedit = true;
@@ -988,11 +1280,16 @@ fn rich_spans<'a>(
     spans
 }
 
-/// Splits styled spans into paragraphs the way `Buffer::set_rich_text` does.
+/// A paragraph to lay out: its text, styles and alignment.
+type RichLine = (String, AttrsList, Option<Align>);
+
+/// Splits styled spans into paragraphs the way `Buffer::set_rich_text` does, each aligned as
+/// `align_at` says for where it starts.
 fn rich_lines(
     spans: &[(&str, Attrs<'static>)],
     default_attrs: &Attrs<'static>,
-) -> Vec<(String, AttrsList)> {
+    align_at: impl Fn(usize) -> Option<Align>,
+) -> Vec<RichLine> {
     let mut text = String::with_capacity(spans.iter().map(|(span, _)| span.len()).sum());
     let mut ranges = Vec::with_capacity(spans.len());
     for (span, attrs) in spans {
@@ -1023,10 +1320,10 @@ fn rich_lines(
                 attrs_list.add_span(span_start - start..span_end - start, attrs);
             }
         }
-        lines.push((paragraph.to_owned(), attrs_list));
+        lines.push((paragraph.to_owned(), attrs_list, align_at(start)));
     }
     if lines.is_empty() {
-        lines.push((String::new(), AttrsList::new(default_attrs)));
+        lines.push((String::new(), AttrsList::new(default_attrs), align_at(0)));
     }
     lines
 }
@@ -1034,15 +1331,12 @@ fn rich_lines(
 /// Keeps the shaped lines an edit left alone. Only the changed middle is
 /// replaced, so typing reshapes one paragraph instead of the whole draft.
 /// Returns the indexes of the new lines.
-fn replace_changed_lines(
-    buffer: &mut Buffer,
-    lines: Vec<(String, AttrsList)>,
-) -> std::ops::Range<usize> {
-    let unchanged = |line: &BufferLine, (text, attrs): &(String, AttrsList)| {
+fn replace_changed_lines(buffer: &mut Buffer, lines: Vec<RichLine>) -> std::ops::Range<usize> {
+    let unchanged = |line: &BufferLine, (text, attrs, align): &RichLine| {
         line.text() == text
             && line.attrs_list() == attrs
             && line.ending() == LineEnding::default()
-            && line.align().is_none()
+            && line.align() == *align
     };
     let prefix = buffer
         .lines
@@ -1065,8 +1359,10 @@ fn replace_changed_lines(
         .into_iter()
         .take(new_end)
         .skip(prefix)
-        .map(|(text, attrs)| {
-            BufferLine::new(text, LineEnding::default(), attrs, Shaping::Advanced)
+        .map(|(text, attrs, align)| {
+            let mut line = BufferLine::new(text, LineEnding::default(), attrs, Shaping::Advanced);
+            line.set_align(align);
+            line
         });
     buffer.lines.splice(prefix..old_end, replacement);
     prefix..new_end
@@ -1078,10 +1374,58 @@ fn push_span<'a>(spans: &mut Vec<(&'a str, Attrs<'static>)>, text: &'a str, attr
     }
 }
 
+/// What styled text looks like in the editor: the theme's darkness, the size of normal text
+/// and the color of links.
+#[derive(Clone, Copy)]
+struct TextLook {
+    dark: bool,
+    metrics: Metrics,
+    link: CosmicColor,
+    /// The width text lays out in, which images shrink to fit.
+    width: f32,
+}
+
+/// Marks a glyph's metadata as highlighted, with the highlight's color in its low bits.
+const HIGHLIGHTED: usize = 1 << 24;
+/// Marks a glyph's metadata as an image's space, with its slot in the layout's images in its low
+/// bits.
+const IMAGE: usize = 1 << 25;
+
+/// An image's size in the layout, in physical pixels: as shown in the message, and no wider
+/// than the text.
+fn image_layout_size(image: &InlineImage, look: TextLook) -> (f32, f32) {
+    let scale = look.metrics.font_size / FONT_SIZE_LOGICAL;
+    let (width, height) = image.shown_size();
+    let width = width as f32 * scale;
+    let height = height as f32 * scale;
+    let fit = (look.width / width).min(1.0);
+    (
+        (width * fit).max(1.0).floor(),
+        (height * fit).max(1.0).round(),
+    )
+}
+
+/// The attributes of an image's space: transparent, as wide as the image by its letter
+/// spacing, and with a line as tall as the image.
+fn image_attrs(
+    default_attrs: &Attrs<'static>,
+    image: &InlineImage,
+    look: TextLook,
+    slot: usize,
+) -> Attrs<'static> {
+    let (width, height) = image_layout_size(image, look);
+    default_attrs
+        .clone()
+        .color(CosmicColor::rgba(0, 0, 0, 0))
+        .letter_spacing(width / look.metrics.font_size)
+        .metrics(Metrics::new(look.metrics.font_size, height))
+        .metadata(IMAGE | slot)
+}
+
 fn character_attrs(
     default_attrs: &Attrs<'static>,
     style: &CharacterStyle,
-    link_color: CosmicColor,
+    look: TextLook,
 ) -> Attrs<'static> {
     let mut attrs = default_attrs.clone();
     if style.marks & BOLD != 0 {
@@ -1096,13 +1440,80 @@ fn character_attrs(
     if style.marks & STRIKE != 0 {
         attrs = attrs.strikethrough();
     }
+    match style.family {
+        FontFamily::Default => {}
+        FontFamily::Serif => attrs = attrs.family(Family::Serif),
+        FontFamily::Monospace => attrs = attrs.family(Family::Monospace),
+    }
     if style.marks & CODE != 0 {
         attrs = attrs.family(Family::Monospace);
     }
+    if style.size != TextSize::Normal {
+        let scale = style.size.scale();
+        attrs = attrs.metrics(Metrics::new(
+            look.metrics.font_size * scale,
+            look.metrics.line_height * scale,
+        ));
+    }
     if style.link.is_some() {
-        attrs = attrs.color(link_color);
+        attrs = attrs.color(look.link);
+    }
+    match (style.highlight, style.color) {
+        // Text on a highlight keeps to the highlight's contrast in either theme.
+        (Some(highlight), color) => {
+            attrs = attrs
+                .metadata(HIGHLIGHTED | highlight as usize)
+                .color(cosmic_rgb(color.unwrap_or(text_on(highlight))));
+        }
+        (None, Some(color)) => attrs = attrs.color(cosmic_rgb(shown_color(color, look.dark))),
+        (None, None) => {}
     }
     attrs
+}
+
+fn cosmic_rgb(color: Rgb) -> CosmicColor {
+    CosmicColor::rgb((color >> 16) as u8, (color >> 8) as u8, color as u8)
+}
+
+/// Relative luminance, as WCAG defines it.
+fn rgb_luminance(color: Rgb) -> f32 {
+    let channel = |shift: u32| {
+        let value = ((color >> shift) & 0xff) as f32 / 255.0;
+        if value <= 0.040_45 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+}
+
+fn luminance(color: Color) -> f32 {
+    rgb_luminance(
+        (u32::from(color.red()) << 16) | (u32::from(color.green()) << 8) | u32::from(color.blue()),
+    )
+}
+
+/// Near-black or white, whichever reads on `highlight`.
+fn text_on(highlight: Rgb) -> Rgb {
+    if rgb_luminance(highlight) > 0.18 {
+        0x20_21_24
+    } else {
+        0xff_ff_ff
+    }
+}
+
+/// A text color as the editor shows it: as chosen, or lightened toward white on a dark theme
+/// when it would be too dark to read there. The message keeps the chosen color.
+fn shown_color(color: Rgb, dark: bool) -> Rgb {
+    if !dark || rgb_luminance(color) >= 0.18 {
+        return color;
+    }
+    let lighten = |shift: u32| {
+        let value = (color >> shift) & 0xff;
+        (value + (0xff - value) / 2) << shift
+    };
+    lighten(16) | lighten(8) | lighten(0)
 }
 
 fn navigation_motion(key: &str, control: bool, alt: bool, meta: bool) -> Option<Motion> {
@@ -1310,6 +1721,32 @@ impl<'a> TileCanvas<'a> {
         blend_premultiplied(&mut self.pixels[index..index + 4], color);
     }
 
+    /// Draws `pixels`, premultiplied RGBA `width` by `height`, with its top left at `x`, `y`.
+    fn image(&mut self, x: i32, y: i32, width: u32, height: u32, pixels: &[u8]) {
+        let top = self.y_offset as i32;
+        let rows = (y.max(top)
+            ..y.saturating_add(height as i32)
+                .min(top + self.height as i32))
+            .map(|row| row - y);
+        for row in rows {
+            for column in x.max(0)..x.saturating_add(width as i32).min(self.width as i32) {
+                let source = ((row as usize * width as usize) + (column - x) as usize) * 4;
+                let Some(source) = pixels.get(source..source + 4) else {
+                    continue;
+                };
+                let index = (((y + row) as u32 - self.y_offset) as usize * self.width as usize
+                    + column as usize)
+                    * 4;
+                let destination = &mut self.pixels[index..index + 4];
+                let inverse = 255 - u32::from(source[3]);
+                for (destination, source) in destination.iter_mut().zip(source) {
+                    *destination = (u32::from(*source) + u32::from(*destination) * inverse / 255)
+                        .min(255) as u8;
+                }
+            }
+        }
+    }
+
     fn rectangle(&mut self, x: i32, y: i32, width: u32, height: u32, color: CosmicColor) {
         if width == 0 || height == 0 || color.a() == 0 {
             return;
@@ -1413,6 +1850,50 @@ impl Renderer for TileRenderer<'_, '_> {
 
 fn multiply_alpha(first: u8, second: u8) -> u8 {
     ((u16::from(first) * u16::from(second) + 127) / 255) as u8
+}
+
+/// An image's pixels at `width` by `height`, turned upright as its camera recorded, as
+/// premultiplied RGBA. One it can't decode shows as a gray box.
+fn decode_image(image: &InlineImage, width: u32, height: u32) -> Arc<[u8]> {
+    let decoded = (|| {
+        // A photo is read at little more than the size it shows, rather than all of it.
+        let read = if image.mime_type == "image/jpeg" {
+            crate::photo_shrink::read_jpeg(&image.data, width, height)
+        } else {
+            None
+        };
+        let picture = match read {
+            Some(picture) => picture,
+            None => {
+                let mut decoder = image::ImageReader::new(std::io::Cursor::new(&*image.data))
+                    .with_guessed_format()
+                    .ok()?
+                    .into_decoder()
+                    .ok()?;
+                let orientation = image::ImageDecoder::orientation(&mut decoder).ok();
+                let mut picture = image::DynamicImage::from_decoder(decoder).ok()?;
+                if let Some(orientation) = orientation {
+                    picture.apply_orientation(orientation);
+                }
+                picture
+            }
+        };
+        Some(
+            picture
+                .resize_exact(width, height, image::imageops::FilterType::Triangle)
+                .into_rgba8()
+                .into_raw(),
+        )
+    })();
+    let mut pixels = decoded
+        .unwrap_or_else(|| [0xc8, 0xc8, 0xc8, 0xff].repeat(width as usize * height as usize));
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        let alpha = u32::from(pixel[3]);
+        for channel in &mut pixel[..3] {
+            *channel = ((u32::from(*channel) * alpha + 127) / 255) as u8;
+        }
+    }
+    pixels.into()
 }
 
 fn blend_premultiplied(destination: &mut [u8], source: CosmicColor) {
@@ -1955,13 +2436,23 @@ mod tests {
         }
     }
 
+    /// The look of a light theme at scale 1.
+    fn test_look() -> TextLook {
+        TextLook {
+            dark: false,
+            metrics: Metrics::new(FONT_SIZE_LOGICAL, LINE_HEIGHT_LOGICAL),
+            link: CosmicColor::rgb(0, 90, 180),
+            width: 600.0,
+        }
+    }
+
     #[test]
     fn layout_spans_borrow_long_unicode_text_and_preedit() {
         let mut document = RichComposeDocument::default();
         document.synchronize(&"é".repeat(512 * 1024), 2, 2);
         let preedit = String::from("世界");
         let attrs = Attrs::new().family(Family::Name(UI_FONT_FAMILY));
-        let spans = rich_spans(&document, 2, &preedit, &attrs, CosmicColor::rgb(0, 90, 180));
+        let spans = rich_spans(&document, 2, &preedit, &attrs, test_look(), &mut Vec::new());
 
         assert_eq!(spans.len(), 3);
         assert_eq!(spans[0].0, "é");
@@ -2013,7 +2504,8 @@ mod tests {
             document.text().len(),
             "",
             &default_attrs,
-            CosmicColor::rgb(90, 150, 255),
+            test_look(),
+            &mut Vec::new(),
         );
         assert_eq!(spans[0].1.text_decoration.underline, UnderlineStyle::Single);
         assert!(spans[0].1.text_decoration.strikethrough);
@@ -2162,11 +2654,12 @@ mod tests {
                 Shaping::Advanced,
                 None,
             );
-            let lines = rich_lines(&spans, &base);
+            let lines = rich_lines(&spans, &base, |_| None);
             assert_eq!(lines.len(), expected.lines.len(), "{spans:?}");
-            for ((text, attrs), line) in lines.iter().zip(&expected.lines) {
+            for ((text, attrs, align), line) in lines.iter().zip(&expected.lines) {
                 assert_eq!(text, line.text());
                 assert_eq!(attrs, line.attrs_list());
+                assert_eq!(*align, line.align());
             }
         }
     }
@@ -2181,8 +2674,10 @@ mod tests {
             .map(|line| format!("> quoted line {line}\n"))
             .collect::<String>();
         let mut apply = |buffer: &mut Buffer, text: &str| {
-            let replaced =
-                replace_changed_lines(buffer, rich_lines(&[(text, attrs.clone())], &attrs));
+            let replaced = replace_changed_lines(
+                buffer,
+                rich_lines(&[(text, attrs.clone())], &attrs, |_| None),
+            );
             let reshaped = buffer
                 .lines
                 .iter()
@@ -2409,5 +2904,427 @@ mod tests {
         let accented = "très bien";
         assert!(is_whole_word(accented, &(0..5)));
         assert!(!is_whole_word(accented, &(0..3)));
+    }
+
+    /// Lays `document` out `width` logical pixels wide at `scale` and returns the first tile's
+    /// pixels, one row after another, `width * scale` pixels to a row.
+    fn painted(
+        editor: &mut CosmicComposeEditor,
+        document: &RichComposeDocument,
+        width: f32,
+        scale: f32,
+        style: ComposeEditorStyle,
+    ) -> Vec<[u8; 4]> {
+        let rendered = editor.render(
+            document,
+            document.selection(),
+            width,
+            200.0,
+            0.0,
+            scale,
+            style,
+            "",
+        );
+        rendered.tiles[0]
+            .image
+            .to_rgba8_premultiplied()
+            .unwrap()
+            .as_bytes()
+            .as_chunks::<4>()
+            .0
+            .to_vec()
+    }
+
+    /// Where each visual line's glyphs start and end.
+    fn line_extents(editor: &CosmicComposeEditor) -> Vec<(f32, f32)> {
+        editor.editor.with_buffer(|buffer| {
+            buffer
+                .layout_runs()
+                .map(|run| {
+                    let left = run.glyphs.first().map_or(f32::MAX, |glyph| glyph.x);
+                    let right = run
+                        .glyphs
+                        .last()
+                        .map_or(f32::MIN, |glyph| glyph.x + glyph.w);
+                    (left, right)
+                })
+                .collect()
+        })
+    }
+
+    #[test]
+    fn highlights_paint_behind_their_words_only() {
+        let mut document = RichComposeDocument::default();
+        document.load("plain marked plain", 0, 0);
+        let text = document.text().to_owned();
+        let marked = text.find("marked").unwrap();
+        let marked_end = marked + "marked".len();
+        document.format("highlight:#ffeb3b", &text, marked as i32, marked_end as i32);
+        document.update_selection(0, 0);
+        // On a dark theme the text on a light highlight turns dark to stay readable.
+        let dark = ComposeEditorStyle {
+            text: Color::from_rgb_u8(230, 230, 230),
+            ..spelling_style()
+        };
+        for (style, scale) in [(spelling_style(), 1.0), (dark, 2.0)] {
+            let mut editor = CosmicComposeEditor::default();
+            let pixels = painted(&mut editor, &document, 320.0, scale, style);
+            let width = (320.0 * scale) as usize;
+            let (left, right) = (editor.glyph_left(marked), editor.glyph_left(marked_end));
+            let highlighted: Vec<usize> = pixels
+                .iter()
+                .enumerate()
+                .filter(|(_, pixel)| **pixel == [0xff, 0xeb, 0x3b, 0xff])
+                .map(|(index, _)| index % width)
+                .collect();
+            assert!(!highlighted.is_empty());
+            for x in highlighted {
+                assert!(
+                    x as f32 >= left.floor() && x as f32 <= right.ceil(),
+                    "highlight at {x} outside {left}..{right}"
+                );
+            }
+            assert!(
+                pixels.contains(&[0x20, 0x21, 0x24, 0xff]),
+                "no dark text on the highlight"
+            );
+        }
+    }
+
+    #[test]
+    fn paragraphs_line_up_as_the_document_says() {
+        let mut document = RichComposeDocument::default();
+        document.load("left\ncenter\nright\n", 0, 0);
+        let mut editor = CosmicComposeEditor::default();
+        painted(&mut editor, &document, 320.0, 1.0, spelling_style());
+        let text = document.text().to_owned();
+        let center = text.find("center").unwrap() as i32;
+        let right = text.find("right").unwrap() as i32;
+        document.format("align:center", &text, center, center);
+        document.format("align:right", &text, right, right);
+        let end = text.len() as i32;
+        document.update_selection(end, end);
+        let pixels = painted(&mut editor, &document, 320.0, 1.0, spelling_style());
+
+        let lines = line_extents(&editor);
+        assert!(lines[0].0 < 1.0, "{lines:?}");
+        assert!(
+            (lines[1].0 - (320.0 - lines[1].1)).abs() <= 1.0,
+            "{lines:?}"
+        );
+        assert!(lines[2].1 > 319.0, "{lines:?}");
+        // The empty line after them goes on as the paragraph above it.
+        let rendered = editor.render(
+            &document,
+            document.selection(),
+            320.0,
+            200.0,
+            0.0,
+            1.0,
+            spelling_style(),
+            "",
+        );
+        assert!(rendered.caret_x > 310.0, "caret at {}", rendered.caret_x);
+
+        // Lines kept from the layout before match a fresh one.
+        assert_eq!(
+            pixels,
+            painted(
+                &mut CosmicComposeEditor::default(),
+                &document,
+                320.0,
+                1.0,
+                spelling_style()
+            )
+        );
+
+        // Centering the empty line moves the caret there, and leaving it takes it back to the
+        // alignment typing there would have.
+        document.format("align:center", &text, end, end);
+        let caret_x = |editor: &mut CosmicComposeEditor, document: &RichComposeDocument| {
+            editor
+                .render(
+                    document,
+                    document.selection(),
+                    320.0,
+                    200.0,
+                    0.0,
+                    1.0,
+                    spelling_style(),
+                    "",
+                )
+                .caret_x
+        };
+        assert!((caret_x(&mut editor, &document) - 160.0).abs() <= 1.0);
+        document.update_selection(0, 0);
+        caret_x(&mut editor, &document);
+        document.update_selection(end, end);
+        assert!(caret_x(&mut editor, &document) > 310.0);
+    }
+
+    #[test]
+    fn the_caret_on_an_empty_line_sits_where_typing_goes() {
+        let caret_x = |document: &RichComposeDocument| {
+            CosmicComposeEditor::default()
+                .render(
+                    document,
+                    document.selection(),
+                    320.0,
+                    200.0,
+                    0.0,
+                    1.0,
+                    spelling_style(),
+                    "",
+                )
+                .caret_x
+        };
+        let mut document = RichComposeDocument::default();
+        document.format("align:right", "", 0, 0);
+        assert_eq!(caret_x(&document), 320.0);
+
+        let mut document = RichComposeDocument::default();
+        document.load("first\n\nlast", 0, 0);
+        let text = document.text().to_owned();
+        document.format("align:center", &text, 0, text.len() as i32);
+        document.update_selection(6, 6);
+        assert_eq!(caret_x(&document), 160.0);
+    }
+
+    #[test]
+    fn bigger_text_makes_its_line_taller() {
+        let mut document = RichComposeDocument::default();
+        document.load("normal\nhuge", 0, 0);
+        let text = document.text().to_owned();
+        let huge = text.find("huge").unwrap() as i32;
+        let mut editor = CosmicComposeEditor::default();
+        let render = |editor: &mut CosmicComposeEditor, document: &RichComposeDocument| {
+            editor.render(
+                document,
+                document.selection(),
+                320.0,
+                200.0,
+                0.0,
+                1.0,
+                spelling_style(),
+                "",
+            )
+        };
+        let before = render(&mut editor, &document).content_height;
+        document.format("size:huge", &text, huge, text.len() as i32);
+        let end = text.len() as i32;
+        document.update_selection(end, end);
+        let after = render(&mut editor, &document);
+        assert_eq!(after.content_height, before + LINE_HEIGHT_LOGICAL);
+        assert_eq!(after.caret_height, LINE_HEIGHT_LOGICAL * 2.0);
+        assert_eq!(after.caret_y, LINE_HEIGHT_LOGICAL);
+    }
+
+    /// The style a character gets from the toolbar's `commands`.
+    fn style_from(commands: &[&str]) -> CharacterStyle {
+        let mut document = RichComposeDocument::default();
+        document.load("x", 0, 0);
+        for command in commands {
+            document.format(command, "x", 0, 1);
+        }
+        document.style_runs()[0].style.clone()
+    }
+
+    #[test]
+    fn character_styles_become_text_attributes() {
+        let base = Attrs::new().family(Family::Name(UI_FONT_FAMILY));
+        let look = test_look();
+        let styled = style_from(&["color:#1a73e8", "size:small", "family:serif"]);
+        let attrs = character_attrs(&base, &styled, look);
+        assert_eq!(attrs.color_opt, Some(CosmicColor::rgb(0x1a, 0x73, 0xe8)));
+        assert_eq!(attrs.family, Family::Serif);
+        assert_eq!(
+            attrs.metrics_opt.map(Metrics::from),
+            Some(Metrics::new(
+                FONT_SIZE_LOGICAL * 13.0 / 16.0,
+                LINE_HEIGHT_LOGICAL * 13.0 / 16.0
+            ))
+        );
+        assert_eq!(attrs.metadata, 0);
+
+        // Normal text keeps the editor's own size, family and color.
+        let plain = character_attrs(&base, &CharacterStyle::default(), look);
+        assert_eq!(plain, base);
+
+        // Code stays monospace whatever the family.
+        let code = style_from(&["family:serif", "code"]);
+        assert_eq!(
+            character_attrs(&base, &code, look).family,
+            Family::Monospace
+        );
+
+        // A highlight marks the glyphs with its color, and the text on it reads either way.
+        let highlighted = style_from(&["highlight:#0b5394"]);
+        let attrs = character_attrs(&base, &highlighted, look);
+        assert_eq!(attrs.metadata, HIGHLIGHTED | 0x0b_53_94);
+        assert_eq!(attrs.color_opt, Some(CosmicColor::rgb(0xff, 0xff, 0xff)));
+    }
+
+    #[test]
+    fn serif_and_monospace_text_use_installed_fonts() {
+        let editor = CosmicComposeEditor::default();
+        let db = editor.font_system.db();
+        for family in [Family::Serif, Family::Monospace] {
+            let query = cosmic_text::fontdb::Query {
+                families: &[family],
+                ..Default::default()
+            };
+            assert!(
+                db.query(&query).is_some(),
+                "no font for {}",
+                db.family_name(&family)
+            );
+        }
+    }
+
+    /// Where the layout's image is: its left and its width, in physical pixels.
+    fn image_box(editor: &CosmicComposeEditor) -> (f32, f32) {
+        editor.editor.with_buffer(|buffer| {
+            buffer
+                .layout_runs()
+                .flat_map(|run| run.glyphs.iter())
+                .find(|glyph| glyph.metadata & IMAGE != 0)
+                .map(|glyph| (glyph.x, glyph.w))
+                .expect("an image in the layout")
+        })
+    }
+
+    /// A PNG `width` by `height` in pure red.
+    fn red_png(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            width,
+            height,
+            image::Rgba([255, 0, 0, 255]),
+        ))
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+        bytes
+    }
+
+    #[test]
+    fn images_take_their_room_in_the_text_and_show_there() {
+        let mut document = RichComposeDocument::default();
+        document.load("ab", 1, 1);
+        document.insert_image(InlineImage::from_file_bytes(red_png(40, 30), "").unwrap());
+        assert_eq!(document.text(), "a\u{fffc}b");
+        let mut editor = CosmicComposeEditor::default();
+        let pixels = painted(&mut editor, &document, 320.0, 2.0, spelling_style());
+        let width = 640;
+        // The image's room: 40 by 30 points, at twice the pixels.
+        let (left, image_width) = image_box(&editor);
+        assert_eq!(image_width, 80.0);
+        assert_eq!(editor.glyph_left(4), left + image_width);
+        let rendered = editor.render(
+            &document,
+            document.selection(),
+            320.0,
+            200.0,
+            0.0,
+            2.0,
+            spelling_style(),
+            "",
+        );
+        assert_eq!(rendered.content_height, 30.0);
+        let red: Vec<(usize, usize)> = pixels
+            .iter()
+            .enumerate()
+            .filter(|(_, pixel)| **pixel == [255, 0, 0, 255])
+            .map(|(index, _)| (index % width, index / width))
+            .collect();
+        assert_eq!(red.len(), 80 * 60);
+        let columns = left.floor() as usize..=(left + image_width).ceil() as usize;
+        assert!(red.iter().all(|(x, y)| columns.contains(x) && *y < 60));
+
+        // A click on it selects it.
+        let selection = editor
+            .handle_pointer(
+                &document,
+                document.selection(),
+                320.0,
+                2.0,
+                spelling_style(),
+                "",
+                (left / 2.0) + 10.0,
+                10.0,
+                "down",
+                false,
+            )
+            .unwrap();
+        assert_eq!(selection, ComposeSelection { start: 1, end: 4 });
+    }
+
+    #[test]
+    fn images_wider_than_the_text_shrink_to_fit() {
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document.insert_image(InlineImage::from_file_bytes(red_png(800, 400), "").unwrap());
+        let mut editor = CosmicComposeEditor::default();
+        let rendered = editor.render(
+            &document,
+            document.selection(),
+            320.0,
+            400.0,
+            0.0,
+            1.0,
+            spelling_style(),
+            "",
+        );
+        assert_eq!(rendered.content_height, 160.0);
+        assert_eq!(image_box(&editor).1, 320.0);
+    }
+
+    #[test]
+    fn photos_show_read_at_their_size_and_keep_only_that_size() {
+        // A photo far larger than it shows: red above, blue below.
+        let picture = image::RgbImage::from_fn(1600, 1200, |_, y| {
+            image::Rgb(if y < 600 { [255, 0, 0] } else { [0, 0, 255] })
+        });
+        let mut jpeg = Vec::new();
+        image::DynamicImage::ImageRgb8(picture)
+            .write_to(
+                &mut std::io::Cursor::new(&mut jpeg),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document.insert_image(InlineImage::from_file_bytes(jpeg, "").unwrap());
+        let mut editor = CosmicComposeEditor::default();
+        let pixels = painted(&mut editor, &document, 200.0, 1.0, spelling_style());
+        let (left, width) = image_box(&editor);
+        assert_eq!(width, 200.0);
+        let middle = (left + width / 2.0) as usize;
+        let at = |y: usize| pixels[y * 200 + middle];
+        assert!(at(20)[0] > 200 && at(20)[2] < 60, "{:?}", at(20));
+        assert!(at(130)[2] > 200 && at(130)[0] < 60, "{:?}", at(130));
+        // As the window narrows, only the size it shows at now is kept.
+        painted(&mut editor, &document, 150.0, 1.0, spelling_style());
+        painted(&mut editor, &document, 120.0, 1.0, spelling_style());
+        let sizes: Vec<_> = editor
+            .image_pixels
+            .keys()
+            .map(|(_, w, h)| (*w, *h))
+            .collect();
+        assert_eq!(sizes, [(120, 90)]);
+    }
+
+    #[test]
+    fn dark_colors_lighten_on_a_dark_theme_only() {
+        let navy = 0x0b_1f_4d;
+        assert_eq!(shown_color(navy, false), navy);
+        let shown = shown_color(navy, true);
+        assert!(rgb_luminance(shown) > rgb_luminance(navy));
+        // Colors that already read on a dark background stay as chosen.
+        assert_eq!(shown_color(0xff_eb_3b, true), 0xff_eb_3b);
+        assert_eq!(text_on(0xff_eb_3b), 0x20_21_24);
+        assert_eq!(text_on(0x0b_53_94), 0xff_ff_ff);
     }
 }

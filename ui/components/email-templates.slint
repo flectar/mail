@@ -25,6 +25,8 @@ export component EmailTemplates inherits Rectangle {
     callback use-template(int) -> bool;
     callback save-template(int, string, string, string, string) -> bool;
     callback delete-template(int) -> bool;
+    // `text` with the last string in place of the bytes between the two offsets.
+    pure callback splice-text(string, int, int, string) -> string;
 
     private property <bool> editing: false;
     private property <int> edit-id: -1;
@@ -305,7 +307,51 @@ export component EmailTemplates inherits Rectangle {
                     input-label: @tr("Subject (optional)");
                     placeholder-text: @tr("Subject (optional)");
                 }
-                TextEdit {
+
+                // Puts a placeholder in the message at the caret, which the template fills in
+                // as it goes into a message.
+                function add-placeholder(placeholder: string) {
+                    let start = min(body-edit.anchor-offset, body-edit.cursor-offset);
+                    let end = max(body-edit.anchor-offset, body-edit.cursor-offset);
+                    root.edit-body = root.splice-text(root.edit-body, start, end, placeholder);
+                    body-edit.set-selection(
+                        start + placeholder.character-count,
+                        start + placeholder.character-count,
+                    );
+                    body-edit.focus();
+                }
+
+                HorizontalLayout {
+                    height: 32px;
+
+                    placeholder-menu := ContextMenuArea {
+                        width: placeholder-button.width;
+
+                        placeholder-button := Button {
+                            width: self.content-width;
+                            text: @tr("Insert placeholder");
+                            clicked => { placeholder-menu.show({ x: 0px, y: self.height + 4px }); }
+                        }
+
+                        Menu {
+                            MenuItem { title: @tr("Recipient's first name"); activated => { add-placeholder("{{recipient.first_name}}"); } }
+                            MenuItem { title: @tr("Recipient's last name"); activated => { add-placeholder("{{recipient.last_name}}"); } }
+                            MenuItem { title: @tr("Recipient's full name"); activated => { add-placeholder("{{recipient.name}}"); } }
+                            MenuItem { title: @tr("Recipient's email address"); activated => { add-placeholder("{{recipient.email}}"); } }
+                            MenuSeparator {}
+                            MenuItem { title: @tr("Your first name"); activated => { add-placeholder("{{sender.first_name}}"); } }
+                            MenuItem { title: @tr("Your last name"); activated => { add-placeholder("{{sender.last_name}}"); } }
+                            MenuItem { title: @tr("Your full name"); activated => { add-placeholder("{{sender.name}}"); } }
+                            MenuItem { title: @tr("Your email address"); activated => { add-placeholder("{{sender.email}}"); } }
+                            MenuSeparator {}
+                            MenuItem { title: @tr("Today's date"); activated => { add-placeholder("{{date}}"); } }
+                        }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
+                body-edit := TextEdit {
                     vertical-stretch: 1;
                     min-height: 70px;
                     text <=> root.edit-body;

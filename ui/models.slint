@@ -29,6 +29,32 @@ export global MailDragApi {
     callback drop-on-mailbox(data-transfer, string, int, int) -> bool;
 }
 
+// What stops an account's mail checks.
+export enum AccountProblem {
+    none,
+    // The server turned the sign-in down; signing in again fixes it.
+    sign-in,
+    // A check failed, and the app keeps trying again on its own.
+    failed,
+}
+
+// How an account's mail checks are going, as its sidebar heading shows it.
+export struct AccountStatus {
+    // A check has been running for a moment.
+    checking: bool,
+    problem: AccountProblem,
+    // The heading shows the problem: at once after a check someone asked
+    // for, otherwise once it has lasted, so a dropped connection that comes
+    // straight back marks nothing.
+    marked: bool,
+    // The server's or the network's own account of the failure.
+    reason: string,
+    // When a check last brought the Inbox up to date, for
+    // AccountStatusText.last-checked.
+    checked_day: int,
+    checked_at: string,
+}
+
 export struct MailboxRow {
     account_id: int,
     folder_id: int,
@@ -53,6 +79,8 @@ export struct MailboxRow {
     count: string,
     color: color,
     has_custom_color: bool,
+    // Account rows only.
+    status: AccountStatus,
 }
 
 // Provider labels and local auto-categories share one presentation model.
@@ -82,6 +110,7 @@ export enum SidebarRowKind {
     unified-heading, unified-section, unified-inbox, unified-mailbox,
     categories-section, important, other, category,
     global-labels-section, global-label,
+    saved-searches-section, saved-search,
     accounts-heading, account, folder, account-labels-section, account-label,
     new-folder, new-label,
 }
@@ -128,6 +157,8 @@ export struct EmailRow {
     starred: bool,
     has_attachments: bool,
     has_replied: bool,
+    // Sent with high importance (#236), for a marker in the list.
+    high_importance: bool,
     message_count: int,
     label_summary: string,
     labels: [MailLabelRow],
@@ -239,6 +270,10 @@ export struct AccountRow {
     mail_protocol: string,
     status: string,
     sync_error: string,
+    // When a check last brought the Inbox up to date, for
+    // AccountStatusText.last-checked.
+    checked_day: int,
+    checked_at: string,
     initials: string,
     avatar: image,
     avatar_small: image,
@@ -260,6 +295,8 @@ export struct AccountRow {
     mail_history: string,
     sent_copy_policy: string,
     keep_on_server: string,
+    // IMAP: the account lists only the folders the user subscribed to.
+    subscribed_folders_only: bool,
     // Days a POP3 server keeps downloaded mail on its own; -1 when it
     // keeps it or hasn't said.
     server_keeps_mail_days: int,
@@ -420,6 +457,13 @@ export struct CalendarSourceRow {
 export struct ComposeAttachment {
     name: string,
     detail: string,
+}
+
+// A file the message sends by link: its name, and how its upload went.
+export struct ComposeLink {
+    name: string,
+    detail: string,
+    failed: bool,
 }
 
 // A deliberately small contact shape for compose autocomplete. The core

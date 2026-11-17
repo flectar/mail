@@ -47,6 +47,8 @@
         <!-- One launcher entry per app icon in Settings. FlectarActivity
              enables the chosen one; resources/app-icon/generate.py checks
              that every icon has an entry. -->
+        <!-- NativeActivity reads the library name from the component that
+             started it, which is the alias when the launcher opens the app. -->
         <activity-alias
             android:name=".IconOrange"
             android:enabled="true"
@@ -54,6 +56,9 @@
             android:icon="@mipmap/ic_launcher"
             android:roundIcon="@mipmap/ic_launcher_round"
             android:targetActivity=".FlectarActivity">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="flectar_mail_android" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -66,6 +71,9 @@
             android:icon="@mipmap/ic_launcher_graphite"
             android:roundIcon="@mipmap/ic_launcher_round_graphite"
             android:targetActivity=".FlectarActivity">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="flectar_mail_android" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -78,6 +86,9 @@
             android:icon="@mipmap/ic_launcher_light"
             android:roundIcon="@mipmap/ic_launcher_round_light"
             android:targetActivity=".FlectarActivity">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="flectar_mail_android" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -90,6 +101,9 @@
             android:icon="@mipmap/ic_launcher_blue"
             android:roundIcon="@mipmap/ic_launcher_round_blue"
             android:targetActivity=".FlectarActivity">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="flectar_mail_android" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -102,6 +116,9 @@
             android:icon="@mipmap/ic_launcher_green"
             android:roundIcon="@mipmap/ic_launcher_round_green"
             android:targetActivity=".FlectarActivity">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="flectar_mail_android" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -114,6 +131,9 @@
             android:icon="@mipmap/ic_launcher_purple"
             android:roundIcon="@mipmap/ic_launcher_round_purple"
             android:targetActivity=".FlectarActivity">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="flectar_mail_android" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

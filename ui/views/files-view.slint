@@ -2,7 +2,7 @@ import { DocumentPreview, TextPreview } from "../components/document-preview.sli
 import { InfiniteScrollController } from "../components/infinite-scroll-controller.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
 import { HorizontalBox, VerticalBox, ListView, ScrollView, ComboBox, CheckBox } from "std-widgets.slint";
-import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { Button } from "../components/button.slint";
 import { DetailEmptyState } from "../components/detail-empty-state.slint";
@@ -550,9 +550,9 @@ export component FilesView inherits Rectangle {
             drop-shadow-blur: root.navigation-open ? 24px : 0px;
             drop-shadow-offset-x: 6px;
             drop-shadow-color: #00000035;
-            animate x { duration: 260ms; easing: spring(0.08); }
+            animate x { duration: 260ms; easing: spring(0.08); enabled: MotionSettings.movement; }
             animate opacity { duration: 180ms; easing: ease-out; }
-            animate drop-shadow-blur { duration: 180ms; easing: ease-out; }
+            animate drop-shadow-blur { duration: 180ms; easing: ease-out; enabled: MotionSettings.movement; }
             VerticalBox {
                 padding: 0px; spacing: 0px;
                 WorkspaceTitleRow { title: @tr("File sources"); horizontal-inset: 12px; Button { text: @tr("Close"); clicked => { root.navigation-open = false; } } }

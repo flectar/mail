@@ -50,6 +50,8 @@ fn args(attachment: Option<DraftAttachmentIn>) -> SaveDraftArgs {
         in_reply_to_message_id: None,
         in_reply_to_header: None,
         attachments: attachment.into_iter().collect(),
+        request_read_receipt: false,
+        importance: Default::default(),
     }
 }
 
@@ -80,6 +82,89 @@ async fn saved_draft_can_be_reloaded_without_losing_editable_fields() {
     assert_eq!(loaded.attachments.len(), 1);
     assert_eq!(loaded.attachments[0].filename, "notes.txt");
     assert_ne!(loaded.attachments[0].file_path, source.to_string_lossy());
+}
+
+#[tokio::test]
+async fn a_draft_saved_on_another_device_reopens_with_its_images() {
+    let (tmp, core) = setup().await;
+    let draft_id = core.save_draft(args(None)).await.unwrap();
+    // Synced from the server: the HTML names the image by Content-ID, and the
+    // image is an inline part of the message.
+    let image = tmp.path().join("image1.png");
+    std::fs::write(&image, b"\x89PNG\r\n\x1a\n").unwrap();
+    let image = image.to_string_lossy().into_owned();
+    core.db
+        .write(move |conn| {
+            conn.execute(
+                "UPDATE message_bodies SET html_body = ?2 WHERE message_id = ?1",
+                rusqlite::params![
+                    draft_id,
+                    r#"<p>Chart <img src="cid:img1.abc@example.com" width="8"></p>"#
+                ],
+            )?;
+            conn.execute(
+                "INSERT INTO attachments
+                   (message_id, part_id, filename, mime_type, size, content_id, is_inline, file_path)
+                 VALUES (?1, '2', 'image1.png', 'image/png', 8, '<img1.abc@example.com>', 1, ?2)",
+                rusqlite::params![draft_id, image],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let loaded = core.get_draft(draft_id).await.unwrap();
+    let html = loaded.body_html.unwrap();
+    assert!(
+        html.contains(r#"src="data:image/png;base64,iVBORw0KGgo=""#),
+        "{html}"
+    );
+    assert!(!html.contains("cid:"), "{html}");
+    // The image is part of the text, not an attachment.
+    assert!(loaded.attachments.is_empty());
+}
+
+#[tokio::test]
+async fn images_in_the_text_count_with_the_attachments() {
+    use base64::Engine;
+    let (tmp, core) = setup().await;
+    let image = |bytes: usize| {
+        let data = base64::engine::general_purpose::STANDARD.encode(vec![0u8; bytes]);
+        format!(r#"<p>Photo <img src="data:image/png;base64,{data}"></p>"#)
+    };
+    // 9 MiB of images: more than the text may take, well within what images
+    // and attachments share.
+    let mut draft = args(None);
+    draft.body_html = Some(image(9 * 1024 * 1024));
+    let draft_id = core.save_draft(draft).await.unwrap();
+
+    // With a 17 MiB attachment the two pass 25 MiB.
+    let source = tmp.path().join("archive.bin");
+    std::fs::write(&source, vec![0u8; 17 * 1024 * 1024]).unwrap();
+    let mut draft = args(Some(DraftAttachmentIn {
+        file_path: source.to_string_lossy().into_owned(),
+        filename: "archive.bin".into(),
+        mime_type: None,
+    }));
+    draft.draft_id = Some(draft_id);
+    draft.body_html = Some(image(9 * 1024 * 1024));
+    assert!(core.save_draft(draft).await.is_err());
+
+    // Images alone past 25 MiB.
+    let mut draft = args(None);
+    draft.draft_id = Some(draft_id);
+    draft.body_html = Some(image(26 * 1024 * 1024));
+    assert!(core.save_draft(draft).await.is_err());
+
+    // The text keeps its own limit.
+    let mut draft = args(None);
+    draft.draft_id = Some(draft_id);
+    draft.body_text = "x".repeat(9 * 1024 * 1024);
+    assert!(core.save_draft(draft).await.is_err());
+
+    let loaded = core.get_draft(draft_id).await.unwrap();
+    assert_eq!(loaded.body_html, Some(image(9 * 1024 * 1024)));
+    assert!(loaded.attachments.is_empty());
 }
 
 #[tokio::test]

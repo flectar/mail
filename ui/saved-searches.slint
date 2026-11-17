@@ -1,0 +1,28 @@
+// Searches kept in the sidebar (src/saved_searches.rs). Opening one runs its
+// query as a search of the accounts in view.
+export global SavedSearchUi {
+    // The saved search the mail list shows, or -1.
+    in property <int> selected-id: -1;
+    // The dialog: "" (closed), "save", "edit" or "delete".
+    in property <string> stage;
+    // The saved search being edited or deleted.
+    in property <int> id: -1;
+    in-out property <string> name;
+    in-out property <string> query;
+    // Where it shows: "All profiles" first, then each profile. Empty without
+    // profiles, which hides the choice.
+    in property <[string]> profiles;
+    in-out property <int> profile-index;
+    // Why saving failed, as the core put it.
+    in property <string> error;
+    callback open(int);
+    // Save the search the list shows.
+    callback start-save();
+    callback start-edit(int);
+    callback start-delete(int);
+    // Move a saved search one place up (-1) or down (1).
+    callback move(int, int);
+    callback submit();
+    callback confirm-delete();
+    callback close();
+}

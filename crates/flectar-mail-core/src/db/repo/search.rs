@@ -1,9 +1,9 @@
 use crate::error::Result;
 use crate::models::{
-    MessageCursor, MessageSearchCursor, MessageSearchPage, SearchCursor, SearchPage, ThreadSummary,
-    roles,
+    MessageCursor, MessageSearchCursor, MessageSearchPage, MessageSummary, SearchCursor,
+    SearchPage, ThreadSummary, roles,
 };
-use crate::search::ParsedQuery;
+use crate::search::{Expr, Filter, ParsedQuery};
 use rusqlite::{Connection, params};
 use std::collections::HashMap;
 
@@ -40,12 +40,8 @@ pub fn index_message(conn: &Connection, message_id: i64) -> Result<()> {
 /// default Trash/Spam exclusion should apply.
 fn has_positive_selector(q: &ParsedQuery) -> bool {
     !q.fts.is_empty()
-        || q.from.is_some()
-        || q.to.is_some()
-        || q.in_folder.is_some()
-        || q.is_unread == Some(true)
-        || q.is_starred == Some(true)
-        || q.has_attachment == Some(true)
+        || q.filters.iter().any(|filter| *filter != Filter::Anywhere)
+        || q.expression.as_ref().is_some_and(Expr::selects)
 }
 
 /// Append the caller's account scope over the `m` alias. It narrows a search
@@ -63,6 +59,35 @@ fn append_account_clauses(
     if let Some(account_ids) = &q.account_ids {
         where_clauses.push(account_set_clause("m.account_id", account_ids, bind));
     }
+    if let Some(folder_ids) = &q.folder_ids {
+        where_clauses.push(folder_set_clause(folder_ids, bind));
+    }
+}
+
+/// Whether message `m` is in any of `folder_ids` as mail lists show it: its
+/// folder, or for Gmail any of its labels. An empty set matches nothing.
+pub(crate) fn folder_set_clause(
+    folder_ids: &[i64],
+    bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+) -> String {
+    if folder_ids.is_empty() {
+        return "0".to_owned();
+    }
+    let placeholders = folder_ids
+        .iter()
+        .map(|folder_id| {
+            bind.push(Box::new(*folder_id));
+            format!("?{}", bind.len())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "(m.folder_id IN ({placeholders})
+          OR (EXISTS (SELECT 1 FROM accounts ma
+                      WHERE ma.id = m.account_id AND ma.provider = 'gmail')
+              AND EXISTS (SELECT 1 FROM message_folders mf
+                          WHERE mf.message_id = m.id AND mf.folder_id IN ({placeholders}))))"
+    )
 }
 
 /// `column IN (…)` for a set of accounts; an empty set matches nothing.
@@ -85,53 +110,118 @@ pub(crate) fn account_set_clause(
     format!("{column} IN ({placeholders})")
 }
 
-/// Append `from:`/`to:`/`in:`/`is:`/`has:` predicates over the `m` alias.
-/// Placeholders are `?n` keyed off the running `bind` length, so this composes
-/// with any binds already pushed by the caller.
+/// One operator's predicate over the `m` alias, binding its value. Placeholders
+/// are `?n` keyed off the running `bind` length, so this composes with any
+/// binds already pushed by the caller. `in:anywhere` keeps every message.
+fn filter_clause(filter: &Filter, bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>) -> String {
+    match filter {
+        Filter::From(from) => {
+            bind.push(Box::new(format!("%{}%", from.to_lowercase())));
+            format!(
+                "(LOWER(COALESCE(m.from_addr,'')) LIKE ?{n} OR LOWER(COALESCE(m.from_name,'')) LIKE ?{n})",
+                n = bind.len()
+            )
+        }
+        Filter::To(to) => {
+            bind.push(Box::new(format!("%{}%", to.to_lowercase())));
+            format!("LOWER(m.to_json) LIKE ?{}", bind.len())
+        }
+        Filter::In(role) => {
+            bind.push(Box::new(*role));
+            format!(
+                "EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = ?{})",
+                bind.len()
+            )
+        }
+        Filter::Anywhere => "1".to_owned(),
+        Filter::Unread => "m.is_read = 0".to_owned(),
+        Filter::Starred => "m.is_starred = 1".to_owned(),
+        Filter::HasAttachment => "m.has_attachments = 1".to_owned(),
+        Filter::Before(at) => {
+            bind.push(Box::new(*at));
+            format!("m.date < ?{}", bind.len())
+        }
+        Filter::After(at) => {
+            bind.push(Box::new(*at));
+            format!("m.date >= ?{}", bind.len())
+        }
+        // A message whose size isn't known matches neither.
+        Filter::Larger(size) => {
+            bind.push(Box::new(*size));
+            format!("m.size >= ?{}", bind.len())
+        }
+        Filter::Smaller(size) => {
+            bind.push(Box::new(*size));
+            format!("m.size < ?{}", bind.len())
+        }
+        Filter::Filename(name) => {
+            let escaped = name
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            bind.push(Box::new(format!("%{escaped}%")));
+            format!(
+                "EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id
+                         AND LOWER(COALESCE(a.filename,'')) LIKE ?{} ESCAPE '\\')",
+                bind.len()
+            )
+        }
+    }
+}
+
+/// A boolean query's predicate over the `m` alias: words through the full-text
+/// index, operators as in [`filter_clause`].
+fn expression_clause(expression: &Expr, bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>) -> String {
+    let join =
+        |parts: &[Expr], connector: &str, bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>| {
+            let parts = parts
+                .iter()
+                .map(|part| expression_clause(part, bind))
+                .collect::<Vec<_>>();
+            format!("({})", parts.join(connector))
+        };
+    match expression {
+        Expr::Text(text) => {
+            bind.push(Box::new(text.fts.clone()));
+            format!(
+                "m.id IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?{})",
+                bind.len()
+            )
+        }
+        Expr::Filter(filter) => filter_clause(filter, bind),
+        Expr::Not(inner) => format!("NOT {}", expression_clause(inner, bind)),
+        Expr::And(parts) => join(parts, " AND ", bind),
+        Expr::Or(parts) => join(parts, " OR ", bind),
+    }
+}
+
+/// Append the query's operators, or its boolean expression, as predicates over
+/// the `m` alias.
 fn append_operator_clauses(
     q: &ParsedQuery,
     where_clauses: &mut Vec<String>,
     bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
 ) {
-    if let Some(from) = &q.from {
-        bind.push(Box::new(format!("%{}%", from.to_lowercase())));
-        where_clauses.push(format!(
-            "(LOWER(COALESCE(m.from_addr,'')) LIKE ?{n} OR LOWER(COALESCE(m.from_name,'')) LIKE ?{n})",
-            n = bind.len()
-        ));
+    for filter in &q.filters {
+        if *filter != Filter::Anywhere {
+            let clause = filter_clause(filter, bind);
+            where_clauses.push(clause);
+        }
     }
-    if let Some(to) = &q.to {
-        bind.push(Box::new(format!("%{}%", to.to_lowercase())));
-        where_clauses.push(format!("LOWER(m.to_json) LIKE ?{}", bind.len()));
+    if let Some(expression) = &q.expression {
+        let clause = expression_clause(expression, bind);
+        where_clauses.push(clause);
     }
-    if let Some(role) = &q.in_folder {
-        bind.push(Box::new(role.clone()));
-        where_clauses.push(format!(
-            "EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = ?{})",
-            bind.len()
-        ));
-    } else if has_positive_selector(q) {
+    if !q.names_folder() && has_positive_selector(q) && q.folder_ids.is_none() {
+        // A folder scope names its folders, Trash and Spam only when meant.
         // No explicit `in:` scope: keep Trash and Spam out of results, the same
         // way the inbox and folder views do. Without this, a `from:`/keyword
         // search matches messages in every folder, so triaging a result (trash,
         // spam) leaves it matching the query and it reappears on the next
-        // refetch. `in:trash` / `in:spam` set `in_folder` and opt back in.
+        // refetch. `in:trash` / `in:spam` / `in:anywhere` opt back in.
         // Gated on there being a real matcher so an empty query still returns
         // nothing (rather than every non-trash thread) via the caller's guard.
-        where_clauses.push(format!(
-            "NOT EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role IN ('{}','{}'))",
-            roles::TRASH,
-            roles::SPAM
-        ));
-    }
-    if q.is_unread == Some(true) {
-        where_clauses.push("m.is_read = 0".into());
-    }
-    if q.is_starred == Some(true) {
-        where_clauses.push("m.is_starred = 1".into());
-    }
-    if q.has_attachment == Some(true) {
-        where_clauses.push("m.has_attachments = 1".into());
+        where_clauses.push(outside_trash_and_spam());
     }
     // `exclude:`/`-term`: drop messages whose FTS content matches any excluded
     // term. Applied here (not in the FTS MATCH string) so it works uniformly
@@ -144,6 +234,61 @@ fn append_operator_clauses(
             bind.len()
         ));
     }
+}
+
+/// Where a message has to match a chronological search: `matching`, the
+/// query's own clauses, or for a message a server search found, the parts
+/// this device can check without its body. Trash and Spam stay out unless
+/// named. `None` when the query matches nothing.
+fn match_clause(
+    q: &ParsedQuery,
+    matching: Vec<String>,
+    bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+) -> Option<String> {
+    let matching = (!matching.is_empty()).then(|| format!("({})", matching.join(" AND ")));
+    if q.found.is_empty() {
+        return matching;
+    }
+    let ids = q
+        .found
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    // Ids come from our own database, so they're inlined rather than bound.
+    let mut found = vec![format!("m.id IN ({ids})")];
+    for filter in &q.filters {
+        // What the server matched in text, attachments and file names needs
+        // the body, but flags, folders, dates and sizes are kept here.
+        if matches!(
+            filter,
+            Filter::Unread
+                | Filter::Starred
+                | Filter::In(_)
+                | Filter::Before(_)
+                | Filter::After(_)
+                | Filter::Larger(_)
+                | Filter::Smaller(_)
+        ) {
+            found.push(filter_clause(filter, bind));
+        }
+    }
+    if !q.names_folder() && q.folder_ids.is_none() {
+        found.push(outside_trash_and_spam());
+    }
+    let found = format!("({})", found.join(" AND "));
+    Some(match matching {
+        Some(matching) => format!("({matching} OR {found})"),
+        None => found,
+    })
+}
+
+fn outside_trash_and_spam() -> String {
+    format!(
+        "NOT EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role IN ('{}','{}'))",
+        roles::TRASH,
+        roles::SPAM
+    )
 }
 
 /// Lexical branch: thread ids ranked by bm25 + recency, capped at `cap`.
@@ -558,6 +703,33 @@ pub fn chronological_page(
     Ok(page)
 }
 
+/// The query's own clauses for a chronological search, and the join its
+/// full-text match needs. With mail a server search found, which needn't
+/// match here, the full-text match is a condition instead of a join.
+fn chronological_matching(
+    q: &ParsedQuery,
+    bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+) -> (&'static str, Vec<String>) {
+    let mut matching = Vec::new();
+    let fts_join = if q.fts.is_empty() {
+        ""
+    } else {
+        bind.push(Box::new(q.fts.clone()));
+        if q.found.is_empty() {
+            matching.push(format!("messages_fts MATCH ?{}", bind.len()));
+            "JOIN messages_fts ON messages_fts.rowid = m.id"
+        } else {
+            matching.push(format!(
+                "m.id IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?{})",
+                bind.len()
+            ));
+            ""
+        }
+    };
+    append_operator_clauses(q, &mut matching, bind);
+    (fts_join, matching)
+}
+
 /// Only the first `limit + 1` distinct threads beyond the cursor are needed.
 /// A thread's first occurrence is its newest matching message, so scanning
 /// from the top makes the cursor safe even when older messages also match.
@@ -567,22 +739,15 @@ fn chronological_page_for_query(
     cursor: Option<SearchCursor>,
     limit: i64,
 ) -> Result<SearchPage> {
-    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned()];
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let fts_join = if q.fts.is_empty() {
-        ""
-    } else {
-        bind.push(Box::new(q.fts.clone()));
-        where_clauses.push(format!("messages_fts MATCH ?{}", bind.len()));
-        "JOIN messages_fts ON messages_fts.rowid = m.id"
-    };
-    append_operator_clauses(q, &mut where_clauses, &mut bind);
-    if where_clauses.len() == 1 {
+    let (fts_join, matching) = chronological_matching(q, &mut bind);
+    let Some(matches) = match_clause(q, matching, &mut bind) else {
         return Ok(SearchPage {
             threads: Vec::new(),
             next_cursor: None,
         });
-    }
+    };
+    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned(), matches];
     append_account_clauses(q, &mut where_clauses, &mut bind);
 
     let sql = format!(
@@ -672,22 +837,15 @@ fn chronological_message_page_for_query(
     limit: i64,
     relaxed: bool,
 ) -> Result<MessageSearchPage> {
-    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned()];
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let fts_join = if q.fts.is_empty() {
-        ""
-    } else {
-        bind.push(Box::new(q.fts.clone()));
-        where_clauses.push(format!("messages_fts MATCH ?{}", bind.len()));
-        "JOIN messages_fts ON messages_fts.rowid = m.id"
-    };
-    append_operator_clauses(q, &mut where_clauses, &mut bind);
-    if where_clauses.len() == 1 {
+    let (fts_join, matching) = chronological_matching(q, &mut bind);
+    let Some(matches) = match_clause(q, matching, &mut bind) else {
         return Ok(MessageSearchPage {
             messages: Vec::new(),
             next_cursor: None,
         });
-    }
+    };
+    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned(), matches];
     append_account_clauses(q, &mut where_clauses, &mut bind);
     if let Some(cursor) = cursor {
         bind.push(Box::new(cursor.date));
@@ -776,6 +934,96 @@ pub fn fuse(
     hydrate(conn, &top)
 }
 
+/// The conversations of messages a server search found, newest first by the
+/// newest found message in each.
+pub fn found_threads(conn: &Connection, message_ids: &[i64]) -> Result<Vec<ThreadSummary>> {
+    if message_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Ids come from our own database, so they're inlined rather than bound.
+    let id_list = message_ids
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut stmt = conn.prepare(&format!(
+        "SELECT thread_id FROM messages
+         WHERE id IN ({id_list}) AND thread_id IS NOT NULL
+         GROUP BY thread_id
+         ORDER BY MAX(date) DESC, thread_id DESC"
+    ))?;
+    let thread_ids = stmt
+        .query_map([], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    hydrate(conn, &thread_ids)
+}
+
+/// The messages a server search found, newest first, for lists that show
+/// each message on its own.
+pub fn found_messages(conn: &Connection, message_ids: &[i64]) -> Result<Vec<MessageSummary>> {
+    if message_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let id_list = message_ids
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id FROM messages
+         WHERE id IN ({id_list}) AND thread_id IS NOT NULL
+         ORDER BY date DESC, id DESC"
+    ))?;
+    let ordered = stmt
+        .query_map([], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    super::threads::get_message_summaries(conn, &ordered)
+}
+
+/// How many conversations, or with `conversations` false how many messages,
+/// have unread mail that `q` matches: a saved search's badge. As in the mail
+/// list, a query that matches nothing with every word counts with any of them.
+pub fn unread_matches(conn: &Connection, q: &ParsedQuery, conversations: bool) -> Result<i64> {
+    let mut query = q.clone();
+    if !q.fts.is_empty() && q.fts_or != q.fts && count_matches(conn, q, None)? == 0 {
+        query.fts = query.fts_or.clone();
+    }
+    let counted = if conversations {
+        "COUNT(DISTINCT m.thread_id)"
+    } else {
+        "COUNT(*)"
+    };
+    count_matches(conn, &query, Some(counted))
+}
+
+/// `counted` of the unread messages `q` matches, or without it whether `q`
+/// matches any message at all, as 1 or 0.
+fn count_matches(conn: &Connection, q: &ParsedQuery, counted: Option<&str>) -> Result<i64> {
+    let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let (fts_join, matching) = chronological_matching(q, &mut bind);
+    let Some(matches) = match_clause(q, matching, &mut bind) else {
+        return Ok(0);
+    };
+    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned(), matches];
+    if counted.is_some() {
+        where_clauses.push("m.is_read = 0".to_owned());
+    }
+    append_account_clauses(q, &mut where_clauses, &mut bind);
+    let found = format!(
+        "FROM messages m {fts_join} WHERE {}",
+        where_clauses.join(" AND ")
+    );
+    let sql = match counted {
+        Some(counted) => format!("SELECT {counted} {found}"),
+        None => format!("SELECT EXISTS(SELECT 1 {found})"),
+    };
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        bind.iter().map(|value| value.as_ref()).collect();
+    Ok(conn
+        .prepare_cached(&sql)?
+        .query_row(params_ref.as_slice(), |row| row.get(0))?)
+}
+
 fn hydrate(conn: &Connection, thread_ids: &[i64]) -> Result<Vec<ThreadSummary>> {
     // One IN query; get_summaries preserves the fused ranking order.
     super::threads::get_summaries(conn, thread_ids)
@@ -840,6 +1088,94 @@ mod tests {
 
         // ...but an explicit `in:trash` opts back in.
         assert_eq!(ids("in:trash from:sender"), vec![thread_id]);
+    }
+
+    #[test]
+    fn dates_sizes_file_names_and_boolean_queries_filter_matches() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let (old, old_message) = testutil::seed_message(&c, "ana@test.dev", "Budget 2023", false);
+        let (new, new_message) = testutil::seed_message(&c, "ben@test.dev", "Budget 2026", false);
+        let noon = |year| {
+            chrono::NaiveDate::from_ymd_opt(year, 6, 1)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_millis()
+        };
+        c.execute(
+            "UPDATE messages SET date = ?1, size = 5000 WHERE id = ?2",
+            params![noon(2023), old_message],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE messages SET date = ?1, size = 2000000 WHERE id = ?2",
+            params![noon(2026), new_message],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO attachments (message_id, filename) VALUES (?1, 'Plan_2026.PDF')",
+            params![new_message],
+        )
+        .unwrap();
+        for message in [old_message, new_message] {
+            index_message(&c, message).unwrap();
+        }
+        let ids = |query: &str| {
+            chronological(&c, &crate::search::parse(query), 20)
+                .unwrap()
+                .iter()
+                .map(|thread| thread.id)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(ids("budget after:2024/01/01"), vec![new]);
+        assert_eq!(ids("budget before:2024/01/01"), vec![old]);
+        assert_eq!(ids("larger:1M"), vec![new]);
+        assert_eq!(ids("smaller:10K"), vec![old]);
+        assert_eq!(ids("filename:pdf"), vec![new]);
+        // An underscore in the name is itself, not any letter.
+        assert_eq!(ids("filename:plan_2026"), vec![new]);
+        assert!(ids("filename:plan_2023").is_empty());
+        // Either sender, newest first.
+        assert_eq!(ids("from:ana OR from:ben"), vec![new, old]);
+        assert_eq!(ids("budget -from:ben"), vec![old]);
+        assert_eq!(ids("(from:ana OR filename:pdf) budget"), vec![new, old]);
+        assert!(ids("budget -(from:ana OR larger:1M)").is_empty());
+        // Words in a boolean query still go through the full-text index.
+        assert_eq!(ids("2023 OR zzzzzz"), vec![old]);
+        assert!(ids("2023 zzzzzz OR yyyyyy").is_empty());
+    }
+
+    #[test]
+    fn in_anywhere_and_boolean_folder_scopes_reach_trash() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        c.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (5,1,'Trash','trash')",
+            [],
+        )
+        .unwrap();
+        let (thread_id, message_id) =
+            testutil::seed_message(&c, "sender@test.dev", "Hello there", false);
+        c.execute(
+            "UPDATE messages SET folder_id = 5 WHERE id = ?1",
+            params![message_id],
+        )
+        .unwrap();
+        let ids = |query: &str| {
+            search(&c, &crate::search::parse(query), 20)
+                .unwrap()
+                .iter()
+                .map(|thread| thread.id)
+                .collect::<Vec<_>>()
+        };
+        assert!(ids("from:sender").is_empty());
+        // A boolean query without a folder leaves Trash out too.
+        assert!(ids("from:sender OR from:nobody").is_empty());
+        assert_eq!(ids("in:anywhere from:sender"), vec![thread_id]);
+        assert_eq!(ids("in:trash OR in:spam"), vec![thread_id]);
     }
 
     #[test]
@@ -938,6 +1274,54 @@ mod tests {
         assert_eq!(set_ids(vec![2]), vec![99]);
         assert_eq!(set_ids(vec![1, 2]), vec![t1, 99]);
         assert_eq!(set_ids(Vec::new()), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn a_folder_scope_keeps_matches_to_those_folders() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        c.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Junk', 'spam')",
+            [],
+        )
+        .unwrap();
+        let (_, inbox) = testutil::seed_message(&c, "a@one.dev", "quarterly plans", false);
+        let (_, junk) = testutil::seed_message(&c, "b@two.dev", "quarterly prize", false);
+        c.execute("UPDATE messages SET folder_id = 2 WHERE id = ?1", [junk])
+            .unwrap();
+        index_message(&c, inbox).unwrap();
+        index_message(&c, junk).unwrap();
+
+        let found = |folder_ids: Vec<i64>| {
+            let query = ParsedQuery {
+                folder_ids: Some(folder_ids),
+                ..crate::search::parse("quarterly")
+            };
+            chronological_message_page(&c, &query, None, 20)
+                .unwrap()
+                .messages
+                .into_iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(found(vec![1]), [inbox]);
+        assert_eq!(found(vec![2]), [junk]);
+        assert!(found(Vec::new()).is_empty());
+        // Gmail labels count, as they do in mail lists.
+        c.execute(
+            "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 2)",
+            [inbox],
+        )
+        .unwrap();
+        assert_eq!(found(vec![2]), [junk]);
+        c.execute(
+            "UPDATE accounts SET provider = 'gmail', mail_protocol = 'gmail' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        let mut both = found(vec![2]);
+        both.sort();
+        assert_eq!(both, [inbox, junk]);
     }
 
     #[test]

@@ -241,6 +241,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_forward_keeps_the_images_of_the_original() {
+        let original = "<p>Look <img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"Logo\" width=\"20\"></p>";
+        let quote = ComposeQuote::forward(
+            &["From: Jamie".to_owned()],
+            "Look [image: Logo]",
+            Some(original),
+        );
+        assert!(
+            quote.html.contains(
+                "<img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"Logo\" width=\"20\">"
+            ),
+            "{}",
+            quote.html
+        );
+        let (_, html) = quote.below("FYI", Some("<div>FYI</div>".to_owned()));
+        assert!(html.contains("data:image/png;base64,iVBORw0KGgo="));
+    }
+
+    #[test]
     fn a_reply_quotes_the_original_html_under_its_attribution() {
         let quote = ComposeQuote::reply(
             "On Mon, Maya <maya@example.com> wrote:",
@@ -330,7 +349,7 @@ mod tests {
         // Blank lines the user left at the end, and a tab, reopen too.
         let mut written = crate::rich_compose::RichComposeDocument::default();
         written.load("Qty:\t3\n\n\n", 0, 0);
-        let (text, html) = quote.below(written.text(), written.body_html_above_quote());
+        let (text, html) = quote.below(written.text(), written.body_html_with(true, |_| None));
         assert_eq!(text, format!("Qty:\t3\n\n{}", quote.plain));
         let saved =
             ComposeQuote::split_saved(&html, &text, |own| document.load_html_start(own, &text))

@@ -1,25 +1,28 @@
 def favicon_path(address):
   ($favicon_dir + "/" + (address | split("@") | last | ascii_downcase) + ".png");
-.theme_mode = $theme
+# Settings is a screen of its own, which goes back to the given view.
+(if $settings_tab == "" then $active_view else "settings" end) as $shown_view
+| .theme_mode = $theme
 | .["MotionSettings.enabled"] = false
 # Notifications show, as on a desktop that allows them.
 | .["SystemNotifications.availability"] = "allowed"
 | .workspace_layout = $workspace_layout
 | .screenshot_theme_preset = $theme_preset
-| .active_view = $active_view
+| .active_view = $shown_view
+| .settings_return_view = $active_view
 | .FilesUi["preview-image"] = $pdf_preview
 # The app always has at least one tab; show the same strip as the frameless
 # screenshots: the current view, a background conversation and the calendar.
 # The tabs showcase adds more conversations and every other workspace.
 | .["TabsUi.rows"] = (if $tab_strip == "showcase" then [
-    {"id": 1, "workspace": $active_view, "title": "", "active": true},
+    {"id": 1, "workspace": $shown_view, "title": "", "active": true},
     {"id": 2, "workspace": "mail", "title": .emails[1].subject, "active": false},
     {"id": 3, "workspace": "mail", "title": .emails[2].subject, "active": false},
     {"id": 4, "workspace": "calendar", "title": "", "active": false},
     {"id": 5, "workspace": "contacts", "title": "", "active": false},
     {"id": 6, "workspace": "files", "title": "", "active": false}
   ] else [
-    {"id": 1, "workspace": $active_view, "title": "", "active": true},
+    {"id": 1, "workspace": $shown_view, "title": "", "active": true},
     {"id": 2, "workspace": "mail", "title": .emails[1].subject, "active": false},
     {"id": 3, "workspace": (if $active_view == "calendar" then "mail" else "calendar" end), "title": "", "active": false}
   ] end)
@@ -31,7 +34,6 @@ def favicon_path(address):
 | .startup_hydrated = true
 | .calendar_view_mode = $calendar_mode
 | .calendar_period_title = (if $calendar_mode == "agenda" then .calendar_month_title else .calendar_period_title end)
-| .settings_open = ($settings_tab != "")
 | .settings_tab = (if $settings_tab == "" then (.settings_tab // "General") else $settings_tab end)
 | .text_mode = false
 | .show_account_markers = $show_account_markers
@@ -71,6 +73,7 @@ def favicon_path(address):
     | .trusted_certificate_pem = (.trusted_certificate_pem // "")
     | .mail_history = (.mail_history // "sixMonths")
     | .keep_on_server = (.keep_on_server // "always")
+    | .subscribed_folders_only = (.subscribed_folders_only // false)
     | .server_keeps_mail_days = (.server_keeps_mail_days // -1)
     | .calendar_connections = (.calendar_connections // [])
     | .provider_calendar_connected = (.provider_calendar_connected // false)
@@ -80,6 +83,8 @@ def favicon_path(address):
     | .carddav_status = (.carddav_status // "")
     | .carddav_url = (.carddav_url // "")
     | .carddav_username = (.carddav_username // "")
+    | .checked_day = (.checked_day // -1)
+    | .checked_at = (.checked_at // "")
   )
 | .calendar_events |= map(.answerable = (.answerable // false) | .removable = (.removable // false) | .recurrence_id = (.recurrence_id // ""))
 | .calendar_agenda_rows |= map(if .event then .event.answerable = (.event.answerable // false) | .event.removable = (.event.removable // false) | .event.recurrence_id = (.event.recurrence_id // "") else . end)
@@ -94,6 +99,7 @@ def favicon_path(address):
     | .mailbox.can_create_children = (.mailbox.can_create_children // false)
     | .mailbox.can_rename = (.mailbox.can_rename // false)
     | .mailbox.can_delete = (.mailbox.can_delete // false)
+    | .mailbox.status = (.mailbox.status // {checking: false, problem: "none", marked: false, reason: "", checked_day: -1, checked_at: ""})
     | .label.account_id = (.label.account_id // -1)
     | .label.account_name = (.label.account_name // "")
     | .label.display_name = (.label.display_name // .label.name // "")
@@ -129,6 +135,7 @@ def favicon_path(address):
 | (.thread_messages // [] | length) as $thread_count
 | .emails |= map(
     .has_replied = (.has_replied // false)
+    | .high_importance = (.high_importance // false)
     | .account_uses_labels = (.account_uses_labels // false)
     | .verification_code = (.verification_code // "")
     | .verification_code_spelled = (.verification_code_spelled // "")

@@ -10,6 +10,7 @@ import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
 
@@ -119,6 +120,15 @@ public final class FlectarActivity extends NativeActivity {
      */
     public void setLauncherIcon(String icon) {
         if (LauncherIcons.exists(icon)) pendingLauncherIcon = icon;
+    }
+
+    /**
+     * Called from Rust for the Reduce motion setting. Remove animations, in
+     * the accessibility settings, sets every animation scale to 0.
+     */
+    public boolean animationsRemoved() {
+        return Settings.Global.getFloat(getContentResolver(),
+                Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f;
     }
 
     private void applyLauncherIcon() {

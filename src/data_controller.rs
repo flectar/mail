@@ -448,6 +448,39 @@ pub(super) fn restore_account_backup(
             {
                 settings.message_appearance = preference;
             }
+            if let Some(size) = preferences
+                .get("interfaceTextSize")
+                .and_then(|value| value.as_str())
+                .and_then(flectar_mail_core::models::InterfaceTextSize::parse)
+            {
+                settings.interface_text_size = size;
+            }
+            if let Some(preference) = preferences
+                .get("reduceMotion")
+                .and_then(|value| value.as_str())
+                .and_then(flectar_mail_core::models::ReduceMotion::parse)
+            {
+                settings.reduce_motion = preference;
+            }
+            if let Some(policy) = preferences
+                .get("readReceipts")
+                .and_then(|value| value.as_str())
+                .and_then(flectar_mail_core::models::ReadReceiptPolicy::parse)
+            {
+                settings.read_receipts = policy;
+            }
+            let days = |key: &str| {
+                preferences
+                    .get(key)
+                    .and_then(|value| value.as_u64())
+                    .and_then(|days| u32::try_from(days).ok())
+            };
+            if let Some(days) = days("emptyTrashAfterDays") {
+                settings.empty_trash_after_days = days;
+            }
+            if let Some(days) = days("emptyJunkAfterDays") {
+                settings.empty_junk_after_days = days;
+            }
             if let Some(width) = preferences
                 .get("workspaceListPaneWidth")
                 .and_then(|value| value.as_i64())
@@ -479,11 +512,8 @@ pub(super) fn restore_account_backup(
             {
                 settings.load_remote_images = enabled;
             }
-            if let Some(enabled) = preferences
-                .get("markReadOnOpen")
-                .and_then(|value| value.as_bool())
-            {
-                settings.mark_read_on_open = enabled;
+            if let Some(choice) = exported_mark_read(preferences) {
+                settings.mark_read = choice;
             }
             if let Some(enabled) = preferences
                 .get("collectOutgoingContacts")
@@ -656,7 +686,18 @@ pub(super) fn restore_account_backup(
     crate::app_icon::apply(app, settings.app_icon);
     app.global::<MessageColors>()
         .set_preference(settings.message_appearance.as_str().into());
+    app.global::<crate::MotionSettings>()
+        .set_preference(settings.reduce_motion.as_str().into());
+    crate::text_size::apply(app, settings.interface_text_size);
+    app.global::<crate::ReadReceipts>()
+        .set_policy(settings.read_receipts.as_str().into());
+    crate::mail_rules::apply_cleanup(
+        app,
+        settings.empty_trash_after_days,
+        settings.empty_junk_after_days,
+    );
     app.set_show_avatars(settings.show_avatars);
+    crate::apply_list_rows(app, &settings);
     app.set_show_tabs(settings.show_tabs);
     crate::spelling::apply_settings(
         settings.spelling_enabled,
@@ -682,12 +723,14 @@ pub(super) fn restore_account_backup(
     app.set_notification_scope(settings.notification_scope.clone().into());
     app.set_sync_interval_minutes(settings.sync_interval_minutes as i32);
     app.set_undo_send_seconds(i32::try_from(settings.undo_send_seconds.clamp(0, 30)).unwrap_or(10));
-    app.set_mark_read_on_open(settings.mark_read_on_open);
+    app.set_compose_font(settings.compose_font.as_str().into());
+    app.set_compose_text_size(settings.compose_text_size.as_str().into());
+    app.set_mark_read(settings.mark_read.as_str().into());
     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
     app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
     app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
     app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
-    state.borrow_mut().mark_read_on_open = settings.mark_read_on_open;
+    state.borrow_mut().mark_read = settings.mark_read;
     app.set_remote_images_enabled(settings.load_remote_images && cfg!(feature = "remote-content"));
     app.set_close_to_tray(settings.close_to_tray && !cfg!(mobile));
     Ok(restore)
@@ -1237,7 +1280,9 @@ pub(super) fn register_data_management_callbacks(
         let Some(app) = storage_app.upgrade() else {
             return;
         };
-        if app.get_storage_loading() || !app.get_settings_open() || app.get_settings_tab() != "Data"
+        if app.get_storage_loading()
+            || app.get_active_view() != "settings"
+            || app.get_settings_tab() != "Data"
         {
             return;
         }
@@ -1334,6 +1379,11 @@ pub(super) fn register_data_management_callbacks(
                 serde_json::json!({
                     "theme": settings.theme,
                     "messageAppearance": settings.message_appearance,
+                    "reduceMotion": settings.reduce_motion,
+                    "interfaceTextSize": settings.interface_text_size,
+                    "readReceipts": settings.read_receipts,
+                    "emptyTrashAfterDays": settings.empty_trash_after_days,
+                    "emptyJunkAfterDays": settings.empty_junk_after_days,
                     "showAvatars": settings.show_avatars,
                     "showTabs": settings.show_tabs,
                     "conversationView": settings.conversation_view,
@@ -1345,7 +1395,7 @@ pub(super) fn register_data_management_callbacks(
                     "timeFormat": settings.time_format,
                     "calendarWeekStart": settings.calendar_week_start,
                     "loadRemoteImages": settings.load_remote_images,
-                    "markReadOnOpen": settings.mark_read_on_open,
+                    "markRead": settings.mark_read.as_str(),
                     "collectOutgoingContacts": settings.collect_outgoing_contacts,
                     "collectIncomingContacts": settings.collect_incoming_contacts,
                     "contactSuggestAllAccounts": settings.contact_suggest_all_accounts,
@@ -1619,7 +1669,7 @@ pub(super) fn register_data_management_callbacks(
                         state.selected_id = None;
                         state.rendered_id = None;
                         state.using_core = true;
-                        state.mark_read_on_open = true;
+                        state.mark_read = flectar_mail_core::models::MarkRead::Immediately;
                     }
                     refresh_connected_accounts(&app, &data_reset_state);
                     let _ = render_current(&app, &data_reset_state, &data_reset_runtime);
@@ -1655,9 +1705,19 @@ pub(super) fn register_data_management_callbacks(
                     app.set_theme_mode("system".into());
                     app.global::<MessageColors>()
                         .set_preference("system".into());
+                    app.global::<crate::MotionSettings>()
+                        .set_preference("system".into());
+                    crate::text_size::apply(&app, Default::default());
+                    app.global::<crate::ReadReceipts>().set_policy(
+                        flectar_mail_core::models::ReadReceiptPolicy::default()
+                            .as_str()
+                            .into(),
+                    );
+                    crate::mail_rules::apply_cleanup(&app, 0, 0);
                     app.set_monochrome_sidebar_icons(false);
                     crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);
+                    crate::apply_list_rows(&app, &Default::default());
                     app.set_show_tabs(true);
                     apply_mail_grouping(
                         &app,
@@ -1676,7 +1736,9 @@ pub(super) fn register_data_management_callbacks(
                     app.set_notification_scope("important".into());
                     app.set_sync_interval_minutes(5);
                     app.set_undo_send_seconds(10);
-                    app.set_mark_read_on_open(true);
+                    app.set_compose_font("default".into());
+                    app.set_compose_text_size("normal".into());
+                    app.set_mark_read("immediately".into());
                     app.set_remote_images_enabled(false);
                     app.set_close_to_tray(false);
                     crate::window_chrome::apply_preference(
@@ -1722,9 +1784,51 @@ pub(super) fn register_data_management_callbacks(
     });
 }
 
+/// When a backup says opened messages count as read. Backups made before
+/// the delay choices say only on or off.
+fn exported_mark_read(
+    preferences: &serde_json::Value,
+) -> Option<flectar_mail_core::models::MarkRead> {
+    use flectar_mail_core::models::MarkRead;
+    match preferences.get("markRead") {
+        Some(choice) => choice.as_str().and_then(MarkRead::parse),
+        None => preferences
+            .get("markReadOnOpen")
+            .and_then(|value| value.as_bool())
+            .map(|on| {
+                if on {
+                    MarkRead::Immediately
+                } else {
+                    MarkRead::Never
+                }
+            }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backups_old_and_new_say_when_messages_count_as_read() {
+        use flectar_mail_core::models::MarkRead;
+        let read = |json: &str| exported_mark_read(&serde_json::from_str(json).unwrap());
+        assert_eq!(
+            read(r#"{"markRead":"afterFiveSeconds"}"#),
+            Some(MarkRead::AfterFiveSeconds)
+        );
+        assert_eq!(read(r#"{"markReadOnOpen":false}"#), Some(MarkRead::Never));
+        assert_eq!(
+            read(r#"{"markReadOnOpen":true}"#),
+            Some(MarkRead::Immediately)
+        );
+        // A choice this version doesn't know changes nothing.
+        assert_eq!(
+            read(r#"{"markRead":"sometimes","markReadOnOpen":false}"#),
+            None
+        );
+        assert_eq!(read("{}"), None);
+    }
 
     #[test]
     fn storage_scan_lifetime_follows_settings_visibility() {
@@ -1748,14 +1852,14 @@ mod tests {
         slint::platform::update_timers_and_animations();
         calls.borrow_mut().clear();
 
-        app.set_settings_open(true);
+        app.invoke_open_settings();
         slint::platform::update_timers_and_animations();
         assert!(calls.borrow().is_empty());
         app.set_settings_tab("Data".into());
         slint::platform::update_timers_and_animations();
-        app.set_settings_open(false);
+        app.invoke_close_settings();
         slint::platform::update_timers_and_animations();
-        app.set_settings_open(true);
+        app.invoke_open_settings();
         slint::platform::update_timers_and_animations();
         app.set_settings_tab("About".into());
         slint::platform::update_timers_and_animations();

@@ -1,0 +1,91 @@
+// Automatic replies an account's server sends while the user is away (#239),
+// told over the mail list while they're on, as webmail does.
+import { AppTheme } from "design-system.slint";
+import { TypeScale } from "typography.slint";
+import { Button } from "components/button.slint";
+
+export global AutoReplies {
+    // Some account's automatic replies are on.
+    in property <bool> on;
+    // For which accounts and until when, such as "alex@example.com · until
+    // Friday, November 20".
+    in property <string> detail;
+    // The account the strip turns them off for, or 0 when several are on.
+    in property <int> account-id;
+    callback turn-off(int);
+    callback open-settings();
+
+    // What saving asks before it changes the filters an IMAP server runs:
+    // "run-before" when the server runs the user's own filter script, named
+    // in question-script, or "replace" when the app's script there was
+    // changed elsewhere.
+    in-out property <bool> question-open;
+    in property <string> question;
+    in property <string> question-script;
+    callback answer(bool);
+}
+
+export component AutoReplyActivity inherits Rectangle {
+    in property <bool> compact: false;
+    private property <bool> shown: AutoReplies.on;
+    private property <string> title: @tr("Automatic replies are on");
+
+    height: root.shown ? 52px : 0px;
+    visible: root.shown;
+    background: AppTheme.accent-pale;
+    accessible-role: text;
+    accessible-label: root.title + ". " + AutoReplies.detail;
+
+    Rectangle {
+        y: parent.height - self.height;
+        height: 1px;
+        background: AppTheme.border-subtle;
+    }
+
+    HorizontalLayout {
+        padding-left: root.compact ? 16px : 20px;
+        padding-right: root.compact ? 8px : 12px;
+        spacing: 10px;
+        Image {
+            width: 16px;
+            source: @image-url("icons/lucide/outline/reply.svg");
+            colorize: AppTheme.accent;
+            image-fit: contain;
+            accessible-role: none;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.title;
+                color: AppTheme.body;
+                font-size: TypeScale.secondary;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: AutoReplies.detail;
+                color: AppTheme.secondary;
+                font-size: TypeScale.caption;
+                overflow: elide;
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+            Button {
+                height: 28px;
+                width: max(80px, self.content-width);
+                text: AutoReplies.account-id > 0 ? @tr("Turn off") : @tr("Settings");
+                clicked => {
+                    if AutoReplies.account-id > 0 {
+                        AutoReplies.turn-off(AutoReplies.account-id);
+                    } else {
+                        AutoReplies.open-settings();
+                    }
+                }
+            }
+        }
+    }
+}

@@ -168,6 +168,8 @@ impl crate::Core {
                             .iter()
                             .any(|attachment| !attachment.is_inline),
                         size,
+                        // Saved mail is answered, or past answering.
+                        receipt_handled: true,
                     },
                 )?;
                 ingest::store_body(tx, imported.message_id, &stored_path, &parsed)?;
@@ -912,6 +914,7 @@ impl Writer<'_> {
                                 .iter()
                                 .any(|attachment| !attachment.is_inline),
                             size: i64::try_from(raw.len()).ok(),
+                            receipt_handled: true,
                         },
                     )?;
                     ingest::store_body(tx, imported.message_id, &path.to_string_lossy(), &parsed)?;

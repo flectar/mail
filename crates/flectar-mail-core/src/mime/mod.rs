@@ -2,7 +2,7 @@
 //! message construction (mail-builder).
 
 use crate::error::{CoreError, Result};
-use crate::models::{Address, SenderVerification};
+use crate::models::{Address, Importance, SenderVerification};
 use mail_parser::MimeHeaders;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,20 @@ pub struct ParsedHeaders {
     pub via: Option<String>,
     /// Strongest authentication result reported by the receiving MTA.
     pub sender_verification: SenderVerification,
+    /// Where a read receipt was asked to go (RFC 8098
+    /// Disposition-Notification-To). Empty when the message asks for none,
+    /// or for one this client must not send.
+    pub receipt_to: Vec<Address>,
+    /// RFC 8098 section 2.1 wants the user's confirmation before a receipt
+    /// goes out: there is no Return-Path, it differs from the receipt
+    /// address, or several receipt addresses are listed.
+    pub receipt_confirm: bool,
+    /// The message is a read receipt that came back: a multipart/report
+    /// (RFC 6522) of report-type disposition-notification. False when the
+    /// fetch left Content-Type out.
+    pub disposition_report: bool,
+    /// How important the sender marked the message.
+    pub importance: Importance,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +102,30 @@ impl MimePlan {
     /// The paperclip signal deliberately excludes embedded CID images.
     pub fn has_file_attachments(&self) -> bool {
         self.attachments.iter().any(|part| !part.is_inline)
+    }
+
+    /// The message carries a read receipt's report (RFC 8098). The part is
+    /// no text to read, so the plan lists it with the files.
+    pub fn carries_disposition_report(&self) -> bool {
+        self.attachments
+            .iter()
+            .any(|part| is_disposition_report_part(&part.mime_type))
+    }
+
+    /// The encoded size of every planned part, each counted once.
+    pub fn encoded_size(&self) -> u64 {
+        let mut seen = std::collections::HashSet::new();
+        self.text_sections
+            .iter()
+            .map(|part| (&part.section, part.size))
+            .chain(
+                self.attachments
+                    .iter()
+                    .map(|part| (&part.section, part.size)),
+            )
+            .filter(|(section, _)| seen.insert(*section))
+            .map(|(_, size)| u64::from(size))
+            .sum()
     }
 }
 
@@ -1049,6 +1087,8 @@ pub struct ParsedBody {
     pub attachments: Vec<ParsedAttachment>,
     /// Raw text of any text/calendar parts (meeting invites).
     pub calendar_parts: Vec<String>,
+    /// The message is a read receipt that came back.
+    pub disposition_report: Option<DispositionReport>,
 }
 
 fn addr_from(a: &mail_parser::Addr) -> Option<Address> {
@@ -1529,6 +1569,385 @@ fn resolve_via(msg: &mail_parser::Message, from: Option<&Address>) -> Option<Str
             None => true,
         })
         .map(str::to_owned)
+}
+
+#[cfg(test)]
+mod read_receipt_tests {
+    use super::{ReadReceipt, build_read_receipt};
+    use crate::models::Address;
+
+    fn build(user_agreed: bool, original_message_id: Option<&str>) -> String {
+        let recipient = Address {
+            name: Some("Me".into()),
+            email: "me@example.org".into(),
+        };
+        let to = [Address {
+            name: Some("Ana".into()),
+            email: "ana@example.com".into(),
+        }];
+        let (id, raw) = build_read_receipt(&ReadReceipt {
+            recipient: &recipient,
+            to: &to,
+            original_subject: "Quarterly plan",
+            original_message_id,
+            user_agreed,
+            reporting_domain: "example.org",
+        })
+        .unwrap();
+        assert!(id.starts_with('<') && id.ends_with("@example.org>"));
+        String::from_utf8(raw).unwrap()
+    }
+
+    #[test]
+    fn a_receipt_is_a_disposition_report_about_the_original() {
+        let raw = build(true, Some("<plan@example.com>"));
+        assert!(raw.contains("multipart/report"));
+        assert!(
+            raw.contains("report-type=\"disposition-notification\"")
+                || raw.contains("report-type=disposition-notification")
+        );
+        assert!(raw.contains("Content-Type: message/disposition-notification"));
+        assert!(raw.contains("Reporting-UA: example.org; Flectar Mail\r\n"));
+        assert!(raw.contains("Final-Recipient: rfc822; me@example.org\r\n"));
+        assert!(raw.contains("Original-Message-ID: <plan@example.com>\r\n"));
+        assert!(raw.contains("Disposition: manual-action/MDN-sent-manually; displayed\r\n"));
+        assert!(raw.contains("In-Reply-To: <plan@example.com>"));
+        assert!(raw.contains("Subject: Read: Quarterly plan"));
+        assert!(
+            raw.contains("To: \"Ana\" <ana@example.com>")
+                || raw.contains("To: Ana <ana@example.com>")
+        );
+        assert!(!raw.contains("Auto-Submitted"));
+        assert!(!raw.contains("Disposition-Notification-To"));
+    }
+
+    #[test]
+    fn a_receipt_settings_sent_says_so_and_marks_itself_automatic() {
+        let raw = build(false, None);
+        assert!(raw.contains("Disposition: manual-action/MDN-sent-automatically; displayed\r\n"));
+        assert!(raw.contains("Auto-Submitted: auto-replied"));
+        // Without a Message-ID there is none to name.
+        assert!(!raw.contains("Original-Message-ID"));
+        assert!(!raw.contains("In-Reply-To"));
+    }
+
+    #[test]
+    fn the_report_part_stays_7bit() {
+        let raw = build(true, Some("<plan@example.com>"));
+        let report = &raw[raw
+            .find("Content-Type: message/disposition-notification")
+            .unwrap()..];
+        let headers = &report[..report.find("\r\n\r\n").unwrap()];
+        assert!(
+            headers.contains("Content-Transfer-Encoding: 7bit"),
+            "{headers}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod returned_receipt_tests {
+    use super::{ReadReceipt, build_read_receipt, parse_header_block, parse_message};
+    use crate::models::{Address, Disposition};
+
+    fn receipt(report_type: &str, report: &str, extra_headers: &str) -> Vec<u8> {
+        format!(
+            "Message-ID: <receipt@example.com>\r\n\
+             From: Ana Ruiz <ana@example.com>\r\n\
+             To: me@example.org\r\n\
+             Subject: Read: Plan\r\n\
+             Date: Tue, 01 Sep 2026 12:30:00 +0000\r\n\
+             {extra_headers}\
+             MIME-Version: 1.0\r\n\
+             Content-Type: multipart/report; report-type=disposition-notification; boundary=\"b\"\r\n\
+             \r\n\
+             --b\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             Your message was displayed.\r\n\
+             --b\r\n\
+             Content-Type: {report_type}\r\n\
+             \r\n\
+             {report}\r\n\
+             --b--\r\n"
+        )
+        .into_bytes()
+    }
+
+    fn report_of(raw: &[u8]) -> Option<super::DispositionReport> {
+        parse_message(raw).unwrap().disposition_report
+    }
+
+    #[test]
+    fn a_receipt_this_client_sends_reads_back() {
+        let recipient = Address {
+            name: Some("Me".into()),
+            email: "me@example.org".into(),
+        };
+        let to = [Address {
+            name: None,
+            email: "ana@example.com".into(),
+        }];
+        let (_, raw) = build_read_receipt(&ReadReceipt {
+            recipient: &recipient,
+            to: &to,
+            original_subject: "Plan",
+            original_message_id: Some("<plan@example.com>"),
+            user_agreed: true,
+            reporting_domain: "example.org",
+        })
+        .unwrap();
+        let report = report_of(&raw).unwrap();
+        assert_eq!(report.original_message_id, "plan@example.com");
+        assert_eq!(report.recipient, recipient);
+        assert_eq!(report.disposition, Disposition::Displayed);
+        assert!(report.reported_at.is_some());
+    }
+
+    #[test]
+    fn a_report_names_the_message_recipient_and_what_happened() {
+        let raw = receipt(
+            "message/disposition-notification",
+            "Reporting-UA: example.com; Mailer\r\n\
+             Original-Recipient: rfc822;team@example.com\r\n\
+             Final-Recipient: rfc822; Ana.Ruiz@Example.com\r\n\
+             Original-Message-ID: <plan@example.org>\r\n\
+             Disposition: automatic-action/MDN-sent-automatically; deleted (by a rule)",
+            "",
+        );
+        let report = report_of(&raw).unwrap();
+        assert_eq!(report.original_message_id, "plan@example.org");
+        // Final-Recipient, in its own case, and without the From name: the
+        // receipt came from another address.
+        assert_eq!(
+            report.recipient,
+            Address {
+                name: None,
+                email: "Ana.Ruiz@Example.com".into()
+            }
+        );
+        assert_eq!(report.disposition, Disposition::Deleted);
+        assert_eq!(report.reported_at, Some(1_788_265_800_000));
+    }
+
+    #[test]
+    fn missing_fields_fall_back_to_the_receipts_own() {
+        // As FairEmail writes them: no Final-Recipient, no
+        // Original-Message-ID.
+        let raw = receipt(
+            "message/disposition-notification; name=\"MDNPart2.txt\"",
+            "Reporting-UA: eu.faircode.email; FairEmail\r\n\
+             Original-Recipient: rfc822;ana@example.com\r\n\
+             Disposition: manual-action/MDN-sent-manually; displayed",
+            "In-Reply-To: <plan@example.org>\r\nReferences: <start@example.org> <plan@example.org>\r\n",
+        );
+        let report = report_of(&raw).unwrap();
+        assert_eq!(report.original_message_id, "plan@example.org");
+        assert_eq!(
+            report.recipient,
+            Address {
+                name: Some("Ana Ruiz".into()),
+                email: "ana@example.com".into()
+            }
+        );
+        // Nothing but the receipt's From to go on.
+        let raw = receipt(
+            "message/disposition-notification",
+            "Original-Message-ID: <plan@example.org>\r\n\
+             Disposition: manual-action/MDN-sent-manually; displayed",
+            "",
+        );
+        assert_eq!(report_of(&raw).unwrap().recipient.email, "ana@example.com");
+    }
+
+    #[test]
+    fn errors_and_refusals_report_nothing() {
+        for disposition in [
+            "manual-action/MDN-sent-manually; displayed/error",
+            "manual-action/MDN-sent-manually; denied",
+            "automatic-action/MDN-sent-automatically; failed",
+            "manual-action/MDN-sent-manually",
+        ] {
+            let raw = receipt(
+                "message/disposition-notification",
+                &format!(
+                    "Final-Recipient: rfc822; ana@example.com\r\n\
+                     Original-Message-ID: <plan@example.org>\r\n\
+                     Disposition: {disposition}"
+                ),
+                "",
+            );
+            assert_eq!(report_of(&raw), None, "{disposition}");
+        }
+        // No message to put it on.
+        let raw = receipt(
+            "message/disposition-notification",
+            "Final-Recipient: rfc822; ana@example.com\r\n\
+             Disposition: manual-action/MDN-sent-manually; displayed",
+            "",
+        );
+        assert_eq!(report_of(&raw), None);
+    }
+
+    #[test]
+    fn addresses_outside_ascii_come_through() {
+        let raw = receipt(
+            "message/global-disposition-notification",
+            "Final-Recipient: utf-8; jörg@exämple.de\r\n\
+             Original-Message-ID: <plan@example.org>\r\n\
+             Disposition: manual-action/MDN-sent-manually; processed",
+            "",
+        );
+        let report = report_of(&raw).unwrap();
+        assert_eq!(report.recipient.email, "jörg@exämple.de");
+        assert_eq!(report.disposition, Disposition::Processed);
+        let raw = receipt(
+            "message/disposition-notification",
+            "Final-Recipient: utf-8; j\\x{F6}rg@example.de\r\n\
+             Original-Message-ID: <plan@example.org>\r\n\
+             Disposition: manual-action/MDN-sent-manually; dispatched",
+            "",
+        );
+        let report = report_of(&raw).unwrap();
+        assert_eq!(report.recipient.email, "jörg@example.de");
+        assert_eq!(report.disposition, Disposition::Dispatched);
+    }
+
+    #[test]
+    fn only_a_report_itself_counts() {
+        let report = "Final-Recipient: rfc822; ana@example.com\r\n\
+                      Original-Message-ID: <plan@example.org>\r\n\
+                      Disposition: manual-action/MDN-sent-manually; displayed";
+        // The same part in ordinary mail.
+        let mixed = String::from_utf8(receipt("message/disposition-notification", report, ""))
+            .unwrap()
+            .replace(
+                "multipart/report; report-type=disposition-notification",
+                "multipart/mixed",
+            );
+        assert_eq!(report_of(mixed.as_bytes()), None);
+        // A receipt forwarded inside another message.
+        let forwarded = format!(
+            "From: Ben <ben@example.com>\r\n\
+             To: me@example.org\r\n\
+             Subject: Fwd: Read: Plan\r\n\
+             MIME-Version: 1.0\r\n\
+             Content-Type: multipart/mixed; boundary=\"outer\"\r\n\
+             \r\n\
+             --outer\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             See below.\r\n\
+             --outer\r\n\
+             Content-Type: message/rfc822\r\n\
+             \r\n\
+             {}\r\n\
+             --outer--\r\n",
+            String::from_utf8(receipt("message/disposition-notification", report, "")).unwrap()
+        );
+        assert_eq!(report_of(forwarded.as_bytes()), None);
+    }
+
+    #[test]
+    fn headers_tell_a_receipt_from_other_reports() {
+        let headers = |content_type: &str| {
+            parse_header_block(
+                format!("From: a@example.com\r\nContent-Type: {content_type}\r\n\r\n").as_bytes(),
+            )
+            .unwrap()
+            .disposition_report
+        };
+        assert!(headers(
+            "multipart/report; report-type=disposition-notification; boundary=b"
+        ));
+        assert!(headers(
+            "Multipart/Report; Report-Type=\"Disposition-Notification\"; boundary=b"
+        ));
+        assert!(!headers(
+            "multipart/report; report-type=delivery-status; boundary=b"
+        ));
+        assert!(!headers("multipart/mixed; boundary=b"));
+    }
+}
+
+#[cfg(test)]
+mod receipt_request_tests {
+    use super::parse_message;
+
+    fn request(headers: &str) -> (Vec<String>, bool) {
+        let raw = format!(
+            "{headers}From: Ana <ana@example.com>\r\nTo: me@example.org\r\nSubject: hi\r\n\r\nbody"
+        );
+        let parsed = parse_message(raw.as_bytes()).unwrap().headers;
+        (
+            parsed.receipt_to.into_iter().map(|a| a.email).collect(),
+            parsed.receipt_confirm,
+        )
+    }
+
+    #[test]
+    fn a_request_to_the_return_path_needs_no_confirmation() {
+        let (to, confirm) = request(
+            "Return-Path: <ana@EXAMPLE.com>\r\nDisposition-Notification-To: Ana <ana@example.com>\r\n",
+        );
+        assert_eq!(to, ["ana@example.com"]);
+        assert!(!confirm, "the domain compares without case");
+    }
+
+    #[test]
+    fn rfc_8098_section_2_1_cases_need_confirmation() {
+        // No Return-Path.
+        assert!(request("Disposition-Notification-To: ana@example.com\r\n").1);
+        // A null Return-Path is no address.
+        assert!(request("Return-Path: <>\r\nDisposition-Notification-To: ana@example.com\r\n").1);
+        // Another address than the Return-Path; the local part keeps its case.
+        assert!(request("Return-Path: <bounce@example.com>\r\nDisposition-Notification-To: ana@example.com\r\n").1);
+        assert!(
+            request(
+                "Return-Path: <Ana@example.com>\r\nDisposition-Notification-To: ana@example.com\r\n"
+            )
+            .1
+        );
+        // Several receipt addresses.
+        let (to, confirm) = request(
+            "Return-Path: <ana@example.com>\r\nDisposition-Notification-To: ana@example.com, boss@example.com\r\n",
+        );
+        assert_eq!(to.len(), 2);
+        assert!(confirm);
+    }
+
+    #[test]
+    fn quoting_is_undone_before_comparing() {
+        let (_, confirm) = request(
+            "Return-Path: <\"ana\"@example.com>\r\nDisposition-Notification-To: ana@example.com\r\n",
+        );
+        assert!(!confirm);
+    }
+
+    #[test]
+    fn a_required_option_stops_the_receipt_and_no_header_asks_for_none() {
+        let (to, _) = request(
+            "Return-Path: <ana@example.com>\r\nDisposition-Notification-To: ana@example.com\r\nDisposition-Notification-Options: signed-receipt=required,pkcs7-signature\r\n",
+        );
+        assert!(to.is_empty());
+        let (to, _) = request(
+            "Return-Path: <ana@example.com>\r\nDisposition-Notification-To: ana@example.com\r\nDisposition-Notification-Options: signed-receipt=optional,pkcs7-signature\r\n",
+        );
+        assert_eq!(to, ["ana@example.com"]);
+        assert_eq!(
+            request("Return-Path: <ana@example.com>\r\n"),
+            (Vec::new(), false)
+        );
+    }
+
+    #[test]
+    fn the_same_address_twice_is_one_receipt_address() {
+        let (to, confirm) = request(
+            "Return-Path: <ana@example.com>\r\nDisposition-Notification-To: ana@example.com\r\nDisposition-Notification-To: Ana <ana@EXAMPLE.COM>\r\n",
+        );
+        assert_eq!(to, ["ana@example.com"]);
+        assert!(!confirm);
+    }
 }
 
 #[cfg(test)]
@@ -2014,6 +2433,7 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
     let authentication_header = without_comments(&authentication_header);
     let authentication_results = authentication_results(&authentication_header);
     let sender_verification = sender_verification(&authentication_results, from.as_ref());
+    let (receipt_to, receipt_confirm) = receipt_request(msg);
 
     // multipart/report is the DSN/MDN envelope: bounces and read receipts.
     let is_report = msg
@@ -2025,6 +2445,19 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
                     .is_some_and(|s| s.eq_ignore_ascii_case("report"))
         })
         .unwrap_or(false);
+
+    let disposition_report = is_report
+        && msg
+            .content_type()
+            .and_then(|ct| ct.attributes())
+            .into_iter()
+            .flatten()
+            .any(|attribute| {
+                attribute.name.eq_ignore_ascii_case("report-type")
+                    && attribute
+                        .value
+                        .eq_ignore_ascii_case("disposition-notification")
+            });
 
     let is_automated = msg.header("List-Id").is_some()
         || msg.header("List-Unsubscribe").is_some()
@@ -2066,7 +2499,269 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
         list_id: raw_header(msg, "List-Id").and_then(|raw| list_id(&raw)),
         via,
         sender_verification,
+        receipt_to,
+        receipt_confirm,
+        disposition_report,
+        importance: importance(
+            raw_header(msg, "Importance").as_deref(),
+            raw_header(msg, "X-Priority").as_deref(),
+            raw_header(msg, "X-MSMail-Priority").as_deref(),
+            raw_header(msg, "Priority").as_deref(),
+        ),
     }
+}
+
+/// How important a message's sender marked it, from the headers mail
+/// programs use for it: Importance (RFC 2156), which Outlook reads first,
+/// then the first digit of X-Priority, then X-MSMail-Priority, then
+/// Priority, whose "non-urgent" also says "urgent".
+pub fn importance(
+    importance: Option<&str>,
+    x_priority: Option<&str>,
+    x_msmail_priority: Option<&str>,
+    priority: Option<&str>,
+) -> Importance {
+    let word = |value: Option<&str>| value.map(|value| value.trim().to_ascii_lowercase());
+    let level = |value: Option<String>| match value.as_deref() {
+        Some("high") => Some(Importance::High),
+        Some("low") => Some(Importance::Low),
+        Some("normal") => Some(Importance::Normal),
+        _ => None,
+    };
+    level(word(importance))
+        .or_else(|| match word(x_priority)?.chars().next()? {
+            '1' | '2' => Some(Importance::High),
+            '3' => Some(Importance::Normal),
+            '4' | '5' => Some(Importance::Low),
+            _ => None,
+        })
+        .or_else(|| level(word(x_msmail_priority)))
+        .or_else(|| match word(priority)?.as_str() {
+            "non-urgent" => Some(Importance::Low),
+            "urgent" => Some(Importance::High),
+            "normal" => Some(Importance::Normal),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// A read receipt request (RFC 8098 section 2): where the receipt goes, and
+/// whether section 2.1 wants the user's confirmation first.
+fn receipt_request(msg: &mail_parser::Message) -> (Vec<Address>, bool) {
+    // RFC 8098 defines no options. One a receiver must understand to answer
+    // stops the receipt, as RFC 3798 answered such a request with "failed".
+    if raw_header(msg, "Disposition-Notification-Options")
+        .is_some_and(|options| requires_unknown_option(&options))
+    {
+        return (Vec::new(), false);
+    }
+    let mut to = Vec::<Address>::new();
+    for value in msg.header_as(
+        "Disposition-Notification-To",
+        mail_parser::HeaderForm::Addresses,
+    ) {
+        if let mail_parser::HeaderValue::Address(addresses) = value {
+            for address in collect_addrs(Some(&addresses)) {
+                if !to
+                    .iter()
+                    .any(|seen| same_receipt_address(&seen.email, &address.email))
+                {
+                    to.push(address);
+                }
+            }
+        }
+    }
+    let Some(first) = to.first() else {
+        return (to, false);
+    };
+    let return_paths = match msg.return_path() {
+        mail_parser::HeaderValue::Text(path) => vec![path.as_ref()],
+        mail_parser::HeaderValue::TextList(paths) => paths.iter().map(AsRef::as_ref).collect(),
+        _ => Vec::new(),
+    }
+    .into_iter()
+    .map(|path| {
+        path.trim()
+            .trim_start_matches('<')
+            .trim_end_matches('>')
+            .trim()
+    })
+    .filter(|path| !path.is_empty())
+    .collect::<Vec<_>>();
+    // Several Return-Path fields that disagree count as a mismatch.
+    let confirm = to.len() > 1
+        || return_paths.is_empty()
+        || return_paths
+            .iter()
+            .any(|path| !same_receipt_address(path, &first.email));
+    (to, confirm)
+}
+
+/// Whether a Disposition-Notification-Options value has an attribute marked
+/// `required`; RFC 8098 defines none, so any is one this client doesn't know.
+fn requires_unknown_option(options: &str) -> bool {
+    options.split(';').any(|option| {
+        option
+            .split_once('=')
+            .and_then(|(_, value)| value.split(',').next())
+            .is_some_and(|importance| importance.trim().eq_ignore_ascii_case("required"))
+    })
+}
+
+/// RFC 8098 section 2.1 compares only the address: the local part exactly,
+/// once quoting is undone, and the domain without regard to case.
+fn same_receipt_address(left: &str, right: &str) -> bool {
+    fn parts(address: &str) -> Option<(String, String)> {
+        let (local, domain) = address.trim().rsplit_once('@')?;
+        let mut unquoted = String::with_capacity(local.len());
+        let mut chars = local.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => {}
+                '\\' => unquoted.extend(chars.next()),
+                c => unquoted.push(c),
+            }
+        }
+        Some((unquoted, domain.to_ascii_lowercase()))
+    }
+    match (parts(left), parts(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
+/// A read receipt that came back (RFC 8098 section 3): the message it's
+/// about, whom it reports for, and what happened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispositionReport {
+    /// The Message-ID of the message it's about, without angle brackets, as
+    /// messages keep theirs.
+    pub original_message_id: String,
+    /// The recipient it reports for. The name is the receipt's sender's,
+    /// when the receipt came from that address.
+    pub recipient: Address,
+    pub disposition: crate::models::Disposition,
+    /// When it was written: the receipt's Date field.
+    pub reported_at: Option<i64>,
+}
+
+/// The MIME types of a report part: RFC 8098's, and RFC 6533's for
+/// addresses that aren't ASCII.
+pub fn is_disposition_report_part(mime_type: &str) -> bool {
+    [
+        "message/disposition-notification",
+        "message/global-disposition-notification",
+    ]
+    .iter()
+    .any(|report| mime_type.eq_ignore_ascii_case(report))
+}
+
+/// Read a report part. The receipt's own fields stand in for what some
+/// reporters leave out: In-Reply-To for Original-Message-ID, and From for
+/// both recipient fields. A report of an error, or one that says nothing
+/// happened ("denied", "failed"), is no receipt.
+pub fn disposition_report(
+    report: &[u8],
+    in_reply_to: Option<&str>,
+    from: Option<&Address>,
+    date_ms: Option<i64>,
+) -> Option<DispositionReport> {
+    let fields = mail_parser::MessageParser::default().parse_headers(report)?;
+    let disposition = report_disposition(&raw_header(&fields, "Disposition")?)?;
+    let original_message_id = raw_header(&fields, "Original-Message-ID")
+        .and_then(|value| bare_message_id(&value))
+        .or_else(|| in_reply_to.and_then(bare_message_id))?;
+    let email = ["Final-Recipient", "Original-Recipient"]
+        .iter()
+        .find_map(|field| raw_header(&fields, field).and_then(|value| report_address(&value)))
+        .or_else(|| from.map(|from| from.email.clone()))?;
+    let name = from
+        .filter(|from| from.email.eq_ignore_ascii_case(&email))
+        .and_then(|from| from.name.clone())
+        .filter(|name| !name.trim().is_empty());
+    Some(DispositionReport {
+        original_message_id,
+        recipient: Address { name, email },
+        disposition,
+        reported_at: date_ms,
+    })
+}
+
+/// The disposition type of a Disposition field (RFC 8098 section 3.2.6):
+/// `manual-action/MDN-sent-manually; displayed`, maybe with modifiers after
+/// a slash, of which "error" undoes it.
+fn report_disposition(value: &str) -> Option<crate::models::Disposition> {
+    let value = without_comments(value);
+    let (_, outcome) = value.split_once(';')?;
+    let (kind, modifiers) = outcome.split_once('/').unwrap_or((outcome, ""));
+    if modifiers
+        .split(',')
+        .any(|modifier| modifier.trim().eq_ignore_ascii_case("error"))
+    {
+        return None;
+    }
+    crate::models::Disposition::parse(kind.trim())
+}
+
+/// The address in a Final-Recipient or Original-Recipient field, `rfc822;
+/// ana@example.com`. RFC 6533's utf-8 type writes characters outside ASCII
+/// as `\x{HEX}` in a plain report part.
+fn report_address(value: &str) -> Option<String> {
+    let (kind, address) = value.split_once(';')?;
+    let kind = kind.trim();
+    if !kind.eq_ignore_ascii_case("rfc822") && !kind.eq_ignore_ascii_case("utf-8") {
+        return None;
+    }
+    let address = address.trim();
+    let address = match (address.rfind('<'), address.rfind('>')) {
+        (Some(start), Some(end)) if start < end => &address[start + 1..end],
+        _ => address,
+    };
+    let address = unescape_utf8_xtext(address.trim());
+    (address.contains('@') && !address.contains(char::is_whitespace)).then_some(address)
+}
+
+/// Undo RFC 6533's `\x{HEX}` escapes; anything else stays as it is.
+fn unescape_utf8_xtext(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(start) = rest.find("\\x{") {
+        output.push_str(&rest[..start]);
+        let escaped = &rest[start + 3..];
+        let decoded = escaped.split_once('}').and_then(|(hex, after)| {
+            u32::from_str_radix(hex, 16)
+                .ok()
+                .and_then(char::from_u32)
+                .map(|ch| (ch, after))
+        });
+        match decoded {
+            Some((ch, after)) => {
+                output.push(ch);
+                rest = after;
+            }
+            None => {
+                output.push_str("\\x{");
+                rest = escaped;
+            }
+        }
+    }
+    output.push_str(rest);
+    output
+}
+
+/// A msg-id without its angle brackets: the first `<...>` in the value, or
+/// the whole value when it has none.
+fn bare_message_id(value: &str) -> Option<String> {
+    let value = value.trim();
+    let id = match value.find('<') {
+        Some(start) => {
+            let rest = &value[start + 1..];
+            &rest[..rest.find('>')?]
+        }
+        None => value,
+    };
+    let id = id.trim();
+    (!id.is_empty() && !id.contains(char::is_whitespace)).then(|| id.to_string())
 }
 
 /// The identifier in a List-Id value: `Weekly news <news.example.com>` names
@@ -2126,6 +2821,7 @@ pub fn parse_message(raw: &[u8]) -> Result<ParsedBody> {
             content_id,
         });
     }
+    let disposition_report = returned_receipt(&msg, &headers);
     // Invites are often an *alternative* body part rather than an attachment.
     for part in msg.text_bodies() {
         let is_cal = part.content_type().is_some_and(|ct| {
@@ -2144,7 +2840,71 @@ pub fn parse_message(raw: &[u8]) -> Result<ParsedBody> {
         snippet,
         attachments,
         calendar_parts,
+        disposition_report,
     })
+}
+
+/// The read receipt a message is, when it's a multipart/report (RFC 6522)
+/// carrying a disposition report. One forwarded inside another message
+/// isn't the message itself, and isn't one.
+fn returned_receipt(
+    msg: &mail_parser::Message,
+    headers: &ParsedHeaders,
+) -> Option<DispositionReport> {
+    let content_type = msg.content_type()?;
+    if !content_type.ctype().eq_ignore_ascii_case("multipart")
+        || !content_type
+            .subtype()
+            .is_some_and(|subtype| subtype.eq_ignore_ascii_case("report"))
+    {
+        return None;
+    }
+    let report = msg.attachments().find(|part| {
+        part.content_type().is_some_and(|ct| {
+            ct.ctype().eq_ignore_ascii_case("message")
+                && ct.subtype().is_some_and(|subtype| {
+                    is_disposition_report_part(&format!("message/{subtype}"))
+                })
+        })
+    })?;
+    let in_reply_to = msg
+        .in_reply_to()
+        .as_text_list()
+        .and_then(|ids| ids.first().map(|id| id.to_string()));
+    disposition_report(
+        report.contents(),
+        in_reply_to.as_deref(),
+        headers.from.as_ref(),
+        headers.date_ms,
+    )
+}
+
+/// Every header field in `raw`, a header block or a whole message, by name
+/// and value: text as decoded, any other value as written, unfolded. For
+/// rules on any header (#238).
+pub fn header_fields(raw: &[u8]) -> Vec<(String, String)> {
+    let Some(message) = mail_parser::MessageParser::default().parse_headers(raw) else {
+        return Vec::new();
+    };
+    message
+        .headers()
+        .iter()
+        .map(|header| {
+            let value = match header.value() {
+                mail_parser::HeaderValue::Text(text) => text.to_string(),
+                mail_parser::HeaderValue::TextList(list) => list.join(", "),
+                _ => {
+                    let (start, end) =
+                        (header.offset_start() as usize, header.offset_end() as usize);
+                    let written = raw.get(start..end.max(start)).unwrap_or_default();
+                    String::from_utf8_lossy(written).into_owned()
+                }
+            };
+            // Unfolded, as a header of no known kind keeps its line breaks.
+            let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+            (header.name().to_owned(), value)
+        })
+        .collect()
 }
 
 /// Parse only headers (from a HEADER.FIELDS fetch).
@@ -2199,19 +2959,86 @@ pub struct OutgoingMessage<'a> {
     pub message_id: Option<&'a str>,
     pub message_id_domain: &'a str,
     pub attachments: Vec<OutgoingAttachment>,
+    /// Who the message asks to send a read receipt to
+    /// (Disposition-Notification-To, RFC 8098), if anyone.
+    pub receipt_to: &'a [Address],
+    pub importance: Importance,
 }
 
 /// An image extracted from the HTML body, to be sent as an inline CID part.
 struct InlineImage {
     mime_type: String,
     cid: String,
+    filename: String,
     bytes: Vec<u8>,
+}
+
+/// The media type of an embedded image, lowercased, when it's a plain
+/// `image/<subtype>` that can go in a part's header as it is.
+fn image_media_type(value: &str) -> Option<String> {
+    let value = value.split(';').next()?.trim().to_ascii_lowercase();
+    let subtype = value.strip_prefix("image/")?;
+    let valid = (1..=64).contains(&subtype.len())
+        && subtype
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'+' | b'-'));
+    valid.then_some(value)
+}
+
+/// A file name for the `index`th image of a message, for mail programs that
+/// list inline images or save them.
+fn inline_image_filename(index: usize, mime_type: &str) -> String {
+    let subtype = mime_type.strip_prefix("image/").unwrap_or_default();
+    let extension = match subtype {
+        "jpeg" | "pjpeg" => "jpg",
+        "svg+xml" => "svg",
+        "x-icon" | "vnd.microsoft.icon" => "ico",
+        other if !other.is_empty() && other.bytes().all(|byte| byte.is_ascii_alphanumeric()) => {
+            other
+        }
+        _ => "img",
+    };
+    format!("image{index}.{extension}")
+}
+
+/// How much of an HTML body its embedded `data:` images take.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct EmbeddedImages {
+    /// The bytes of the `data:` addresses in the HTML.
+    pub(crate) source_bytes: usize,
+    /// The size of the images they hold, once decoded.
+    pub(crate) image_bytes: usize,
+}
+
+/// Measures the `src="data:image/...;base64,..."` images of `html` without
+/// decoding them.
+pub(crate) fn embedded_images(html: &str) -> EmbeddedImages {
+    const MARKER: &str = "src=\"data:image/";
+    let mut found = EmbeddedImages::default();
+    let mut rest = html;
+    while let Some(pos) = rest.find(MARKER) {
+        let after = &rest[pos + 5..];
+        let Some(end) = after.find('"') else {
+            break;
+        };
+        let uri = &after[..end];
+        if let Some((_, data)) = uri.split_once(";base64,") {
+            found.source_bytes = found.source_bytes.saturating_add(uri.len());
+            found.image_bytes = found.image_bytes.saturating_add(data.trim().len() / 4 * 3);
+        }
+        rest = &after[end + 1..];
+    }
+    found
 }
 
 /// Replace `src="data:image/...;base64,..."` with `src="cid:..."` and return
 /// the decoded images. Editors embed pasted screenshots as data URIs, but
-/// many mail clients (Gmail included) strip those - CID parts survive.
-fn extract_data_uri_images(html: &str) -> (std::borrow::Cow<'_, str>, Vec<InlineImage>) {
+/// many mail clients (Gmail included) strip those - CID parts survive. Each
+/// Content-ID is unique and ends in `domain`, as RFC 2392 asks.
+fn extract_data_uri_images<'h>(
+    html: &'h str,
+    domain: &str,
+) -> (std::borrow::Cow<'h, str>, Vec<InlineImage>) {
     use base64::Engine;
     const MARKER: &str = "src=\"data:image/";
 
@@ -2233,13 +3060,15 @@ fn extract_data_uri_images(html: &str) -> (std::borrow::Cow<'_, str>, Vec<Inline
             .strip_prefix("data:")
             .and_then(|u| u.split_once(";base64,"))
             .and_then(|(mime, b64)| {
+                let mime_type = image_media_type(mime)?;
                 base64::engine::general_purpose::STANDARD
                     .decode(b64.trim())
                     .ok()
-                    .map(|bytes| (mime.to_owned(), bytes))
+                    .map(|bytes| (mime_type, bytes))
             });
         if let Some((mime_type, bytes)) = decoded {
-            let cid = format!("img{}.{}", images.len() + 1, rand_token());
+            let index = images.len() + 1;
+            let cid = format!("img{index}.{}@{domain}", rand_token());
             let output = out.get_or_insert_with(String::new);
             output.push_str(&html[copied..source_start]);
             output.push_str("src=\"cid:");
@@ -2247,6 +3076,7 @@ fn extract_data_uri_images(html: &str) -> (std::borrow::Cow<'_, str>, Vec<Inline
             output.push('"');
             copied = source_start + 5 + endq + 1;
             images.push(InlineImage {
+                filename: inline_image_filename(index, &mime_type),
                 mime_type,
                 cid,
                 bytes,
@@ -2261,6 +3091,41 @@ fn extract_data_uri_images(html: &str) -> (std::borrow::Cow<'_, str>, Vec<Inline
         }
         None => (std::borrow::Cow::Borrowed(html), images),
     }
+}
+
+/// The HTML part of a message with the images it shows: on their own, the
+/// HTML, and with images a multipart/related holding the HTML first and then
+/// each image as an inline part (RFC 2387), as mail programs expect.
+fn html_with_images<'a>(
+    html: std::borrow::Cow<'a, str>,
+    images: Vec<InlineImage>,
+) -> mail_builder::mime::MimePart<'a> {
+    use mail_builder::headers::content_type::ContentType;
+    use mail_builder::mime::{BodyPart, MimePart};
+
+    let html = MimePart::new("text/html", BodyPart::Text(html));
+    if images.is_empty() {
+        return html;
+    }
+    let mut parts = Vec::with_capacity(images.len() + 1);
+    parts.push(html);
+    for image in images {
+        parts.push(
+            MimePart::new(
+                ContentType::new(image.mime_type).attribute("name", image.filename.clone()),
+                BodyPart::Binary(std::borrow::Cow::Owned(image.bytes)),
+            )
+            .header(
+                "Content-Disposition",
+                ContentType::new("inline").attribute("filename", image.filename),
+            )
+            .cid(image.cid),
+        );
+    }
+    MimePart::new(
+        ContentType::new("multipart/related").attribute("type", "text/html"),
+        parts,
+    )
 }
 
 struct MessageAttachment<'a> {
@@ -2321,19 +3186,234 @@ fn imip_body<'a>(
         )
         .attachment(calendar.filename),
     );
-    for attachment in attachments {
-        parts.push(
-            MimePart::new(
-                ContentType::new(attachment.mime_type),
-                BodyPart::Binary(attachment.bytes),
-            )
-            .attachment(attachment.filename),
-        );
-    }
+    parts.extend(attachments.into_iter().map(attachment_part));
     MimePart::new("multipart/mixed", parts)
 }
 
+/// An attachment's part, as mail-builder writes those it adds itself.
+fn attachment_part(attachment: MessageAttachment<'_>) -> mail_builder::mime::MimePart<'_> {
+    use mail_builder::headers::content_type::ContentType;
+    use mail_builder::mime::{BodyPart, MimePart};
+
+    // A forwarded message goes in as it is: RFC 2046 lets a message/rfc822 body be only 7bit,
+    // 8bit or binary, so mail apps show it as a message rather than a file.
+    let message = is_message_type(&attachment.mime_type)
+        .then(|| message_part(&attachment.bytes))
+        .flatten();
+    match message {
+        Some((bytes, encoding)) => MimePart::new(
+            ContentType::new(attachment.mime_type),
+            BodyPart::Binary(bytes.into()),
+        )
+        .attachment(attachment.filename)
+        .transfer_encoding(encoding),
+        None => MimePart::new(
+            ContentType::new(attachment.mime_type),
+            BodyPart::Binary(attachment.bytes),
+        )
+        .attachment(attachment.filename),
+    }
+}
+
+/// Whether `mime_type` names a whole message, as a forwarded one is.
+fn is_message_type(mime_type: &str) -> bool {
+    let media = mime_type.split(';').next().unwrap_or_default().trim();
+    media.eq_ignore_ascii_case("message/rfc822") || media.eq_ignore_ascii_case("message/global")
+}
+
+/// A forwarded message's bytes with its lines ending in CRLF, as mail carries them, and its
+/// transfer encoding: 7bit when it's all ASCII, and 8bit otherwise. `None` leaves it to base64,
+/// for a message with NUL bytes, carriage returns of their own, or lines longer than the 998
+/// characters RFC 5322 allows, which only binary transport carries.
+fn message_part(bytes: &[u8]) -> Option<(Vec<u8>, &'static str)> {
+    let mut lines = Vec::with_capacity(bytes.len() + bytes.len() / 64);
+    let mut eight_bit = false;
+    let mut length = 0usize;
+    let mut index = 0;
+    while let Some(&byte) = bytes.get(index) {
+        match byte {
+            0 => return None,
+            b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
+                lines.extend_from_slice(b"\r\n");
+                length = 0;
+                index += 2;
+                continue;
+            }
+            b'\r' => return None,
+            b'\n' => {
+                lines.extend_from_slice(b"\r\n");
+                length = 0;
+            }
+            _ => {
+                length += 1;
+                if length > 998 {
+                    return None;
+                }
+                eight_bit |= !byte.is_ascii();
+                lines.push(byte);
+            }
+        }
+        index += 1;
+    }
+    Some((lines, if eight_bit { "8bit" } else { "7bit" }))
+}
+
+/// `raw`, a whole message, without its Bcc field: a copy of mail sent from here keeps the
+/// addresses it was blind copied to, which its recipients never saw, and which a forward
+/// mustn't show either.
+pub fn without_bcc(raw: &[u8]) -> Vec<u8> {
+    let mut kept = Vec::with_capacity(raw.len());
+    let mut rest = raw;
+    let mut skipping = false;
+    while !rest.is_empty() {
+        let end = rest
+            .iter()
+            .position(|&byte| byte == b'\n')
+            .map_or(rest.len(), |at| at + 1);
+        let (line, after) = rest.split_at(end);
+        rest = after;
+        // The header ends at its first empty line, and the body stays as it is.
+        if line == b"\r\n" || line == b"\n" {
+            kept.extend_from_slice(line);
+            kept.extend_from_slice(rest);
+            break;
+        }
+        let folded = line
+            .first()
+            .is_some_and(|byte| *byte == b' ' || *byte == b'\t');
+        if !folded {
+            skipping = line
+                .get(..4)
+                .is_some_and(|name| name.eq_ignore_ascii_case(b"bcc:"));
+        }
+        if !skipping {
+            kept.extend_from_slice(line);
+        }
+    }
+    kept
+}
+
 /// Build a raw RFC 5322 message. Returns (message_id, raw_bytes).
+/// What a read receipt reports (RFC 8098 section 3).
+pub struct ReadReceipt<'a> {
+    /// The account the message reached: the receipt's From and its
+    /// Final-Recipient.
+    pub recipient: &'a Address,
+    /// The Disposition-Notification-To addresses.
+    pub to: &'a [Address],
+    pub original_subject: &'a str,
+    pub original_message_id: Option<&'a str>,
+    /// The user agreed to this receipt, rather than Settings sending it on
+    /// its own.
+    pub user_agreed: bool,
+    /// Reporting-UA's name part: the account's mail domain, which says no
+    /// more about the device than the From address does.
+    pub reporting_domain: &'a str,
+}
+
+/// A read receipt: multipart/report with a sentence for people and the
+/// message/disposition-notification part for programs. The message was
+/// "displayed", which RFC 8098 is careful to say doesn't mean read or
+/// understood. Returns its Message-ID and bytes.
+pub fn build_read_receipt(receipt: &ReadReceipt) -> Result<(String, Vec<u8>)> {
+    use mail_builder::headers::content_type::ContentType;
+    use mail_builder::mime::{BodyPart, MimePart};
+    let msg_id = format!(
+        "{}.{}@{}",
+        chrono::Utc::now().timestamp_micros(),
+        rand_token(),
+        receipt.reporting_domain
+    );
+    let original_id = receipt
+        .original_message_id
+        .map(|id| id.trim().trim_matches(['<', '>']))
+        .filter(|id| !id.is_empty() && !id.contains(['\r', '\n']));
+    // Section 3: "manual-action" even when the user set the client to send
+    // on its own; MDN-sent-manually only for one they agreed to.
+    let sending_mode = if receipt.user_agreed {
+        "MDN-sent-manually"
+    } else {
+        "MDN-sent-automatically"
+    };
+    // The report part must be 7bit; RFC 6533 carries an address that isn't
+    // ASCII in message/global-disposition-notification instead.
+    let ascii = receipt.recipient.email.is_ascii()
+        && original_id.is_none_or(|id| id.is_ascii())
+        && receipt.reporting_domain.is_ascii();
+    let mut report = format!(
+        "Reporting-UA: {}; Flectar Mail\r\nFinal-Recipient: {}; {}\r\n",
+        receipt.reporting_domain,
+        if ascii { "rfc822" } else { "utf-8" },
+        receipt.recipient.email,
+    );
+    if let Some(id) = original_id {
+        report.push_str(&format!("Original-Message-ID: <{id}>\r\n"));
+    }
+    report.push_str(&format!(
+        "Disposition: manual-action/{sending_mode}; displayed\r\n"
+    ));
+    let text = format!(
+        "This is a receipt for the message you sent to {} with the subject \"{}\". \
+         It was displayed on the recipient's screen. That doesn't say it was \
+         read or understood.\r\n",
+        receipt.recipient.email, receipt.original_subject,
+    );
+    let report_part = MimePart::new(
+        if ascii {
+            "message/disposition-notification"
+        } else {
+            "message/global-disposition-notification"
+        },
+        BodyPart::Text(report.into()),
+    );
+    let report_part = if ascii {
+        report_part.transfer_encoding("7bit")
+    } else {
+        report_part
+    };
+    let mut builder = mail_builder::MessageBuilder::new()
+        .message_id(msg_id.clone())
+        .from((
+            receipt.recipient.name.as_deref().unwrap_or_default(),
+            receipt.recipient.email.as_str(),
+        ))
+        .to(mail_builder::headers::address::Address::new_list(
+            receipt
+                .to
+                .iter()
+                .map(|address| {
+                    mail_builder::headers::address::Address::from((
+                        address.name.as_deref().unwrap_or_default(),
+                        address.email.as_str(),
+                    ))
+                })
+                .collect(),
+        ))
+        .subject(format!("Read: {}", receipt.original_subject))
+        .body(MimePart::new(
+            ContentType::new("multipart/report")
+                .attribute("report-type", "disposition-notification"),
+            vec![
+                MimePart::new("text/plain", BodyPart::Text(text.into())),
+                report_part,
+            ],
+        ));
+    if let Some(id) = original_id {
+        builder = builder.in_reply_to(id).references(id);
+    }
+    if !receipt.user_agreed {
+        // RFC 3834: other automatic responders shouldn't answer it.
+        builder = builder.header(
+            "Auto-Submitted",
+            mail_builder::headers::raw::Raw::new("auto-replied"),
+        );
+    }
+    let raw = builder
+        .write_to_vec()
+        .map_err(|error| CoreError::Mime(format!("building a read receipt: {error}")))?;
+    Ok((format!("<{msg_id}>"), raw))
+}
+
 pub fn build_message(out: &OutgoingMessage) -> Result<(String, Vec<u8>)> {
     build_message_with_attachments(
         out,
@@ -2432,18 +3512,22 @@ fn build_message_with_attachments<'a>(
         ));
     }
 
+    let mut html_body = None;
     if let Some(html) = out.body_html
         && !html.trim().is_empty()
         && calendar.is_none()
     {
-        let (html, inline_images) = extract_data_uri_images(html);
+        let (html, inline_images) = extract_data_uri_images(html, out.message_id_domain);
         other_source_bytes = other_source_bytes.saturating_add(html.len());
-        builder = builder.html_body(html);
-        for img in inline_images {
+        for img in &inline_images {
             binary_output_bytes =
                 binary_output_bytes.saturating_add(encoded_binary_len(img.bytes.len()));
             part_count += 1;
-            builder = builder.inline(img.mime_type, img.cid, img.bytes);
+        }
+        if inline_images.is_empty() {
+            builder = builder.html_body(html);
+        } else {
+            html_body = Some(html_with_images(html, inline_images));
         }
     }
 
@@ -2455,6 +3539,24 @@ fn build_message_with_attachments<'a>(
     }
     if !out.bcc.is_empty() {
         builder = builder.bcc(addresses(out.bcc));
+    }
+    if !out.receipt_to.is_empty() {
+        builder = builder.header("Disposition-Notification-To", addresses(out.receipt_to));
+    }
+    // Importance for Outlook, X-Priority for Thunderbird and webmail, which
+    // read only that. Normal needs neither.
+    let importance = match out.importance {
+        Importance::High => Some(("High", "2 (High)")),
+        Importance::Low => Some(("Low", "4 (Low)")),
+        Importance::Normal => None,
+    };
+    if let Some((importance, priority)) = importance {
+        builder = builder
+            .header(
+                "Importance",
+                mail_builder::headers::raw::Raw::new(importance),
+            )
+            .header("X-Priority", mail_builder::headers::raw::Raw::new(priority));
     }
     for att in &attachments {
         if att
@@ -2476,14 +3578,27 @@ fn build_message_with_attachments<'a>(
             .saturating_add(calendar.bytes.len().saturating_mul(2));
         part_count += 3;
         builder = builder.body(imip_body(out, calendar, attachments));
-    } else {
-        for att in attachments {
-            builder = builder.attachment(
-                mail_builder::headers::content_type::ContentType::new(att.mime_type),
-                att.filename,
-                mail_builder::mime::BodyPart::Binary(att.bytes),
-            );
-        }
+    } else if let Some(html) = html_body {
+        // The text, and the HTML with its images, as alternatives of one
+        // another, followed by any attachments.
+        use mail_builder::mime::MimePart;
+        let alternative = MimePart::new(
+            "multipart/alternative",
+            vec![MimePart::new("text/plain", out.body_text), html],
+        );
+        builder = builder.body(if attachments.is_empty() {
+            alternative
+        } else {
+            let mut parts = Vec::with_capacity(attachments.len() + 1);
+            parts.push(alternative);
+            parts.extend(attachments.into_iter().map(attachment_part));
+            MimePart::new("multipart/mixed", parts)
+        });
+    } else if !attachments.is_empty() {
+        builder
+            .attachments
+            .get_or_insert_with(Vec::new)
+            .extend(attachments.into_iter().map(attachment_part));
     }
     if let Some(irt) = out.in_reply_to {
         builder = builder.in_reply_to(irt.trim_matches(['<', '>']));
@@ -2591,12 +3706,12 @@ mod tests {
     fn image_extraction_preserves_invalid_neighbors_and_unterminated_tail() {
         let invalid = "<img src=\"data:image/png;base64,%%%\">";
         assert!(matches!(
-            extract_data_uri_images(invalid).0,
+            extract_data_uri_images(invalid, "example.com").0,
             std::borrow::Cow::Borrowed(_)
         ));
         let tail = "<img src=\"data:image/png;base64,unterminated";
         let html = format!("é{invalid}<img src=\"data:image/png;base64,AAE=\">{invalid}{tail}");
-        let (rewritten, images) = extract_data_uri_images(&html);
+        let (rewritten, images) = extract_data_uri_images(&html, "example.com");
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].bytes, [0, 1]);
         assert_eq!(
@@ -2623,6 +3738,23 @@ mod tests {
         let part = parsed.attachments().next().unwrap();
         assert_eq!(part.attachment_name(), Some("é-large.bin"));
         assert_eq!(part.contents(), message.attachments[0].bytes);
+    }
+
+    #[test]
+    fn header_fields_list_every_header_unfolded_and_decoded() {
+        let raw = b"Subject: =?utf-8?q?R=C3=A9sum=C3=A9?=\r\nX-Spam-Flag: YES\r\nX-Folded: one\r\n two\r\nTo: Ana <ana@test.dev>\r\n\r\nbody";
+        let fields = header_fields(raw);
+        let value = |name: &str| {
+            fields
+                .iter()
+                .find(|(field, _)| field.eq_ignore_ascii_case(name))
+                .map(|(_, value)| value.as_str())
+        };
+        assert_eq!(value("subject"), Some("Résumé"));
+        assert_eq!(value("x-spam-flag"), Some("YES"));
+        assert_eq!(value("X-Folded"), Some("one two"));
+        assert_eq!(value("To"), Some("Ana <ana@test.dev>"));
+        assert_eq!(value("X-Missing"), None);
     }
 
     #[test]
@@ -3141,6 +4273,86 @@ mod tests {
         );
     }
 
+    #[test]
+    fn importance_reads_outlooks_header_first_then_the_others() {
+        assert_eq!(
+            importance(Some("High"), Some("5"), None, None),
+            Importance::High
+        );
+        assert_eq!(
+            importance(None, Some("1 (Highest)"), None, None),
+            Importance::High
+        );
+        assert_eq!(
+            importance(None, Some(" 4 (Low)"), None, None),
+            Importance::Low
+        );
+        assert_eq!(
+            importance(None, Some("3"), Some("High"), None),
+            Importance::Normal
+        );
+        assert_eq!(importance(None, None, Some("low"), None), Importance::Low);
+        assert_eq!(
+            importance(None, None, None, Some("non-urgent")),
+            Importance::Low
+        );
+        assert_eq!(
+            importance(None, None, None, Some("Urgent")),
+            Importance::High
+        );
+        assert_eq!(
+            importance(Some("soon"), Some("x"), None, None),
+            Importance::Normal
+        );
+        let headers =
+            parse_header_block(b"Subject: Now\r\nX-Priority: 1 (Highest)\r\n\r\n").unwrap();
+        assert_eq!(headers.importance, Importance::High);
+    }
+
+    #[test]
+    fn importance_goes_out_for_outlook_and_thunderbird_alike() {
+        let high = OutgoingMessage {
+            importance: Importance::High,
+            ..outgoing("Hi", None)
+        };
+        let text = String::from_utf8(build_message(&high).unwrap().1).unwrap();
+        assert!(text.contains("Importance: High\r\n"), "{text}");
+        assert!(text.contains("X-Priority: 2 (High)\r\n"), "{text}");
+        let low = OutgoingMessage {
+            importance: Importance::Low,
+            ..outgoing("Hi", None)
+        };
+        let text = String::from_utf8(build_message(&low).unwrap().1).unwrap();
+        assert!(text.contains("Importance: Low\r\n") && text.contains("X-Priority: 4 (Low)\r\n"));
+        let text = String::from_utf8(build_message(&outgoing("Hi", None)).unwrap().1).unwrap();
+        assert!(!text.contains("Importance") && !text.contains("X-Priority"));
+    }
+
+    #[test]
+    fn a_message_asks_for_a_read_receipt_at_the_address_given() {
+        let me = [Address {
+            name: Some("Me".into()),
+            email: "me@example.com".into(),
+        }];
+        let asking = OutgoingMessage {
+            receipt_to: &me,
+            ..outgoing("Hi", None)
+        };
+        let (_, raw) = build_message(&asking).unwrap();
+        let text = String::from_utf8(raw).unwrap();
+        let header = text
+            .lines()
+            .find(|line| line.starts_with("Disposition-Notification-To: "))
+            .unwrap_or_default();
+        assert!(header.ends_with("<me@example.com>"), "{text}");
+        let (_, raw) = build_message(&outgoing("Hi", None)).unwrap();
+        assert!(
+            !String::from_utf8(raw)
+                .unwrap()
+                .contains("Disposition-Notification-To")
+        );
+    }
+
     fn outgoing<'a>(text: &'a str, html: Option<&'a str>) -> OutgoingMessage<'a> {
         OutgoingMessage {
             from: Address {
@@ -3159,6 +4371,8 @@ mod tests {
             message_id: None,
             message_id_domain: "example.com",
             attachments: Vec::new(),
+            receipt_to: &[],
+            importance: Importance::Normal,
         }
     }
 
@@ -3232,6 +4446,76 @@ mod tests {
         );
         assert!(parsed.calendar_parts[0].contains("UID:evt-1@example.com"));
         assert_eq!(parsed.text.as_deref(), Some("Accepted: Design review"));
+    }
+
+    #[test]
+    fn attached_messages_go_in_unencoded() {
+        let original = "From: Ana <ana@example.org>\nTo: me@example.com\nSubject: Café plans\n\
+                        Content-Type: text/plain; charset=utf-8\n\nSee you at the café.\n";
+        // Plain text, HTML, and HTML with pictures of its own put their parts together each
+        // their own way.
+        let picture = "<p>Here it is</p><img src=\"data:image/png;base64,AAE=\">";
+        for html in [None, Some("<p>Here it is</p>"), Some(picture)] {
+            let mut message = outgoing("Here it is", html);
+            message.attachments.push(OutgoingAttachment {
+                filename: "Café plans.eml".into(),
+                mime_type: "message/rfc822".into(),
+                bytes: original.as_bytes().to_vec(),
+            });
+            let (_, raw) = build_message(&message).unwrap();
+            let text = String::from_utf8_lossy(&raw);
+            // RFC 2046 lets a message/rfc822 body be only 7bit, 8bit or binary, and mail
+            // carries its lines ending in CRLF.
+            assert!(text.contains("Subject: Café plans\r\n"), "{text}");
+            assert!(text.contains("\r\n\r\nSee you at the café.\r\n"), "{text}");
+            assert_eq!(
+                part_types(&raw).last().map(String::as_str),
+                Some("message/rfc822")
+            );
+            let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+            let attached = parsed
+                .attachments()
+                .find(|part| part.attachment_name() == Some("Café plans.eml"))
+                .unwrap();
+            assert_eq!(attached.content_transfer_encoding(), Some("8bit"), "{text}");
+            let inner = attached
+                .message()
+                .expect("the attachment reads as a message");
+            assert_eq!(inner.subject(), Some("Café plans"));
+        }
+
+        let (bytes, encoding) = message_part(b"Subject: x\r\n\r\nplain\r\n").unwrap();
+        assert_eq!(
+            (bytes.as_slice(), encoding),
+            (&b"Subject: x\r\n\r\nplain\r\n"[..], "7bit")
+        );
+        // Only binary transport carries NUL bytes, bare carriage returns and lines past 998
+        // characters, so those go in base64.
+        assert!(message_part(b"Subject: x\r\n\r\na\0b").is_none());
+        assert!(message_part(b"Subject: x\r\n\r\na\rb").is_none());
+        assert!(
+            message_part(format!("Subject: x\r\n\r\n{}", "a".repeat(999)).as_bytes()).is_none()
+        );
+        assert!(
+            message_part(format!("Subject: x\r\n\r\n{}", "a".repeat(998)).as_bytes()).is_some()
+        );
+    }
+
+    #[test]
+    fn forwarded_copies_leave_out_their_bcc_field() {
+        let raw = b"From: me@example.com\r\nBcc: secret@example.org,\r\n  other@example.org\r\n\
+                    To: ana@example.org\r\nbcc: more@example.org\r\nSubject: Plans\r\n\r\n\
+                    Bcc: in the body stays\r\n";
+        assert_eq!(
+            without_bcc(raw),
+            b"From: me@example.com\r\nTo: ana@example.org\r\nSubject: Plans\r\n\r\n\
+              Bcc: in the body stays\r\n"
+        );
+        let lf = b"From: me@example.com\nBcc: secret@example.org\nSubject: Plans\n\nBody\n";
+        assert_eq!(
+            without_bcc(lf),
+            b"From: me@example.com\nSubject: Plans\n\nBody\n"
+        );
     }
 
     #[test]
@@ -3414,7 +4698,7 @@ mod tests {
     #[test]
     fn outgoing_html_without_embedded_images_is_borrowed() {
         let html = "<p>é界👩‍🚀</p>".repeat(100_000);
-        let (rewritten, images) = extract_data_uri_images(&html);
+        let (rewritten, images) = extract_data_uri_images(&html, "example.com");
         assert!(matches!(rewritten, std::borrow::Cow::Borrowed(_)));
         assert_eq!(rewritten.as_ptr(), html.as_ptr());
         assert!(images.is_empty());
@@ -3425,14 +4709,14 @@ mod tests {
         use base64::Engine;
         let encoded = base64::engine::general_purpose::STANDARD.encode(vec![7; 1024 * 1024]);
         let html = format!("<img src=\"data:image/png;base64,{encoded}\">");
-        let (rewritten, images) = extract_data_uri_images(&html);
+        let (rewritten, images) = extract_data_uri_images(&html, "example.com");
         let std::borrow::Cow::Owned(rewritten) = rewritten else {
             panic!("image must be rewritten")
         };
         assert_eq!(images[0].bytes.len(), 1024 * 1024);
         assert!(rewritten.capacity() < 1024);
         let invalid = "<img src=\"data:image/png;base64,invalid!\">";
-        let (unchanged, images) = extract_data_uri_images(invalid);
+        let (unchanged, images) = extract_data_uri_images(invalid, "example.com");
         assert!(matches!(unchanged, std::borrow::Cow::Borrowed(_)));
         assert_eq!(unchanged.as_ptr(), invalid.as_ptr());
         assert!(images.is_empty());
@@ -3443,7 +4727,7 @@ mod tests {
         // 1x1 transparent PNG
         let png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
         let html = format!(r#"before <img src="data:image/png;base64,{png_b64}" alt="dot"> after"#);
-        let (rewritten, images) = extract_data_uri_images(&html);
+        let (rewritten, images) = extract_data_uri_images(&html, "example.com");
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].mime_type, "image/png");
         assert!(rewritten.contains(&format!("src=\"cid:{}\"", images[0].cid)));
@@ -3460,9 +4744,127 @@ mod tests {
     }
 
     #[test]
+    fn images_go_with_the_html_they_belong_to() {
+        let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+        let html = format!(
+            r#"<p>Chart <img src="data:image/png;base64,{png}"> and photo <img src="data:image/jpeg;base64,/9j/"></p>"#
+        );
+        for attached in [false, true] {
+            let mut message = outgoing("Chart [image] and photo [image]", Some(&html));
+            if attached {
+                message.attachments.push(OutgoingAttachment {
+                    filename: "notes.pdf".into(),
+                    mime_type: "application/pdf".into(),
+                    bytes: b"%PDF-1.7".to_vec(),
+                });
+            }
+            let (_, raw) = build_message(&message).unwrap();
+            let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+            let types: Vec<String> = parsed
+                .parts
+                .iter()
+                .map(|part| {
+                    let content_type = part.content_type().unwrap();
+                    format!(
+                        "{}/{}",
+                        content_type.ctype(),
+                        content_type.subtype().unwrap_or_default()
+                    )
+                })
+                .collect();
+            let mut expected = vec![
+                "multipart/alternative",
+                "text/plain",
+                "multipart/related",
+                "text/html",
+                "image/png",
+                "image/jpeg",
+            ];
+            if attached {
+                expected.insert(0, "multipart/mixed");
+                expected.push("application/pdf");
+            }
+            assert_eq!(types, expected, "attached: {attached}");
+
+            let related = parsed
+                .parts
+                .iter()
+                .find(|part| part.content_type().unwrap().subtype() == Some("related"))
+                .unwrap();
+            assert_eq!(
+                related.content_type().unwrap().attribute("type"),
+                Some("text/html")
+            );
+            let html = parsed.body_html(0).unwrap();
+            for (index, extension) in [(1, "png"), (2, "jpg")] {
+                let image = parsed
+                    .parts
+                    .iter()
+                    .find(|part| {
+                        part.attachment_name() == Some(format!("image{index}.{extension}").as_str())
+                    })
+                    .unwrap();
+                let cid = image.content_id().unwrap();
+                assert!(cid.starts_with(&format!("img{index}.")), "{cid}");
+                assert!(cid.ends_with("@example.com"), "{cid}");
+                assert!(html.contains(&format!("src=\"cid:{cid}\"")));
+                let disposition = image.content_disposition().unwrap();
+                assert_eq!(disposition.ctype(), "inline");
+                assert_eq!(
+                    disposition.attribute("filename"),
+                    Some(format!("image{index}.{extension}").as_str())
+                );
+            }
+            assert!(!html.contains("data:"));
+            assert_eq!(
+                parsed.body_text(0).unwrap(),
+                "Chart [image] and photo [image]"
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_images_are_measured_without_decoding() {
+        let html = concat!(
+            r#"<p>a <img src="data:image/png;base64,AAAAAAAA"> b "#,
+            r#"<img src="https://example.com/x.png"> <img src="data:image/gif;base64,AAAA"></p>"#,
+        );
+        assert_eq!(
+            embedded_images(html),
+            EmbeddedImages {
+                source_bytes: "data:image/png;base64,AAAAAAAA".len()
+                    + "data:image/gif;base64,AAAA".len(),
+                image_bytes: 9,
+            }
+        );
+        assert_eq!(embedded_images("<p>none</p>"), EmbeddedImages::default());
+    }
+
+    #[test]
+    fn only_plain_image_types_become_parts() {
+        let html = concat!(
+            r#"<img src="data:image/png;charset=x;base64,AAE=">"#,
+            r#"<img src="data:image/svg+xml;base64,PHN2Zy8+">"#,
+            r#"<img src="data:image/png&#13;&#10;X-Evil: 1;base64,AAE=">"#,
+            "<img src=\"data:image/png\r\nX-Evil: 1;base64,AAE=\">",
+            r#"<img src="data:image/;base64,AAE=">"#,
+        );
+        let (rewritten, images) = extract_data_uri_images(html, "example.com");
+        let found: Vec<_> = images
+            .iter()
+            .map(|image| (image.mime_type.as_str(), image.filename.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [("image/png", "image1.png"), ("image/svg+xml", "image2.svg")]
+        );
+        assert_eq!(rewritten.matches("data:image/").count(), 3);
+    }
+
+    #[test]
     fn malformed_data_uri_is_left_alone() {
         let html = r#"<img src="data:image/png;base64,@@notbase64@@">"#;
-        let (rewritten, images) = extract_data_uri_images(html);
+        let (rewritten, images) = extract_data_uri_images(html, "example.com");
         assert!(images.is_empty());
         assert_eq!(rewritten, html);
     }

@@ -3,8 +3,18 @@
 [patch.crates-io]
 blitz-dom = { path = "../../crates/blitz-dom" }
 blitz-paint = { path = "../../crates/blitz-paint" }
-parley = { path = "../../crates/parley" }
 i-slint-backend-winit = { path = "../../crates/i-slint-backend-winit" }
+smithay-clipboard = { path = "../../crates/smithay-clipboard" }
+# Slint 1.19's software renderer panics on a rounded clip far out of view; see
+# patches/slint-renderer-software/README.md.
+i-slint-renderer-software = { path = "../../crates/i-slint-renderer-software" }
+# Fontique 0.12 slants italics from a font's `slnt` axis the wrong way, so
+# variable fonts without an italic face, such as the bundled Google Sans Flex,
+# stay upright; see patches/fontique/README.md.
+fontique = { path = "../../crates/fontique" }
+# Remove when Slint releases its Android pointer scroll fix; see
+# patches/slint-android-activity/README.md.
+i-slint-backend-android-activity = { path = "../../crates/i-slint-backend-android-activity" }
 
 [profile.release]
 opt-level = 3
@@ -17,7 +27,7 @@ strip = "symbols"
 name = "flectar-mail-android"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.95"
 license = "AGPL-3.0-only"
 repository = "https://github.com/flectar/mail"
 homepage = "https://flectar.com"
@@ -34,7 +44,7 @@ jni = "0.21"
 jni-verifier = { package = "jni", version = "0.22" }
 rustls-platform-verifier = "0.7"
 serde_json = "1"
-slint = { version = "1.18.1", default-features = false, features = [
+slint = { version = "1.19.0", default-features = false, features = [
     "std",
     "backend-android-activity-06",
     "renderer-skia",

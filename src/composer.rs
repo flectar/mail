@@ -6,16 +6,24 @@
 use super::*;
 use crate::rich_compose::{EditMark, EditState};
 use flectar_mail_core::models::{
-    Address, AttachmentMeta, SaveDraftArgs, SenderIdentity, Signature,
+    Address, AttachmentMeta, Importance, SaveDraftArgs, SenderIdentity, Settings, Signature,
 };
 use slint::SharedString;
 #[cfg(desktop)]
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use std::rc::Weak;
 
+mod forward;
+mod link_block;
+mod links;
 mod message_spelling;
+mod photos;
+mod placeholders;
+mod plain_text;
 pub(crate) use message_spelling::spelling_changed;
 use message_spelling::{MessageSpelling, apply_spelling_state};
+use photos::MessagePhotos;
+use plain_text::PlainEdit;
 
 thread_local! {
     static COMPOSERS: RefCell<Option<Rc<Composers>>> = const { RefCell::new(None) };
@@ -35,12 +43,18 @@ pub(super) struct Composers {
     state: Rc<RefCell<InboxState>>,
     runtime: tokio::runtime::Handle,
     documents: Arc<dyn documents::DocumentProvider>,
+    /// Where shrunk copies of attached photos are kept while their messages are open.
+    temp_dir: PathBuf,
     templates: RefCell<Vec<Snippet>>,
     send_updates: UiSender<ComposeSendUpdate>,
     sessions: RefCell<Vec<Rc<ComposeSession>>>,
     /// Wakes the composers when a quoted message's image finished loading.
     quote_wake: UiWake,
     quote_poll_pending: Cell<bool>,
+    /// Files dropped on the main window with no message open there, for the
+    /// new one they start. They arrive one at a time.
+    #[cfg(desktop)]
+    dropped: RefCell<Vec<PathBuf>>,
 }
 
 /// An original moved into the message's text by Edit.
@@ -60,6 +74,14 @@ pub(super) struct ComposeSession {
     /// left on the one it moved from no longer reach it.
     host_id: Cell<u64>,
     files: RefCell<Vec<ComposeFile>>,
+    /// Downloads of a forward's files still on their way, and uploads of files sent by link,
+    /// which sending waits for.
+    attaching: Cell<u32>,
+    /// Files the message sends by link, and the timer that shows how far along their uploads
+    /// are.
+    links: RefCell<Vec<links::LinkedFile>>,
+    next_link: Cell<u64>,
+    link_timer: Timer,
     /// Bumped when the message is cleared, so a file picker or a download of
     /// the original's files that finishes later attaches to nothing.
     generation: Cell<u64>,
@@ -80,15 +102,43 @@ pub(super) struct ComposeSession {
     edited_quote: RefCell<Option<EditedQuote>>,
     send_action: Cell<Option<i64>>,
     picking: Cell<bool>,
+    /// Files dropped on the message, which go in together once the drop ends.
+    #[cfg(desktop)]
+    dropped: RefCell<Vec<PathBuf>>,
     /// The signature block this composer inserted, while the user has not
     /// edited it, and the signatures of its sending account.
     signature: RefCell<Option<String>>,
     signatures: RefCell<Vec<Signature>>,
+    /// The signature this composer writes, in place of a message.
+    signature_target: RefCell<Option<SignatureTarget>>,
     /// Bumped for each sending-account change; older results are dropped.
     preferences_generation: Cell<u64>,
     spelling: MessageSpelling,
+    photos: MessagePhotos,
+    /// The message goes out as plain text only.
+    plain_text: Cell<bool>,
+    /// The edit that took the message's formatting out, while undo can take it back.
+    plain_edit: RefCell<Option<PlainEdit>>,
+    /// An email template went into the message, whose placeholders sending checks for.
+    templated: Cell<bool>,
+    /// The placeholders the message was last sent with, which sending warned about.
+    placeholder_warning: RefCell<Vec<String>>,
+    /// The user said to send without a subject, or without the file the
+    /// message mentions (#236), while sending goes on.
+    subject_confirmed: Cell<bool>,
+    attachment_confirmed: Cell<bool>,
+    /// The subject a reply or forward started with, which mentions files of
+    /// the original rather than the user's.
+    opened_subject: RefCell<String>,
+    /// Until the sending account's preference chooses how the message starts: whether it
+    /// answers or forwards a plain-text message.
+    format_pending: Cell<Option<bool>>,
     /// Closed, and waiting for the event loop to let its window go.
     disposed: Cell<bool>,
+    /// The draft an AI agent asked to send, which this composer shows the
+    /// user to check (#237).
+    #[cfg(desktop)]
+    reviewing: Cell<Option<i64>>,
 }
 
 enum Host {
@@ -175,6 +225,7 @@ pub(super) fn install(
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,
     documents: Arc<dyn documents::DocumentProvider>,
+    temp_dir: PathBuf,
     pop_out: bool,
 ) -> Rc<Composers> {
     let (send_tx, send_rx) = bounded_ui_channel::<ComposeSendUpdate>();
@@ -184,6 +235,7 @@ pub(super) fn install(
         state: Rc::clone(state),
         runtime: runtime.clone(),
         documents,
+        temp_dir,
         templates: RefCell::default(),
         send_updates: UiSender::new(
             send_tx,
@@ -192,8 +244,22 @@ pub(super) fn install(
         sessions: RefCell::default(),
         quote_wake: UiWake::new(app.as_weak(), |app| app.invoke_refresh_composer_quotes()),
         quote_poll_pending: Cell::new(false),
+        #[cfg(desktop)]
+        dropped: RefCell::default(),
     });
     COMPOSERS.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&composers)));
+    #[cfg(desktop)]
+    crate::agents::on_send_review(|draft_id, agent| {
+        let posted = slint::invoke_from_event_loop(move || {
+            let opened = with_composers(|composers| composers.review_send(draft_id, &agent));
+            if opened != Some(true) {
+                crate::agents::review_ended(draft_id);
+            }
+        });
+        if posted.is_err() {
+            crate::agents::review_ended(draft_id);
+        }
+    });
 
     let weak = Rc::downgrade(&composers);
     app.on_open_compose(move |to| {
@@ -208,7 +274,11 @@ pub(super) fn install(
         if let Some(composers) = weak.upgrade()
             && let Some(app) = composers.app.upgrade()
         {
-            composers.open_from_message(&app, action.as_str());
+            if action == "forward_attachment" {
+                composers.forward_shown_as_attachment(&app);
+            } else {
+                composers.open_from_message(&app, action.as_str());
+            }
         }
     });
     let weak = Rc::downgrade(&composers);
@@ -261,6 +331,31 @@ pub(super) fn install(
 }
 
 /// The composers, once installed.
+/// Opens a signature, or a new one when `signature` is `None`, in a composer to write.
+pub(super) fn edit_signature(app: &AppWindow, account_id: i64, signature: Option<Signature>) {
+    with_composers(|composers| composers.edit_signature(app, account_id, signature));
+}
+
+/// Files dragged over the main window, for its open message to show where
+/// they'll go, or the window when they'd start a new one.
+#[cfg(desktop)]
+pub(super) fn files_hovered(hovering: bool) {
+    with_composers(|composers| match composers.in_app() {
+        Some(session) => session.files_hovered(hovering),
+        None => composers.new_message_hint(hovering),
+    });
+}
+
+/// A file dropped on the main window goes into its open message, or starts a
+/// new one.
+#[cfg(desktop)]
+pub(super) fn file_dropped(path: PathBuf) {
+    with_composers(|composers| match composers.in_app() {
+        Some(session) => session.file_dropped(path),
+        None => composers.dropped_for_new_message(path),
+    });
+}
+
 pub(super) fn with_composers<R>(f: impl FnOnce(&Rc<Composers>) -> R) -> Option<R> {
     COMPOSERS.with(|slot| slot.borrow().as_ref().map(f))
 }
@@ -340,7 +435,11 @@ pub(super) fn save_open_messages() {
     with_composers(|composers| {
         let sessions = composers.sessions.borrow().clone();
         for session in sessions {
-            if session.disposed.get() || session.send_action.get().is_some() {
+            // A signature being written isn't a message, and has no draft.
+            if session.disposed.get()
+                || session.send_action.get().is_some()
+                || session.signature_target.borrow().is_some()
+            {
                 continue;
             }
             let Some(host) = session.host() else {
@@ -448,6 +547,12 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_from_label(from.get_from_label());
     to.set_attachments(from.get_attachments());
     to.set_attachment_summary(from.get_attachment_summary());
+    to.set_attaching_files(from.get_attaching_files());
+    to.set_links(from.get_links());
+    to.set_link_sharing(from.get_link_sharing());
+    to.set_plain_text(from.get_plain_text());
+    to.set_request_receipt(from.get_request_receipt());
+    to.set_importance(from.get_importance());
     to.set_templates(from.get_templates());
     to.set_message(from.get_message());
     to.set_notice_is_error(from.get_notice_is_error());
@@ -459,6 +564,15 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_strike_active(from.get_strike_active());
     to.set_code_active(from.get_code_active());
     to.set_active_link_url(from.get_active_link_url());
+    to.set_active_color(from.get_active_color());
+    to.set_active_highlight(from.get_active_highlight());
+    to.set_active_size(from.get_active_size());
+    to.set_active_family(from.get_active_family());
+    to.set_active_align(from.get_active_align());
+    to.set_active_image_size(from.get_active_image_size());
+    to.set_active_image_alt(from.get_active_image_alt());
+    to.set_active_image_width(from.get_active_image_width());
+    to.set_active_image_shown_width(from.get_active_image_shown_width());
     to.set_quote(from.get_quote());
     to.set_quote_left_out(from.get_quote_left_out());
     to.set_quote_text(from.get_quote_text());
@@ -550,12 +664,21 @@ impl Composers {
             }
             previous.dispose();
         }
+        self.start_session(app, Host::Main(app.as_weak()))
+    }
+
+    /// A new, empty composer in `host`.
+    fn start_session(self: &Rc<Self>, app: &AppWindow, host: Host) -> Option<Rc<ComposeSession>> {
         let session = Rc::new_cyclic(|this| ComposeSession {
             this: this.clone(),
             composers: Rc::downgrade(self),
-            host: RefCell::new(Host::Main(app.as_weak())),
+            host: RefCell::new(host),
             host_id: Cell::new(0),
             files: RefCell::default(),
+            attaching: Cell::new(0),
+            links: RefCell::default(),
+            next_link: Cell::new(0),
+            link_timer: Timer::default(),
             generation: Cell::new(0),
             document: RefCell::default(),
             editor: RefCell::default(),
@@ -568,16 +691,36 @@ impl Composers {
             edited_quote: RefCell::default(),
             send_action: Cell::new(None),
             picking: Cell::new(false),
+            #[cfg(desktop)]
+            dropped: RefCell::default(),
             signature: RefCell::default(),
             signatures: RefCell::default(),
+            signature_target: RefCell::default(),
             preferences_generation: Cell::new(0),
             spelling: MessageSpelling::default(),
+            photos: MessagePhotos::default(),
+            plain_text: Cell::new(false),
+            plain_edit: RefCell::default(),
+            templated: Cell::new(false),
+            placeholder_warning: RefCell::default(),
+            subject_confirmed: Cell::new(false),
+            attachment_confirmed: Cell::new(false),
+            opened_subject: RefCell::default(),
+            format_pending: Cell::new(Some(false)),
             disposed: Cell::new(false),
+            #[cfg(desktop)]
+            reviewing: Cell::new(None),
         });
         session.connect();
+        // What's written starts in the default text style from Settings.
+        session.document.borrow_mut().set_base_style(
+            crate::rich_compose::FontFamily::from_name(&app.get_compose_font()).unwrap_or_default(),
+            crate::rich_compose::TextSize::from_name(&app.get_compose_text_size())
+                .unwrap_or_default(),
+        );
         let host = session.host()?;
         let ui = host.ui();
-        ui.set_can_pop_out(self.pop_out);
+        ui.set_can_pop_out(self.pop_out && matches!(host, HostRef::Main(_)));
         ui.set_accounts(app.get_connected_accounts());
         ui.set_account_id(app.get_compose_account_id());
         ui.set_from_label(app.get_compose_from_label());
@@ -585,6 +728,34 @@ impl Composers {
         session.clear_fields(&host);
         self.sessions.borrow_mut().push(Rc::clone(&session));
         Some(session)
+    }
+
+    /// Opens a signature to write in a composer of its own: on the desktop in a window beside
+    /// Settings and any message being written, and on phones in place of Settings.
+    fn edit_signature(
+        self: &Rc<Self>,
+        app: &AppWindow,
+        account_id: i64,
+        signature: Option<Signature>,
+    ) {
+        let session = if self.pop_out {
+            let Some(host) = new_window(app) else {
+                return;
+            };
+            self.start_session(app, host)
+        } else {
+            // Phones show one composer, which a message being written keeps.
+            if self.in_app().is_some() {
+                app.global::<AccountMailPreferences>()
+                    .set_status("Close the message you're writing to edit a signature.".into());
+                return;
+            }
+            app.invoke_close_settings();
+            self.open(app)
+        };
+        if let Some(session) = session {
+            session.start_signature(account_id, signature, !self.pop_out);
+        }
     }
 
     /// A new message to `to`, which may be empty. A message the main window
@@ -610,26 +781,55 @@ impl Composers {
         Some(session)
     }
 
+    /// Shows over the main window that files dropped there start a new
+    /// message, while one could.
+    #[cfg(desktop)]
+    fn new_message_hint(&self, hovering: bool) {
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        let can_start = !self.state.borrow().connected_accounts.is_empty();
+        app.set_drop_starts_message(hovering && can_start);
+    }
+
+    /// A file dropped on the main window with no message open there. The
+    /// others of the same drop follow at once, and they start one new
+    /// message together.
+    #[cfg(desktop)]
+    fn dropped_for_new_message(self: &Rc<Self>, path: PathBuf) {
+        let mut dropped = self.dropped.borrow_mut();
+        dropped.push(path);
+        if dropped.len() > 1 {
+            return;
+        }
+        let composers = Rc::downgrade(self);
+        Timer::single_shot(Duration::from_millis(30), move || {
+            if let Some(composers) = composers.upgrade() {
+                composers.start_with_dropped();
+            }
+        });
+    }
+
+    #[cfg(desktop)]
+    fn start_with_dropped(self: &Rc<Self>) {
+        let paths = std::mem::take(&mut *self.dropped.borrow_mut());
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        // No event ends the hover once files are dropped.
+        app.set_drop_starts_message(false);
+        if paths.is_empty() {
+            return;
+        }
+        if let Some(session) = self.open_new(&app, "") {
+            session.place_files(paths);
+        }
+    }
+
     /// Reply, reply all, forward, edit as new, or edit the selected draft.
     fn open_from_message(self: &Rc<Self>, app: &AppWindow, action: &str) {
-        let (core, row, conversation_message_id) = {
-            let state = self.state.borrow();
-            let row = state
-                .selected_id
-                .and_then(|id| state.messages.iter().find(|message| message.id == id))
-                .cloned();
-            let conversation_message_id = row.as_ref().and_then(|row| {
-                (state.conversation_owner_id == Some(row.id))
-                    .then(|| {
-                        state
-                            .conversation_messages
-                            .get(state.conversation_selected_index)
-                            .map(|message| i64::from(message.id))
-                    })
-                    .flatten()
-            });
-            (state.core.clone(), row, conversation_message_id)
-        };
+        let (row, conversation_message_id) = self.shown_message();
+        let core = self.core();
         let Some(core) = core else {
             app.set_render_status(UiMessage::plain(
                 "Connect an account before replying or forwarding.",
@@ -710,6 +910,7 @@ impl Composers {
         ui.set_to(prepared.to.into());
         ui.set_cc(prepared.cc.into());
         ui.set_bcc("".into());
+        *session.opened_subject.borrow_mut() = prepared.subject.clone();
         ui.set_subject(prepared.subject.into());
         let quote = {
             let mut document = session.document.borrow_mut();
@@ -725,9 +926,14 @@ impl Composers {
                     document.load_html_start(own, &saved.text)
                 })
             });
+            // HTML another app wrote opens with the formatting and images pasting keeps.
             if split.is_none()
                 && saved
-                    .and_then(|saved| document.load_html(&saved.html, &saved.text))
+                    .and_then(|saved| {
+                        document
+                            .load_html(&saved.html, &saved.text)
+                            .or_else(|| document.load_foreign_html(&saved.html))
+                    })
                     .is_none()
             {
                 document.load(&prepared.body, 0, 0);
@@ -735,6 +941,13 @@ impl Composers {
             split
         };
         session.set_quote(&ui, prepared.quote.or(quote));
+        // A message edited as new keeps the original's format; replies and forwards start as
+        // the account's preference says once it's loaded, which may follow the original's.
+        if action == "edit_as_new" {
+            session.start_format(prepared.plain_original);
+        } else {
+            session.format_pending.set(Some(prepared.plain_original));
+        }
         *session.intent.borrow_mut() = prepared.intent;
         session.show(action, Some(prepared.sender_email));
         // A forward, and a message edited as new, carry the original's files.
@@ -756,6 +969,61 @@ impl Composers {
         }
     }
 
+    /// Opens draft `draft_id`, which the AI agent `agent` asked to send, for
+    /// the user to check and send themselves (#237). False when it couldn't
+    /// open.
+    #[cfg(desktop)]
+    fn review_send(self: &Rc<Self>, draft_id: i64, agent: &str) -> bool {
+        if let Some(open) = self.holding_draft(draft_id) {
+            open.bring_forward();
+            return self.mark_review(&open, draft_id, agent);
+        }
+        let Some(core) = self.core() else {
+            return false;
+        };
+        let Ok(draft) = self.runtime.block_on(core.file_core().get_draft(draft_id)) else {
+            return false;
+        };
+        self.show_review(draft, agent)
+    }
+
+    /// Opens `draft`, which an AI agent asked to send, in a window of its
+    /// own, so a message the main window holds stays as it is.
+    #[cfg(desktop)]
+    fn show_review(self: &Rc<Self>, draft: SaveDraftArgs, agent: &str) -> bool {
+        let (Some(app), Some(draft_id)) = (self.app.upgrade(), draft.draft_id) else {
+            return false;
+        };
+        if let Some(open) = self.holding_draft(draft_id) {
+            open.bring_forward();
+            return self.mark_review(&open, draft_id, agent);
+        }
+        let Some(window) = new_window(&app) else {
+            return false;
+        };
+        match self.show_written_in(&app, draft, "draft", Some(window)) {
+            Some(session) => self.mark_review(&session, draft_id, agent),
+            None => false,
+        }
+    }
+
+    /// Notes over `session` that `agent` asked to send it.
+    #[cfg(desktop)]
+    fn mark_review(&self, session: &ComposeSession, draft_id: i64, agent: &str) -> bool {
+        let (Some(app), Some(host)) = (self.app.upgrade(), session.host()) else {
+            return false;
+        };
+        session.reviewing.set(Some(draft_id));
+        host.ui().set_review_note(translated(
+            &app,
+            &UiMessage::detail(
+                "{} asked to send this message. Check it, and send it only if it's right.",
+                agent,
+            ),
+        ));
+        true
+    }
+
     /// Open a saved draft in a composer.
     fn show_draft(self: &Rc<Self>, app: &AppWindow, draft: SaveDraftArgs) {
         self.show_written(app, draft, "draft");
@@ -764,17 +1032,29 @@ impl Composers {
     /// Open a written message in a composer: a saved draft (`mode` "draft"),
     /// or a new message the user has yet to look over ("new").
     fn show_written(self: &Rc<Self>, app: &AppWindow, draft: SaveDraftArgs, mode: &str) {
+        self.show_written_in(app, draft, mode, None);
+    }
+
+    /// Open a written message in a composer in `window`, or in the main
+    /// window's, and give the composer that shows it.
+    fn show_written_in(
+        self: &Rc<Self>,
+        app: &AppWindow,
+        draft: SaveDraftArgs,
+        mode: &str,
+        window: Option<Host>,
+    ) -> Option<Rc<ComposeSession>> {
         // A draft already open in a composer comes forward instead of opening
         // twice, where each copy's saves would overwrite the other's.
         if let Some(open) = draft.draft_id.and_then(|id| self.holding_draft(id)) {
             open.bring_forward();
-            return;
+            return Some(open);
         }
         let Ok(account_id) = i32::try_from(draft.account_id) else {
             app.set_render_status(UiMessage::plain(
                 "Could not open draft: invalid account identifier",
             ));
-            return;
+            return None;
         };
         let account_label = self
             .state
@@ -802,12 +1082,11 @@ impl Composers {
             .map(|address| address.email.clone())
             .unwrap_or_default();
 
-        let Some(session) = self.open(app) else {
-            return;
-        };
-        let Some(host) = session.host() else {
-            return;
-        };
+        let session = match window {
+            Some(window) => self.start_session(app, window),
+            None => self.open(app),
+        }?;
+        let host = session.host()?;
         let ui = host.ui();
         ui.set_account_id(account_id);
         ui.set_from_label(account_label.into());
@@ -815,6 +1094,9 @@ impl Composers {
         ui.set_cc(compose_addresses(&draft.cc).into());
         ui.set_bcc(compose_addresses(&draft.bcc).into());
         ui.set_subject(draft.subject.clone().into());
+        ui.set_request_receipt(draft.request_read_receipt);
+        ui.set_importance(i32::try_from(draft.importance.as_i64()).unwrap_or_default());
+        session.opened_subject.borrow_mut().clear();
 
         *session.files.borrow_mut() = draft
             .attachments
@@ -825,17 +1107,27 @@ impl Composers {
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
                 ComposeFile {
+                    shrinkable: crate::photo_shrink::can_shrink_file(&path),
                     path,
                     filename: attachment.filename.clone(),
                     size,
                     _import: None,
+                    original: None,
                 }
             })
             .collect();
         apply_compose_files(&ui, &session.files.borrow());
+        // A draft saved as plain text has text and no HTML.
+        let plain = draft
+            .body_html
+            .as_deref()
+            .is_none_or(|html| html.trim().is_empty())
+            && !draft.body_text.trim().is_empty();
         let quote = {
             let mut document = session.document.borrow_mut();
-            let html = draft.body_html.as_deref().unwrap_or_default();
+            // Files the draft sends by link come back as such.
+            let html = session.restore_links(draft.body_html.as_deref().unwrap_or_default());
+            let html = html.as_str();
             // The HTML keeps the draft's formatting and the original it
             // quotes; HTML that holds other text than the draft's opens as
             // the plain text.
@@ -847,12 +1139,17 @@ impl Composers {
                 document.load_html_start(own, &draft.body_text)
             });
             if split.is_none() && document.load_html(html, &draft.body_text).is_none() {
-                let cursor = i32::try_from(draft.body_text.len()).unwrap_or(i32::MAX);
-                document.load(&draft.body_text, cursor, cursor);
+                // Images the HTML no longer holds leave no mark in the text.
+                let text = draft
+                    .body_text
+                    .replace(crate::rich_compose::IMAGE_PLACEHOLDER, "");
+                let cursor = i32::try_from(text.len()).unwrap_or(i32::MAX);
+                document.load(&text, cursor, cursor);
             }
             split
         };
         session.set_quote(&ui, quote);
+        session.start_format(plain);
         *session.intent.borrow_mut() = ComposeIntent {
             mode: draft.mode,
             in_reply_to_message_id: draft.in_reply_to_message_id,
@@ -860,6 +1157,7 @@ impl Composers {
             draft_id: draft.draft_id,
         };
         session.show(mode, Some(draft_sender_email));
+        Some(session)
     }
 
     /// A send reached its end: a sent message closes its composer, a failed
@@ -970,6 +1268,7 @@ impl ComposeSession {
         }
         self.render_quote(host);
         self.check_spelling_soon();
+        self.refresh_photos();
     }
 
     /// Draw the visible part of the original below the editor, while it is
@@ -1022,23 +1321,22 @@ impl ComposeSession {
             );
             // Line the quote up with the reply above it, and give unstyled
             // text such as the attribution line the reply's size rather than
-            // the reader's 16px default.
-            let html = format!(
-                "<body style=\"margin:8px 0;font-size:{}px\">{}</body>",
-                crate::compose_editor::FONT_SIZE_LOGICAL,
-                quote.html
-            );
+            // the reader's 16px default. A plain-text message shows the
+            // original as the text that goes out.
+            let html = if self.plain_text.get() {
+                plain_text::plain_quote_html(&quote.plain)
+            } else {
+                format!(
+                    "<body style=\"margin:8px 0;font-size:{}px\">{}</body>",
+                    crate::compose_editor::FONT_SIZE_LOGICAL,
+                    quote.html
+                )
+            };
             // An original the renderer can't lay out shows as its text, as
             // the reader shows such a message; what is sent stays the same.
             let prepared = renderer.prepare_email_html(&html, false).or_else(|error| {
                 tracing::warn!(%error, "quoted message shown as text");
-                let mut text = format!(
-                    "<body style=\"margin:8px 0;font-size:{}px\"><div style=\"white-space:pre-wrap\">",
-                    crate::compose_editor::FONT_SIZE_LOGICAL
-                );
-                crate::email_document::append_escaped(&mut text, &quote.plain);
-                text.push_str("</div></body>");
-                renderer.prepare_email_html(&text, false)
+                renderer.prepare_email_html(&plain_text::plain_quote_html(&quote.plain), false)
             });
             match prepared {
                 Ok(prepared) => {
@@ -1119,11 +1417,19 @@ impl ComposeSession {
     fn clear_fields(&self, host: &HostRef) {
         let ui = host.ui();
         host.preferences().invoke_composer_reset();
+        self.reset_send_checks();
+        self.opened_subject.borrow_mut().clear();
+        ui.set_send_check_open(false);
         ui.set_editor_tiles(ModelRc::default());
         apply_compose_files(&ui, &[]);
+        ui.set_links(ModelRc::default());
+        ui.set_attaching_files(false);
+        photos::apply_photos(&ui, &photos::PhotoSummary::default());
+        ui.set_plain_text(false);
         apply_compose_contacts(&ui, &[]);
         ui.set_sending(false);
         ui.set_mode("new".into());
+        ui.set_importance(0);
         ui.set_to("".into());
         ui.set_cc("".into());
         ui.set_bcc("".into());
@@ -1136,6 +1442,7 @@ impl ComposeSession {
         ui.set_quote_tiles(ModelRc::default());
         ui.set_quote_height(0.0);
         ui.set_notice(UiMessage::EMPTY, false);
+        ui.set_review_note("".into());
         apply_rich_compose_state(&ui, &self.document.borrow(), ComposeSelection::default());
     }
 
@@ -1147,12 +1454,16 @@ impl ComposeSession {
         };
         let ui = host.ui();
         ui.set_mode(mode.into());
-        let preferences = host.preferences();
-        preferences.invoke_composer_reset();
-        if let Some(sender_email) = sender_email {
-            preferences.set_composer_sender_email(sender_email.into());
+        ui.set_link_sharing(self.can_share_by_link());
+        // A signature has no sender, and no signature of its own to insert.
+        if mode != "signature" {
+            let preferences = host.preferences();
+            preferences.invoke_composer_reset();
+            if let Some(sender_email) = sender_email {
+                preferences.set_composer_sender_email(sender_email.into());
+            }
+            preferences.invoke_composer_account_changed(ui.get_account_id());
         }
-        preferences.invoke_composer_account_changed(ui.get_account_id());
         self.editor.borrow_mut().reset();
         {
             let document = self.document.borrow();
@@ -1307,6 +1618,19 @@ impl ComposeSession {
                 }
                 _ => {}
             }
+            match event {
+                WindowEvent::HoveredFile(_) | WindowEvent::HoveredFileCancelled => {
+                    if let Some(session) = session.upgrade() {
+                        session.files_hovered(matches!(event, WindowEvent::HoveredFile(_)));
+                    }
+                }
+                WindowEvent::DroppedFile(path) => {
+                    if let Some(session) = session.upgrade() {
+                        session.file_dropped(path.clone());
+                    }
+                }
+                _ => {}
+            }
             if matches!(
                 event,
                 WindowEvent::Resized(_) | WindowEvent::Focused(_) | WindowEvent::Occluded(_)
@@ -1350,7 +1674,18 @@ impl ComposeSession {
         if self.disposed.replace(true) {
             return;
         }
+        #[cfg(desktop)]
+        if let Some(draft_id) = self.reviewing.take() {
+            crate::agents::review_ended(draft_id);
+        }
         self.files.borrow_mut().clear();
+        self.attaching.set(0);
+        // Files already shared stay so: a sent message links to them.
+        self.links.borrow_mut().clear();
+        self.link_timer.stop();
+        self.templated.set(false);
+        self.placeholder_warning.borrow_mut().clear();
+        self.photos.clear();
         // A picker still open for this composer must not attach to another.
         self.generation.set(self.generation.get().wrapping_add(1));
         self.preferences_generation
@@ -1365,6 +1700,7 @@ impl ComposeSession {
         *self.left_out_quote.borrow_mut() = None;
         *self.edited_quote.borrow_mut() = None;
         *self.signature.borrow_mut() = None;
+        *self.signature_target.borrow_mut() = None;
         if let Some(host) = self.host() {
             match &host {
                 HostRef::Main(_) => {
@@ -1436,9 +1772,21 @@ impl ComposeSession {
             }
         });
         let weak = self.reference();
+        ui.on_save_signature(move || {
+            if let Some(session) = weak.upgrade() {
+                session.save_signature();
+            }
+        });
+        let weak = self.reference();
         ui.on_save(move |account_id, to, cc, bcc, subject, body, send| {
             if let Some(session) = weak.upgrade() {
                 session.save(account_id, &to, &cc, &bcc, &subject, &body, send);
+            }
+        });
+        let weak = self.reference();
+        ui.on_answer_send_check(move |answer| {
+            if let Some(session) = weak.upgrade() {
+                session.answer_send_check(&answer);
             }
         });
         let weak = self.reference();
@@ -1448,9 +1796,21 @@ impl ComposeSession {
             }
         });
         let weak = self.reference();
+        ui.on_insert_images(move || {
+            if let Some(session) = weak.upgrade() {
+                session.pick_images();
+            }
+        });
+        let weak = self.reference();
         ui.on_remove_attachment(move |index| {
             if let Some(session) = weak.upgrade() {
                 session.remove_attachment(index);
+            }
+        });
+        let weak = self.reference();
+        ui.on_shrink_photos_toggled(move |on| {
+            if let Some(session) = weak.upgrade() {
+                session.set_shrink_photos(on);
             }
         });
         let weak = self.reference();
@@ -1469,9 +1829,28 @@ impl ComposeSession {
         });
         let weak = self.reference();
         ui.on_format(move |kind, body, anchor, cursor| {
-            if let Some(session) = weak.upgrade() {
+            // Plain text has no formatting to apply, also from the keyboard.
+            if let Some(session) = weak.upgrade()
+                && !session.plain_text.get()
+            {
                 session.edit(|document| document.format(&kind, &body, anchor, cursor));
             }
+        });
+        let weak = self.reference();
+        ui.on_plain_text_chosen(move |plain| {
+            if let Some(session) = weak.upgrade() {
+                session.set_plain_text(plain);
+            }
+        });
+        let weak = self.reference();
+        ui.on_paste_formatted(move |body, anchor, cursor| {
+            weak.upgrade()
+                .is_some_and(|session| session.paste_formatted(&body, anchor, cursor))
+        });
+        let weak = self.reference();
+        ui.on_copy_formatted(move |cut, body, anchor, cursor| {
+            weak.upgrade()
+                .is_some_and(|session| session.copy_formatted(cut, &body, anchor, cursor))
         });
         let weak = self.reference();
         ui.on_link(move |url, body, anchor, cursor| {
@@ -1528,6 +1907,21 @@ impl ComposeSession {
         ui.on_use_template(move |id| {
             weak.upgrade()
                 .is_some_and(|session| session.use_template(id))
+        });
+        ui.on_splice_text(|text, start, end, insert| {
+            placeholders::splice(&text, start, end, &insert).into()
+        });
+        let weak = self.reference();
+        ui.on_remove_link(move |index| {
+            if let Some(session) = weak.upgrade() {
+                session.remove_link(index);
+            }
+        });
+        let weak = self.reference();
+        ui.on_share_by_link(move || {
+            if let Some(session) = weak.upgrade() {
+                session.pick_link_files();
+            }
         });
         let weak = self.reference();
         ui.on_edit_quote(move || {
@@ -1638,7 +2032,19 @@ impl ComposeSession {
         if self.send_action.get().is_some() {
             return;
         }
+        let back_to_settings = self
+            .signature_target
+            .borrow()
+            .as_ref()
+            .is_some_and(|target| target.return_to_settings);
         self.dispose();
+        if back_to_settings
+            && let Some(app) = self
+                .composers()
+                .and_then(|composers| composers.app.upgrade())
+        {
+            app.invoke_open_settings();
+        }
         if let Some(app) = self
             .composers()
             .and_then(|composers| composers.app.upgrade())
@@ -1748,6 +2154,121 @@ impl ComposeSession {
             );
         }
         self.check_spelling_soon();
+        self.refresh_photos();
+    }
+
+    /// Pastes the HTML on the clipboard over the selection, with the formatting the composer
+    /// keeps, or else a picture on it. False when the clipboard holds neither, for the plain
+    /// text to go in.
+    fn paste_formatted(&self, body: &str, anchor: i32, cursor: i32) -> bool {
+        let Some(host) = self.host() else {
+            return false;
+        };
+        {
+            let mut document = self.document.borrow_mut();
+            if document.text() != body {
+                document.synchronize(body, anchor, cursor);
+            } else {
+                document.update_selection(anchor, cursor);
+            }
+        }
+        // Plain text takes what's pasted as text.
+        if self.plain_text.get() {
+            return false;
+        }
+        if let Some(html) = crate::reader_clipboard::html()
+            && self.paste_html(&host, &html)
+        {
+            return true;
+        }
+        // A picture copied on its own, such as a screenshot, goes in as an image.
+        let image = crate::reader_clipboard::image_png()
+            .and_then(|png| crate::rich_compose::InlineImage::from_file_bytes(png, ""));
+        match image {
+            Some(image) => {
+                self.insert_image(image);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Pastes `html` over the selection, unless it holds no text, or images that would take the
+    /// message's images and attachments past what a message carries. Returns whether it went in.
+    fn paste_html(&self, host: &HostRef, html: &str) -> bool {
+        {
+            let files = self
+                .files
+                .borrow()
+                .iter()
+                .map(|file| file.size)
+                .sum::<u64>();
+            let mut document = self.document.borrow_mut();
+            let carried = |document: &RichComposeDocument| -> u64 {
+                files.saturating_add(self.photos.image_bytes(document))
+            };
+            let before = carried(&document);
+            let Some(mut selection) = document.paste_html(html) else {
+                return false;
+            };
+            if carried(&document) > before.max(MAX_COMPOSE_ATTACHMENT_BYTES) {
+                if let Some(undone) = document.history("undo") {
+                    selection = undone;
+                }
+                host.ui().set_notice(
+                    UiMessage::plain("Images and attachments can take up to 25 MB in all."),
+                    true,
+                );
+            }
+            apply_rich_compose(
+                &host.view(),
+                &document,
+                selection,
+                &mut self.editor.borrow_mut(),
+            );
+        }
+        self.check_spelling_soon();
+        self.refresh_photos();
+        true
+    }
+
+    /// Puts the selection on the clipboard as HTML and plain text, so that it pastes back with
+    /// its formatting, and for a cut takes it out. False when the plain text is left to copy.
+    fn copy_formatted(&self, cut: bool, body: &str, anchor: i32, cursor: i32) -> bool {
+        let Some(host) = self.host() else {
+            return false;
+        };
+        {
+            let mut document = self.document.borrow_mut();
+            if document.text() != body {
+                document.synchronize(body, anchor, cursor);
+            } else {
+                document.update_selection(anchor, cursor);
+            }
+            // Plain text copies as text.
+            if self.plain_text.get() {
+                return false;
+            }
+            let Some((html, text)) = document.selection_html() else {
+                return false;
+            };
+            if !crate::reader_clipboard::set_html(&html, &text) {
+                return false;
+            }
+            if !cut {
+                return true;
+            }
+            let selection = document.insert_text("");
+            apply_rich_compose(
+                &host.view(),
+                &document,
+                selection,
+                &mut self.editor.borrow_mut(),
+            );
+        }
+        self.check_spelling_soon();
+        self.refresh_photos();
+        true
     }
 
     fn update_selection(&self, body: &str, anchor: i32, cursor: i32) {
@@ -1787,7 +2308,9 @@ impl ComposeSession {
                 .as_ref()
                 .map(|edited| document.edit_state(edited.mark))
         };
+        self.follow_plain_edit(&self.document.borrow());
         self.check_spelling_soon();
+        self.refresh_photos();
         // Undoing Edit puts the drawn original back, and redoing it moves the
         // original into the text again.
         let ui = host.ui();
@@ -1916,6 +2439,71 @@ impl ComposeSession {
         self.render_quote(&host);
     }
 
+    /// What sending asks first, if anything: whether to send without a
+    /// subject, then without the file the message mentions, as the first
+    /// keyword it mentions. Only what the user wrote counts.
+    fn send_check(
+        &self,
+        app: &AppWindow,
+        subject: &str,
+        body: &str,
+    ) -> Option<(&'static str, String)> {
+        if !self.subject_confirmed.get() && subject.trim().is_empty() {
+            return Some(("subject", String::new()));
+        }
+        let carries_files = !self.files.borrow().is_empty()
+            || !self.links.borrow().is_empty()
+            || self.document.borrow().images().next().is_some();
+        if self.attachment_confirmed.get() || carries_files {
+            return None;
+        }
+        let own_subject =
+            (subject.trim() != self.opened_subject.borrow().trim()).then_some(subject);
+        let text =
+            attachment_reminder::own_text(own_subject, body, self.signature.borrow().as_deref());
+        let keywords = attachment_reminder::keywords();
+        let local = translated(app, &keywords);
+        attachment_reminder::mentioned(&text, &[keywords.key(), local.as_str()])
+            .map(|keyword| ("attachment", keyword))
+    }
+
+    /// Sends on, attaches files, or goes back to the message, as the user
+    /// answered what sending asked.
+    fn answer_send_check(self: &Rc<Self>, answer: &str) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        match answer {
+            "send" => {
+                if ui.get_send_check() == "subject" {
+                    self.subject_confirmed.set(true);
+                } else {
+                    self.attachment_confirmed.set(true);
+                }
+                self.save(
+                    ui.get_account_id(),
+                    &ui.get_to(),
+                    &ui.get_cc(),
+                    &ui.get_bcc(),
+                    &ui.get_subject(),
+                    &ui.get_body(),
+                    true,
+                );
+            }
+            "attach" => {
+                self.reset_send_checks();
+                self.pick_attachments();
+            }
+            _ => self.reset_send_checks(),
+        }
+    }
+
+    fn reset_send_checks(&self) {
+        self.subject_confirmed.set(false);
+        self.attachment_confirmed.set(false);
+    }
+
     fn pick_attachments(self: &Rc<Self>) {
         let Some(composers) = self.composers() else {
             return;
@@ -1960,64 +2548,306 @@ impl ComposeSession {
                     return;
                 }
             };
-            if documents.is_empty() {
-                return;
+            session.attach(
+                documents
+                    .into_iter()
+                    .map(|document| NewAttachment {
+                        path: document.path().to_path_buf(),
+                        filename: document.name(),
+                        import: Some(document),
+                    })
+                    .collect(),
+            );
+        });
+    }
+
+    /// Attaches `new`, leaving out files already attached, ones that can't be read, and any
+    /// that would take the message's images and attachments past what it carries, which go
+    /// by link instead when a storage service is connected, and says what went in.
+    fn attach(self: &Rc<Self>, new: Vec<NewAttachment>) {
+        if new.is_empty() {
+            return;
+        }
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        if self.signature_target.borrow().is_some() {
+            ui.set_notice(
+                UiMessage::plain("A signature can hold pictures, but not attachments."),
+                true,
+            );
+            return;
+        }
+        let mut files = self.files.borrow_mut();
+        let mut total_size = files
+            .iter()
+            .map(|file| file.size)
+            .sum::<u64>()
+            .saturating_add(self.photos.image_bytes(&self.document.borrow()));
+        let mut added = 0usize;
+        let mut skipped = 0usize;
+        let mut shrinking = Vec::new();
+        let mut by_link = Vec::new();
+        let mut linking = None;
+        for document in new {
+            let path = std::fs::canonicalize(&document.path).unwrap_or(document.path);
+            if files.iter().any(|file| file.holds(&path)) || self.photos.waiting_for(&path) {
+                skipped += 1;
+                continue;
             }
-            let mut files = session.files.borrow_mut();
-            let mut total_size = files.iter().map(|file| file.size).sum::<u64>();
-            let mut added = 0usize;
-            let mut skipped = 0usize;
-            for document in documents {
-                let path = std::fs::canonicalize(document.path())
-                    .unwrap_or_else(|_| document.path().to_path_buf());
-                if files.iter().any(|file| file.path == path) {
+            let Ok(metadata) = std::fs::metadata(&path) else {
+                skipped += 1;
+                continue;
+            };
+            let Some(filename) = document.filename.filter(|_| metadata.is_file()) else {
+                skipped += 1;
+                continue;
+            };
+            let shrinkable = crate::photo_shrink::can_shrink_file(&path);
+            // A file the message can't carry goes by link, where a storage service is
+            // connected.
+            if !(shrinkable && self.photos.on())
+                && total_size.saturating_add(metadata.len()) > MAX_COMPOSE_ATTACHMENT_BYTES
+            {
+                if *linking.get_or_insert_with(|| self.can_share_by_link()) {
+                    by_link.push(NewAttachment {
+                        path,
+                        filename: Some(filename),
+                        import: document.import,
+                    });
+                } else {
                     skipped += 1;
-                    continue;
                 }
-                let Ok(metadata) = std::fs::metadata(&path) else {
-                    skipped += 1;
-                    continue;
-                };
-                if !metadata.is_file()
-                    || total_size.saturating_add(metadata.len()) > MAX_COMPOSE_ATTACHMENT_BYTES
-                {
-                    skipped += 1;
-                    continue;
-                }
-                let Some(filename) = document.name() else {
-                    skipped += 1;
-                    continue;
-                };
-                total_size += metadata.len();
-                files.push(ComposeFile {
-                    path,
-                    filename,
-                    size: metadata.len(),
-                    _import: Some(Rc::new(document)),
-                });
-                added += 1;
+                continue;
             }
-            apply_compose_files(&ui, &files);
-            if skipped == 0 {
-                ui.set_notice(
-                    if added == 1 {
-                        UiMessage::plain("Added 1 attachment.")
-                    } else {
-                        UiMessage::detail("Added {} attachments.", added)
-                    },
-                    false,
-                );
-            } else {
-                ui.set_notice(
-                    UiMessage::arguments(
-                        "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).",
-                        added,
-                        skipped,
-                    ),
-                    added == 0,
-                );
+            let file = ComposeFile {
+                shrinkable,
+                path,
+                filename,
+                size: metadata.len(),
+                _import: document.import.map(Rc::new),
+                original: None,
+            };
+            // A photo going out shrunk goes in at the size it'll have.
+            if file.shrinkable && self.photos.on() {
+                shrinking.push(file);
+                continue;
+            }
+            total_size += file.size;
+            files.push(file);
+            added += 1;
+        }
+        apply_compose_files(&ui, &files);
+        drop(files);
+        if !by_link.is_empty() {
+            ui.set_notice(
+                UiMessage::plain("Files over the 25 MB limit go as links."),
+                false,
+            );
+            self.share_by_link(by_link);
+        } else if shrinking.is_empty() || added + skipped > 0 {
+            let (notice, error) = attachments_notice(added, skipped);
+            ui.set_notice(notice, error);
+        }
+        self.photos.attach_when_shrunk(shrinking);
+        self.refresh_photos();
+    }
+
+    /// The storage service the message's files go by link from, as its account says: the
+    /// account's own Google Drive or OneDrive, else the Nextcloud or ownCloud server.
+    pub(super) fn link_service(&self) -> Option<flectar_mail_core::links::LinkService> {
+        let (composers, host) = (self.composers()?, self.host()?);
+        let core = composers.core()?;
+        let account_id = i64::from(host.ui().get_account_id());
+        composers
+            .runtime
+            .block_on(core.link_service_for_account(account_id))
+            .ok()
+            .flatten()
+    }
+
+    /// Whether the message's files can go by link.
+    fn can_share_by_link(&self) -> bool {
+        self.link_service().is_some()
+    }
+
+    /// Files dragged over the message's window show where they'll go, until they're dropped
+    /// or taken away.
+    #[cfg(desktop)]
+    fn files_hovered(&self, hovering: bool) {
+        if let Some(host) = self.host() {
+            let ui = host.ui();
+            ui.set_drop_hint(hovering && !ui.get_sending());
+        }
+    }
+
+    /// A file dropped on the message. Several come one after another, and go in together.
+    #[cfg(desktop)]
+    fn file_dropped(self: &Rc<Self>, path: PathBuf) {
+        let mut dropped = self.dropped.borrow_mut();
+        dropped.push(path);
+        if dropped.len() > 1 {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        Timer::single_shot(Duration::from_millis(30), move || {
+            if let Some(session) = weak.upgrade() {
+                session.place_dropped_files();
             }
         });
+    }
+
+    #[cfg(desktop)]
+    fn place_dropped_files(self: &Rc<Self>) {
+        let paths = std::mem::take(&mut *self.dropped.borrow_mut());
+        self.place_files(paths);
+    }
+
+    /// Puts dropped pictures in the text at the caret, as pasting does, and attaches the
+    /// other files.
+    #[cfg(desktop)]
+    fn place_files(self: &Rc<Self>, paths: Vec<PathBuf>) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        ui.set_drop_hint(false);
+        if ui.get_sending() {
+            return;
+        }
+        let mut attachments = Vec::new();
+        for path in paths {
+            // Plain text holds no pictures, so they're attached.
+            let image = (is_image_name(&path) && !self.plain_text.get())
+                .then(|| std::fs::metadata(&path).ok())
+                .flatten()
+                .filter(|metadata| {
+                    metadata.is_file() && metadata.len() <= MAX_COMPOSE_ATTACHMENT_BYTES
+                })
+                .and_then(|_| std::fs::read(&path).ok())
+                .and_then(|bytes| crate::rich_compose::InlineImage::from_file_bytes(bytes, ""));
+            match image {
+                Some(image) => {
+                    if !self.insert_image(image) {
+                        break;
+                    }
+                }
+                None => attachments.push(NewAttachment {
+                    filename: path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned()),
+                    path,
+                    import: None,
+                }),
+            }
+        }
+        self.attach(attachments);
+    }
+
+    /// Opens a picker for images to put in the text at the caret.
+    fn pick_images(self: &Rc<Self>) {
+        if self.plain_text.get() {
+            return;
+        }
+        let Some(composers) = self.composers() else {
+            return;
+        };
+        let Some(app) = composers.app.upgrade() else {
+            return;
+        };
+        if self.picking.replace(true) {
+            return;
+        }
+        let mut dialog = documents::DocumentDialog::titled(translated(
+            &app,
+            &UiMessage::plain("Insert images in this email"),
+        ));
+        dialog.filter = Some((
+            translated(&app, &UiMessage::plain("Images")).into(),
+            &["png", "jpg", "jpeg", "gif", "webp"],
+        ));
+        let request = composers
+            .documents
+            .import_many(MAX_COMPOSE_ATTACHMENT_FILES, dialog);
+        let weak = Rc::downgrade(self);
+        let picked_in = self.generation.get();
+        documents::run_request(&composers.runtime, request, move |imported| {
+            let Some(session) = weak.upgrade() else {
+                return;
+            };
+            session.picking.set(false);
+            if session.generation.get() != picked_in {
+                return;
+            }
+            let Some(host) = session.host() else {
+                return;
+            };
+            let ui = host.ui();
+            let documents = match imported {
+                Ok(documents) => documents,
+                Err(error) => {
+                    tracing::warn!(%error, "compose image picker failed");
+                    ui.set_notice(UiMessage::detail("Could not add images: {}", error), true);
+                    return;
+                }
+            };
+            for document in documents {
+                let name = document.name().unwrap_or_default();
+                let image = std::fs::metadata(document.path())
+                    .ok()
+                    .filter(|metadata| metadata.len() <= MAX_COMPOSE_ATTACHMENT_BYTES)
+                    .and_then(|_| std::fs::read(document.path()).ok())
+                    .map(|bytes| crate::rich_compose::InlineImage::from_file_bytes(bytes, ""));
+                match image {
+                    Some(Some(image)) => {
+                        if !session.insert_image(image) {
+                            break;
+                        }
+                    }
+                    Some(None) => ui.set_notice(
+                        UiMessage::detail("{} isn't a PNG, JPEG, GIF or WebP image.", name),
+                        true,
+                    ),
+                    None => {
+                        ui.set_notice(
+                            UiMessage::plain("Images and attachments can take up to 25 MB in all."),
+                            true,
+                        );
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    /// Puts an image in the text at the caret, unless it would take the message's images and
+    /// attachments past what a message carries. Returns whether it went in.
+    fn insert_image(&self, image: crate::rich_compose::InlineImage) -> bool {
+        let Some(host) = self.host() else {
+            return false;
+        };
+        let fits = {
+            let files = self
+                .files
+                .borrow()
+                .iter()
+                .map(|file| file.size)
+                .sum::<u64>();
+            files
+                .saturating_add(self.photos.image_bytes(&self.document.borrow()))
+                .saturating_add(image.data.len() as u64)
+                <= MAX_COMPOSE_ATTACHMENT_BYTES
+        };
+        if !fits {
+            host.ui().set_notice(
+                UiMessage::plain("Images and attachments can take up to 25 MB in all."),
+                true,
+            );
+            return false;
+        }
+        self.edit(|document| document.insert_image(image));
+        true
     }
 
     fn remove_attachment(&self, index: i32) {
@@ -2033,6 +2863,8 @@ impl ComposeSession {
             let ui = host.ui();
             apply_compose_files(&ui, &files);
             ui.set_notice(UiMessage::plain("Attachment removed."), false);
+            drop(files);
+            self.refresh_photos();
         }
     }
 
@@ -2052,6 +2884,7 @@ impl ComposeSession {
         };
         host.ui()
             .set_notice(UiMessage::plain("Attaching the original's files…"), false);
+        self.count_attaching(true);
         let core = core.clone();
         let request: documents::DocumentFuture<FetchedFiles> = Box::pin(async move {
             let mut fetched = Vec::with_capacity(attachments.len());
@@ -2082,11 +2915,16 @@ impl ComposeSession {
             if session.generation.get() != started_in {
                 return;
             }
+            session.count_attaching(false);
             let Some(host) = session.host() else {
                 return;
             };
             let mut files = session.files.borrow_mut();
-            let mut total_size = files.iter().map(|file| file.size).sum::<u64>();
+            let mut total_size = files
+                .iter()
+                .map(|file| file.size)
+                .sum::<u64>()
+                .saturating_add(session.photos.image_bytes(&session.document.borrow()));
             let mut failure = None;
             let mut too_large = false;
             for file in fetched.unwrap_or_else(|error| vec![Err(error)]) {
@@ -2098,10 +2936,12 @@ impl ComposeSession {
                         }
                         total_size += size;
                         files.push(ComposeFile {
+                            shrinkable: crate::photo_shrink::can_shrink_file(&path),
                             path,
                             filename,
                             size,
                             _import: None,
+                            original: None,
                         });
                     }
                     Err(error) => {
@@ -2122,7 +2962,23 @@ impl ComposeSession {
             };
             let error = notice != UiMessage::EMPTY;
             ui.set_notice(notice, error);
+            drop(files);
+            session.refresh_photos();
         });
+    }
+
+    /// Count a download of a forward's files starting or finishing: sending waits while any
+    /// is on its way.
+    fn count_attaching(&self, started: bool) {
+        let count = if started {
+            self.attaching.get().saturating_add(1)
+        } else {
+            self.attaching.get().saturating_sub(1)
+        };
+        self.attaching.set(count);
+        if let Some(host) = self.host() {
+            host.ui().set_attaching_files(count > 0);
+        }
     }
 
     fn search_contacts(&self, recipients: &str, account_id: i32) {
@@ -2200,11 +3056,44 @@ impl ComposeSession {
         if send && !preferences.get_composer_preferences_ready() {
             return;
         }
+        // Photos going out shrunk are sent once they are, and a forward once its files are here.
+        if send && (self.photos.on() && self.photos.busy() || self.attaching.get() > 0) {
+            return;
+        }
+        // A file that couldn't go up by link holds the message back until it's removed.
+        if send && let Some(name) = self.failed_link() {
+            ui.set_notice(
+                UiMessage::detail("Remove {} to send the message.", name),
+                true,
+            );
+            return;
+        }
+        // A message from a template says which placeholders it still has, and goes as it is
+        // when sent again.
+        if send && self.templated.get() {
+            let left = placeholders::placeholders_in(&format!("{subject}\n{body}"));
+            if !left.is_empty() && *self.placeholder_warning.borrow() != left {
+                ui.set_notice(
+                    UiMessage::detail("Fill in {} or send again.", left.join(", ")),
+                    true,
+                );
+                *self.placeholder_warning.borrow_mut() = left;
+                return;
+            }
+        }
         if account_id <= 0 {
             ui.set_notice(
                 UiMessage::plain("Choose the account this message should be sent from."),
                 true,
             );
+            return;
+        }
+        // A message without a subject, or that mentions a file it doesn't
+        // carry, goes once the user says so (#236).
+        if send && let Some((check, keyword)) = self.send_check(&app, subject, body) {
+            ui.set_send_check(check.into());
+            ui.set_send_check_keyword(keyword.into());
+            ui.set_send_check_open(true);
             return;
         }
         let Some(core) = composers.core() else {
@@ -2223,19 +3112,46 @@ impl ComposeSession {
                 mime_type: None,
             })
             .collect::<Vec<_>>();
-        let body_html = {
+        let (body_html, described) = {
             let mut document = self.document.borrow_mut();
             if document.text() != body {
                 document.synchronize(body, body.len() as i32, body.len() as i32);
             }
             // Blank lines at the end give way to the one above the quote, in
             // both parts, so a reopened draft finds where the quote starts.
-            if self.quote.borrow().is_some() {
-                document.body_html_above_quote()
-            } else {
-                document.body_html()
-            }
+            // Photos go out shrunk when the message's photos do.
+            let html = document.body_html_with(self.quote.borrow().is_some(), |image| {
+                self.photos.shrunk(image)
+            });
+            // Mail read as plain text has each link's address and each image's name in
+            // its place. A draft keeps the placeholders, which the HTML's images reopen
+            // into.
+            (html, send.then(|| document.plain_text()))
         };
+        let body = described.as_deref().unwrap_or(body);
+        // Files sent by link go in a block after what's written. A draft keeps the block in
+        // its HTML only, with each link's details, to reopen as the files.
+        let (body, body_html) = match self.link_blocks(!send) {
+            Some((html_block, text_block)) => {
+                let rich = !self.plain_text.get();
+                let text = if send || !rich {
+                    match body.trim_end() {
+                        "" => text_block,
+                        written => format!("{written}\n\n{text_block}"),
+                    }
+                } else {
+                    body.to_owned()
+                };
+                let html = if rich {
+                    Some(format!("{}{html_block}", body_html.unwrap_or_default()))
+                } else {
+                    body_html
+                };
+                (text, html)
+            }
+            None => (body.to_owned(), body_html),
+        };
+        let body = body.as_str();
         // The original goes below what the user wrote, in both parts.
         let (body, body_html) = match self.quote.borrow().as_ref() {
             Some(quote) => {
@@ -2244,6 +3160,8 @@ impl ComposeSession {
             }
             None => (body.to_owned(), body_html),
         };
+        // A plain-text message goes out, and saves, without HTML.
+        let body_html = body_html.filter(|_| !self.plain_text.get());
         // Recipients reading plain text see quote blocks as quotes; a draft
         // keeps them as the editor writes them, to reopen as blocks.
         let body = if send {
@@ -2275,6 +3193,8 @@ impl ComposeSession {
             mode: intent.mode.as_str(),
             in_reply_to_message_id: intent.in_reply_to_message_id,
             in_reply_to_header: intent.in_reply_to_header.as_deref(),
+            request_read_receipt: ui.get_request_receipt(),
+            importance: Importance::from_i64(i64::from(ui.get_importance())),
         };
         if send {
             let queued = composers
@@ -2486,13 +3406,31 @@ impl ComposeSession {
             return false;
         };
 
+        // Its placeholders take the message's first recipient, its sender and today's date,
+        // and those it can't fill stay for the writer.
+        let values = self.placeholder_values(&composers, &host);
+        let mut left = Vec::new();
         if ui.get_subject().trim().is_empty()
             && let Some(subject) = template.subject.as_deref()
             && !subject.trim().is_empty()
         {
+            let subject = placeholders::fill(subject, &values);
+            left = placeholders::placeholders_in(&subject);
             ui.set_subject(subject.into());
         }
-        self.edit(|document| document.insert_text(&template.body_text));
+        let body = placeholders::fill(&template.body_text, &values);
+        for placeholder in placeholders::placeholders_in(&body) {
+            if !left.contains(&placeholder) {
+                left.push(placeholder);
+            }
+        }
+        self.edit(|document| document.insert_text(&body));
+        self.templated.set(true);
+        let inserted = if left.is_empty() {
+            UiMessage::plain("Email template inserted.")
+        } else {
+            UiMessage::detail("Fill in {} before sending.", left.join(", "))
+        };
 
         let usage = composers.core().map(|core| {
             composers
@@ -2511,7 +3449,7 @@ impl ComposeSession {
                 }
                 composers.sort_templates();
                 composers.apply_templates();
-                ui.set_notice(UiMessage::plain("Email template inserted."), false);
+                ui.set_notice(inserted, false);
             }
             Some(Err(error)) => ui.set_notice(
                 UiMessage::detail(
@@ -2520,9 +3458,79 @@ impl ComposeSession {
                 ),
                 true,
             ),
-            None => ui.set_notice(UiMessage::plain("Email template inserted."), false),
+            None => ui.set_notice(inserted, false),
         }
         true
+    }
+
+    /// What a template's placeholders take from this message: its first recipient, by the
+    /// name the message shows or else its contact's, its sender, and today's date.
+    fn placeholder_values(
+        &self,
+        composers: &Composers,
+        host: &HostRef,
+    ) -> placeholders::PlaceholderValues {
+        let ui = host.ui();
+        let core = composers.core();
+        let account_id = i64::from(ui.get_account_id());
+        let recipient = ui
+            .get_to()
+            .split([',', ';', '\n'])
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .find_map(|item| crate::mail::parse_address(item).ok())
+            .map_or_else(placeholders::Person::default, |address| {
+                let name = address.name.clone().or_else(|| {
+                    let contacts = composers
+                        .runtime
+                        .block_on(core.as_ref()?.list_contacts(
+                            address.email.clone(),
+                            (account_id > 0).then_some(account_id),
+                            6,
+                        ))
+                        .ok()?;
+                    contacts
+                        .into_iter()
+                        .find(|contact| contact.email.eq_ignore_ascii_case(&address.email))
+                        .and_then(|contact| contact.name)
+                });
+                placeholders::Person::new(name.as_deref(), Some(&address.email))
+            });
+        let sender_email = host.preferences().get_composer_sender_email().to_string();
+        let sender_name = core
+            .as_ref()
+            .and_then(|core| {
+                composers
+                    .runtime
+                    .block_on(
+                        core.account_preferences_core()
+                            .list_sender_identities(account_id),
+                    )
+                    .ok()
+            })
+            .and_then(|identities| {
+                identities
+                    .into_iter()
+                    .find(|identity| identity.email.eq_ignore_ascii_case(&sender_email))
+                    .and_then(|identity| identity.display_name)
+            })
+            .or_else(|| {
+                composers
+                    .state
+                    .borrow()
+                    .connected_accounts
+                    .iter()
+                    .find(|account| account.email.eq_ignore_ascii_case(&sender_email))
+                    .and_then(|account| account.display_name.clone())
+            });
+        placeholders::PlaceholderValues {
+            recipient,
+            sender: placeholders::Person::new(sender_name.as_deref(), Some(&sender_email)),
+            date: crate::date_format::current().date(
+                crate::date_format::DateStyle::Medium,
+                chrono::Local::now().date_naive(),
+            ),
+        }
     }
 
     fn reset_preferences(&self) {
@@ -2552,6 +3560,10 @@ impl ComposeSession {
             .and_then(|composers| composers.app.upgrade())
         {
             account_controller::remember_compose_account(&app, account_id);
+        }
+        // Files go by link from the account's own storage, where it has one on.
+        if let Some(host) = self.host() {
+            host.ui().set_link_sharing(self.can_share_by_link());
         }
         self.load_preferences(account_id);
     }
@@ -2630,6 +3642,12 @@ impl ComposeSession {
         else {
             return;
         };
+        // How the message starts, before its signature goes in to match.
+        self.choose_starting_format(&config.settings);
+        // A draft, and a message edited as new, keep their own request.
+        if !matches!(ui.get_mode().as_str(), "draft" | "edit_as_new") {
+            ui.set_request_receipt(config.settings.request_read_receipts);
+        }
         let requested = preferences.get_composer_sender_email().to_string();
         let identities = account_mail_preferences::selectable_identities(identities, &requested);
         let sender_choices = identities
@@ -2704,6 +3722,162 @@ impl ComposeSession {
         preferences.set_composer_sender_email(identity.email);
     }
 
+    /// Starts writing `signature`, or a new one, for `account_id`: its name where a message
+    /// has its subject, and its text in the editor in the formatting it was saved with.
+    fn start_signature(
+        self: &Rc<Self>,
+        account_id: i64,
+        signature: Option<Signature>,
+        return_to_settings: bool,
+    ) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        let name = signature
+            .as_ref()
+            .map(|signature| signature.name.clone())
+            .unwrap_or_default();
+        *self.signature_target.borrow_mut() = Some(SignatureTarget {
+            account_id,
+            id: signature
+                .as_ref()
+                .map(|signature| signature.id.clone())
+                .unwrap_or_default(),
+            return_to_settings,
+        });
+        ui.set_account_id(i32::try_from(account_id).unwrap_or_default());
+        ui.set_subject(name.as_str().into());
+        ui.set_signature_saved_name(name.into());
+        {
+            let mut document = self.document.borrow_mut();
+            // Plain text names no font, so a signature takes each message's own.
+            document.set_base_style(
+                crate::rich_compose::FontFamily::Default,
+                crate::rich_compose::TextSize::Normal,
+            );
+            match &signature {
+                Some(signature) => {
+                    document.load_signature_html(&signature.html);
+                }
+                None => {
+                    document.load("", 0, 0);
+                    document.mark_saved();
+                }
+            }
+        }
+        // A signature keeps its formatting, for formatted messages to show.
+        self.start_format(false);
+        self.show("signature", None);
+        #[cfg(desktop)]
+        if let HostRef::Window(handle) = &host {
+            self.watch_window(handle);
+            if let Err(error) = handle.show() {
+                ui.set_notice(
+                    UiMessage::detail("Could not open composer: {}", error),
+                    true,
+                );
+            }
+        }
+    }
+
+    /// Saves the signature being written to Settings, and closes it once saved.
+    fn save_signature(self: &Rc<Self>) {
+        let Some(target) = self.signature_target.borrow().clone() else {
+            return;
+        };
+        let (Some(host), Some(composers)) = (self.host(), self.composers()) else {
+            return;
+        };
+        let ui = host.ui();
+        if ui.get_sending() {
+            return;
+        }
+        let name = ui.get_subject().trim().to_owned();
+        if name.is_empty() {
+            ui.set_notice(UiMessage::plain("Give the signature a name."), true);
+            return;
+        }
+        let html = {
+            let body = ui.get_body();
+            let mut document = self.document.borrow_mut();
+            if document.text() != body.as_str() {
+                let end = i32::try_from(body.len()).unwrap_or(i32::MAX);
+                document.synchronize(&body, end, end);
+            }
+            document.body_html().unwrap_or_default()
+        };
+        let Some(core) = composers
+            .state
+            .borrow()
+            .core
+            .as_ref()
+            .map(CoreMailSource::account_preferences_core)
+        else {
+            return;
+        };
+        let signature = Signature {
+            id: target.id,
+            account_id: target.account_id,
+            name,
+            html,
+        };
+        // Saving holds the composer, as sending does, so it saves once.
+        ui.set_sending(true);
+        let task = composers.runtime.spawn(async move {
+            let saved = core
+                .save_signature(signature)
+                .await
+                .map_err(|error| error.to_string())?;
+            let settings = core
+                .get_settings()
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>((saved, settings))
+        });
+        let session = self.reference();
+        let spawned = slint::spawn_local(async move {
+            let result = task.await.unwrap_or_else(|error| Err(error.to_string()));
+            let Some(session) = session.upgrade() else {
+                return;
+            };
+            match result {
+                Ok((saved, settings)) => session.signature_saved(&saved, &settings),
+                Err(error) => {
+                    if let Some(host) = session.host() {
+                        let ui = host.ui();
+                        ui.set_sending(false);
+                        ui.set_notice(
+                            UiMessage::detail("Could not save the signature: {}", error),
+                            true,
+                        );
+                    }
+                }
+            }
+        });
+        if let Err(error) = spawned {
+            ui.set_sending(false);
+            ui.set_notice(
+                UiMessage::detail("Could not save the signature: {}", error),
+                true,
+            );
+        }
+    }
+
+    /// The signature was saved: Settings shows it, and its composer closes.
+    fn signature_saved(self: &Rc<Self>, saved: &Signature, settings: &Settings) {
+        if let Some(host) = self.host() {
+            host.ui().set_sending(false);
+        }
+        if let Some(app) = self
+            .composers()
+            .and_then(|composers| composers.app.upgrade())
+        {
+            account_mail_preferences::signature_saved(&app, saved, settings);
+        }
+        self.close();
+    }
+
     /// Only replace the exact unedited block this composer inserted. User
     /// edits are never discarded when switching identity or signature.
     fn choose_signature(&self, index: i32) {
@@ -2737,22 +3911,75 @@ impl ComposeSession {
         let signature = usize::try_from(index - 1)
             .ok()
             .and_then(|i| self.signatures.borrow().get(i).cloned());
-        let text = signature
-            .as_ref()
-            .map(flectar_mail_core::signatures::plain_text)
-            .unwrap_or_default();
-        let new_body = flectar_mail_core::signatures::insert(&body, &text);
-        *self.signature.borrow_mut() = if text.is_empty() {
-            None
-        } else {
-            Some(format!("\n\n-- \n{}", text.trim()))
-        };
-        self.edit(|document| document.synchronize(&new_body, 0, 0));
+        // The new signature takes the old one's place, in its formatting and with its
+        // pictures, or goes above the quotation.
+        let at = flectar_mail_core::signatures::insertion_point(&body);
+        let mut inserted = None;
+        self.edit(|document| {
+            let (selection, block) = document.replace_signature(
+                old.as_deref(),
+                at,
+                signature.as_ref().map(|signature| signature.html.as_str()),
+                self.plain_text.get(),
+            );
+            inserted = block;
+            selection
+        });
+        *self.signature.borrow_mut() = inserted;
         preferences.set_composer_signature_index(index);
     }
 }
 
 type FetchedFiles = Vec<Result<(PathBuf, String, u64), String>>;
+
+/// The signature a composer writes: its account, its id, empty for a new one, and whether
+/// Settings comes back when it closes, as on phones, where the composer took its place.
+#[derive(Clone, Debug)]
+struct SignatureTarget {
+    account_id: i64,
+    id: String,
+    return_to_settings: bool,
+}
+
+/// A file to attach: where it is, the name it goes out with, and the copy that keeps it
+/// readable, when the host made one.
+struct NewAttachment {
+    path: PathBuf,
+    filename: Option<String>,
+    import: Option<documents::ImportedDocument>,
+}
+
+/// What adding files did, and whether that's an error: none of them went in.
+fn attachments_notice(added: usize, skipped: usize) -> (UiMessage, bool) {
+    if skipped == 0 {
+        let notice = if added == 1 {
+            UiMessage::plain("Added 1 attachment.")
+        } else {
+            UiMessage::detail("Added {} attachments.", added)
+        };
+        return (notice, false);
+    }
+    (
+        UiMessage::arguments(
+            "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).",
+            added,
+            skipped,
+        ),
+        added == 0,
+    )
+}
+
+/// Whether a file's name says it's a picture the text can show.
+#[cfg(desktop)]
+fn is_image_name(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["png", "jpg", "jpeg", "gif", "webp"]
+                .iter()
+                .any(|known| extension.eq_ignore_ascii_case(known))
+        })
+}
 
 #[cfg(all(test, desktop))]
 mod tests {
@@ -2768,14 +3995,14 @@ mod tests {
         }
     }
 
-    struct Setup {
-        app: AppWindow,
-        composers: Rc<Composers>,
-        _runtime: tokio::runtime::Runtime,
-        _dir: tempfile::TempDir,
+    pub(super) struct Setup {
+        pub(super) app: AppWindow,
+        pub(super) composers: Rc<Composers>,
+        pub(super) _runtime: tokio::runtime::Runtime,
+        pub(super) _dir: tempfile::TempDir,
     }
 
-    fn setup() -> Setup {
+    pub(super) fn setup() -> Setup {
         slint::platform::set_platform(Box::new(Windows)).unwrap();
         let app = AppWindow::new().unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -2806,6 +4033,7 @@ mod tests {
             sync_error: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
+            caught_up_at: None,
         }];
         let state = Rc::new(RefCell::new(state));
         app.set_compose_account_id(1);
@@ -2814,6 +4042,7 @@ mod tests {
             &state,
             runtime.handle(),
             documents::default_provider(),
+            std::env::temp_dir(),
             true,
         );
 
@@ -2823,6 +4052,264 @@ mod tests {
             _runtime: runtime,
             _dir: dir,
         }
+    }
+
+    #[test]
+    fn a_draft_an_agent_asks_to_send_opens_in_a_window_of_its_own() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        let main = app.global::<ComposerUi>();
+        // The user is writing a message of their own.
+        app.invoke_open_compose("friend@example.com".into());
+        main.set_subject("Mine".into());
+
+        let draft = SaveDraftArgs {
+            draft_id: Some(42),
+            account_id: 1,
+            from: None,
+            to: vec![Address {
+                name: None,
+                email: "priya@example.com".into(),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Plans".into(),
+            body_text: "Thursday works.".into(),
+            body_html: None,
+            mode: "new".into(),
+            in_reply_to_message_id: None,
+            in_reply_to_header: None,
+            attachments: Vec::new(),
+            request_read_receipt: false,
+            importance: Default::default(),
+        };
+        assert!(composers.show_review(draft.clone(), "Claude"));
+        assert_eq!(open_windows(), 1);
+        let review = composers.holding_draft(42).unwrap();
+        let host = review.host().unwrap();
+        let ui = host.ui();
+        assert_eq!(ui.get_subject(), "Plans");
+        assert_eq!(ui.get_to(), "priya@example.com");
+        assert!(ui.get_review_note().contains("Claude"));
+        // Asked again, the same window comes forward.
+        assert!(composers.show_review(draft, "Claude"));
+        assert_eq!(open_windows(), 1);
+        // The user's own message stays as it was, without the note.
+        assert!(main.get_open());
+        assert_eq!(main.get_subject(), "Mine");
+        assert_eq!(main.get_review_note(), "");
+
+        // Closing it ends the review.
+        review.dispose();
+        assert_eq!(review.reviewing.get(), None);
+        assert_eq!(open_windows(), 0);
+        assert_eq!(main.get_subject(), "Mine");
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn files_dropped_with_no_message_open_start_one_with_all_of_them() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        let files = tempfile::tempdir().unwrap();
+        let notes = files.path().join("notes.txt");
+        let plan = files.path().join("plan.pdf");
+        std::fs::write(&notes, "notes").unwrap();
+        std::fs::write(&plan, "%PDF-1.4").unwrap();
+        let wait_for_the_rest = || {
+            std::thread::sleep(Duration::from_millis(40));
+            slint::platform::update_timers_and_animations();
+        };
+
+        // With no message open, the window says the files would start one.
+        files_hovered(true);
+        assert!(app.get_drop_starts_message());
+        files_hovered(false);
+        assert!(!app.get_drop_starts_message());
+
+        // A drop's files arrive one at a time and start one message.
+        files_hovered(true);
+        file_dropped(notes);
+        file_dropped(plan.clone());
+        assert!(composers.in_app().is_none());
+        wait_for_the_rest();
+        assert!(
+            !app.get_drop_starts_message(),
+            "the hint goes with the drop"
+        );
+        let session = composers.in_app().expect("a new message opened");
+        let names = || {
+            session
+                .files
+                .borrow()
+                .iter()
+                .map(|file| file.filename.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(), ["notes.txt", "plan.pdf"]);
+
+        // Files dropped while it's open go into it, not into another one.
+        files_hovered(true);
+        assert!(!app.get_drop_starts_message());
+        let agenda = files.path().join("agenda.txt");
+        std::fs::write(&agenda, "agenda").unwrap();
+        file_dropped(agenda);
+        wait_for_the_rest();
+        assert!(Rc::ptr_eq(&composers.in_app().unwrap(), &session));
+        assert_eq!(names(), ["notes.txt", "plan.pdf", "agenda.txt"]);
+    }
+
+    #[test]
+    fn a_forward_goes_once_its_files_are_in() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.invoke_open_compose("ana@example.test".into());
+        let session = composers.in_app().unwrap();
+        session.count_attaching(true);
+        assert!(app.global::<ComposerUi>().get_attaching_files());
+
+        // The wait moves with the message to a window of its own.
+        app.global::<ComposerUi>().invoke_pop_out();
+        let host = session.host().unwrap();
+        let ui = host.ui();
+        assert!(ui.get_attaching_files());
+        host.preferences().set_composer_preferences_ready(true);
+        let send = || session.save(1, "ana@example.test", "", "", "Fwd: Plans", "Here", true);
+        send();
+        assert!(!ui.get_notice_is_error(), "nothing was sent");
+
+        // Once they're in, it goes, which with no account connected it can't.
+        session.count_attaching(false);
+        assert!(!ui.get_attaching_files());
+        send();
+        assert!(ui.get_notice_is_error());
+    }
+
+    #[test]
+    fn a_template_fills_its_placeholders_and_sending_asks_about_the_rest() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.invoke_open_compose("Ana María Ruiz <ana@example.test>".into());
+        let session = composers.in_app().unwrap();
+        let host = session.host().unwrap();
+        let ui = host.ui();
+        host.preferences().set_composer_preferences_ready(true);
+        host.preferences()
+            .set_composer_sender_email("me@example.test".into());
+        composers.templates.borrow_mut().push(Snippet {
+            id: 7,
+            name: "Thanks".into(),
+            shortcut: None,
+            subject: Some("Thanks, {{recipient.first_name}}".into()),
+            body_text: "Hi {{recipient.first_name}}, about {{company}}. {{sender.email}}".into(),
+            usage_count: 0,
+        });
+
+        // What the message knows goes in, and what it doesn't stays for the writer.
+        assert!(session.use_template(7));
+        assert_eq!(ui.get_subject(), "Thanks, Ana");
+        assert_eq!(
+            session.document.borrow().text(),
+            "Hi Ana, about {{company}}. me@example.test"
+        );
+        let notice = ui.get_message();
+        assert_eq!(notice.key, "Fill in {} before sending.");
+        assert_eq!(notice.argument, "{{company}}");
+
+        // Sending asks once about it, then sends it as it is, which with no account
+        // connected it can't.
+        let send = || {
+            let body = session.document.borrow().text().to_owned();
+            session.save(1, &ui.get_to(), "", "", &ui.get_subject(), &body, true);
+        };
+        send();
+        let notice = ui.get_message();
+        assert_eq!(notice.key, "Fill in {} or send again.");
+        assert_eq!(notice.argument, "{{company}}");
+        send();
+        assert_eq!(
+            ui.get_message().key,
+            "Connect an account before saving or sending mail."
+        );
+    }
+
+    #[test]
+    fn sending_asks_about_a_missing_subject_then_a_mentioned_file() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.invoke_open_compose("ana@example.test".into());
+        let session = composers.in_app().unwrap();
+        let host = session.host().unwrap();
+        let ui = host.ui();
+        host.preferences().set_composer_preferences_ready(true);
+        ui.set_subject(" ".into());
+        ui.set_body("I've attached the plan.\n> The report is attached".into());
+        let send = || {
+            session.save(
+                1,
+                &ui.get_to(),
+                "",
+                "",
+                &ui.get_subject(),
+                &ui.get_body(),
+                true,
+            );
+        };
+
+        send();
+        assert!(ui.get_send_check_open());
+        assert_eq!(ui.get_send_check(), "subject");
+        // Sent without a subject, it asks about the file the message mentions.
+        session.answer_send_check("send");
+        assert_eq!(ui.get_send_check(), "attachment");
+        assert_eq!(ui.get_send_check_keyword(), "attached");
+        // Going back asks both again next time.
+        session.answer_send_check("cancel");
+        send();
+        assert_eq!(ui.get_send_check(), "subject");
+
+        // With a subject, and sent anyway, the message goes, which with no
+        // account connected it can't.
+        ui.set_subject("Plan".into());
+        send();
+        assert_eq!(ui.get_send_check(), "attachment");
+        session.answer_send_check("send");
+        assert_eq!(
+            ui.get_message().key,
+            "Connect an account before saving or sending mail."
+        );
+
+        // A quoted mention isn't the user's, so it asks nothing.
+        session.reset_send_checks();
+        ui.set_send_check_open(false);
+        ui.set_notice(UiMessage::EMPTY, false);
+        ui.set_body("Thanks!\n> The report is attached".into());
+        send();
+        assert!(!ui.get_send_check_open());
+        assert_eq!(
+            ui.get_message().key,
+            "Connect an account before saving or sending mail."
+        );
     }
 
     #[test]

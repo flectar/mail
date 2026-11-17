@@ -331,6 +331,7 @@ export component ContactsView inherits Rectangle {
                             { title: @tr("Favorites"), value: "favorites" },
                             { title: @tr("Suggested"), value: "suggestions" },
                         ];
+                        selected-filter: root.filter;
                         filter-active: root.filter != "all";
                         filter-tooltip: @tr("Filter contacts");
                         filter-accessible-id: "contacts-filter-button";

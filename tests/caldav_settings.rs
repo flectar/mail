@@ -5,6 +5,7 @@ use slint::platform::{
 use std::{cell::RefCell, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { SettingsDialog } from "../ui/dialogs/settings-dialog.slint";
 
     export component CaldavSettingsHarness inherits Window {
@@ -24,7 +25,6 @@ slint::slint! {
             width: parent.width;
             height: parent.height;
             compact: root.compact;
-            settings_open: true;
             settings_tab: "Accounts";
             sync_status: root.status;
             caldav_account_id <=> root.account;

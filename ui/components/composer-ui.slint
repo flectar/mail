@@ -1,4 +1,4 @@
-import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow, LocalizedMessage, SpellingLanguage } from "../models.slint";
+import { AccountRow, ComposeAttachment, ComposeLink, ComposeContact, ComposeEditorTile, EmailTemplateRow, LocalizedMessage, SpellingLanguage } from "../models.slint";
 import { AppTheme } from "../design-system.slint";
 import { EmailComposer } from "email-composer.slint";
 
@@ -15,12 +15,45 @@ export global ComposerUi {
     in-out property <string> subject: "";
     in-out property <string> body: "";
     in property <bool> sending: false;
+    // Files dragged from elsewhere are over the message.
+    in property <bool> drop-hint: false;
+    // Who asked to send this draft, when an AI agent did (#237), as the note
+    // the composer shows over it. Empty otherwise.
+    in property <string> review-note: "";
+    // A signature being written ("signature" mode): whether it changed since it opened, and
+    // the name it was saved with.
+    in property <bool> signature-edited: false;
+    in property <string> signature-saved-name: "";
     in property <[AccountRow]> accounts: [];
     in-out property <int> account-id: -1;
     in-out property <string> from-label: @tr("No connected account");
     in property <[ComposeContact]> contact-suggestions: [];
     in property <[ComposeAttachment]> attachments: [];
     in property <string> attachment-summary: "";
+    // Files the message sends by link, and whether a storage service is there to send them.
+    in property <[ComposeLink]> links: [];
+    in property <bool> link-sharing: false;
+    // The message's JPEG photos that can go out shrunk: how many, their size as they go out
+    // and at full size, whether they go out shrunk, and whether they're being shrunk.
+    in property <int> photo-count: 0;
+    in property <string> photo-size: "";
+    in property <string> photo-full-size: "";
+    in-out property <bool> shrink-photos: false;
+    in property <bool> shrinking-photos: false;
+    // The message asks for a read receipt, which More options turns on and off.
+    in-out property <bool> request-receipt: false;
+    // How important the message says it is (#236): 1 high, -1 low, 0 normal.
+    in-out property <int> importance: 0;
+    // A forward's files are still on their way, which sending and saving wait for.
+    in property <bool> attaching-files: false;
+    // The message goes out as plain text only.
+    in property <bool> plain-text: false;
+    // What sending asks first: "subject", or "attachment" with the keyword the
+    // message mentions. Answered "send", "attach" or "cancel".
+    in-out property <bool> send-check-open: false;
+    in property <string> send-check;
+    in property <string> send-check-keyword;
+    callback answer-send-check(string);
     in property <[EmailTemplateRow]> templates: [];
     in property <LocalizedMessage> message;
     in property <bool> notice-is-error: false;
@@ -31,12 +64,33 @@ export global ComposerUi {
     in property <float> editor-caret-x: 0;
     in property <float> editor-caret-y: 0;
     in property <float> editor-caret-height: 18;
+    // Where the selected image shows, when the selection is one image.
+    in property <bool> editor-image-shown: false;
+    in property <float> editor-image-x: 0;
+    in property <float> editor-image-y: 0;
+    in property <float> editor-image-width: 0;
+    in property <float> editor-image-height: 0;
     in property <bool> bold-active: false;
     in property <bool> italic-active: false;
     in property <bool> underline-active: false;
     in property <bool> strike-active: false;
     in property <bool> code-active: false;
     in property <string> active-link-url: "";
+    // What the selection's text shares, for the toolbar: its color and highlight as
+    // "#rrggbb" or "none", its size and font, each empty when it mixes several, and the
+    // alignment of the paragraph it starts in.
+    in property <string> active-color: "none";
+    in property <string> active-highlight: "none";
+    in property <string> active-size: "normal";
+    in property <string> active-family: "default";
+    in property <string> active-align: "left";
+    // The selected image's size, as "small", "medium", "large", "original" or "custom",
+    // or empty when the selection isn't one image; its alt text, and its own width in pixels.
+    in property <string> active-image-size: "";
+    in property <string> active-image-alt: "";
+    in property <int> active-image-width: 0;
+    // The width it shows at, in CSS pixels.
+    in property <int> active-image-shown-width: 0;
     // On the desktop a message can move into a window of its own.
     in property <bool> can-pop-out: false;
     // "reply" or "forward" while the message carries the original below the
@@ -80,11 +134,24 @@ export global ComposerUi {
     in property <length> editor-menu-word-bottom: 0px;
 
     callback close();
+    callback save-signature();
     callback pop-out();
     callback save(int, string, string, string, string, string, bool);
     callback pick-attachments();
+    // Opens a picker for images to put in the text at the caret.
+    callback insert-images();
     callback remove-attachment(int);
+    callback remove-link(int);
+    callback share-by-link();
+    callback shrink-photos-toggled(bool);
+    callback plain-text-chosen(bool);
     callback format(string, string, int, int);
+    // Pastes the clipboard's HTML over the selection of the body given, with its
+    // formatting: false when it holds none, for the plain text to go in.
+    callback paste-formatted(string, int, int) -> bool;
+    // Puts the selection on the clipboard with its formatting, and for a cut takes it
+    // out: false when the plain text is left to copy.
+    callback copy-formatted(bool, string, int, int) -> bool;
     callback link(string, string, int, int);
     callback edit-body(string, int, int, string);
     callback update-selection(string, int, int);
@@ -98,6 +165,8 @@ export global ComposerUi {
     callback use-template(int) -> bool;
     callback save-template(int, string, string, string, string) -> bool;
     callback delete-template(int) -> bool;
+    // `text` with the last string in place of the bytes between the two offsets.
+    pure callback splice-text(string, int, int, string) -> string;
     callback edit-quote();
     callback remove-quote();
     callback restore-quote();
@@ -124,12 +193,31 @@ export component BoundComposer inherits EmailComposer {
     subject <=> ComposerUi.subject;
     body <=> ComposerUi.body;
     sending: ComposerUi.sending;
+    drop-hint: ComposerUi.drop-hint;
+    review-note: ComposerUi.review-note;
+    signature-edited: ComposerUi.signature-edited;
+    signature-saved-name: ComposerUi.signature-saved-name;
     accounts: ComposerUi.accounts;
     selected-account-id <=> ComposerUi.account-id;
     contact-suggestions: ComposerUi.contact-suggestions;
     attachments: ComposerUi.attachments;
+    links: ComposerUi.links;
+    link-sharing: ComposerUi.link-sharing;
     templates: ComposerUi.templates;
     attachment-summary: ComposerUi.attachment-summary;
+    photo-count: ComposerUi.photo-count;
+    photo-size: ComposerUi.photo-size;
+    photo-full-size: ComposerUi.photo-full-size;
+    shrink-photos <=> ComposerUi.shrink-photos;
+    shrinking-photos: ComposerUi.shrinking-photos;
+    request-receipt <=> ComposerUi.request-receipt;
+    importance <=> ComposerUi.importance;
+    attaching-files: ComposerUi.attaching-files;
+    plain-text: ComposerUi.plain-text;
+    send-check-open <=> ComposerUi.send-check-open;
+    send-check: ComposerUi.send-check;
+    send-check-keyword: ComposerUi.send-check-keyword;
+    answer-send-check(answer) => { ComposerUi.answer-send-check(answer); }
     from-label <=> ComposerUi.from-label;
     notice-is-error: ComposerUi.notice-is-error;
     selection-start: ComposerUi.selection-start;
@@ -139,12 +227,26 @@ export component BoundComposer inherits EmailComposer {
     editor-caret-x: ComposerUi.editor-caret-x;
     editor-caret-y: ComposerUi.editor-caret-y;
     editor-caret-height: ComposerUi.editor-caret-height;
+    editor-image-shown: ComposerUi.editor-image-shown;
+    editor-image-x: ComposerUi.editor-image-x;
+    editor-image-y: ComposerUi.editor-image-y;
+    editor-image-width: ComposerUi.editor-image-width;
+    editor-image-height: ComposerUi.editor-image-height;
     bold-active: ComposerUi.bold-active;
     italic-active: ComposerUi.italic-active;
     underline-active: ComposerUi.underline-active;
     strike-active: ComposerUi.strike-active;
     code-active: ComposerUi.code-active;
     active-link-url: ComposerUi.active-link-url;
+    active-color: ComposerUi.active-color;
+    active-highlight: ComposerUi.active-highlight;
+    active-size: ComposerUi.active-size;
+    active-family: ComposerUi.active-family;
+    active-align: ComposerUi.active-align;
+    active-image-size: ComposerUi.active-image-size;
+    active-image-alt: ComposerUi.active-image-alt;
+    active-image-width: ComposerUi.active-image-width;
+    active-image-shown-width: ComposerUi.active-image-shown-width;
     can-pop-out: ComposerUi.can-pop-out;
     quote: ComposerUi.quote;
     quote-left-out: ComposerUi.quote-left-out;
@@ -175,6 +277,7 @@ export component BoundComposer inherits EmailComposer {
     accent-background: AppTheme.accent-soft;
 
     close => { ComposerUi.close(); }
+    save-signature => { ComposerUi.save-signature(); }
     pop-out => { ComposerUi.pop-out(); }
     submit(send-now) => {
         ComposerUi.save(
@@ -188,8 +291,15 @@ export component BoundComposer inherits EmailComposer {
         );
     }
     pick-attachments => { ComposerUi.pick-attachments(); }
+    insert-images => { ComposerUi.insert-images(); }
     remove-attachment(index) => { ComposerUi.remove-attachment(index); }
+    remove-link(index) => { ComposerUi.remove-link(index); }
+    share-by-link => { ComposerUi.share-by-link(); }
+    shrink-photos-toggled(on) => { ComposerUi.shrink-photos-toggled(on); }
+    plain-text-chosen(plain) => { ComposerUi.plain-text-chosen(plain); }
     format-requested(kind, body, anchor, cursor) => { ComposerUi.format(kind, body, anchor, cursor); }
+    paste-requested(body, anchor, cursor) => { return ComposerUi.paste-formatted(body, anchor, cursor); }
+    copy-requested(cut, body, anchor, cursor) => { return ComposerUi.copy-formatted(cut, body, anchor, cursor); }
     link-requested(url, body, anchor, cursor) => { ComposerUi.link(url, body, anchor, cursor); }
     body-edited(body, anchor, cursor, key-text) => { ComposerUi.edit-body(body, anchor, cursor, key-text); }
     selection-changed(body, anchor, cursor) => { ComposerUi.update-selection(body, anchor, cursor); }
@@ -207,6 +317,7 @@ export component BoundComposer inherits EmailComposer {
     use-template(id) => ComposerUi.use-template(id);
     save-template(id, name, shortcut, subject, body) => ComposerUi.save-template(id, name, shortcut, subject, body);
     delete-template(id) => ComposerUi.delete-template(id);
+    splice-text(text, start, end, insert) => ComposerUi.splice-text(text, start, end, insert);
     edit-quote => { ComposerUi.edit-quote(); }
     remove-quote => { ComposerUi.remove-quote(); }
     restore-quote => { ComposerUi.restore-quote(); }

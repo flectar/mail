@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render synthetic folder trees and count constructed sidebar delegates.
 
-Requires slint-viewer 1.18+. Use --baseline-ref with a pre-virtualization
+Requires slint-viewer 1.19+. Use --baseline-ref with a pre-virtualization
 commit to compare the original ScrollView. Timings include interpretation, layout, and one software frame;
 they are diagnostic, not a compiled application or hardware benchmark.
 """
@@ -102,7 +102,7 @@ export component Harness inherits Window {{
             output = args.output_dir / f"{'flat' if flat else 'baseline'}-{account_count}x{folder_count}.png"
             for _ in range(args.rounds):
                 started = time.perf_counter()
-                result = subprocess.run(["slint-viewer", "-I", str(REPO / "ui/components"), "--style", "fluent", "--load-data", str(directory / "data.json"),
+                result = subprocess.run(["slint-viewer", "--edition", "1.19", "-I", str(REPO / "ui/components"), "--style", "fluent", "--load-data", str(directory / "data.json"),
                                          "--screenshot", str(output), str(directory / "main.slint")], capture_output=True, text=True)
                 if result.returncode:
                     raise RuntimeError(result.stdout + result.stderr)

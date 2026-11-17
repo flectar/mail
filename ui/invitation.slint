@@ -19,8 +19,10 @@ export global Invitation {
     // For an answer: who answered, and how (a PARTSTAT).
     in property <string> answered-by;
     in property <string> their-answer;
-    // The guest list: how many, and how many accepted.
-    in property <int> guests;
+    // The other guests, the first few by name and how many more there are,
+    // and how many of all the guests accepted.
+    in property <string> guest-names;
+    in property <int> more-guests;
     in property <int> accepted;
     // The first of the user's other events at the same time, and how many
     // more there are.

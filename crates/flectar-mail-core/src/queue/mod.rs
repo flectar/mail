@@ -239,7 +239,7 @@ fn is_permanent(error: &CoreError) -> bool {
 /// Whether an SMTP error carries a 5xx reply code. A code stands alone, as in
 /// lettre's `permanent error (550)` or a raw `550 5.7.1 ...` reply, which
 /// keeps the `host:587:` prefix of every SMTP error from reading as one.
-fn has_permanent_smtp_reply(message: &str) -> bool {
+pub(crate) fn has_permanent_smtp_reply(message: &str) -> bool {
     let bytes = message.as_bytes();
     bytes.windows(3).enumerate().any(|(start, code)| {
         let before = start.checked_sub(1).map(|index| bytes[index]);
@@ -420,9 +420,21 @@ async fn complete_on_device(ctx: &SyncCtx, action: &repo::actions::PendingAction
             crate::sync::finish_empty_trash(ctx, action.account_id, snapshot_ids).await
         }
         "delete_permanently" => crate::sync::finish_permanent_delete(ctx, action.message_id).await,
+        // POP3 keeps no mark on the server; the answer is recorded here.
+        "read_receipt" => {
+            let account_id = action.account_id;
+            match ctx
+                .db
+                .read(move |conn| repo::accounts::get_config(conn, account_id))
+                .await?
+            {
+                Some(config) => send_read_receipt(ctx, &config, action).await,
+                None => Ok(()),
+            }
+        }
         "archive" | "unarchive" | "trash" | "spam" | "not_spam" | "move" | "mark_read"
-        | "mark_unread" | "star" | "unstar" | "add_label" | "remove_label" | "snooze"
-        | "unsnooze" => Ok(()),
+        | "mark_unread" | "mark_folder_read" | "star" | "unstar" | "add_label" | "remove_label"
+        | "snooze" | "unsnooze" | "show_in" => Ok(()),
         other => {
             tracing::warn!("action kind {other} has nothing to do on this device");
             Ok(())
@@ -505,6 +517,7 @@ async fn execute_on_imap(
             crate::sync::finish_permanent_delete(ctx, action.message_id).await
         }
         "mark_read" => flag_action(ctx, session, action, "\\Seen", true).await,
+        "mark_folder_read" => mark_folder_read_on_imap(ctx, config, session, action).await,
         "mark_unread" => flag_action(ctx, session, action, "\\Seen", false).await,
         "star" => flag_action(ctx, session, action, "\\Flagged", true).await,
         "unstar" => flag_action(ctx, session, action, "\\Flagged", false).await,
@@ -513,10 +526,12 @@ async fn execute_on_imap(
         }
         "add_label" => keyword_action(ctx, session, action, true).await,
         "remove_label" => keyword_action(ctx, session, action, false).await,
+        "read_receipt" => read_receipt_on_imap(ctx, config, session, action).await,
         "append_sent" => append_sent_action(ctx, config, session, action).await,
         "remove_transferred" => remove_transferred(ctx, config, session, action).await,
         // Local-only kinds recorded for undo history.
-        "snooze" | "unsnooze" => Ok(()),
+        // Tabs are this device's alone.
+        "snooze" | "unsnooze" | "show_in" => Ok(()),
         other => {
             tracing::warn!("unknown action kind {other}");
             Ok(())
@@ -528,12 +543,12 @@ async fn execute_on_imap(
 /// select that folder. Actions run in order, so a move queued after this one
 /// hasn't run yet: the server still has the message where that move takes it
 /// from, though the local row already shows it moved.
-async fn resolve_remote(
+async fn resolve_remote_selected(
     ctx: &SyncCtx,
     session: &mut Session,
     action: &repo::actions::PendingAction,
     message_id: i64,
-) -> Result<Option<(repo::folders::Folder, u32)>> {
+) -> Result<Option<(repo::folders::Folder, u32, imap::SelectedFolder)>> {
     let after = action.id;
     let (row, waiting_move) = ctx
         .db
@@ -559,12 +574,24 @@ async fn resolve_remote(
     let Some(folder) = folder else {
         return Ok(None);
     };
-    imap::select(session, &folder.path).await?;
+    let selected = imap::select(session, &folder.path).await?;
     let uid = match valid_uid(known_uid) {
         Some(uid) => Some(uid),
         None => uid_by_message_id(session, row.message_id.as_deref()).await?,
     };
-    Ok(uid.map(|uid| (folder, uid)))
+    Ok(uid.map(|uid| (folder, uid, selected)))
+}
+
+/// As [`resolve_remote_selected`], without what the SELECT reported.
+async fn resolve_remote(
+    ctx: &SyncCtx,
+    session: &mut Session,
+    action: &repo::actions::PendingAction,
+    message_id: i64,
+) -> Result<Option<(repo::folders::Folder, u32)>> {
+    Ok(resolve_remote_selected(ctx, session, action, message_id)
+        .await?
+        .map(|(folder, uid, _)| (folder, uid)))
 }
 
 /// For moves the local row already points at the *target* folder; the remote
@@ -642,6 +669,43 @@ pub(crate) async fn uid_by_message_id(
     Ok(newest)
 }
 
+/// Mark a whole folder read on the server through the newest message the
+/// check before the request knew of (#234). Its messages here were marked
+/// when it was queued.
+async fn mark_folder_read_on_imap(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Session,
+    action: &repo::actions::PendingAction,
+) -> Result<()> {
+    let Some(folder_id) = action.payload["folderId"].as_i64() else {
+        return Ok(());
+    };
+    let Some(through) = action.payload["throughUid"]
+        .as_i64()
+        .and_then(|uid| u32::try_from(uid).ok())
+        .filter(|uid| *uid > 0)
+    else {
+        return Ok(());
+    };
+    let folder = ctx
+        .db
+        .read(move |conn| repo::folders::get(conn, folder_id))
+        .await?;
+    // The folder went away since: nothing of it is left to mark.
+    let Some(folder) = folder.filter(|folder| folder.account_id == config.id) else {
+        return Ok(());
+    };
+    let selected = imap::select(session, &folder.path).await?;
+    // A new UIDVALIDITY means the UIDs now name other mail.
+    if let Some(validity) = action.payload["uidValidity"].as_i64()
+        && selected.uid_validity != Some(validity)
+    {
+        return Ok(());
+    }
+    imap::mark_seen_through(session, through).await
+}
+
 async fn flag_action(
     ctx: &SyncCtx,
     session: &mut Session,
@@ -659,6 +723,46 @@ async fn flag_action(
 }
 
 /// Push a label as a custom IMAP keyword on the message's current remote copy.
+/// Record a read receipt's answer where the mailbox keeps $MDNSent, then
+/// send the receipt if one was agreed. RFC 3503: no receipt goes when the
+/// server refused the mark, so another device can't send a second one.
+async fn read_receipt_on_imap(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Session,
+    action: &repo::actions::PendingAction,
+) -> Result<()> {
+    let Some(message_id) = action.message_id else {
+        return Ok(());
+    };
+    if let Some((_folder, uid, selected)) =
+        resolve_remote_selected(ctx, session, action, message_id).await?
+        && selected.keeps_keyword(imap::MDN_SENT)
+    {
+        imap::store_flag(session, uid, imap::MDN_SENT, true).await?;
+    }
+    send_read_receipt(ctx, config, action).await
+}
+
+/// Send the read receipt `action` agreed to, by SMTP.
+async fn send_read_receipt(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    action: &repo::actions::PendingAction,
+) -> Result<()> {
+    if !action.payload["send"].as_bool().unwrap_or(false) {
+        return Ok(());
+    }
+    let Some(message_id) = action.message_id else {
+        return Ok(());
+    };
+    let user_agreed = action.payload["userAgreed"].as_bool().unwrap_or(false);
+    match crate::read_receipts::prepare(ctx, config.id, message_id, user_agreed).await? {
+        Some(receipt) => crate::read_receipts::send_by_smtp(ctx, config, &receipt).await,
+        None => Ok(()),
+    }
+}
+
 async fn keyword_action(
     ctx: &SyncCtx,
     session: &mut Session,
@@ -788,11 +892,15 @@ async fn append_sent_action(
     let message_id = action
         .message_id
         .ok_or_else(|| CoreError::NotFound("message for Sent filing".into()))?;
-    let row = ctx
+    let (row, asks_receipt) = ctx
         .db
         .read(move |conn| {
-            repo::messages::get_row(conn, message_id)?
-                .ok_or_else(|| CoreError::NotFound(format!("message {message_id}")))
+            let row = repo::messages::get_row(conn, message_id)?
+                .ok_or_else(|| CoreError::NotFound(format!("message {message_id}")))?;
+            Ok((
+                row,
+                !repo::messages::receipt_to(conn, message_id)?.is_empty(),
+            ))
         })
         .await?;
     if row.account_id != config.id || action.account_id != config.id {
@@ -864,7 +972,14 @@ async fn append_sent_action(
             Ok(())
         })
         .await?;
-    let receipt = imap::append_with_receipt(session, &sent.path, &raw, true).await?;
+    // A saved copy of a message that asks for a read receipt is marked as
+    // answered, so no client sends one for it (RFC 3503 section 3.3).
+    let options = imap::AppendOptions {
+        seen: true,
+        mdn_sent: asks_receipt && selected.keeps_keyword(imap::MDN_SENT),
+        ..Default::default()
+    };
+    let receipt = imap::append_message(session, &sent.path, &raw, options).await?;
     // Tagged OK is enough to complete filing even without UIDPLUS. Header sync
     // will attach the UID later; no fallible post-APPEND SELECT/search is needed.
     let (validity, uid) = receipt
@@ -1052,6 +1167,15 @@ async fn send_action(
         });
     }
 
+    let (receipt_to, importance) = ctx
+        .db
+        .read(move |conn| {
+            Ok((
+                repo::messages::receipt_to(conn, draft_id)?,
+                repo::messages::importance(conn, draft_id)?,
+            ))
+        })
+        .await?;
     let out = crate::mime::OutgoingMessage {
         from: from.clone(),
         reply_to: identity.reply_to(),
@@ -1066,6 +1190,8 @@ async fn send_action(
         message_id: stored_message_id.as_deref(),
         message_id_domain: &domain,
         attachments,
+        receipt_to: &receipt_to,
+        importance,
     };
     let attachment_count = out.attachments.len();
     let security_recipients = out
@@ -1507,3 +1633,8 @@ pub(crate) mod sent_tests;
 
 #[cfg(test)]
 mod move_tests;
+
+#[cfg(test)]
+mod mark_folder_read_tests;
+#[cfg(test)]
+mod read_receipt_tests;

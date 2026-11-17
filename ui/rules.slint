@@ -1,0 +1,115 @@
+// Rules that sort new mail as it arrives in an Inbox (#238): the list in
+// Settings and the editor (src/mail_rules.rs).
+
+// A rule in the list, in the order rules are tried.
+export struct RuleRow {
+    id: int,
+    name: string,
+    // The account's address, or "" for every account.
+    account: string,
+    enabled: bool,
+    // Something keeps it from running as written, such as a folder it moves
+    // mail to that is gone.
+    problem: bool,
+    // Where it runs, once some server can run rules: "server", "some" for
+    // the servers of some of its accounts, or "app" while Flectar Mail is
+    // open. "" when no server of its accounts runs rules.
+    place: string,
+}
+
+// What an account's server needs before it runs the rules.
+export struct RulesNotice {
+    account-id: int,
+    account: string,
+    // "run-before": the server runs the user's own filter script, named in
+    // `detail`. "others": it runs rules saved on another device. "edited":
+    // Flectar Mail's script there was changed elsewhere. "failed": the
+    // server can't take them, for the reason in `detail`.
+    kind: string,
+    detail: string,
+    // This device has rules for the account to put there.
+    has-rules: bool,
+}
+
+// A condition in the editor. `field` indexes the fields and `op` that
+// field's comparisons, as the editor lists them. The editor binds both ways
+// to these rows.
+export struct RuleConditionRow {
+    field: int,
+    // The header a Header condition looks at.
+    header: string,
+    op: int,
+    value: string,
+}
+
+// An action in the editor. `kind` indexes the actions as the editor lists
+// them, and `target` the folders or labels it puts mail in.
+export struct RuleActionRow {
+    kind: int,
+    target: int,
+}
+
+export global MailRules {
+    in property <[RuleRow]> rows;
+    in property <[RulesNotice]> notices;
+    // Do what the notice for account `account-id` offers.
+    callback notice-action(int);
+    // How long Trash and Junk keep mail, as places in the cleanup choices:
+    // for ever, then 7, 14, 30, 60 or 90 days.
+    in-out property <int> trash-days;
+    in-out property <int> junk-days;
+    callback choose-cleanup(int, int);
+
+    // The editor, open for the rule `editing-id`, or 0 for a new one.
+    in-out property <bool> editing;
+    in property <int> editing-id;
+    in-out property <string> name;
+    // "All accounts" first, then each account that receives mail.
+    in property <[string]> accounts;
+    in-out property <int> account;
+    // 0: all of the conditions, 1: any of them.
+    in-out property <int> match;
+    in property <[RuleConditionRow]> conditions;
+    in property <[RuleActionRow]> actions;
+    // The rule's account's folders and the labels it can use. A rule for
+    // every account files only into labels of this device.
+    in property <[string]> folders;
+    in property <[string]> labels;
+    // The Inbox's categories a rule can show mail in.
+    in property <[string]> tabs;
+    // The account keeps a message in several folders (JMAP), so it can
+    // copy mail too.
+    in property <bool> can-copy;
+    in-out property <bool> stop;
+    // Where the rule in the editor runs, as `RuleRow.place` says, and why
+    // it runs in the app: "pattern", "attachments", "case", "name",
+    // "folder", "label", "unsupported" or "after". "" for a new rule.
+    in property <string> place;
+    in property <string> place-why;
+    in property <string> error;
+    in property <bool> busy;
+
+    callback create();
+    callback edit(int);
+    callback close();
+    callback save();
+    callback delete();
+    callback toggle(int, bool);
+    // Move the rule up (-1) or down (1).
+    callback move(int, int);
+    callback choose-account(int);
+    callback add-condition();
+    callback remove-condition(int);
+    callback add-action();
+    callback remove-action(int);
+
+    // Running the rule on mail already in the Inbox: the question, with how
+    // much it matches there now and how much it can't tell about yet.
+    in-out property <bool> run-open;
+    in property <int> run-count;
+    in property <int> run-unknown;
+    callback run();
+    callback confirm-run();
+    // The message menu: a new rule for mail like the open message.
+    callback create-from-message();
+}

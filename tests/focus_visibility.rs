@@ -5,6 +5,7 @@ use slint::platform::{
 use std::{cell::Cell, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { Button } from "../ui/components/button.slint";
     import { IconButton, TextLink } from "../ui/components/controls.slint";
     import { SettingsLinkRow } from "../ui/components/settings-components.slint";

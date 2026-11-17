@@ -322,6 +322,32 @@ impl SentCopyPolicy {
     }
 }
 
+/// How an account's messages start: formatted, or as plain text only. Each message can change.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MessageFormat {
+    #[default]
+    Formatted,
+    PlainText,
+}
+
+impl MessageFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Formatted => "formatted",
+            Self::PlainText => "plainText",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "formatted" => Some(Self::Formatted),
+            "plainText" => Some(Self::PlainText),
+            _ => None,
+        }
+    }
+}
+
 /// How long a POP3 account leaves downloaded mail on its server. Mail is
 /// removed from the server only once this device has stored it, and every
 /// choice but `Always` also removes mail deleted here.
@@ -400,6 +426,26 @@ pub struct AccountSettings {
     /// POP3 accounts only.
     #[serde(default)]
     pub keep_on_server: KeepOnServer,
+    /// How new messages start.
+    #[serde(default)]
+    pub message_format: MessageFormat,
+    /// Replies and forwards to messages that are plain text only start in plain text, also
+    /// when new messages start formatted.
+    #[serde(default = "plain_text_replies_default")]
+    pub plain_text_replies: bool,
+    /// New messages ask for a read receipt (RFC 8098), which each message
+    /// can still change.
+    #[serde(default)]
+    pub request_read_receipts: bool,
+    /// IMAP accounts only: list and sync the folders the user subscribed to
+    /// (RFC 9051 6.3.7), plus the Inbox, a folder for each purpose Flectar
+    /// Mail files mail into, and the folders rules file into.
+    #[serde(default)]
+    pub subscribed_folders_only: bool,
+}
+
+const fn plain_text_replies_default() -> bool {
+    true
 }
 
 impl AccountSettings {
@@ -413,6 +459,10 @@ impl AccountSettings {
             default_sender_email: None,
             sent_copy_policy: SentCopyPolicy::Auto,
             keep_on_server: KeepOnServer::Always,
+            message_format: MessageFormat::Formatted,
+            plain_text_replies: plain_text_replies_default(),
+            request_read_receipts: false,
+            subscribed_folders_only: false,
         }
     }
 }
@@ -453,6 +503,31 @@ mod account_settings_tests {
     }
 
     #[test]
+    fn message_format_defaults_and_choices_survive_serialization() {
+        let mut settings: AccountSettings = serde_json::from_str(MINIMAL_SETTINGS).unwrap();
+        // Accounts from before the choice start formatted, with plain-text replies to plain text.
+        assert_eq!(settings.message_format, MessageFormat::Formatted);
+        assert!(settings.plain_text_replies);
+        let new = AccountSettings::new(settings.connection.clone());
+        assert_eq!(
+            (new.message_format, new.plain_text_replies),
+            (MessageFormat::Formatted, true)
+        );
+        for format in [MessageFormat::Formatted, MessageFormat::PlainText] {
+            settings.message_format = format;
+            settings.plain_text_replies = false;
+            let restored: AccountSettings =
+                serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(
+                (restored.message_format, restored.plain_text_replies),
+                (format, false)
+            );
+            assert_eq!(MessageFormat::from_storage(format.as_str()), Some(format));
+        }
+        assert_eq!(MessageFormat::from_storage("html"), None);
+    }
+
+    #[test]
     fn sent_copy_defaults_and_overrides_survive_serialization() {
         let mut settings: AccountSettings = serde_json::from_str(MINIMAL_SETTINGS).unwrap();
         assert_eq!(settings.sent_copy_policy, SentCopyPolicy::Auto);
@@ -471,6 +546,17 @@ mod account_settings_tests {
         }
         assert!(SentCopyPolicy::Client.should_append(Provider::Microsoft));
         assert!(!SentCopyPolicy::Server.should_append(Provider::Generic));
+    }
+
+    #[test]
+    fn subscribed_folders_only_starts_off_and_survives_serialization() {
+        let mut settings: AccountSettings = serde_json::from_str(MINIMAL_SETTINGS).unwrap();
+        assert!(!settings.subscribed_folders_only);
+        settings.subscribed_folders_only = true;
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains(r#""subscribedFoldersOnly":true"#));
+        let restored: AccountSettings = serde_json::from_str(&json).unwrap();
+        assert!(restored.subscribed_folders_only);
     }
 
     #[test]
@@ -540,6 +626,11 @@ pub struct Account {
     /// said.
     #[serde(default)]
     pub server_keeps_mail_days: Option<u32>,
+    /// When the last check that brought the Inbox up to date started, in
+    /// milliseconds since the epoch: the account last checked for new mail
+    /// then. `None` before its first complete check.
+    #[serde(default)]
+    pub caught_up_at: Option<i64>,
 }
 
 /// Mail imported into folders that exist only on this device. It belongs to
@@ -959,6 +1050,8 @@ pub struct ThreadSummary {
     pub is_starred: bool,
     pub has_attachments: bool,
     pub has_replied: bool,
+    /// A message of the conversation was sent with high importance.
+    pub high_importance: bool,
     pub snoozed_until: Option<i64>,
     /// Ids of labels present on any message in the thread.
     pub labels: Vec<i64>,
@@ -1005,6 +1098,8 @@ pub struct MessageSummary {
     pub has_attachments: bool,
     /// A sent reply refers to this message.
     pub has_replied: bool,
+    /// The message was sent with high importance.
+    pub high_importance: bool,
     /// When the message's conversation is snoozed until.
     pub snoozed_until: Option<i64>,
     pub labels: Vec<i64>,
@@ -1090,6 +1185,184 @@ pub struct MessageDetail {
     pub in_spam: bool,
     /// Its sender is blocked: their mail goes to Spam.
     pub sender_blocked: bool,
+    /// The read receipt it asks for, when one may be sent and nothing has
+    /// answered it yet.
+    pub receipt_request: Option<ReceiptRequest>,
+    /// For a message one sent, the read receipts that came back for it,
+    /// earliest first.
+    pub returned_receipts: Vec<ReturnedReceipt>,
+}
+
+/// A read receipt a received message asks for (RFC 8098), which this client
+/// may send. Mail in Spam, drafts, sent and automated mail, and requests that
+/// go back to the account's own addresses, ask for none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptRequest {
+    /// Where the receipt would go.
+    pub to: Vec<Address>,
+    /// It may only go with the user's agreement: RFC 8098 section 2.1 wants
+    /// it for this request, or the receiving server didn't authenticate the
+    /// sender (section 6.1).
+    pub needs_confirmation: bool,
+}
+
+/// What a read receipt that came back says happened to the message (RFC 8098
+/// section 3.2.6.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Disposition {
+    /// Shown to someone reading the recipient's mailbox, which doesn't mean
+    /// it was read or understood.
+    Displayed,
+    /// Deleted, seen or not.
+    Deleted,
+    /// Printed, faxed or forwarded without being shown.
+    Dispatched,
+    /// Handled by rules or a server without being shown.
+    Processed,
+}
+
+impl Disposition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Displayed => "displayed",
+            Self::Deleted => "deleted",
+            Self::Dispatched => "dispatched",
+            Self::Processed => "processed",
+        }
+    }
+
+    /// A disposition type, in any case. The types RFC 3798 also had,
+    /// "denied" and "failed", say nothing happened to the message.
+    pub fn parse(value: &str) -> Option<Self> {
+        [
+            Self::Displayed,
+            Self::Deleted,
+            Self::Dispatched,
+            Self::Processed,
+        ]
+        .into_iter()
+        .find(|disposition| value.eq_ignore_ascii_case(disposition.as_str()))
+    }
+}
+
+/// A read receipt that came back for a message one sent: whom it's from and
+/// what it says happened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReturnedReceipt {
+    /// The recipient, named as the message addressed them where it did.
+    pub recipient: Address,
+    pub disposition: Disposition,
+    /// When the receipt was written, in milliseconds since the Unix epoch.
+    pub reported_at: i64,
+}
+
+/// How a read receipt request is answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceiptAnswer {
+    /// Send it: the user agreed to this one, or Settings says to always
+    /// send and the request needs no confirmation.
+    Send { user_agreed: bool },
+    /// Don't send one, and don't ask again.
+    Decline,
+}
+
+/// Automatic replies an account's server sends while the user is away
+/// (#239), such as Gmail's vacation responder.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoReply {
+    pub enabled: bool,
+    pub subject: String,
+    pub text: String,
+    /// When replies start and end, in milliseconds since the epoch. Mail
+    /// that arrives before or after gets none.
+    pub starts_at: Option<i64>,
+    pub ends_at: Option<i64>,
+    /// Only senders in the user's contacts get a reply.
+    pub contacts_only: bool,
+    /// Only senders of the account's own domain get a reply, which Google
+    /// Workspace offers.
+    pub domain_only: bool,
+}
+
+impl AutoReply {
+    /// Whether replies go out at `now`, or will once their first day comes.
+    pub fn on_at(&self, now: i64) -> bool {
+        self.enabled && self.ends_at.is_none_or(|ends_at| ends_at > now)
+    }
+}
+
+/// What saving automatic replies did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoReplySaved {
+    /// The replies as the server keeps them now.
+    Done(AutoReply),
+    /// Nothing changed: the user must allow this first.
+    Ask(AutoReplyQuestion),
+}
+
+/// What saving automatic replies would change on a server that runs Sieve
+/// scripts, beyond the replies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoReplyQuestion {
+    /// The server runs the user's own filter script, named here. The replies
+    /// would run first, then that script, unchanged.
+    RunBefore(String),
+    /// The app's script on the server was changed elsewhere since the app
+    /// wrote it. Saving replaces those changes.
+    ReplaceChanges,
+}
+
+/// Something an AI agent did through the local MCP server, without message
+/// content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentActivity {
+    pub id: i64,
+    pub occurred_at: i64,
+    /// The name the agent's app gave itself.
+    pub agent: String,
+    pub tool: String,
+    pub account_id: Option<i64>,
+    pub folder_id: Option<i64>,
+    /// How many accounts, folders, messages, contacts or events it touched.
+    pub items: i64,
+    pub outcome: AgentOutcome,
+    /// The user can still undo what it changed.
+    pub undoable: bool,
+    /// The user undid what it changed.
+    pub undone: bool,
+}
+
+/// How an agent's request ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentOutcome {
+    Done,
+    /// It asked for something outside its access.
+    Refused,
+    Failed,
+}
+
+impl AgentOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Done => "done",
+            Self::Refused => "refused",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub(crate) fn from_column(value: &str) -> Self {
+        match value {
+            "done" => Self::Done,
+            "refused" => Self::Refused,
+            _ => Self::Failed,
+        }
+    }
 }
 
 /// A sender whose mail goes to Spam.
@@ -1121,6 +1394,194 @@ pub struct BlockResult {
     pub action_ids: Vec<i64>,
     /// How many messages moved.
     pub moved: usize,
+}
+
+/// A rule that sorts new mail as it arrives in an Inbox (#238). Rules are
+/// tried top to bottom.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailRule {
+    /// 0 for a rule not saved yet.
+    pub id: i64,
+    /// The account whose mail it sorts, or None for every account's.
+    pub account_id: Option<i64>,
+    pub name: String,
+    pub enabled: bool,
+    /// Whether mail must meet every condition, or any one.
+    pub match_all: bool,
+    pub conditions: Vec<RuleCondition>,
+    pub actions: Vec<RuleAction>,
+    /// Whether later rules leave alone the mail this one matched. Filing
+    /// mail away (move, archive, trash, junk) always ends the rules.
+    pub stop: bool,
+}
+
+/// What one condition of a [`MailRule`] tests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleCondition {
+    pub field: RuleField,
+    /// The header a [`RuleField::Header`] condition looks at, such as
+    /// "X-Spam-Flag".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub header: String,
+    pub op: RuleOp,
+    /// The text to look for, the pattern, or the size in KB.
+    #[serde(default)]
+    pub value: String,
+    /// Whether the condition holds when the test fails, as in "doesn't
+    /// contain".
+    #[serde(default)]
+    pub negate: bool,
+}
+
+/// The part of a message a [`RuleCondition`] tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuleField {
+    /// The sender's address or name.
+    From,
+    To,
+    Cc,
+    /// Any recipient in To or Cc.
+    ToOrCc,
+    Subject,
+    /// The List-Id of mailing list mail.
+    MailingList,
+    /// The message's size in KB.
+    Size,
+    /// A header the condition names.
+    Header,
+    /// The message's text.
+    Body,
+    /// Whether files are attached.
+    Attachments,
+}
+
+/// How a [`RuleCondition`] compares. Text is compared without regard to
+/// case, an address by its email and by its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuleOp {
+    Contains,
+    Is,
+    StartsWith,
+    EndsWith,
+    /// A regular expression, found anywhere in the text.
+    Matches,
+    /// The field is there at all, as mailing list mail has a List-Id and
+    /// some mail has files attached.
+    Exists,
+    /// A size larger than the value.
+    Over,
+    /// A size smaller than the value.
+    Under,
+}
+
+/// What a [`MailRule`] does with mail it matches. Mail is marked and
+/// labeled first, then copied, then filed away.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RuleAction {
+    /// Into one of the rule's account's folders.
+    Move {
+        folder: i64,
+    },
+    /// Into one more folder, where a message can be in several (JMAP).
+    Copy {
+        folder: i64,
+    },
+    Label {
+        label: i64,
+    },
+    MarkRead,
+    Star,
+    Archive,
+    Trash,
+    Junk,
+    /// Under a tab of the Inbox: "important", "other", or "label:<id>" for
+    /// an automatic category. The conversation stays there.
+    ShowIn {
+        tab: String,
+    },
+}
+
+/// Where an account's rules run (#238), as last checked. The rules its
+/// server runs work while the app is closed. The app tries every rule on
+/// new mail while it's open, whatever the server ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerRules {
+    pub account_id: i64,
+    pub state: ServerRulesState,
+    /// The rules the server runs, in order.
+    pub on_server: Vec<i64>,
+    /// The account's other rules, which run in the app alone, and why.
+    pub here: Vec<RuleHere>,
+    /// Milliseconds since the epoch.
+    pub checked_at: i64,
+}
+
+/// What an account's server does with its rules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "detail", rename_all = "camelCase")]
+pub enum ServerRulesState {
+    /// The server can't run rules.
+    Unavailable,
+    /// The server runs the rules it can.
+    Runs,
+    /// The server runs rules another device put there, so this device's
+    /// rules run in the app until the user replaces those.
+    Others,
+    /// The server runs the user's own filter script, named here. Rules run
+    /// on the server once the user lets the app's script run before it.
+    RunBefore(String),
+    /// Flectar Mail's script on the server was changed elsewhere. Rules run
+    /// there again once the user lets the app replace those changes.
+    Edited,
+    /// The server can't take the rules, for this reason.
+    Failed(String),
+}
+
+/// A rule that runs in the app alone, and why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleHere {
+    pub rule_id: i64,
+    pub why: RuleHereWhy,
+}
+
+/// Why a rule runs in the app alone, though its server runs rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuleHereWhy {
+    /// It looks for a pattern.
+    Pattern,
+    /// It asks whether files are attached.
+    Attachments,
+    /// It compares text beyond ASCII, which the server compares with case.
+    Case,
+    /// It compares a whole name, or the start or end of one.
+    Name,
+    /// The server can't name one of its folders, or the folder is gone.
+    Folder,
+    /// One of its labels has a name the server can't keep.
+    Label,
+    /// The server lacks something the rule needs.
+    Unsupported,
+    /// A rule before it runs in the app, and server rules run first.
+    After,
+}
+
+/// The user's go-ahead for a [`ServerRulesState`] that waits for one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerRulesAnswer {
+    /// Run the app's script before the user's own one, named here.
+    RunBefore(String),
+    /// Replace the changes made to the app's script elsewhere.
+    ReplaceChanges,
+    /// Replace the rules another device put on the server.
+    ReplaceOthers,
 }
 
 /// How the user can leave a mailing list, for the confirmation shown before
@@ -1163,8 +1624,40 @@ pub struct ThreadDetail {
     pub messages: Vec<MessageDetail>,
 }
 
-/// Stable keyset cursor for the descending thread timeline. Timestamps alone
-/// are not unique, so the thread id is the deterministic tie-breaker.
+/// Which end of a mail list's timeline comes first.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ListOrder {
+    #[default]
+    NewestFirst,
+    OldestFirst,
+}
+
+impl ListOrder {
+    /// The other order, which pages toward a list's start.
+    #[must_use]
+    pub const fn reversed(self) -> Self {
+        match self {
+            Self::NewestFirst => Self::OldestFirst,
+            Self::OldestFirst => Self::NewestFirst,
+        }
+    }
+}
+
+/// What a mail list's saved order belongs to. The order goes when its
+/// account, folder or label does, so a later one that takes the same id
+/// starts newest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListOwner {
+    /// A list across accounts, such as a unified mailbox or an inbox half.
+    Unified,
+    Account(i64),
+    Folder(i64),
+    Label(i64),
+}
+
+/// Stable keyset cursor for the thread timeline, in either order. Timestamps
+/// alone are not unique, so the thread id is the deterministic tie-breaker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadCursor {
@@ -1195,8 +1688,38 @@ pub struct SearchPage {
     pub next_cursor: Option<SearchCursor>,
 }
 
-/// Stable keyset cursor for the descending message timeline; the message id
-/// breaks ties between messages with the same date.
+/// Where a server search of one account goes on from: Gmail's page token, how
+/// many results JMAP gave already, or for IMAP each folder with the UID its
+/// next results are below.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerSearchCursor {
+    pub page_token: Option<String>,
+    pub position: u64,
+    pub below: Vec<(i64, u32)>,
+}
+
+/// A page of what accounts' servers found for a search, past what this
+/// device keeps: the conversations of the messages found, newest first. The
+/// messages are kept here, their bodies fetched when opened.
+#[derive(Debug, Clone, Default)]
+pub struct ServerSearchPage {
+    pub threads: Vec<ThreadSummary>,
+    /// The messages themselves, newest first, for lists without
+    /// conversations.
+    pub messages: Vec<MessageSummary>,
+    /// Where each account's search goes on from. An account that found all
+    /// its server has isn't here.
+    pub cursors: Vec<(i64, ServerSearchCursor)>,
+    /// Accounts whose servers can't be searched: POP3, and mail kept only on
+    /// this device.
+    pub unsearchable: Vec<i64>,
+    /// Accounts whose search failed, with why.
+    pub failed: Vec<(i64, String)>,
+}
+
+/// Stable keyset cursor for the message timeline, in either order; the
+/// message id breaks ties between messages with the same date.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageCursor {
@@ -1349,6 +1872,16 @@ pub struct ActionParams {
     pub label_id: Option<i64>,
 }
 
+/// A message to forward as an attachment, as the composer names it before its original is
+/// fetched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForwardedMessage {
+    pub message_id: i64,
+    pub account_id: i64,
+    pub thread_id: Option<i64>,
+    pub subject: String,
+}
+
 /// What an action applies to: whole conversations, or single messages, as a
 /// mail list without conversations shows them.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1410,6 +1943,43 @@ pub struct SaveDraftArgs {
     pub in_reply_to_header: Option<String>,
     #[serde(default)]
     pub attachments: Vec<DraftAttachmentIn>,
+    /// The message asks for a read receipt (Disposition-Notification-To,
+    /// RFC 8098), sent to its From address.
+    #[serde(default)]
+    pub request_read_receipt: bool,
+    /// How important the message says it is.
+    #[serde(default)]
+    pub importance: Importance,
+}
+
+/// How important a message's sender marked it, from its Importance or
+/// X-Priority header, or what a draft asks for (#236).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Importance {
+    Low,
+    #[default]
+    Normal,
+    High,
+}
+
+impl Importance {
+    /// As stored: -1, 0 or 1.
+    pub const fn as_i64(self) -> i64 {
+        match self {
+            Self::Low => -1,
+            Self::Normal => 0,
+            Self::High => 1,
+        }
+    }
+
+    pub const fn from_i64(value: i64) -> Self {
+        match value {
+            ..=-1 => Self::Low,
+            0 => Self::Normal,
+            _ => Self::High,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1436,46 +2006,6 @@ pub struct Snippet {
     pub subject: Option<String>,
     pub body_text: String,
     pub usage_count: i64,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SplitRuleQuery {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub senders: Option<Vec<String>>,
-    /// Never match threads from these addresses/domains, even when every
-    /// positive criterion holds. Exclusions alone never make a rule match.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exclude_senders: Option<Vec<String>>,
-    /// Match a recipient (To or Cc) address/domain.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recipients: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subject_contains: Option<Vec<String>>,
-    /// Match threads carrying any of these user (non-auto) label ids. Lets an
-    /// AI-applied label like "INVOICE" route mail into a tab even when the
-    /// subject holds no keyword.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub labels: Option<Vec<i64>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub is_automated: Option<bool>,
-    /// Match threads that have (true) or lack (false) an attachment.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub has_attachment: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SplitRule {
-    pub id: i64,
-    pub name: String,
-    pub position: i64,
-    pub query: SplitRuleQuery,
-    /// Where matching mail is routed. `None` = the rule is its own tab (legacy,
-    /// route key `"split:<id>"`); otherwise a route key: `"important"`,
-    /// `"other"`, or `"label:<id>"` to drop matches into an existing tab.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1660,9 +2190,6 @@ pub struct MailboxBadgeCounts {
     /// Unread per label id, ascending: manual labels count their members,
     /// categories the inbox mail routed to them.
     pub labels: Vec<(i64, i64)>,
-    /// Unread inbox mail per custom split id, ascending. Splits have no
-    /// sidebar row; notifications and the app icon count them.
-    pub splits: Vec<(i64, i64)>,
 }
 
 /// One deterministic action attached to an AI-matched automation. `value` is
@@ -1740,6 +2267,21 @@ impl Default for CustomTheme {
     }
 }
 
+/// A search kept in the sidebar. Its mail stays where it is: the search only
+/// shows it, as the search field would.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedSearch {
+    pub id: i64,
+    pub name: String,
+    /// What it searches for, as typed in the search field.
+    pub query: String,
+    /// The mail profile whose accounts it covers. Without one it covers the
+    /// accounts the mail view shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+}
+
 /// A local, user-owned grouping for connected mail accounts.
 ///
 /// Profiles organize account provenance in Flectar Mail only. They never map
@@ -1779,6 +2321,115 @@ impl MessageAppearance {
             "light" => Some(Self::Light),
             "dark" => Some(Self::Dark),
             _ => None,
+        }
+    }
+}
+
+/// Whether the interface reduces motion (#231): as the operating system asks,
+/// or always, or never.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReduceMotion {
+    #[default]
+    System,
+    On,
+    Off,
+}
+
+impl ReduceMotion {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::On => "on",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "system" => Some(Self::System),
+            "on" => Some(Self::On),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
+}
+
+/// What to do when a message asks for a read receipt (RFC 8098). The
+/// standard wants none sent without the user's consent by default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReadReceiptPolicy {
+    #[default]
+    Never,
+    /// Ask above the message.
+    Ask,
+    /// Send them, except where RFC 8098 wants the user asked first.
+    Always,
+}
+
+impl ReadReceiptPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::Ask => "ask",
+            Self::Always => "always",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "never" => Some(Self::Never),
+            "ask" => Some(Self::Ask),
+            "always" => Some(Self::Always),
+            _ => None,
+        }
+    }
+}
+
+/// The interface's text size (#231), as a step on the system's own text size.
+/// Message zoom and the composer's text size stay separate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InterfaceTextSize {
+    Smaller,
+    #[default]
+    Default,
+    Large,
+    Larger,
+    Largest,
+}
+
+impl InterfaceTextSize {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Smaller => "smaller",
+            Self::Default => "default",
+            Self::Large => "large",
+            Self::Larger => "larger",
+            Self::Largest => "largest",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "smaller" => Some(Self::Smaller),
+            "default" => Some(Self::Default),
+            "large" => Some(Self::Large),
+            "larger" => Some(Self::Larger),
+            "largest" => Some(Self::Largest),
+            _ => None,
+        }
+    }
+
+    /// How many times the system's text size the interface uses.
+    pub fn factor(self) -> f32 {
+        match self {
+            Self::Smaller => 0.9,
+            Self::Default => 1.0,
+            Self::Large => 1.15,
+            Self::Larger => 1.3,
+            Self::Largest => 1.5,
         }
     }
 }
@@ -1898,12 +2549,105 @@ impl<'de> Deserialize<'de> for AppIcon {
     }
 }
 
+/// How tightly the mail list packs its rows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ListDensity {
+    #[default]
+    Comfortable,
+    Compact,
+}
+
+impl ListDensity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Comfortable => "comfortable",
+            Self::Compact => "compact",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        [Self::Comfortable, Self::Compact]
+            .into_iter()
+            .find(|choice| choice.as_str() == value)
+    }
+}
+
+/// The most lines of a message's text the mail list shows.
+pub const MAX_PREVIEW_LINES: u8 = 3;
+
+/// When an unread message the user opens counts as read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MarkRead {
+    /// As it opens.
+    #[default]
+    Immediately,
+    /// Once it has stayed open for two seconds.
+    AfterTwoSeconds,
+    /// Once it has stayed open for five seconds.
+    AfterFiveSeconds,
+    /// Only when the user marks it.
+    Never,
+}
+
+impl MarkRead {
+    pub const ALL: [Self; 4] = [
+        Self::Immediately,
+        Self::AfterTwoSeconds,
+        Self::AfterFiveSeconds,
+        Self::Never,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Immediately => "immediately",
+            Self::AfterTwoSeconds => "afterTwoSeconds",
+            Self::AfterFiveSeconds => "afterFiveSeconds",
+            Self::Never => "never",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|choice| choice.as_str() == value)
+    }
+
+    /// How long an opened message stays open before it counts as read, or
+    /// `None` when opening never marks it.
+    pub fn delay(self) -> Option<std::time::Duration> {
+        match self {
+            Self::Immediately => Some(std::time::Duration::ZERO),
+            Self::AfterTwoSeconds => Some(std::time::Duration::from_secs(2)),
+            Self::AfterFiveSeconds => Some(std::time::Duration::from_secs(5)),
+            Self::Never => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub theme: String,
     #[serde(default)]
     pub message_appearance: MessageAppearance,
+    /// Whether the interface reduces motion.
+    #[serde(default)]
+    pub reduce_motion: ReduceMotion,
+    /// The interface's text size.
+    #[serde(default)]
+    pub interface_text_size: InterfaceTextSize,
+    /// What to do when a message asks for a read receipt.
+    #[serde(default)]
+    pub read_receipts: ReadReceiptPolicy,
+    /// For how many days mail stays in Trash before Flectar Mail deletes
+    /// it for good, counted from when it went there. 0 keeps it.
+    #[serde(default)]
+    pub empty_trash_after_days: u32,
+    /// The same for Junk.
+    #[serde(default)]
+    pub empty_junk_after_days: u32,
     /// Named application palette: "default" | "teal" | "green" | "purple" | "custom".
     #[serde(default = "default_theme_preset")]
     pub theme_preset: String,
@@ -1917,6 +2661,13 @@ pub struct Settings {
     /// Group the mail list into collapsible local-date sections.
     #[serde(default = "default_true")]
     pub group_mail_by_date: bool,
+    /// How tightly the mail list packs its rows.
+    #[serde(default)]
+    pub list_density: ListDensity,
+    /// How many lines of each message's text the mail list shows, up to
+    /// `MAX_PREVIEW_LINES`.
+    #[serde(default = "default_preview_lines")]
+    pub preview_lines: u8,
     /// Show browser-style tabs: the strip in the desktop top bar, and the tab
     /// switcher in compact layouts. Saved tabs are kept while they are hidden.
     #[serde(default = "default_true")]
@@ -1954,11 +2705,24 @@ pub struct Settings {
     #[serde(default = "default_calendar_week_start")]
     pub calendar_week_start: String,
     pub undo_send_seconds: i64,
+    /// The font and size new messages start in: "default", which names none, "serif" or
+    /// "monospace", and "small", "normal", "large" or "huge".
+    #[serde(default = "default_compose_font")]
+    pub compose_font: String,
+    #[serde(default = "default_compose_text_size")]
+    pub compose_text_size: String,
+    /// How many days a link to a file sent by link works, or 0 for as long as the file is
+    /// kept. A server that limits links shortens it.
+    #[serde(default = "default_link_expiry_days")]
+    pub link_expiry_days: u32,
+    /// A file sent by link asks for a password, which the sender passes on another way.
+    #[serde(default)]
+    pub link_password: bool,
     #[serde(default)]
     pub load_remote_images: bool,
-    /// Mark unread conversations as read when the user opens them.
-    #[serde(default = "default_true")]
-    pub mark_read_on_open: bool,
+    /// When an unread message the user opens counts as read.
+    #[serde(default)]
+    pub mark_read: MarkRead,
     /// Directory desktop save dialogs open in. An empty value follows the
     /// platform default. The path is deliberately not validated when stored:
     /// a saved location can be unavailable later, such as an unmounted network
@@ -2134,10 +2898,58 @@ pub struct Settings {
     /// to at most one profile; provider state is never affected.
     #[serde(default)]
     pub mail_profiles: Vec<MailProfile>,
+    /// Searches kept in the sidebar, in its order.
+    #[serde(default)]
+    pub saved_searches: Vec<SavedSearch>,
     /// The profile whose accounts the mail view shows. `None` shows every
     /// account. Never names a deleted or empty profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_mail_profile: Option<String>,
+    /// What AI agents on this computer may do with mail through the local
+    /// MCP server. Off until the user turns it on.
+    #[serde(default)]
+    pub agent_access: AgentAccess,
+}
+
+/// What AI agents may see and do through `flectar-mail mcp`, the same for
+/// every agent. Reading is the only right that comes with access itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AgentAccess {
+    pub enabled: bool,
+    /// Accounts agents can't see.
+    pub hidden_accounts: Vec<i64>,
+    /// Folders agents can't see.
+    pub hidden_folders: Vec<i64>,
+    /// Spam and Trash folders agents can see. They're hidden otherwise, since
+    /// junk mail is where hostile instructions are most likely to be.
+    pub shown_folders: Vec<i64>,
+    /// Write drafts for the user to review and send. Agents never send them.
+    pub can_write_drafts: bool,
+    /// Mark messages read or unread, flagged or not.
+    pub can_mark: bool,
+    /// Move messages between folders, to the archive or to the trash.
+    pub can_move: bool,
+    /// Add and remove labels.
+    pub can_label: bool,
+    /// Send drafts, each one approved in the app first.
+    pub can_send: bool,
+}
+
+impl AgentAccess {
+    /// Whether agents can see the account `account_id`.
+    pub fn shows_account(&self, account_id: i64) -> bool {
+        self.enabled && !self.hidden_accounts.contains(&account_id)
+    }
+
+    /// Whether agents can see `folder`.
+    pub fn shows_folder(&self, folder: &FolderInfo) -> bool {
+        if !self.shows_account(folder.account_id) || self.hidden_folders.contains(&folder.id) {
+            return false;
+        }
+        let hidden_by_role = matches!(folder.role.as_deref(), Some(roles::SPAM | roles::TRASH));
+        !hidden_by_role || self.shown_folders.contains(&folder.id)
+    }
 }
 
 /// A named, rich-HTML signature belonging to one account.
@@ -2222,6 +3034,17 @@ pub fn normalized_workspace_list_pane_width(width: i64) -> i64 {
 fn default_window_frame() -> String {
     "integrated".into()
 }
+fn default_compose_font() -> String {
+    "default".into()
+}
+fn default_compose_text_size() -> String {
+    "normal".into()
+}
+
+/// Links to files sent by link work for 30 days, as Mail Drop's do.
+fn default_link_expiry_days() -> u32 {
+    30
+}
 
 /// Unknown values, including those written by newer versions, fall back to
 /// the platform frame so a window can never start without any controls.
@@ -2249,15 +3072,26 @@ fn default_theme_preset() -> String {
     "default".into()
 }
 
+fn default_preview_lines() -> u8 {
+    1
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
             theme: "system".into(),
             message_appearance: MessageAppearance::default(),
+            reduce_motion: ReduceMotion::default(),
+            interface_text_size: InterfaceTextSize::default(),
+            read_receipts: ReadReceiptPolicy::default(),
+            empty_trash_after_days: 0,
+            empty_junk_after_days: 0,
             theme_preset: default_theme_preset(),
             custom_theme: CustomTheme::default(),
             show_avatars: true,
             group_mail_by_date: true,
+            list_density: ListDensity::Comfortable,
+            preview_lines: default_preview_lines(),
             show_tabs: true,
             conversation_view: true,
             workspace_layout: default_workspace_layout(),
@@ -2269,8 +3103,12 @@ impl Default for Settings {
             time_format: TimeFormat::default(),
             calendar_week_start: default_calendar_week_start(),
             undo_send_seconds: 10,
+            compose_font: default_compose_font(),
+            compose_text_size: default_compose_text_size(),
+            link_expiry_days: default_link_expiry_days(),
+            link_password: false,
             load_remote_images: false,
-            mark_read_on_open: true,
+            mark_read: MarkRead::Immediately,
             download_directory: String::new(),
             ai_base_url: default_ai_base_url(),
             ai_model_instant: default_ai_model(),
@@ -2320,7 +3158,9 @@ impl Default for Settings {
             account_colors: std::collections::HashMap::new(),
             account_short_names: std::collections::HashMap::new(),
             mail_profiles: Vec::new(),
+            saved_searches: Vec::new(),
             active_mail_profile: None,
+            agent_access: AgentAccess::default(),
         }
     }
 }
@@ -2709,6 +3549,26 @@ mod tests {
     }
 
     #[test]
+    fn mark_read_choices_keep_their_names_and_waits() {
+        use std::time::Duration;
+        for choice in MarkRead::ALL {
+            assert_eq!(MarkRead::parse(choice.as_str()), Some(choice));
+            assert_eq!(serde_json::to_value(choice).unwrap(), choice.as_str());
+        }
+        assert_eq!(MarkRead::parse("sometimes"), None);
+        assert_eq!(MarkRead::Immediately.delay(), Some(Duration::ZERO));
+        assert_eq!(
+            MarkRead::AfterTwoSeconds.delay(),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            MarkRead::AfterFiveSeconds.delay(),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(MarkRead::Never.delay(), None);
+    }
+
+    #[test]
     fn settings_serde_defaults_for_new_fields() {
         let s: Settings = serde_json::from_str(
             r#"{"theme":"snow","undoSendSeconds":5,"loadRemoteImages":false}"#,
@@ -2721,6 +3581,21 @@ mod tests {
         assert_eq!(s.ai_base_url, crate::ai::DEFAULT_BASE_URL);
         assert!(s.show_avatars);
         assert_eq!(s.message_appearance, MessageAppearance::System);
+        assert_eq!(s.reduce_motion, ReduceMotion::System);
+        for motion in [ReduceMotion::System, ReduceMotion::On, ReduceMotion::Off] {
+            assert_eq!(ReduceMotion::parse(motion.as_str()), Some(motion));
+        }
+        assert_eq!(s.interface_text_size, InterfaceTextSize::Default);
+        assert_eq!(InterfaceTextSize::Default.factor(), 1.0);
+        for size in [
+            InterfaceTextSize::Smaller,
+            InterfaceTextSize::Default,
+            InterfaceTextSize::Large,
+            InterfaceTextSize::Larger,
+            InterfaceTextSize::Largest,
+        ] {
+            assert_eq!(InterfaceTextSize::parse(size.as_str()), Some(size));
+        }
         // Settings saved before the choice existed take the safe default.
         assert_eq!(s.add_invitations, AddInvitations::Known);
         for adding in [
@@ -2732,6 +3607,13 @@ mod tests {
         }
         assert_eq!(s.app_icon, AppIcon::Orange);
         assert!(s.group_mail_by_date);
+        // Rows stay as they were before the list could be made denser.
+        assert_eq!(s.list_density, ListDensity::Comfortable);
+        assert_eq!(s.preview_lines, 1);
+        for density in [ListDensity::Comfortable, ListDensity::Compact] {
+            assert_eq!(ListDensity::parse(density.as_str()), Some(density));
+        }
+        assert_eq!(ListDensity::parse("cozy"), None);
         assert!(s.show_tabs);
         assert!(s.conversation_view);
         // New installs draw their own frame; a saved choice stays.

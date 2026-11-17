@@ -1,0 +1,82 @@
+// AI agents using mail through the Model Context Protocol (#237,
+// src/agents/). Settings → AI agents turns access on, chooses what agents
+// can read, shows how to connect an agent's app, and lists what agents did.
+
+// A folder of an account agents can read.
+export struct AgentFolder {
+    id: int,
+    name: string,
+    // How deep it sits under other folders, for indenting.
+    depth: int,
+    shown: bool,
+}
+
+// An account and, when its folders are open for choosing, its folders.
+export struct AgentAccount {
+    id: int,
+    name: string,
+    address: string,
+    shown: bool,
+    // Which folders agents can read, in a few words.
+    folders-summary: string,
+    folders-open: bool,
+    folders: [AgentFolder],
+}
+
+// Something an agent did, without message content.
+export struct AgentActivityEntry {
+    id: int,
+    // What it changed can still be undone, or was.
+    undoable: bool,
+    undone: bool,
+    time: string,
+    agent: string,
+    // What it did, such as "Searched messages".
+    action: string,
+    // Where, and how many: "Work, Inbox · 12 messages".
+    detail: string,
+    refused: bool,
+    failed: bool,
+}
+
+export global AgentAccess {
+    // Agents can connect on this platform: the desktop apps.
+    in property <bool> available;
+    // Settings shows the page, or stopped showing it.
+    callback page-shown(bool);
+    in-out property <bool> enabled;
+    in property <[AgentAccount]> accounts;
+    callback set-enabled(bool);
+    callback set-account-shown(int, bool);
+    callback toggle-folders(int);
+    callback set-folder-shown(int, int, bool);
+    // What agents may do besides reading: save drafts for the user to review
+    // and send, mark messages read or flagged, move them and label them.
+    in-out property <bool> can-write-drafts;
+    callback set-can-write-drafts(bool);
+    in-out property <bool> can-mark;
+    callback set-can-mark(bool);
+    in-out property <bool> can-move;
+    callback set-can-move(bool);
+    in-out property <bool> can-label;
+    callback set-can-label(bool);
+    // Agents may ask to send a draft, which opens for the user to check.
+    in-out property <bool> can-send;
+    callback set-can-send(bool);
+
+    // Connecting an agent's app: the apps there are instructions for, the
+    // chosen one's text to paste, where it goes, and whether the app can
+    // take it from a link instead.
+    in property <[string]> clients;
+    in-out property <int> client-index;
+    in property <string> setup-text;
+    in property <string> setup-hint;
+    in property <string> install-label;
+    callback choose-client(int);
+    callback install();
+
+    // The newest entries first.
+    in property <[AgentActivityEntry]> activity;
+    callback undo-activity(int);
+    callback clear-activity();
+}

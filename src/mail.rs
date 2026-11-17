@@ -8,12 +8,14 @@ use flectar_mail_core::{
         Account, AccountConfig, ActionKind, ActionParams, ActionTarget, AddPasswordAccountArgs,
         Address, BlockOffer, BlockResult, CalendarConnection, CalendarEvent, CardDavConnection,
         ConnectCaldavArgs, ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage,
-        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, InvitationCard, Label,
-        MailGrouping, MailHistory, MailProfile, MailProtocol, MailboxBadgeCounts, MessageCursor,
-        MessageDetail, MessageSearchCursor, MessageSummary, PerformActionArgs,
-        PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult, RsvpEventArgs,
-        SaveDraftArgs, SearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary,
-        UnsubscribeOffer, UnsubscribeOutcome, View, normalized_workspace_list_pane_width, roles,
+        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, ForwardedMessage, Importance,
+        InvitationCard, Label, ListOrder, ListOwner, MailGrouping, MailHistory, MailProfile,
+        MailProtocol, MailRule, MailboxBadgeCounts, MessageCursor, MessageDetail,
+        MessageSearchCursor, MessageSummary, PerformActionArgs, PortableAccountConfig, Provider,
+        QueueSendArgs, QueueSendResult, RsvpEventArgs, SaveDraftArgs, SearchCursor, SenderIdentity,
+        ServerRules, ServerRulesAnswer, ServerSearchCursor, Settings, Snippet, ThreadCursor,
+        ThreadSummary, UnsubscribeOffer, UnsubscribeOutcome, View,
+        normalized_workspace_list_pane_width, roles,
     },
 };
 #[cfg(test)]
@@ -46,8 +48,17 @@ pub struct EmailFixture {
     pub has_attachments: bool,
     #[serde(default)]
     pub has_replied: bool,
+    #[serde(default)]
+    pub high_importance: bool,
     #[serde(skip)]
     pub html: String,
+}
+
+/// A read receipt the open message asks for, and which message that is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReceiptAsk {
+    pub message_id: i64,
+    pub request: flectar_mail_core::models::ReceiptRequest,
 }
 
 /// Owned view data used by the Slint shell.
@@ -78,6 +89,7 @@ pub struct MailMessage {
     pub message_count: i64,
     pub attachments: Vec<flectar_mail_core::models::AttachmentMeta>,
     pub has_replied: bool,
+    pub high_importance: bool,
     pub is_outgoing: bool,
     pub labels: Vec<i64>,
     pub html: Option<String>,
@@ -98,6 +110,10 @@ pub struct MailMessage {
     /// The calendar the message carries, as the card above it shows it
     /// (#228). Loaded with the message's body.
     pub invitation: Option<flectar_mail_core::models::InvitationCard>,
+    /// The read receipt it asks for, when one may still be sent (RFC 8098).
+    pub receipt: Option<ReceiptAsk>,
+    /// For a message the user sent, the read receipts that came back.
+    pub returned_receipts: Vec<flectar_mail_core::models::ReturnedReceipt>,
     /// The one-time code the message asks its reader to enter.
     pub verification_code: Option<String>,
     /// Gmail labels are tags; other accounts file labels like folders.
@@ -134,6 +150,7 @@ impl MailMessage {
             message_count: 1,
             attachments: Vec::new(),
             has_replied: email.has_replied,
+            high_importance: email.high_importance,
             is_outgoing: false,
             labels: Vec::new(),
             html: Some(email.html.to_owned()),
@@ -144,6 +161,8 @@ impl MailMessage {
             can_block: false,
             sender_blocked: false,
             invitation: None,
+            receipt: None,
+            returned_receipts: Vec::new(),
             verification_code: None,
             account_uses_labels: false,
             first_attachment: None,
@@ -204,6 +223,9 @@ pub struct ComposeMessage<'a> {
     pub in_reply_to_message_id: Option<i64>,
     /// The Message-ID answered when that message is not stored here.
     pub in_reply_to_header: Option<&'a str>,
+    /// The message asks for a read receipt.
+    pub request_read_receipt: bool,
+    pub importance: Importance,
 }
 
 /// The latest concrete message in a selected thread, with the addressing data
@@ -232,12 +254,28 @@ pub struct ComposeSource {
 #[derive(Clone, Debug)]
 pub struct MailPage {
     pub account_revision: u64,
+    /// The order the rows are in. Search results are newest first.
+    pub order: ListOrder,
+    /// Where the rows start: after this cursor, or at the list's start.
+    pub start: Option<MailCursor>,
     pub messages: Vec<MailMessage>,
     pub labels: Vec<Label>,
     pub mailboxes: Vec<MailboxEntry>,
     pub next_cursor: Option<MailCursor>,
     pub account_count: usize,
     pub unified_mailboxes: Vec<MailboxEntry>,
+}
+
+/// What a search of the servers found, for the mail list.
+pub struct ServerFound {
+    /// The list rows it found: conversations, or messages in a list without
+    /// them.
+    pub rows: Vec<i32>,
+    /// Where each account's search goes on from. An account that found all
+    /// its server has isn't here.
+    pub cursors: Vec<(i64, ServerSearchCursor)>,
+    /// The accounts whose search failed, with why.
+    pub failed: Vec<(i64, String)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -293,6 +331,7 @@ pub struct MailMetadata {
     pub mailboxes: Vec<MailboxEntry>,
     pub unified_mailboxes: Vec<MailboxEntry>,
     pub sidebar_badges: SidebarBadges,
+    pub saved_searches: Vec<SavedSearchEntry>,
     /// The account of local mail, which an import creates.
     pub local_mail: Option<i64>,
     /// Unread mail of `scope` older than the mail history this device
@@ -300,11 +339,24 @@ pub struct MailMetadata {
     pub server_only_unread: u32,
 }
 
+/// A search kept in the sidebar, with the unread mail it finds here.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SavedSearchEntry {
+    pub id: i64,
+    pub name: String,
+    pub query: String,
+    pub profile_id: Option<String>,
+    pub unread: i64,
+}
+
 struct PageLoadContext<'a> {
     scope: Scope,
     query: &'a str,
     cursor: Option<MailCursor>,
     limit: i64,
+    /// Read toward the list's start from `cursor`, for the rows before the
+    /// ones shown. The page still lists them in the list's order.
+    backward: bool,
     include_counts: bool,
     /// The accounts and folders the mail view shows.
     accounts: &'a [Account],
@@ -381,6 +433,8 @@ pub struct CoreMailSource {
     profile_accounts: Arc<std::sync::Mutex<Option<Arc<[i64]>>>>,
     /// Whether mail lists show conversations or each message on its own.
     grouping: Arc<std::sync::Mutex<MailGrouping>>,
+    /// The lists shown oldest first; every other list is newest first.
+    oldest_first: Arc<std::sync::Mutex<std::collections::HashSet<Scope>>>,
 }
 
 pub struct AccountSnapshot {
@@ -449,6 +503,52 @@ impl CoreMailSource {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// The order `scope` lists its mail in.
+    pub fn order(&self, scope: Scope) -> ListOrder {
+        let oldest_first = self
+            .oldest_first
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if oldest_first.contains(&scope) {
+            ListOrder::OldestFirst
+        } else {
+            ListOrder::NewestFirst
+        }
+    }
+
+    /// List `scope` in `order` from now on. Returns whether that changed;
+    /// pages loaded in the other order are then out of date. `save_order`
+    /// keeps it for later sessions.
+    pub fn set_order(&self, scope: Scope, order: ListOrder) -> bool {
+        {
+            let mut oldest_first = self
+                .oldest_first
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let changed = match order {
+                ListOrder::OldestFirst => oldest_first.insert(scope),
+                ListOrder::NewestFirst => oldest_first.remove(&scope),
+            };
+            if !changed {
+                return false;
+            }
+        }
+        // After the new order is in place: a load that reads the new
+        // revision also reads it.
+        self.account_revision
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        true
+    }
+
+    /// Keep `scope` in `order` for later sessions. Fails for a list whose
+    /// folder, label or account is gone.
+    pub async fn save_order(&self, scope: Scope, order: ListOrder) -> Result<(), String> {
+        self.core
+            .set_list_order(scope.to_string(), list_owner(scope), order)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     fn profile_accounts(&self) -> Option<Arc<[i64]>> {
         self.profile_accounts
             .lock()
@@ -498,11 +598,19 @@ impl CoreMailSource {
         let core = Core::start_mail_ui_with_platform(paths, credentials, oauth_redirects)
             .await
             .map_err(|error| error.to_string())?;
+        // A list whose saved order can't be read is newest first, as before
+        // it was turned around.
+        let oldest_first =
+            oldest_first_scopes(core.oldest_first_lists().await.unwrap_or_else(|error| {
+                tracing::warn!(%error, "mail list orders could not be read");
+                Vec::new()
+            }));
         Ok(Self {
             core: Arc::new(core),
             account_revision: Arc::default(),
             profile_accounts: Arc::default(),
             grouping: Arc::default(),
+            oldest_first: Arc::new(std::sync::Mutex::new(oldest_first)),
         })
     }
 
@@ -513,6 +621,39 @@ impl CoreMailSource {
         self.core.notify_ui_ready();
     }
 
+    /// Searches the servers of `accounts` for `query`, past the mail kept
+    /// here, going on from `cursors`. The list's search shows what they find
+    /// from then on.
+    pub async fn search_server(
+        &self,
+        query: String,
+        accounts: Vec<i64>,
+        cursors: Vec<(i64, ServerSearchCursor)>,
+    ) -> Result<ServerFound, String> {
+        let page = self
+            .core
+            .search_server(query, accounts, cursors, crate::server_search::PAGE)
+            .await
+            .map_err(|error| error.to_string())?;
+        let rows = match self.grouping() {
+            MailGrouping::Conversations => page
+                .threads
+                .iter()
+                .filter_map(|thread| i32::try_from(thread.id).ok())
+                .collect(),
+            MailGrouping::Messages => page
+                .messages
+                .iter()
+                .filter_map(|message| i32::try_from(message.id).ok())
+                .collect(),
+        };
+        Ok(ServerFound {
+            rows,
+            cursors: page.cursors,
+            failed: page.failed,
+        })
+    }
+
     pub async fn load_page(
         &self,
         scope: Scope,
@@ -520,6 +661,51 @@ impl CoreMailSource {
         cursor: Option<MailCursor>,
         limit: i64,
         include_counts: bool,
+    ) -> Result<MailPage, String> {
+        self.read_page(scope, query, cursor, limit, include_counts, false)
+            .await
+    }
+
+    /// The rows of `scope` before the shown ones, which start with the row
+    /// whose own cursor is `first`, in the list's order. The page's
+    /// `next_cursor` reads on toward the list's start, and is None once that
+    /// is reached.
+    pub async fn load_earlier(
+        &self,
+        scope: Scope,
+        first: MailCursor,
+        limit: i64,
+    ) -> Result<MailPage, String> {
+        self.read_page(scope, "", Some(first), limit, false, true)
+            .await
+    }
+
+    /// The rows of `scope` from list row `row` on, for a row further down
+    /// than one read goes. A row that is gone gives the list's start.
+    pub async fn load_page_from_row(
+        &self,
+        scope: Scope,
+        row: i32,
+        limit: i64,
+    ) -> Result<MailPage, String> {
+        let grouping = self.grouping();
+        let start = self
+            .core
+            .row_time(grouping, i64::from(row))
+            .await
+            .map_err(|error| error.to_string())?
+            .map(|time| cursor_before(grouping, time, i64::from(row), self.order(scope)));
+        self.load_page(scope, "", start, limit, false).await
+    }
+
+    async fn read_page(
+        &self,
+        scope: Scope,
+        query: &str,
+        cursor: Option<MailCursor>,
+        limit: i64,
+        include_counts: bool,
+        backward: bool,
     ) -> Result<MailPage, String> {
         let revision = self.account_revision();
         let profile = self.profile_accounts();
@@ -542,6 +728,7 @@ impl CoreMailSource {
             query,
             cursor,
             limit,
+            backward,
             include_counts,
             accounts: &accounts,
             folders: &folders,
@@ -554,6 +741,55 @@ impl CoreMailSource {
             page.account_revision = revision;
             page
         })
+    }
+
+    /// Mark everything `scope` lists as read (#234): a whole mailbox on its
+    /// server too, part of one as ordinary read actions. The list is the one
+    /// [`Self::load_page`] shows for the scope.
+    pub async fn mark_all_read(&self, scope: Scope) -> Result<(), String> {
+        let profile = self.profile_accounts();
+        let mut accounts = self
+            .core
+            .list_accounts()
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut folders = self
+            .core
+            .list_folders(None)
+            .await
+            .map_err(|error| error.to_string())?;
+        let local_mail = self.load_local_mail_account().await?;
+        let profile = with_local_mail(profile, local_mail);
+        retain_profile_accounts(profile.as_deref(), &mut accounts, &mut folders);
+        let mut labels = self
+            .core
+            .list_labels()
+            .await
+            .map_err(|error| error.to_string())?;
+        retain_profile_labels(profile.as_deref(), &mut labels);
+        let mut resolved = resolve_scope(scope, &folders, &labels);
+        if resolved
+            .account_id
+            .is_some_and(|account_id| !profile_shows(profile.as_deref(), account_id))
+        {
+            resolved = resolve_scope(Scope::UNIFIED_INBOX, &folders, &labels);
+        }
+        let profile_accounts = profile
+            .as_deref()
+            .filter(|_| resolved.account_id.is_none())
+            .map(<[i64]>::to_vec);
+        self.core
+            .mark_all_read(
+                resolved.view,
+                resolved.split_id,
+                resolved.account_id,
+                profile_accounts,
+                resolved.label_id,
+                resolved.folder_id,
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     /// Startup needs the account list and first page together. Loading them in
@@ -586,6 +822,7 @@ impl CoreMailSource {
                         query: "",
                         cursor: None,
                         limit,
+                        backward: false,
                         include_counts: false,
                         accounts: &shown,
                         folders: &folders,
@@ -638,6 +875,87 @@ impl CoreMailSource {
         })
     }
 
+    /// The saved searches the sidebar shows with the profile in view, each
+    /// with its unread mail.
+    pub async fn saved_searches(&self) -> Result<Vec<SavedSearchEntry>, String> {
+        let local_mail = self.load_local_mail_account().await?;
+        let shown = with_local_mail(self.profile_accounts(), local_mail);
+        self.saved_searches_for(shown.as_deref()).await
+    }
+
+    /// The saved searches of the profile in view and those of every profile,
+    /// counted in `shown`, the accounts the view shows, or every account.
+    async fn saved_searches_for(
+        &self,
+        shown: Option<&[i64]>,
+    ) -> Result<Vec<SavedSearchEntry>, String> {
+        let settings = self
+            .core
+            .get_settings()
+            .await
+            .map_err(|error| error.to_string())?;
+        if settings.saved_searches.is_empty() {
+            return Ok(Vec::new());
+        }
+        let counts = self
+            .core
+            .saved_search_counts(
+                self.grouping() == MailGrouping::Conversations,
+                shown.map(<[i64]>::to_vec),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        let active = settings.active_mail_profile;
+        Ok(settings
+            .saved_searches
+            .into_iter()
+            .filter(|saved| saved.profile_id.is_none() || saved.profile_id == active)
+            .map(|saved| SavedSearchEntry {
+                unread: counts
+                    .iter()
+                    .find(|(id, _)| *id == saved.id)
+                    .map_or(0, |(_, unread)| *unread),
+                id: saved.id,
+                name: saved.name,
+                query: saved.query,
+                profile_id: saved.profile_id,
+            })
+            .collect())
+    }
+
+    /// Keeps a search in the sidebar, or changes one kept there.
+    pub async fn save_search(
+        &self,
+        id: Option<i64>,
+        name: String,
+        query: String,
+        profile_id: Option<String>,
+    ) -> Result<(), String> {
+        self.core
+            .save_search(id, name, query, profile_id)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Takes a search out of the sidebar. Its mail stays where it is.
+    pub async fn delete_saved_search(&self, id: i64) -> Result<(), String> {
+        self.core
+            .delete_saved_search(id)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Moves a saved search to `index` in the sidebar's order.
+    pub async fn move_saved_search(&self, id: i64, index: usize) -> Result<(), String> {
+        self.core
+            .move_saved_search(id, index)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     async fn load_mail_metadata_with_context(
         &self,
         scope: Scope,
@@ -663,9 +981,11 @@ impl CoreMailSource {
                 .map_err(|error| error.to_string())?
                 .map_or(0, badge)
         };
+        let saved_searches = self.saved_searches_for(profile).await?;
         Ok(MailMetadata {
             account_revision: self.account_revision(),
             scope,
+            saved_searches,
             inbox_count: badges
                 .iter()
                 .map(|counts| counts.inbox.max(0) as usize)
@@ -687,6 +1007,7 @@ impl CoreMailSource {
             query,
             cursor,
             limit,
+            backward,
             include_counts,
             accounts,
             folders,
@@ -724,19 +1045,40 @@ impl CoreMailSource {
         // Unified mailboxes, categories and shared labels cover the profile's
         // accounts; an account's own mailboxes need no more than its id.
         let profile_accounts = profile.filter(|_| resolved.account_id.is_none());
+        // Search results span folders, so they keep to newest first.
+        let order = if query.trim().is_empty() {
+            self.order(scope)
+        } else {
+            ListOrder::NewestFirst
+        };
+        // Rows before the shown ones come nearest first from the other order.
+        let read_order = if backward { order.reversed() } else { order };
+        let start = (!backward).then_some(cursor).flatten();
 
         if self.grouping() == MailGrouping::Messages {
             let (rows, next_cursor) = self
-                .load_message_rows(&resolved, profile_accounts, query, cursor, limit)
+                .load_message_rows(
+                    &resolved,
+                    profile_accounts,
+                    query,
+                    cursor,
+                    limit,
+                    read_order,
+                )
                 .await?;
-            let messages = rows
+            let mut messages = rows
                 .into_iter()
                 .filter_map(|row| {
                     message_summary_to_message(row, accounts, resolved.title.as_str())
                 })
-                .collect();
+                .collect::<Vec<_>>();
+            if backward {
+                messages.reverse();
+            }
             return Ok(MailPage {
                 account_revision: self.account_revision(),
+                order,
+                start,
                 messages,
                 labels,
                 mailboxes,
@@ -754,6 +1096,11 @@ impl CoreMailSource {
                 Some(MailCursor::Thread(cursor)) => Some(cursor),
                 Some(_) => return Err("this cursor belongs to another list".into()),
             };
+            let page = flectar_mail_core::ThreadPageRequest {
+                cursor,
+                limit,
+                order: read_order,
+            };
             let page = match profile_accounts {
                 Some(accounts) => {
                     self.core
@@ -763,7 +1110,7 @@ impl CoreMailSource {
                             accounts.to_vec(),
                             resolved.label_id,
                             resolved.folder_id,
-                            (cursor, limit),
+                            page,
                         )
                         .await
                 }
@@ -775,7 +1122,7 @@ impl CoreMailSource {
                             resolved.account_id,
                             resolved.label_id,
                             resolved.folder_id,
-                            (cursor, limit),
+                            page,
                         )
                         .await
                 }
@@ -813,13 +1160,18 @@ impl CoreMailSource {
             (page.threads, page.next_cursor.map(MailCursor::Search))
         };
 
-        let messages = threads
+        let mut messages = threads
             .into_iter()
             .filter_map(|thread| summary_to_message(thread, accounts, resolved.title.as_str()))
-            .collect();
+            .collect::<Vec<_>>();
+        if backward {
+            messages.reverse();
+        }
 
         Ok(MailPage {
             account_revision: self.account_revision(),
+            order,
+            start,
             messages,
             labels,
             mailboxes,
@@ -840,6 +1192,7 @@ impl CoreMailSource {
         query: &str,
         cursor: Option<MailCursor>,
         limit: i64,
+        order: ListOrder,
     ) -> Result<(Vec<MessageSummary>, Option<MailCursor>), String> {
         if query.trim().is_empty() {
             let cursor = match cursor {
@@ -847,7 +1200,11 @@ impl CoreMailSource {
                 Some(MailCursor::Message(cursor)) => Some(cursor),
                 Some(_) => return Err("this cursor belongs to another list".into()),
             };
-            let page = flectar_mail_core::MessagePageRequest { cursor, limit };
+            let page = flectar_mail_core::MessagePageRequest {
+                cursor,
+                limit,
+                order,
+            };
             let page = match profile_accounts {
                 Some(accounts) => {
                     self.core
@@ -992,36 +1349,8 @@ impl CoreMailSource {
             .find(|message| Some(message.id) == message_id)
             .or_else(|| thread.messages.last())
             .ok_or_else(|| "thread has no messages".to_owned())?;
-        let accounts = self
-            .core
-            .list_accounts()
-            .await
-            .map_err(|error| error.to_string())?;
-        let account = match accounts
-            .iter()
-            .find(|account| account.id == message.account_id)
-        {
-            Some(account) => account.clone(),
-            // Local mail is answered from an account.
-            None => {
-                if self.load_local_mail_account().await? != Some(message.account_id) {
-                    return Err("message account is no longer connected".to_owned());
-                }
-                self.reply_account(&accounts, message).await?
-            }
-        };
-
-        let sender_identities = self
-            .core
-            .list_sender_identities(account.id)
-            .await
-            .map_err(|error| error.to_string())?;
-        let default_sender_email = self
-            .core
-            .default_sender_identity(account.id)
-            .await
-            .map_err(|error| error.to_string())?
-            .email;
+        let (account, sender_identities, default_sender_email) =
+            self.answering_account(message).await?;
         // The original's own images come inline, fetched now if they weren't
         // yet: the thread leaves those still downloading as cid: links, which
         // a reply or forward could not carry.
@@ -1066,6 +1395,202 @@ impl CoreMailSource {
             .get_attachment(attachment_id)
             .await
             .map_err(|error| error.to_string())
+    }
+
+    /// The messages of `target` to forward as attachments, with their subjects.
+    pub async fn forwarded_messages(
+        &self,
+        target: ActionTarget,
+    ) -> Result<Vec<ForwardedMessage>, String> {
+        self.core
+            .forwarded_messages(target)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// The storage services files go by link from.
+    pub async fn link_services(
+        &self,
+    ) -> Result<Vec<flectar_mail_core::links::LinkService>, String> {
+        self.core
+            .link_services()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Starts signing in to a storage service in the browser.
+    pub async fn start_link_service_login(
+        &self,
+        server_url: String,
+    ) -> Result<flectar_mail_core::links::LinkLogin, String> {
+        self.core
+            .start_link_service_login(&server_url)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Waits for a sign-in in the browser to finish, and keeps the service.
+    pub async fn finish_link_service_login(
+        &self,
+        login: flectar_mail_core::links::LinkLogin,
+    ) -> Result<flectar_mail_core::links::LinkService, String> {
+        self.core
+            .finish_link_service_login(login)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Keeps a storage service signed in with an app password.
+    pub async fn add_link_service(
+        &self,
+        server_url: String,
+        login_name: String,
+        app_password: String,
+    ) -> Result<flectar_mail_core::links::LinkService, String> {
+        self.core
+            .add_link_service(&server_url, &login_name, &app_password)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// The storage service a message from the account with id `account_id` sends files by
+    /// link from: the account's own when that's on, else the Nextcloud or ownCloud server.
+    pub async fn link_service_for_account(
+        &self,
+        account_id: i64,
+    ) -> Result<Option<flectar_mail_core::links::LinkService>, String> {
+        self.core
+            .link_service_for_account(account_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Turns on sending files by link from the account's Google Drive or OneDrive, widening
+    /// its sign-in in the browser, which `open_url` opens.
+    pub async fn add_cloud_link_service<F>(
+        &self,
+        account_id: i64,
+        open_url: F,
+    ) -> Result<flectar_mail_core::links::LinkService, String>
+    where
+        F: FnOnce(String) -> Result<(), String> + Send + 'static,
+    {
+        self.core
+            .add_cloud_link_service(account_id, open_url)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn remove_link_service(&self, id: i64) -> Result<(), String> {
+        self.core
+            .remove_link_service(id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Uploads a file and shares it by link.
+    pub async fn share_by_link(
+        &self,
+        service_id: i64,
+        path: std::path::PathBuf,
+        name: String,
+    ) -> Result<flectar_mail_core::links::SharedLink, String> {
+        self.core
+            .share_by_link(service_id, &path, &name)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Takes back a link and the file it shares.
+    pub async fn unshare_link(
+        &self,
+        link: flectar_mail_core::links::SharedLink,
+    ) -> Result<(), String> {
+        self.core
+            .unshare_link(&link)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// The originals of `message_ids` in files of their own to attach, which go when their
+    /// paths are dropped, or why they couldn't be fetched.
+    pub async fn forwarded_originals(
+        &self,
+        message_ids: Vec<i64>,
+    ) -> Vec<(i64, Result<tempfile::TempPath, String>)> {
+        self.core
+            .forwarded_originals(message_ids)
+            .await
+            .into_iter()
+            .map(|(id, file)| (id, file.map_err(|error| error.to_string())))
+            .collect()
+    }
+
+    /// The account a reply or forward of `message` goes from, with its sender identities and
+    /// the address it sends from by default: the message's own account, and for local mail,
+    /// the one [`Self::reply_account`] finds.
+    async fn answering_account(
+        &self,
+        message: &MessageDetail,
+    ) -> Result<(Account, Vec<SenderIdentity>, String), String> {
+        let accounts = self
+            .core
+            .list_accounts()
+            .await
+            .map_err(|error| error.to_string())?;
+        let account = match accounts
+            .iter()
+            .find(|account| account.id == message.account_id)
+        {
+            Some(account) => account.clone(),
+            // Local mail is answered from an account.
+            None => {
+                if self.load_local_mail_account().await? != Some(message.account_id) {
+                    return Err("message account is no longer connected".to_owned());
+                }
+                self.reply_account(&accounts, message).await?
+            }
+        };
+        let sender_identities = self
+            .core
+            .list_sender_identities(account.id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let default_sender_email = self
+            .core
+            .default_sender_identity(account.id)
+            .await
+            .map_err(|error| error.to_string())?
+            .email;
+        Ok((account, sender_identities, default_sender_email))
+    }
+
+    /// The account a forward of `message` goes from, and the address: the one the message
+    /// reached, as a forward that quotes it would.
+    pub async fn forward_sender(
+        &self,
+        message: &ForwardedMessage,
+    ) -> Result<(Account, String), String> {
+        let thread_id = message
+            .thread_id
+            .ok_or_else(|| "message is not backed by a core thread".to_owned())?;
+        let thread = self
+            .core
+            .get_thread_outline(thread_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let detail = thread
+            .messages
+            .iter()
+            .find(|detail| detail.id == message.message_id)
+            .ok_or_else(|| "message not found".to_owned())?;
+        let (account, identities, default_sender_email) = self.answering_account(detail).await?;
+        let sender = flectar_mail_core::sender_identities::reply_sender(
+            &identities,
+            detail.to.iter().chain(detail.cc.iter()),
+        )
+        .unwrap_or(default_sender_email);
+        Ok((account, sender))
     }
 
     /// The account that answers local mail, which is never sent from: the
@@ -1337,6 +1862,17 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_account_subscribed_folders_only(
+        &self,
+        account_id: i64,
+        enabled: bool,
+    ) -> Result<(), String> {
+        self.core
+            .set_account_subscribed_folders_only(account_id, enabled)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_account_sent_copy_policy(
         &self,
         account_id: i64,
@@ -1350,9 +1886,12 @@ impl CoreMailSource {
             .map_err(|e| e.to_string())
     }
 
-    pub async fn set_mark_read_on_open(&self, enabled: bool) -> Result<(), String> {
+    pub async fn set_mark_read(
+        &self,
+        choice: flectar_mail_core::models::MarkRead,
+    ) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
-        settings.mark_read_on_open = enabled;
+        settings.mark_read = choice;
         self.core
             .set_settings(settings)
             .await
@@ -1436,6 +1975,50 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn answer_read_receipt(
+        &self,
+        message_id: i64,
+        answer: flectar_mail_core::models::ReceiptAnswer,
+    ) -> Result<(), String> {
+        self.core
+            .answer_read_receipt(message_id, answer)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_read_receipts(&self, policy: &str) -> Result<(), String> {
+        let policy = flectar_mail_core::models::ReadReceiptPolicy::parse(policy)
+            .ok_or("Unknown read receipt preference")?;
+        let mut settings = self.load_settings().await?;
+        settings.read_receipts = policy;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_interface_text_size(&self, size: &str) -> Result<(), String> {
+        let size = flectar_mail_core::models::InterfaceTextSize::parse(size)
+            .ok_or("Unknown interface text size")?;
+        let mut settings = self.load_settings().await?;
+        settings.interface_text_size = size;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_reduce_motion(&self, preference: &str) -> Result<(), String> {
+        let preference = flectar_mail_core::models::ReduceMotion::parse(preference)
+            .ok_or("Unknown reduce motion preference")?;
+        let mut settings = self.load_settings().await?;
+        settings.reduce_motion = preference;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     /// Which invitations found in mail join the calendar before an answer:
     /// "everyone", "known" or "answered".
     pub async fn set_add_invitations(&self, choice: &str) -> Result<(), String> {
@@ -1491,6 +2074,22 @@ impl CoreMailSource {
     pub async fn set_show_avatars(&self, enabled: bool) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.show_avatars = enabled;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// How tightly the mail list packs its rows, and how many lines of each
+    /// message's text they show.
+    pub async fn set_list_rows(
+        &self,
+        density: flectar_mail_core::models::ListDensity,
+        preview_lines: u8,
+    ) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.list_density = density;
+        settings.preview_lines = preview_lines.min(flectar_mail_core::models::MAX_PREVIEW_LINES);
         self.core
             .set_settings(settings)
             .await
@@ -1939,6 +2538,123 @@ impl CoreMailSource {
             .blocked_senders()
             .await
             .map(|senders| senders.into_iter().map(|sender| sender.address).collect())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Every rule that sorts new mail, in order (#238).
+    pub async fn mail_rules(&self) -> Result<Vec<MailRule>, String> {
+        self.core
+            .mail_rules()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// What a rule can name: the accounts, their folders and the labels.
+    pub async fn rule_choices(
+        &self,
+    ) -> Result<(Vec<Account>, Vec<FolderInfo>, Vec<Label>), String> {
+        let accounts = self
+            .core
+            .list_accounts()
+            .await
+            .map_err(|error| error.to_string())?;
+        let folders = self
+            .core
+            .list_folders(None)
+            .await
+            .map_err(|error| error.to_string())?;
+        let labels = self
+            .core
+            .list_labels()
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok((accounts, folders, labels))
+    }
+
+    pub async fn save_mail_rule(&self, rule: MailRule) -> Result<MailRule, String> {
+        self.core
+            .save_mail_rule(rule)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn delete_mail_rule(&self, id: i64) -> Result<(), String> {
+        self.core
+            .delete_mail_rule(id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_mail_rule_enabled(&self, id: i64, enabled: bool) -> Result<(), String> {
+        self.core
+            .set_mail_rule_enabled(id, enabled)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn reorder_mail_rules(&self, ids: Vec<i64>) -> Result<(), String> {
+        self.core
+            .reorder_mail_rules(ids)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// The Inbox mail `rule` matches now.
+    pub async fn mail_rule_matches(
+        &self,
+        rule: MailRule,
+    ) -> Result<flectar_mail_core::rules::InboxMatches, String> {
+        self.core
+            .mail_rule_matches(rule)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Run `rule` on the Inbox mail it matches now: the actions, for Undo.
+    pub async fn run_mail_rule(&self, rule: MailRule) -> Result<Vec<i64>, String> {
+        self.core
+            .run_mail_rule(rule)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// A new rule for mail like `target`'s.
+    pub async fn rule_from(&self, target: MailTarget) -> Result<MailRule, String> {
+        match target {
+            MailTarget::Message { id, .. } => self.core.rule_from_message(id).await,
+            MailTarget::Thread(thread_id) => self.core.rule_from_thread(thread_id).await,
+        }
+        .map_err(|error| error.to_string())
+    }
+
+    /// Keep mail in Trash and Junk for these days, 0 for ever, and empty
+    /// them of older mail now.
+    pub async fn set_folder_cleanup(&self, trash_days: u32, junk_days: u32) -> Result<(), String> {
+        self.core
+            .set_folder_cleanup(trash_days, junk_days)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Where each account's rules run, as last checked.
+    pub async fn server_rules(&self) -> Result<Vec<ServerRules>, String> {
+        self.core
+            .server_rules()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Put account `account_id`'s rules on its server now, with the user's
+    /// `answer` to what the last try asked.
+    pub async fn put_rules_on_server(
+        &self,
+        account_id: i64,
+        answer: Option<ServerRulesAnswer>,
+    ) -> Result<(), String> {
+        self.core
+            .put_rules_on_server(account_id, answer)
+            .await
+            .map(|_| ())
             .map_err(|error| error.to_string())
     }
 
@@ -2414,6 +3130,32 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_compose_text_style(&self, font: String, size: String) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.compose_font = font;
+        settings.compose_text_size = size;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// How many days links to files sent by link work, 0 for as long as the file is kept, and
+    /// whether they ask for a password.
+    pub async fn set_link_preferences(
+        &self,
+        expiry_days: u32,
+        password: bool,
+    ) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.link_expiry_days = expiry_days;
+        settings.link_password = password;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_undo_send_seconds(&self, seconds: i64) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.undo_send_seconds = seconds;
@@ -2461,6 +3203,8 @@ fn compose_args(
         in_reply_to_message_id: message.in_reply_to_message_id,
         in_reply_to_header: message.in_reply_to_header.map(str::to_owned),
         attachments: message.attachments.to_vec(),
+        request_read_receipt: message.request_read_receipt,
+        importance: message.importance,
     })
 }
 
@@ -2475,7 +3219,7 @@ fn parse_recipients(value: &str) -> Result<Vec<Address>, String> {
         .collect()
 }
 
-fn parse_address(value: &str) -> Result<Address, String> {
+pub(crate) fn parse_address(value: &str) -> Result<Address, String> {
     let (name, email) = value
         .rsplit_once('<')
         .and_then(|(name, email)| email.strip_suffix('>').map(|email| (Some(name), email)))
@@ -3001,6 +3745,68 @@ fn server_only_folders(scope: Scope, folders: &[FolderInfo]) -> Vec<i64> {
         .collect()
 }
 
+/// The cursor of a list row: its timeline time and id, in `grouping`.
+pub fn row_cursor(grouping: MailGrouping, time: i64, id: i64) -> MailCursor {
+    match grouping {
+        MailGrouping::Conversations => MailCursor::Thread(ThreadCursor {
+            last_message_at: time,
+            thread_id: id,
+        }),
+        MailGrouping::Messages => MailCursor::Message(MessageCursor {
+            date: time,
+            message_id: id,
+        }),
+    }
+}
+
+/// Whether a loaded row is a conversation or a single message.
+fn row_grouping(row: &MailMessage) -> MailGrouping {
+    if row.message_id.is_some() {
+        MailGrouping::Messages
+    } else {
+        MailGrouping::Conversations
+    }
+}
+
+/// The cursor of a loaded row.
+pub fn cursor_of(row: &MailMessage) -> MailCursor {
+    row_cursor(row_grouping(row), row.date_ms, i64::from(row.id))
+}
+
+/// The cursor a page in `order` reads from to start with a loaded `row`.
+pub fn cursor_before_row(row: &MailMessage, order: ListOrder) -> MailCursor {
+    cursor_before(row_grouping(row), row.date_ms, i64::from(row.id), order)
+}
+
+/// The cursor a page in `order` reads from to start with the row of `time`
+/// and `id`: the same time and the next id toward the list's start. Ids are
+/// whole numbers, so that leaves out no other row.
+pub fn cursor_before(grouping: MailGrouping, time: i64, id: i64, order: ListOrder) -> MailCursor {
+    let id = match order {
+        ListOrder::OldestFirst => id - 1,
+        ListOrder::NewestFirst => id + 1,
+    };
+    row_cursor(grouping, time, id)
+}
+
+/// The lists with these saved keys. A key the app no longer knows is left
+/// out, and its list is newest first.
+fn oldest_first_scopes(keys: Vec<String>) -> std::collections::HashSet<Scope> {
+    keys.into_iter()
+        .filter_map(|key| key.parse::<Scope>().ok())
+        .collect()
+}
+
+/// What `scope` belongs to, which its saved order goes with.
+fn list_owner(scope: Scope) -> ListOwner {
+    match scope {
+        Scope::Unified(_) | Scope::Important | Scope::Other => ListOwner::Unified,
+        Scope::Label { id, .. } => ListOwner::Label(id),
+        Scope::Folder(id) => ListOwner::Folder(id),
+        Scope::Account { account_id, .. } => ListOwner::Account(account_id),
+    }
+}
+
 struct ScopeResolution {
     account_id: Option<i64>,
     folder_id: Option<i64>,
@@ -3155,6 +3961,7 @@ fn summary_to_message(
         message_count: thread.message_count.max(1),
         attachments: Vec::new(),
         has_replied: thread.has_replied,
+        high_importance: thread.high_importance,
         is_outgoing: false,
         labels: thread.labels,
         html: None,
@@ -3165,6 +3972,8 @@ fn summary_to_message(
         can_block: false,
         sender_blocked: false,
         invitation: None,
+        receipt: None,
+        returned_receipts: Vec::new(),
         verification_code: thread.verification_code,
         account_uses_labels: thread_account
             .is_some_and(|account| account.mail_protocol == MailProtocol::Gmail),
@@ -3264,6 +4073,7 @@ fn message_summary_to_message(
         message_count: 1,
         attachments: Vec::new(),
         has_replied: message.has_replied,
+        high_importance: message.high_importance,
         is_outgoing: message.is_outgoing,
         labels: message.labels,
         html: None,
@@ -3274,6 +4084,8 @@ fn message_summary_to_message(
         can_block: false,
         sender_blocked: false,
         invitation: None,
+        receipt: None,
+        returned_receipts: Vec::new(),
         verification_code: message.verification_code,
         account_uses_labels: message_account
             .is_some_and(|account| account.mail_protocol == MailProtocol::Gmail),
@@ -3374,6 +4186,7 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
             Vec::new()
         },
         has_replied: row.has_replied,
+        high_importance: row.high_importance,
         is_outgoing: message.is_outgoing,
         labels: row.labels.clone(),
         html,
@@ -3393,6 +4206,14 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
         can_block: !message.is_draft && !message.is_outgoing && message.from.email.contains('@'),
         sender_blocked: message.sender_blocked,
         invitation: None,
+        receipt: message
+            .receipt_request
+            .clone()
+            .map(|request| ReceiptAsk {
+                message_id: message.id,
+                request,
+            }),
+        returned_receipts: message.returned_receipts.clone(),
         verification_code: row.verification_code.clone(),
         account_uses_labels: row.account_uses_labels,
         first_attachment: row.first_attachment.clone(),
@@ -3616,7 +4437,7 @@ mod tests {
     };
     use crate::mail_scope::{LabelKind, Scope, StandardMailbox};
     use flectar_mail_core::models::{
-        Account, ActionTarget, Address, AuthKind, FolderInfo, Label, MailProtocol,
+        Account, ActionTarget, Address, AuthKind, FolderInfo, Importance, Label, MailProtocol,
         MailboxBadgeCounts, MessageSummary, Provider, ThreadSummary, View,
     };
     use std::collections::HashMap;
@@ -3635,6 +4456,7 @@ mod tests {
             sync_error: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
+            caught_up_at: None,
         }
     }
 
@@ -3730,7 +4552,6 @@ mod tests {
                 // The Inbox row counts its view, which leaves out snoozes.
                 folders: vec![(1, 9), (2, 3), (3, 2)],
                 labels: vec![(20, 2)],
-                ..Default::default()
             },
             MailboxBadgeCounts {
                 account_id: 2,
@@ -3947,6 +4768,7 @@ mod tests {
             is_outgoing: outgoing,
             has_attachments: false,
             has_replied: false,
+            high_importance: false,
             snoozed_until: None,
             labels: vec![3],
             verification_code: None,
@@ -4028,6 +4850,7 @@ mod tests {
             is_starred: false,
             has_attachments: false,
             has_replied: true,
+            high_importance: false,
             snoozed_until: None,
             labels: Vec::new(),
             verification_code: Some("482913".into()),
@@ -4117,6 +4940,8 @@ mod tests {
             mode: "new",
             in_reply_to_message_id: None,
             in_reply_to_header: None,
+            request_read_receipt: false,
+            importance: Importance::Normal,
         };
         let draft = compose_args(message(), false).unwrap();
 
@@ -4143,6 +4968,8 @@ mod tests {
                 mode: "reply",
                 in_reply_to_message_id: Some(99),
                 in_reply_to_header: None,
+                request_read_receipt: true,
+                importance: Importance::High,
             },
             true,
         )
@@ -4153,6 +4980,8 @@ mod tests {
         assert_eq!(draft.body_text, "Hello Maya");
         assert_eq!(draft.mode, "reply");
         assert_eq!(draft.in_reply_to_message_id, Some(99));
+        assert!(draft.request_read_receipt);
+        assert_eq!(draft.importance, Importance::High);
         assert_eq!(
             draft.body_html.as_deref(),
             Some("<div>Hello <strong>Maya</strong></div>")
@@ -4545,13 +5374,13 @@ mod search_pagination_adapter_tests {
     use super::*;
     use flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore;
 
-    #[tokio::test]
-    async fn search_and_inbox_pages_keep_their_own_cursors() {
-        let dir = tempfile::tempdir().unwrap();
+    /// A source with one account whose inbox has threads 1 to 27, each one
+    /// message from that time, all matching "needle".
+    async fn source_with_27_threads(dir: &std::path::Path) -> CoreMailSource {
         let source = CoreMailSource::start(
-            Paths::for_tests(dir.path()),
+            Paths::for_tests(dir),
             Arc::new(DevelopmentFileCredentialStore::new(
-                dir.path().join("credentials.json"),
+                dir.join("credentials.json"),
             )),
             Arc::new(flectar_mail_core::oauth::redirect::LoopbackRedirectBroker::default()),
         )
@@ -4587,6 +5416,13 @@ mod search_pagination_adapter_tests {
             })
             .await
             .unwrap();
+        source
+    }
+
+    #[tokio::test]
+    async fn search_and_inbox_pages_keep_their_own_cursors() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = source_with_27_threads(dir.path()).await;
 
         for query in ["needle", ""] {
             let first = source
@@ -4610,6 +5446,105 @@ mod search_pagination_adapter_tests {
                 .collect::<Vec<_>>();
             assert_eq!(ids, (1..=27).rev().collect::<Vec<_>>());
         }
+    }
+
+    #[tokio::test]
+    async fn a_list_turned_around_pages_oldest_first_and_keeps_that() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = source_with_27_threads(dir.path()).await;
+        let inbox = Scope::UNIFIED_INBOX;
+        assert_eq!(source.order(inbox), ListOrder::NewestFirst);
+        let row_ids = |page: MailPage| page.messages.iter().map(|row| row.id).collect::<Vec<_>>();
+        // A list can open at any row, in either order.
+        let from_20 = source.load_page_from_row(inbox, 20, 3).await.unwrap();
+        assert!(from_20.start.is_some());
+        assert_eq!(row_ids(from_20), [20, 19, 18]);
+
+        let revision = source.account_revision();
+        assert!(source.set_order(inbox, ListOrder::OldestFirst));
+        assert_ne!(
+            source.account_revision(),
+            revision,
+            "pages loaded newest first are out of date"
+        );
+        assert!(!source.set_order(inbox, ListOrder::OldestFirst));
+        let first = source.load_page(inbox, "", None, 25, false).await.unwrap();
+        assert_eq!(first.order, ListOrder::OldestFirst);
+        let second = source
+            .load_page(inbox, "", first.next_cursor, 25, false)
+            .await
+            .unwrap();
+        assert!(second.next_cursor.is_none());
+        let ids = first
+            .messages
+            .into_iter()
+            .chain(second.messages)
+            .map(|message| message.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, (1..=27).collect::<Vec<_>>());
+
+        let from_20 = source.load_page_from_row(inbox, 20, 3).await.unwrap();
+        assert_eq!(row_ids(from_20.clone()), [20, 21, 22]);
+        // The rows before come nearest last, as the list shows them.
+        let first = cursor_of(&from_20.messages[0]);
+        let earlier = source.load_earlier(inbox, first, 3).await.unwrap();
+        assert!(earlier.next_cursor.is_some());
+        assert_eq!(row_ids(earlier), [17, 18, 19]);
+        let first = cursor_of(
+            &source
+                .load_page_from_row(inbox, 2, 1)
+                .await
+                .unwrap()
+                .messages[0],
+        );
+        let earliest = source.load_earlier(inbox, first, 3).await.unwrap();
+        assert!(
+            earliest.next_cursor.is_none(),
+            "the list's start is reached"
+        );
+        assert_eq!(row_ids(earliest), [1]);
+        // A row that is gone gives the list's start.
+        let gone = source.load_page_from_row(inbox, 404, 3).await.unwrap();
+        assert!(gone.start.is_none());
+        assert_eq!(row_ids(gone), [1, 2, 3]);
+
+        // Search results span folders, so they stay newest first.
+        let search = source
+            .load_page(inbox, "needle", None, 25, false)
+            .await
+            .unwrap();
+        assert_eq!(search.order, ListOrder::NewestFirst);
+        assert_eq!(search.messages[0].id, 27);
+        // Every other list keeps its own order.
+        assert_eq!(
+            source.order(Scope::Unified(StandardMailbox::Sent)),
+            ListOrder::NewestFirst
+        );
+
+        // The next session starts with the saved orders.
+        source
+            .save_order(inbox, ListOrder::OldestFirst)
+            .await
+            .unwrap();
+        let saved = source.core.oldest_first_lists().await.unwrap();
+        assert_eq!(saved, [inbox.to_string()]);
+        assert_eq!(
+            oldest_first_scopes(saved),
+            std::collections::HashSet::from([inbox])
+        );
+        // A folder that is gone can't keep an order.
+        assert!(
+            source
+                .save_order(Scope::Folder(404), ListOrder::OldestFirst)
+                .await
+                .is_err()
+        );
+        source.set_order(inbox, ListOrder::NewestFirst);
+        source
+            .save_order(inbox, ListOrder::NewestFirst)
+            .await
+            .unwrap();
+        assert!(source.core.oldest_first_lists().await.unwrap().is_empty());
     }
 
     #[tokio::test]

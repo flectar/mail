@@ -21,7 +21,9 @@ import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { Unsubscribe } from "../unsubscribe.slint";
+import { ReadReceipts, ReceiptRequestBar, ReturnedReceiptList } from "../read-receipts.slint";
 import { BlockSender } from "../block-sender.slint";
+import { MailRules } from "../rules.slint";
 import { Invitation } from "../invitation.slint";
 import { InvitationCard } from "../components/invitation-card.slint";
 
@@ -83,19 +85,12 @@ component MessageLoadingSkeleton inherits Rectangle {
     in property <color> base-color;
     in property <color> highlight-color;
     in property <color> text-color;
-    // The skeleton covers a body as tall as its rendered email. Only this
-    // visible window, in the skeleton's coordinates, is painted.
-    in property <length> paint-top: 0px;
-    in property <length> paint-bottom: self.height;
-
     visible: root.active || self.opacity > 0;
     clip: true;
     opacity: root.active ? 1 : 0;
     animate opacity { duration: 180ms; easing: ease-out; }
 
     Rectangle {
-        y: clamp(root.paint-top, 0px, root.height);
-        height: clamp(root.paint-bottom, 0px, root.height) - self.y;
         background: root.surface-color;
     }
 
@@ -210,7 +205,7 @@ component ThreadMessageHeader inherits Rectangle {
         has-source: root.has-favicon;
         fallback: root.initials;
         image-fit: contain;
-        background-color: root.has-favicon ? #ffffff : root.outgoing ? root.accent : root.control-bg;
+        background-color: root.outgoing ? root.accent : root.control-bg;
         foreground-color: root.outgoing ? #ffffff : root.secondary-text;
         avatar-border-width: root.has-favicon ? 1px : 0px;
         avatar-border-color: root.border;
@@ -342,6 +337,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg") },
         { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg") },
         { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg") },
+        { id: "forward_attachment", title: @tr("Forward as attachment"), icon: @image-url("../icons/lucide/outline/paperclip.svg") },
         { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg") },
         { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
         { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
@@ -359,12 +355,14 @@ export component MailReadingPane inherits FocusScope {
         { id: "unsubscribe", title: @tr("Unsubscribe…"), icon: @image-url("../icons/lucide/outline/mail-x.svg"), disabled: !Unsubscribe.available },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: "block", title: BlockSender.blocked ? @tr("Unblock sender") : @tr("Block sender…"), icon: @image-url("../icons/lucide/outline/ban.svg"), disabled: !BlockSender.available },
+        { id: "rule", title: @tr("Create rule…"), icon: @image-url("../icons/lucide/outline/list-filter-plus.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
     private property <[ActionMenuEntry]> message-action-menu-no-print: [
         { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg") },
         { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg") },
         { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg") },
+        { id: "forward_attachment", title: @tr("Forward as attachment"), icon: @image-url("../icons/lucide/outline/paperclip.svg") },
         { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg") },
         { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
         { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
@@ -381,6 +379,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "unsubscribe", title: @tr("Unsubscribe…"), icon: @image-url("../icons/lucide/outline/mail-x.svg"), disabled: !Unsubscribe.available },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: "block", title: BlockSender.blocked ? @tr("Unblock sender") : @tr("Block sender…"), icon: @image-url("../icons/lucide/outline/ban.svg"), disabled: !BlockSender.available },
+        { id: "rule", title: @tr("Create rule…"), icon: @image-url("../icons/lucide/outline/list-filter-plus.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
     // Local mail has no archive or spam.
@@ -388,6 +387,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg"), disabled: !LocalMailUi.can-send },
         { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg"), disabled: !LocalMailUi.can-send },
         { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg"), disabled: !LocalMailUi.can-send },
+        { id: "forward_attachment", title: @tr("Forward as attachment"), icon: @image-url("../icons/lucide/outline/paperclip.svg"), disabled: !LocalMailUi.can-send },
         { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg"), disabled: !LocalMailUi.can-send },
         { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
         { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
@@ -407,6 +407,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg"), disabled: !LocalMailUi.can-send },
         { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg"), disabled: !LocalMailUi.can-send },
         { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg"), disabled: !LocalMailUi.can-send },
+        { id: "forward_attachment", title: @tr("Forward as attachment"), icon: @image-url("../icons/lucide/outline/paperclip.svg"), disabled: !LocalMailUi.can-send },
         { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg"), disabled: !LocalMailUi.can-send },
         { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
         { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
@@ -465,15 +466,6 @@ export component MailReadingPane inherits FocusScope {
         email-surface.height - root.thread-header-height - root.renderer-controls-height
     );
     private property <length> rendered-email-height: root.email-viewport-width * EmailReader.width-ratio * root.email-content-aspect + (root.remote-images-blocked ? 60px : 0px);
-    // Slint's software renderer (CPU mode) panics when it paints a rectangle
-    // past ±32767 physical pixels (#35). Surfaces that grow with the message
-    // paint only the visible scroll content, with a margin for cut edges.
-    // Remove this clamping once a Slint release fixes slint-ui/slint#14250.
-    private property <length> paint-margin: 32px;
-    private property <length> paint-left: -email-scroll.content-x - root.paint-margin;
-    private property <length> paint-right: -email-scroll.content-x + email-scroll.visible-width + root.paint-margin;
-    private property <length> paint-top: -email-scroll.content-y - root.paint-margin;
-    private property <length> paint-bottom: -email-scroll.content-y + email-scroll.visible-height + root.paint-margin;
     // Attachment rows share one height so the document height stays exact.
     private property <length> attachment-heading-line: max(20px, attachment-heading-probe.preferred-height);
     private property <length> attachment-name-line: max(22px, attachment-name-probe.preferred-height);
@@ -482,12 +474,23 @@ export component MailReadingPane inherits FocusScope {
     private property <length> attachment-section-height: MailAttachments.rows.length > 0
         ? 14px + root.attachment-heading-line + MailAttachments.rows.length * (root.attachment-card-height + 4px)
         : 0px;
+    // The read receipts that came back for a message the user sent follow
+    // its attachments, one line each and a button past three.
+    private property <length> returned-row-height: max(root.compact ? 32px : 26px, returned-row-probe.preferred-height + 8px);
+    private property <length> returned-button-height: root.compact ? 36px : 26px;
+    private property <length> returned-section-height: ReadReceipts.returned.length > 0
+        ? 8px + root.attachment-heading-line + ReadReceipts.returned.length * root.returned-row-height
+            + (ReadReceipts.more-returned > 0 ? root.returned-button-height + 8px : 0px)
+        : 0px;
+    private property <length> returned-section-y: root.attachment-flow-y + root.attachment-section-height
+        + (MailAttachments.rows.length > 0 ? 12px : 0px);
     // Normal HTML uses its intrinsic rendered height. Alternate surfaces own
     // their scrolling. Fit their body and footer in the outer viewport when
     // possible so a short reader view cannot scroll its header away.
     private property <length> message-body-content-height: root.alternate-body-active
         ? max(40px, root.email-viewport-height - root.attachment-section-height
             - (MailAttachments.rows.length > 0 ? 12px : 0px)
+            - root.returned-section-height - (ReadReceipts.returned.length > 0 ? 12px : 0px)
             - root.message-actions-height - root.message-bottom-padding)
         : root.rendered-email-height;
     private property <length> attachment-flow-y: root.message-body-content-height;
@@ -503,15 +506,16 @@ export component MailReadingPane inherits FocusScope {
     attachment-heading-probe := Text { visible: false; text: "Ag"; font-weight: 600; }
     attachment-name-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.body; font-weight: 600; }
     attachment-detail-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; }
+    returned-row-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.body; }
     private property <length> thread-item-stride: root.thread-header-height + root.thread-item-gap;
     private property <int> accordion-message-count: max(1, root.thread-messages.length);
     private property <int> accordion-selected-index: min(max(0, root.selected-thread-index), root.accordion-message-count - 1);
     private property <length> selected-header-y: root.accordion-selected-index * root.thread-item-stride;
     private property <length> renderer-controls-height: renderer-controls.preferred-height;
     private property <length> message-body-y: root.selected-header-y + root.thread-header-height + root.renderer-controls-height;
-    private property <length> message-document-height: root.attachment-flow-y
-        + root.attachment-section-height
-        + (MailAttachments.rows.length > 0 ? 12px : 0px);
+    private property <length> message-document-height: root.returned-section-y
+        + root.returned-section-height
+        + (ReadReceipts.returned.length > 0 ? 12px : 0px);
     private property <length> message-actions-y: root.message-body-y + root.message-document-height;
     private property <length> expanded-message-height: root.renderer-controls-height
         + root.message-document-height
@@ -521,7 +525,7 @@ export component MailReadingPane inherits FocusScope {
     // navigation uses the active surface's height, including attachments.
     out property <length> email-scroll-document-height: root.message-document-height
         + root.message-actions-height + root.message-bottom-padding;
-    animate selected-header-y { duration: 240ms; easing: spring(0); }
+    animate selected-header-y { duration: 240ms; easing: spring(0); enabled: MotionSettings.movement; }
     in property <color> accent;
     in property <color> accent-soft;
     in property <color> border;
@@ -1071,7 +1075,7 @@ export component MailReadingPane inherits FocusScope {
                                         ? root.message-action-menu
                                         : root.message-action-menu-no-print;
                                 activated(action) => {
-                                    if action == "edit_draft" || action == "reply" || action == "reply_all" || action == "forward" || action == "edit_as_new" {
+                                    if action == "edit_draft" || action == "reply" || action == "reply_all" || action == "forward" || action == "forward_attachment" || action == "edit_as_new" {
                                         root.compose_message_action(action);
                                     } else if action == "star" {
                                         root.message_action(root.selected_starred ? "unstar" : "star");
@@ -1085,6 +1089,8 @@ export component MailReadingPane inherits FocusScope {
                                         Unsubscribe.start();
                                     } else if action == "block" {
                                         BlockSender.start();
+                                    } else if action == "rule" {
+                                        MailRules.create-from-message();
                                     } else if action == "print" {
                                         root.print_message();
                                     } else if action == "browser" {
@@ -1204,15 +1210,11 @@ export component MailReadingPane inherits FocusScope {
                                 // The expanded header and document share one card
                                 // boundary. Its fixed horizontal position keeps the
                                 // chrome aligned while a zoomed document scrolls.
-                                // The card is as tall as the rendered email, so it
-                                // is painted only within the visible window.
                                 Rectangle {
-                                    property <length> card-top: root.selected-header-y;
-                                    property <length> card-bottom: self.card-top + root.thread-header-height + root.expanded-message-height;
                                     x: -email-scroll.content-x + root.message-card-inset;
-                                    y: clamp(root.paint-top, self.card-top, self.card-bottom);
+                                    y: root.selected-header-y;
                                     width: max(0px, email-scroll.visible-width - 2 * root.message-card-inset);
-                                    height: clamp(root.paint-bottom, self.card-top, self.card-bottom) - self.y;
+                                    height: root.thread-header-height + root.expanded-message-height;
                                     background: root.surface;
                                     border-radius: 8px;
                                     border-width: 1px;
@@ -1249,7 +1251,7 @@ export component MailReadingPane inherits FocusScope {
                                     x: -email-scroll.content-x + root.message-card-inset;
                                     y: row.index * root.thread-item-stride
                                         + (row.index > root.accordion-selected-index ? root.expanded-message-height : 0px);
-                                    animate y { duration: 240ms; easing: spring(0); }
+                                    animate y { duration: 240ms; easing: spring(0); enabled: MotionSettings.movement; }
                                     width: max(0px, email-scroll.visible-width - 2 * root.message-card-inset);
                                     sender: row.sender;
                                     address: row.address;
@@ -1352,6 +1354,12 @@ export component MailReadingPane inherits FocusScope {
                                             clicked => { Unsubscribe.start(); }
                                         }
                                     }
+                                    // A sender asked to be notified when the message is
+                                    // read (RFC 8098), and Settings says to ask.
+                                    if ReadReceipts.available && !LocalMailUi.selected : ReceiptRequestBar {
+                                        compact: root.compact;
+                                        text-color: root.secondary-text;
+                                    }
                                     // A calendar the message carries (#228), above the
                                     // message as Outlook, Apple Mail and Gmail put theirs.
                                     if Invitation.available : Rectangle {
@@ -1385,8 +1393,6 @@ export component MailReadingPane inherits FocusScope {
                                     y: root.message-body-y;
                                     width: root.email-viewport-width;
                                     height: root.message-body-content-height;
-                                    paint-top: root.paint-top - self.y;
-                                    paint-bottom: root.paint-bottom - self.y;
                                     z: 50;
                                     active: EmailReader.body-pending;
                                     surface-color: root.surface;
@@ -1469,13 +1475,7 @@ export component MailReadingPane inherits FocusScope {
                                         x: missing.x * 1px; y: missing.y * 1px + (root.remote-images-blocked ? 60px : 0px);
                                         width: missing.width * 1px; height: missing.height * 1px;
                                         clip: true; accessible-role: image; accessible-label: missing.alt;
-                                        // Authored image sizes are unbounded; paint
-                                        // only the visible part of the placeholder.
                                         Rectangle {
-                                            x: clamp(root.paint-left - email-context.x - parent.x, 0px, parent.width);
-                                            y: clamp(root.paint-top - email-context.y - parent.y, 0px, parent.height);
-                                            width: clamp(root.paint-right - email-context.x - parent.x, 0px, parent.width) - self.x;
-                                            height: clamp(root.paint-bottom - email-context.y - parent.y, 0px, parent.height) - self.y;
                                             background: root.control-bg; border-width: 1px; border-color: root.border;
                                         }
                                         Text {
@@ -1737,13 +1737,7 @@ export component MailReadingPane inherits FocusScope {
                                         if event.text == Key.Return || event.text == " " { root.open_email_link(link.url); return accept; }
                                         reject
                                     }
-                                    // A link can wrap the whole message; paint
-                                    // only the visible part of its focus ring.
                                     Rectangle {
-                                        x: clamp(root.paint-left - parent.x, 0px, parent.width);
-                                        y: clamp(root.paint-top - parent.y, 0px, parent.height);
-                                        width: clamp(root.paint-right - parent.x, 0px, parent.width) - self.x;
-                                        height: clamp(root.paint-bottom - parent.y, 0px, parent.height) - self.y;
                                         border-width: parent.has-focus ? 2px : 0px; border-color: root.accent; background: transparent;
                                     }
                                 }
@@ -1863,6 +1857,22 @@ export component MailReadingPane inherits FocusScope {
                                             clicked => { MailAttachments.command("download", attachment.id); }
                                         }
                                     }
+                                }
+
+                                // Then the read receipts that came back for a message
+                                // the user sent, lined up with the attachments.
+                                if ReadReceipts.returned.length > 0 : ReturnedReceiptList {
+                                    x: -email-scroll.content-x + root.message-card-inset + root.message-card-border-width + 12px;
+                                    y: root.message-body-y + root.returned-section-y;
+                                    width: max(0px, root.email-viewport-width - 24px);
+                                    height: root.returned-section-height;
+                                    compact: root.compact;
+                                    heading-color: root.heading;
+                                    text-color: root.heading;
+                                    secondary-color: root.secondary-text;
+                                    heading-line: root.attachment-heading-line;
+                                    row-height: root.returned-row-height;
+                                    button-height: root.returned-button-height;
                                 }
 
                                 reader-focus := FocusVisibleScope {

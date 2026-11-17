@@ -7,4 +7,6 @@
 //! pending-action semantics.
 
 pub mod client;
+pub(crate) mod sieve;
 pub mod sync;
+pub(crate) mod vacation;

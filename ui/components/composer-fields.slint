@@ -5,6 +5,7 @@ import { IconButton } from "controls.slint";
 import { ModeButton, RecipientRow } from "composer-controls.slint";
 import { ComposerContactMenu } from "composer-contact-menu.slint";
 import { TypeScale } from "../typography.slint";
+import { MotionSettings } from "../design-system.slint";
 import { WindowControlsClearance } from "../window-chrome.slint";
 
 // What a composer is for: its heading, and its window's title.
@@ -15,6 +16,7 @@ export global ComposerText {
             : mode == "forward" ? @tr("Forward")
             : mode == "draft" ? @tr("Edit draft")
             : mode == "edit_as_new" ? @tr("Edit as new")
+            : mode == "signature" ? @tr("Signature")
             : @tr("New message");
     }
 }
@@ -159,7 +161,7 @@ export component ComposerFromRow inherits Rectangle {
                     image-fit: contain;
                     transform-rotation: account-popup.is-open ? 180deg : 0deg;
                     accessible-role: none;
-                    animate transform-rotation { duration: 120ms; }
+                    animate transform-rotation { duration: 120ms; enabled: MotionSettings.movement; }
                 }
 
                 account-focus := FocusScope {
@@ -475,10 +477,16 @@ export component ComposerRecipients inherits Rectangle {
 
 export component ComposerSubject inherits Rectangle {
     in-out property <string> subject;
+    // A signature being written has a name where a message has its subject.
+    in property <bool> naming-signature: false;
     in property <color> accent-color;
     in property <color> background-color;
     in property <color> muted-color;
     in property <color> title-color;
+
+    public function focus-subject() {
+        subject-input.focus();
+    }
 
             height: 42px;
             background: root.background-color;
@@ -487,7 +495,7 @@ export component ComposerSubject inherits Rectangle {
                 x: 12px;
                 width: max(46px, self.preferred-width);
                 height: parent.height;
-                text: @tr("Subject");
+                text: root.naming-signature ? @tr("signature" => "Name") : @tr("Subject");
                 color: subject-input.has-focus ? root.accent-color : root.muted-color;
                 font-size: TypeScale.caption;
                 font-weight: 600;
@@ -499,7 +507,7 @@ export component ComposerSubject inherits Rectangle {
                 width: parent.width - self.x - 12px;
                 height: parent.height;
                 visible: root.subject == "";
-                text: @tr("What is this email about?");
+                text: root.naming-signature ? @tr("Signature name, for example Work") : @tr("What is this email about?");
                 color: root.muted-color;
                 font-size: TypeScale.body;
                 vertical-alignment: center;

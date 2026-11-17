@@ -7,7 +7,7 @@ mkdir -p "$output_dir"
 temporary_dir="$(mktemp -d)"
 temporary_ui="$(mktemp "$repo_dir/ui/.onboarding-render.XXXXXX.slint")"
 trap 'rm -rf "$temporary_dir"; rm -f "$temporary_ui"' EXIT
-slint-viewer --check "$repo_dir/ui/app.slint"
+slint-viewer --edition 1.19 --check "$repo_dir/ui/app.slint"
 python3 - "$temporary_dir" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
@@ -30,13 +30,13 @@ PY
 for state in unconfigured dialog saving save-error google-configured configured bundled dialog-dark unconfigured-dark; do
     style=fluent
     if [[ "$state" == *-dark ]]; then style=fluent-dark; fi
-    slint-viewer --style "$style" --load-data "$temporary_dir/$state.json" \
+    slint-viewer --edition 1.19 --style "$style" --load-data "$temporary_dir/$state.json" \
         --screenshot "$output_dir/$state.png" "$repo_dir/ui/app.slint"
 done
 sed -e 's/preferred-width: 1320px/preferred-width: 390px/' \
     -e 's/preferred-height: 800px/preferred-height: 844px/' \
     "$repo_dir/ui/app.slint" > "$temporary_ui"
 for state in unconfigured dialog; do
-    slint-viewer --load-data "$temporary_dir/$state.json" \
+    slint-viewer --edition 1.19 --load-data "$temporary_dir/$state.json" \
         --screenshot "$output_dir/mobile-$state.png" "$temporary_ui"
 done

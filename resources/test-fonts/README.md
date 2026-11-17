@@ -25,3 +25,27 @@ Vello CPU's current build lacks PNG glyph support, so these bitmap digits
 vanish; Vello GPU paints them with emoji metrics and excessive spacing.
 The tests verify that text uses the regular fallback while real emoji still
 select the emoji family.
+
+# Bitmap strike regression fixtures
+
+`BitmapStrikes-EBDT.ttf` and `BitmapStrikes-CBDT.ttf` are test-only fonts
+derived from the bundled Google Sans Flex, licensed under SIL OFL 1.1 (see
+`OFL-GoogleSansFlex.txt`). They are not bundled into the application. Each is
+the default instance subset to E, F and space, renamed to `Flectar EBDT
+Strikes Test` and `Flectar CBDT Strikes Test`, with one 16 ppem monochrome
+bitmap strike added, like the strikes in Calibri and Cambria. F's bitmap is
+byte-aligned (image format 1, as in Calibri) and E's bit-aligned (format 2).
+The EBDT font keeps them in `EBLC`/`EBDT`, the CBDT font in `CBLC`/`CBDT`.
+
+Source: `resources/fonts/google-sans-flex`, SHA-256
+`c6d53424121196b81de816b8daccf200e285dd506df43766db3d7e8cdf06ee30`
+
+Reproduce with FontTools:
+
+```sh
+python3 scripts/make-bitmap-strike-test-fonts.py
+```
+
+Vello's GPU renderer dropped such glyphs or drew them white instead of drawing
+their outlines (issue #342). The tests check that both renderers draw F and E
+from their outlines.

@@ -247,13 +247,21 @@ fn register_desktop_events(app: &AppWindow) {
         }
         match event {
             winit::event::WindowEvent::ModifiersChanged(state) => modifiers.set(state.state()),
+            // Files dragged from elsewhere go into an open message.
+            winit::event::WindowEvent::HoveredFile(_) => crate::composer::files_hovered(true),
+            winit::event::WindowEvent::HoveredFileCancelled => {
+                crate::composer::files_hovered(false)
+            }
+            winit::event::WindowEvent::DroppedFile(path) => {
+                crate::composer::file_dropped(path.clone())
+            }
             // Tab shortcuts work wherever focus is, as in a browser, except in
             // the composer and the calendar editor, which keep their keys.
             winit::event::WindowEvent::KeyboardInput { event, .. }
                 if event.state.is_pressed()
                     && app.global::<crate::TabsUi>().get_enabled()
                     && !app.global::<crate::ComposerUi>().get_open()
-                    && !app.get_calendar_editor_open() =>
+                    && !app.get_calendar_editor_shown() =>
             {
                 if let Some(command) = crate::tabs::shortcut(&event.logical_key, modifiers.get()) {
                     app.global::<crate::TabsUi>()

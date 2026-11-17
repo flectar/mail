@@ -88,6 +88,21 @@ pub enum CoreEvent {
         sync_state: String,
         sync_error: Option<String>,
     },
+    /// What the app knows of an account's automatic replies changed, read
+    /// from its server or saved to it.
+    AutoReplyChanged {
+        account_id: i64,
+    },
+    /// Where an account's rules run changed: on its server or in the app.
+    ServerRulesChanged {
+        account_id: i64,
+    },
+    /// A check stored all the mail the account's Inbox had when it started
+    /// at `at` (milliseconds since the epoch), as `Account::caught_up_at`.
+    AccountCaughtUp {
+        account_id: i64,
+        at: i64,
+    },
     /// RAG "ask" retrieved its source messages (emitted before the answer
     /// streams, so the UI can show sources immediately).
     AskCitations {

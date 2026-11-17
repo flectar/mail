@@ -131,12 +131,20 @@ jobs:
         run: python3 scripts/check-platform-gates.py
       - name: Verify the Blitz patch queue
         run: bash scripts/blitz-patches.sh verify
-      - name: Verify and test the Parley backport
-        run: |
-          python3 scripts/verify-parley.py
-          cargo test --manifest-path crates/parley/Cargo.toml --lib --locked --target-dir target/parley-tests
-      - name: Verify the Slint winit clipboard backport
+      - name: Verify the Slint winit file drop patch
         run: python3 scripts/verify-slint-winit.py
+      - name: Verify the Slint Android pointer scroll backport
+        run: python3 scripts/verify-slint-android-activity.py
+      - name: Verify the Slint software renderer clip fix
+        run: python3 scripts/verify-slint-renderer-software.py
+      - name: Verify the fontique slant fix
+        run: python3 scripts/verify-fontique.py
+      - name: Verify the Vello bitmap strike fix
+        run: python3 scripts/verify-vello.py
+      - name: Verify and test the smithay-clipboard file drop patch
+        run: |
+          python3 scripts/verify-smithay-clipboard.py
+          cargo test --manifest-path crates/smithay-clipboard/Cargo.toml --lib --locked --target-dir target/smithay-clipboard-tests
       - name: Verify and test the vendored spellbook
         run: |
           python3 scripts/verify-spellbook.py
@@ -171,7 +179,7 @@ jobs:
       - name: Validate translations
         shell: bash
         run: |
-          cargo install slint-tr-extractor --version 1.18.1 --locked
+          cargo install slint-tr-extractor --version 1.19.0 --locked
           bash scripts/check-translations.sh
       - name: Run the default test suite
         run: cargo test --workspace --all-targets --locked
@@ -238,9 +246,14 @@ jobs:
       - name: Configure Android NDK compiler
         if: matrix.name == 'Android'
         run: |
-          toolchain="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          # Slint's prebuilt Skia binaries need the C++ library of NDK r30 or
+          # newer, and the runner's default NDK is older.
+          ndk="$ANDROID_NDK_LATEST_HOME"
+          toolchain="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
           test -x "$toolchain/aarch64-linux-android26-clang"
           {
+            echo "ANDROID_NDK_ROOT=$ndk"
+            echo "ANDROID_NDK_HOME=$ndk"
             echo "CC_aarch64_linux_android=$toolchain/aarch64-linux-android26-clang"
             echo "CXX_aarch64_linux_android=$toolchain/aarch64-linux-android26-clang++"
             echo "AR_aarch64_linux_android=$toolchain/llvm-ar"
@@ -314,10 +327,12 @@ jobs:
         # The first four exceptions are unmaintained notices in optional/build
         # or Slint/Blitz typography dependencies. The next three cover crates
         # folded into zbus 6: remove them when Slint, ashpd, and ksni migrate
-        # from zbus 5. The last is pin-utils, which async-imap and Slint's
-        # spin_on still use: remove it when both drop it. These are maintenance
-        # notices, not vulnerability waivers. Deny every other warning and all
-        # known vulnerabilities.
+        # from zbus 5. Then pin-utils, which async-imap and Slint's spin_on
+        # still use: remove it when both drop it. The last two are chrono,
+        # which the app uses for dates throughout, and humantime, which the
+        # optional model download pulls in. Remove them when both move to a
+        # maintained crate. These are maintenance notices, not vulnerability
+        # waivers. Deny every other warning and all known vulnerabilities.
         run: |
           lockfiles="Cargo.lock platform/android/Cargo.lock"
           # Tier 3 ports are audited daily and when their own workflow runs,
@@ -334,5 +349,7 @@ jobs:
               --ignore RUSTSEC-2026-0370 \
               --ignore RUSTSEC-2026-0371 \
               --ignore RUSTSEC-2026-0372 \
-              --ignore RUSTSEC-2026-0441
+              --ignore RUSTSEC-2026-0441 \
+              --ignore RUSTSEC-2026-0543 \
+              --ignore RUSTSEC-2026-0542
           done

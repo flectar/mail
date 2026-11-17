@@ -135,6 +135,7 @@ static ACTIVE: AtomicBool = AtomicBool::new(false);
 pub fn set_app_active(active: bool) {
     ACTIVE.store(active, Ordering::Relaxed);
     if active {
+        crate::motion::system_changed();
         crate::notifications::app_became_active();
         let _ = slint::invoke_from_event_loop(crate::notifications::ui::came_to_front);
     }
@@ -144,6 +145,25 @@ pub fn set_app_active(active: bool) {
 pub(crate) fn app_is_active() -> bool {
     ACTIVE.load(Ordering::Relaxed)
 }
+
+type ReduceMotion = Box<dyn Fn() -> bool + Send + Sync>;
+
+static REDUCE_MOTION: OnceLock<ReduceMotion> = OnceLock::new();
+
+/// Supply the bridge to FlectarActivity.animationsRemoved, once.
+pub fn configure_reduce_motion(read: impl Fn() -> bool + Send + Sync + 'static) {
+    let _ = REDUCE_MOTION.set(Box::new(read));
+}
+
+/// Remove animations, in the accessibility settings, asks apps to reduce
+/// motion.
+pub(crate) fn reduce_motion() -> bool {
+    REDUCE_MOTION.get().is_some_and(|read| read())
+}
+
+/// Android announces no change of the setting, so the app reads it again
+/// whenever it comes back to the front (`set_app_active`).
+pub(crate) fn watch_reduce_motion() {}
 
 /// What the host reports and opens about the app's work in the background.
 pub struct BackgroundBridge {

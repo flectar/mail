@@ -1,0 +1,153 @@
+import { Button } from "button.slint";
+import { AccountProblem, AccountStatus } from "../models.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+
+export global AccountStatusText {
+    // The name of what stops an account's checks; empty when nothing does.
+    public pure function problem(problem: AccountProblem) -> string {
+        return problem == AccountProblem.sign-in ? @tr("Sign-in required")
+            : problem == AccountProblem.failed ? @tr("Couldn't check mail") : "";
+    }
+
+    // When a check last brought an account's Inbox up to date: `day` is 0
+    // for today and 1 for yesterday, with `at` the time, or 2 for earlier,
+    // with `at` the date and time. Empty before the first check.
+    public pure function last-checked(day: int, at: string) -> string {
+        return at == "" ? ""
+            : day == 1 ? @tr("Last checked yesterday at {}", at)
+            : @tr("Last checked {}", at);
+    }
+}
+
+// What stops an account's mail checks, and the action that fits it: trying
+// again after a failure, or signing in again after the server turned the
+// sign-in down.
+export component AccountStatusPanel inherits Rectangle {
+    in property <AccountStatus> status;
+    in property <bool> can-check-mail: true;
+    // Touch-sized buttons, as in the phone drawer.
+    in property <bool> touch: false;
+    callback check-mail();
+    callback sign-in();
+    callback account-settings();
+
+    private property <bool> sign-in-problem: root.status.problem == AccountProblem.sign-in;
+    private property <string> last-checked: AccountStatusText.last-checked(root.status.checked_day, root.status.checked_at);
+
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: AppTheme.border;
+    background: AppTheme.surface-raised;
+    drop-shadow-blur: 18px;
+    drop-shadow-offset-y: 5px;
+    drop-shadow-color: #0000002e;
+    accessible-role: groupbox;
+    accessible-label: AccountStatusText.problem(root.status.problem);
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 8px;
+
+        HorizontalLayout {
+            spacing: 10px;
+
+            VerticalLayout {
+                padding-top: 1px;
+                alignment: start;
+
+                Image {
+                    width: 18px;
+                    height: 18px;
+                    source: @image-url("../icons/lucide/outline/alert-circle.svg");
+                    colorize: AppTheme.destructive;
+                    image-fit: contain;
+                    accessible-role: none;
+                }
+            }
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 4px;
+
+                Text {
+                    text: AccountStatusText.problem(root.status.problem);
+                    color: AppTheme.heading;
+                    font-size: TypeScale.body;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+
+                // The server's or the network's own words, selectable for a
+                // report; Settings offers them with a copy button as well.
+                if !root.sign-in-problem && root.status.reason != "" : TextInput {
+                    text: root.status.reason;
+                    color: AppTheme.body;
+                    font-size: TypeScale.caption;
+                    read-only: true;
+                    single-line: false;
+                    wrap: word-wrap;
+                    selection-background-color: AppTheme.accent;
+                    selection-foreground-color: white;
+                    accessible-label: root.status.reason;
+                }
+
+                if root.sign-in-problem : Text {
+                    text: @tr("The server didn't accept the saved sign-in. Sign in again to keep getting mail.");
+                    color: AppTheme.body;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: root.sign-in-problem ? root.last-checked
+                        : root.last-checked == "" ? @tr("Retrying automatically")
+                        : @tr("{} · Retrying automatically", root.last-checked);
+                    visible: self.text != "";
+                    color: AppTheme.secondary;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        // Side by side where both fit, as on a wide sidebar; stacked with
+        // the fixing action first in a narrow phone drawer or at large text.
+        actions := Rectangle {
+            private property <bool> inline: secondary.content-width + primary.content-width + 8px <= self.width;
+            private property <length> button-height: root.touch ? LayoutMetrics.touch-target : 32px;
+            height: 6px + (self.inline ? self.button-height : 2 * self.button-height + 8px);
+
+            secondary := Button {
+                x: actions.inline ? primary.x - self.width - 8px : 0px;
+                y: actions.inline ? 6px : 14px + actions.button-height;
+                width: actions.inline ? self.content-width : parent.width;
+                height: actions.button-height;
+                text: @tr("Account settings");
+                clicked => { root.account-settings(); }
+            }
+
+            primary := Button {
+                x: actions.inline ? parent.width - self.width : 0px;
+                y: 6px;
+                width: actions.inline ? self.content-width : parent.width;
+                height: actions.button-height;
+                primary: true;
+                text: root.sign-in-problem ? @tr("Sign in again") : @tr("Try again");
+                enabled: root.sign-in-problem || root.can-check-mail;
+                clicked => {
+                    if root.sign-in-problem {
+                        root.sign-in();
+                    } else {
+                        root.check-mail();
+                    }
+                }
+            }
+        }
+    }
+
+    // Keyboard users land on the action that fixes the problem.
+    public function focus-action() {
+        primary.focus();
+    }
+}

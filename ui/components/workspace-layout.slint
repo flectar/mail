@@ -26,7 +26,7 @@ export component WorkspaceFrame inherits Rectangle {
     private property <float> reveal-progress: MotionSettings.enabled ? root.animated-reveal-progress : 1;
     private property <bool> reveal-pending: true;
 
-    x: root.base-x + (1 - root.reveal-progress) * 14px;
+    x: root.base-x + (MotionSettings.movement ? (1 - root.reveal-progress) * 14px : 0px);
     y: 0px;
     width: max(0px, root.available-width - root.base-x);
     height: max(0px, root.available-height - (root.compact && root.reserve-compact-navigation ? LayoutMetrics.compact-navigation-height : 0px));
@@ -44,8 +44,8 @@ export component WorkspaceFrame inherits Rectangle {
             root.animated-reveal-progress = 1;
         }
     }
-    animate x { duration: 240ms; easing: spring(0); enabled: MotionSettings.enabled; }
-    animate height { duration: 220ms; easing: spring(0); enabled: MotionSettings.enabled; }
+    animate x { duration: 240ms; easing: spring(0); enabled: MotionSettings.movement; }
+    animate height { duration: 220ms; easing: spring(0); enabled: MotionSettings.movement; }
     animate opacity { duration: 180ms; easing: ease-out; enabled: MotionSettings.enabled; }
 
     @children
@@ -107,7 +107,7 @@ export component CollapsibleWorkspaceSidebar inherits WorkspaceSidebarSurface {
     width: root.animated-width;
     clip: true;
 
-    animate animated-width { duration: 220ms; easing: spring(0); }
+    animate animated-width { duration: 220ms; easing: spring(0); enabled: MotionSettings.movement; }
 }
 
 // A one-pixel divider with a larger, invisible interaction target. The
@@ -316,7 +316,24 @@ export component WorkspaceSearchToolbar inherits Rectangle {
     in property <image> leading-icon;
     in property <string> leading-tooltip: "";
     in property <string> leading-accessible-id: "";
+    // A dot on the leading button for something behind it that needs a look,
+    // such as an account whose checks fail while the sidebar is hidden.
+    in property <bool> leading-badge: false;
+    in property <string> leading-badge-description;
     in property <[WorkspaceSearchFilter]> filters: [];
+    // The filter in use, which its menu item checks. Lists that only offer
+    // actions in the menu leave it empty.
+    in property <string> selected-filter: "";
+    // Newest first and Oldest first after the filters, for lists that sort
+    // by date. Disabled, they show the order the list has anyway.
+    in property <bool> show-sort: false;
+    in property <bool> sort-enabled: true;
+    in property <bool> oldest-first: false;
+    // Save search… at the end of the menu, for fields whose searches can be
+    // kept in the sidebar.
+    in property <bool> show-save-search: false;
+    // Search tips at the end of the menu, for fields that take operators.
+    in property <bool> show-search-tips: false;
     in property <bool> filter-active: false;
     in property <string> filter-tooltip;
     in property <string> filter-accessible-id;
@@ -326,6 +343,9 @@ export component WorkspaceSearchToolbar inherits Rectangle {
     callback edited(string);
     callback submitted(string);
     callback filter-selected(string);
+    callback sort-selected(/* oldest first */ bool);
+    callback save-search;
+    callback search-tips;
     callback leading-clicked;
     callback refresh;
     out property <bool> search-focused: search-edit.has-focus;
@@ -363,7 +383,19 @@ export component WorkspaceSearchToolbar inherits Rectangle {
             active-background: AppTheme.accent-soft;
             tooltip-text: root.leading-tooltip;
             accessible-id: root.leading-accessible-id;
+            accessible-description: root.leading-badge ? root.leading-badge-description : "";
             clicked => { root.leading-clicked(); }
+
+            if root.leading-badge : Rectangle {
+                x: parent.width - self.width - 3px;
+                y: 3px;
+                width: 10px;
+                height: 10px;
+                border-radius: 5px;
+                border-width: 2px;
+                border-color: AppTheme.surface;
+                background: AppTheme.destructive;
+            }
         }
 
         search-field := Rectangle {
@@ -373,6 +405,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
             search-edit := LineEdit {
                 width: parent.width;
                 height: parent.height;
+                outlined: false;
                 text <=> root.text;
                 placeholder-text: root.placeholder-text;
                 show-leading-icon: true;
@@ -404,7 +437,35 @@ export component WorkspaceSearchToolbar inherits Rectangle {
                 Menu {
                     for option in root.filters : MenuItem {
                         title: option.title;
+                        checkable: root.selected-filter != "";
+                        checked: option.value == root.selected-filter;
                         activated => { root.filter-selected(option.value); }
+                    }
+                    if root.show-sort : MenuSeparator {}
+                    if root.show-sort : MenuItem {
+                        title: @tr("Newest first");
+                        enabled: root.sort-enabled;
+                        checkable: true;
+                        checked: !root.oldest-first;
+                        activated => { root.sort-selected(false); }
+                    }
+                    if root.show-sort : MenuItem {
+                        title: @tr("Oldest first");
+                        enabled: root.sort-enabled;
+                        checkable: true;
+                        checked: root.oldest-first;
+                        activated => { root.sort-selected(true); }
+                    }
+                    if root.show-save-search : MenuSeparator {}
+                    if root.show-save-search : MenuItem {
+                        title: @tr("Save search…");
+                        enabled: root.text != "";
+                        activated => { root.save-search(); }
+                    }
+                    if root.show-search-tips : MenuSeparator {}
+                    if root.show-search-tips : MenuItem {
+                        title: @tr("Search tips");
+                        activated => { root.search-tips(); }
                     }
                 }
             }

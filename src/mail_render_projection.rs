@@ -124,6 +124,7 @@ pub(super) fn clear_reader_projection(app: &AppWindow) {
     block.set_available(false);
     block.set_blocked(false);
     crate::invitation::clear(app);
+    crate::read_receipts::clear(app);
     let reader = app.global::<EmailReader>();
     reader.set_available(false);
     reader.set_body_pending(false);
@@ -168,6 +169,7 @@ pub(super) fn apply_email(
     block.set_available(email.can_block);
     block.set_blocked(email.sender_blocked);
     crate::invitation::project(app, &email);
+    crate::read_receipts::project(app, &email);
     let reader = app.global::<EmailReader>();
     reader.set_body_pending(email.body_pending);
     reader.set_authored_text(email.text.clone().unwrap_or_default().into());

@@ -30,6 +30,7 @@ fn main() {
             .file("platform/ios/WebAuthentication.m")
             .file("platform/ios/MemoryPressure.m")
             .file("platform/ios/BackgroundChecks.m")
+            .file("platform/ios/ReduceMotion.m")
             .flag("-fobjc-arc")
             .compile("flectar_documents");
         println!("cargo:rustc-link-lib=framework=UIKit");
@@ -47,6 +48,7 @@ fn main() {
         println!("cargo:rerun-if-changed=platform/ios/WebAuthentication.m");
         println!("cargo:rerun-if-changed=platform/ios/MemoryPressure.m");
         println!("cargo:rerun-if-changed=platform/ios/BackgroundChecks.m");
+        println!("cargo:rerun-if-changed=platform/ios/ReduceMotion.m");
     }
     if std::env::var_os("CARGO_CFG_TARGET_OS").as_deref() == Some(std::ffi::OsStr::new("windows")) {
         winresource::WindowsResource::new()
@@ -65,6 +67,9 @@ fn main() {
     // only the deterministic implementation for the remaining layout/scroll
     // infrastructure and never selects a platform widget toolkit.
     let config = slint_build::CompilerConfiguration::new()
+        // The `slint!` UI tests use the same edition, so they see the layout
+        // and state behavior that the application gets.
+        .with_edition((1, 19))
         .with_style("fluent".into())
         // A source phrase has one meaning throughout this application. Keeping
         // catalogs context-free avoids duplicate entries for shared controls.

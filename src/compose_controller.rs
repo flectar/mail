@@ -37,6 +37,9 @@ pub(super) struct PreparedMessageCompose {
     /// The original a reply or forward carries below the editor.
     pub quote: Option<ComposeQuote>,
     pub intent: ComposeIntent,
+    /// The original is plain text only, which a message edited as new keeps, and replies and
+    /// forwards may follow.
+    pub plain_original: bool,
 }
 
 /// A message as it was sent: its HTML, and the plain text that has to say
@@ -96,6 +99,7 @@ pub(super) fn prepare_message_compose(
             }),
             quote: None,
             intent: ComposeIntent::default(),
+            plain_original: source.html_body.is_none(),
         });
     }
 
@@ -135,6 +139,7 @@ pub(super) fn prepare_message_compose(
                 in_reply_to_header: None,
                 draft_id: None,
             },
+            plain_original: source.html_body.is_none(),
         });
     }
 
@@ -182,6 +187,7 @@ pub(super) fn prepare_message_compose(
             in_reply_to_header: None,
             draft_id: None,
         },
+        plain_original: source.html_body.is_none(),
     })
 }
 
@@ -262,7 +268,7 @@ fn append_address(output: &mut String, address: &flectar_mail_core::models::Addr
     }
 }
 
-fn prefixed_subject(subject: &str, prefix: &str) -> String {
+pub(super) fn prefixed_subject(subject: &str, prefix: &str) -> String {
     let subject = subject.trim();
     let already_prefixed = match prefix {
         "Re" => subject
@@ -324,12 +330,15 @@ pub(super) fn perform_selected_action(
 pub(super) fn format_file_size(size: u64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = 1024.0 * 1024.0;
+    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
     if size < 1024 {
         format!("{size} B")
     } else if (size as f64) < MB {
         format!("{:.1} KB", size as f64 / KB)
-    } else {
+    } else if (size as f64) < GB {
         format!("{:.1} MB", size as f64 / MB)
+    } else {
+        format!("{:.1} GB", size as f64 / GB)
     }
 }
 
@@ -443,6 +452,12 @@ pub(super) fn apply_rendered_compose_editor(ui: &ComposerUi<'_>, rendered: Rende
     ui.set_editor_caret_x(rendered.caret_x);
     ui.set_editor_caret_y(rendered.caret_y);
     ui.set_editor_caret_height(rendered.caret_height);
+    let [x, y, width, height] = rendered.image_box.unwrap_or_default();
+    ui.set_editor_image_shown(rendered.image_box.is_some());
+    ui.set_editor_image_x(x);
+    ui.set_editor_image_y(y);
+    ui.set_editor_image_width(width);
+    ui.set_editor_image_height(height);
     if let Some(started) = started {
         eprintln!(
             "compose Slint model update: {:.2}ms tiles={tile_count} replaced_model={replaced_model}",
@@ -481,6 +496,35 @@ pub(super) fn apply_rich_compose_state(
     ui.set_strike_active(active.strike);
     ui.set_code_active(active.code);
     ui.set_active_link_url(document.active_link().unwrap_or_default().into());
+    ui.set_active_color(color_choice(active.color));
+    ui.set_active_highlight(color_choice(active.highlight));
+    ui.set_active_size(active.size.map_or("", |size| size.name()).into());
+    ui.set_active_family(active.family.map_or("", |family| family.name()).into());
+    ui.set_active_align(active.align.name().into());
+    let image = document.selected_image();
+    ui.set_active_image_size(
+        match image {
+            Some(image) => rich_compose::ImageSize::of(image).map_or("custom", |size| size.name()),
+            None => "",
+        }
+        .into(),
+    );
+    ui.set_active_image_alt(image.map_or("", |image| &*image.alt).into());
+    ui.set_active_image_width(image.map_or(0, |image| image.width.min(i32::MAX as u32) as i32));
+    ui.set_signature_edited(document.changed_since_saved());
+    ui.set_active_image_shown_width(
+        image.map_or(0, |image| image.shown_size().0.min(i32::MAX as u32) as i32),
+    );
+}
+
+/// A color the selection shares as the toolbar shows it: `#rrggbb`, `none` when it has none,
+/// or nothing when it mixes several.
+fn color_choice(color: Option<Option<rich_compose::Rgb>>) -> slint::SharedString {
+    match color {
+        Some(Some(color)) => rich_compose::css_rgb(color).into(),
+        Some(None) => "none".into(),
+        None => slint::SharedString::new(),
+    }
 }
 
 pub(super) fn apply_compose_contacts(

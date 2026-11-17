@@ -8,6 +8,7 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { EmailRow, MailListEntry } from "../ui/models.slint";
     import { MailListPane } from "../ui/views/mail-list-pane.slint";
     import { MotionSettings } from "../ui/design-system.slint";
