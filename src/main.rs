@@ -4189,7 +4189,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         if pending.calendar_changed
             && let Some(app) = mail_update_app.upgrade()
-            && app.get_settings_open()
+            && app.get_active_view() == "settings"
         {
             app.invoke_reload_calendar_connections();
         }
@@ -4854,8 +4854,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let generation = product_generation.get().wrapping_add(1);
         product_generation.set(generation);
         let previous = previous_product.replace(view.to_string());
+        let mail_returned = previous != view.as_str() && view == "mail";
         if previous != view.as_str() {
             if previous == "mail" {
+                // Tabs keep where mail was before its reader goes.
+                app.global::<TabsUi>().invoke_mail_hidden();
                 product_body_generation.set(product_body_generation.get().wrapping_add(1));
                 product_body_pending.set(None);
                 product_body_requests.send_replace(None);
@@ -4865,6 +4868,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 clear_reader_projection(&app);
                 app.set_selected_source("".into());
                 app.set_selected_plain_text("".into());
+                // The next reader starts at the top, and tabs scroll it back.
+                app.set_email_scroll_y(0.0);
             }
             if previous == "calendar" {
                 let mut calendar = product_calendar.borrow_mut();
@@ -4912,7 +4917,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             tokio::time::sleep(window_controller::TRIM_DELAY).await;
             crate::memory::release_free_heap();
         });
-        if app.get_settings_open() {
+        if view == "settings" {
             let updates = product_updates.clone();
             product_runtime.spawn(async move {
                 let (calendar, contacts) = tokio::join!(
@@ -4950,6 +4955,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         } else if view == "mail" {
             app.invoke_drain_core_updates();
             let _ = render_current(&app, &product_state, &product_runtime);
+            if mail_returned {
+                app.global::<TabsUi>().invoke_mail_shown();
+            }
         }
     });
 

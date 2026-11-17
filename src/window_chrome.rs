@@ -261,7 +261,7 @@ fn register_desktop_events(app: &AppWindow) {
                 if event.state.is_pressed()
                     && app.global::<crate::TabsUi>().get_enabled()
                     && !app.global::<crate::ComposerUi>().get_open()
-                    && !app.get_calendar_editor_open() =>
+                    && !app.get_calendar_editor_shown() =>
             {
                 if let Some(command) = crate::tabs::shortcut(&event.logical_key, modifiers.get()) {
                     app.global::<crate::TabsUi>()

@@ -750,7 +750,7 @@ impl Composers {
                     .set_status("Close the message you're writing to edit a signature.".into());
                 return;
             }
-            app.set_settings_open(false);
+            app.invoke_close_settings();
             self.open(app)
         };
         if let Some(session) = session {
@@ -2043,7 +2043,7 @@ impl ComposeSession {
                 .composers()
                 .and_then(|composers| composers.app.upgrade())
         {
-            app.set_settings_open(true);
+            app.invoke_open_settings();
         }
         if let Some(app) = self
             .composers()

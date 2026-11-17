@@ -488,7 +488,8 @@ export component SettingsDialog inherits Rectangle {
     in property <color> surface;
     in property <color> surface-raised;
     in property <color> title-color;
-    in-out property <bool> settings_open: false;
+    // Closing goes back to the screen Settings was opened from.
+    callback close-requested();
     in-out property <string> settings_tab: "General";
     // An account to sign in again as soon as its card shows, as the sidebar's
     // Sign in again asks.
@@ -1169,7 +1170,6 @@ export component SettingsDialog inherits Rectangle {
     }
 
         Rectangle {
-            visible: root.settings_open;
             x: 0px;
             y: 0px;
             width: parent.width;
@@ -1610,7 +1610,7 @@ export component SettingsDialog inherits Rectangle {
 
                             LargeFilesCard {
                                 compact: root.compact;
-                                shown: root.settings_open && root.settings_tab == "General";
+                                shown: root.settings_tab == "General";
                                 oauth-busy: root.oauth_in_progress || root.oauth_settings_saving || root.account_setup_in_progress;
                                 oauth-authorization-url: root.oauth_authorization_url;
                                 oauth-browser-error: root.oauth_browser_error;
@@ -3682,7 +3682,7 @@ export component SettingsDialog inherits Rectangle {
                     accessible-id: "settings-close-button";
                     clicked => {
                         root.compact-nav-open = false;
-                        root.settings_open = false;
+                        root.close-requested();
                     }
                 }
             }
@@ -3744,7 +3744,7 @@ export component SettingsDialog inherits Rectangle {
         }
 
         Rectangle {
-            visible: root.settings_open && root.caldav_account_id > 0;
+            visible: root.caldav_account_id > 0;
             width: parent.width;
             height: parent.height;
             background: #00000088;
@@ -3887,7 +3887,7 @@ export component SettingsDialog inherits Rectangle {
         }
 
         Rectangle {
-            visible: root.settings_open && root.account_form_open;
+            visible: root.account_form_open;
             width: parent.width;
             height: parent.height;
             background: #00000088;
@@ -4066,7 +4066,7 @@ export component SettingsDialog inherits Rectangle {
         }
 
         Rectangle {
-            visible: root.settings_open && root.profile-editor-open;
+            visible: root.profile-editor-open;
             width: parent.width;
             height: parent.height;
             background: #00000088;
@@ -4212,7 +4212,7 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
-        if root.settings_open && MailRules.editing : Rectangle {
+        if MailRules.editing : Rectangle {
             width: parent.width;
             height: parent.height;
             background: #00000088;
@@ -4232,7 +4232,7 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
-        if root.settings_open && root.account-profile-picker-open
+        if root.account-profile-picker-open
             && root.account-profile-picker-account.id == root.account-profile-picker-id : Rectangle {
             width: parent.width;
             height: parent.height;

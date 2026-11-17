@@ -660,7 +660,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert!(renderer_settings.get_restart_required());
     app.set_theme_mode("light".into());
     app.set_settings_tab("General".into());
-    app.set_settings_open(true);
+    app.invoke_open_settings();
     draw("renderer-settings-desktop", 1280, 900);
     draw("renderer-settings-phone", 390, 844);
     renderer_settings.invoke_choose("cpu".into());
@@ -693,7 +693,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert!(renderer_settings.get_gpu_failed());
     assert_eq!(renderer_settings.get_preferred(), "gpu");
     assert_eq!(renderer_settings.get_active(), "cpu");
-    app.set_settings_open(false);
+    app.invoke_close_settings();
     app.set_active_view("contacts".into());
     app.set_contacts(ModelRc::default());
     app.set_contact_loading_more(true);

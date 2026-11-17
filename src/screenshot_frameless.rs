@@ -134,7 +134,7 @@ fn frameless_screenshots() {
     linux("adwaita", &[], &gtk_default);
     draw("linux-compact-light", 900, 760);
 
-    app.set_settings_open(true);
+    app.invoke_open_settings();
     for (mode, suffix) in themes {
         app.set_theme_mode(mode.into());
         app.set_settings_tab("General".into());

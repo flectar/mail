@@ -351,12 +351,6 @@ pub(super) fn register_window_preference_callbacks(
     runtime: &tokio::runtime::Handle,
     ui_task_tx: &UiSender<UiTaskUpdate>,
 ) {
-    let app_weak = app.as_weak();
-    app.on_toggle_settings(move || {
-        if let Some(app) = app_weak.upgrade() {
-            app.set_settings_open(!app.get_settings_open());
-        }
-    });
     // Spelling languages, the startup entry and the default email app can also
     // change in the system's own settings, so read them again whenever
     // Settings appears: from the rail, a tab or a shortcut into a settings page.

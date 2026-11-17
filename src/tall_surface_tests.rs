@@ -157,7 +157,7 @@ fn account_preferences_paint_hundreds_of_sender_identities() {
     }])));
     app.set_active_view("mail".into());
     app.set_settings_tab("Accounts".into());
-    app.set_settings_open(true);
+    app.invoke_open_settings();
     // Servers can report hundreds of aliases for one account.
     let preferences = app.global::<AccountMailPreferences>();
     preferences.set_account_id(1);
@@ -194,7 +194,7 @@ fn account_preferences_paint_hundreds_of_sender_identities() {
         });
         paint();
     }
-    assert!(app.get_settings_open());
+    assert_eq!(app.get_active_view(), "settings");
     app.hide().unwrap();
 }
 
@@ -216,7 +216,7 @@ fn account_cards_paint_long_sync_errors() {
     }])));
     app.set_active_view("mail".into());
     app.set_settings_tab("Accounts".into());
-    app.set_settings_open(true);
+    app.invoke_open_settings();
     let (width, height) = (2560, 1800);
     app.window()
         .set_size(slint::PhysicalSize::new(width, height));
@@ -238,7 +238,7 @@ fn account_cards_paint_long_sync_errors() {
         });
         paint();
     }
-    assert!(app.get_settings_open());
+    assert_eq!(app.get_active_view(), "settings");
     app.hide().unwrap();
 }
 

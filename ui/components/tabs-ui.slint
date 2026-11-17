@@ -66,6 +66,10 @@ export global TabsUi {
     callback regroup();
     // Save every tab now, before the application exits.
     callback flush();
+    // Another screen replaced the mail view, or mail shows again. Tabs keep
+    // where mail was and return there in the same tab.
+    callback mail-hidden();
+    callback mail-shown();
 }
 
 export component WorkspaceIcon inherits Image {

@@ -689,7 +689,7 @@ fn reset(app: &AppWindow) {
     app.set_active_view("mail".into());
     app.set_mail_sidebar_collapsed(false);
     app.set_active_mail_profile(MailProfileRow::default());
-    app.set_settings_open(false);
+    app.invoke_close_settings();
     app.set_contact_source("Personal · jamie.rivera@example.com".into());
     app.set_contact_sync(ContactSyncState::Pending);
     app.set_settings_tab("General".into());
@@ -1039,18 +1039,18 @@ fn states() -> Vec<State> {
         state("settings custom theme", |app| {
             app.global::<AppTheme>().set_preset("custom".into());
             app.set_settings_tab("General".into());
-            app.set_settings_open(true);
+            app.invoke_open_settings();
         }),
         state("settings profile editor", |app| {
             app.set_settings_tab("Accounts".into());
-            app.set_settings_open(true);
+            app.invoke_open_settings();
             press(app, "Add profile");
         }),
         State {
             dismiss: Some("Keep my data"),
             ..state("settings delete confirmation", |app| {
                 app.set_settings_tab("Data".into());
-                app.set_settings_open(true);
+                app.invoke_open_settings();
                 press(app, "Delete everything");
             })
         },
@@ -1060,19 +1060,19 @@ fn states() -> Vec<State> {
         state("import error", |app| open_import(app, "error")),
         state("settings profile picker", |app| {
             app.set_settings_tab("Accounts".into());
-            app.set_settings_open(true);
+            app.invoke_open_settings();
             press(app, "No profile");
         }),
         state("settings caldav form", |app| {
             app.set_settings_tab("Accounts".into());
-            app.set_settings_open(true);
+            app.invoke_open_settings();
             app.set_caldav_account_id(1);
             app.set_caldav_url("https://dav.example.com/".into());
             app.set_caldav_username("alex.morgan@example.com".into());
         }),
         state("settings caldav settings", |app| {
             app.set_settings_tab("Accounts".into());
-            app.set_settings_open(true);
+            app.invoke_open_settings();
             app.set_caldav_account_id(1);
             app.set_caldav_connection_id(2);
             app.set_caldav_url("https://dav.example.com/".into());
@@ -1091,7 +1091,7 @@ fn states() -> Vec<State> {
     ] {
         states.push(state(&format!("settings {tab}"), move |app| {
             app.set_settings_tab(tab.into());
-            app.set_settings_open(true);
+            app.invoke_open_settings();
         }));
     }
     states
