@@ -22,6 +22,7 @@ import { Shortcuts } from "../shortcuts.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { Unsubscribe } from "../unsubscribe.slint";
 import { ReadReceipts, ReceiptRequestBar, ReturnedReceiptList } from "../read-receipts.slint";
+import { Translation, TranslationBar } from "../translation.slint";
 import { BlockSender } from "../block-sender.slint";
 import { MailRules } from "../rules.slint";
 import { Invitation } from "../invitation.slint";
@@ -348,6 +349,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
         { id: "plain_text", title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text"), icon: root.text_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg") },
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
+        { id: "translate", title: Translation.state == "shown" ? @tr("Show original") : @tr("Translate message"), icon: @image-url("../icons/lucide/outline/languages.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
@@ -372,6 +374,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
         { id: "plain_text", title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text"), icon: root.text_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg") },
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
+        { id: "translate", title: Translation.state == "shown" ? @tr("Show original") : @tr("Translate message"), icon: @image-url("../icons/lucide/outline/languages.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
@@ -398,6 +401,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
         { id: "plain_text", title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text"), icon: root.text_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg") },
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
+        { id: "translate", title: Translation.state == "shown" ? @tr("Show original") : @tr("Translate message"), icon: @image-url("../icons/lucide/outline/languages.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
         { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
@@ -417,6 +421,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
         { id: "plain_text", title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text"), icon: root.text_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg") },
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
+        { id: "translate", title: Translation.state == "shown" ? @tr("Show original") : @tr("Translate message"), icon: @image-url("../icons/lucide/outline/languages.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
         { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
@@ -1085,6 +1090,12 @@ export component MailReadingPane inherits FocusScope {
                                         label-popup.show();
                                     } else if action == "openpgp" {
                                         AccountMailPreferences.read-message();
+                                    } else if action == "translate" {
+                                        if Translation.state == "shown" {
+                                            Translation.show-original();
+                                        } else {
+                                            Translation.translate();
+                                        }
                                     } else if action == "unsubscribe" {
                                         Unsubscribe.start();
                                     } else if action == "block" {
@@ -1359,6 +1370,13 @@ export component MailReadingPane inherits FocusScope {
                                     if ReadReceipts.available && !LocalMailUi.selected : ReceiptRequestBar {
                                         compact: root.compact;
                                         text-color: root.secondary-text;
+                                    }
+                                    // A message in a language the user doesn't read, or
+                                    // its translation (#240).
+                                    if Translation.state != "" : TranslationBar {
+                                        compact: root.compact;
+                                        text-color: root.secondary-text;
+                                        error-color: #d04a43;
                                     }
                                     // A calendar the message carries (#228), above the
                                     // message as Outlook, Apple Mail and Gmail put theirs.

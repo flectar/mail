@@ -23,11 +23,12 @@ const SAVE_DELAY: Duration = Duration::from_millis(500);
 const READER_POLL: Duration = Duration::from_millis(50);
 const READER_DEADLINE: Duration = Duration::from_secs(10);
 /// Settings pages a tab can reopen: the `settings_tab` values of the UI.
-const SETTINGS_PAGES: [&str; 9] = [
+const SETTINGS_PAGES: [&str; 10] = [
     "General",
     "Accounts",
     "Contacts",
     "Rules",
+    "Translation",
     "Notifications",
     "Shortcuts",
     "Data",

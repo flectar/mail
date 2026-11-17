@@ -4304,10 +4304,22 @@ fn initials(name: &str) -> String {
 }
 
 fn text_to_html(text: &str) -> String {
-    const PREFIX: &str = "<html><body style=\"font-family:Arial,sans-serif;padding:32px;line-height:1.6;color:#303348\"><pre style=\"margin:0;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere\">";
+    text_to_html_in(text, false)
+}
+
+/// A text body as the reader shows it, written right to left when its
+/// language is, as a translation into Arabic or Hebrew is (#240).
+pub(crate) fn text_to_html_in(text: &str, right_to_left: bool) -> String {
+    const PREFIX: &str = "<html><body style=\"font-family:Arial,sans-serif;padding:32px;line-height:1.6;color:#303348\"";
+    const PRE: &str =
+        "><pre style=\"margin:0;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere\">";
     const SUFFIX: &str = "</pre></body></html>";
-    let mut html = String::with_capacity(PREFIX.len() + text.len() + SUFFIX.len());
+    let mut html = String::with_capacity(PREFIX.len() + PRE.len() + text.len() + SUFFIX.len() + 10);
     html.push_str(PREFIX);
+    if right_to_left {
+        html.push_str(" dir=\"rtl\"");
+    }
+    html.push_str(PRE);
     crate::email_document::append_escaped(&mut html, text);
     html.push_str(SUFFIX);
     html
