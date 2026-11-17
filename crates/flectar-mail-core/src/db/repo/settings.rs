@@ -29,6 +29,7 @@ pub fn set(conn: &Connection, settings: &Settings) -> Result<()> {
 mod tests {
     use super::*;
     use crate::db::testutil;
+    use crate::models::MarkRead;
 
     #[test]
     fn defaults_when_unset_and_roundtrip() {
@@ -38,7 +39,7 @@ mod tests {
         assert_eq!(d.sync_interval_minutes, 5);
         assert!(d.auto_advance);
         assert!(d.auto_labels_enabled);
-        assert!(d.mark_read_on_open);
+        assert_eq!(d.mark_read, MarkRead::Immediately);
         assert!(!d.load_remote_images);
         assert!(!d.monochrome_sidebar_icons);
         assert_eq!(d.app_icon, crate::models::AppIcon::Orange);
@@ -50,7 +51,11 @@ mod tests {
         assert!(!d.collect_incoming_contacts);
         assert!(!d.contact_suggest_all_accounts);
         assert!(d.suggest_learned_contacts);
+        assert!(d.spelling_enabled);
+        assert_eq!(d.spelling_languages, None);
         assert_eq!(d.workspace_layout, "default");
+        assert_eq!(d.compose_font, "default");
+        assert_eq!(d.compose_text_size, "normal");
         assert_eq!(d.calendar_week_start, "monday");
         assert_eq!(d.theme_preset, "default");
         assert_eq!(
@@ -110,6 +115,8 @@ mod tests {
             account_ids: vec![1, 2],
         });
         s.active_mail_profile = Some("work".into());
+        s.spelling_enabled = false;
+        s.spelling_languages = Some(vec!["en_GB".into(), "de_DE".into()]);
         set(&c, &s).unwrap();
 
         let back = get(&c).unwrap();
@@ -136,6 +143,8 @@ mod tests {
         assert_eq!(back.ai_automation_rules, s.ai_automation_rules);
         assert_eq!(back.mail_profiles, s.mail_profiles);
         assert_eq!(back.active_mail_profile.as_deref(), Some("work"));
+        assert!(!back.spelling_enabled);
+        assert_eq!(back.spelling_languages, s.spelling_languages);
         assert_eq!(
             back.signature_defaults
                 .get("1")
@@ -157,8 +166,10 @@ mod tests {
         let s = get(&c).unwrap();
         assert_eq!(s.theme, "snow");
         assert_eq!(s.undo_send_seconds, 20);
+        assert_eq!(s.compose_font, "default");
+        assert_eq!(s.compose_text_size, "normal");
         assert!(s.load_remote_images);
-        assert!(s.mark_read_on_open);
+        assert_eq!(s.mark_read, MarkRead::Immediately);
         assert!(!s.monochrome_sidebar_icons);
         assert_eq!(s.app_icon, crate::models::AppIcon::Orange);
         assert!(s.show_avatars);
@@ -169,6 +180,8 @@ mod tests {
         assert!(!s.collect_incoming_contacts);
         assert!(!s.contact_suggest_all_accounts);
         assert!(s.suggest_learned_contacts);
+        assert!(s.spelling_enabled);
+        assert_eq!(s.spelling_languages, None);
         assert_eq!(s.workspace_layout, "default");
         assert_eq!(s.calendar_week_start, "monday");
         assert_eq!(s.theme_preset, "default");

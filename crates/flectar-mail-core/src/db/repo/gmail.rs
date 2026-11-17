@@ -144,10 +144,14 @@ pub fn set_inbox_count(
     Ok(changed)
 }
 
+/// Puts `message_id` in `folder_ids` and in no other folder. Only what
+/// changed is written, so a folder the message stays in keeps the time it
+/// went there.
 pub fn set_message_folders(conn: &Connection, message_id: i64, folder_ids: &[i64]) -> Result<()> {
     conn.execute(
-        "DELETE FROM message_folders WHERE message_id = ?1",
-        params![message_id],
+        "DELETE FROM message_folders
+         WHERE message_id = ?1 AND folder_id NOT IN (SELECT value FROM json_each(?2))",
+        params![message_id, serde_json::to_string(folder_ids)?],
     )?;
     for folder_id in folder_ids {
         conn.execute(

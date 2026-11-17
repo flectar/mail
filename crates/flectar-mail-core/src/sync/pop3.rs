@@ -10,8 +10,8 @@
 //! was.
 
 use super::engine::{
-    PriorityFetchCmd, RestoreRequest, SyncCmd, SyncCtx, configured_sync_interval, set_state,
-    set_state_error,
+    PriorityFetchCmd, RestoreRequest, SyncCmd, SyncCtx, caught_up, configured_sync_interval,
+    set_state, set_state_error,
 };
 use super::ingest::{self, Delivery, Importer};
 use crate::accounts::credentials::{self, Slot};
@@ -75,6 +75,7 @@ pub(crate) async fn run(ctx: SyncCtx, mut config: AccountConfig, mut inputs: Inp
             tracing::warn!(account_id, %error, "completing local POP3 actions failed");
         }
         if next_sync.is_some_and(|at| at <= Instant::now()) {
+            let started = now_ms();
             next_sync = match sync(&ctx, &config, &mut catch_up).await {
                 Ok(synced) => {
                     backoff = Duration::from_secs(1);
@@ -83,6 +84,7 @@ pub(crate) async fn run(ctx: SyncCtx, mut config: AccountConfig, mut inputs: Inp
                     ctx.bus.emit(CoreEvent::NetworkState { online: true });
                     let next = match synced {
                         Synced::Complete => {
+                            caught_up(&ctx, account_id, started).await;
                             finish(&mut waiters, Ok(()));
                             Instant::now() + configured_sync_interval(&ctx.db).await
                         }
@@ -151,6 +153,10 @@ pub(crate) async fn run(ctx: SyncCtx, mut config: AccountConfig, mut inputs: Inp
                     let _ = complete.send(Err(
                         "attachments of POP3 mail are read from the stored message".into(),
                     ));
+                }
+                // POP3 has no search: the core doesn't ask.
+                Some(PriorityFetchCmd::Search { complete, .. }) => {
+                    let _ = complete.send(Err("POP3 servers can't search".into()));
                 }
             },
             request = inputs.restores.recv() => match request {
@@ -425,6 +431,7 @@ async fn sync(
     let first_synced = state.first_synced_at.is_some();
     for candidate in &mut planned {
         candidate.live = first_synced && !catch_up.contains(&candidate.uidl);
+        candidate.arrival = first_synced;
     }
     let listed: HashSet<String> = listing.iter().map(|message| message.uidl.clone()).collect();
     ctx.db
@@ -505,6 +512,9 @@ struct Candidate {
     /// Whether it arrived while Flectar Mail followed the account, so that
     /// it may notify. The session settles it.
     live: bool,
+    /// Whether it is new mail that rules sort (#238): anything after the
+    /// first complete download. The session settles it.
+    arrival: bool,
 }
 
 /// The listed messages to download, newest first. A server numbers its
@@ -552,6 +562,7 @@ fn plan(
             sent_at,
             attempts,
             live: false,
+            arrival: false,
         });
     }
     candidates
@@ -810,12 +821,15 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
         .map_err(|error| CoreError::Other(error.to_string()))?;
     let path = new_original_path(ctx, account_id);
     crate::file_io::write_durable(&path, &raw, "POP3 message").await?;
+    // Rules on any header read them from the original (#238).
+    let header_fields = candidate.arrival.then(|| crate::mime::header_fields(&raw));
     drop(raw);
-    let calendar_events = ingest::calendar_events(&parsed);
+    let calendar_events = ingest::calendar_parts(&parsed);
     let path_string = path.to_string_lossy().into_owned();
     let uidl = candidate.uidl.clone();
     let size = candidate.size;
     let live = candidate.live;
+    let arrival = candidate.arrival;
     let committed = ctx
         .db
         .write_durable(move |tx| {
@@ -848,14 +862,43 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
                         .iter()
                         .any(|attachment| !attachment.is_inline),
                     size: i64::try_from(size).ok(),
+                    // POP3 keeps no flags; this device records the answer.
+                    receipt_handled: false,
                 },
             )?;
-            ingest::store_body(tx, imported.message_id, &path_string, &parsed)?;
+            let receipt_threads =
+                ingest::store_body(tx, imported.message_id, &path_string, &parsed)?;
             repo::threads::recompute(tx, imported.thread_id)?;
-            importer.learn_contacts(tx, &parsed.headers, &imported)?;
-            importer.announce(tx, &imported, live)?;
+            // Mail from a blocked sender goes to Spam as it arrives. Then
+            // rules sort new mail, and what they file away or mark read
+            // stays silent.
+            if !crate::turn_away(tx, imported.message_id)? {
+                let sorted = if arrival {
+                    // The whole message is here: nothing waits.
+                    crate::rules::Sorter::load(tx, account_id)?.arrived(
+                        tx,
+                        imported.message_id,
+                        crate::rules::Arrival {
+                            headers: header_fields,
+                            text: parsed.text.clone(),
+                            attachments_known: true,
+                        },
+                    )?
+                } else {
+                    Default::default()
+                };
+                if !sorted.unwanted {
+                    importer.learn_contacts(tx, &parsed.headers, &imported)?;
+                }
+                importer.announce(tx, &imported, live && !sorted.silent())?;
+            }
             let message_id = imported.message_id;
-            let (thread_ids, fresh) = importer.finish(tx)?;
+            let (mut thread_ids, fresh) = importer.finish(tx)?;
+            for thread_id in receipt_threads {
+                if !thread_ids.contains(&thread_id) {
+                    thread_ids.push(thread_id);
+                }
+            }
             repo::pop3::record_stored(tx, account_id, &uidl, size, sent_at, message_id, now)?;
             Ok(Some((message_id, thread_ids, fresh)))
         })
@@ -871,8 +914,13 @@ async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u
             return Err(error);
         }
     };
-    if let Err(error) =
-        ingest::store_calendar_events(ctx, account_id, message_id, calendar_events).await
+    if let Err(error) = ingest::store_calendar_events(
+        ctx,
+        account_id,
+        vec![(message_id, calendar_events)],
+        ingest::Arrival::Received,
+    )
+    .await
     {
         tracing::warn!(account_id, message_id, %error, "could not record a POP3 message's invitations");
     }

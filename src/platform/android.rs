@@ -2,7 +2,13 @@
 //! JNI services live in that shell; this module only holds what the shared
 //! application needs at runtime.
 use flectar_mail_core::models::AppIcon;
-use std::{path::PathBuf, sync::OnceLock};
+use std::{
+    path::PathBuf,
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 static PDFIUM_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
 /// Hands the chosen icon's name to the activity.
@@ -11,6 +17,14 @@ static LAUNCHER_ICON: OnceLock<LauncherIconSwitch> = OnceLock::new();
 
 /// Names this platform to the settings that describe it.
 pub(crate) const NAME: &str = "android";
+
+/// The spell checker is the one the user chose in Android's settings, which the host brings
+/// as `PlatformContext::spelling`.
+pub(crate) const CHECKS_SPELLING: bool = false;
+
+pub(crate) fn spell_checker() -> Option<std::sync::Arc<dyn crate::spelling::Checker>> {
+    None
+}
 
 /// Supply ApplicationInfo.nativeLibraryDir, never a document-controlled path.
 /// The APK uses extracted native libraries so this is a private installed file.
@@ -148,4 +162,76 @@ fn system_property(name: &std::ffi::CStr) -> Option<String> {
     // SAFETY: the call wrote a NUL-terminated string into `value`.
     let value = unsafe { std::ffi::CStr::from_ptr(value.as_ptr()) };
     Some(value.to_string_lossy().trim().to_owned()).filter(|value| !value.is_empty())
+}
+
+/// Whether the activity is in front of the user, as its host reports it.
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// The activity was resumed (`true`) or paused. Coming to the front, the
+/// user sees what came while the app wasn't running, and with an account set
+/// up it is the moment to ask for permission to notify.
+pub fn set_app_active(active: bool) {
+    ACTIVE.store(active, Ordering::Relaxed);
+    if active {
+        crate::motion::system_changed();
+        crate::notifications::app_became_active();
+        let _ = slint::invoke_from_event_loop(crate::notifications::ui::came_to_front);
+    }
+}
+
+/// Whether the activity is in front of the user.
+pub(crate) fn app_is_active() -> bool {
+    ACTIVE.load(Ordering::Relaxed)
+}
+
+type ReduceMotion = Box<dyn Fn() -> bool + Send + Sync>;
+
+static REDUCE_MOTION: OnceLock<ReduceMotion> = OnceLock::new();
+
+/// Supply the bridge to FlectarActivity.animationsRemoved, once.
+pub fn configure_reduce_motion(read: impl Fn() -> bool + Send + Sync + 'static) {
+    let _ = REDUCE_MOTION.set(Box::new(read));
+}
+
+/// Remove animations, in the accessibility settings, asks apps to reduce
+/// motion.
+pub(crate) fn reduce_motion() -> bool {
+    REDUCE_MOTION.get().is_some_and(|read| read())
+}
+
+/// Android announces no change of the setting, so the app reads it again
+/// whenever it comes back to the front (`set_app_active`).
+pub(crate) fn watch_reduce_motion() {}
+
+/// What the host reports and opens about the app's work in the background.
+pub struct BackgroundBridge {
+    /// Whether Android lets the app check for mail in the background now.
+    pub state: Box<dyn Fn() -> super::BackgroundRefresh + Send + Sync>,
+    /// The app's page in Settings, where its background use is allowed.
+    pub open_settings: Box<dyn Fn() + Send + Sync>,
+}
+
+static BACKGROUND: OnceLock<BackgroundBridge> = OnceLock::new();
+
+/// Supply the bridge to the host's background state, once.
+pub fn configure_background(bridge: BackgroundBridge) {
+    let _ = BACKGROUND.set(bridge);
+}
+
+pub(crate) fn background_refresh() -> super::BackgroundRefresh {
+    BACKGROUND
+        .get()
+        .map_or(super::BackgroundRefresh::On, |bridge| (bridge.state)())
+}
+
+pub(crate) fn open_app_settings() {
+    if let Some(bridge) = BACKGROUND.get() {
+        (bridge.open_settings)();
+    }
+}
+
+/// Keeps a mail store opened for a background errand open while the guard
+/// lives, such as while a button's action goes to the server.
+pub(crate) fn stay_awake() -> crate::notifications::engine::Hold {
+    crate::notifications::engine::hold()
 }

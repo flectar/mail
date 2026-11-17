@@ -1,0 +1,231 @@
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { AppTheme } from "../design-system.slint";
+import { Button } from "../components/button.slint";
+import { TypeScale } from "../typography.slint";
+import { Unsubscribe } from "../unsubscribe.slint";
+
+// Asks before leaving a mailing list, as RFC 2369 and RFC 8058 want, says
+// how it went, and then offers to clear the list's mail out of the inbox
+// (src/unsubscribe.rs).
+export component UnsubscribeDialog inherits Rectangle {
+    private property <bool> narrow: panel.width < 360px;
+    private property <bool> emailed: Unsubscribe.kind == "mailto";
+    // Asking first, and while the request goes out: the dialog keeps what
+    // it asked, its buttons disabled.
+    private property <bool> asking: Unsubscribe.stage == "confirm" || Unsubscribe.stage == "working";
+    private property <bool> working: Unsubscribe.stage == "working";
+    private property <string> title: Unsubscribe.stage == "error" ? @tr("Could not unsubscribe")
+        : Unsubscribe.stage == "done" && root.emailed ? @tr("Unsubscribe request sent")
+        : Unsubscribe.stage == "done" ? @tr("Unsubscribed from {}", Unsubscribe.sender)
+        : @tr("Unsubscribe from {}?", Unsubscribe.sender);
+    private property <string> description: Unsubscribe.stage == "error" ? Unsubscribe.error
+        : Unsubscribe.stage == "website" && Unsubscribe.kind == "one-click"
+            ? @tr("{} did not take the request. You can unsubscribe on its website instead.", Unsubscribe.host)
+        : Unsubscribe.stage == "done" && root.emailed
+            ? @tr("Your request went to {}. It can take a few days for the mail to stop.", Unsubscribe.to)
+        : Unsubscribe.stage == "done" ? @tr("It can take a few days for the mail to stop.")
+        : Unsubscribe.kind == "one-click" ? @tr("Flectar Mail will ask {} to stop sending you this mail.", Unsubscribe.host)
+        : root.emailed ? @tr("Flectar Mail will send an email asking the list to unsubscribe you.")
+        : @tr("{} takes unsubscribe requests on its website.", Unsubscribe.host);
+    private property <string> detail: root.asking && Unsubscribe.kind == "website" ? @tr("The page opens in your browser.")
+        : Unsubscribe.stage == "confirm" && root.emailed ? @tr("You can review the email before it goes.")
+        : root.asking ? @tr("It can take a few days for the mail to stop.")
+        : "";
+    private property <bool> cleaning: Unsubscribe.stage == "done" && Unsubscribe.inbox-count > 0;
+
+    visible: Unsubscribe.stage != "";
+    background: #00000088;
+    z: 1000;
+    accessible-role: groupbox;
+    accessible-label: root.title;
+
+    function cancel() {
+        if !root.working {
+            Unsubscribe.close();
+        }
+    }
+
+    changed visible => {
+        if self.visible {
+            dialog-focus.focus();
+        }
+    }
+
+    // Consume pointer input over the scrim.
+    TouchArea { }
+
+    panel := Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(460px, parent.width - 32px);
+        height: max(212px, dialog-content.preferred-height);
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: AppTheme.border;
+        background: AppTheme.surface;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: #00000055;
+
+        dialog-focus := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    root.cancel();
+                    return accept;
+                }
+                reject
+            }
+
+            dialog-content := VerticalBox {
+                padding-top: 22px;
+                padding-right: 22px;
+                padding-bottom: 20px;
+                padding-left: 22px;
+                spacing: 12px;
+
+                HorizontalBox {
+                    height: max(root.narrow ? 56px : 42px, dialog-title.preferred-height + 16px);
+                    padding: 0px;
+                    spacing: 12px;
+                    Rectangle {
+                        width: 42px;
+                        height: 42px;
+                        border-radius: 21px;
+                        background: AppTheme.accent-soft;
+                        Image {
+                            x: 11px;
+                            y: 11px;
+                            width: 20px;
+                            height: 20px;
+                            source: @image-url("../icons/lucide/outline/mail-x.svg");
+                            colorize: AppTheme.accent;
+                            image-fit: contain;
+                            accessible-role: none;
+                        }
+                    }
+                    dialog-title := Text {
+                        text: root.title;
+                        color: AppTheme.title;
+                        font-size: TypeScale.heading;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+
+                Text {
+                    height: max(24px, self.preferred-height);
+                    text: root.description;
+                    color: AppTheme.body;
+                    font-size: TypeScale.secondary;
+                    wrap: word-wrap;
+                }
+                // RFC 2369 appendix B.1: where an emailed request goes, and
+                // from which address. Each on a line of its own, so an
+                // address doesn't break in two.
+                if root.asking && root.emailed : GridLayout {
+                    spacing-horizontal: 12px;
+                    spacing-vertical: 4px;
+                    Row {
+                        Text { text: @tr("To"); color: AppTheme.muted; font-size: TypeScale.secondary; }
+                        Text { text: Unsubscribe.to; color: AppTheme.body; font-size: TypeScale.secondary; font-weight: 600; wrap: char-wrap; horizontal-stretch: 1; }
+                    }
+                    Row {
+                        Text { text: @tr("From"); color: AppTheme.muted; font-size: TypeScale.secondary; }
+                        Text { text: Unsubscribe.from; color: AppTheme.body; font-size: TypeScale.secondary; font-weight: 600; wrap: char-wrap; horizontal-stretch: 1; }
+                    }
+                }
+                if root.cleaning : Text {
+                    height: self.preferred-height;
+                    text: @tr("One message from this list is still in your inbox." | "{n} messages from this list are still in your inbox." % Unsubscribe.inbox-count);
+                    color: AppTheme.body;
+                    font-size: TypeScale.secondary;
+                    wrap: word-wrap;
+                }
+                if root.detail != "" : Text {
+                    height: self.preferred-height;
+                    text: root.detail;
+                    color: AppTheme.muted;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+                Rectangle { vertical-stretch: 1; }
+
+                // Wide panels put the buttons in a row, the main one last;
+                // narrow ones stack them, the main one first.
+                if root.asking || Unsubscribe.stage == "website" : GridLayout {
+                    spacing: 8px;
+                    Button {
+                        row: root.narrow ? (root.emailed && root.asking ? 2 : 1) : 0;
+                        col: 0;
+                        height: 34px;
+                        enabled: !root.working;
+                        text: @tr("Cancel");
+                        clicked => { Unsubscribe.close(); }
+                    }
+                    if root.emailed && root.asking : Button {
+                        row: root.narrow ? 1 : 0;
+                        col: root.narrow ? 0 : 1;
+                        height: 34px;
+                        enabled: !root.working;
+                        text: @tr("Review email");
+                        clicked => { Unsubscribe.review(); }
+                    }
+                    Button {
+                        row: 0;
+                        col: root.narrow ? 0 : (root.emailed && root.asking ? 2 : 1);
+                        height: 34px;
+                        primary: true;
+                        enabled: !root.working;
+                        text: root.working ? @tr("Unsubscribing…")
+                            : Unsubscribe.kind == "website" || Unsubscribe.stage == "website" ? @tr("Open website")
+                            : @tr("Unsubscribe");
+                        clicked => { Unsubscribe.confirm(); }
+                    }
+                }
+                if root.cleaning : GridLayout {
+                    spacing: 8px;
+                    Button {
+                        row: root.narrow ? 2 : 0;
+                        col: 0;
+                        height: 34px;
+                        text: @tr("Keep them");
+                        clicked => { Unsubscribe.close(); }
+                    }
+                    Button {
+                        row: root.narrow ? 1 : 0;
+                        col: root.narrow ? 0 : 1;
+                        height: 34px;
+                        text: @tr("Move to trash");
+                        clicked => { Unsubscribe.clean-up("trash"); }
+                    }
+                    Button {
+                        row: 0;
+                        col: root.narrow ? 0 : 2;
+                        height: 34px;
+                        primary: true;
+                        text: @tr("Archive");
+                        clicked => { Unsubscribe.clean-up("archive"); }
+                    }
+                }
+                if Unsubscribe.stage == "error" : HorizontalBox {
+                    padding: 0px;
+                    spacing: 8px;
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.emailed : Button {
+                        height: 34px;
+                        text: @tr("Review email");
+                        clicked => { Unsubscribe.review(); }
+                    }
+                    Button {
+                        height: 34px;
+                        min-width: 96px;
+                        primary: true;
+                        text: @tr("Close");
+                        clicked => { Unsubscribe.close(); }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,92 @@
+diff --git a/crates/i-slint-backend-winit/Cargo.toml b/crates/i-slint-backend-winit/Cargo.toml
+index 0a62c2f..705390e 100644
+--- a/crates/i-slint-backend-winit/Cargo.toml
++++ b/crates/i-slint-backend-winit/Cargo.toml
+@@ -479,4 +479,5 @@ features = [
+     "Win32_Graphics_Gdi",
+     "Win32_Graphics_Dwm",
+     "Win32_System_Threading",
++    "Win32_System_Performance",
+ ]
+diff --git a/crates/i-slint-backend-winit/frame_throttle.rs b/crates/i-slint-backend-winit/frame_throttle.rs
+index 8e1c55b..70bba15 100644
+--- a/crates/i-slint-backend-winit/frame_throttle.rs
++++ b/crates/i-slint-backend-winit/frame_throttle.rs
+@@ -57,9 +57,10 @@ impl FrameThrottle for TimerBasedFrameThrottle {
+             .unwrap_or(60000) as u64;
+         let window_adapter = self.window_adapter.clone();
+         let timer = Rc::downgrade(&self.timer);
++        // In nanoseconds, because whole milliseconds turned 60 Hz into 62.5 Hz.
+         let interval =
+-            std::time::Duration::from_millis((1000 * 1000) / refresh_interval_millihertz);
+-        self.timer.start(TimerMode::Repeated, interval, move || {
++            std::time::Duration::from_nanos(1_000_000_000_000 / refresh_interval_millihertz);
++        self.timer.start(TimerMode::Repeated, next_frame(interval), move || {
+             let Some(adapter) = window_adapter.upgrade() else { return };
+             if adapter.pending_redraw()
+                 && adapter.visibility() != WindowVisibility::Hidden
+@@ -67,6 +68,10 @@ impl FrameThrottle for TimerBasedFrameThrottle {
+                 && let Some(winit_window) = adapter.winit_window()
+             {
+                 winit_window.request_redraw();
++                #[cfg(target_os = "windows")]
++                if let Some(timer) = timer.upgrade() {
++                    timer.set_interval(next_frame(interval));
++                }
+             } else {
+                 // Showing a hidden window draws it.
+                 // Windows sends no WM_PAINT to a minimized window, and repaints it on restore.
+@@ -79,6 +84,53 @@ impl FrameThrottle for TimerBasedFrameThrottle {
+     }
+ }
+ 
++/// How long until the next frame should start.
++///
++/// On Windows that is the next vblank of the compositor's clock, as Chromium paces its
++/// software frames, so that frames keep in step with the display instead of drifting
++/// against it.
++fn next_frame(interval: std::time::Duration) -> std::time::Duration {
++    #[cfg(target_os = "windows")]
++    if let Some(delay) = compositor_clock::until_next_vblank(interval) {
++        return delay;
++    }
++    interval
++}
++
++#[cfg(target_os = "windows")]
++mod compositor_clock {
++    use std::time::Duration;
++    use windows::Win32::Foundation::HWND;
++    use windows::Win32::Graphics::Dwm::{DWM_TIMING_INFO, DwmGetCompositionTimingInfo};
++    use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
++
++    /// The time until DWM's next vblank. `None` when DWM has no timing, or when its refresh
++    /// period is more than a tenth away from `interval`, as for a window on a monitor with
++    /// another refresh rate than the one DWM follows.
++    pub fn until_next_vblank(interval: Duration) -> Option<Duration> {
++        let mut info = DWM_TIMING_INFO {
++            cbSize: core::mem::size_of::<DWM_TIMING_INFO>() as u32,
++            ..Default::default()
++        };
++        // Since Windows 8.1 the window must be null.
++        unsafe { DwmGetCompositionTimingInfo(HWND::default(), &mut info) }.ok()?;
++        let (mut now, mut frequency) = (0i64, 0i64);
++        unsafe { QueryPerformanceCounter(&mut now) }.ok()?;
++        unsafe { QueryPerformanceFrequency(&mut frequency) }.ok()?;
++        let frequency = u128::try_from(frequency).ok().filter(|&frequency| frequency > 0)?;
++        let duration = |ticks: i64| {
++            Duration::from_nanos((ticks.max(0) as u128 * 1_000_000_000 / frequency) as u64)
++        };
++        let period = i64::try_from(info.qpcRefreshPeriod).ok().filter(|&period| period > 0)?;
++        let vblank = i64::try_from(info.qpcVBlank).ok()?;
++        let ratio = duration(period).as_secs_f64() / interval.as_secs_f64();
++        if !(0.9..1.1).contains(&ratio) {
++            return None;
++        }
++        Some(duration(period - (now - vblank).rem_euclid(period)))
++    }
++}
++
+ struct WinitBasedFrameThrottle;
+ 
+ impl WinitBasedFrameThrottle {

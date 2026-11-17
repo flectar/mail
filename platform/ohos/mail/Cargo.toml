@@ -2,7 +2,7 @@
 name = "flectar-mail-ohos"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.95"
 license = "AGPL-3.0-only"
 description = "Flectar Mail shell for OpenHarmony"
 publish = false

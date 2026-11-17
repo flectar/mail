@@ -24,6 +24,8 @@ pub struct DavItem {
     pub color: Option<String>,
     pub current_user_principal: Option<String>,
     pub calendar_home_set: Option<String>,
+    /// The addresses a principal schedules for (RFC 6638 §2.4.1).
+    pub calendar_user_addresses: Vec<String>,
     pub is_calendar: bool,
     pub supports_vevent: bool,
     /// whether a supported-calendar-component-set was present at all (absent
@@ -97,6 +99,7 @@ pub fn parse_multistatus(body: &str) -> Result<Multistatus> {
                     }
                     "current-user-principal" => href_target = Some("principal"),
                     "calendar-home-set" => href_target = Some("home"),
+                    "calendar-user-address-set" => href_target = Some("addresses"),
                     "resourcetype" => {}
                     "supported-calendar-component-set" => {
                         if let Some(item) = cur.as_mut() {
@@ -182,6 +185,9 @@ pub fn parse_multistatus(body: &str) -> Result<Multistatus> {
                                     item.current_user_principal = Some(value.to_owned());
                                 }
                                 Some("home") => item.calendar_home_set = Some(value.to_owned()),
+                                Some("addresses") => {
+                                    item.calendar_user_addresses.push(value.to_owned());
+                                }
                                 _ => {
                                     if item.href.is_empty() {
                                         item.href = value.to_owned();
@@ -190,7 +196,9 @@ pub fn parse_multistatus(body: &str) -> Result<Multistatus> {
                             }
                         }
                     }
-                    "current-user-principal" | "calendar-home-set" => href_target = None,
+                    "current-user-principal"
+                    | "calendar-home-set"
+                    | "calendar-user-address-set" => href_target = None,
                     "status" => {
                         let code = parse_status_line(value);
                         // <status> directly under <response> is the item's
@@ -268,6 +276,13 @@ pub fn propfind_principal() -> String {
 pub fn propfind_home_set() -> String {
     r#"<?xml version="1.0" encoding="utf-8"?>
 <d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-home-set/></d:prop></d:propfind>"#
+        .into()
+}
+
+/// What a principal schedules as: its calendar user addresses.
+pub fn propfind_scheduling() -> String {
+    r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-user-address-set/></d:prop></d:propfind>"#
         .into()
 }
 
@@ -365,6 +380,36 @@ pub fn xml_escape(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_addresses_a_principal_schedules_as() {
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">
+ <d:response>
+  <d:href>/dav/principals/me/</d:href>
+  <d:propstat>
+   <d:prop>
+    <cal:calendar-user-address-set>
+     <d:href>mailto:me@example.com</d:href>
+     <d:href>mailto:alias@example.com</d:href>
+     <d:href>/dav/principals/me/</d:href>
+    </cal:calendar-user-address-set>
+   </d:prop>
+   <d:status>HTTP/1.1 200 OK</d:status>
+  </d:propstat>
+ </d:response>
+</d:multistatus>"#;
+        let item = &parse_multistatus(body).unwrap().items[0];
+        assert_eq!(item.href, "/dav/principals/me/");
+        assert_eq!(
+            item.calendar_user_addresses,
+            [
+                "mailto:me@example.com",
+                "mailto:alias@example.com",
+                "/dav/principals/me/"
+            ]
+        );
+    }
 
     /// Google style: `D:` prefixes, principal discovery.
     const GOOGLE_PRINCIPAL: &str = r#"<?xml version="1.0" encoding="UTF-8"?>

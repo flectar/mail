@@ -1,0 +1,111 @@
+import { ActivitySpinner } from "activity-spinner.slint";
+import { AppTheme, MotionSettings } from "../design-system.slint";
+
+// Pull to refresh for a touch list, as on Android and iOS. Dragging down from
+// the top of the list brings a spinner down with the finger, and letting go
+// once it has come far enough refreshes. The spinner then stays, turning,
+// while `refreshing` holds, and leaves when it ends.
+//
+// The list stays where it is, as with Android's swipe-to-refresh. Only a drag
+// that starts with the list at its top pulls, so a fling up to the top never
+// refreshes by itself, and every other drag scrolls the list as before.
+export component PullToRefresh inherits Rectangle {
+    // Whether a pull is possible at all.
+    in property <bool> enabled: true;
+    // Whether the list is scrolled to its top.
+    in property <bool> at-top: true;
+    // A refresh is running, whether a pull started it or not.
+    in property <bool> refreshing: false;
+    // How far down the spinner has come while it is pulled.
+    out property <length> travel: root.finger / 2 <= root.trigger ? root.finger / 2
+        : min(root.trigger * 1.5, root.trigger + (root.finger / 2 - root.trigger) / 2);
+    // Whether the spinner is out, being pulled or waiting for the refresh.
+    out property <bool> shown: root.pulling || root.waiting;
+    callback refresh();
+
+    // SwipeRefreshLayout's measures. The finger moves twice as far as the
+    // spinner, which sits on a 40px disc, and letting go once the spinner has
+    // come 64px down refreshes. Past that it follows at a quarter of the
+    // finger's pace, up to half as far again.
+    private property <length> trigger: 64px;
+    private property <bool> pulling: false;
+    // Where the finger was when the pull took over from the list.
+    private property <length> start-y: 0px;
+    private property <length> finger: 0px;
+    // Let go past the trigger: the spinner waits for the refresh to end.
+    private property <bool> waiting: false;
+
+    changed refreshing => {
+        if !self.refreshing {
+            root.waiting = false;
+        }
+    }
+
+    SwipeGestureHandler {
+        enabled: root.enabled && root.at-top && !root.waiting;
+        handle-swipe-down: true;
+
+        moved => {
+            if !self.swiping {
+                return;
+            }
+            if !root.pulling {
+                root.pulling = true;
+                root.start-y = self.current-position.y;
+            }
+            root.finger = max(0px, self.current-position.y - root.start-y);
+        }
+        swiped => {
+            if root.pulling && root.travel >= root.trigger {
+                root.refresh();
+                // Wait only for a refresh that runs: one already running, or
+                // the one this pull started.
+                root.waiting = root.refreshing;
+            }
+            root.pulling = false;
+            root.finger = 0px;
+        }
+        cancelled => {
+            root.pulling = false;
+            root.finger = 0px;
+        }
+
+        @children
+    }
+
+    Rectangle {
+        clip: true;
+
+        disc := Rectangle {
+            x: (parent.width - self.width) / 2;
+            // Above the top edge, shadow included, until it is pulled down.
+            y: root.pulling ? root.travel - self.height
+                : root.waiting ? root.trigger - self.height
+                : -self.height - 16px;
+            width: 40px;
+            height: 40px;
+            border-radius: self.width / 2;
+            // In the dark, where the shadow barely shows, a lighter disc
+            // stands apart from the list and from a selected row.
+            background: AppTheme.dark ? AppTheme.surface.mix(white, 0.86) : AppTheme.surface;
+            drop-shadow-blur: 8px;
+            drop-shadow-offset-y: 2px;
+            drop-shadow-color: #00000038;
+            // It follows the finger at once, and glides when let go.
+            animate y {
+                duration: root.pulling || !MotionSettings.movement ? 0ms : 180ms;
+                easing: ease-out;
+            }
+
+            ActivitySpinner {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 22px;
+                height: 22px;
+                color: AppTheme.accent;
+                running: root.waiting;
+                progress: root.travel / root.trigger;
+            }
+        }
+    }
+}

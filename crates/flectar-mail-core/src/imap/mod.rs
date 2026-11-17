@@ -850,11 +850,123 @@ async fn list_folders_inner(session: &mut Session) -> Result<Vec<RemoteFolder>> 
     Ok(out)
 }
 
+/// The names of the mailboxes the user subscribed to that match `pattern`
+/// (RFC 9051 6.3.7). A subscription can outlive its mailbox, so a name here
+/// may name none. Every IMAP4rev1 server answers LSUB; RFC 9051 deprecates it
+/// in favour of LIST (SUBSCRIBED), which a server that turns LSUB down is
+/// asked instead.
+pub async fn list_subscribed(session: &mut Session, pattern: &str) -> Result<HashSet<String>> {
+    with_deadline(
+        "LSUB",
+        METADATA_TIMEOUT,
+        list_subscribed_inner(session, pattern),
+    )
+    .await
+}
+
+async fn list_subscribed_inner(session: &mut Session, pattern: &str) -> Result<HashSet<String>> {
+    let pattern = quoted_mailbox(pattern)
+        .ok_or_else(|| CoreError::Imap("folder name pattern can't be quoted".into()))?;
+    match subscribed_names(session, &format!("LSUB \"\" {pattern}")).await {
+        Err(CoreError::ImapRefused(_)) => {
+            subscribed_names(session, &format!("LIST (SUBSCRIBED) \"\" {pattern}")).await
+        }
+        result => result,
+    }
+}
+
+/// The mailbox names an LSUB or LIST (SUBSCRIBED) `command` lists. Read
+/// here rather than through async-imap's `lsub`, whose stream ends at the
+/// tagged reply without telling a refusal from an empty list.
+async fn subscribed_names(session: &mut Session, command: &str) -> Result<HashSet<String>> {
+    use async_imap::imap_proto::{MailboxDatum, NameAttribute, Response, Status};
+    let tag = session.run_command(command).await.map_err(command_error)?;
+    let mut names = HashSet::new();
+    loop {
+        let response = session
+            .read_response()
+            .await
+            .map_err(|e| CoreError::Imap(e.to_string()))?
+            .ok_or_else(|| CoreError::Imap("connection closed during LSUB".into()))?;
+        match response.parsed() {
+            Response::Done {
+                tag: done,
+                status,
+                outcome,
+            } if *done == tag => {
+                return match status {
+                    Status::Ok => Ok(names),
+                    _ => Err(refusal(ServerReply::from_outcome(
+                        *status == Status::Bad,
+                        outcome,
+                    ))),
+                };
+            }
+            // imap-proto reads LSUB replies as LIST ones.
+            Response::MailboxData(MailboxDatum::List(listed)) => {
+                // RFC 5258 also lists subscriptions whose mailbox is gone.
+                let gone = listed.name_attributes.iter().any(|attribute| {
+                    matches!(attribute, NameAttribute::Extension(name)
+                        if name.eq_ignore_ascii_case("\\NonExistent"))
+                });
+                if !gone {
+                    names.insert(listed.name.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Add `name` to the user's subscribed mailboxes, so clients that show only
+/// those, this one among them, list it.
+pub async fn subscribe(session: &mut Session, name: &str) -> Result<()> {
+    with_deadline("SUBSCRIBE", METADATA_TIMEOUT, async {
+        session.subscribe(name).await.map_err(command_error)
+    })
+    .await
+}
+
+pub async fn unsubscribe(session: &mut Session, name: &str) -> Result<()> {
+    with_deadline("UNSUBSCRIBE", METADATA_TIMEOUT, async {
+        session.unsubscribe(name).await.map_err(command_error)
+    })
+    .await
+}
+
+/// `name` as an IMAP quoted string, escaped as APPEND does, or None when it
+/// holds a line break or NUL, which no quoted string can carry.
+fn quoted_mailbox(name: &str) -> Option<String> {
+    if name.chars().any(|c| matches!(c, '\r' | '\n' | '\0')) {
+        return None;
+    }
+    Some(format!(
+        "\"{}\"",
+        name.replace('\\', "\\\\").replace('"', "\\\"")
+    ))
+}
+
 #[derive(Debug, Clone)]
 pub struct SelectedFolder {
     pub uid_validity: Option<i64>,
     pub uid_next: Option<i64>,
     pub exists: u32,
+    /// PERMANENTFLAGS lists `\*`: any new keyword is kept.
+    pub creates_keywords: bool,
+    /// The keywords PERMANENTFLAGS lists by name.
+    pub permanent_keywords: Vec<String>,
+}
+
+impl SelectedFolder {
+    /// Whether the mailbox keeps `keyword` for good, so setting it isn't
+    /// just for this session (RFC 3501 PERMANENTFLAGS).
+    pub fn keeps_keyword(&self, keyword: &str) -> bool {
+        self.creates_keywords
+            || self
+                .permanent_keywords
+                .iter()
+                .any(|kept| kept.eq_ignore_ascii_case(keyword))
+    }
 }
 
 pub async fn select(session: &mut Session, folder: &str) -> Result<SelectedFolder> {
@@ -867,6 +979,18 @@ async fn select_inner(session: &mut Session, folder: &str) -> Result<SelectedFol
         uid_validity: mb.uid_validity.map(|v| v as i64),
         uid_next: mb.uid_next.map(|v| v as i64),
         exists: mb.exists,
+        creates_keywords: mb
+            .permanent_flags
+            .iter()
+            .any(|flag| matches!(flag, async_imap::types::Flag::MayCreate)),
+        permanent_keywords: mb
+            .permanent_flags
+            .iter()
+            .filter_map(|flag| match flag {
+                async_imap::types::Flag::Custom(name) => Some(name.to_string()),
+                _ => None,
+            })
+            .collect(),
     })
 }
 
@@ -878,6 +1002,8 @@ pub struct FetchedFlags {
     pub deleted: bool,
     /// Custom IMAP keywords (used to round-trip user labels).
     pub keywords: Vec<String>,
+    /// `$MDNSent`: a read receipt was sent or declined.
+    pub mdn_sent: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -904,30 +1030,72 @@ fn flags_of(fetch: &async_imap::types::Fetch) -> FetchedFlags {
             async_imap::types::Flag::Flagged => f.flagged = true,
             async_imap::types::Flag::Draft => f.draft = true,
             async_imap::types::Flag::Deleted => f.deleted = true,
-            async_imap::types::Flag::Custom(name) => f.keywords.push(name.to_string()),
+            async_imap::types::Flag::Custom(name) => {
+                // RFC 3503: a read receipt was sent or declined.
+                f.mdn_sent |= name.eq_ignore_ascii_case(MDN_SENT);
+                f.keywords.push(name.to_string());
+            }
             _ => {}
         }
     }
     f
 }
 
-const HEADER_FIELDS: &str = "BODY.PEEK[HEADER.FIELDS (MESSAGE-ID X-FLECTAR-SUBMISSION-ID IN-REPLY-TO REFERENCES SUBJECT FROM TO CC BCC DATE LIST-ID LIST-UNSUBSCRIBE LIST-UNSUBSCRIBE-POST PRECEDENCE AUTO-SUBMITTED AUTHENTICATION-RESULTS)]";
+/// The keyword recording that a read receipt was sent or declined (RFC 3503).
+pub const MDN_SENT: &str = "$MDNSent";
+
+const HEADER_FIELDS: &str = "BODY.PEEK[HEADER.FIELDS (MESSAGE-ID X-FLECTAR-SUBMISSION-ID IN-REPLY-TO REFERENCES SUBJECT FROM TO CC BCC DATE LIST-ID LIST-UNSUBSCRIBE LIST-UNSUBSCRIBE-POST PRECEDENCE AUTO-SUBMITTED AUTHENTICATION-RESULTS RETURN-PATH DISPOSITION-NOTIFICATION-TO DISPOSITION-NOTIFICATION-OPTIONS IMPORTANCE X-PRIORITY X-MSMAIL-PRIORITY PRIORITY)]";
 
 /// Fetch envelope headers + flags for a UID set (e.g. "100:200" or "5,7,9").
 pub async fn fetch_headers(session: &mut Session, uid_set: &str) -> Result<Vec<FetchedHeader>> {
+    fetch_headers_with(session, uid_set, &[]).await
+}
+
+/// [`fetch_headers`] with the headers `extra` too, such as those the
+/// account's rules test (#238). Names are letters, digits and dashes.
+pub async fn fetch_headers_with(
+    session: &mut Session,
+    uid_set: &str,
+    extra: &[String],
+) -> Result<Vec<FetchedHeader>> {
     with_deadline(
         "UID FETCH headers",
         METADATA_TIMEOUT,
-        fetch_headers_inner(session, uid_set),
+        fetch_headers_inner(session, uid_set, extra),
     )
     .await
 }
 
-async fn fetch_headers_inner(session: &mut Session, uid_set: &str) -> Result<Vec<FetchedHeader>> {
+/// The header section a fetch of headers asks for, with `extra` headers.
+fn header_section(extra: &[String]) -> String {
+    let names = extra
+        .iter()
+        .filter(|name| {
+            !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+        .map(|name| format!(" {}", name.to_ascii_uppercase()))
+        .collect::<String>();
+    match HEADER_FIELDS.strip_suffix(")]") {
+        Some(start) if !names.is_empty() => format!("{start}{names})]"),
+        _ => HEADER_FIELDS.to_owned(),
+    }
+}
+
+async fn fetch_headers_inner(
+    session: &mut Session,
+    uid_set: &str,
+    extra: &[String],
+) -> Result<Vec<FetchedHeader>> {
     // Keep header sync independent from BODYSTRUCTURE: an incompatible MIME
     // response must not prevent historical headers from being stored. MIME
     // plans are fetched separately when preparing or opening message bodies.
-    let query = format!("(UID FLAGS INTERNALDATE RFC822.SIZE {HEADER_FIELDS})");
+    let query = format!(
+        "(UID FLAGS INTERNALDATE RFC822.SIZE {})",
+        header_section(extra)
+    );
     let mut out = Vec::new();
     {
         let mut stream = session
@@ -1153,7 +1321,8 @@ fn section_fetch_query(paths: &[(String, Vec<u32>)]) -> String {
     )
 }
 
-fn normalized_uid_set(uids: &[u32]) -> Result<String> {
+/// `uids` in any order as one UID set, runs of them as ranges.
+pub(crate) fn normalized_uid_set(uids: &[u32]) -> Result<String> {
     if uids.contains(&0) {
         return Err(CoreError::Imap("IMAP UID must be greater than zero".into()));
     }
@@ -1298,6 +1467,30 @@ async fn fetch_flags_inner(
     Ok(out)
 }
 
+/// When the server got each message of `uid_set`, in milliseconds.
+pub async fn fetch_internal_dates(
+    session: &mut Session,
+    uid_set: &str,
+) -> Result<Vec<(u32, Option<i64>)>> {
+    with_deadline("UID FETCH dates", METADATA_TIMEOUT, async {
+        let mut out = Vec::new();
+        {
+            let mut stream = session
+                .uid_fetch(uid_set, "(UID INTERNALDATE)")
+                .await
+                .map_err(command_error)?;
+            while let Some(item) = stream.next().await {
+                let fetch = item.map_err(command_error)?;
+                if let Some(uid) = fetch.uid {
+                    out.push((uid, fetch.internal_date().map(|d| d.timestamp_millis())));
+                }
+            }
+        }
+        Ok(out)
+    })
+    .await
+}
+
 /// Full raw RFC 5322 bytes of one message.
 pub async fn fetch_full(session: &mut Session, uid: u32) -> Result<Option<Vec<u8>>> {
     with_deadline(
@@ -1372,6 +1565,20 @@ async fn uid_search_all_inner(session: &mut Session) -> Result<Vec<u32>> {
     let mut v: Vec<u32> = set.into_iter().collect();
     v.sort_unstable();
     Ok(v)
+}
+
+/// UIDs of the selected folder's messages that `criteria` match, newest
+/// first. The criteria come from a search's translation, with any
+/// `CHARSET` in front.
+pub async fn uid_search_matching(session: &mut Session, criteria: &str) -> Result<Vec<u32>> {
+    with_deadline("UID SEARCH", METADATA_TIMEOUT, async {
+        let set = session.uid_search(criteria).await.map_err(command_error)?;
+        let mut uids: Vec<u32> = set.into_iter().collect();
+        uids.sort_unstable_by(|a, b| b.cmp(a));
+        uids.dedup();
+        Ok(uids)
+    })
+    .await
 }
 
 /// UIDs visible in the selected folder, excluding messages awaiting expunge.
@@ -1479,6 +1686,42 @@ async fn store_flag_inner(session: &mut Session, uid: u32, flag: &str, add: bool
     store_flag_set_inner(session, &uid.to_string(), flag, add).await
 }
 
+/// UIDs per command when a server turns down one command for the whole
+/// mailbox, such as for a message limit (RFC 9738).
+const MARK_SEEN_WINDOW: u32 = 10_000;
+
+/// Mark every message of the selected mailbox up to UID `through` seen
+/// (#234). One command does it, as `.SILENT` without CONDSTORE draws no
+/// per-message replies. A server that turns that down gets windows of
+/// [`MARK_SEEN_WINDOW`] UIDs from the newest down: a window that wide holds
+/// at most that many messages.
+pub async fn mark_seen_through(session: &mut Session, through: u32) -> Result<()> {
+    let whole = with_deadline(
+        "UID STORE seen",
+        CONTENT_TIMEOUT,
+        store_flag_set_inner(session, &format!("1:{through}"), "\\Seen", true),
+    )
+    .await;
+    match whole {
+        Err(CoreError::ImapRefused(reply)) if through > MARK_SEEN_WINDOW => {
+            tracing::info!(%reply, "marking a mailbox read in windows");
+            let mut high = through;
+            while high > 0 {
+                let low = high.saturating_sub(MARK_SEEN_WINDOW - 1).max(1);
+                with_deadline(
+                    "UID STORE seen",
+                    CONTENT_TIMEOUT,
+                    store_flag_set_inner(session, &format!("{low}:{high}"), "\\Seen", true),
+                )
+                .await?;
+                high = low - 1;
+            }
+            Ok(())
+        }
+        other => other,
+    }
+}
+
 async fn store_flag_set_inner(
     session: &mut Session,
     uid_set: &str,
@@ -1490,14 +1733,12 @@ async fn store_flag_set_inner(
     } else {
         "-FLAGS.SILENT"
     };
-    let mut stream = session
-        .uid_store(uid_set, format!("{op} ({flag})"))
+    // The command's own status says whether the server made the change: a
+    // FETCH stream ends at a tagged NO or BAD just as it does at OK.
+    session
+        .run_command_and_check_ok(format!("UID STORE {uid_set} {op} ({flag})"))
         .await
-        .map_err(command_error)?;
-    while let Some(item) = stream.next().await {
-        item.map_err(command_error)?;
-    }
-    Ok(())
+        .map_err(command_error)
 }
 
 /// Move one UID without guessing at unsupported server extensions.
@@ -1592,6 +1833,8 @@ pub async fn append_with_receipt(
 pub struct AppendOptions {
     pub seen: bool,
     pub flagged: bool,
+    /// `$MDNSent`: a read receipt the message asks for is answered.
+    pub mdn_sent: bool,
     /// The message's internal date, instead of the time it is appended.
     pub internal_date: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -1610,6 +1853,9 @@ pub async fn append_message(
     }
     if options.flagged {
         flags.push("\\Flagged");
+    }
+    if options.mdn_sent {
+        flags.push(MDN_SENT);
     }
     let flags = if flags.is_empty() {
         String::new()
@@ -1887,20 +2133,67 @@ pub async fn status(session: &mut Session, folder: &str) -> Result<MailboxStatus
     .await
 }
 
-/// The STATUS of every mailbox, from one LIST-STATUS command, by mailbox
-/// name as LIST names it. A server may leave out a mailbox it could not
-/// look up (RFC 5819), so a missing name means "unknown", not "unchanged".
-pub async fn list_status(session: &mut Session) -> Result<HashMap<String, MailboxStatus>> {
-    with_deadline("LIST-STATUS", METADATA_TIMEOUT, list_status_inner(session)).await
+/// RFC 7162 section 4 asks clients to keep a command line near 8192 octets
+/// and split longer requests; this leaves room for the rest of LIST-STATUS.
+const LIST_PATTERNS_MAX: usize = 8000;
+
+/// The STATUS of every mailbox, or of just `mailboxes`, by mailbox name as
+/// LIST names it: one LIST-STATUS command for every mailbox, and as few as
+/// keep each command line short for a list of them (RFC 5258 patterns). A
+/// server may leave out a mailbox it could not look up (RFC 5819), so a
+/// missing name means "unknown", not "unchanged".
+pub async fn list_status(
+    session: &mut Session,
+    mailboxes: Option<&[&str]>,
+) -> Result<HashMap<String, MailboxStatus>> {
+    with_deadline("LIST-STATUS", METADATA_TIMEOUT, async {
+        let mut statuses = HashMap::new();
+        for patterns in list_status_patterns(mailboxes) {
+            list_status_inner(session, &patterns, &mut statuses).await?;
+        }
+        Ok(statuses)
+    })
+    .await
 }
 
-async fn list_status_inner(session: &mut Session) -> Result<HashMap<String, MailboxStatus>> {
+/// The mailbox argument of each LIST-STATUS command that reports
+/// `mailboxes`: all of them when None. A name no quoted string can carry
+/// goes unreported.
+fn list_status_patterns(mailboxes: Option<&[&str]>) -> Vec<String> {
+    let Some(mailboxes) = mailboxes else {
+        return vec!["\"*\"".into()];
+    };
+    let mut commands = Vec::new();
+    let mut patterns = String::new();
+    for quoted in mailboxes.iter().filter_map(|name| quoted_mailbox(name)) {
+        // The space before the name and the parentheses around the list.
+        if !patterns.is_empty() && patterns.len() + quoted.len() + 3 > LIST_PATTERNS_MAX {
+            commands.push(format!("({patterns})"));
+            patterns.clear();
+        }
+        if !patterns.is_empty() {
+            patterns.push(' ');
+        }
+        patterns.push_str(&quoted);
+    }
+    if !patterns.is_empty() {
+        commands.push(format!("({patterns})"));
+    }
+    commands
+}
+
+async fn list_status_inner(
+    session: &mut Session,
+    patterns: &str,
+    statuses: &mut HashMap<String, MailboxStatus>,
+) -> Result<()> {
     use async_imap::imap_proto::{MailboxDatum, Response, Status};
     let tag = session
-        .run_command(format!("LIST \"\" \"*\" RETURN (STATUS {STATUS_ITEMS})"))
+        .run_command(format!(
+            "LIST \"\" {patterns} RETURN (STATUS {STATUS_ITEMS})"
+        ))
         .await
         .map_err(command_error)?;
-    let mut statuses = HashMap::new();
     loop {
         let response = session
             .read_response()
@@ -1914,7 +2207,7 @@ async fn list_status_inner(session: &mut Session) -> Result<HashMap<String, Mail
                 outcome,
             } if *done == tag => {
                 return match status {
-                    Status::Ok => Ok(statuses),
+                    Status::Ok => Ok(()),
                     _ => Err(refusal(ServerReply::from_outcome(
                         *status == Status::Bad,
                         outcome,
@@ -2648,5 +2941,36 @@ mod tests {
         for excluded in ["FLAGS", "INTERNALDATE", "RFC822.SIZE", "HEADER.FIELDS"] {
             assert!(!MIME_PLAN_QUERY.contains(excluded));
         }
+    }
+
+    #[test]
+    fn list_status_asks_for_every_mailbox_or_the_named_ones() {
+        use super::{LIST_PATTERNS_MAX, list_status_patterns, quoted_mailbox};
+        assert_eq!(list_status_patterns(None), ["\"*\""]);
+        assert!(list_status_patterns(Some(&[])).is_empty());
+        assert_eq!(
+            list_status_patterns(Some(&["INBOX", r#"Say "hi"\now"#, "Bad\r\nname"])),
+            [r#"("INBOX" "Say \"hi\"\\now")"#]
+        );
+        assert_eq!(quoted_mailbox("a\0b"), None);
+
+        // A long list is split so no command line runs past the limit, and
+        // every name is asked for once.
+        let names = (0..2000)
+            .map(|i| format!("Shared/Folder {i}"))
+            .collect::<Vec<_>>();
+        let names = names.iter().map(String::as_str).collect::<Vec<_>>();
+        let commands = list_status_patterns(Some(&names));
+        assert!(commands.len() > 1);
+        assert!(
+            commands
+                .iter()
+                .all(|command| command.len() <= LIST_PATTERNS_MAX)
+        );
+        let asked = commands
+            .iter()
+            .flat_map(|command| command.trim_matches(['(', ')']).split("\" \""))
+            .count();
+        assert_eq!(asked, names.len());
     }
 }

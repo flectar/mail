@@ -10,9 +10,10 @@ import tempfile
 import zipfile
 
 
-REQUIRED_EXPORTS = {
-    "ANativeActivity_onCreate",
-    *("Java_com_flectar_mail_FlectarActivity_" + method for method in (
+# The native methods each of the app's Java classes declares. ART looks them up
+# by name only when they are first called, so a missing one fails at run time.
+NATIVE_METHODS = {
+    "FlectarActivity": (
         "nativeGoogleAuthorizationResult",
         "nativeMicrosoftRedirect",
         "nativeDocumentResult",
@@ -20,7 +21,20 @@ REQUIRED_EXPORTS = {
         "nativeDocumentRequestActive",
         "nativeSuspendPdfPreview",
         "nativeTrimMemory",
-    )),
+        "nativeResumed",
+        "nativePaused",
+        "nativeNotificationOpened",
+        "nativeNotificationPermissionAnswered",
+    ),
+    "GoogleAuthorization": ("nativeResult",),
+    "MailCheckJob": ("nativeCheck", "nativeStop"),
+    "NotificationActionReceiver": ("nativeRespond",),
+}
+
+REQUIRED_EXPORTS = {
+    "ANativeActivity_onCreate",
+    *(f"Java_com_flectar_mail_{class_name}_{method}"
+      for class_name, methods in NATIVE_METHODS.items() for method in methods),
 }
 
 

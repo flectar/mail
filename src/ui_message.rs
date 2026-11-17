@@ -5,7 +5,7 @@
 //! language changes. This also prevents background workers from formatting
 //! user-facing English before an update reaches the UI thread.
 
-use crate::{AppWindow, ComposerUi, I18n, LocalizedMessage};
+use crate::{AppWindow, ComposerUi, I18n, LocalizedMessage, Notice};
 use slint::{ComponentHandle, SharedString};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -55,6 +55,11 @@ impl UiMessage {
         }
     }
 
+    /// The source text, before any arguments go in.
+    pub(crate) fn key(&self) -> &'static str {
+        self.key
+    }
+
     /// The source text with its arguments, as shown without a translation.
     #[cfg(test)]
     pub(crate) fn english(&self) -> String {
@@ -102,6 +107,13 @@ impl ComposerUi<'_> {
     pub(crate) fn set_notice(&self, message: UiMessage, error: bool) {
         self.set_message(message.as_slint());
         self.set_notice_is_error(error);
+    }
+}
+
+impl Notice<'_> {
+    /// What the notice at the foot of the main window says.
+    pub(crate) fn set_text(&self, message: UiMessage) {
+        self.set_message(message.as_slint());
     }
 }
 

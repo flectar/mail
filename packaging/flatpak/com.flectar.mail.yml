@@ -10,6 +10,9 @@ separate-locales: false
 # The app already uses portals for browser and file-picker requests. Credential
 # storage uses the freedesktop Secret Service. The Flatpak feature disables the
 # legacy StatusNotifier tray backend so the sandbox needs no unsafe D-Bus name.
+# Docks that show the unread count on the icon own com.canonical.Unity; the
+# count is a broadcast that needs no permission, and the name only tells the app
+# when a dock (re)starts, to send it again.
 finish-args:
   - --share=ipc
   - --share=network
@@ -17,6 +20,7 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --talk-name=org.freedesktop.secrets
+  - --talk-name=com.canonical.Unity
 
 cleanup:
   - /include
@@ -35,6 +39,9 @@ modules:
         CARGO_BUILD_JOBS: '1'
         CARGO_HOME: /run/build/flectar-mail/cargo
         CARGO_NET_OFFLINE: 'true'
+        # The bundle on GitHub tells of newer releases. Flathub updates the
+        # app itself, so its manifest leaves this out.
+        FLECTAR_UPDATE_CHECKS: github
     build-commands:
       - cargo build --offline --locked --release --no-default-features --features remote-content,gpu-renderer,flatpak --bin flectar-mail
       - install -Dm0755 target/release/flectar-mail /app/bin/flectar-mail

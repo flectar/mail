@@ -15,6 +15,7 @@ use std::{
 };
 
 slint::slint! {
+    #[edition = "1.19"]
     import { EmailRow, ListAttachment, MailLabelRow, MailListEntry } from "../ui/models.slint";
     export { MailAttachments } from "../ui/models.slint";
     import { MailListPane } from "../ui/views/mail-list-pane.slint";

@@ -1,0 +1,389 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { AgentAccess } from "../agent-access.slint";
+import { Button } from "button.slint";
+import { Switch } from "controls.slint";
+import { SettingsSelectRow, SettingsSwitchRow } from "settings-components.slint";
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+
+// A card on the page, titled like the General page's.
+component Card inherits Rectangle {
+    in property <string> title;
+    in property <color> surface;
+    in property <color> card-border-color;
+    in property <color> heading;
+    background: root.surface;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.card-border-color;
+    vertical-stretch: 0;
+    height: content.preferred-height;
+
+    content := VerticalBox {
+        padding-top: 15px;
+        padding-right: 20px;
+        padding-bottom: 15px;
+        padding-left: 20px;
+        spacing: 5px;
+        if root.title != "" : Text {
+            text: root.title;
+            color: root.heading;
+            font-size: TypeScale.subtitle;
+            font-weight: 700;
+            wrap: word-wrap;
+        }
+        @children
+    }
+}
+
+// Lines content up with the texts of the shared settings rows, which sit
+// inside two boxes' padding.
+component Inset inherits HorizontalBox {
+    padding-top: 0px;
+    padding-bottom: 0px;
+    VerticalBox {
+        padding-top: 0px;
+        padding-bottom: 0px;
+        @children
+    }
+}
+
+// Settings → AI agents, below the page's title.
+export component AgentAccessPage inherits VerticalLayout {
+    in property <bool> compact;
+    in property <color> surface;
+    in property <color> card-border-color;
+    in property <color> code-background;
+    in property <color> heading;
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> faint-text;
+    in property <color> warning-text;
+
+    spacing: 12px;
+
+    Text {
+        height: max(root.compact ? 51px : 34px, self.preferred-height);
+        text: @tr("Let AI apps on this computer, such as a desktop assistant or a local model, read your mail through the Model Context Protocol (MCP). Flectar Mail runs no AI itself.");
+        color: root.secondary-text;
+        font-size: TypeScale.secondary;
+        vertical-alignment: center;
+        wrap: word-wrap;
+    }
+
+    Card {
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        SettingsSwitchRow {
+            compact: root.compact;
+            title: @tr("Let AI agents read your mail");
+            description: @tr("Agents can read the accounts and folders you choose, your contacts and your calendars, and nothing more unless you allow it below.");
+            checked <=> AgentAccess.enabled;
+            title-color: root.body-text;
+            description-color: root.faint-text;
+            toggled(checked) => { AgentAccess.set-enabled(checked); }
+        }
+    }
+
+    if AgentAccess.enabled : VerticalLayout {
+        spacing: 12px;
+
+        Card {
+            title: @tr("What agents can read");
+            surface: root.surface;
+            card-border-color: root.card-border-color;
+            heading: root.heading;
+            if AgentAccess.accounts.length == 0 : Inset {
+                Text {
+                    height: max(22px, self.preferred-height);
+                    text: @tr("Add an email account, and agents can read it here.");
+                    color: root.faint-text;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+            }
+            for account[index] in AgentAccess.accounts : VerticalLayout {
+                spacing: 6px;
+                if index > 0 : Rectangle { height: 1px; background: root.card-border-color; }
+                HorizontalBox {
+                    spacing: 16px;
+                    VerticalBox {
+                        horizontal-stretch: 1;
+                        min-width: 0px;
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: account.name;
+                            color: root.body-text;
+                            font-size: TypeScale.body;
+                            font-weight: 600;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: (account.address == "" ? "" : account.address + " · ") + (account.shown ? account.folders-summary : @tr("Agents can't read this account."));
+                            color: root.faint-text;
+                            font-size: TypeScale.caption;
+                            wrap: word-wrap;
+                        }
+                    }
+                    if account.shown : Button {
+                        y: (parent.height - self.height) / 2;
+                        width: max(140px, self.content-width);
+                        height: 32px;
+                        text: account.folders-open ? @tr("Done") : @tr("Choose folders");
+                        clicked => { AgentAccess.toggle-folders(account.id); }
+                    }
+                    Switch {
+                        y: (parent.height - self.height) / 2;
+                        checked: account.shown;
+                        control-label: account.address;
+                        toggled => { AgentAccess.set-account-shown(account.id, self.checked); }
+                    }
+                }
+                if account.shown && account.folders-open : HorizontalBox {
+                    padding-top: 0px;
+                    padding-left: root.compact ? 16px : 32px;
+                    VerticalLayout {
+                        spacing: 0px;
+                        for folder in account.folders : HorizontalLayout {
+                            padding-left: 8px + folder.depth * 18px;
+                            spacing: 12px;
+                            height: 36px;
+                            Text {
+                                horizontal-stretch: 1;
+                                text: folder.name;
+                                color: root.body-text;
+                                font-size: TypeScale.secondary;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            Switch {
+                                y: (parent.height - self.height) / 2;
+                                checked: folder.shown;
+                                control-label: folder.name;
+                                toggled => { AgentAccess.set-folder-shown(account.id, folder.id, self.checked); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Card {
+            title: @tr("What agents can do");
+            surface: root.surface;
+            card-border-color: root.card-border-color;
+            heading: root.heading;
+            SettingsSwitchRow {
+                compact: root.compact;
+                title: @tr("Write drafts");
+                description: @tr("Agents can save drafts in Drafts for you to check and send. They can't send anything themselves.");
+                checked <=> AgentAccess.can-write-drafts;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                toggled(checked) => { AgentAccess.set-can-write-drafts(checked); }
+            }
+            Rectangle { height: 1px; background: root.card-border-color; }
+            SettingsSwitchRow {
+                compact: root.compact;
+                title: @tr("Mark messages");
+                description: @tr("Agents can mark messages read or unread, and flag them.");
+                checked <=> AgentAccess.can-mark;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                toggled(checked) => { AgentAccess.set-can-mark(checked); }
+            }
+            Rectangle { height: 1px; background: root.card-border-color; }
+            SettingsSwitchRow {
+                compact: root.compact;
+                title: @tr("Move messages");
+                description: @tr("Agents can move messages to the archive, to Trash or to other folders. They can't delete anything for good.");
+                checked <=> AgentAccess.can-move;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                toggled(checked) => { AgentAccess.set-can-move(checked); }
+            }
+            Rectangle { height: 1px; background: root.card-border-color; }
+            SettingsSwitchRow {
+                compact: root.compact;
+                title: @tr("Label messages");
+                description: @tr("Agents can add your labels to messages and take them off.");
+                checked <=> AgentAccess.can-label;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                toggled(checked) => { AgentAccess.set-can-label(checked); }
+            }
+            Rectangle { height: 1px; background: root.card-border-color; }
+            SettingsSwitchRow {
+                compact: root.compact;
+                title: @tr("Ask to send");
+                description: @tr("Agents can ask to send a draft. It opens for you to check, and only you can send it.");
+                checked <=> AgentAccess.can-send;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                toggled(checked) => { AgentAccess.set-can-send(checked); }
+            }
+        }
+
+        Card {
+            title: @tr("Connect an app");
+            surface: root.surface;
+            card-border-color: root.card-border-color;
+            heading: root.heading;
+            SettingsSelectRow {
+                compact: root.compact;
+                title: @tr("App");
+                description: @tr("The app that runs your agent.");
+                choices: AgentAccess.clients;
+                selected-index <=> AgentAccess.client-index;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                selected(index, value) => { AgentAccess.choose-client(index); }
+            }
+            Inset {
+            Text {
+                height: max(17px, self.preferred-height);
+                text: AgentAccess.setup-hint;
+                color: root.secondary-text;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+            Rectangle {
+                background: root.code-background;
+                border-radius: 6px;
+                height: setup-text.preferred-height + 20px;
+                setup-text := TextInput {
+                    x: 12px;
+                    y: 10px;
+                    width: parent.width - 24px;
+                    text: AgentAccess.setup-text;
+                    color: root.body-text;
+                    font-size: TypeScale.caption;
+                    read-only: true;
+                    single-line: false;
+                    wrap: word-wrap;
+                    selection-background-color: AppTheme.accent;
+                    selection-foreground-color: white;
+                    accessible-label: @tr("Setup for the chosen app");
+                }
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                Button {
+                    width: max(110px, self.content-width);
+                    height: 32px;
+                    text: @tr("Copy");
+                    icon: @image-url("../icons/lucide/outline/copy.svg");
+                    has-icon: true;
+                    clicked => {
+                        setup-text.select-all();
+                        setup-text.copy();
+                        setup-text.clear-selection();
+                    }
+                }
+                if AgentAccess.install-label != "" : Button {
+                    width: max(150px, self.content-width);
+                    height: 32px;
+                    text: AgentAccess.install-label;
+                    icon: @image-url("../icons/lucide/outline/external-link.svg");
+                    has-icon: true;
+                    clicked => { AgentAccess.install(); }
+                }
+            }
+            }
+        }
+
+        Card {
+            title: @tr("Recent activity");
+            surface: root.surface;
+            card-border-color: root.card-border-color;
+            heading: root.heading;
+            if AgentAccess.activity.length == 0 : Inset {
+                Text {
+                    height: max(22px, self.preferred-height);
+                    text: @tr("No agent has read your mail yet.");
+                    color: root.faint-text;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+            }
+            for entry in AgentAccess.activity : HorizontalBox {
+                padding-top: 2px;
+                padding-bottom: 2px;
+                padding-left: 16px;
+                // Undo lines up with Clear activity below.
+                padding-right: 8px;
+                spacing: 12px;
+                Text {
+                    width: root.compact ? 64px : 120px;
+                    text: entry.time;
+                    color: root.faint-text;
+                    font-size: TypeScale.caption;
+                    vertical-alignment: top;
+                    overflow: elide;
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    spacing: 1px;
+                    Text {
+                        text: entry.agent + " · " + entry.action;
+                        color: entry.refused || entry.failed ? root.warning-text : root.body-text;
+                        font-size: TypeScale.secondary;
+                        wrap: word-wrap;
+                    }
+                    if entry.detail != "" : Text {
+                        text: entry.detail;
+                        color: root.faint-text;
+                        font-size: TypeScale.caption;
+                        wrap: word-wrap;
+                    }
+                }
+                if entry.undoable : Button {
+                    y: (parent.height - self.height) / 2;
+                    width: max(80px, self.content-width);
+                    height: 28px;
+                    text: @tr("Undo");
+                    clicked => { AgentAccess.undo-activity(entry.id); }
+                }
+                if entry.undone : Text {
+                    text: @tr("Undone");
+                    color: root.faint-text;
+                    font-size: TypeScale.caption;
+                    vertical-alignment: center;
+                }
+            }
+            if AgentAccess.activity.length > 0 : HorizontalBox {
+                padding-left: 16px;
+                padding-right: 8px;
+                spacing: 16px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: AgentAccess.can-mark || AgentAccess.can-move || AgentAccess.can-label
+                        ? @tr("You can undo what agents change for a week.") : "";
+                    color: root.faint-text;
+                    font-size: TypeScale.caption;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+                Button {
+                    width: max(130px, self.content-width);
+                    height: 32px;
+                    text: @tr("Clear activity");
+                    clicked => { AgentAccess.clear-activity(); }
+                }
+            }
+        }
+
+        Text {
+            height: max(root.compact ? 51px : 34px, self.preferred-height);
+            text: @tr("What a message says comes from its sender. A well-behaved agent treats it as data, but no agent is immune to instructions hidden in mail, so give agents only what they need.");
+            color: root.faint-text;
+            font-size: TypeScale.caption;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}

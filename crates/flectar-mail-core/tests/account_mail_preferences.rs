@@ -105,6 +105,8 @@ async fn protected_drafts_stay_local_and_queued_policy_cannot_downgrade() {
             in_reply_to_message_id: None,
             in_reply_to_header: None,
             attachments: vec![],
+            request_read_receipt: false,
+            importance: Default::default(),
         })
         .await
         .unwrap();

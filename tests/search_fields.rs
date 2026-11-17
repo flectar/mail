@@ -12,6 +12,7 @@ use slint::platform::{
 use std::{ops::ControlFlow, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { WorkspaceSearchToolbar } from "../ui/components/workspace-layout.slint";
     import { TextEdit } from "../ui/components/controls.slint";
 

@@ -1,8 +1,8 @@
 //! Browser-style tabs.
 //!
 //! A tab is a saved place: a workspace plus, for mail, the mailbox, search,
-//! filter and open conversation; the Settings page when Settings is open over
-//! that place; and how far the mail list and reader were scrolled. Only the
+//! filter and open conversation; the Settings page when Settings shows instead
+//! of that place; and how far the mail list and reader were scrolled. Only the
 //! active tab is live. An inactive mail tab keeps a copy of its list rows
 //! without message bodies, so switching back shows its list and conversation
 //! at once, and the refresh that follows re-reads every row so none of them
@@ -23,10 +23,11 @@ const SAVE_DELAY: Duration = Duration::from_millis(500);
 const READER_POLL: Duration = Duration::from_millis(50);
 const READER_DEADLINE: Duration = Duration::from_secs(10);
 /// Settings pages a tab can reopen: the `settings_tab` values of the UI.
-const SETTINGS_PAGES: [&str; 8] = [
+const SETTINGS_PAGES: [&str; 9] = [
     "General",
     "Accounts",
     "Contacts",
+    "Rules",
     "Notifications",
     "Shortcuts",
     "Data",
@@ -120,7 +121,7 @@ impl Scroll {
     }
 }
 
-/// Where a tab is: its location, the Settings page open over it, the
+/// Where a tab is: its location, the Settings page shown instead of it, the
 /// message open in its conversation, and how far its views were scrolled.
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Place {
@@ -151,6 +152,10 @@ impl Place {
 struct CachedRows {
     messages: Vec<MailMessage>,
     next_cursor: Option<MailCursor>,
+    /// The order of `messages`, which `next_cursor` continues.
+    order: ListOrder,
+    /// Where `messages` start when the list's earlier rows aren't loaded.
+    window_start: Option<MailCursor>,
     collapsed: HashSet<String>,
 }
 
@@ -167,7 +172,7 @@ struct SavedTab {
     location: Location,
     #[serde(default)]
     title: String,
-    /// Settings page open over the location.
+    /// Settings page shown instead of the location, which closing it shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     settings: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -586,6 +591,13 @@ struct Tabs {
     newest_write: Arc<Mutex<u64>>,
     reader_timer: slint::Timer,
     reader_restore: Cell<Option<ReaderRestore>>,
+    /// Where the mail view was when another screen, such as Settings,
+    /// replaced it in this tab. Showing mail again returns there.
+    mail_return: RefCell<Option<Place>>,
+    /// The screen a shown tab switched to. The window reports mail hidden or
+    /// shown for that switch after the tab has set where mail is, so that
+    /// report is skipped.
+    restored_view: RefCell<Option<String>>,
     /// Tabs respond, and navigation is saved, only once the saved active tab
     /// has been shown; until then the window shows the startup inbox, which
     /// must not overwrite a tab's place.
@@ -690,6 +702,10 @@ pub(crate) fn register(app: &AppWindow, context: TabContext) {
     let owner = Rc::clone(&tabs);
     global.on_reset(move || owner.reset());
     let owner = Rc::clone(&tabs);
+    global.on_mail_hidden(move || owner.mail_hidden());
+    let owner = Rc::clone(&tabs);
+    global.on_mail_shown(move || owner.mail_shown());
+    let owner = Rc::clone(&tabs);
     global.on_restore_active(move || {
         owner.restored.set(true);
         let active = owner.strip.borrow().active;
@@ -716,6 +732,8 @@ impl Tabs {
             newest_write: Arc::new(Mutex::new(0)),
             reader_timer: slint::Timer::default(),
             reader_restore: Cell::new(None),
+            mail_return: RefCell::new(None),
+            restored_view: RefCell::new(None),
             restored: Cell::new(false),
             weak: weak.clone(),
         });
@@ -737,7 +755,7 @@ impl Tabs {
         // their keys.
         if !app.global::<TabsUi>().get_enabled()
             || app.global::<ComposerUi>().get_open()
-            || app.get_calendar_editor_open()
+            || app.get_calendar_editor_shown()
         {
             return;
         }
@@ -954,14 +972,20 @@ impl Tabs {
         app: &AppWindow,
         with_rows: bool,
     ) -> (Place, Option<String>, Option<CachedRows>) {
-        let settings = app
-            .get_settings_open()
-            .then(|| app.get_settings_tab().to_string());
+        // Settings shows instead of the screen it goes back to, which is
+        // where the tab is.
+        let shown = app.get_active_view();
+        let settings = (shown == "settings").then(|| app.get_settings_tab().to_string());
+        let view = if settings.is_some() {
+            app.get_settings_return_view()
+        } else {
+            shown.clone()
+        };
         let mut place = Place {
-            settings,
+            settings: settings.clone(),
             ..Place::default()
         };
-        let (title, rows) = match app.get_active_view().as_str() {
+        let (title, rows) = match view.as_str() {
             "calendar" => {
                 let calendar = self.context.calendar.borrow();
                 place.location = Location::Calendar {
@@ -979,71 +1003,90 @@ impl Tabs {
                 (Some(String::new()), None)
             }
             _ => {
-                let ui = app.global::<TabsUi>();
-                let state = self.context.state.borrow();
-                let shown = state.selected_id.filter(|_| !state.preview_closed);
-                // A shown tab may still be loading the conversation it reopens.
-                let conversation = state.pending_selection.or(shown);
-                let scope_title = || app.get_selected_scope_title().to_string();
-                let row =
-                    conversation.and_then(|id| state.messages.iter().find(|row| row.id == id));
-                let title = match (conversation, row) {
-                    (None, _) => Some(scope_title()),
-                    (Some(_), Some(row)) if row.subject.is_empty() => Some(scope_title()),
-                    (Some(_), Some(row)) => Some(row.subject.clone()),
-                    // Unknown while loading; the tab keeps its saved title.
-                    (Some(_), None) => None,
-                };
-                place.account = row.map(|row| row.account_id);
-                // A background tab shown before its first page arrived has
-                // still not been seen.
-                place.unseen =
-                    state.pending_selection_opens && state.pending_selection == conversation;
-                place.thread_message = conversation.and_then(|id| {
-                    // A conversation still loading may be another tab's.
-                    if state.conversation_owner_id == Some(id) && state.rendered_id == Some(id) {
-                        state
-                            .conversation_messages
-                            .get(state.conversation_selected_index)
-                            .map(|message| message.id)
-                    } else {
-                        state
-                            .restore_thread_message
-                            .filter(|(owner, _)| *owner == id)
-                            .map(|(_, message)| message)
-                    }
-                });
-                let reader_restore = self
-                    .reader_restore
-                    .get()
-                    .filter(|restore| Some(restore.conversation) == conversation);
-                place.scroll = Scroll {
-                    // Positions still being restored count as where the tab is.
-                    list: if ui.get_list_restore() >= 0.0 {
-                        ui.get_list_restore()
-                    } else {
-                        ui.get_list_offset().max(0.0)
-                    },
-                    reader: match (reader_restore, conversation) {
-                        (Some(restore), _) => restore.offset,
-                        (None, Some(_)) => (-app.get_email_scroll_y()).max(0.0),
-                        (None, None) => 0.0,
-                    },
-                };
-                place.location = Location::Mail {
-                    scope: state.scope,
-                    query: state.query.clone(),
-                    filter: state.search_filter.clone(),
-                    conversation,
-                };
-                (
-                    title,
-                    // A list still loading has no rows to return to.
-                    (with_rows && state.using_core && !mail_work::replacing(&state))
-                        .then(|| cached_rows(&state)),
-                )
+                let (mail, title, rows) = self.live_mail(app, with_rows);
+                place = mail;
+                place.settings = settings;
+                // A hidden mail view has no positions of its own; it returns
+                // to where it was.
+                if shown != "mail"
+                    && let Some(saved) = self.mail_return.borrow().as_ref()
+                    && saved.location == place.location
+                {
+                    place.thread_message = saved.thread_message;
+                    place.scroll = saved.scroll;
+                }
+                (title, rows)
             }
         };
+        (place, title, rows)
+    }
+
+    /// Where the mail view is, its title when known, and with `with_rows` a
+    /// copy of its list rows.
+    fn live_mail(
+        &self,
+        app: &AppWindow,
+        with_rows: bool,
+    ) -> (Place, Option<String>, Option<CachedRows>) {
+        let mut place = Place::default();
+        let ui = app.global::<TabsUi>();
+        let state = self.context.state.borrow();
+        let shown = state.selected_id.filter(|_| !state.preview_closed);
+        // A shown tab may still be loading the conversation it reopens.
+        let conversation = state.pending_selection.or(shown);
+        let scope_title = || app.get_selected_scope_title().to_string();
+        let row = conversation.and_then(|id| state.messages.iter().find(|row| row.id == id));
+        let title = match (conversation, row) {
+            (None, _) => Some(scope_title()),
+            (Some(_), Some(row)) if row.subject.is_empty() => Some(scope_title()),
+            (Some(_), Some(row)) => Some(row.subject.clone()),
+            // Unknown while loading; the tab keeps its saved title.
+            (Some(_), None) => None,
+        };
+        place.account = row.map(|row| row.account_id);
+        // A background tab shown before its first page arrived has
+        // still not been seen.
+        place.unseen = state.pending_selection_opens && state.pending_selection == conversation;
+        place.thread_message = conversation.and_then(|id| {
+            // A conversation still loading may be another tab's.
+            if state.conversation_owner_id == Some(id) && state.rendered_id == Some(id) {
+                state
+                    .conversation_messages
+                    .get(state.conversation_selected_index)
+                    .map(|message| message.id)
+            } else {
+                state
+                    .restore_thread_message
+                    .filter(|(owner, _)| *owner == id)
+                    .map(|(_, message)| message)
+            }
+        });
+        let reader_restore = self
+            .reader_restore
+            .get()
+            .filter(|restore| Some(restore.conversation) == conversation);
+        place.scroll = Scroll {
+            // Positions still being restored count as where the tab is.
+            list: if ui.get_list_restore() >= 0.0 {
+                ui.get_list_restore()
+            } else {
+                ui.get_list_offset().max(0.0)
+            },
+            reader: match (reader_restore, conversation) {
+                (Some(restore), _) => restore.offset,
+                (None, Some(_)) => (-app.get_email_scroll_y()).max(0.0),
+                (None, None) => 0.0,
+            },
+        };
+        place.location = Location::Mail {
+            scope: state.scope,
+            query: state.query.clone(),
+            filter: state.search_filter.clone(),
+            conversation,
+        };
+        // A list still loading has no rows to return to.
+        let rows = (with_rows && state.using_core && !mail_work::replacing(&state))
+            .then(|| cached_rows(&state));
         (place, title, rows)
     }
 
@@ -1079,6 +1122,17 @@ impl Tabs {
             // conversation is unseen; the page must not open it now.
             self.context.state.borrow_mut().pending_selection_opens = false;
         }
+        // The tab's own place replaces whatever mail kept from this or another
+        // tab.
+        *self.mail_return.borrow_mut() = None;
+        // Settings shows instead of the place it goes back to, which is set
+        // without being shown.
+        let behind_settings = settings.is_some();
+        if let Some(page) = &settings {
+            app.set_settings_tab(page.as_str().into());
+            app.set_settings_return_view(location.workspace().into());
+            app.set_active_view("settings".into());
+        }
         match location {
             Location::Mail {
                 scope,
@@ -1097,31 +1151,35 @@ impl Tabs {
                 },
                 unseen,
                 rows,
+                !behind_settings,
             ),
             Location::Calendar { date, mode } => {
                 ui.set_list_restore(-1.0);
-                self.restore_calendar(&app, date, mode);
+                self.restore_calendar(&app, date, mode, !behind_settings);
             }
             Location::Contacts | Location::Files => {
                 ui.set_list_restore(-1.0);
-                app.set_active_view(location.workspace().into());
+                if !behind_settings {
+                    app.set_active_view(location.workspace().into());
+                }
             }
         }
-        // Settings opens over the place it was opened from.
-        if let Some(page) = &settings {
-            app.set_settings_tab(page.as_str().into());
-        }
-        app.set_settings_open(settings.is_some());
+        *self.restored_view.borrow_mut() = Some(app.get_active_view().to_string());
         ui.set_shown_conversation(shows_conversation);
         ui.set_shown(ui.get_shown().wrapping_add(1));
     }
 
-    fn restore_calendar(&self, app: &AppWindow, date: NaiveDate, mode: String) {
+    /// Set the calendar to a tab's date and view, showing it when `show`.
+    fn restore_calendar(&self, app: &AppWindow, date: NaiveDate, mode: String, show: bool) {
         {
             let mut calendar = self.context.calendar.borrow_mut();
             calendar.selected_date = date;
             calendar.visible_month = first_of_month(date);
             calendar.view_mode = mode;
+        }
+        // Showing the calendar later loads its month.
+        if !show {
+            return;
         }
         if app.get_active_view() != "calendar" {
             // Entering the calendar loads the visible month.
@@ -1143,12 +1201,16 @@ impl Tabs {
         apply_calendar(app, &calendar, Local::now().date_naive());
     }
 
+    /// Set mail to a tab's mailbox, search and conversation, showing it when
+    /// `show`. Mail set behind Settings returns to the tab's positions once
+    /// it shows.
     fn restore_mail(
         &self,
         app: &AppWindow,
         place: MailPlace,
         unseen: bool,
         rows: Option<CachedRows>,
+        show: bool,
     ) {
         let MailPlace {
             scope,
@@ -1204,6 +1266,9 @@ impl Tabs {
             state.set_scope(scope);
             state.query = query;
             state.search_filter = filter;
+            // Rows in the order the list had before it was turned around
+            // load again.
+            let rows = rows.filter(|rows| rows.order == state.list_order_for_view());
             state.mail_groups.clear();
             state.page = 1;
             state.checked_ids.clear();
@@ -1217,6 +1282,8 @@ impl Tabs {
                 Some(rows) => {
                     state.messages = rows.messages;
                     state.next_cursor = rows.next_cursor;
+                    state.list_order = rows.order;
+                    state.window_start = rows.window_start;
                     state.mail_groups.collapsed = rows.collapsed;
                     state.selected_id = conversation;
                     state.pending_selection = None;
@@ -1225,6 +1292,7 @@ impl Tabs {
                 None => {
                     state.messages.clear();
                     state.next_cursor = None;
+                    state.window_start = None;
                     state.selected_id = None;
                     state.pending_selection = conversation;
                     state.pending_selection_opens = unseen && conversation.is_some();
@@ -1241,24 +1309,24 @@ impl Tabs {
                 scroll,
             )
         };
-        // The list scrolls back once its rows are laid out.
-        let ui = app.global::<TabsUi>();
-        ui.set_list_restore(scroll.list);
-        ui.set_list_restore_view(view.into());
-        ui.set_list_restore_request(ui.get_list_restore_request().wrapping_add(1));
-        app.set_active_view("mail".into());
-        let result = match conversation {
-            // Showing a background tab opens its conversation, which marks it
-            // read like any opened conversation; returning to a tab does not.
-            Some(id) if shown && unseen => {
-                app.invoke_select_email(id);
-                Ok(())
+        if show {
+            // The list scrolls back once its rows are laid out.
+            request_list_restore(app, scroll.list, view);
+            app.set_active_view("mail".into());
+            let result = match conversation {
+                // Showing a background tab opens its conversation, which marks
+                // it read like any opened conversation; returning to a tab does
+                // not.
+                Some(id) if shown && unseen => {
+                    app.invoke_select_email(id);
+                    Ok(())
+                }
+                Some(id) if shown => select_message(app, &context.state, &context.runtime, id),
+                _ => render_current(app, &context.state, &context.runtime),
+            };
+            if let Err(error) = result {
+                app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
             }
-            Some(id) if shown => select_message(app, &context.state, &context.runtime, id),
-            _ => render_current(app, &context.state, &context.runtime),
-        };
-        if let Err(error) = result {
-            app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
         }
         if using_core {
             // Re-read every row the tab returned to, or load its first page:
@@ -1269,10 +1337,63 @@ impl Tabs {
                 app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
             }
         }
+        if !show {
+            let (mut place, ..) = self.live_mail(app, false);
+            place.thread_message = thread_message;
+            place.scroll = scroll;
+            *self.mail_return.borrow_mut() = Some(place);
+            return;
+        }
         // Even at the top: a conversation another tab showed too keeps that
         // tab's position otherwise.
         if let Some(conversation) = conversation {
             self.restore_reader(conversation, thread_message, scroll.reader);
+        }
+    }
+
+    /// Mail gave way to another screen: keep where it was for when it shows
+    /// again in this tab.
+    fn mail_hidden(&self) {
+        let Some(app) = self.app() else {
+            return;
+        };
+        // A shown tab has already set what mail returns to.
+        if self.restored_view.take().as_deref() == Some(app.get_active_view().as_str()) {
+            return;
+        }
+        let (place, ..) = self.live_mail(&app, false);
+        *self.mail_return.borrow_mut() = Some(place);
+        // A position still being restored belongs to the view that is gone.
+        app.global::<TabsUi>().set_list_restore(-1.0);
+        self.reader_timer.stop();
+        self.reader_restore.set(None);
+    }
+
+    /// Mail shows again: return to where it was, unless it was sent
+    /// somewhere else meanwhile.
+    fn mail_shown(&self) {
+        let Some(app) = self.app() else {
+            return;
+        };
+        let restored = self.restored_view.take();
+        let Some(saved) = self.mail_return.borrow_mut().take() else {
+            return;
+        };
+        // A shown tab requested its own positions.
+        if restored.as_deref() == Some("mail") {
+            return;
+        }
+        let (place, ..) = self.live_mail(&app, false);
+        if place.location != saved.location {
+            return;
+        }
+        let view = {
+            let state = self.context.state.borrow();
+            format!("{}\n{}\n{}", state.scope, state.query, state.search_filter)
+        };
+        request_list_restore(&app, saved.scroll.list, view);
+        if let Some(conversation) = saved.conversation() {
+            self.restore_reader(conversation, saved.thread_message, saved.scroll.reader);
         }
     }
 
@@ -1582,6 +1703,15 @@ struct MailPlace {
     scroll: Scroll,
 }
 
+/// Scroll the list to `offset` once the rows of `view`, its mailbox, search
+/// and filter, are laid out.
+fn request_list_restore(app: &AppWindow, offset: f32, view: String) {
+    let ui = app.global::<TabsUi>();
+    ui.set_list_restore(offset);
+    ui.set_list_restore_view(view.into());
+    ui.set_list_restore_request(ui.get_list_restore_request().wrapping_add(1));
+}
+
 /// Update rows in place, so each tab keeps its element.
 fn sync_rows(model: &VecModel<TabRow>, rows: impl Iterator<Item = TabRow>) {
     let mut count = 0;
@@ -1641,6 +1771,8 @@ fn cached_rows(state: &InboxState) -> CachedRows {
     CachedRows {
         messages,
         next_cursor: state.next_cursor,
+        order: state.list_order,
+        window_start: state.window_start,
         collapsed: state.mail_groups.collapsed.clone(),
     }
 }
@@ -2020,19 +2152,35 @@ mod tests {
         assert_eq!(active(), 0, "the reopened tab is shown where it was");
         assert!(!ui.get_can_reopen());
 
-        // Settings belongs to the tab it was opened in.
+        // Settings belongs to the tab it was opened in, and goes back to
+        // that tab's place.
         app.set_settings_tab("Data".into());
-        app.set_settings_open(true);
+        app.invoke_open_settings();
         ui.invoke_select(id(1));
-        assert!(!app.get_settings_open(), "another tab shows its own place");
+        assert_eq!(
+            app.get_active_view(),
+            "mail",
+            "another tab shows its own place"
+        );
         let settings_tab = rows.row_data(0).unwrap();
         assert_eq!(settings_tab.workspace, "settings");
         app.set_settings_tab("General".into());
         ui.invoke_select(id(0));
-        assert!(app.get_settings_open());
+        assert_eq!(app.get_active_view(), "settings");
         assert_eq!(app.get_settings_tab(), "Data");
+        assert_eq!(app.get_settings_return_view(), "mail");
+        app.invoke_close_settings();
         assert_eq!(app.get_active_view(), "mail");
-        app.set_settings_open(false);
+
+        // Settings opened from the calendar goes back to the calendar.
+        app.set_active_view("calendar".into());
+        app.invoke_open_settings();
+        ui.invoke_select(id(1));
+        ui.invoke_select(id(0));
+        assert_eq!(app.get_active_view(), "settings");
+        app.invoke_close_settings();
+        assert_eq!(app.get_active_view(), "calendar");
+        app.set_active_view("mail".into());
 
         // A calendar tab stays a calendar tab.
         app.set_active_view("calendar".into());
@@ -2238,6 +2386,121 @@ mod tests {
         assert_eq!(app.get_email_scroll_y(), -100.0);
     }
 
+    /// Another screen, such as Settings, replaces mail in the same tab, and
+    /// product changes report mail hidden and shown again. Mail returns to
+    /// where its list and reader were, unless it was sent somewhere else
+    /// meanwhile.
+    #[test]
+    fn mail_returns_to_where_it_was_after_another_screen() {
+        let (app, context, _dir, _) = headless();
+        let state = Rc::clone(&context.state);
+        let tabs = Tabs::new(&app, context);
+        let ui = app.global::<TabsUi>();
+        app.set_active_view("mail".into());
+        {
+            let mut state = state.borrow_mut();
+            state.selected_id = Some(7);
+            state.preview_closed = false;
+        }
+        ui.set_list_offset(640.0);
+        app.set_email_scroll_y(-300.0);
+        let view = || {
+            let state = state.borrow();
+            format!("{}\n{}\n{}", state.scope, state.query, state.search_filter)
+        };
+
+        app.invoke_open_settings();
+        tabs.mail_hidden();
+        assert_eq!(app.get_active_view(), "settings");
+        assert_eq!(app.get_settings_return_view(), "mail");
+        // The new mail view starts at the top, as the window resets it.
+        app.set_email_scroll_y(0.0);
+        ui.set_list_offset(0.0);
+        // Saved meanwhile, the tab is Settings over where mail was.
+        let (place, ..) = tabs.live(&app, false);
+        assert_eq!(place.settings.as_deref(), Some("General"));
+        assert_eq!(place.conversation(), Some(7));
+        assert_eq!(
+            place.scroll,
+            Scroll {
+                list: 640.0,
+                reader: 300.0
+            }
+        );
+
+        app.invoke_close_settings();
+        tabs.mail_shown();
+        assert_eq!(app.get_active_view(), "mail");
+        assert_eq!(ui.get_list_restore(), 640.0);
+        assert_eq!(ui.get_list_restore_view(), view());
+        let reader = tabs.reader_restore.get().expect("the reader scrolls back");
+        assert_eq!((reader.conversation, reader.offset), (7, 300.0));
+
+        // A notification opened another conversation while mail was hidden:
+        // mail shows that one from the top.
+        ui.set_list_offset(640.0);
+        app.invoke_open_settings();
+        tabs.mail_hidden();
+        assert_eq!(
+            ui.get_list_restore(),
+            -1.0,
+            "the pending restore is dropped"
+        );
+        assert!(tabs.reader_restore.get().is_none());
+        state.borrow_mut().selected_id = Some(8);
+        app.set_active_view("mail".into());
+        tabs.mail_shown();
+        assert_eq!(ui.get_list_restore(), -1.0);
+        assert!(tabs.reader_restore.get().is_none());
+    }
+
+    /// A tab shown with Settings open goes back to its own mail place when
+    /// Settings closes, not to where the tab shown before it had mail.
+    #[test]
+    fn a_settings_tab_goes_back_to_its_own_mail_place() {
+        let (app, context, _dir, _) = headless();
+        let tabs = Tabs::new(&app, context);
+        let ui = app.global::<TabsUi>();
+        app.set_active_view("mail".into());
+        ui.set_list_offset(300.0);
+        let search = Place {
+            location: Location::Mail {
+                scope: Scope::UNIFIED_INBOX,
+                query: "invoice".into(),
+                filter: default_filter(),
+                conversation: None,
+            },
+            settings: Some("Data".into()),
+            scroll: Scroll {
+                list: 900.0,
+                reader: 0.0,
+            },
+            ..Place::default()
+        };
+        tabs.strip.borrow_mut().open(search, "Search".into(), None);
+
+        tabs.activate(1);
+        assert_eq!(app.get_active_view(), "settings");
+        assert_eq!(app.get_settings_tab(), "Data");
+        assert_eq!(app.get_settings_return_view(), "mail");
+        assert_eq!(tabs.context.state.borrow().query, "invoice");
+        // Mail stays hidden: nothing scrolls yet, and mail being hidden is
+        // the tab's own doing.
+        assert_eq!(ui.get_list_restore(), -1.0);
+        tabs.mail_hidden();
+
+        app.invoke_close_settings();
+        tabs.mail_shown();
+        assert_eq!(ui.get_list_restore(), 900.0);
+        assert!(ui.get_list_restore_view().contains("invoice"));
+
+        // The first tab returns to its own position.
+        tabs.activate(0);
+        assert_eq!(app.get_active_view(), "mail");
+        assert_eq!(ui.get_list_restore(), 300.0);
+        assert_eq!(tabs.context.state.borrow().query, "");
+    }
+
     /// A folder of `account_id` in the sidebar's mailbox list.
     fn folder(account_id: i64, folder_id: i64) -> MailboxEntry {
         MailboxEntry {
@@ -2295,6 +2558,7 @@ mod tests {
             sync_error: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
+            caught_up_at: None,
         }
     }
 
@@ -2623,6 +2887,7 @@ mod tests {
     #[cfg(desktop)]
     mod listed {
         slint::slint! {
+            #[edition = "1.19"]
             export { Shortcuts } from "../ui/shortcuts.slint";
             export component ShortcutList inherits Window {}
         }

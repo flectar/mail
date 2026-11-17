@@ -8,6 +8,7 @@ use slint::{ComponentHandle, ModelRc, Rgb8Pixel, VecModel};
 use std::{cell::RefCell, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { MoveDialog, MovePickerUi } from "../ui/dialogs/move-dialog.slint";
     export { MovePickerUi, MoveTargetRow } from "../ui/dialogs/move-dialog.slint";
 

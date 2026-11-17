@@ -42,6 +42,8 @@ fn uidnext_is_used_only_when_it_is_a_consistent_high_watermark() {
             uid_validity: Some(7),
             uid_next: Some(101),
             exists: 2,
+            creates_keywords: false,
+            permanent_keywords: Vec::new(),
         }),
         Some(100)
     );
@@ -50,6 +52,8 @@ fn uidnext_is_used_only_when_it_is_a_consistent_high_watermark() {
             uid_validity: Some(7),
             uid_next: Some(2),
             exists: 2,
+            creates_keywords: false,
+            permanent_keywords: Vec::new(),
         }),
         None
     );
@@ -58,6 +62,8 @@ fn uidnext_is_used_only_when_it_is_a_consistent_high_watermark() {
             uid_validity: Some(7),
             uid_next: None,
             exists: 2,
+            creates_keywords: false,
+            permanent_keywords: Vec::new(),
         }),
         None
     );
@@ -261,8 +267,13 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
                     references: Vec::new(),
                     list_unsubscribe: None,
                     list_unsubscribe_post: None,
+                    list_id: None,
                     sender_addr: None,
                     sender_verification: SenderVerification::None,
+                    receipt_to: Vec::new(),
+                    receipt_confirm: false,
+                    receipt_handled: false,
+                    importance: Default::default(),
                 },
                 thread_id,
             )?;
@@ -662,6 +673,272 @@ async fn deleted_headers_are_skipped_without_stalling_progress_or_notifying() {
 }
 
 #[tokio::test]
+async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
+    let (_dir, ctx, config, folder) = deleted_mail_context(1).await;
+    let (account_id, inbox) = (config.id, folder.id);
+    let spam = ctx
+        .db
+        .write(move |conn| {
+            let spam =
+                repo::folders::upsert(conn, account_id, "Junk", Some("/"), Some(roles::SPAM))?;
+            repo::blocked::block(conn, "sender@example.test", 0)?;
+            Ok(spam)
+        })
+        .await
+        .unwrap();
+    let (updated, fresh) = store_headers(
+        &ctx,
+        &config,
+        &folder,
+        vec![deletion_header(50, false)],
+        Some(1),
+        NewHeaders::Insert,
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.len(), 1);
+    assert!(fresh.is_empty());
+    ctx.db
+        .read(move |conn| {
+            let (id, folder_id, uid): (i64, Option<i64>, Option<i64>) = conn.query_row(
+                "SELECT id, folder_id, uid FROM messages
+                 WHERE message_id = 'deletion-50@example.test'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            assert_eq!((folder_id, uid), (Some(spam), None));
+            // The server copy moves out of the inbox like Move to spam's.
+            let (kind, payload): (String, String) = conn.query_row(
+                "SELECT kind, payload FROM pending_actions WHERE message_id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            assert_eq!(kind, "spam");
+            let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+            assert_eq!(payload["srcFolderId"], inbox);
+            assert_eq!(payload["srcUid"], 50);
+            assert_eq!(payload["messageOnly"], true);
+            let notifications: i64 =
+                conn.query_row("SELECT COUNT(*) FROM notification_outbox", [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(notifications, 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // Once unblocked, their mail arrives as before.
+    ctx.db
+        .write(|conn| repo::blocked::unblock(conn, "sender@example.test"))
+        .await
+        .unwrap();
+    let (_, fresh) = store_headers(
+        &ctx,
+        &config,
+        &folder,
+        vec![deletion_header(51, false)],
+        Some(1),
+        NewHeaders::Insert,
+    )
+    .await
+    .unwrap();
+    assert_eq!(fresh.len(), 1);
+    ctx.db
+        .read(move |conn| {
+            assert!(repo::messages::by_folder_uid(conn, inbox, 51)?.is_some());
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn rules_sort_new_inbox_mail_and_what_they_file_away_stays_silent() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let (_dir, ctx, config, folder) = deleted_mail_context(1).await;
+    let (account_id, inbox) = (config.id, folder.id);
+    let news = ctx
+        .db
+        .write(move |conn| {
+            let news = repo::folders::upsert(conn, account_id, "News", Some("/"), None)?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(account_id),
+                    name: "News".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::Subject,
+                        header: String::new(),
+                        op: RuleOp::Is,
+                        value: "message 60".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::Move { folder: news }],
+                    stop: false,
+                },
+                0,
+            )?;
+            Ok(news)
+        })
+        .await
+        .unwrap();
+    let (updated, fresh) = store_headers(
+        &ctx,
+        &config,
+        &folder,
+        vec![deletion_header(60, false), deletion_header(61, false)],
+        Some(1),
+        NewHeaders::Insert,
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.len(), 2);
+    // Only the mail the rule left in the Inbox notifies.
+    assert_eq!(fresh.len(), 1);
+    ctx.db
+        .read(move |conn| {
+            let filed = repo::messages::get_row(
+                conn,
+                conn.query_row(
+                    "SELECT id FROM messages WHERE message_id = 'deletion-60@example.test'",
+                    [],
+                    |row| row.get(0),
+                )?,
+            )?
+            .unwrap();
+            assert_eq!(filed.folder_id, Some(news));
+            let kind: String = conn.query_row(
+                "SELECT kind FROM pending_actions WHERE message_id = ?1",
+                [filed.id],
+                |row| row.get(0),
+            )?;
+            assert_eq!(kind, "move");
+            assert!(repo::messages::by_folder_uid(conn, inbox, 61)?.is_some());
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // What a history pass finds stays where the server has it.
+    let mut old = deletion_header(40, false);
+    old.header_bytes = b"Message-ID: <old-40@example.test>\r\nFrom: sender@example.test\r\nSubject: Message 60\r\n\r\n".to_vec();
+    store_headers(&ctx, &config, &folder, vec![old], None, NewHeaders::Insert)
+        .await
+        .unwrap();
+    ctx.db
+        .read(move |conn| {
+            assert!(repo::messages::by_folder_uid(conn, inbox, 40)?.is_some());
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_rule_on_the_body_holds_new_mail_until_its_body_comes() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let (_dir, ctx, config, folder) = deleted_mail_context(1).await;
+    let (account_id, inbox) = (config.id, folder.id);
+    let news = ctx
+        .db
+        .write(move |conn| {
+            let news = repo::folders::upsert(conn, account_id, "News", Some("/"), None)?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(account_id),
+                    name: "Lists".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::Body,
+                        header: String::new(),
+                        op: RuleOp::Contains,
+                        value: "unsubscribe".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::Move { folder: news }],
+                    stop: false,
+                },
+                0,
+            )?;
+            Ok(news)
+        })
+        .await
+        .unwrap();
+    let (_, fresh) = store_headers(
+        &ctx,
+        &config,
+        &folder,
+        vec![deletion_header(80, false), deletion_header(81, false)],
+        Some(1),
+        NewHeaders::Insert,
+    )
+    .await
+    .unwrap();
+    // Both wait for their bodies, and so do their notifications.
+    assert!(fresh.is_empty());
+    let waiting = ctx
+        .db
+        .read(move |conn| repo::messages::rules_waiting_in(conn, inbox))
+        .await
+        .unwrap();
+    assert_eq!(
+        waiting.iter().map(|(_, uid)| *uid).collect::<Vec<_>>(),
+        [80, 81]
+    );
+    let raw = |uid: i64, text: &str| {
+        format!(
+            "Message-ID: <deletion-{uid}@example.test>\r\nFrom: sender@example.test\r\nTo: reader@example.test\r\nSubject: Message {uid}\r\n\r\n{text}\r\n"
+        )
+        .into_bytes()
+    };
+    let guard = SelectivePersistGuard::Background { folder_id: inbox };
+    for ((message_id, uid), text) in waiting.iter().zip(["Unsubscribe here", "Hello"]) {
+        let stored = persist_body(
+            &ctx,
+            &config,
+            *message_id,
+            guard,
+            *uid as u32,
+            &raw(*uid, text),
+        )
+        .await
+        .unwrap();
+        assert!(stored);
+    }
+    // The one that asks to unsubscribe moved without a word; the other
+    // notifies now.
+    let (moved, kept) = (waiting[0].0, waiting[1].0);
+    ctx.db
+        .read(move |conn| {
+            let folder_of = |id| -> rusqlite::Result<Option<i64>> {
+                conn.query_row(
+                    "SELECT folder_id FROM messages WHERE id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )
+            };
+            assert_eq!(folder_of(moved)?, Some(news));
+            assert_eq!(folder_of(kept)?, Some(inbox));
+            let notified: Vec<i64> = conn
+                .prepare("SELECT message_id FROM notification_outbox")?
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            assert_eq!(notified, [kept]);
+            assert!(repo::messages::rules_waiting_in(conn, inbox)?.is_empty());
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn reload_removes_deleted_messages_even_outside_flag_window() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -828,6 +1105,11 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
     let mut expected = removed_threads.clone();
     expected.sort_unstable();
     assert_eq!(thread_ids, expected);
+    // The Inbox pass caught up, which the app shows as the last check.
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        CoreEvent::AccountCaughtUp { account_id: caught_up, .. } if caught_up == account_id
+    ));
     ctx.db
         .read(move |conn| {
             assert!(repo::messages::by_folder_uid(conn, folder_id, 42)?.is_none());
@@ -877,6 +1159,10 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
     assert!(matches!(
         events.try_recv().unwrap(),
         CoreEvent::MailUpdated { .. }
+    ));
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        CoreEvent::AccountCaughtUp { .. }
     ));
     assert!(
         events.try_recv().is_err(),
@@ -1413,8 +1699,13 @@ fn seed_unread(
             references: Vec::new(),
             list_unsubscribe: None,
             list_unsubscribe_post: None,
+            list_id: None,
             sender_addr: None,
             sender_verification: SenderVerification::None,
+            receipt_to: Vec::new(),
+            receipt_confirm: false,
+            receipt_handled: false,
+            importance: Default::default(),
         },
         thread_id,
     )?;
@@ -1864,4 +2155,459 @@ async fn history_backfill_goes_on_past_a_refused_folder() {
         .filter(|command| command.contains(" LOGIN "))
         .count();
     assert_eq!(sign_ins, 1, "{commands:?}");
+}
+
+/// A server search brings a page of mail not kept here at a time, newest
+/// first across the folders it covers, with the matches kept here that the
+/// page passes. A page stops in each folder at one UID and the next goes on
+/// below it, so no match is missed or found twice. Found mail isn't new
+/// mail: the folders' sync positions stay where they were.
+#[tokio::test]
+async fn a_server_search_pages_through_the_folders_newest_first() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    // Each folder's matches and the day in March 2020 the server got them.
+    let inbox: &[(u32, u32)] = &[(30, 5), (20, 3), (10, 1)];
+    let archive: &[(u32, u32)] = &[(7, 4), (5, 2)];
+    let mut selected = "";
+    let server = serve(listener, commands.clone(), move |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 IDLE\r\n{tag} OK capability\r\n"),
+            "SELECT" => {
+                selected = ["INBOX", "Archive"]
+                    .into_iter()
+                    .find(|name| command.contains(&format!("\"{name}\"")))
+                    .unwrap_or_else(|| panic!("searched another folder: {command:?}"));
+                format!(
+                    "* 40 EXISTS\r\n* OK [UIDVALIDITY 7] valid\r\n\
+                     * OK [UIDNEXT 41] next\r\n{tag} OK [READ-WRITE] selected\r\n"
+                )
+            }
+            "UID" if fields[2] == "SEARCH" => {
+                assert_eq!(
+                    command.trim_end(),
+                    format!("{tag} UID SEARCH (TEXT \"invoice\" FROM \"ana\")")
+                );
+                let found = if selected == "INBOX" { inbox } else { archive };
+                let uids = found.iter().map(|(uid, _)| uid.to_string());
+                format!(
+                    "* SEARCH {}\r\n{tag} OK searched\r\n",
+                    uids.collect::<Vec<_>>().join(" ")
+                )
+            }
+            "UID" if fields[2] == "FETCH" => {
+                let found = if selected == "INBOX" { inbox } else { archive };
+                let asked = fields[3]
+                    .split(',')
+                    .map(|uid| uid.parse::<u32>().unwrap())
+                    .collect::<Vec<_>>();
+                let mut response = String::new();
+                for (index, (uid, day)) in found
+                    .iter()
+                    .filter(|(uid, _)| asked.contains(uid))
+                    .enumerate()
+                {
+                    let arrived = format!("INTERNALDATE \"{day:02}-Mar-2020 10:00:00 +0000\"");
+                    if command.contains("HEADER.FIELDS") {
+                        let header = format!(
+                            "Message-ID: <{selected}-{uid}@example.test>\r\n\
+                             From: Ana <ana@example.test>\r\n\
+                             To: reader@example.test\r\n\
+                             Subject: Invoice {uid}\r\n\
+                             Date: {day} Mar 2020 10:00:00 +0000\r\n\r\n"
+                        );
+                        response.push_str(&format!(
+                            "* {} FETCH (UID {uid} FLAGS (\\Seen) {arrived} RFC822.SIZE 200 \
+                             BODY[HEADER.FIELDS (MESSAGE-ID FROM TO SUBJECT DATE)] {{{}}}\r\n\
+                             {header})\r\n",
+                            index + 1,
+                            header.len()
+                        ));
+                    } else {
+                        response
+                            .push_str(&format!("* {} FETCH (UID {uid} {arrived})\r\n", index + 1));
+                    }
+                }
+                format!("{response}{tag} OK fetched\r\n")
+            }
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+
+    let (_dir, ctx, config, inbox_folder) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let inbox_id = inbox_folder.id;
+    let (archive_id, kept_id) = ctx
+        .db
+        .write(move |conn| {
+            let archive_id = repo::folders::upsert(
+                conn,
+                account_id,
+                "Archive",
+                Some("/"),
+                Some(roles::ARCHIVE),
+            )?;
+            // Left out unless a search names it.
+            repo::folders::upsert(conn, account_id, "Trash", Some("/"), Some(roles::TRASH))?;
+            let kept_id = seed_unread(conn, account_id, inbox_id, 30)?;
+            Ok((archive_id, kept_id))
+        })
+        .await
+        .unwrap();
+
+    let tree = crate::search::parse("invoice from:ana").tree.unwrap();
+    let mut session = connect(&ctx, &config).await.unwrap();
+    let first = search_server(
+        &ctx,
+        &config,
+        &mut session,
+        &tree,
+        &ServerSearchCursor::default(),
+        3,
+    )
+    .await
+    .unwrap();
+    let next = first
+        .next
+        .clone()
+        .expect("the search stopped after one page");
+    let mut below = next.below.clone();
+    below.sort_unstable();
+    // Archive has nothing new left.
+    let mut expected = vec![(inbox_id, 20), (archive_id, 5)];
+    expected.sort_unstable();
+    assert_eq!(below, expected);
+    let second = search_server(&ctx, &config, &mut session, &tree, &next, 3)
+        .await
+        .unwrap();
+    assert_eq!(second.next, None);
+    imap::logout(session).await;
+    server.await.unwrap();
+
+    let commands = commands.lock().unwrap().clone();
+    let mut headers_fetched = commands
+        .iter()
+        .filter(|command| command.contains("HEADER.FIELDS"))
+        .map(|command| command.split_whitespace().nth(3).unwrap())
+        .collect::<Vec<_>>();
+    headers_fetched.sort_unstable();
+    // 30 is kept here already.
+    assert_eq!(headers_fetched, ["10", "20", "5,7"]);
+    assert!(
+        selected_folders(&commands)
+            .iter()
+            .all(|name| *name != "Trash")
+    );
+
+    assert!(first.message_ids.contains(&kept_id));
+    let (first_found, second_found, archive_seen) = ctx
+        .db
+        .read(move |conn| {
+            let place = |ids: &[i64]| -> crate::Result<Vec<(i64, i64)>> {
+                let mut places = ids
+                    .iter()
+                    .map(|id| {
+                        let row = repo::messages::get_row(conn, *id)?.unwrap();
+                        Ok((row.folder_id.unwrap(), row.uid.unwrap()))
+                    })
+                    .collect::<crate::Result<Vec<_>>>()?;
+                places.sort_unstable();
+                Ok(places)
+            };
+            Ok((
+                place(&first.message_ids)?,
+                place(&second.message_ids)?,
+                repo::folders::get(conn, archive_id)?.unwrap().last_seen_uid,
+            ))
+        })
+        .await
+        .unwrap();
+    // The newest three not kept here, and 30 on the way.
+    let mut expected = vec![
+        (inbox_id, 30),
+        (inbox_id, 20),
+        (archive_id, 7),
+        (archive_id, 5),
+    ];
+    expected.sort_unstable();
+    assert_eq!(first_found, expected);
+    assert_eq!(second_found, [(inbox_id, 10)]);
+    assert_eq!(
+        archive_seen, 0,
+        "found mail moved the folder's sync position"
+    );
+}
+
+/// Issue #371: a server can list thousands of shared folders. With
+/// subscribed folders only, the account lists the folders the user
+/// subscribed to, the Inbox, a folder for each purpose mail is filed into,
+/// and those its rules file into. The others go from this device with their
+/// mail, unless queued work still involves them, and LIST-STATUS asks the
+/// server about the listed folders alone.
+#[tokio::test]
+async fn subscribed_folders_only_lists_and_syncs_just_those() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let server = serve(listener, commands.clone(), move |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => format!(
+                "* CAPABILITY IMAP4rev1 LIST-EXTENDED LIST-STATUS\r\n{tag} OK capability\r\n"
+            ),
+            "LIST" if command.contains(" RETURN ") => format!(
+                "* LIST () \"/\" INBOX\r\n\
+                 * STATUS INBOX (MESSAGES 1 UIDNEXT 2 UNSEEN 0 UIDVALIDITY 7)\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            "LIST" => format!(
+                "* LIST (\\HasNoChildren) \"/\" INBOX\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Projects\r\n\
+                 * LIST (\\Noselect \\HasChildren) \"/\" Shared\r\n\
+                 * LIST (\\HasChildren) \"/\" \"Shared/alice\"\r\n\
+                 * LIST (\\HasNoChildren) \"/\" \"Shared/alice/Reports\"\r\n\
+                 * LIST (\\HasNoChildren) \"/\" \"Shared/alice/Trash\"\r\n\
+                 * LIST (\\HasNoChildren) \"/\" \"Shared/bob\"\r\n\
+                 * LIST (\\HasNoChildren \\Trash) \"/\" Bin\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Receipts\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Busy\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            // A subscription can outlive its folder.
+            "LSUB" => format!(
+                "* LSUB () \"/\" Projects\r\n\
+                 * LSUB () \"/\" \"Shared/alice/Reports\"\r\n\
+                 * LSUB () \"/\" Gone\r\n\
+                 {tag} OK lsub completed\r\n"
+            ),
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+
+    let (_dir, ctx, config, _inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let (alice_mail, bob_id, bob_mail, busy_id) = ctx
+        .db
+        .write(move |conn| {
+            let alice_id = synced_folder(conn, account_id, "Shared/alice", 2, 1, 1)?;
+            let alice_mail = seed_unread(conn, account_id, alice_id, 1)?;
+            let bob_id = synced_folder(conn, account_id, "Shared/bob", 2, 1, 1)?;
+            let bob_mail = seed_unread(conn, account_id, bob_id, 1)?;
+            let busy_id = synced_folder(conn, account_id, "Busy", 2, 1, 1)?;
+            let busy_mail = seed_unread(conn, account_id, busy_id, 1)?;
+            repo::actions::enqueue(
+                conn,
+                account_id,
+                "markRead",
+                Some(busy_mail),
+                None,
+                &serde_json::json!({}),
+                None,
+            )?;
+            let receipts_id = synced_folder(conn, account_id, "Receipts", 2, 1, 1)?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(account_id),
+                    name: "Receipts".into(),
+                    enabled: false,
+                    match_all: true,
+                    conditions: Vec::new(),
+                    actions: vec![RuleAction::Move {
+                        folder: receipts_id,
+                    }],
+                    stop: true,
+                },
+                0,
+            )?;
+            Ok((alice_mail, bob_id, bob_mail, busy_id))
+        })
+        .await
+        .unwrap();
+    let mut events = ctx.bus.subscribe();
+
+    let mut session = connect(&ctx, &config).await.unwrap();
+    discover_folders(&ctx, &config, &mut session, true)
+        .await
+        .unwrap();
+    let listed = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await
+        .unwrap();
+    let mut paths = listed
+        .iter()
+        .map(|folder| (folder.path.as_str(), folder.selectable))
+        .collect::<Vec<_>>();
+    paths.sort();
+    assert_eq!(
+        paths,
+        [
+            ("Bin", true),
+            // Queued work still involves it.
+            ("Busy", true),
+            ("INBOX", true),
+            ("Projects", true),
+            ("Receipts", true),
+            ("Shared", false),
+            // Only the container of a subscribed folder now.
+            ("Shared/alice", false),
+            ("Shared/alice/Reports", true),
+        ]
+    );
+    assert!(listed.iter().any(|folder| folder.id == busy_id));
+    assert!(matches!(events.try_recv(), Ok(CoreEvent::SyncProgress(_))));
+    assert!(matches!(
+        events.try_recv(),
+        Ok(CoreEvent::MailUpdated { .. })
+    ));
+    ctx.db
+        .read(move |conn| {
+            assert!(repo::messages::get_row(conn, alice_mail)?.is_none());
+            assert!(repo::messages::get_row(conn, bob_mail)?.is_none());
+            assert!(repo::folders::get(conn, bob_id)?.is_none());
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // Each cycle asks about the listed folders alone.
+    let synced = listed
+        .iter()
+        .filter(|folder| folder.selectable)
+        .collect::<Vec<_>>();
+    let reported = report_folders(&mut session, &synced, true, true).await;
+    assert!(reported.contains_key("INBOX"));
+
+    // Showing every folder again lists the others anew.
+    discover_folders(&ctx, &config, &mut session, false)
+        .await
+        .unwrap();
+    imap::logout(session).await;
+    server.await.unwrap();
+    let listed = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await
+        .unwrap();
+    assert!(listed.iter().any(|folder| folder.path == "Shared/bob"));
+    assert!(
+        listed
+            .iter()
+            .any(|folder| folder.path == "Shared/alice/Trash")
+    );
+
+    let commands = commands.lock().unwrap().clone();
+    let status = commands
+        .iter()
+        .find(|command| command.contains(" RETURN "))
+        .unwrap();
+    assert!(
+        status.starts_with(&format!(
+            "{} LIST \"\" (",
+            status.split_whitespace().next().unwrap()
+        )),
+        "{status:?}"
+    );
+    for path in [
+        "INBOX",
+        "Projects",
+        "Shared/alice/Reports",
+        "Bin",
+        "Receipts",
+        "Busy",
+    ] {
+        assert!(status.contains(&format!("\"{path}\"")), "{status:?}");
+    }
+    assert!(
+        !status.contains("bob") && !status.contains('*'),
+        "{status:?}"
+    );
+    assert_eq!(
+        commands
+            .iter()
+            .filter(|command| command.split_whitespace().nth(1) == Some("LSUB"))
+            .count(),
+        1,
+        "only the subscribed-only listing reads subscriptions: {commands:?}"
+    );
+}
+
+/// The folders listed with subscribed folders only from a server that turns
+/// down LSUB, which RFC 9051 deprecates, and answers LIST (SUBSCRIBED) or
+/// not, by path, with the commands it got.
+async fn listed_without_lsub(list_subscribed: bool) -> (Vec<String>, Vec<String>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let server = serve(listener, commands.clone(), move |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => {
+                format!("* CAPABILITY IMAP4rev1 IMAP4rev2 LIST-EXTENDED\r\n{tag} OK capability\r\n")
+            }
+            "LSUB" => format!("{tag} BAD unknown command\r\n"),
+            "LIST" if command.contains("(SUBSCRIBED)") && list_subscribed => format!(
+                "* LIST (\\Subscribed) \"/\" Projects\r\n\
+                 * LIST (\\Subscribed \\NonExistent) \"/\" Archive\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            "LIST" if command.contains("(SUBSCRIBED)") => {
+                format!("{tag} BAD unknown selection option\r\n")
+            }
+            "LIST" => format!(
+                "* LIST (\\HasNoChildren) \"/\" INBOX\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Projects\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Archive2\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Shared\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+    let (_dir, ctx, config, _inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let mut session = connect(&ctx, &config).await.unwrap();
+    discover_folders(&ctx, &config, &mut session, true)
+        .await
+        .unwrap();
+    imap::logout(session).await;
+    server.await.unwrap();
+    let mut paths = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|folder| folder.path)
+        .collect::<Vec<_>>();
+    paths.sort();
+    let commands = commands.lock().unwrap().clone();
+    (paths, commands)
+}
+
+#[tokio::test]
+async fn subscriptions_come_from_list_subscribed_when_lsub_is_refused() {
+    let (paths, commands) = listed_without_lsub(true).await;
+    assert_eq!(paths, ["INBOX", "Projects"]);
+    assert!(
+        commands
+            .iter()
+            .any(|command| command.contains(" LIST (SUBSCRIBED) \"\" \"*\"")),
+        "{commands:?}"
+    );
+}
+
+/// A server that keeps no subscriptions has every folder listed rather than
+/// stop the account's sync.
+#[tokio::test]
+async fn without_subscriptions_on_the_server_every_folder_is_listed() {
+    let (paths, _) = listed_without_lsub(false).await;
+    assert_eq!(paths, ["Archive2", "INBOX", "Projects", "Shared"]);
 }

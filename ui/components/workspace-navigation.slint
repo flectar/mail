@@ -42,7 +42,7 @@ component ProductRailItem inherits Rectangle {
             source: root.active ? root.filled-icon : root.outline-icon;
             colorize: root.active ? root.accent-color : root.muted-color;
             animate colorize { duration: 140ms; easing: ease-out; }
-            animate width, height { duration: 180ms; easing: spring(0.12); }
+            animate width, height { duration: 180ms; easing: spring(0.12); enabled: MotionSettings.movement; }
             image-fit: contain;
             accessible-role: none;
         }
@@ -62,7 +62,6 @@ component ProductRailItem inherits Rectangle {
 // competing with the context-specific sidebar immediately to its right.
 export component ProductRail inherits Rectangle {
     in-out property <string> active-view: "mail";
-    in property <bool> settings-active: false;
     in property <color> background-color;
     in property <color> divider-color;
     in property <color> accent-color;
@@ -109,7 +108,7 @@ export component ProductRail inherits Rectangle {
             label: @tr("Mail");
             outline-icon: @image-url("../icons/lucide/outline/mail.svg");
             filled-icon: @image-url("../icons/lucide/filled/mail.svg");
-            active: !root.settings-active && root.active-view == "mail";
+            active: root.active-view == "mail";
             accent-color: root.accent-color;
             accent-background: root.accent-background;
             muted-color: root.muted-color;
@@ -120,7 +119,7 @@ export component ProductRail inherits Rectangle {
             label: @tr("Calendar");
             outline-icon: @image-url("../icons/lucide/outline/calendar.svg");
             filled-icon: @image-url("../icons/lucide/filled/calendar.svg");
-            active: !root.settings-active && root.active-view == "calendar";
+            active: root.active-view == "calendar";
             accent-color: root.accent-color;
             accent-background: root.accent-background;
             muted-color: root.muted-color;
@@ -131,7 +130,7 @@ export component ProductRail inherits Rectangle {
             label: @tr("Files");
             outline-icon: @image-url("../icons/lucide/outline/files.svg");
             filled-icon: @image-url("../icons/lucide/filled/files.svg");
-            active: !root.settings-active && root.active-view == "files";
+            active: root.active-view == "files";
             accent-color: root.accent-color;
             accent-background: root.accent-background;
             muted-color: root.muted-color;
@@ -142,7 +141,7 @@ export component ProductRail inherits Rectangle {
             label: @tr("Contacts");
             outline-icon: @image-url("../icons/lucide/outline/contacts.svg");
             filled-icon: @image-url("../icons/lucide/filled/contacts.svg");
-            active: !root.settings-active && root.active-view == "contacts";
+            active: root.active-view == "contacts";
             accent-color: root.accent-color;
             accent-background: root.accent-background;
             muted-color: root.muted-color;
@@ -156,7 +155,7 @@ export component ProductRail inherits Rectangle {
             label: @tr("Settings");
             outline-icon: @image-url("../icons/lucide/outline/gear.svg");
             filled-icon: @image-url("../icons/lucide/filled/gear.svg");
-            active: root.settings-active;
+            active: root.active-view == "settings";
             accent-color: root.accent-color;
             accent-background: root.accent-background;
             muted-color: root.muted-color;
@@ -203,7 +202,7 @@ component CompactProductNavItem inherits Rectangle {
             source: root.active ? root.filled-icon : root.outline-icon;
             colorize: root.active ? root.accent-color : root.muted-color;
             animate colorize { duration: 140ms; easing: ease-out; }
-            animate width, height { duration: 180ms; easing: spring(0.12); }
+            animate width, height { duration: 180ms; easing: spring(0.12); enabled: MotionSettings.movement; }
             image-fit: contain;
             accessible-role: none;
         }
@@ -241,7 +240,6 @@ component CompactProductNavItem inherits Rectangle {
 
 export component CompactProductNav inherits Rectangle {
     in-out property <string> active-view: "mail";
-    in property <bool> settings-active: false;
     in property <color> background-color;
     in property <color> divider-color;
     in property <color> accent-color;
@@ -278,7 +276,7 @@ export component CompactProductNav inherits Rectangle {
             label: @tr("Mail");
             outline-icon: @image-url("../icons/lucide/outline/mail.svg");
             filled-icon: @image-url("../icons/lucide/filled/mail.svg");
-            active: !root.settings-active && root.active-view == "mail";
+            active: root.active-view == "mail";
             accent-color: root.accent-color;
             active-background: root.accent-background;
             muted-color: root.muted-color;
@@ -290,7 +288,7 @@ export component CompactProductNav inherits Rectangle {
             label: @tr("Calendar");
             outline-icon: @image-url("../icons/lucide/outline/calendar.svg");
             filled-icon: @image-url("../icons/lucide/filled/calendar.svg");
-            active: !root.settings-active && root.active-view == "calendar";
+            active: root.active-view == "calendar";
             accent-color: root.accent-color;
             active-background: root.accent-background;
             muted-color: root.muted-color;
@@ -302,7 +300,7 @@ export component CompactProductNav inherits Rectangle {
             label: @tr("Files");
             outline-icon: @image-url("../icons/lucide/outline/files.svg");
             filled-icon: @image-url("../icons/lucide/filled/files.svg");
-            active: !root.settings-active && root.active-view == "files";
+            active: root.active-view == "files";
             accent-color: root.accent-color;
             active-background: root.accent-background;
             muted-color: root.muted-color;
@@ -314,7 +312,7 @@ export component CompactProductNav inherits Rectangle {
             label: @tr("Contacts");
             outline-icon: @image-url("../icons/lucide/outline/contacts.svg");
             filled-icon: @image-url("../icons/lucide/filled/contacts.svg");
-            active: !root.settings-active && root.active-view == "contacts";
+            active: root.active-view == "contacts";
             accent-color: root.accent-color;
             active-background: root.accent-background;
             muted-color: root.muted-color;
@@ -326,7 +324,7 @@ export component CompactProductNav inherits Rectangle {
             label: @tr("Settings");
             outline-icon: @image-url("../icons/lucide/outline/gear.svg");
             filled-icon: @image-url("../icons/lucide/filled/gear.svg");
-            active: root.settings-active;
+            active: root.active-view == "settings";
             accent-color: root.accent-color;
             active-background: root.accent-background;
             muted-color: root.muted-color;
@@ -492,7 +490,7 @@ component TabItem inherits Rectangle {
         width: parent.width;
         height: parent.height;
         animate x {
-            duration: MotionSettings.enabled && root.reordering && !hit.dragging ? 160ms : 0ms;
+            duration: MotionSettings.movement && root.reordering && !hit.dragging ? 160ms : 0ms;
             easing: ease-out;
         }
 
@@ -628,8 +626,8 @@ component TabItem inherits Rectangle {
                 Image {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
-                    width: 12px;
-                    height: 12px;
+                    width: 16px;
+                    height: 16px;
                     source: @image-url("../icons/lucide/outline/x.svg");
                     colorize: close-hit.has-hover ? root.title-color : root.text-color;
                     accessible-role: none;

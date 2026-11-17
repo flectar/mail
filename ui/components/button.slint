@@ -1,5 +1,5 @@
 import { HorizontalBox } from "std-widgets.slint";
-import { AppTheme, LayoutMetrics, ThemeUtilities } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MotionSettings, ThemeUtilities } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 
@@ -13,6 +13,9 @@ export component Button inherits Rectangle {
     in property <bool> primary: false;
     in property <bool> destructive: false;
     in property <bool> selected: false;
+    // A button that is on or off, such as one of a set of choices: it
+    // reads as checked while selected.
+    in property <bool> checkable: false;
     in property <bool> enabled: true;
     // A button that fills a fixed-width column may elide a label that does
     // not fit there; other buttons are given room for the whole label.
@@ -44,6 +47,8 @@ export component Button inherits Rectangle {
     animate background { duration: 120ms; easing: ease-out; }
     accessible-role: button;
     accessible-label: root.text;
+    accessible-checkable: root.checkable;
+    accessible-checked: root.checkable && root.selected;
     accessible-action-default => {
         if root.enabled {
             root.clicked();
@@ -52,7 +57,7 @@ export component Button inherits Rectangle {
 
     label-row := HorizontalBox {
         y: button-area.pressed ? 1px : 0px;
-        animate y { duration: 140ms; easing: spring(0); }
+        animate y { duration: 140ms; easing: spring(0); enabled: MotionSettings.movement; }
         padding-left: 12px;
         padding-right: 12px;
         spacing: 7px;

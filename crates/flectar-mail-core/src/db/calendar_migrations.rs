@@ -140,6 +140,14 @@ CREATE INDEX idx_calendar_actions_due
 "#,
     ),
     Migration::TableRebuild(include_str!("migrations/calendar_002_connections.sql")),
+    Migration::Plain(include_str!(
+        "migrations/calendar_003_invitation_dtstamp.sql"
+    )),
+    Migration::Plain(include_str!("migrations/calendar_004_scheduling.sql")),
+    Migration::Plain(include_str!("migrations/calendar_005_series_uid.sql")),
+    Migration::Plain(include_str!(
+        "migrations/calendar_006_message_calendars.sql"
+    )),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -230,6 +238,7 @@ mod tests {
             "calendar_events",
             "calendar_secret_moves",
             "calendars",
+            "message_calendars",
             "pending_actions",
         ]
         .into_iter()

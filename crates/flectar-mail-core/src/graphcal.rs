@@ -228,7 +228,17 @@ async fn sync_calendar(
                             });
                         }
                         if let Some(master) = &ev.series_master_id {
-                            repo::calendar::set_series_master(&tx, calendar_id, &ev.id, master)?;
+                            let series = ev
+                                .ical_uid
+                                .as_deref()
+                                .map_or_else(|| master.clone(), series_uid);
+                            repo::calendar::set_series_master(
+                                &tx,
+                                calendar_id,
+                                &ev.id,
+                                master,
+                                &series,
+                            )?;
                         }
                     }
                     tx.commit()?;
@@ -273,13 +283,75 @@ async fn sync_calendar(
     Ok((changed_any, new_events))
 }
 
+/// The class id every Exchange meeting's GlobalObjectId starts with
+/// (MS-OXOCAL 2.2.1.27).
+const GLOBAL_OBJECT_ID_CLASS: [u8; 16] = [
+    0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82, 0xE0, 0x08,
+];
+
+/// The iCalendar UID a meeting got from outside Exchange, when `ical_uid`
+/// is the hex form of the GlobalObjectId Exchange keeps it in. After the
+/// class id, a date, a creation time and eight reserved bytes come the
+/// data's length and the data, which for such a UID is "vCal-Uid", then
+/// 01 00 00 00, then the UID (MS-OXCICAL 2.1.3.1.1.20.26). A meeting made in
+/// Exchange has no such data: its hex id is its UID.
+fn third_party_uid(ical_uid: &str) -> Option<String> {
+    if ical_uid.len() < 80 || !ical_uid.len().is_multiple_of(2) {
+        return None;
+    }
+    let bytes = (0..ical_uid.len())
+        .step_by(2)
+        .map(|at| {
+            ical_uid
+                .get(at..at + 2)
+                .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+        })
+        .collect::<Option<Vec<u8>>>()?;
+    if bytes.get(..16)? != GLOBAL_OBJECT_ID_CLASS {
+        return None;
+    }
+    let size = u32::from_le_bytes(bytes.get(36..40)?.try_into().ok()?) as usize;
+    let data = bytes.get(40..40usize.checked_add(size)?)?;
+    let uid = data.strip_prefix(b"vCal-Uid\x01\x00\x00\x00")?;
+    let uid = std::str::from_utf8(uid).ok()?.trim_end_matches('\0');
+    (!uid.is_empty()).then(|| uid.to_string())
+}
+
+/// The UID of the series an occurrence's iCalUId belongs to: the UID its
+/// invitation carried, or, for a meeting made in Exchange, Exchange's id for
+/// the series, which is the occurrence's with its date left out
+/// (PidLidCleanGlobalObjectId, MS-OXOCAL 2.2.1.28).
+fn series_uid(ical_uid: &str) -> String {
+    if let Some(uid) = third_party_uid(ical_uid) {
+        return uid;
+    }
+    let is_object_id = ical_uid.len() >= 80
+        && ical_uid.is_ascii()
+        && ical_uid[..32].eq_ignore_ascii_case(&hex(&GLOBAL_OBJECT_ID_CLASS));
+    if !is_object_id {
+        return ical_uid.to_string();
+    }
+    // Bytes 16 to 19 hold the occurrence's date.
+    format!("{}00000000{}", &ical_uid[..32], &ical_uid[40..]).to_ascii_uppercase()
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02X}")).collect()
+}
+
 /// Map a Graph delta event onto the shared calendar row shape. Occurrences
 /// and exceptions of a series all share one iCalUId, so their local uid is
 /// the (unique) Graph id instead - only single instances keep the iCalUId,
 /// which lets the row adopt an earlier mail-invite copy of the same event.
+/// A meeting from outside Exchange is known by the UID its invitation
+/// carried, which Exchange keeps inside its own id.
 fn ics_event(ev: &graph::DeltaEvent) -> IcsEvent {
     let uid = match ev.event_type.as_deref() {
-        Some("singleInstance") | None => ev.ical_uid.clone().unwrap_or_else(|| ev.id.clone()),
+        Some("singleInstance") | None => ev
+            .ical_uid
+            .clone()
+            .map(|uid| third_party_uid(&uid).unwrap_or(uid))
+            .unwrap_or_else(|| ev.id.clone()),
         _ => ev.id.clone(),
     };
     IcsEvent {
@@ -288,6 +360,8 @@ fn ics_event(ev: &graph::DeltaEvent) -> IcsEvent {
         summary: ev.subject.clone(),
         location: ev.location.clone(),
         organizer: ev.organizer_email.clone(),
+        organizer_name: None,
+        dtstamp_ms: None,
         description: ev.body_preview.clone(),
         attendees: ev
             .attendees
@@ -296,6 +370,7 @@ fn ics_event(ev: &graph::DeltaEvent) -> IcsEvent {
                 email: email.clone(),
                 name: name.clone(),
                 partstat: partstat.clone(),
+                ..Default::default()
             })
             .collect(),
         join_url: ev.join_url.clone(),
@@ -314,5 +389,67 @@ fn ics_event(ev: &graph::DeltaEvent) -> IcsEvent {
             }
             .to_string(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A GlobalObjectId as Exchange builds it, in hex, around `data`.
+    fn global_object_id(data: &[u8]) -> String {
+        occurrence_object_id([0; 4], data)
+    }
+
+    /// The same for one occurrence: `date` is its year (two bytes), month
+    /// and day.
+    fn occurrence_object_id(date: [u8; 4], data: &[u8]) -> String {
+        let mut bytes = GLOBAL_OBJECT_ID_CLASS.to_vec();
+        bytes.extend(date);
+        bytes.extend([0x10, 0x8D, 0x2B, 0x33, 0x45, 0x67, 0xDC, 0x01]); // creation time
+        bytes.extend([0; 8]);
+        bytes.extend((data.len() as u32).to_le_bytes());
+        bytes.extend(data);
+        bytes.iter().map(|byte| format!("{byte:02X}")).collect()
+    }
+
+    #[test]
+    fn a_meeting_from_outside_exchange_keeps_its_own_uid() {
+        let mut data = b"vCal-Uid\x01\x00\x00\x00".to_vec();
+        data.extend(b"review-1@example.com\0");
+        let hex = global_object_id(&data);
+        assert_eq!(
+            third_party_uid(&hex).as_deref(),
+            Some("review-1@example.com")
+        );
+        assert_eq!(
+            third_party_uid(&hex.to_ascii_lowercase()).as_deref(),
+            Some("review-1@example.com")
+        );
+
+        // A meeting made in Exchange, and anything else, keeps its iCalUId.
+        let native = global_object_id(&[0x3A, 0x9F, 0x01, 0xC4, 0x77, 0x0E, 0x5B, 0x12]);
+        assert_eq!(third_party_uid(&native), None);
+        assert_eq!(third_party_uid("review-1@example.com"), None);
+        assert_eq!(third_party_uid(&hex[..hex.len() - 4]), None, "cut short");
+    }
+
+    #[test]
+    fn an_occurrence_belongs_to_the_series_its_invitation_named() {
+        let november_16 = [0x07, 0xEA, 0x0B, 0x10];
+        let mut data = b"vCal-Uid\x01\x00\x00\x00".to_vec();
+        data.extend(b"weekly@example.com\0");
+        assert_eq!(
+            series_uid(&occurrence_object_id(november_16, &data)),
+            "weekly@example.com"
+        );
+
+        // A series made in Exchange is its occurrences' id without the date.
+        let native = [0x3A, 0x9F, 0x01, 0xC4, 0x77, 0x0E, 0x5B, 0x12];
+        assert_eq!(
+            series_uid(&occurrence_object_id(november_16, &native).to_ascii_lowercase()),
+            global_object_id(&native)
+        );
+        assert_eq!(series_uid("weekly@example.com"), "weekly@example.com");
     }
 }

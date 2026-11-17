@@ -535,6 +535,35 @@ pub(super) unsafe extern "C" fn set_color_scheme(
     }
 }
 
+/// `reduceMotion(reduced)`: report the accessibility setting that asks apps
+/// for less animation.
+pub(super) unsafe extern "C" fn reduce_motion(
+    env: napi_env,
+    info: ffi::napi_callback_info,
+) -> napi_value {
+    // SAFETY: live NAPI env/info; argv holds one boolean.
+    unsafe {
+        let mut argc: usize = 1;
+        let mut argv: [napi_value; 1] = [core::ptr::null_mut()];
+        if ffi::napi_get_cb_info(
+            env,
+            info,
+            &mut argc,
+            argv.as_mut_ptr(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        ) == ffi::NAPI_OK
+            && argc >= 1
+        {
+            let mut reduced = false;
+            if ffi::napi_get_value_bool(env, argv[0], &mut reduced) == ffi::NAPI_OK {
+                flectar_mail::platform::set_reduce_motion(reduced);
+            }
+        }
+        undefined(env)
+    }
+}
+
 /// `suspendPreview()`: the app is leaving the foreground; release any preview
 /// resource the core keeps alive.
 pub(super) unsafe extern "C" fn suspend_preview(

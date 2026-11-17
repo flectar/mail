@@ -80,7 +80,7 @@ flectar-mail-sync-crypto = { git = "https://github.com/flectar/mail-sync-client"
 hostname = "0.4"
 
 # misc
-ammonia = "4.1.8"
+ammonia = "4.1.9"
 deunicode = "1"
 rand = "0.9"
 regex = "1"

@@ -390,14 +390,21 @@ pub fn export_html(html: &str, print: bool) -> String {
     output
 }
 
+/// The largest message whose style sheets a quote copies onto its elements.
+/// Replies are built as the composer opens, so bigger ones skip that work.
+const MAX_INLINED_HTML_BYTES: usize = 2 * 1024 * 1024;
+
 /// A message's body as it goes inside a reply or forward: what lies within
 /// `<body>`, without the head, style sheets, scripts or event handlers, which
-/// would otherwise restyle or act in the message quoting it.
+/// would otherwise restyle or act in the message quoting it. The sheets' rules
+/// stay on the elements they style, and the body's colors and fonts on a
+/// `<div>` around the rest, so the original keeps its look.
 pub fn quoted_body(html: &str) -> String {
     struct Quote {
         output: String,
         in_head: bool,
         skipped: Option<html5ever::LocalName>,
+        wrapped: bool,
     }
     struct QuoteSink(RefCell<Quote>);
     impl TokenSink for QuoteSink {
@@ -429,7 +436,16 @@ pub fn quoted_body(html: &str) -> String {
                     }
                     match name {
                         "head" => quote.in_head = true,
-                        "body" => quote.in_head = false,
+                        "body" => {
+                            quote.in_head = false;
+                            let look = body_look(&tag.attrs);
+                            if !look.is_empty() && !quote.wrapped {
+                                quote.wrapped = true;
+                                quote.output.push_str("<div style=\"");
+                                append_escaped(&mut quote.output, &look);
+                                quote.output.push_str("\">");
+                            }
+                        }
                         "html" | "meta" | "base" | "link" => {}
                         _ if quote.in_head => {}
                         _ => {
@@ -458,17 +474,88 @@ pub fn quoted_body(html: &str) -> String {
             TokenSinkResult::Continue
         }
     }
+    let html = &html[..html.floor_char_boundary(html.len().min(MAX_HTML_BYTES))];
+    let inlined = inline_style_sheets(html);
+    let html = inlined.as_deref().unwrap_or(html);
     let sink = QuoteSink(RefCell::new(Quote {
         output: String::with_capacity(html.len()),
         in_head: false,
         skipped: None,
+        wrapped: false,
     }));
     let tokenizer = Tokenizer::new(sink, Default::default());
     let input = BufferQueue::default();
-    input.push_back(html[..html.floor_char_boundary(html.len().min(MAX_HTML_BYTES))].into());
+    input.push_back(html.into());
     let _ = tokenizer.feed(&input);
     tokenizer.end();
-    tokenizer.sink.0.into_inner().output
+    let mut quote = tokenizer.sink.0.into_inner();
+    if quote.wrapped {
+        quote.output.push_str("</div>");
+    }
+    quote.output
+}
+
+/// `html` with its style sheets' rules copied onto the elements they match,
+/// or `None` when it has no sheet or is too big to do that as a reply opens.
+fn inline_style_sheets(html: &str) -> Option<String> {
+    if html.len() > MAX_INLINED_HTML_BYTES || !contains_ascii_case_insensitive(html, b"<style") {
+        return None;
+    }
+    css_inline::CSSInliner::options()
+        // Only the message's own sheets: linked ones are never fetched.
+        .load_remote_stylesheets(false)
+        // The sheets that define custom properties are left out of the quote.
+        .resolve_css_variables(true)
+        .minify_css(true)
+        .build()
+        .inline(html)
+        .ok()
+}
+
+/// The colors and fonts a message's `<body>` gives all of it, as CSS for a
+/// `<div>` around its quote. Its size, spacing and images stay out.
+fn body_look(attributes: &[html5ever::Attribute]) -> String {
+    let mut look = String::new();
+    let mut add = |name: &str, value: &str| {
+        look.push_str(name);
+        look.push(':');
+        look.push_str(value);
+        look.push(';');
+    };
+    // The legacy attributes come first, so the body's own CSS overrides them.
+    for attribute in attributes {
+        let value = attribute.value.trim();
+        let plain = !value.is_empty()
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'#');
+        match attribute.name.local.as_str() {
+            "bgcolor" if plain => add("background-color", value),
+            "text" if plain => add("color", value),
+            _ => {}
+        }
+    }
+    for attribute in attributes {
+        if attribute.name.local.as_str() != "style" {
+            continue;
+        }
+        for declaration in attribute.value.split(';') {
+            let Some((name, value)) = declaration.split_once(':') else {
+                continue;
+            };
+            let name = name.trim().to_ascii_lowercase();
+            let value = value.trim();
+            let kept = match name.as_str() {
+                "background-color" | "color" | "font-family" | "font-size" | "line-height" => true,
+                "background" => !contains_ascii_case_insensitive(value, b"url("),
+                _ => false,
+            };
+            if kept && !value.is_empty() {
+                add(&name, value);
+            }
+        }
+    }
+    look
 }
 
 #[cfg(test)]
@@ -512,19 +599,56 @@ mod tests {
         }
     }
     #[test]
-    fn quoted_bodies_keep_the_body_without_head_styles_or_handlers() {
+    fn quoted_bodies_keep_the_body_and_its_styles_without_head_or_handlers() {
         let html = "<!doctype html><html><head><title>Sale</title><style>p{color:red}</style>\
             <meta charset=utf-8></head><body style=\"margin:0\"><p class=\"lead\" onclick=\"x()\">\
             Hello &amp; <b>welcome</b></p><style>.x{}</style><img src=\"data:image/png;base64,AA\" alt=\"a&quot;b\">\
             <script>alert(1)</script><br></body></html>";
         assert_eq!(
             quoted_body(html),
-            "<p class=\"lead\">Hello &amp; <b>welcome</b></p><img src=\"data:image/png;base64,AA\" alt=\"a&quot;b\"><br>"
+            "<p class=\"lead\" style=\"color:red\">Hello &amp; <b>welcome</b></p><img src=\"data:image/png;base64,AA\" alt=\"a&quot;b\"><br>"
         );
         assert_eq!(
             quoted_body("<div>Fragment</div> text"),
             "<div>Fragment</div> text"
         );
+    }
+    #[test]
+    fn quoted_outlook_paragraphs_keep_their_spacing_and_font() {
+        // Outlook spaces paragraphs only through its style sheet.
+        let html = "<html><head><style><!--\np.MsoNormal, li.MsoNormal\n\t{margin:0cm;\n\t\
+            font-size:11.0pt;\n\tfont-family:\"Calibri\",sans-serif;}\n--></style></head>\
+            <body lang=\"EN-GB\" style=\"word-wrap:break-word\"><div class=\"WordSection1\">\
+            <p class=\"MsoNormal\">Hi Maya,<o:p></o:p></p><p class=\"MsoNormal\"><o:p>&nbsp;</o:p></p>\
+            </div></body></html>";
+        assert_eq!(
+            quoted_body(html),
+            "<div class=\"WordSection1\"><p class=\"MsoNormal\" style=\"margin:0cm;font-size:11.0pt;\
+            font-family:'Calibri',sans-serif\">Hi Maya,<o:p></o:p></p><p class=\"MsoNormal\" \
+            style=\"margin:0cm;font-size:11.0pt;font-family:'Calibri',sans-serif\"><o:p>\u{a0}</o:p></p></div>"
+        );
+    }
+    #[test]
+    fn quotes_keep_the_body_colors_and_fonts_but_not_its_size_or_images() {
+        let html = "<html><head><style>body{background:#101820;color:#f0f0f0;font-family:Georgia;\
+            height:100%}</style></head><body bgcolor=\"#000000\" text=\"red;position:fixed\" \
+            style=\"margin:0;background-image:url(https://t.example/p.gif)\"><p>Dark</p></body></html>";
+        assert_eq!(
+            quoted_body(html),
+            "<div style=\"background-color:#000000;background:#101820;color:#f0f0f0;font-family:Georgia;\">\
+            <p>Dark</p></div>"
+        );
+        // A body with nothing but spacing gets no wrapper.
+        assert_eq!(
+            quoted_body("<body style=\"margin:0\"><p>Light</p></body>"),
+            "<p>Light</p>"
+        );
+    }
+    #[test]
+    fn style_sheets_of_very_large_messages_are_left_out_of_quotes() {
+        let mut html = "<style>p{color:red}</style><p>x</p>".to_owned();
+        html.push_str(&"<br>".repeat(MAX_INLINED_HTML_BYTES / 4));
+        assert!(quoted_body(&html).starts_with("<p>x</p>"));
     }
     #[test]
     fn escaping_reserves_only_the_final_unicode_output() {

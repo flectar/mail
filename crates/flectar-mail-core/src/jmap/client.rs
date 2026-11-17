@@ -265,6 +265,25 @@ impl ConnectedClient {
         Ok(serde_json::from_slice(&body)?)
     }
 
+    /// Where the session downloads blob `blob_id` of the selected account,
+    /// named `name`, as `content_type`.
+    pub fn blob_url(&self, blob_id: &str, name: &str, content_type: &str) -> String {
+        use jmap_client::blob::URLParameter;
+        let mut url = String::with_capacity(
+            self.client.session().download_url().len() + self.account_id.len() + blob_id.len(),
+        );
+        for part in self.client.download_url() {
+            match part {
+                URLPart::Value(value) => url.push_str(value),
+                URLPart::Parameter(URLParameter::AccountId) => url.push_str(&self.account_id),
+                URLPart::Parameter(URLParameter::BlobId) => url.push_str(blob_id),
+                URLPart::Parameter(URLParameter::Name) => url.push_str(name),
+                URLPart::Parameter(URLParameter::Type) => url.push_str(content_type),
+            }
+        }
+        url
+    }
+
     /// Starts a download over the session's connection.
     pub fn get(&self, url: impl reqwest::IntoUrl) -> reqwest::RequestBuilder {
         self.http.get(url).timeout(self.timeout)

@@ -15,7 +15,13 @@ import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { LocalMailUi } from "../local-mail.slint";
+import { SavedSearchUi } from "../saved-searches.slint";
+import { ServerSearchUi } from "../server-search.slint";
+import { ActivitySpinner } from "../components/activity-spinner.slint";
+import { PullToRefresh } from "../components/pull-to-refresh.slint";
+import { SearchTips } from "../components/search-tips.slint";
 import { ImportActivity } from "../dialogs/import-dialog.slint";
+import { AutoReplyActivity } from "../auto-replies.slint";
 import { MovePickerUi } from "../dialogs/move-dialog.slint";
 import { SnoozeUi } from "../dialogs/when-dialog.slint";
 
@@ -298,17 +304,19 @@ component MailGroupHeader inherits Rectangle {
     }
 }
 
-// Ends a list whose older unread mail is only on the server: how much, and
-// the setting that downloads further back.
+// Ends a list whose older unread mail is only on the server, or starts one
+// shown oldest first: how much, and the setting that downloads further back.
 component ServerOnlyNote inherits Rectangle {
     in property <int> count;
     in property <color> text-color;
     in property <color> divider-color;
+    // The note starts the list, so its divider goes below it.
+    in property <bool> at-top: false;
     callback open-mail-history();
 
     Rectangle {
         x: 0px;
-        y: 0px;
+        y: root.at-top ? parent.height - self.height : 0px;
         width: parent.width;
         height: LayoutMetrics.divider-width;
         background: root.divider-color;
@@ -338,6 +346,103 @@ component ServerOnlyNote inherits Rectangle {
     }
 }
 
+// Ends a list of search results whose rows are all here, or sits under an
+// empty one's message: searching the servers past the mail this device
+// keeps, and how that went.
+component ServerSearchRow inherits Rectangle {
+    in property <color> text-color;
+    in property <color> divider-color;
+    // Below rows, centred under a divider; under an empty list's message, in
+    // line with it.
+    in property <bool> below-rows: true;
+    private property <string> stage: ServerSearchUi.stage;
+    private property <string> caption: root.stage == "failed"
+        ? (ServerSearchUi.failed-count == 1
+            ? @tr("Couldn't search {}: {}", ServerSearchUi.failed-account, ServerSearchUi.error)
+            : @tr("Couldn't search {n} account." | "Couldn't search {n} accounts." % ServerSearchUi.failed-count))
+        : (root.stage == "more" || root.stage == "done") && ServerSearchUi.found > 0
+            ? @tr("Found {n} more on the server." | "Found {n} more on the server." % ServerSearchUi.found)
+        : root.stage == "done" ? @tr("Nothing more on the server.")
+        : "";
+    private property <string> action: root.stage == "offer" ? @tr("Search on server")
+        : root.stage == "more" ? @tr("Search further")
+        : root.stage == "failed" ? @tr("Try again")
+        : "";
+
+    if root.below-rows : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: LayoutMetrics.divider-width;
+        background: root.divider-color;
+        accessible-role: none;
+    }
+    VerticalLayout {
+        alignment: center;
+        padding-left: root.below-rows ? 16px : 0px;
+        padding-right: root.below-rows ? 16px : 0px;
+        spacing: 10px;
+        if root.caption != "" : Text {
+            text: root.caption;
+            color: root.text-color;
+            font-size: TypeScale.secondary;
+            horizontal-alignment: root.below-rows ? center : left;
+            wrap: word-wrap;
+        }
+        if root.stage == "searching" : HorizontalLayout {
+            alignment: root.below-rows ? center : start;
+            spacing: 8px;
+            ActivitySpinner {
+                y: (parent.height - self.height) / 2;
+                color: root.text-color;
+            }
+            Text {
+                text: @tr("Searching the server…");
+                color: root.text-color;
+                font-size: TypeScale.secondary;
+                vertical-alignment: center;
+            }
+        }
+        if root.action != "" : HorizontalLayout {
+            alignment: root.below-rows ? center : start;
+            Button {
+                width: self.content-width;
+                text: root.action;
+                accessible-id: "mail-list-search-server";
+                clicked => { ServerSearchUi.search(); }
+            }
+        }
+    }
+}
+
+// Starts a list opened at a message further down, such as new mail a
+// notification shows in a list shown oldest first. The rows before it come
+// on request.
+component EarlierMailRow inherits Rectangle {
+    in property <color> divider-color;
+    callback show-earlier();
+
+    Rectangle {
+        x: 0px;
+        y: parent.height - self.height;
+        width: parent.width;
+        height: LayoutMetrics.divider-width;
+        background: root.divider-color;
+        accessible-role: none;
+    }
+    HorizontalLayout {
+        alignment: center;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        Button {
+            width: self.content-width;
+            text: @tr("Show earlier mail");
+            accessible-id: "mail-list-show-earlier";
+            clicked => { root.show-earlier(); }
+        }
+    }
+}
+
 // A focus scope only so message shortcuts work from anywhere in the pane.
 export component MailListPane inherits FocusScope {
     enabled: false;
@@ -348,6 +453,10 @@ export component MailListPane inherits FocusScope {
     in property <bool> preview-on-navigation: !root.compact;
     in property <bool> show-avatars: true;
     in property <bool> dense: false;
+    // Tighter rows, and how many lines of each message's text they show:
+    // none puts the chips beside the subject, more wraps the text.
+    in property <bool> compact-rows: false;
+    in property <int> preview-lines: 1;
     in property <bool> loading: false;
     in property <[EmailRow]> emails: [];
     in property <[MailListEntry]> list_entries: [];
@@ -357,7 +466,11 @@ export component MailListPane inherits FocusScope {
     in property <bool> trash_view: false;
     in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
+    // The list shows its oldest mail first.
+    in property <bool> oldest_first: false;
     in property <bool> sync_in_progress: false;
+    // An account's checks fail, as its sidebar heading shows.
+    in property <bool> account-problem: false;
     in property <bool> can_load_more: false;
     in property <bool> loading_more: false;
     // Only the pane on screen scrolls back for a shown tab; both exist.
@@ -390,8 +503,12 @@ export component MailListPane inherits FocusScope {
     callback open_email(int);
     callback search_changed(string);
     callback set_search_filter(string);
+    callback set_oldest_first(bool);
     callback load_more();
+    callback load_earlier();
     callback sync_mail();
+    // Checks the accounts in view for new mail, as F5 does.
+    callback check_mail_in_view();
     callback open_folders();
     callback open_compose();
     callback message_action_for_email(int, string);
@@ -414,8 +531,16 @@ export component MailListPane inherits FocusScope {
     private property <length> sender-line: max(22px, sender-line-probe.preferred-height);
     private property <length> subject-line: max(22px, subject-line-probe.preferred-height);
     private property <length> detail-line: max(20px, detail-line-probe.preferred-height);
+    private property <length> row-top: root.compact-rows ? 4px : 8px;
+    private property <length> line-gap: root.compact-rows ? 2px : 5px;
+    private property <length> row-bottom: root.compact-rows ? 8px : 14px;
+    private property <length> preview-height: max(0, root.preview-lines) * root.detail-line;
+    // Without a preview, the chips and account share the subject's line.
+    private property <bool> inline-detail: !root.dense && root.preview-lines <= 0;
+    private property <length> avatar-size: root.dense ? 28px : root.compact-rows ? 32px : 38px;
     private property <length> message-row-height: root.dense ? 44px
-        : 32px + root.sender-line + root.subject-line + root.detail-line;
+        : root.row-top + root.sender-line + root.line-gap + root.subject-line
+            + (root.inline-detail ? 0px : root.line-gap + root.preview-height) + root.row-bottom;
     private property <length> group-row-height: root.compact ? 44px : 40px;
     // A label shows only with room for the start of its name, and its gap.
     private property <length> label-least-width: label-probe.least-width + 4px;
@@ -537,7 +662,7 @@ export component MailListPane inherits FocusScope {
         list-keyboard.pointer-activated();
     }
 
-    animate bulk-toolbar-height { duration: 180ms; easing: spring(0); }
+    animate bulk-toolbar-height { duration: 180ms; easing: spring(0); enabled: MotionSettings.movement; }
 
     pagination := InfiniteScrollController {
         active: true;
@@ -716,6 +841,9 @@ export component MailListPane inherits FocusScope {
                                 : @image-url("../icons/lucide/outline/sidebar-collapse.svg");
                             leading-tooltip: root.mail_sidebar_collapsed ? @tr("Show folders") : @tr("Hide folders");
                             leading-accessible-id: "mail-folders-button";
+                            // The sidebar's account problems, while it is hidden.
+                            leading-badge: root.account-problem && (root.single-pane-navigation || root.mail_sidebar_collapsed);
+                            leading-badge-description: @tr("An account can't check mail");
                             text <=> root.search_query;
                             placeholder-text: @tr("Search mail");
                             filters: [
@@ -724,9 +852,16 @@ export component MailListPane inherits FocusScope {
                                 { title: @tr("Starred"), value: "Starred" },
                                 { title: @tr("Has attachments"), value: "Has attachments" },
                             ];
-                            filter-active: root.search_filter != "All mail";
-                            filter-tooltip: @tr("Filter mail");
+                            selected-filter: root.search_filter;
+                            // Search results span folders and stay newest first.
+                            show-sort: true;
+                            sort-enabled: root.search_query == "";
+                            oldest-first: root.oldest_first;
+                            filter-active: root.search_filter != "All mail" || root.oldest_first;
+                            filter-tooltip: @tr("Filter and sort mail");
                             filter-accessible-id: "mail-filter-button";
+                            show-save-search: true;
+                            show-search-tips: true;
                             refresh-enabled: !root.sync_in_progress;
                             refresh-tooltip: root.sync_in_progress ? @tr("Synchronizing mail") : @tr("Check for new mail");
                             refresh-accessible-id: "mail-refresh-button";
@@ -739,7 +874,41 @@ export component MailListPane inherits FocusScope {
                             }
                             edited(text) => { root.search_changed(text); }
                             filter-selected(value) => { root.set_search_filter(value); }
+                            sort-selected(oldest-first) => {
+                                if oldest-first != root.oldest_first {
+                                    root.set_oldest_first(oldest-first);
+                                    // The list starts over at the top in its new order.
+                                    root.reset-pagination();
+                                }
+                            }
                             refresh => { root.sync_mail(); }
+                            save-search => { SavedSearchUi.start-save(); }
+                            search-tips => { search-tips-popup.show(); }
+                        }
+
+                        search-tips-popup := PopupWindow {
+                            // Under the search field's end, inside the list.
+                            x: max(8px, search-toolbar.x + search-toolbar.width - self.width);
+                            y: parent.height;
+                            width: min(360px, parent.width - 16px);
+                            height: tips.height;
+                            close-policy: close-on-click-outside;
+                            forward-focus: tips-keys;
+
+                            tips-keys := FocusScope {
+                                key-pressed(event) => {
+                                    if event.text == Key.Escape {
+                                        search-tips-popup.close();
+                                        return accept;
+                                    }
+                                    reject
+                                }
+
+                                tips := SearchTips {
+                                    width: parent.width;
+                                    room: max(160px, root.height - search-tips-popup.y - 16px);
+                                }
+                            }
                         }
                     }
 
@@ -847,6 +1016,10 @@ export component MailListPane inherits FocusScope {
                                         }
                                     }
                                     MenuItem {
+                                        title: @tr("Forward as attachment");
+                                        activated => { root.bulk_message_action("forward_attachment"); }
+                                    }
+                                    MenuItem {
                                         title: SnoozeUi.view ? @tr("Unsnooze") : @tr("Snooze…");
                                         activated => {
                                             if SnoozeUi.view {
@@ -866,10 +1039,17 @@ export component MailListPane inherits FocusScope {
                     }
 
                     ImportActivity { compact: root.compact; }
+                    AutoReplyActivity { compact: root.compact; }
 
-                    Rectangle {
+                    PullToRefresh {
                         vertical-stretch: 1;
                         background: root.surface;
+                        // On phones, pulling the list down from its top checks the
+                        // accounts in view, as F5 does on a keyboard.
+                        enabled: root.compact && !root.loading && root.search_query == "";
+                        at-top: mail-list-scroll.content-y >= -1px;
+                        refreshing: root.sync_in_progress;
+                        refresh => { root.check_mail_in_view(); }
 
                         list-keyboard := FocusVisibleScope {
                             width: parent.width;
@@ -952,12 +1132,13 @@ export component MailListPane inherits FocusScope {
                                 private property <bool> shows-attachment: mail-data.attachment_total > 0
                                     && detail.width >= (mail-row.shows-code ? code-chip.natural-width + 4px : 0px)
                                         + attachment-chip.least-width + 4px;
-                                // Labels follow, one beside a chip, while each keeps room for
-                                // the start of its name; "+N" (26px) counts the rest.
+                                // Labels follow, one beside a chip or the subject, while each
+                                // keeps room for the start of its name; "+N" (26px) counts the
+                                // rest.
                                 private property <length> label-room: detail.width
                                     - (mail-row.shows-code ? code-chip.natural-width + 4px : 0px)
                                     - (mail-row.shows-attachment ? attachment-chip.preferred-width + 4px : 0px);
-                                private property <int> label-limit: !root.dense && !mail-row.shows-code && !mail-row.shows-attachment
+                                private property <int> label-limit: !root.dense && !root.inline-detail && !mail-row.shows-code && !mail-row.shows-attachment
                                     && mail-row.label-room >= 2 * root.label-least-width + (mail-data.labels.length > 2 ? 26px : 0px) ? 2
                                     : mail-row.label-room >= root.label-least-width + (mail-data.labels.length > 1 ? 26px : 0px) ? 1
                                     : 0;
@@ -967,8 +1148,11 @@ export component MailListPane inherits FocusScope {
                                 private property <float> touch-start-x: 0;
                                 private property <float> touch-start-y: 0;
                                 width: max(0px, mail-list-scroll.visible-width - LayoutMetrics.list-scrollbar-gutter);
-                                height: entry.is_header ? (entry.group_kind == "server-only" ? 100px : root.compact ? 44px : 40px)
-                                    : entry.show_row && (mail-row.reveal-ready || !MotionSettings.enabled)
+                                height: entry.is_header
+                                    ? (entry.group_kind == "server-only" ? 100px : entry.group_kind == "earlier" ? 56px
+                                        : entry.group_kind == "server-search" ? (ServerSearchUi.stage == "failed" || (ServerSearchUi.stage == "more" && ServerSearchUi.found > 0) ? 100px : 64px)
+                                        : root.compact ? 44px : 40px)
+                                    : entry.show_row && (mail-row.reveal-ready || !MotionSettings.movement)
                                         ? root.message-row-height : 0px;
                                 border-radius: 6px;
                                 clip: true;
@@ -977,7 +1161,7 @@ export component MailListPane inherits FocusScope {
                                 border-width: !entry.is_header && entry.show_row && list-keyboard.focus-visible && root.keyboard-email-id == mail-data.id ? 2px : 0px;
                                 border-color: root.accent;
                                 animate opacity { duration: 120ms; }
-                                animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.enabled; }
+                                animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.movement; }
                                 accessible-role: none;
 
                                 Rectangle {
@@ -995,7 +1179,8 @@ export component MailListPane inherits FocusScope {
                                             : ", " + @tr("Verification code {}", mail-data.verification_code_spelled))
                                         + (mail-data.has_attachments ? ", " + @tr("Has attachments") : "")
                                         + (mail-data.has_replied ? ", " + @tr("Replied") : "")
-                                        + (mail-data.reply_due ? ", " + @tr("No reply yet") : "");
+                                        + (mail-data.reply_due ? ", " + @tr("No reply yet") : "")
+                                        + (mail-data.high_importance ? ", " + @tr("High importance") : "");
                                     accessible-id: "mail-row-" + mail-data.id;
                                     accessible-item-index: entry.email_index;
                                     accessible-item-selectable: true;
@@ -1040,13 +1225,13 @@ export component MailListPane inherits FocusScope {
                                 Avatar {
                                     visible: !entry.is_header && root.show-avatars;
                                     x: 14px;
-                                    y: root.dense ? 8px : 12px;
-                                    size: root.dense ? 28px : 38px;
+                                    y: root.dense ? 8px : root.row-top + 4px;
+                                    size: root.avatar-size;
                                     source: root.dense ? mail-data.favicon_small : mail-data.favicon;
                                     has-source: mail-data.has_favicon;
                                     fallback: mail-data.initials;
                                     image-fit: contain;
-                                    background-color: mail-data.has_favicon ? #ffffff : (mail-data.selected ? root.avatar-selected-bg : root.avatar-bg);
+                                    background-color: mail-data.selected ? root.avatar-selected-bg : root.avatar-bg;
                                     foreground-color: mail-data.selected ? root.accent : root.secondary-text;
                                     avatar-border-width: mail-data.has_favicon ? 1px : 0px;
                                     avatar-border-color: root.border;
@@ -1130,15 +1315,23 @@ export component MailListPane inherits FocusScope {
                                                 // Dense rows keep everything on one line: the account
                                                 // comes before the indicators, thread count and time,
                                                 // and the subject and preview end before it.
-                                                property <length> dense-account-x: (sender-indicators.width > 0px ? sender-indicators.x
-                                                    : mail-data.message_count > 1 ? thread-count.x : sender-time.x) - 54px;
+                                                // Where the sender line's indicators, thread count and
+                                                // time begin.
+                                                property <length> line-one-end: sender-indicators.width > 0px ? sender-indicators.x
+                                                    : mail-data.message_count > 1 ? thread-count.x : sender-time.x;
+                                                property <length> dense-account-x: self.line-one-end - 54px;
+                                                property <length> dense-subject-x: min(190px, sender-time.x);
+                                                property <length> dense-subject-width: min(260px, max(0px, self.dense-account-x - self.dense-subject-x - 2px));
+                                                property <length> dense-detail-x: self.dense-subject-x + self.dense-subject-width + 12px;
+                                                // Beside the subject, the chips take at most this much.
+                                                property <length> inline-detail-width: max(0px, self.width * 0.45);
                                                 visible: !entry.is_header;
-                                                x: root.show-avatars ? (root.dense ? 52px : 64px) : 14px;
-                                                y: root.dense ? 0px : 8px;
+                                                x: root.show-avatars ? (root.dense ? 52px : 26px + root.avatar-size) : 14px;
+                                                y: root.dense ? 0px : root.row-top;
                                                 // The row already ends before the scrollbar
                                                 // gutter, so only its 12px padding remains.
                                                 width: max(0px, parent.width - self.x - 12px);
-                                                height: root.message-row-height - (root.dense ? 0px : 16px);
+                                                height: root.message-row-height - (root.dense ? 0px : 2 * root.row-top);
 
                                                 sender-time := Text {
                                                     x: parent.width - self.width;
@@ -1155,16 +1348,30 @@ export component MailListPane inherits FocusScope {
                                                     vertical-alignment: center;
                                                 }
                                                 sender-indicators := HorizontalLayout {
+                                                    property <int> shown: (mail-data.high_importance ? 1 : 0)
+                                                        + (mail-data.has_attachments ? 1 : 0)
+                                                        + (mail-data.has_replied && mail-data.message_count <= 1 ? 1 : 0);
                                                     x: mail-data.message_count > 1
                                                         ? thread-count.x - self.width - (self.width > 0px ? 8px : 0px)
                                                         : sender-time.x - self.width - 8px;
                                                     y: 0px;
-                                                    width: mail-data.has_attachments && mail-data.has_replied && mail-data.message_count <= 1 ? 32px
-                                                        : mail-data.has_attachments || (mail-data.has_replied && mail-data.message_count <= 1) ? 14px : 0px;
+                                                    width: self.shown == 0 ? 0px : self.shown * 14px + (self.shown - 1) * 4px;
                                                     height: root.dense ? 44px : root.sender-line;
                                                     spacing: 4px;
                                                     cross-axis-alignment: center;
 
+                                                    // Sent with high importance, as a red mark the way
+                                                    // Outlook shows it.
+                                                    if mail-data.high_importance : Text {
+                                                        width: 14px;
+                                                        text: "!";
+                                                        color: AppTheme.destructive;
+                                                        font-size: TypeScale.body;
+                                                        font-weight: 800;
+                                                        horizontal-alignment: center;
+                                                        vertical-alignment: center;
+                                                        accessible-role: none;
+                                                    }
                                                     if mail-data.has_attachments : Image {
                                                         width: 14px;
                                                         height: 14px;
@@ -1219,9 +1426,11 @@ export component MailListPane inherits FocusScope {
                                                     x: 0px;
                                                     y: 0px;
                                                     width: root.dense ? min(170px, max(0px, parent.width - 190px))
+                                                        : root.inline-detail && account-label.text != ""
+                                                            ? max(0px, account-label.x - 8px)
                                                         : mail-data.message_count > 1
                                                             ? max(0px, (sender-indicators.width > 0px ? sender-indicators.x : thread-count.x) - 8px)
-                                                        : mail-data.has_attachments || mail-data.has_replied
+                                                        : mail-data.has_attachments || mail-data.has_replied || mail-data.high_importance
                                                             ? max(0px, sender-indicators.x - 8px)
                                                             : max(0px, sender-time.x - 22px);
                                                     height: root.dense ? 44px : root.sender-line;
@@ -1244,9 +1453,12 @@ export component MailListPane inherits FocusScope {
                                                     background: root.accent;
                                                 }
                                                 subject-label := Text {
-                                                    x: root.dense ? min(190px, sender-time.x) : 0px;
-                                                    y: root.dense ? 0px : root.sender-line + 5px;
-                                                    width: root.dense ? min(260px, max(0px, message-content.dense-account-x - self.x - 2px)) : parent.width;
+                                                    x: root.dense ? message-content.dense-subject-x : 0px;
+                                                    y: root.dense ? 0px : root.sender-line + root.line-gap;
+                                                    width: root.dense ? message-content.dense-subject-width
+                                                        : root.inline-detail
+                                                            ? max(0px, parent.width - detail-row.preferred-width - (detail-row.preferred-width > 0px ? 8px : 0px))
+                                                        : parent.width;
                                                     height: root.dense ? 44px : root.subject-line;
                                                     text: mail-data.subject == "" ? @tr("(No subject)") : mail-data.subject;
                                                     color: root.body-text;
@@ -1255,12 +1467,14 @@ export component MailListPane inherits FocusScope {
                                                     overflow: elide;
                                                     vertical-alignment: center;
                                                 }
+                                                // Without a preview, the account moves up beside the
+                                                // time, and the subject and chips get the line below.
                                                 account-label := Text {
                                                     visible: !root.dense;
-                                                    x: parent.width - 88px;
-                                                    y: root.sender-line + root.subject-line + 10px;
-                                                    width: 88px;
-                                                    height: root.detail-line;
+                                                    x: root.inline-detail ? message-content.line-one-end - 8px - self.width : parent.width - 88px;
+                                                    y: root.inline-detail ? 0px : root.sender-line + root.subject-line + 2 * root.line-gap;
+                                                    width: root.inline-detail ? min(88px, self.preferred-width) : 88px;
+                                                    height: root.inline-detail ? root.sender-line : root.detail-line;
                                                     text: mail-row.account-name;
                                                     color: root.muted-text;
                                                     font-size: TypeScale.caption;
@@ -1300,18 +1514,28 @@ export component MailListPane inherits FocusScope {
                                                 }
                                                 // A line too narrow for its chips cuts them off rather
                                                 // than drawing over the account.
+                                                // Beside the subject, the chips end the line and the
+                                                // subject takes the rest.
                                                 detail := Rectangle {
-                                                    x: root.dense ? subject-label.x + subject-label.width + 12px : 0px;
-                                                    y: root.dense ? 0px : root.sender-line + root.subject-line + 10px;
-                                                    width: root.dense ? max(0px, message-content.dense-account-x - self.x - 12px) : max(0px, parent.width - 98px);
-                                                    height: root.dense ? 44px : root.detail-line;
+                                                    x: root.dense ? message-content.dense-detail-x
+                                                        : root.inline-detail ? parent.width - message-content.inline-detail-width
+                                                        : 0px;
+                                                    y: root.dense ? 0px
+                                                        : root.inline-detail ? subject-label.y
+                                                        : root.sender-line + root.subject-line + 2 * root.line-gap;
+                                                    width: root.dense ? max(0px, message-content.dense-account-x - message-content.dense-detail-x - 12px)
+                                                        : root.inline-detail ? message-content.inline-detail-width
+                                                        : max(0px, parent.width - 98px);
+                                                    height: root.dense ? 44px : root.inline-detail ? root.subject-line : root.preview-height;
                                                     clip: true;
 
                                                     // Each item carries its own gap, so labels past the
-                                                    // limit take no room.
-                                                    HorizontalLayout {
+                                                    // limit take no room. Chips keep to the first line of
+                                                    // a longer preview.
+                                                    detail-row := HorizontalLayout {
+                                                        alignment: root.inline-detail ? end : stretch;
                                                         spacing: 0px;
-                                                        cross-axis-alignment: center;
+                                                        cross-axis-alignment: root.preview-lines > 1 && !root.dense ? start : center;
 
                                                         // Back because nobody replied in time.
                                                         HorizontalLayout {
@@ -1448,13 +1672,16 @@ export component MailListPane inherits FocusScope {
                                                             // so it gives up all its room first and stays
                                                             // out of a gap too narrow for a word.
                                                             min-width: 0px;
-                                                            visible: self.width >= 4 * self.font-size;
+                                                            max-width: root.preview-lines > 0 ? 100000px : 0px;
+                                                            visible: root.preview-lines > 0 && self.width >= 4 * self.font-size;
                                                             horizontal-stretch: 1;
-                                                            text: mail-data.preview;
+                                                            height: root.dense ? 44px : root.preview-height;
+                                                            text: root.preview-lines > 0 ? mail-data.preview : "";
                                                             color: root.faint-text;
                                                             font-size: TypeScale.secondary;
+                                                            wrap: root.preview-lines > 1 && !root.dense ? word-wrap : no-wrap;
                                                             overflow: elide;
-                                                            vertical-alignment: center;
+                                                            vertical-alignment: root.preview-lines > 1 && !root.dense ? top : center;
                                                         }
                                                     }
                                                 }
@@ -1521,9 +1748,22 @@ export component MailListPane inherits FocusScope {
                                     count: entry.group_count;
                                     text-color: root.secondary-text;
                                     divider-color: root.border-subtle;
+                                    at-top: root.oldest_first;
                                     open-mail-history => { root.open-mail-history(); }
                                 }
-                                if entry.is_header && entry.group_kind != "server-only" : MailGroupHeader {
+                                if entry.is_header && entry.group_kind == "earlier" : EarlierMailRow {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    divider-color: root.border-subtle;
+                                    show-earlier => { root.load_earlier(); }
+                                }
+                                if entry.is_header && entry.group_kind == "server-search" : ServerSearchRow {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text-color: root.secondary-text;
+                                    divider-color: root.border-subtle;
+                                }
+                                if entry.is_header && entry.group_kind != "server-only" && entry.group_kind != "earlier" && entry.group_kind != "server-search" : MailGroupHeader {
                                     width: parent.width;
                                     height: parent.height;
                                     title: root.group-title(entry.group_kind);
@@ -1569,14 +1809,28 @@ export component MailListPane inherits FocusScope {
                             x: LayoutMetrics.list-row-inset;
                             y: 0px;
                             width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
-                            height: min(parent.height, 120px);
+                            height: min(parent.height, ServerSearchUi.stage == "" ? 120px : 220px);
                             background: root.surface;
                             VerticalBox {
+                                alignment: start;
                                 padding-top: 28px;
                                 padding-left: 20px;
+                                padding-right: 20px;
                                 spacing: 4px;
                                 Text { text: root.loading ? @tr("Opening your mailbox…") : @tr("Nothing here"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
-                                if !root.loading : Text { text: @tr("Try another folder or search term."); color: root.muted-text; font-size: TypeScale.secondary; }
+                                if !root.loading : Text {
+                                    text: ServerSearchUi.stage == "" ? @tr("Try another folder or search term.") : @tr("No mail on this device matches.");
+                                    color: root.muted-text;
+                                    font-size: TypeScale.secondary;
+                                    wrap: word-wrap;
+                                }
+                                // A search of the servers may find older mail.
+                                if ServerSearchUi.stage != "" : ServerSearchRow {
+                                    height: ServerSearchUi.stage == "failed" || (ServerSearchUi.stage == "more" && ServerSearchUi.found > 0) ? 84px : 56px;
+                                    below-rows: false;
+                                    text-color: root.secondary-text;
+                                    divider-color: root.border-subtle;
+                                }
                             }
                         }
 

@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/flectar-mail-core", "crates/renderer-probe"]
-exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-winit", "crates/parley", "crates/parley_emoji"]
+members = ["crates/flectar-mail-core", "crates/flectar-spell", "crates/renderer-probe"]
+exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/fontique", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/i-slint-renderer-software", "crates/smithay-clipboard", "crates/spellbook", "crates/vello"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -15,10 +15,20 @@ chrono = { version = "0.4", features = ["serde"] }
 [patch.crates-io]
 blitz-dom = { path = "crates/blitz-dom" }
 blitz-paint = { path = "crates/blitz-paint" }
-# Slint still uses Parley 0.11.1; Blitz's Parley 0.12 is already fixed upstream.
-parley = { path = "crates/parley" }
-# Remove when Slint releases its Wayland clipboard fix; see patches/slint-winit/README.md.
+# winit 0.30 doesn't report files dropped on a Wayland window, so they come
+# through the clipboard's data device, as patches/slint-winit/README.md and
+# patches/smithay-clipboard/README.md explain.
 i-slint-backend-winit = { path = "crates/i-slint-backend-winit" }
+smithay-clipboard = { path = "crates/smithay-clipboard" }
+# Slint 1.19's software renderer panics on a rounded clip far out of view; see
+# patches/slint-renderer-software/README.md.
+i-slint-renderer-software = { path = "crates/i-slint-renderer-software" }
+# Fontique 0.12 slants italics from a font's `slnt` axis the wrong way, so
+# variable fonts without an italic face, such as the bundled Google Sans Flex,
+# stay upright; see patches/fontique/README.md.
+fontique = { path = "crates/fontique" }
+# Vello drops Calibri's letters on the GPU; see patches/vello/README.md.
+vello = { path = "crates/vello" }
 
 [package]
 name = "flectar-mail"
@@ -29,7 +39,7 @@ repository = "https://github.com/flectar/mail"
 homepage = "https://flectar.com"
 publish = false
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.95"
 build = "build.rs"
 autobins = false
 
@@ -66,6 +76,10 @@ pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdf
 anyrender = "0.14"
 anyrender_vello = { version = "0.15", optional = true }
 anyrender_vello_cpu = "0.18"
+# AnyRender's geometry and paint types, for the scene adapter in
+# src/renderer/cpu_scene.rs.
+kurbo = "0.13.1"
+peniko = "0.6"
 # Email templates use CSS floats and legacy table/image align attributes.
 # Keep float layout enabled on every platform, including minimal builds.
 blitz-dom = { version = "=0.3.0-beta.4", features = ["floats"] }
@@ -79,6 +93,8 @@ html5ever = "0.40"
 # Snapshot archives one verified database snapshot for the document provider.
 zip = { version = "9.0.4", default-features = false }
 cssparser = "0.38"
+# A quoted original keeps the look its style sheets gave it, as inline styles.
+css-inline = { version = "0.23", default-features = false }
 # Match Blitz's Stylo version when adapting resolved CSS colors and gradients.
 style = { package = "stylo", version = "=0.22.0" }
 style_traits = { package = "stylo_traits", version = "=0.22.0" }
@@ -90,17 +106,26 @@ vello = { version = "0.11", optional = true }
 # This native shell currently exposes keyword/FTS search, not local semantic
 # search. Do not link Candle, tokenizers, or Hugging Face into every AppImage.
 flectar-mail-core = { path = "crates/flectar-mail-core", default-features = false }
-# Slint uses Fontique 0.11; Blitz beta.4 uses 0.12. Both must load
-# Fontconfig dynamically so the rendering stacks agree on the native ABI.
-fontique_0_11 = { package = "fontique", version = "=0.11.1", features = ["fontconfig-dlopen"] }
+# Which words spelling checks, everywhere, and on Linux the checking itself, with the system's
+# Hunspell dictionaries read in place from disk.
+flectar-spell = { path = "crates/flectar-spell" }
+# Slint and Blitz share Fontique 0.12, which loads Fontconfig dynamically so
+# both rendering stacks agree on the native ABI.
 fontique_0_12 = { package = "fontique", version = "=0.12.0", features = ["fontconfig-dlopen"] }
 chrono.workspace = true
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
+# The script type of cosmic-text's font fallback lists (src/han_fallback.rs).
+unicode-script = "0.5"
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
+# Reads photos at a half, a quarter or an eighth of their size, to shrink them and to show
+# them in the composer (src/photo_shrink.rs).
+jpeg-decoder = { version = "0.3.2", default-features = false }
 keyboard-types = "0.8"
 # Flectar Mail Sync's pairing QR codes, drawn by the app itself.
 qrcode = { version = "0.14", default-features = false }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
+# Compares release versions for update notices (src/updates.rs).
+semver = "1"
 sha2 = "0.10"
 serde.workspace = true
 serde_json.workspace = true
@@ -110,11 +135,11 @@ tempfile = "3"
 # Linux enables both Wayland and X11; Apple and Windows use their native winit
 # integrations. Android supplies its dedicated activity backend separately.
 # The `gpu-renderer` feature adds WGPU and exposes its device/queue to Vello.
-slint = { version = "1.18.1", default-features = false, features = [
+slint = { version = "1.19.0", default-features = false, features = [
     "std",
     "renderer-software",
     "system-tray",
-    "unstable-fontique-011",
+    "unstable-fontique-012",
     "compat-1-2",
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "fs", "process"] }
@@ -131,6 +156,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Storage_Packaging_Appx",
     "Win32_System_JobObjects",
     "Win32_System_Memory",
+    "Win32_System_Pipes",
     "Win32_System_Registry",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
@@ -140,7 +166,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 # The Microsoft Store build's startup task and new-mail toasts are WinRT
-# APIs; the toast activator is a COM server. Slint and wgpu already build
+# APIs, as are the accent colours of the taskbar's unread count; the toast
+# activator is a COM server. Slint and wgpu already build
 # this version of the crate.
 windows = { version = "0.62", default-features = false, features = [
     "std",
@@ -149,10 +176,13 @@ windows = { version = "0.62", default-features = false, features = [
     "Foundation",
     "Foundation_Collections",
     "UI_Notifications",
+    "UI_ViewManagement",
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_System_Com",
     "Win32_UI_Notifications",
     "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # `windows::core::implement` expands to paths in this crate.
 windows-core = { version = "0.62", default-features = false, features = ["std"] }
@@ -175,7 +205,7 @@ ashpd = { version = "0.11", default-features = false, features = ["async-std"] }
 zbus = { version = "5", default-features = false, features = ["async-io"] }
 landlock = "0.4.7"
 seccompiler = "0.5"
-slint = { version = "1.18.1", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
+slint = { version = "1.19.0", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
 # Integrated window controls follow live desktop settings from the portal
 # stream and ask X11 window managers for their window menu. Both crates are
 # already part of the Linux build through ashpd and winit.
@@ -190,34 +220,49 @@ wayland-protocols = { version = "0.32", default-features = false, features = ["c
 
 # Integrated window frames use winit window attributes and native window events.
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))'.dependencies]
-slint = { version = "1.18.1", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
+slint = { version = "1.19.0", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
 
 # The integrated title bar adjusts the native window, which winit cannot
 # change after creation, and the chosen app icon replaces the Dock icon.
 # These AppKit bindings are already in the build.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "NSWorkspace"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAppleEventManager", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSSet", "NSString", "NSURL", "NSUserDefaults"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSAccessibility", "NSApplication", "NSButton", "NSControl", "NSDockTile", "NSImage", "NSResponder", "NSRunningApplication", "NSSpellChecker", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSAppleEventManager", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSOperation", "NSOrthography", "NSRange", "NSSet", "NSString", "NSTextCheckingResult", "NSURL", "NSUserDefaults"] }
 # Launch Services reports a default email app change through a block.
 block2 = { version = "0.6", default-features = false, features = ["std"] }
 # Registers the bundled sign-in agent with Login Items (macOS 13+).
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
-# New-mail notifications.
+
+# New-mail notifications through Apple's User Notifications. This is
+# `user_notifications`; keep it in step with the alias in build.rs.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+objc2 = { version = "0.6", default-features = false, features = ["std"] }
+block2 = { version = "0.6", default-features = false, features = ["std"] }
+# Warms CoreText's Han font lookups off the UI thread (src/han_fallback.rs).
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFDictionary", "CFString"] }
+objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFont", "CTFontDescriptor"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSError", "NSSet", "NSString"] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNNotification", "UNNotificationAction", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter", "UNError"] }
 
 # Account secrets live in the iOS Keychain (src/platform/ios/security.rs), and
 # sign-in uses the core's async OAuth broker trait (src/platform/web_authentication.rs).
+# Spelling is checked with UITextChecker (src/platform/ios/spelling.rs).
 [target.'cfg(target_os = "ios")'.dependencies]
 async-trait = "0.1"
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFData", "CFDictionary", "CFNumber", "CFString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSObjCRuntime", "NSRange"] }
 objc2-security = { version = "0.3", default-features = false, features = ["std", "SecBase", "SecItem"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UITextChecker"] }
 
 # This is `desktop`; keep it in step with the `mobile` alias in build.rs.
 [target.'cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))'.dependencies]
-arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
+arboard = { version = "3.6", default-features = false, features = ["image-data", "wayland-data-control"] }
 # The same async-io backend for the file chooser portal; see ashpd above.
 rfd = { version = "0.16", default-features = false, features = ["async-std", "xdg-portal"] }
+# The official MCP SDK, for `flectar-mail mcp`. Only that bridge process runs
+# it; the running app answers the bridge over its own small protocol.
+rmcp = { version = "3.10", default-features = false, features = ["server", "transport-io"] }
 
 [package.metadata.appimage]
 icon = "resources/app-icon/flectar-mail-masked-512.png"
@@ -244,19 +289,24 @@ auto_link_exclude_list = [
 # These do not appear as normal Rust paths on every host, so dependency
 # scanners need the explicit exceptions.
 [package.metadata.cargo-machete]
-ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "winresource", "cc", "cfg_aliases", "windows-core"]
+ignored = ["fontique_0_12", "wayland-backend", "slint-build", "winresource", "cc", "cfg_aliases", "rspolib", "windows-core"]
 
 # tests/text_fit.rs measures laid-out text through Slint's item tree, which
 # only the internal crate exposes. It must stay on the version `slint` uses.
 [dev-dependencies]
-i-slint-core = { version = "=1.18.1", default-features = false }
+i-slint-core = { version = "=1.19.0", default-features = false }
+# src/updates.rs tests its schedule on tokio's paused clock.
+tokio = { version = "1", features = ["macros", "test-util"] }
 # src/platform/web_authentication.rs, which only iOS builds otherwise.
 async-trait = "0.1"
 
 [build-dependencies]
 cc = "1"
 cfg_aliases = "0.2"
-slint-build = "1.18.1"
+# Reads the translation catalogs as Slint does, for notification words
+# without the window (build.rs).
+rspolib = "0.1.2"
+slint-build = "1.19.0"
 winresource = "0.1"
 
 [profile.release]

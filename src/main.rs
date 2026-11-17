@@ -1,17 +1,24 @@
 mod account_controller;
 mod account_mail_preferences;
+mod account_status;
+#[cfg(desktop)]
+pub mod agents;
 mod app_icon;
 #[cfg(test)]
 mod account_removal_tests;
 mod app_runtime;
 mod attachment_controller;
+mod attachment_reminder;
+mod auto_replies;
 #[cfg(desktop)]
 mod autostart;
+mod block_sender;
 mod browser;
 pub use browser::ExternalUrlOpener;
 mod calendar;
 mod compose_controller;
 mod compose_editor;
+mod compose_paste;
 mod compose_quote;
 mod composer;
 mod contacts;
@@ -24,35 +31,49 @@ pub mod documents;
 mod email_document;
 pub mod favicon;
 mod files_controller;
+mod han_fallback;
 mod import_controller;
+mod invitation;
 mod keyboard_keys;
 mod latest_load;
+mod link_services;
 mod mail;
 #[cfg(test)]
 mod mail_drop_tests;
 mod mail_groups;
 mod mail_navigation;
 mod mail_render_projection;
+mod mail_rules;
 mod mail_scope;
 mod mail_setup;
 mod mail_view_model;
+#[cfg(test)]
+mod mail_window_tests;
 mod mail_work;
 mod mailto_links;
 mod memory;
 mod message_appearance;
+mod motion;
 mod move_picker;
 mod notifications;
+/// What Android asks of the app without its window.
+#[cfg(background_engine)]
+pub use notifications::engine::{
+    EngineServices, check_for_mail, respond_in_background, stop_check, window_ended,
+    window_starting,
+};
 pub use notifications::{
-    Act, Alert, AlertId, Availability, Failure, FixedWords, HostFuture, NewMailNotification,
-    NotificationHost, Response, Route, parse_payload, payload, respond,
+    Act, Alert, AlertId, Availability, Badge, Controls, Failure, FixedWords, HostFuture,
+    NewMailNotification, NotificationHost, Response, Route, parse_payload, payload, respond,
 };
 mod number_format;
 mod oauth_browser;
-#[cfg(test)]
-mod on_screen_surface_tests;
 pub mod pdf_preview;
+mod photo_shrink;
 pub mod platform;
 mod preview_controls;
+mod read_marking;
+mod read_receipts;
 mod reader_clipboard;
 #[cfg(test)]
 mod reader_validation;
@@ -71,7 +92,11 @@ mod renderer_preferences;
 mod rendering_report;
 mod retained_model;
 mod rich_compose;
+mod saved_searches;
+mod server_search;
 mod settings_controller;
+pub mod spelling;
+pub use spelling::{SpellingHost, SpellingSession};
 mod sidebar_model;
 #[cfg(desktop)]
 mod single_instance;
@@ -79,9 +104,15 @@ mod startup;
 mod startup_metrics;
 mod sync_controller;
 mod tabs;
+#[cfg(test)]
+mod tall_surface_tests;
+mod text_size;
 mod theme;
 mod ui_dispatch;
 mod ui_message;
+mod undo;
+mod unsubscribe;
+mod updates;
 mod when_picker;
 mod window_chrome;
 mod window_controller;
@@ -115,8 +146,8 @@ use flectar_mail_core::models::ThreadCursor;
 use flectar_mail_core::models::{
     Account, AccountConfig, AddPasswordAccountArgs, CalendarConnection, CardDavConnection,
     ConnectionSecurity, ContactRecord, ContactRecordCursor, ContactRecordPage, CreateEventArgs,
-    DraftAttachmentIn, Label, MailConnectionSettings, MailGrouping, MailProfile, MailProtocol,
-    Provider, Settings, Snippet, UpdateEventArgs,
+    DraftAttachmentIn, Label, ListOrder, MailConnectionSettings, MailGrouping, MailProfile,
+    MailProtocol, Provider, Settings, Snippet, UpdateEventArgs,
 };
 #[cfg(test)]
 use mail::fixture_messages;
@@ -125,8 +156,8 @@ use mail::{
     MailTarget, MailboxEntry, SidebarBadges, display_preview,
 };
 use mail_groups::{
-    MailGroupState, mail_group_key, mail_list_entry_key, project_mail_list, same_mail_list_entry,
-    server_only_entry,
+    MailGroupState, earlier_entry, mail_group_key, mail_list_entry_key, project_mail_list,
+    same_mail_list_entry, server_only_entry,
 };
 use mail_render_projection::*;
 use mail_scope::{Scope, StandardMailbox, accounts_to_check};
@@ -372,6 +403,11 @@ struct ComposeFile {
     /// clearing the composer releases it; drafts and sends stage the file in
     /// Core first.
     _import: Option<Rc<documents::ImportedDocument>>,
+    /// A JPEG photo large enough to go out shrunk.
+    shrinkable: bool,
+    /// The photo this file is a shrunk copy of, which comes back when the message's photos
+    /// no longer go out shrunk.
+    original: Option<Box<ComposeFile>>,
 }
 
 struct FaviconUpdate {
@@ -395,6 +431,8 @@ struct ProfileAvatarUpdate {
 }
 
 struct SyncUpdate {
+    /// The accounts checked, or every account.
+    accounts: Option<Vec<i64>>,
     result: Result<(), String>,
     metadata: Option<mail::MailMetadata>,
 }
@@ -415,6 +453,11 @@ struct MailListUpdate {
 enum MailListUpdateKind {
     Refresh,
     Pagination { cursor: MailCursor, generation: u64 },
+    /// The rows before the first one, which `first` is the cursor of.
+    Earlier {
+        first: MailCursor,
+        generation: u64,
+    },
 }
 
 struct MailMetadataUpdate {
@@ -640,6 +683,10 @@ struct InboxState {
     sidebar_badges: SidebarBadges,
     /// Unread mail only on the server of the scope it was counted for.
     server_only: Option<(Scope, u32)>,
+    /// The searches the sidebar keeps, with their unread mail.
+    saved_searches: Vec<mail::SavedSearchEntry>,
+    /// The search of the servers for the list's search.
+    server_search: server_search::ServerSearch,
     mail_work: Option<mail_work::MailWork>,
     collapsed_folder_ids: HashSet<i64>,
     collapsed_sidebar_sections: HashSet<String>,
@@ -656,6 +703,10 @@ struct InboxState {
     inbox_count: usize,
     page: usize,
     next_cursor: Option<MailCursor>,
+    /// Where the rows start when the list's earlier rows aren't loaded: a
+    /// list opened at a message further down than one read goes. Refreshes
+    /// read from here, and the list offers the rows before.
+    window_start: Option<MailCursor>,
     selected_id: Option<i32>,
     /// Conversation to select once the next replacing page arrives, for a
     /// tab restored without cached rows.
@@ -679,6 +730,8 @@ struct InboxState {
     favicon_generation: u64,
     favicon_tx: UiSender<FaviconUpdate>,
     connected_accounts: Vec<Account>,
+    /// How each account's checks are going, for its sidebar heading.
+    account_activity: account_status::AccountActivity,
     account_configs: Vec<AccountConfig>,
     /// Mail imported into folders on this device, which belongs to no
     /// account.
@@ -701,12 +754,15 @@ struct InboxState {
     profile_avatar_tx: UiSender<ProfileAvatarUpdate>,
     remote_images_enabled: bool,
     remote_images_override_id: Option<i32>,
-    mark_read_on_open: bool,
+    /// When an opened unread message counts as read.
+    mark_read: flectar_mail_core::models::MarkRead,
     /// Whether the mail list shows conversations or each message on its own.
     grouping: MailGrouping,
     /// A scheduled send is being sent now, cancelled or moved. The mail
     /// server may still be letting go of it, so another change waits.
     changing_send: bool,
+    /// The order of `messages`, which their date sections follow.
+    list_order: ListOrder,
     warm_start_cache: WarmStartCacheWriter,
 }
 
@@ -992,6 +1048,19 @@ fn perform_mail_drop(
     )
 }
 
+/// Shows the mail list's rows as dense as `settings` keep them, with as many
+/// lines of each message's text.
+pub(crate) fn apply_list_rows(app: &AppWindow, settings: &Settings) {
+    app.set_mail_compact_rows(
+        settings.list_density == flectar_mail_core::models::ListDensity::Compact,
+    );
+    app.set_mail_preview_lines(i32::from(
+        settings
+            .preview_lines
+            .min(flectar_mail_core::models::MAX_PREVIEW_LINES),
+    ));
+}
+
 /// Show conversations, or each message on its own. The list starts over like
 /// a newly chosen mailbox, and tabs forget the conversations or messages they
 /// had open, whose ids belong to the other grouping. Returns whether the
@@ -1176,6 +1245,9 @@ fn apply_language(app: &AppWindow, preference: &str) {
         language => language,
     };
     number_format::set_language(selected);
+    spelling::apply_display_language(language_mode);
+    // Before the translation, whose text is laid out again with these fonts.
+    han_fallback::set_ui_language(selected, slint::fontique_012::shared_collection);
     if let Err(error) = slint::select_bundled_translation(selected) {
         eprintln!("could not select {selected} translation: {error}");
     }
@@ -1204,6 +1276,8 @@ impl InboxState {
             unified_mailboxes: Vec::new(),
             sidebar_badges: SidebarBadges::default(),
             server_only: None,
+            saved_searches: Vec::new(),
+            server_search: Default::default(),
             mail_work: None,
             collapsed_folder_ids: HashSet::new(),
             collapsed_sidebar_sections: HashSet::from([
@@ -1230,6 +1304,7 @@ impl InboxState {
             search_filter: "All mail".to_owned(),
             page: 1,
             next_cursor: None,
+            window_start: None,
             selected_id: None,
             pending_selection: None,
             pending_selection_opens: false,
@@ -1246,6 +1321,7 @@ impl InboxState {
             favicon_generation: 0,
             favicon_tx,
             connected_accounts: Vec::new(),
+            account_activity: account_status::AccountActivity::default(),
             account_configs: Vec::new(),
             local_mail: None,
             local_mail_reloads: 0,
@@ -1262,9 +1338,10 @@ impl InboxState {
             profile_avatar_tx,
             remote_images_enabled,
             remote_images_override_id: None,
-            mark_read_on_open: true,
+            mark_read: flectar_mail_core::models::MarkRead::Immediately,
             grouping: MailGrouping::Conversations,
             changing_send: false,
+            list_order: ListOrder::NewestFirst,
             warm_start_cache,
         }
     }
@@ -1273,6 +1350,15 @@ impl InboxState {
     /// is still under way. Clear `changing_send` once it is done.
     fn start_send_change(&mut self) -> bool {
         !std::mem::replace(&mut self.changing_send, true)
+    }
+
+    /// The order the list of the current mailbox and search loads in: the
+    /// mailbox's own, except search results, which are newest first.
+    fn list_order_for_view(&self) -> ListOrder {
+        match &self.core {
+            Some(core) if self.query.trim().is_empty() => core.order(self.scope),
+            _ => ListOrder::NewestFirst,
+        }
     }
 
     /// Select `scope`, or the equivalent mailbox the sidebar shows for the
@@ -1314,20 +1400,27 @@ impl InboxState {
         self.mailboxes = metadata.mailboxes;
         self.unified_mailboxes = metadata.unified_mailboxes;
         self.sidebar_badges = metadata.sidebar_badges;
+        self.saved_searches = metadata.saved_searches;
         self.inbox_count = metadata.inbox_count;
         self.server_only = Some((metadata.scope, metadata.server_only_unread));
         self.server_only_note() != note
     }
 
     /// How many older unread messages of the list are only on the server,
-    /// which its end mentions once all of its mail is shown: not for
-    /// searches, nor for filters other than unread mail.
+    /// which the list's old end mentions once it is shown. A list shown
+    /// oldest first starts there, and a newest first one gets there once all
+    /// of its mail is in. Not for searches, nor for filters other than
+    /// unread mail.
     fn server_only_note(&self) -> u32 {
+        let at_old_end = match self.list_order {
+            ListOrder::OldestFirst => self.window_start.is_none(),
+            ListOrder::NewestFirst => self.next_cursor.is_none(),
+        };
         match self.server_only {
             Some((scope, count))
                 if scope == self.scope
                     && self.using_core
-                    && self.next_cursor.is_none()
+                    && at_old_end
                     && self.query.trim().is_empty()
                     && matches!(self.search_filter.as_str(), "All mail" | "Unread") =>
             {
@@ -1434,7 +1527,11 @@ impl InboxState {
         }
         // Search results and temporary filters are intentionally session-only;
         // keep the last ordinary mailbox page as the repeat-launch surface.
-        if !self.query.trim().is_empty() || self.search_filter != "All mail" {
+        // A list opened further down starts at its start next time.
+        if !self.query.trim().is_empty()
+            || self.search_filter != "All mail"
+            || self.window_start.is_some()
+        {
             return;
         }
         self.warm_start_cache
@@ -1442,6 +1539,7 @@ impl InboxState {
                 scope: self.scope,
                 inbox_count: self.inbox_count,
                 grouping: self.grouping,
+                order: self.list_order,
                 next_cursor: self.next_cursor.and_then(WarmStartCursor::of),
                 accounts: &self.connected_accounts,
                 profile_accounts: self.profile_accounts.as_deref(),
@@ -1463,6 +1561,9 @@ pub struct PlatformContext {
     /// has none. Desktop builds leave it empty: `run` creates the platform's
     /// own once this process owns the profile.
     pub notifications: Option<Arc<dyn NotificationHost>>,
+    /// The system's spell checker, where the app has none of its own for the
+    /// platform: Android's. `None` elsewhere.
+    pub spelling: Option<Arc<dyn SpellingHost>>,
     pub paths: Paths,
     pub documents: Arc<dyn documents::DocumentProvider>,
     pub credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
@@ -1478,6 +1579,7 @@ impl PlatformContext {
             paths,
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
+            spelling: None,
             documents: documents::default_provider(),
             credentials,
             oauth_redirects: Arc::new(
@@ -1496,13 +1598,20 @@ impl PlatformContext {
         oauth_redirects: flectar_mail_core::oauth::redirect::OAuthRedirectBrokerHandle,
     ) -> Self {
         Self {
-            paths: Paths::new(data_root.join("data"), cache_dir),
+            paths: Self::app_private_paths(data_root, cache_dir),
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
+            spelling: None,
             documents,
             credentials,
             oauth_redirects,
         }
+    }
+
+    /// The profile in a host-owned sandbox, as [`Self::app_private`] keeps it:
+    /// what a process that runs without the window opens too.
+    pub fn app_private_paths(data_root: PathBuf, cache_dir: PathBuf) -> Paths {
+        Paths::new(data_root.join("data"), cache_dir)
     }
 }
 
@@ -1708,6 +1817,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let benchmark_disable_background =
         std::env::var("FLECTAR_BENCHMARK_DISABLE_SYNC").as_deref() == Ok("1");
     normalize_appimage_environment();
+    // Overlaps the system's font lookups with the rest of startup.
+    han_fallback::warm_up();
 
     // Created before the backend: claiming the profile uses its reactor, and
     // a launch that only forwards to a running instance should exit before
@@ -1814,8 +1925,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     ))]
     slint::set_xdg_app_id("com.flectar.mail")?;
 
-    // Register the deterministic emoji face before any initial text is measured.
+    // Register the deterministic emoji face and the Han fallback before any
+    // initial text is measured.
     configure_emoji_font_fallback()?;
+    han_fallback::install_ui(&mut slint::fontique_012::shared_collection());
 
     // Construct the window before opening or migrating either database. Seed
     // the presentation preferences visible in the inert mailbox shell from
@@ -1831,6 +1944,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_workspace_list_pane_width(width as f32);
     }
     window_chrome::register(&app, &runtime);
+    motion::watch(&app, &runtime);
     app_icon::apply(&app, startup_presentation.app_icon);
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     app.on_settings_search_matches(|haystack, query| {
@@ -1890,6 +2004,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let (profile_avatar_raw_tx, profile_avatar_rx) = bounded_ui_channel();
     let profile_avatar_tx = UiSender::new(profile_avatar_raw_tx, profile_avatar_wake);
 
+    spelling::install(
+        &runtime,
+        &platform.paths.cache_dir,
+        platform.spelling.clone(),
+    );
     let profile_avatar_loader = if benchmark_disable_background {
         None
     } else {
@@ -3164,6 +3283,41 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let app_weak = app.as_weak();
+    let calendar_for_answer = Rc::clone(&calendar_state);
+    let runtime_for_calendar_answer = runtime.clone();
+    let inbox_for_calendar_answer = Rc::clone(&state);
+    app.on_calendar_answer_event(move |event_id, response, occurrence| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = inbox_for_calendar_answer.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Calendar storage is unavailable."));
+            return;
+        };
+        // An occurrence of a repeating event comes by its RECURRENCE-ID, or
+        // empty for the whole event.
+        let occurrence = occurrence.parse::<i64>().ok();
+        if let Err(error) = runtime_for_calendar_answer.block_on(core.rsvp_event(
+            i64::from(event_id),
+            response.as_str(),
+            occurrence,
+        )) {
+            app.set_sync_status(UiMessage::detail("Could not answer: {}", error));
+        }
+        let today = Local::now().date_naive();
+        let mut calendar = calendar_for_answer.borrow_mut();
+        if let Err(error) = refresh_calendar_events(
+            &core,
+            &runtime_for_calendar_answer,
+            &mut calendar,
+            &inbox_for_calendar_answer.borrow().connected_accounts,
+        ) {
+            app.set_sync_status(UiMessage::detail("Could not load calendar: {}", error));
+        }
+        apply_calendar(&app, &calendar, today);
+    });
+
+    let app_weak = app.as_weak();
     let calendar_for_delete = Rc::clone(&calendar_state);
     let runtime_for_calendar_delete = runtime.clone();
     let inbox_for_calendar_delete = Rc::clone(&state);
@@ -3172,17 +3326,20 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        let is_local = calendar_for_delete
+        // Events created here, and cancelled ones from others, which leave
+        // the calendar without telling anyone.
+        let Some(is_local) = calendar_for_delete
             .borrow()
             .events
             .iter()
-            .any(|event| event.id == event_id && event.is_local);
-        if !is_local {
+            .find(|event| event.id == event_id && (event.is_local || event.cancelled()))
+            .map(|event| event.is_local)
+        else {
             app.set_sync_status(UiMessage::plain(
                 "Only events created in Flectar Mail can be deleted.",
             ));
             return;
-        }
+        };
         let Some(core) = inbox_for_calendar_delete.borrow().core.clone() else {
             app.set_sync_status(UiMessage::plain("Calendar storage is unavailable."));
             return;
@@ -3210,8 +3367,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 "Event deleted, but refresh failed: {}",
                 error,
             ));
-        } else {
+        } else if is_local {
             app.set_sync_status(UiMessage::plain("Event deleted."));
+        } else {
+            app.set_sync_status(UiMessage::plain("Removed from your calendar."));
         }
         apply_calendar(&app, &calendar, today);
     });
@@ -3583,7 +3742,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         let animate = section_toggle_app
             .upgrade()
-            .is_some_and(|app| app.global::<MotionSettings>().get_enabled());
+            .is_some_and(|app| app.global::<MotionSettings>().get_movement());
         refresh_sidebar_with_motion(&section_toggle_state, animate);
     });
 
@@ -3604,7 +3763,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         let animate = folder_toggle_app
             .upgrade()
-            .is_some_and(|app| app.global::<MotionSettings>().get_enabled());
+            .is_some_and(|app| app.global::<MotionSettings>().get_movement());
         refresh_sidebar_with_motion(&folder_toggle_state, animate);
     });
 
@@ -3847,6 +4006,37 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         app.set_mail_list_revision(app.get_mail_list_revision().wrapping_add(1));
                     }
                 }
+                MailListUpdateKind::Earlier { first, generation } => {
+                    if generation != mail_pagination_generation_for_result.get() {
+                        continue;
+                    }
+                    mail_pagination_in_progress_for_result.set(false);
+                    let still_current = mail_work::accepts_background(
+                        &mail_update_state.borrow(),
+                        update.view_generation,
+                    ) && update.scope == current_scope
+                        && update.query == current_query
+                        && mail_update_state
+                            .borrow()
+                            .messages
+                            .first()
+                            .is_some_and(|row| mail::cursor_of(row) == first);
+                    if still_current
+                        && let Err(error) = update.result.map(|page| {
+                            mail_view_model::prepend_mail_page(
+                                &app,
+                                &mail_update_state,
+                                &mail_update_runtime,
+                                page,
+                            )
+                        })
+                    {
+                        app.set_render_status(UiMessage::detail(
+                            "Mail pagination failed: {}",
+                            error,
+                        ));
+                    }
+                }
             }
         }
         if let Some(app) = mail_list_app.upgrade() {
@@ -3986,13 +4176,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             && !mail_work::actions_pending(&mail_update_state.borrow())
             && !mail_work::loading(&mail_update_state.borrow())
         {
-            let (using_core, core, scope, query, limit) = {
+            let (using_core, core, scope, query, start, limit) = {
                 let state = mail_update_state.borrow();
                 (
                     state.using_core,
                     state.core.clone(),
                     state.scope,
                     state.query.clone(),
+                    state.window_start,
                     mail_work::refresh_limit(state.messages.len(), &state.query),
                 )
             };
@@ -4002,7 +4193,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 let view_generation = mail_work::generation(&mail_update_state.borrow());
                 let updates = mail_list_tx_for_core.clone();
                 mail_update_runtime.spawn(async move {
-                    let result = core.load_page(scope, &query, None, limit, false).await;
+                    let result = core.load_page(scope, &query, start, limit, false).await;
                     let _ = updates
                         .send(MailListUpdate {
                             view_generation,
@@ -4015,10 +4206,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 });
             }
         }
-        if !pending.account_states.is_empty()
+        if !(pending.account_states.is_empty() && pending.caught_up.is_empty())
             && let Some(app) = mail_update_app.upgrade()
         {
-            apply_account_states(&app, &mail_update_state, &pending.account_states);
+            apply_account_states(
+                &app,
+                &mail_update_state,
+                &pending.account_states,
+                &pending.caught_up,
+            );
         }
         if let Some(error) = pending.action_error
             && let Some(app) = mail_update_app.upgrade()
@@ -4034,9 +4230,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         if pending.calendar_changed
             && let Some(app) = mail_update_app.upgrade()
-            && app.get_settings_open()
+            && app.get_active_view() == "settings"
         {
             app.invoke_reload_calendar_connections();
+        }
+        if pending.calendar_changed {
+            invitation::refresh();
         }
         if pending.calendar_changed
             && let Some(app) = mail_update_app.upgrade()
@@ -4482,9 +4681,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         state.local_mail = local_mail;
                         state.set_scope(scope);
                         state.remote_images_enabled = allow_remote_images;
-                        state.mark_read_on_open = settings
+                        state.mark_read = settings
                             .as_ref()
-                            .is_none_or(|settings| settings.mark_read_on_open);
+                            .map(|settings| settings.mark_read)
+                            .unwrap_or_default();
                         state.grouping = core.grouping();
                         state.favicon_loader = if allow_remote_images {
                             match FaviconLoader::new(&startup_paths_for_ui.cache_dir) {
@@ -4505,6 +4705,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                                 state.inbox_count = page.messages.len();
                             }
                             state.messages = page.messages;
+                            state.list_order = page.order;
                             state.labels = page.labels;
                             state.mailboxes = page.mailboxes;
                             state.unified_mailboxes = page.unified_mailboxes;
@@ -4564,6 +4765,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     app.set_startup_hydrated(true);
                     app.set_startup_ready(true);
                     mailto_links::open_pending_soon(&app);
+                    block_sender::refresh();
+                    mail_rules::refresh();
                     app.invoke_product_changed(app.get_active_view());
                     app.global::<TabsUi>().invoke_restore_active();
                     app.set_startup_failed(false);
@@ -4584,7 +4787,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         core.file_core(),
                         startup_notification_host.clone(),
                     );
+                    #[cfg(desktop)]
+                    agents::core_ready(
+                        &startup_runtime,
+                        &startup_paths_for_ui.data_dir,
+                        core.file_core(),
+                    );
                     notifications::ui::core_ready();
+                    auto_replies::core_ready(&app, &startup_runtime, core.file_core());
+                    mail_rules::core_ready(&startup_runtime, core.file_core());
                     if !startup_benchmark_disable_background {
                         core.notify_ui_ready();
                     }
@@ -4637,6 +4848,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         calendar.accounts = calendar_accounts;
                         calendar.sources = calendar_sources;
                         apply_calendar(&app, &calendar, Local::now().date_naive());
+                        calendar::reveal_asked_event(&app, &mut calendar);
                     }
                     refresh_connected_accounts(&app, &startup_state);
                 }
@@ -4696,8 +4908,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let generation = product_generation.get().wrapping_add(1);
         product_generation.set(generation);
         let previous = previous_product.replace(view.to_string());
+        let mail_returned = previous != view.as_str() && view == "mail";
         if previous != view.as_str() {
             if previous == "mail" {
+                // Tabs keep where mail was before its reader goes.
+                app.global::<TabsUi>().invoke_mail_hidden();
                 product_body_generation.set(product_body_generation.get().wrapping_add(1));
                 product_body_pending.set(None);
                 product_body_requests.send_replace(None);
@@ -4707,6 +4922,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 clear_reader_projection(&app);
                 app.set_selected_source("".into());
                 app.set_selected_plain_text("".into());
+                // The next reader starts at the top, and tabs scroll it back.
+                app.set_email_scroll_y(0.0);
             }
             if previous == "calendar" {
                 let mut calendar = product_calendar.borrow_mut();
@@ -4754,7 +4971,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             tokio::time::sleep(window_controller::TRIM_DELAY).await;
             crate::memory::release_free_heap();
         });
-        if app.get_settings_open() {
+        if view == "settings" {
             let updates = product_updates.clone();
             product_runtime.spawn(async move {
                 let (calendar, contacts) = tokio::join!(
@@ -4792,6 +5009,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         } else if view == "mail" {
             app.invoke_drain_core_updates();
             let _ = render_current(&app, &product_state, &product_runtime);
+            if mail_returned {
+                app.global::<TabsUi>().invoke_mail_shown();
+            }
         }
     });
 
@@ -5001,6 +5221,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                             selected_id,
                         );
                         state.messages = page.messages;
+                        state.list_order = page.order;
                         state.labels = page.labels;
                         state.next_cursor = page.next_cursor;
                     }
@@ -5310,6 +5531,48 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let app_weak = app.as_weak();
+    let state_for_subscribed_folders = Rc::clone(&state);
+    let runtime_for_subscribed_folders = runtime.clone();
+    let ui_task_tx_for_subscribed_folders = ui_task_tx.clone();
+    app.on_save_account_subscribed_folders_only(move |account_id, enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_subscribed_folders.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Folder settings require local mail data."));
+            return;
+        };
+        let account_id = i64::from(account_id);
+        app.set_sync_status(UiMessage::plain("Updating folder settings…"));
+        let updates = ui_task_tx_for_subscribed_folders.clone();
+        runtime_for_subscribed_folders.spawn(async move {
+            let message = match core
+                .set_account_subscribed_folders_only(account_id, enabled)
+                .await
+            {
+                Ok(()) => UiMessage::plain("Folder settings updated."),
+                Err(error) => UiMessage::detail("Could not update folder settings: {}", error),
+            };
+            // Reload either way so the switch shows the saved choice.
+            let accounts = core.load_account_snapshot().await.ok();
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts,
+                    calendar_connections: None,
+                    carddav_connections: None,
+                    calendar_error: None,
+                    account_removal: None,
+                    clear_account_form: false,
+                    finishes_account_setup: false,
+                    finishes_oauth: false,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
+    let app_weak = app.as_weak();
     let state_for_sent_copy_policy = Rc::clone(&state);
     let runtime_for_sent_copy_policy = runtime.clone();
     let ui_task_tx_for_sent_copy_policy = ui_task_tx.clone();
@@ -5532,6 +5795,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 }
                 Err(error) => app.set_sync_status(UiMessage::detail("Sync failed: {}", error)),
             }
+            // The failures this check ended in show on their accounts at once.
+            account_status::checked_on_request(&app, &sync_state, update.accounts.as_deref());
         }
     });
 
@@ -5573,7 +5838,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 } else {
                     None
                 };
-                let _ = sync_tx.send(SyncUpdate { result, metadata }).await;
+                let _ = sync_tx
+                    .send(SyncUpdate {
+                        accounts,
+                        result,
+                        metadata,
+                    })
+                    .await;
             });
         })
     };
@@ -5659,7 +5930,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         if !header_exists {
             return;
         }
-        let motion_enabled = app.global::<MotionSettings>().get_enabled();
+        let motion_enabled = app.global::<MotionSettings>().get_movement();
         let generation = {
             let mut state = state_for_mail_group.borrow_mut();
             let (generation, _) = state.mail_groups.toggle(&key);
@@ -5735,6 +6006,38 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         else {
             return;
         };
+        // The chosen messages, or conversations, go as attachments of a new message.
+        if action == "forward_attachment" {
+            let targets = {
+                let state = state_for_bulk_action.borrow();
+                let mut threads = Vec::new();
+                let mut messages = Vec::new();
+                for id in mail_operation_ids(&state.messages, &state.checked_ids, trigger_id) {
+                    match state
+                        .messages
+                        .iter()
+                        .find(|message| message.id == id)
+                        .and_then(MailTarget::of)
+                    {
+                        Some(MailTarget::Thread(thread)) => threads.push(thread),
+                        Some(MailTarget::Message { id, .. }) => messages.push(id),
+                        None => {}
+                    }
+                }
+                [
+                    flectar_mail_core::models::ActionTarget::Threads(threads),
+                    flectar_mail_core::models::ActionTarget::Messages(messages),
+                ]
+                .into_iter()
+                .filter(|target| match target {
+                    flectar_mail_core::models::ActionTarget::Threads(ids)
+                    | flectar_mail_core::models::ActionTarget::Messages(ids) => !ids.is_empty(),
+                })
+                .collect::<Vec<_>>()
+            };
+            composer::with_composers(|composers| composers.forward_as_attachment(&app, targets));
+            return;
+        }
         if let Err(error) = perform_mail_list_action(
             &app,
             &state_for_bulk_action,
@@ -5745,6 +6048,34 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         ) {
             app.set_render_status(UiMessage::detail("Message action failed: {}", error));
         }
+    });
+
+    // "Mark all as read…" from a sidebar row, once confirmed (#234).
+    let app_weak = app.as_weak();
+    let state_for_mark_all = Rc::clone(&state);
+    let runtime_for_mark_all = runtime.clone();
+    app.on_mark_all_read(move |scope| {
+        let Ok(scope) = scope.parse::<Scope>() else {
+            return;
+        };
+        let core = {
+            let state = state_for_mark_all.borrow();
+            state.core.clone().filter(|_| state.using_core)
+        };
+        let Some(core) = core else {
+            return;
+        };
+        let app = app_weak.clone();
+        runtime_for_mark_all.spawn(async move {
+            if let Err(error) = core.mark_all_read(scope).await {
+                let _ = app.upgrade_in_event_loop(move |app| {
+                    app.set_render_status(UiMessage::detail(
+                        "Could not mark all as read: {}",
+                        error,
+                    ));
+                });
+            }
+        });
     });
 
     let app_weak = app.as_weak();
@@ -6045,16 +6376,30 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     register_settings_preference_callbacks(&app, &state, &runtime);
+    settings_controller::register_update_callbacks(&app, &state, &runtime, &platform.paths.cache_dir);
+    #[cfg(desktop)]
+    agents::register_settings(&app, &state, &runtime);
 
     account_mail_preferences::register(&app, &state, &runtime);
+    auto_replies::register(&app, &state, &runtime, platform.external_urls.clone());
     let composers = composer::install(
         &app,
         &state,
         &runtime,
         platform.documents.clone(),
+        platform.paths.temp_dir(),
         cfg!(desktop),
     );
     mailto_links::install(&app, composers);
+    undo::install(&app, &state, &runtime);
+    unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
+    link_services::install(&app, &state, &runtime, platform.external_urls.clone());
+    read_receipts::install(&app, &state, &runtime);
+    block_sender::install(&app, &state, &runtime);
+    saved_searches::install(&app, &state, &runtime);
+    server_search::install(&app, &state, &runtime);
+    mail_rules::install(&app, &state, &runtime);
+    invitation::install(&app, &state, &calendar_state, &runtime);
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);
     notifications::ui::attach(&app, &state, &runtime, platform.notifications.clone());
@@ -6885,6 +7230,67 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     });
 
+    // Turning a list around is like opening it again: it starts over at the
+    // top, in the new order, and keeps that order from now on.
+    let app_weak = app.as_weak();
+    let state_for_order = Rc::clone(&state);
+    let runtime_for_order = runtime.clone();
+    let mail_pagination_generation_for_order = Rc::clone(&mail_pagination_generation);
+    let mail_pagination_in_progress_for_order = Rc::clone(&mail_pagination_in_progress);
+    app.on_set_mail_oldest_first(move |oldest_first| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let order = if oldest_first {
+            ListOrder::OldestFirst
+        } else {
+            ListOrder::NewestFirst
+        };
+        let (core, scope) = {
+            let state = state_for_order.borrow();
+            (state.core.clone().filter(|_| state.using_core), state.scope)
+        };
+        let Some(core) = core else {
+            return;
+        };
+        if !core.set_order(scope, order) {
+            return;
+        }
+        mail_pagination_generation_for_order
+            .set(mail_pagination_generation_for_order.get().wrapping_add(1));
+        mail_pagination_in_progress_for_order.set(false);
+        app.set_mail_loading_more(false);
+        {
+            let mut state = state_for_order.borrow_mut();
+            state.list_order = state.list_order_for_view();
+            state.pending_selection = None;
+            state.pending_selection_opens = false;
+            state.restore_thread_message = None;
+            state.mail_groups.clear();
+            state.page = 1;
+            state.next_cursor = None;
+            state.selected_id = None;
+            state.checked_ids.clear();
+            state.preview_closed = false;
+        }
+        if let Err(error) =
+            refresh_from_source(&app, &state_for_order, &runtime_for_order, false, &[])
+        {
+            app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
+        }
+        let app = app.as_weak();
+        runtime_for_order.spawn(async move {
+            if let Err(error) = core.save_order(scope, order).await {
+                let _ = app.upgrade_in_event_loop(move |app| {
+                    app.set_render_status(UiMessage::detail(
+                        "Could not save the order of this list: {}",
+                        error,
+                    ));
+                });
+            }
+        });
+    });
+
     let app_weak = app.as_weak();
     let state_for_scope = Rc::clone(&state);
     let runtime_for_scope = runtime.clone();
@@ -7040,6 +7446,47 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     });
 
+    // A list opened further down shows the rows before its first one on
+    // request, read toward the list's start.
+    let state_for_earlier = Rc::clone(&state);
+    let runtime_for_earlier = runtime.clone();
+    let mail_list_tx_for_earlier = mail_list_tx.clone();
+    let mail_pagination_generation_for_earlier = Rc::clone(&mail_pagination_generation);
+    let mail_pagination_in_progress_for_earlier = Rc::clone(&mail_pagination_in_progress);
+    app.on_load_earlier_mail(move || {
+        let (core, scope, first) = {
+            let state = state_for_earlier.borrow();
+            (
+                state.core.clone().filter(|_| state.using_core),
+                state.scope,
+                state
+                    .window_start
+                    .and(state.messages.first().map(mail::cursor_of)),
+            )
+        };
+        let (Some(core), Some(first)) = (core, first) else {
+            return;
+        };
+        if mail_pagination_in_progress_for_earlier.replace(true) {
+            return;
+        }
+        let generation = mail_pagination_generation_for_earlier.get();
+        let view_generation = mail_work::generation(&state_for_earlier.borrow());
+        let updates = mail_list_tx_for_earlier.clone();
+        runtime_for_earlier.spawn(async move {
+            let result = core.load_earlier(scope, first, PAGE_SIZE as i64).await;
+            let _ = updates
+                .send(MailListUpdate {
+                    view_generation,
+                    scope,
+                    query: String::new(),
+                    kind: MailListUpdateKind::Earlier { first, generation },
+                    result,
+                })
+                .await;
+        });
+    });
+
     // Automatic read marking must never wait for SQLite or a page refresh
     // inside the pointer callback. A bounded, serial worker preserves requests.
     // A conversation's row marks the conversation read; a single message's
@@ -7053,7 +7500,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
     runtime.spawn(async move {
         while let Some((core, target)) = mark_read_rx.recv().await {
-            let result = core.perform_message_action(target, "mark_read").await;
+            let result = core
+                .perform_message_action(target, "mark_read")
+                .await
+                .map(|_| ());
             let _ = read_results.send((target, result)).await;
         }
     });
@@ -7084,12 +7534,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        // Opening another message ends the wait for the one before, which
+        // stays unread.
+        read_marking::cancel();
         let read_target = {
             let state = state_for_selection.borrow();
             state
-                .core
-                .clone()
-                .filter(|_| state.mark_read_on_open && state.using_core)
+                .mark_read
+                .delay()
+                .filter(|_| state.using_core)
+                .zip(state.core.clone())
                 .zip(
                     state
                         .messages
@@ -7105,15 +7559,39 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 return;
             }
         };
-        if let Some((core, target)) = read_target
-            && ui_dispatch::enqueue_once(&mark_read_tx, &pending_reads, target, (core, target))
-                .is_err()
-        {
-            app.set_render_status(UiMessage::detail(
-                "Could not mark message as read: {}",
-                "read queue is busy; reopen the message to retry",
-            ));
+        let Some(((delay, core), target)) = read_target else {
+            return;
+        };
+        let mark = {
+            let app = app.as_weak();
+            let mark_read_tx = mark_read_tx.clone();
+            let pending_reads = Rc::clone(&pending_reads);
+            move || {
+                if ui_dispatch::enqueue_once(&mark_read_tx, &pending_reads, target, (core, target))
+                    .is_err()
+                    && let Some(app) = app.upgrade()
+                {
+                    app.set_render_status(UiMessage::detail(
+                        "Could not mark message as read: {}",
+                        "read queue is busy; reopen the message to retry",
+                    ));
+                }
+            }
+        };
+        if delay.is_zero() {
+            mark();
+            return;
         }
+        // Only a message still open when the wait ends counts as read.
+        let state = Rc::downgrade(&state_for_selection);
+        read_marking::after(delay, move || {
+            if state
+                .upgrade()
+                .is_some_and(|state| state.borrow().selected_id == Some(id))
+            {
+                mark();
+            }
+        });
     });
 
     let app_weak = app.as_weak();
@@ -7271,8 +7749,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     app.global::<TabsUi>().invoke_flush();
     // So are the messages still being written.
     composer::save_open_messages();
+    // Messages sent with an undo delay leave now, not at the next start.
+    undo::send_before_exit(&runtime);
+    // Agents can't reach a closing app, and its endpoint goes with it.
+    #[cfg(desktop)]
+    agents::shutdown();
     let core = state.borrow().core.as_ref().map(CoreMailSource::file_core);
     notifications::withdraw_before_exit(&runtime, core, platform.notifications.clone());
+    // The runtime ends with this function.
+    notifications::core_closed();
     event_loop_result.map_err(|error| {
         renderer_preferences::startup_error(error, use_wgpu && !gpu_startup_completed.get())
     })?;
@@ -7289,14 +7774,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 /// shaping mixed text, so configuring its generic family keeps the normal UI
 /// font and emoji font separate without rewriting folder names into image runs.
 fn configure_emoji_font_fallback() -> Result<(), Box<dyn std::error::Error>> {
-    use slint::fontique_011::fontique::{Blob, GenericFamily};
+    use slint::fontique_012::fontique::{Blob, GenericFamily};
 
     const NOTO_EMOJI: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/resources/fonts/noto-emoji/NotoEmoji[wght].ttf"
     ));
 
-    let mut fonts = slint::fontique_011::shared_collection();
+    let mut fonts = slint::fontique_012::shared_collection();
     let noto_emoji = fonts
         .register_fonts(Blob::new(Arc::new(NOTO_EMOJI)), None)
         .first()

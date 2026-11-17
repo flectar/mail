@@ -4,6 +4,12 @@ Flectar Mail is in development and isn't stable yet. Preview builds are
 published on [GitHub Releases](https://github.com/flectar/mail/releases). The
 [README](../README.md#-get-flectar-mail) lists the files for each platform.
 
+The builds from GitHub Releases tell you when a newer version is out. Once a
+day, Flectar Mail asks GitHub for the list of releases, without any account or
+mail details, and a newer one shows up in the sidebar and in Settings → About,
+where you can also turn the check off. Copies that update another way, such as
+the Microsoft Store package, Flathub or a distribution's package, don't ask.
+
 ## Signing in to Gmail and Outlook
 
 Google OAuth verification requires an annual CASA security assessment, which
@@ -20,7 +26,9 @@ Builds without OAuth app keys keep Gmail and Outlook sign-in disabled. Use the
 Microsoft app registration, or connect an IMAP, POP3, or JMAP account. Custom
 keys are shared with Settings and take precedence over bundled keys; clearing a
 custom client ID restores the defaults when available. Each provider enables
-separately once its configuration is saved.
+separately once its configuration is saved. A Google app needs the Gmail API
+turned on in its Google Cloud project, and the Google Drive API as well for
+sending large files from Google Drive.
 
 ## Windows and macOS
 
@@ -156,8 +164,9 @@ AltStore or SideStore refreshes them or you install them again, and only three
 can be installed at once, counting AltStore or SideStore. A paid Apple
 Developer Program membership extends this to a year.
 
-Mail syncs while the app is open; it doesn't check in the background or show
-notifications on iOS yet.
+Flectar Mail checks for new mail in the background when iOS lets it, and shows
+notifications for it, as
+[New-mail notifications](features.md#new-mail-notifications) describes.
 
 Releases built with Flectar's iOS registrations sign in to Gmail and Outlook
 directly. Your own keys in **Sign-in settings** must be iOS registrations: a

@@ -3,12 +3,25 @@
 //! what the shared application needs at runtime.
 
 use flectar_mail_core::models::AppIcon;
-use std::{path::PathBuf, sync::OnceLock};
+use std::{
+    path::PathBuf,
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 static PDFIUM_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
 
 /// Names this platform to the settings that describe it.
 pub(crate) const NAME: &str = "ohos";
+
+/// OpenHarmony has no spell checker for apps.
+pub(crate) const CHECKS_SPELLING: bool = false;
+
+pub(crate) fn spell_checker() -> Option<std::sync::Arc<dyn crate::spelling::Checker>> {
+    None
+}
 
 /// Supply the application's native library directory (the hap's `libs/<abi>`,
 /// which the host derives from its own loaded module path). Never a
@@ -103,3 +116,20 @@ pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDesc
         ..Default::default()
     }
 }
+
+/// The animation reduction setting, as the page last reported it.
+static REDUCE_MOTION: AtomicBool = AtomicBool::new(false);
+
+/// The page reports animation reduction, from the accessibility settings of
+/// API 23 and later, when it shows and whenever the setting changes.
+pub fn set_reduce_motion(reduced: bool) {
+    REDUCE_MOTION.store(reduced, Ordering::Relaxed);
+    crate::motion::system_changed();
+}
+
+pub(crate) fn reduce_motion() -> bool {
+    REDUCE_MOTION.load(Ordering::Relaxed)
+}
+
+/// Changes arrive through `set_reduce_motion`.
+pub(crate) fn watch_reduce_motion() {}

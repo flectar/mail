@@ -1,5 +1,5 @@
 import { ScrollView } from "std-widgets.slint";
-import { AppTheme, LayoutMetrics, ThemeUtilities } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MotionSettings, ThemeUtilities } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
 import { WindowChrome } from "../window-chrome.slint";
@@ -12,9 +12,13 @@ export component TextEdit inherits Rectangle {
     in property <color> text-color: AppTheme.heading;
     in property <color> background-color: AppTheme.input-bg;
     in property <length> font-size: TypeScale.body;
+    // The selection's ends, as byte offsets into the text.
+    out property <int> anchor-offset: editor.anchor-position-byte-offset;
+    out property <int> cursor-offset: editor.cursor-position-byte-offset;
     callback edited(string);
     callback select-all;
     callback copy;
+    callback set-selection(int, int);
     forward-focus: editor;
 
     min-height: 80px;
@@ -71,6 +75,7 @@ export component TextEdit inherits Rectangle {
 
     select-all => { editor.select-all(); }
     copy => { editor.copy(); }
+    set-selection(anchor, cursor) => { editor.set-selection-offsets(anchor, cursor); }
 }
 
 export component Switch inherits Rectangle {
@@ -95,7 +100,7 @@ export component Switch inherits Rectangle {
         height: 16px;
         border-radius: 8px;
         background: white;
-        animate x { duration: 180ms; easing: spring(0.18); }
+        animate x { duration: 180ms; easing: spring(0.18); enabled: MotionSettings.movement; }
     }
 
     switch-focus := FocusVisibleScope {
@@ -335,7 +340,7 @@ export component IconButton inherits Rectangle {
         colorize: root.primary ? ThemeUtilities.contrasting-foreground(root.fill-color) : root.icon-color;
         image-fit: contain;
         accessible-role: none;
-        animate y { duration: 140ms; easing: spring(0); }
+        animate y { duration: 140ms; easing: spring(0); enabled: MotionSettings.movement; }
     }
 
     keyboard := FocusVisibleScope {
@@ -397,6 +402,10 @@ export component LineEdit inherits Rectangle {
     in property <image> leading-icon;
     in property <color> leading-icon-color: AppTheme.secondary;
     in property <length> trailing-content-width: 0px;
+    // Outlined and filled like a form field, or at rest only its text and
+    // icon on what is behind it, as the search field in a toolbar. Focus and
+    // invalid input still draw the outline.
+    in property <bool> outlined: true;
     private property <length> text-inset: root.show-leading-icon ? 40px : 12px;
     // Password fields can be shown while typing (NIST SP 800-63B-4
     // 3.1.1.2), on desktop only: a shown password is plain text to the input
@@ -423,10 +432,10 @@ export component LineEdit inherits Rectangle {
     height: 36px;
     min-width: 80px;
     border-radius: LayoutMetrics.corner-radius - 2px;
-    border-width: 1px;
+    border-width: root.outlined || root.invalid || editor.has-focus ? 1px : 0px;
     border-color: root.invalid ? AppTheme.destructive
         : editor.has-focus ? AppTheme.accent : AppTheme.input-border;
-    background: AppTheme.input-bg;
+    background: root.outlined ? AppTheme.input-bg : transparent;
     opacity: root.enabled ? 1 : 0.5;
 
     Text {

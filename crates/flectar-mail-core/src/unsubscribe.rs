@@ -3,14 +3,14 @@
 //!
 //! One-click (RFC 8058) requires the sender to publish BOTH
 //! `List-Unsubscribe: <https://…>` and
-//! `List-Unsubscribe-Post: List-Unsubscribe=One-Click`; the receiver then
-//! POSTs the literal body `List-Unsubscribe=One-Click` to the HTTPS URI.
-//! The endpoint must complete the unsubscribe without cookies, logins or
-//! redirects, so the client here carries no cookie store and treats any
-//! non-2xx (including 3xx) as failure.
+//! `List-Unsubscribe-Post: List-Unsubscribe=One-Click`, signed by DKIM
+//! ([`crate::mime::one_click_signed`]); the receiver then POSTs the field
+//! `List-Unsubscribe=One-Click` to the HTTPS URI. The endpoint must complete
+//! the unsubscribe without cookies, logins or redirects, so the client here
+//! carries no cookie store and treats any non-2xx (including 3xx) as failure.
 
 use crate::error::{CoreError, Result};
-use crate::mime::{is_one_click_post, unsubscribe_uris};
+use crate::mime::unsubscribe_uris;
 use std::{
     net::{IpAddr, SocketAddr},
     time::Duration,
@@ -33,17 +33,15 @@ pub enum UnsubscribePlan {
     Browser { url: String },
 }
 
-/// Decide how to unsubscribe from the raw header values. None when the header
-/// contains no usable URI.
-pub fn plan(
-    list_unsubscribe: &str,
-    list_unsubscribe_post: Option<&str>,
-) -> Option<UnsubscribePlan> {
+/// Decide how to unsubscribe from the raw List-Unsubscribe value. `one_click`
+/// says the sender signed a one-click request
+/// ([`crate::mime::one_click_signed`]). None when the header contains no
+/// usable URI.
+pub fn plan(list_unsubscribe: &str, one_click: bool) -> Option<UnsubscribePlan> {
     let mut uris = unsubscribe_uris(list_unsubscribe);
     let web = uris
         .clone()
         .find(|u| has_scheme_prefix(u, "https://") || has_scheme_prefix(u, "http://"));
-    let one_click = list_unsubscribe_post.is_some_and(is_one_click_post);
 
     // RFC 8058 is https-only; a one-click marker on an http:// URI is ignored.
     if one_click && let Some(url) = web.filter(|u| has_scheme_prefix(u, "https://")) {
@@ -84,6 +82,11 @@ fn parse_mailto(uri: &str) -> Option<UnsubscribePlan> {
     Some(UnsubscribePlan::Mailto { to, subject, body })
 }
 
+/// The form field the POST carries, as multipart/form-data: RFC 8058 section
+/// 3.2 says it SHOULD be sent that way, and MAY be urlencoded.
+const ONE_CLICK_BOUNDARY: &str = "flectar-one-click";
+const ONE_CLICK_FORM: &str = "--flectar-one-click\r\nContent-Disposition: form-data; name=\"List-Unsubscribe\"\r\n\r\nOne-Click\r\n--flectar-one-click--\r\n";
+
 /// Perform the RFC 8058 one-click POST. Success is a 2xx only: no redirects
 /// are followed (the endpoint must not require them) and no cookies are sent.
 pub async fn post_one_click(url: &str) -> Result<()> {
@@ -120,9 +123,9 @@ pub async fn post_one_click(url: &str) -> Result<()> {
         .post(url)
         .header(
             reqwest::header::CONTENT_TYPE,
-            "application/x-www-form-urlencoded",
+            format!("multipart/form-data; boundary={ONE_CLICK_BOUNDARY}"),
         )
-        .body("List-Unsubscribe=One-Click")
+        .body(ONE_CLICK_FORM)
         .send()
         .await
         .map_err(|e| CoreError::Network(e.to_string()))?;
@@ -203,11 +206,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn one_click_needs_post_header_and_https() {
-        let p = plan(
-            "<https://x.example/u?t=1>, <mailto:u@x.example>",
-            Some("List-Unsubscribe=One-Click"),
-        );
+    fn one_click_needs_a_signed_request_and_https() {
+        let p = plan("<https://x.example/u?t=1>, <mailto:u@x.example>", true);
         assert_eq!(
             p,
             Some(UnsubscribePlan::OneClick {
@@ -215,12 +215,12 @@ mod tests {
             })
         );
 
-        // Same header without the POST marker: mailto wins over browser.
-        let p = plan("<https://x.example/u?t=1>, <mailto:u@x.example>", None);
+        // The same header without a signed request: mailto wins over browser.
+        let p = plan("<https://x.example/u?t=1>, <mailto:u@x.example>", false);
         assert!(matches!(p, Some(UnsubscribePlan::Mailto { .. })));
 
         // One-click marker on a plain http URL is ignored.
-        let p = plan("<http://x.example/u>", Some("List-Unsubscribe=One-Click"));
+        let p = plan("<http://x.example/u>", true);
         assert_eq!(
             p,
             Some(UnsubscribePlan::Browser {
@@ -249,7 +249,7 @@ mod tests {
     fn mailto_parses_subject_and_body() {
         let p = plan(
             "<mailto:leave@list.example?subject=unsub%20me&body=please%20go>",
-            None,
+            false,
         );
         assert_eq!(
             p,
@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn mailto_defaults() {
-        let p = plan("<mailto:leave@list.example>", None);
+        let p = plan("<mailto:leave@list.example>", false);
         assert_eq!(
             p,
             Some(UnsubscribePlan::Mailto {
@@ -278,7 +278,7 @@ mod tests {
     fn mailto_keeps_plus_addresses() {
         let p = plan(
             "<mailto:googlegroups-manage+123+unsubscribe@googlegroups.com?subject=Unsubscribe+me>",
-            None,
+            false,
         );
         assert_eq!(
             p,
@@ -292,9 +292,9 @@ mod tests {
 
     #[test]
     fn mailto_without_an_address_is_not_usable() {
-        assert_eq!(plan("<mailto:?subject=unsubscribe>", None), None);
+        assert_eq!(plan("<mailto:?subject=unsubscribe>", false), None);
         assert_eq!(
-            plan("<mailto:?subject=x>, <https://x.example/u>", None),
+            plan("<mailto:?subject=x>, <https://x.example/u>", false),
             Some(UnsubscribePlan::Browser {
                 url: "https://x.example/u".into()
             })
@@ -304,15 +304,15 @@ mod tests {
     #[test]
     fn browser_fallback_and_empty() {
         assert_eq!(
-            plan("<https://x.example/u>", None),
+            plan("<https://x.example/u>", false),
             Some(UnsubscribePlan::Browser {
                 url: "https://x.example/u".into()
             })
         );
-        assert_eq!(plan("nothing useful", None), None);
+        assert_eq!(plan("nothing useful", false), None);
         // Bare (unbracketed) value from a sloppy sender still parses.
         assert!(matches!(
-            plan("https://x.example/u", Some("List-Unsubscribe=One-Click")),
+            plan("https://x.example/u", true),
             Some(UnsubscribePlan::OneClick { .. })
         ));
     }

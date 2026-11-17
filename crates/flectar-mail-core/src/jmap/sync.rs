@@ -6,9 +6,13 @@ use crate::db::repo::messages::NewMessage;
 use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
 use crate::jmap::client::{self, ConnectedClient};
-use crate::models::{AccountConfig, Address, MailProtocol, SenderDeliveryStatus, now_ms, roles};
+use crate::models::{
+    AccountConfig, Address, MailProtocol, SenderDeliveryStatus, ServerRulesState,
+    ServerSearchCursor, now_ms, roles,
+};
 use crate::sync::engine::{
-    PriorityFetchCmd, SyncCmd, SyncCtx, configured_sync_interval, set_state, set_state_error,
+    PriorityFetchCmd, SERVER_SEARCH_PAGES, ServerHits, SyncCmd, SyncCtx, caught_up,
+    configured_sync_interval, set_state, set_state_error,
 };
 use futures::{FutureExt, Stream, StreamExt};
 use jmap_client::core::error::MethodErrorType;
@@ -53,6 +57,55 @@ pub(crate) fn spawn(
 }
 
 const IDENTITY_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// Reads the account's automatic replies back, so that replies set in
+/// webmail show in the app too.
+async fn sync_auto_reply(
+    ctx: &SyncCtx,
+    account_id: i64,
+    connected: &ConnectedClient,
+) -> Result<()> {
+    let saved_at = ctx
+        .db
+        .read(move |conn| repo::auto_replies::saved_at(conn, account_id))
+        .await?;
+    let reply = match crate::jmap::sieve::replies(connected) {
+        Some(mut scripts) => crate::sieve::read_from(&mut scripts).await?,
+        None => crate::jmap::vacation::read(connected).await?,
+    };
+    let changed = ctx
+        .db
+        .write(move |conn| {
+            let read = repo::auto_replies::Origin::Read { saved_at };
+            repo::auto_replies::store(conn, account_id, &reply, now_ms(), read)
+        })
+        .await?;
+    if changed {
+        ctx.bus.emit(CoreEvent::AutoReplyChanged { account_id });
+    }
+    Ok(())
+}
+
+/// Puts the account's rules on its server, when it runs Sieve scripts.
+async fn sync_server_rules(ctx: &SyncCtx, account_id: i64, connected: &ConnectedClient) {
+    let writer = crate::server_rules::writer(account_id);
+    let _writing = writer.lock().await;
+    let state = match crate::jmap::sieve::scripts(connected) {
+        Some(mut scripts) => {
+            match crate::server_rules::mirror(ctx, account_id, &mut scripts, None).await {
+                Ok(_) => return,
+                Err(error) => {
+                    tracing::warn!(account_id, %error, "JMAP rules on the server failed");
+                    ServerRulesState::Failed(error.to_string())
+                }
+            }
+        }
+        None => ServerRulesState::Unavailable,
+    };
+    if let Err(error) = crate::server_rules::store_state(ctx, account_id, state).await {
+        tracing::warn!(account_id, %error, "JMAP rules on the server unrecorded");
+    }
+}
 
 async fn sync_sender_identities(
     ctx: &SyncCtx,
@@ -121,10 +174,22 @@ async fn actor(
                         "JMAP identity refresh failed; keeping cached identities"
                     ),
                 }
+                // Replies set in webmail show too. Reading them never fails a sync.
+                if (crate::jmap::sieve::replies(&connected).is_some()
+                    || crate::jmap::vacation::offered(&connected))
+                    && let Err(error) = sync_auto_reply(&ctx, config.id, &connected).await
+                {
+                    tracing::warn!(account_id = config.id, %error, "JMAP automatic replies failed");
+                }
+                // So do rules, nor do they fail a sync.
+                sync_server_rules(&ctx, config.id, &connected).await;
             }
+            let started = now_ms();
             set_state(&ctx, config.id, "syncing").await;
             sync_mailboxes(&ctx, config.id, &connected).await?;
             sync_emails(&ctx, &config, &connected, live_since).await?;
+            caught_up(&ctx, config.id, started).await;
+            crate::sync::engine::settle_waiting_rules(&ctx, config.id).await;
             execute_actions(&ctx, &config, &connected).await?;
             // Scheduled mail the server holds: released, cancelled
             // elsewhere, or new from another device. Never fails a sync.
@@ -884,7 +949,41 @@ async fn current_email_state(c: &ConnectedClient) -> Result<String> {
     Ok(response.take_state())
 }
 
-fn header_properties() -> Vec<EmailProperty> {
+/// Headers read as text with every Email's metadata.
+const TEXT_HEADERS: [&str; 7] = [
+    "Auto-Submitted",
+    "List-Id",
+    "Precedence",
+    "Importance",
+    "X-Priority",
+    "X-MSMail-Priority",
+    "Priority",
+];
+
+/// The name `name` is fetched under: as [`TEXT_HEADERS`] spells it, when it
+/// is one of them, which servers name in the case asked for.
+fn fetched_header_name(name: &str) -> &str {
+    TEXT_HEADERS
+        .iter()
+        .find(|known| known.eq_ignore_ascii_case(name))
+        .copied()
+        .unwrap_or(name)
+}
+
+/// The values of the headers rules test (#238), as fetched with an Email.
+fn rule_header_values(email: &Email, names: &[String]) -> Vec<(String, String)> {
+    names
+        .iter()
+        .filter_map(|name| {
+            header_text(email, fetched_header_name(name))
+                .map(|value| (name.clone(), value.to_owned()))
+        })
+        .collect()
+}
+
+/// What Email/get asks for, with the headers `rule_headers` that the
+/// account's rules test.
+fn header_properties(rule_headers: &[String]) -> Vec<EmailProperty> {
     vec![
         EmailProperty::Id,
         EmailProperty::BlobId,
@@ -905,11 +1004,60 @@ fn header_properties() -> Vec<EmailProperty> {
         // Not `attachments`: see `list_attachments`.
         EmailProperty::HasAttachment,
         EmailProperty::Preview,
-        EmailProperty::Header(Header::as_text("Auto-Submitted", false)),
-        EmailProperty::Header(Header::as_text("List-Id", false)),
-        EmailProperty::Header(Header::as_text("Precedence", false)),
     ]
+    .into_iter()
+    .chain(
+        TEXT_HEADERS
+            .into_iter()
+            .map(|name| EmailProperty::Header(Header::as_text(name, false))),
+    )
+    .chain(RECEIPT_HEADERS.map(|name| EmailProperty::Header(Header::as_raw(name, true))))
+    .chain(
+        rule_headers
+            .iter()
+            .filter(|name| fetched_header_name(name) == name.as_str())
+            .map(|name| EmailProperty::Header(Header::as_text(name.as_str(), false))),
+    )
+    .collect()
 }
+
+/// The fields a read receipt request is read from (RFC 8098 section 2),
+/// fetched raw so the MIME parser reads them as it does IMAP's.
+const RECEIPT_HEADERS: [&str; 3] = [
+    "Return-Path",
+    "Disposition-Notification-To",
+    "Disposition-Notification-Options",
+];
+
+/// Where the message asks a read receipt to go, and whether RFC 8098
+/// section 2.1 wants the user's confirmation first.
+fn receipt_request(email: &Email) -> (Vec<Address>, bool) {
+    let mut block = String::new();
+    for name in RECEIPT_HEADERS {
+        let values = match email.header(&Header::as_raw(name, true)) {
+            Some(HeaderValue::AsTextAll(values)) => values.clone(),
+            Some(HeaderValue::AsText(value)) => vec![value.clone()],
+            _ => Vec::new(),
+        };
+        for value in values {
+            // A raw value starts after the colon, folding included.
+            block.push_str(name);
+            block.push(':');
+            block.push_str(&value);
+            block.push_str("\r\n");
+        }
+    }
+    if block.is_empty() {
+        return (Vec::new(), false);
+    }
+    block.push_str("\r\n");
+    crate::mime::parse_header_block(block.as_bytes())
+        .map(|headers| (headers.receipt_to, headers.receipt_confirm))
+        .unwrap_or_default()
+}
+
+/// RFC 9007 and the IANA keyword registry spell it in lowercase for JMAP.
+const MDN_SENT: &str = "$mdnsent";
 
 fn header_text<'a>(email: &'a Email, name: &str) -> Option<&'a str> {
     match email.header(&Header::as_text(name, false)) {
@@ -992,11 +1140,19 @@ async fn sync_emails(
     // checkpointed once every page is stored.
     let mut remote_ids = skipped.into_iter().collect::<HashSet<_>>();
     remote_ids.reserve(ids.len());
+    let rule_headers = ctx
+        .db
+        .read(move |conn| crate::rules::header_names(conn, account_id))
+        .await?;
     let mut pages = HeaderPages {
         ids: &ids,
         position: 0,
         size: max_objects_in_get(c),
+        rule_headers: &rule_headers,
     };
+    // New mail whose rules wait for its body, which comes once the pages
+    // are stored.
+    let mut waiting = Vec::new();
     let mut fetched = pages.next(c).await?;
     while let Some((emails, not_found)) = fetched.take() {
         destroyed.extend(not_found);
@@ -1007,11 +1163,20 @@ async fn sync_emails(
         );
         let (next, persisted) = tokio::join!(
             pages.next(c),
-            persist_emails(ctx, config, emails, full, insert_after, live_since)
+            persist_emails(
+                ctx,
+                config,
+                emails,
+                full,
+                insert_after,
+                live_since,
+                Some(rule_headers.clone()),
+            )
         );
-        persisted?;
+        waiting.extend(persisted?);
         fetched = next?;
     }
+    fetch_waiting_bodies(ctx, config, c, waiting).await;
     destroyed.sort();
     destroyed.dedup();
     finish_email_sync(ctx, config, remote_ids, destroyed, checkpoint_state, full).await
@@ -1022,6 +1187,8 @@ struct HeaderPages<'a> {
     ids: &'a [String],
     position: usize,
     size: usize,
+    /// Headers the account's rules test, fetched too.
+    rule_headers: &'a [String],
 }
 
 impl HeaderPages<'_> {
@@ -1032,7 +1199,7 @@ impl HeaderPages<'_> {
     async fn next(&mut self, c: &ConnectedClient) -> Result<Option<(Vec<Email>, Vec<String>)>> {
         while self.position < self.ids.len() {
             let end = self.ids.len().min(self.position + self.size);
-            match fetch_headers(c, &self.ids[self.position..end]).await {
+            match fetch_headers(c, &self.ids[self.position..end], self.rule_headers).await {
                 Ok(page) => {
                     self.position = end;
                     return Ok(Some(page));
@@ -1054,13 +1221,14 @@ impl HeaderPages<'_> {
 async fn fetch_headers(
     c: &ConnectedClient,
     ids: &[String],
+    rule_headers: &[String],
 ) -> jmap_client::Result<(Vec<Email>, Vec<String>)> {
     let mut request = c.request();
     request
         .get_email()
         .account_id(&c.account_id)
         .ids(ids.iter().cloned())
-        .properties(header_properties());
+        .properties(header_properties(rule_headers));
     let mut response: EmailGetResponse = c.send_single(request).await?;
     Ok((response.take_list(), response.take_not_found()))
 }
@@ -1094,7 +1262,10 @@ fn first(values: Option<&[String]>) -> Option<String> {
 
 /// Stores a page of headers. A full sync also records each message as
 /// stored, so an interrupted run need not fetch it again. An Email received
-/// before `insert_after` only updates a message already here.
+/// before `insert_after` only updates a message already here. Rules sort mail
+/// new here (#238) with `rules`, the headers they test fetched with it, unless
+/// it is None: what a search on the server finds is never new mail. Returns
+/// the new mail whose rules wait for its body.
 async fn persist_emails(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -1102,13 +1273,15 @@ async fn persist_emails(
     full_sync: bool,
     insert_after: Option<i64>,
     live_since: i64,
-) -> Result<()> {
+    rules: Option<Vec<String>>,
+) -> Result<Vec<i64>> {
     let account_id = config.id;
-    let (thread_ids, notified_threads, stale_paths) = ctx
+    let (thread_ids, notified_threads, stale_paths, waiting) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
             let settings = repo::settings::get(&tx)?;
+            let mut waiting = Vec::new();
             let (outgoing_learning_since, incoming_learning_since) =
                 repo::contacts::learning_boundaries(&tx, account_id, now_ms())?;
             let account_emails = repo::sender_identities::own_addresses(&tx, account_id)?;
@@ -1116,6 +1289,19 @@ async fn persist_emails(
             // Threads queued for a new-mail notification, once each.
             let mut notified_threads = Vec::new();
             let mut stale_paths = Vec::new();
+            // Rules sort new mail (#238): what changes report, and what a
+            // full sync after the changes ran out finds received since the
+            // account last caught up. A first full sync finds only history.
+            let sorter = crate::rules::Sorter::load(&tx, account_id)?;
+            let caught_up_at = if full_sync {
+                tx.query_row(
+                    "SELECT caught_up_at FROM accounts WHERE id = ?1",
+                    params![account_id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )?
+            } else {
+                None
+            };
 
             for email in emails {
                 let remote_id = email
@@ -1207,6 +1393,7 @@ async fn persist_emails(
                     .collect::<Vec<_>>();
                 let is_read = keywords.iter().any(|value| value == "$seen");
                 let is_starred = keywords.iter().any(|value| value == "$flagged");
+                let receipt_answered = keywords.iter().any(|value| value == MDN_SENT);
                 let is_draft = keywords.iter().any(|value| value == "$draft")
                     || primary_folder.role.as_deref() == Some(roles::DRAFTS);
                 let is_outgoing = primary_folder.role.as_deref() == Some(roles::SENT);
@@ -1263,7 +1450,10 @@ async fn persist_emails(
                             repo::contacts::harvest(&tx, account_id, address, true, date)?;
                         }
                     }
-                } else if inserted
+                }
+                // The sender of new incoming mail is learned once rules have
+                // sorted it, unless they throw it away.
+                let learn_sender = if inserted
                     && !is_outgoing
                     && settings.collect_incoming_contacts
                     && date >= incoming_learning_since
@@ -1271,12 +1461,18 @@ async fn persist_emails(
                     && !is_automated
                     && let Some(sender) = &from
                     && !crate::mime::robot_sender(&sender.email)
+                    && !repo::blocked::is_blocked(&tx, &sender.email.to_ascii_lowercase())?
                 {
-                    repo::contacts::harvest(&tx, account_id, sender, false, date)?;
-                }
+                    Some(sender.clone())
+                } else {
+                    None
+                };
                 let mut pending_keywords = false;
                 let mut pending_mailboxes = false;
                 let local_id;
+                // For mail new here that arrived live in the Inbox, whether
+                // its notification may play a sound.
+                let mut announce = None;
 
                 if let Some(existing) = existing {
                     (pending_keywords, pending_mailboxes) =
@@ -1345,6 +1541,10 @@ async fn persist_emails(
                         &remote_id,
                         blob_id.as_deref(),
                     )?;
+                    // Another device sent or declined the read receipt.
+                    if receipt_answered {
+                        repo::messages::mark_receipt_handled(&tx, local_id)?;
+                    }
                     if let Some(old_thread_id) = old_thread_id
                         && old_thread_id != thread_id
                     {
@@ -1362,6 +1562,7 @@ async fn persist_emails(
                         .as_ref()
                         .map(|sender| sender.email.to_ascii_lowercase())
                         .unwrap_or_default();
+                    let (receipt_to, receipt_confirm) = receipt_request(&email);
                     let new = NewMessage {
                         account_id,
                         folder_id: primary_folder.id,
@@ -1387,8 +1588,18 @@ async fn persist_emails(
                         references,
                         list_unsubscribe: None,
                         list_unsubscribe_post: None,
+                        list_id: header_text(&email, "List-Id").and_then(crate::mime::list_id),
                         sender_addr: None,
                         sender_verification: crate::models::SenderVerification::None,
+                        receipt_to,
+                        receipt_confirm,
+                        receipt_handled: receipt_answered,
+                        importance: crate::mime::importance(
+                            header_text(&email, "Importance"),
+                            header_text(&email, "X-Priority"),
+                            header_text(&email, "X-MSMail-Priority"),
+                            header_text(&email, "Priority"),
+                        ),
                     };
                     local_id = repo::messages::insert(&tx, &new, thread_id)?;
                     repo::messages::set_jmap_remote(
@@ -1411,11 +1622,8 @@ async fn persist_emails(
                             date,
                             now_ms(),
                         )
-                        && !notified_threads.contains(&thread_id)
                     {
-                        let audible = crate::sync::ingest::chime_worthy(is_automated, &from_email);
-                        repo::notifications::enqueue(&tx, local_id, audible)?;
-                        notified_threads.push(thread_id);
+                        announce = Some(crate::sync::ingest::chime_worthy(is_automated, &from_email));
                     }
                 }
                 if !pending_mailboxes {
@@ -1425,6 +1633,53 @@ async fn persist_emails(
                     repo::labels::reconcile_keywords(&tx, local_id, &keywords)?;
                 }
                 repo::search::index_message(&tx, local_id)?;
+                // Mail from a blocked sender goes to Spam as it arrives, once
+                // its mailboxes are in place.
+                let turned_away = inserted && crate::turn_away(&tx, local_id)?;
+                // Then rules sort new mail. What they file away or mark read
+                // stays silent.
+                let arrived = rules.is_some()
+                    && inserted
+                    && !turned_away
+                    && (!full_sync || caught_up_at.is_some_and(|at| date >= at));
+                let sorted = if arrived {
+                    sorter.arrived(
+                        &tx,
+                        local_id,
+                        crate::rules::Arrival {
+                            headers: Some(rule_header_values(
+                                &email,
+                                rules.as_deref().unwrap_or_default(),
+                            )),
+                            text: None,
+                            attachments_known: true,
+                        },
+                    )?
+                } else {
+                    Default::default()
+                };
+                if !sorted.unwanted
+                    && let Some(sender) = &learn_sender
+                {
+                    repo::contacts::harvest(&tx, account_id, sender, false, date)?;
+                }
+                // Rules that wait for the body hold the notification back
+                // until they are done.
+                if sorted.waiting {
+                    if let Some(audible) = announce
+                        && !turned_away
+                    {
+                        crate::rules::hold(&tx, local_id, audible)?;
+                    }
+                    waiting.push(local_id);
+                } else if let Some(audible) = announce
+                    && !turned_away
+                    && !sorted.silent()
+                    && !notified_threads.contains(&thread_id)
+                {
+                    repo::notifications::enqueue(&tx, local_id, audible)?;
+                    notified_threads.push(thread_id);
+                }
                 changed_threads.insert(thread_id);
             }
 
@@ -1436,6 +1691,7 @@ async fn persist_emails(
                 changed_threads.into_iter().collect::<Vec<_>>(),
                 notified_threads,
                 stale_paths,
+                waiting,
             ))
         })
         .await?;
@@ -1446,7 +1702,26 @@ async fn persist_emails(
             thread_ids: notified_threads,
         });
     }
-    Ok(())
+    Ok(waiting)
+}
+
+/// Fetch over `c`, now, the bodies new mail's rules wait for (#238), as
+/// Thunderbird downloads new mail's bodies when its filters need them.
+/// Storing a body goes on with its rules; one that fails waits for the rules
+/// to settle without it.
+async fn fetch_waiting_bodies(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    waiting: Vec<i64>,
+) {
+    for message_id in waiting {
+        if let Err(error) =
+            fetch_body_over(ctx, config, BodyConnection::Shared(c), message_id).await
+        {
+            tracing::warn!(account_id = config.id, message_id, %error, "receive: a body for rules failed");
+        }
+    }
 }
 
 /// Applies remote deletions and full-sync reconciliation before checkpointing.
@@ -1965,6 +2240,26 @@ async fn execute_action(
             }
             crate::sync::finish_permanent_delete(ctx, action.message_id).await
         }
+        "mark_folder_read" => {
+            let Some(folder_id) = action.payload["folderId"].as_i64() else {
+                return Ok(());
+            };
+            let before = action.payload["before"]
+                .as_i64()
+                .unwrap_or_else(crate::models::now_ms);
+            let folder = ctx
+                .db
+                .read(move |conn| repo::folders::get(conn, folder_id))
+                .await?;
+            // The mailbox went away since: nothing of it is left to mark.
+            let Some(mailbox_id) = folder
+                .filter(|folder| folder.account_id == config.id)
+                .and_then(|folder| folder.jmap_id)
+            else {
+                return Ok(());
+            };
+            mark_mailbox_read(c, &mailbox_id, before).await
+        }
         "mark_read" | "mark_unread" | "star" | "unstar" => {
             let Some(remote_id) = linked_or_retry(&remote_id)? else {
                 return Ok(());
@@ -1981,6 +2276,19 @@ async fn execute_action(
                 c.email_set_keyword(remote_id, keyword, set).await,
             )
             .await
+        }
+        // RFC 9007 spells it in lowercase; a receipt goes after the mark,
+        // as RFC 3503 asks of IMAP.
+        "read_receipt" => {
+            if let Some(remote_id) = linked_or_retry(&remote_id)? {
+                apply_message_mutation(
+                    ctx,
+                    action.message_id,
+                    c.email_set_keyword(remote_id, MDN_SENT, true).await,
+                )
+                .await?;
+            }
+            send_read_receipt(ctx, config, c, action).await
         }
         "add_label" | "remove_label" => {
             let Some(remote_id) = linked_or_retry(&remote_id)? else {
@@ -2036,10 +2344,65 @@ async fn execute_action(
                 .ok_or_else(|| CoreError::Jmap("draft deletion has no JMAP Email id".into()))?;
             destroy_email_if_present(c, remote_id).await
         }
-        "snooze" | "unsnooze" => Ok(()),
+        "snooze" | "unsnooze" | "show_in" => Ok(()),
         other => Err(CoreError::Jmap(format!(
             "unsupported queued JMAP action: {other}"
         ))),
+    }
+}
+
+/// Mark a mailbox's unread messages that arrived before `before` (in
+/// milliseconds) seen (#234). JMAP has no call for a whole mailbox, so each
+/// round asks for as many unread ones as one Email/set takes and marks
+/// them, until none are left.
+async fn mark_mailbox_read(c: &ConnectedClient, mailbox_id: &str, before: i64) -> Result<()> {
+    let batch = c
+        .client
+        .session()
+        .core_capabilities()
+        .map_or(1, |caps| caps.max_objects_in_set().clamp(1, 500));
+    let mut previous = Vec::new();
+    loop {
+        let filter = jmap_client::core::query::Filter::and([
+            jmap_client::email::query::Filter::in_mailbox(mailbox_id),
+            jmap_client::email::query::Filter::not_keyword("$seen"),
+            jmap_client::email::query::Filter::before(before / 1000),
+        ]);
+        let mut request = c.request();
+        request
+            .query_email()
+            .account_id(&c.account_id)
+            .limit(batch)
+            .filter(filter);
+        let response: QueryResponse = c.send_single(request).await.map_err(client::map_error)?;
+        let ids = response.ids().to_vec();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        // A server that answers with what it was just asked to mark isn't
+        // marking: stop rather than ask forever.
+        if ids == previous {
+            return Err(CoreError::Jmap(
+                "the server still lists the messages it was asked to mark read".into(),
+            ));
+        }
+        let mut request = c.request();
+        {
+            let set = request.set_email().account_id(&c.account_id);
+            for id in &ids {
+                set.update(id).keyword("$seen", true);
+            }
+        }
+        let mut response: EmailSetResponse =
+            c.send_single(request).await.map_err(client::map_error)?;
+        for id in &ids {
+            match response.updated(id) {
+                Ok(_) => {}
+                Err(jmap_client::Error::Set(error)) if error.type_ == SetErrorType::NotFound => {}
+                Err(error) => return Err(client::map_error(error)),
+            }
+        }
+        previous = ids;
     }
 }
 
@@ -2195,11 +2558,16 @@ async fn build_draft_message(
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
             let (references, in_reply_to) = repo::messages::draft_reply_headers(conn, draft_id)?;
-            let mut stmt =
-                conn.prepare("SELECT file_path,filename FROM draft_attachments WHERE draft_id=?1")?;
+            let mut stmt = conn.prepare(
+                "SELECT file_path,filename,mime_type FROM draft_attachments WHERE draft_id=?1",
+            )?;
             let attachments = stmt
                 .query_map(params![draft_id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let bcc = serde_json::from_str::<Vec<Address>>(&bcc_json)?;
@@ -2244,7 +2612,7 @@ async fn build_draft_message(
         .await
         .ok();
     let mut outgoing_attachments = Vec::new();
-    for (path, filename) in attachments {
+    for (path, filename, mime_type) in attachments {
         let canonical = tokio::fs::canonicalize(&path)
             .await
             .map_err(|error| CoreError::Other(format!("attachment {filename}: {error}")))?;
@@ -2267,7 +2635,7 @@ async fn build_draft_message(
             )));
         }
         outgoing_attachments.push(crate::mime::OutgoingAttachment {
-            mime_type: crate::queue::mime_guess_from_name(&filename),
+            mime_type: mime_type.unwrap_or_else(|| crate::queue::mime_guess_from_name(&filename)),
             filename,
             bytes: crate::file_io::read(
                 canonical,
@@ -2283,6 +2651,15 @@ async fn build_draft_message(
         .rsplit_once('@')
         .map(|(_, value)| value)
         .unwrap_or("localhost");
+    let (receipt_to, importance) = ctx
+        .db
+        .read(move |conn| {
+            Ok((
+                repo::messages::receipt_to(conn, draft_id)?,
+                repo::messages::importance(conn, draft_id)?,
+            ))
+        })
+        .await?;
     let outgoing = crate::mime::OutgoingMessage {
         from: detail.from.clone(),
         reply_to,
@@ -2297,6 +2674,8 @@ async fn build_draft_message(
         message_id: stored_message_id.as_deref(),
         message_id_domain: domain,
         attachments: outgoing_attachments,
+        receipt_to: &receipt_to,
+        importance,
     };
     let security_recipients = outgoing
         .to
@@ -2343,6 +2722,11 @@ async fn save_draft_action(
         .or(action.message_id)
         .ok_or_else(|| CoreError::Jmap("draft save has no draftId".into()))?;
     let (message_id, raw) = build_draft_message(ctx, config, c, draft_id).await?;
+    let asks_receipt = !ctx
+        .db
+        .read(move |conn| repo::messages::receipt_to(conn, draft_id))
+        .await?
+        .is_empty();
     let draft_mailbox =
         ensure_role_mailbox(ctx, config.id, c, roles::DRAFTS, "Drafts", Role::Drafts).await?;
     if !action_is_inflight(ctx, action.id).await? {
@@ -2384,7 +2768,14 @@ async fn save_draft_action(
         .account_id(&c.account_id)
         .email(blob_id)
         .mailbox_ids([draft_mailbox])
-        .keywords(["$draft", "$seen"])
+        // A message that asks for a read receipt is marked as answered, so
+        // no client sends one for its draft or its sent copy (RFC 3503
+        // sections 3.3 and 3.4, RFC 9007).
+        .keywords(if asks_receipt {
+            vec!["$draft", "$seen", MDN_SENT]
+        } else {
+            vec!["$draft", "$seen"]
+        })
         .received_at(now_ms() / 1000);
     let create_id = import.create_id();
     let imported = c
@@ -2463,7 +2854,7 @@ pub(super) async fn send_action(
             .await?
             .is_some();
     if !already_submitted {
-        let (sender_email, identity_id) = sending_identity(ctx, c, draft_id).await?;
+        let (sender_email, identity_id) = draft_sending_identity(ctx, c, draft_id).await?;
         let (request, create_id) =
             submission_request(c, &remote_email, identity_id, sent_mailbox.clone());
         let mut response = c
@@ -2568,9 +2959,8 @@ pub(super) async fn prepared_email(
     Ok(remote_email)
 }
 
-/// The sender of a draft and the server's identity that sends as it: an
-/// exact identity before a `*@domain` one (RFC 8621 §6).
-pub(super) async fn sending_identity(
+/// The sender of a draft and the server's identity that sends as it.
+pub(super) async fn draft_sending_identity(
     ctx: &SyncCtx,
     c: &ConnectedClient,
     draft_id: i64,
@@ -2579,34 +2969,7 @@ pub(super) async fn sending_identity(
         .db
         .read(move |conn| Ok(repo::messages::detail(conn, draft_id)?.from.email))
         .await?;
-    let mut identity_request = c.request();
-    identity_request.get_identity().account_id(&c.account_id);
-    let identities = c
-        .send_single::<IdentityGetResponse>(identity_request)
-        .await
-        .map_err(client::map_error)?
-        .take_list();
-    // RFC 8621 §6: an exact identity is more specific than `*@domain`.
-    let identity_id = identities
-        .iter()
-        .filter(|identity| {
-            identity
-                .email()
-                .is_some_and(|email| identity_matches(email, &sender_email))
-        })
-        .min_by_key(|identity| {
-            identity
-                .email()
-                .is_some_and(|email| email.starts_with("*@"))
-        })
-        .and_then(|identity| identity.id())
-        .ok_or_else(|| {
-            CoreError::Jmap(format!(
-                "server has no JMAP sending identity for {}",
-                sender_email
-            ))
-        })?
-        .to_owned();
+    let identity_id = sending_identity(c, &sender_email).await?;
     Ok((sender_email, identity_id))
 }
 
@@ -2699,6 +3062,113 @@ pub(super) async fn ensure_role_mailbox(
         })
         .await?;
     Ok(remote)
+}
+
+/// The server's sending identity for `sender_email`.
+async fn sending_identity(c: &ConnectedClient, sender_email: &str) -> Result<String> {
+    let mut identity_request = c.request();
+    identity_request.get_identity().account_id(&c.account_id);
+    let identities = c
+        .send_single::<IdentityGetResponse>(identity_request)
+        .await
+        .map_err(client::map_error)?
+        .take_list();
+    // RFC 8621 §6: an exact identity is more specific than `*@domain`.
+    identities
+        .iter()
+        .filter(|identity| {
+            identity
+                .email()
+                .is_some_and(|email| identity_matches(email, sender_email))
+        })
+        .min_by_key(|identity| {
+            identity
+                .email()
+                .is_some_and(|email| email.starts_with("*@"))
+        })
+        .and_then(|identity| identity.id())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            CoreError::Jmap(format!(
+                "server has no JMAP sending identity for {sender_email}"
+            ))
+        })
+}
+
+/// Send an agreed read receipt as an Email the server submits and then
+/// destroys, so no copy of it stays in Sent.
+async fn send_read_receipt(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    action: &repo::actions::PendingAction,
+) -> Result<()> {
+    if !action.payload["send"].as_bool().unwrap_or(false) {
+        return Ok(());
+    }
+    let Some(message_id) = action.message_id else {
+        return Ok(());
+    };
+    if !c.supports_submission {
+        return Err(CoreError::Jmap(
+            "server does not advertise JMAP EmailSubmission".into(),
+        ));
+    }
+    let user_agreed = action.payload["userAgreed"].as_bool().unwrap_or(false);
+    let Some(receipt) =
+        crate::read_receipts::prepare(ctx, config.id, message_id, user_agreed).await?
+    else {
+        return Ok(());
+    };
+    let identity_id = sending_identity(c, &receipt.from.email).await?;
+    let sent_mailbox =
+        ensure_role_mailbox(ctx, config.id, c, roles::SENT, "Sent", Role::Sent).await?;
+    let mut uploaded = c
+        .upload(receipt.raw, "message/rfc822")
+        .await
+        .map_err(client::map_error)?;
+    let mut request = c.request();
+    let import = request
+        .import_email()
+        .account_id(&c.account_id)
+        .email(uploaded.take_blob_id())
+        .mailbox_ids([sent_mailbox])
+        .keywords(["$seen"])
+        .received_at(now_ms() / 1000);
+    let create_id = import.create_id();
+    let email_id = c
+        .send_single::<EmailImportResponse>(request)
+        .await
+        .map_err(client::map_error)?
+        .created(&create_id)
+        .map_err(client::map_error)?
+        .id()
+        .ok_or_else(|| CoreError::Jmap("Email/import returned no id".into()))?
+        .to_owned();
+    let mut request = c.request();
+    let set = request.set_email_submission().account_id(&c.account_id);
+    let create_id = set
+        .create()
+        .email_id(&email_id)
+        .identity_id(identity_id)
+        .create_id()
+        .unwrap_or_else(|| "c0".into());
+    set.arguments().on_success_destroy_email(&create_id);
+    let submitted = c
+        .send_single::<EmailSubmissionSetResponse>(request)
+        .await
+        .map_err(map_submission_error)
+        .and_then(|mut response| {
+            response
+                .created(&create_id)
+                .map(drop)
+                .map_err(map_submission_error)
+        });
+    if submitted.is_err() {
+        // Nothing went out: leave no unsent receipt in Sent.
+        destroy_email_if_present(c, &email_id).await?;
+    }
+    submitted
 }
 
 fn submission_request<'a>(
@@ -2838,8 +3308,132 @@ async fn body_actor(ctx: SyncCtx, config: AccountConfig, mut rx: mpsc::Receiver<
                     });
                 let _ = complete.send(result);
             }
+            PriorityFetchCmd::Search {
+                tree,
+                cursor,
+                limit,
+                complete,
+            } => {
+                let result = search_server(&ctx, &config, &mut session, &tree, &cursor, limit)
+                    .await
+                    .map_err(|error| {
+                        session = None;
+                        error.to_string()
+                    });
+                let _ = complete.send(result);
+            }
         }
     }
+}
+
+/// Searches the account's mail on its JMAP server for `tree` from `cursor`:
+/// the newest `limit` emails it finds that aren't kept here, which are
+/// fetched as their headers and kept, and the ones kept here already that it
+/// passes. Their bodies come when opened.
+async fn search_server(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Option<ConnectedClient>,
+    tree: &crate::search::Expr,
+    cursor: &ServerSearchCursor,
+    limit: usize,
+) -> Result<ServerHits> {
+    use crate::search::server::{JmapSearch, jmap};
+    let account_id = config.id;
+    let folders = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await?;
+    let mailboxes = folders
+        .iter()
+        .filter_map(|folder| Some((folder.role.as_deref()?, folder.jmap_id.clone()?)))
+        .collect::<HashMap<_, _>>();
+    let filter = match jmap(tree, &mailboxes) {
+        JmapSearch::Nothing => {
+            return Ok(ServerHits {
+                message_ids: Vec::new(),
+                next: None,
+            });
+        }
+        JmapSearch::Filter(filter) => filter,
+    };
+    let c = body_session(ctx, config, session).await?;
+    // The server's results a page at a time, until a page of them isn't kept
+    // here or they end.
+    let mut position = cursor.position;
+    let mut ids = Vec::new();
+    let mut missing = Vec::new();
+    let mut more = true;
+    for _ in 0..SERVER_SEARCH_PAGES {
+        let at = i32::try_from(position)
+            .map_err(|_| CoreError::Jmap("the search went past its last result".into()))?;
+        let mut request = c.request();
+        let query = request
+            .query_email()
+            .account_id(&c.account_id)
+            .position(at)
+            .limit(limit)
+            .sort([jmap_client::email::query::Comparator::received_at().descending()]);
+        if let Some(filter) = filter.clone() {
+            query.filter(filter);
+        }
+        let mut response: QueryResponse =
+            c.send_single(request).await.map_err(client::map_error)?;
+        // A server whose most is fewer gives that many and says so.
+        let page = response.limit().map_or(limit, |most| most.min(limit));
+        let batch = response.take_ids();
+        position += batch.len() as u64;
+        let ended = batch.is_empty() || batch.len() < page;
+        let wanted = batch.clone();
+        missing.extend(
+            ctx.db
+                .read(move |conn| {
+                    let mut missing = Vec::new();
+                    for id in wanted {
+                        if repo::messages::by_jmap_id(conn, account_id, &id)?.is_none() {
+                            missing.push(id);
+                        }
+                    }
+                    Ok(missing)
+                })
+                .await?,
+        );
+        ids.extend(batch);
+        if ended {
+            more = false;
+            break;
+        }
+        if missing.len() >= limit {
+            break;
+        }
+    }
+    for chunk in missing.chunks(max_objects_in_get(c).max(1)) {
+        let (emails, _) = fetch_headers(c, chunk, &[])
+            .await
+            .map_err(client::map_error)?;
+        // Found mail notifies of nothing, whenever it arrived, and rules
+        // leave it as it is.
+        persist_emails(ctx, config, emails, false, None, i64::MAX, None).await?;
+    }
+    let message_ids = ctx
+        .db
+        .read(move |conn| {
+            let mut message_ids = Vec::with_capacity(ids.len());
+            for id in &ids {
+                if let Some(row) = repo::messages::by_jmap_id(conn, account_id, id)? {
+                    message_ids.push(row.id);
+                }
+            }
+            Ok(message_ids)
+        })
+        .await?;
+    Ok(ServerHits {
+        message_ids,
+        next: more.then(|| ServerSearchCursor {
+            position,
+            ..ServerSearchCursor::default()
+        }),
+    })
 }
 
 /// The body worker's session: connected when first needed, and again after a
@@ -2864,6 +3458,22 @@ async fn fetch_body(
     session: &mut Option<ConnectedClient>,
     message_id: i64,
 ) -> Result<()> {
+    fetch_body_over(ctx, config, BodyConnection::Own(session), message_id).await
+}
+
+/// The session a body comes over: the body fetcher's own, opened when it
+/// is needed, or the one a sync is using.
+enum BodyConnection<'a> {
+    Own(&'a mut Option<ConnectedClient>),
+    Shared(&'a ConnectedClient),
+}
+
+async fn fetch_body_over(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    connection: BodyConnection<'_>,
+    message_id: i64,
+) -> Result<()> {
     let row = ctx
         .db
         .read(move |conn| repo::messages::get_row(conn, message_id))
@@ -2886,10 +3496,13 @@ async fn fetch_body(
             MAX_JMAP_MESSAGE_BYTES / (1024 * 1024)
         )));
     }
-    let connected = body_session(ctx, config, session).await?;
+    let connected = match connection {
+        BodyConnection::Own(session) => body_session(ctx, config, session).await?,
+        BodyConnection::Shared(connected) => connected,
+    };
     let raw = download_message_bounded(connected, &expected_blob).await?;
     let parsed = crate::mime::parse_message(&raw)?;
-    let calendar_events = crate::sync::ingest::calendar_events(&parsed);
+    let calendar_events = crate::sync::ingest::calendar_parts(&parsed);
     let dir = ctx.paths.mail_dir(config.id);
     tokio::fs::create_dir_all(&dir).await?;
     let path = dir.join(format!("{message_id}.jmap.eml"));
@@ -2897,7 +3510,7 @@ async fn fetch_body(
     let path_string = path.to_string_lossy().into_owned();
     let guarded_remote = remote_id.clone();
     let guarded_blob = expected_blob.clone();
-    let (persisted, thread_id) = ctx
+    let (persisted, thread_ids, fresh) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
@@ -2907,24 +3520,41 @@ async fn fetch_body(
                     && current.jmap_blob_id.as_deref() == Some(&guarded_blob)
             });
             if !valid {
-                return Ok((false, None));
+                return Ok((false, Vec::new(), None));
             }
-            crate::sync::ingest::store_body(&tx, message_id, &path_string, &parsed)?;
-            let thread_id = current.and_then(|row| row.thread_id);
-            if let Some(thread_id) = thread_id {
+            let mut thread_ids =
+                crate::sync::ingest::store_body(&tx, message_id, &path_string, &parsed)?;
+            // Rules that waited for this body go on (#238).
+            let fresh = crate::rules::resume(&tx, message_id)?
+                .filter(|resumed| resumed.announced)
+                .map(|resumed| resumed.thread_id);
+            if let Some(thread_id) = current.and_then(|row| row.thread_id) {
                 repo::threads::recompute(&tx, thread_id)?;
+                if !thread_ids.contains(&thread_id) {
+                    thread_ids.push(thread_id);
+                }
             }
             tx.commit()?;
-            Ok((true, thread_id))
+            Ok((true, thread_ids, fresh))
         })
         .await?;
     if !persisted {
         let _ = tokio::fs::remove_file(path).await;
         return Ok(());
     }
-    crate::sync::ingest::store_calendar_events(ctx, config.id, message_id, calendar_events).await?;
-    if let Some(thread_id) = thread_id {
-        ctx.bus.emit(CoreEvent::MailUpdated {
+    crate::sync::ingest::store_calendar_events(
+        ctx,
+        config.id,
+        vec![(message_id, calendar_events)],
+        crate::sync::ingest::Arrival::Received,
+    )
+    .await?;
+    if !thread_ids.is_empty() {
+        ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+    }
+    if let Some(thread_id) = fresh {
+        ctx.bus.emit(CoreEvent::MailNew {
+            account_id: config.id,
             thread_ids: vec![thread_id],
         });
     }
@@ -2935,22 +3565,9 @@ pub(crate) async fn download_message_bounded(
     c: &ConnectedClient,
     blob_id: &str,
 ) -> Result<Vec<u8>> {
-    use jmap_client::blob::URLParameter;
-    use jmap_client::core::session::URLPart;
     use reqwest::header::CONTENT_LENGTH;
 
-    let mut url = String::with_capacity(
-        c.client.session().download_url().len() + c.account_id.len() + blob_id.len(),
-    );
-    for part in c.client.download_url() {
-        match part {
-            URLPart::Value(value) => url.push_str(value),
-            URLPart::Parameter(URLParameter::AccountId) => url.push_str(&c.account_id),
-            URLPart::Parameter(URLParameter::BlobId) => url.push_str(blob_id),
-            URLPart::Parameter(URLParameter::Name) => url.push_str("message.eml"),
-            URLPart::Parameter(URLParameter::Type) => url.push_str("message/rfc822"),
-        }
-    }
+    let url = c.blob_url(blob_id, "message.eml", "message/rfc822");
     let response = c.get(url).send().await.map_err(|error| {
         CoreError::Network(format!(
             "JMAP message download failed: {}",

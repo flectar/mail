@@ -44,6 +44,8 @@ fn draft_args(account_id: i64, atts: Vec<DraftAttachmentIn>) -> SaveDraftArgs {
         in_reply_to_message_id: None,
         in_reply_to_header: None,
         attachments: atts,
+        request_read_receipt: false,
+        importance: Default::default(),
     }
 }
 
@@ -81,6 +83,7 @@ async fn save_draft_stages_external_file_into_app_dir() {
             vec![DraftAttachmentIn {
                 file_path: secret.to_string_lossy().into_owned(),
                 filename: "secret.txt".into(),
+                mime_type: None,
             }],
         ))
         .await
@@ -133,6 +136,7 @@ async fn save_draft_neutralizes_traversal_filename_and_is_idempotent() {
             vec![DraftAttachmentIn {
                 file_path: src.to_string_lossy().into_owned(),
                 filename: "../../../../etc/evil".into(),
+                mime_type: None,
             }],
         ))
         .await
@@ -156,6 +160,7 @@ async fn save_draft_neutralizes_traversal_filename_and_is_idempotent() {
                 vec![DraftAttachmentIn {
                     file_path: staged.clone(),
                     filename: "evil".into(),
+                    mime_type: None,
                 }],
             )
         })

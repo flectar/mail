@@ -356,6 +356,7 @@ pub(crate) mod tests {
 
     pub(crate) fn ms207(body: &str) -> DavResponse {
         DavResponse {
+            dav: None,
             status: 207,
             etag: None,
             body: body.into(),
@@ -417,6 +418,7 @@ END:VCALENDAR</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:
             .unwrap();
 
         let invalid = DavResponse {
+            dav: None,
             status: 409,
             etag: None,
             body: "<d:error xmlns:d=\"DAV:\"><d:valid-sync-token/></d:error>".into(),
@@ -462,6 +464,7 @@ END:VCALENDAR</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:
         // push_dirty PUT fails with 500 (row stays dirty); the pull then sees
         // a changed etag for the same href and must not clobber the edit.
         let put_fail = DavResponse {
+            dav: None,
             status: 500,
             etag: None,
             body: String::new(),
@@ -511,6 +514,7 @@ END:VCALENDAR</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:
         .unwrap();
         let bus = EventBus::new();
         let forbidden = DavResponse {
+            dav: None,
             status: 403,
             etag: None,
             body: String::new(),

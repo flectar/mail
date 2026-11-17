@@ -13,8 +13,8 @@
 
 use super::client::{self, ConnectedClient};
 use super::sync::{
-    ensure_role_mailbox, ensure_submitted_email_state, finish_sent_locally, map_submission_error,
-    prepared_email, send_action, sending_identity,
+    draft_sending_identity, ensure_role_mailbox, ensure_submitted_email_state, finish_sent_locally,
+    map_submission_error, prepared_email, send_action,
 };
 use crate::db::repo;
 use crate::error::{CoreError, Result};
@@ -172,7 +172,7 @@ async fn hold(
     let submission_id = match live_submission(c, &remote_email).await? {
         Some(id) => id,
         None => {
-            let (sender, identity_id) = sending_identity(ctx, c, draft_id).await?;
+            let (sender, identity_id) = draft_sending_identity(ctx, c, draft_id).await?;
             let recipients = recipients(ctx, draft_id).await?;
             if recipients.is_empty() {
                 return Err(CoreError::Jmap(

@@ -126,7 +126,7 @@ pub(crate) fn acquire(runtime: &Handle, data_dir: &Path, request: Request) -> io
 
 /// A short, stable name for the profile; endpoints share a namespace across
 /// profiles and, for named pipes, across users.
-fn profile_key(data_dir: &Path) -> String {
+pub(crate) fn profile_key(data_dir: &Path) -> String {
     let digest = Sha256::digest(data_dir.as_os_str().as_encoded_bytes());
     digest[..12]
         .iter()
@@ -351,6 +351,7 @@ mod imp {
     use super::{
         CONNECT_ATTEMPTS, CONNECT_RETRY, ShowCallback, handle_request, profile_key, read_request,
     };
+    use crate::platform::windows_security::CurrentUserOnly;
     use std::{io, path::Path, sync::Arc};
     use tokio::{
         io::AsyncWriteExt,
@@ -364,6 +365,7 @@ mod imp {
 
     pub(super) struct Endpoint {
         name: String,
+        security: Arc<CurrentUserOnly>,
         server: Option<NamedPipeServer>,
     }
 
@@ -371,11 +373,12 @@ mod imp {
         pub(super) fn serve(&mut self, show: ShowCallback) -> Option<JoinHandle<()>> {
             let mut server = self.server.take()?;
             let name = self.name.clone();
+            let security = Arc::clone(&self.security);
             Some(tokio::spawn(async move {
                 loop {
                     if server.connect().await.is_err() {
                         // The client went away before it was accepted.
-                        server = match pipe(&name, false) {
+                        server = match pipe(&name, &security, false) {
                             Ok(server) => server,
                             Err(_) => return,
                         };
@@ -383,7 +386,7 @@ mod imp {
                     }
                     // Create the next instance before handing this one off, so
                     // the pipe name never disappears while this process runs.
-                    let connected = match pipe(&name, false) {
+                    let connected = match pipe(&name, &security, false) {
                         Ok(next) => std::mem::replace(&mut server, next),
                         Err(_) => return,
                     };
@@ -400,19 +403,28 @@ mod imp {
         format!(r"\\.\pipe\com.flectar.mail-{}", profile_key(data_dir))
     }
 
-    fn pipe(name: &str, first: bool) -> io::Result<NamedPipeServer> {
-        ServerOptions::new()
-            .first_pipe_instance(first)
-            .reject_remote_clients(true)
-            .access_outbound(false)
-            .create(name)
+    /// Only this user can open the pipe. The default security descriptor
+    /// would let every user, and anonymous clients, open it for reading.
+    fn pipe(name: &str, security: &CurrentUserOnly, first: bool) -> io::Result<NamedPipeServer> {
+        let mut attributes = security.attributes();
+        // SAFETY: `attributes` points at a security descriptor that `security`
+        // keeps alive for this call.
+        unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(first)
+                .reject_remote_clients(true)
+                .access_outbound(false)
+                .create_with_security_attributes_raw(name, (&raw mut attributes).cast())
+        }
     }
 
     pub(super) fn claim(data_dir: &Path) -> io::Result<Option<Endpoint>> {
         let name = pipe_name(data_dir);
-        match pipe(&name, true) {
+        let security = Arc::new(CurrentUserOnly::new()?);
+        match pipe(&name, &security, true) {
             Ok(server) => Ok(Some(Endpoint {
                 name,
+                security,
                 server: Some(server),
             })),
             // Another process already created the first instance.

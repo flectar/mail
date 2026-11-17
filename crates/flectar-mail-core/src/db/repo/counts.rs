@@ -2,7 +2,7 @@
 //! Kept out of threads.rs so the two evolve independently.
 
 use crate::error::Result;
-use crate::models::{MailGrouping, MailboxBadgeCounts, roles};
+use crate::models::{MailGrouping, MailboxBadgeCounts, Settings, roles};
 use rusqlite::Connection;
 use rusqlite::types::ValueRef;
 use std::collections::HashMap;
@@ -102,7 +102,7 @@ enum Tab {
     Other,
     /// A category, by label id.
     Category(i64),
-    /// A custom split, which has no sidebar row.
+    /// A route nothing lists.
     Elsewhere,
 }
 
@@ -112,10 +112,14 @@ impl Tab {
             ValueRef::Null | ValueRef::Text(b"pending") => Self::Unrouted,
             ValueRef::Text(b"important") => Self::Important,
             ValueRef::Text(b"other") => Self::Other,
-            ValueRef::Text(route) => route
-                .strip_prefix(b"label:")
-                .and_then(|id| std::str::from_utf8(id).ok()?.parse().ok())
-                .map_or(Self::Elsewhere, Self::Category),
+            ValueRef::Text(route) => {
+                let id = |prefix: &[u8]| {
+                    route
+                        .strip_prefix(prefix)
+                        .and_then(|id| std::str::from_utf8(id).ok()?.parse().ok())
+                };
+                id(b"label:").map(Self::Category).unwrap_or(Self::Elsewhere)
+            }
             _ => Self::Elsewhere,
         }
     }
@@ -434,10 +438,82 @@ pub fn mailbox_badge_counts(
     Ok(tally.finish())
 }
 
+/// The unread mail in the Inboxes that new-mail notifications cover, as the
+/// sidebar counts it, for the badge on the app icon: all of it with the
+/// "all" scope, the chosen tabs' with "tabs", and otherwise the Important
+/// tab's, as notifications fall back to.
+pub fn notified_unread(badges: &[MailboxBadgeCounts], settings: &Settings) -> i64 {
+    let tabs = settings
+        .notification_tabs
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    badges
+        .iter()
+        .map(|counts| match settings.notification_scope.as_str() {
+            "all" => counts.inbox,
+            "tabs" => tabs.iter().map(|tab| tab_unread(counts, tab)).sum(),
+            _ => counts.important,
+        })
+        .sum()
+}
+
+/// The unread inbox mail one notification tab key ("important", "other" or
+/// "label:<id>") stands for.
+fn tab_unread(counts: &MailboxBadgeCounts, tab: &str) -> i64 {
+    let find = |list: &[(i64, i64)], id: &str| {
+        id.parse::<i64>()
+            .ok()
+            .and_then(|id| list.binary_search_by_key(&id, |(key, _)| *key).ok())
+            .map_or(0, |position| list[position].1)
+    };
+    match tab {
+        "important" => counts.important,
+        "other" => counts.other,
+        tab => tab
+            .strip_prefix("label:")
+            .map_or(0, |label| find(&counts.labels, label)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rusqlite::params;
+
+    #[test]
+    fn the_app_icon_counts_what_notifications_cover() {
+        let counts = |account_id, inbox, important, other| MailboxBadgeCounts {
+            account_id,
+            inbox,
+            important,
+            other,
+            labels: vec![(2, 4), (9, 50)],
+            ..Default::default()
+        };
+        let badges = [counts(1, 10, 6, 1), counts(2, 20, 5, 2)];
+        let mut settings = Settings::default();
+        assert_eq!(settings.notification_scope, "important");
+        assert_eq!(notified_unread(&badges, &settings), 11);
+
+        settings.notification_scope = "all".into();
+        assert_eq!(notified_unread(&badges, &settings), 30);
+
+        // A tab chosen twice counts once; unknown keys count nothing.
+        settings.notification_scope = "tabs".into();
+        settings.notification_tabs = [
+            "other", "label:2", "split:7", "split:8", "other", "nonsense",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(notified_unread(&badges, &settings), 2 * 4 + 1 + 2);
+
+        // A scope from a newer version falls back to Important, as
+        // notifications do.
+        settings.notification_scope = "starred".into();
+        assert_eq!(notified_unread(&badges, &settings), 11);
+        assert_eq!(notified_unread(&[], &settings), 0);
+    }
 
     fn test_db() -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -675,6 +751,7 @@ mod tests {
         routed_thread(&conn, 2, Some("pending"), true);
         routed_thread(&conn, 3, Some("other"), false);
         routed_thread(&conn, 4, Some("label:2"), false);
+        // A route nothing lists any more, such as one to a deleted split.
         routed_thread(&conn, 5, Some("split:7"), false);
         // A human reply after a notification moves the conversation to
         // Important, and a notification after a reply to Other.
@@ -853,6 +930,7 @@ mod tests {
                     folder_id,
                     cursor: None,
                     limit: 10_000,
+                    order: crate::models::ListOrder::NewestFirst,
                 };
                 if messages {
                     let page = threads::list_messages(&conn, &args, None).unwrap();

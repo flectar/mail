@@ -62,6 +62,9 @@ pub struct DavResponse {
     pub status: u16,
     pub etag: Option<String>,
     pub body: String,
+    /// The DAV header: the WebDAV and CalDAV features the server supports,
+    /// such as calendar-auto-schedule (RFC 6638 §2).
+    pub dav: Option<String>,
 }
 
 impl DavResponse {
@@ -169,9 +172,21 @@ impl Transport for HttpTransport {
             .get("etag")
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
+        let dav = resp
+            .headers()
+            .get_all("dav")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect::<Vec<_>>();
+        let dav = (!dav.is_empty()).then(|| dav.join(", "));
         let body =
             http_body::text(resp, MAX_DAV_RESPONSE_BODY_BYTES, "CalDAV response body").await?;
-        Ok(DavResponse { status, etag, body })
+        Ok(DavResponse {
+            status,
+            etag,
+            body,
+            dav,
+        })
     }
 }
 

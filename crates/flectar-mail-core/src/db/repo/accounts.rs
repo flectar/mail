@@ -26,6 +26,7 @@ fn account_from_row(row: &Row) -> rusqlite::Result<Account> {
                 Expire::Never => None,
             }
         }),
+        caught_up_at: row.get("caught_up_at")?,
     })
 }
 
@@ -55,7 +56,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Account>> {
     let mut stmt = conn.prepare(
         "SELECT a.id, a.email, a.display_name, a.avatar_url, a.provider, a.auth_kind,
                 a.mail_protocol, a.sync_state, a.sync_error, a.can_create_top_level_mailbox,
-                s.expire
+                a.caught_up_at, s.expire
          FROM accounts a LEFT JOIN pop3_sync_state s ON s.account_id = a.id
          WHERE a.sync_state <> ?1 AND a.mail_protocol <> 'local'
          ORDER BY a.sort_order, a.id",
@@ -95,7 +96,7 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Account>> {
     let mut stmt = conn.prepare(
         "SELECT a.id, a.email, a.display_name, a.avatar_url, a.provider, a.auth_kind,
                 a.mail_protocol, a.sync_state, a.sync_error, a.can_create_top_level_mailbox,
-                s.expire
+                a.caught_up_at, s.expire
          FROM accounts a LEFT JOIN pop3_sync_state s ON s.account_id = a.id
          WHERE a.id = ?1 AND a.mail_protocol <> 'local'",
     )?;
@@ -553,6 +554,25 @@ pub fn update_sync_state_with_error(
          WHERE id = ?1 AND (sync_state IS NOT ?2 OR sync_error IS NOT ?3)",
         params![id, state, error],
     )? != 0)
+}
+
+/// Note that a sync of the account that started at `started` stored all the
+/// mail its Inbox had by then.
+pub fn set_caught_up(conn: &Connection, id: i64, started: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE accounts SET caught_up_at = ?2 WHERE id = ?1",
+        params![id, started],
+    )?;
+    Ok(())
+}
+
+/// When each account's last complete sync started, for the accounts that
+/// have had one.
+pub fn caught_up(conn: &Connection) -> Result<std::collections::BTreeMap<i64, i64>> {
+    let mut statement =
+        conn.prepare("SELECT id, caught_up_at FROM accounts WHERE caught_up_at IS NOT NULL")?;
+    let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 /// Move one account before or after another and compact the persisted order.
@@ -1036,6 +1056,23 @@ mod tests {
             !update_sync_state_with_error(&conn, 1, "retrying", Some("connection lost")).unwrap()
         );
         assert!(update_sync_state_with_error(&conn, 1, "idle", None).unwrap());
+    }
+
+    #[test]
+    fn accounts_tell_when_a_check_last_caught_their_inbox_up() {
+        let conn = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&conn);
+        assert_eq!(get(&conn, 1).unwrap().unwrap().caught_up_at, None);
+
+        set_caught_up(&conn, 1, 1_763_100_000_000).unwrap();
+        assert_eq!(
+            get(&conn, 1).unwrap().unwrap().caught_up_at,
+            Some(1_763_100_000_000)
+        );
+        assert_eq!(
+            list(&conn).unwrap()[0].caught_up_at,
+            Some(1_763_100_000_000)
+        );
     }
 
     #[test]

@@ -168,6 +168,8 @@ impl crate::Core {
                             .iter()
                             .any(|attachment| !attachment.is_inline),
                         size,
+                        // Saved mail is answered, or past answering.
+                        receipt_handled: true,
                     },
                 )?;
                 ingest::store_body(tx, imported.message_id, &stored_path, &parsed)?;
@@ -912,6 +914,7 @@ impl Writer<'_> {
                                 .iter()
                                 .any(|attachment| !attachment.is_inline),
                             size: i64::try_from(raw.len()).ok(),
+                            receipt_handled: true,
                         },
                     )?;
                     ingest::store_body(tx, imported.message_id, &path.to_string_lossy(), &parsed)?;
@@ -919,7 +922,7 @@ impl Writer<'_> {
                     if downloaded {
                         importer.learn_contacts(tx, &parsed.headers, &imported)?;
                     }
-                    inserted.push((imported.message_id, ingest::calendar_events(&parsed)));
+                    inserted.push((imported.message_id, ingest::calendar_parts(&parsed)));
                 }
                 let thread_ids = if downloaded {
                     importer.finish(tx)?.0
@@ -944,12 +947,12 @@ impl Writer<'_> {
         self.report.already_present += duplicates.len() as u64;
         self.report.imported += inserted.len() as u64;
         if self.downloaded {
-            for (message_id, events) in inserted {
+            for (message_id, calendars) in inserted {
                 if let Err(error) = ingest::store_calendar_events(
                     &self.core.sync_ctx(),
                     account_id,
-                    message_id,
-                    events,
+                    vec![(message_id, calendars)],
+                    ingest::Arrival::Imported,
                 )
                 .await
                 {

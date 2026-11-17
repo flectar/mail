@@ -7,15 +7,16 @@
 //! pending-action queue remain provider-neutral and fully offline-first.
 
 use super::engine::{
-    PriorityFetchCmd, SyncCmd, SyncCtx, configured_sync_interval, emit_sync_status, set_state,
-    set_state_error,
+    PriorityFetchCmd, SERVER_SEARCH_PAGES, ServerHits, SyncCmd, SyncCtx, caught_up,
+    configured_sync_interval, emit_sync_status, set_state, set_state_error,
 };
 use crate::db::repo::{self, messages::NewMessage};
 use crate::error::{CoreError, Result};
 use crate::events::{CoreEvent, SyncProgress};
 use crate::http_body;
 use crate::models::{
-    AccountConfig, AccountSettings, Address, AuthKind, MailHistory, Provider, now_ms, roles,
+    AccountConfig, AccountSettings, Address, AuthKind, AutoReply, MailHistory, Provider,
+    ServerSearchCursor, now_ms, roles,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use futures::{StreamExt, stream};
@@ -58,24 +59,36 @@ const MAX_MESSAGES_PER_THREAD: usize = 10_000;
 const MAX_DRAFT_PAGES: usize = 100;
 const MAX_DRAFTS: usize = 50_000;
 const MAX_GMAIL_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+/// messages.batchModify takes at most 1000 ids a call.
+const MARK_READ_BATCH_SIZE: usize = 1000;
+/// A call costs 50 quota units, and a project made since May 2026 has 6000
+/// a minute per user: at most 100 calls a minute leaves room for the rest.
+const MARK_READ_PACE: Duration = Duration::from_millis(600);
 const METADATA_HEADERS: &[&str] = &[
     "Authentication-Results",
     "Bcc",
     "Cc",
+    "Content-Type",
     "Date",
+    "Disposition-Notification-Options",
+    "Disposition-Notification-To",
     "From",
+    "Importance",
     "In-Reply-To",
     "List-Id",
     "List-Unsubscribe",
     "List-Unsubscribe-Post",
     "Message-ID",
     "Precedence",
+    "Priority",
     "References",
     "Reply-To",
     "Return-Path",
     "Sender",
     "Subject",
     "To",
+    "X-MSMail-Priority",
+    "X-Priority",
 ];
 
 type RemoteDraftAttachment = (Option<String>, Option<String>, String, Option<String>);
@@ -85,6 +98,9 @@ struct GmailApi {
     http: Client,
     ctx: SyncCtx,
     account: AccountConfig,
+    /// Headers the account's rules test (#238), fetched with new mail's
+    /// metadata besides [`METADATA_HEADERS`].
+    rule_headers: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +115,9 @@ struct GmailLabel {
 #[derive(Debug)]
 struct HistoryPage {
     affected_threads: BTreeSet<String>,
+    /// The messages the history added, which are new mail (or sent, or
+    /// drafts) where its other records only change what is there.
+    added_messages: HashSet<String>,
     next_page_token: Option<String>,
     completed_history_id: Option<String>,
 }
@@ -112,7 +131,35 @@ impl GmailApi {
             .user_agent(concat!("Flectar-Mail/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|error| CoreError::Network(error.to_string()))?;
-        Ok(Self { http, ctx, account })
+        Ok(Self {
+            http,
+            ctx,
+            account,
+            rule_headers: Default::default(),
+        })
+    }
+
+    /// Fetch the headers `names` with metadata too, as rules test them.
+    fn set_rule_headers(&self, names: Vec<String>) {
+        if let Ok(mut rule_headers) = self.rule_headers.lock() {
+            *rule_headers = names;
+        }
+    }
+
+    /// The headers a metadata fetch asks for.
+    fn metadata_headers(&self) -> Vec<String> {
+        let mut headers = METADATA_HEADERS
+            .iter()
+            .map(|header| (*header).to_owned())
+            .collect::<Vec<_>>();
+        if let Ok(rule_headers) = self.rule_headers.lock() {
+            for name in rule_headers.iter() {
+                if !headers.iter().any(|known| known.eq_ignore_ascii_case(name)) {
+                    headers.push(name.clone());
+                }
+            }
+        }
+        headers
     }
 
     async fn token(&self) -> Result<String> {
@@ -350,16 +397,21 @@ impl GmailApi {
     }
 
     async fn batch_metadata(&self, ids: &[String]) -> Result<Vec<Value>> {
+        self.batch_metadata_at(GMAIL_BATCH_API, ids).await
+    }
+
+    /// [`Self::batch_metadata`] through the batch endpoint at `url`.
+    async fn batch_metadata_at(&self, url: &str, ids: &[String]) -> Result<Vec<Value>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
         let boundary = format!("flectar_{:016x}_{}", rand::random::<u64>(), now_ms());
-        let body = build_batch_body(ids, &boundary);
+        let body = build_batch_body(ids, &boundary, &self.metadata_headers());
         for attempt in 0..2 {
             let token = self.token().await?;
             let response = self
                 .http
-                .post(GMAIL_BATCH_API)
+                .post(url)
                 .bearer_auth(token)
                 .header(
                     CONTENT_TYPE,
@@ -395,6 +447,14 @@ impl GmailApi {
         Err(CoreError::NeedsReauth)
     }
 
+    async fn message_full(&self, message_id: &str) -> Result<Value> {
+        self.get_json(&format!(
+            "{GMAIL_API}/messages/{}?format=full",
+            urlencode(message_id)
+        ))
+        .await
+    }
+
     async fn thread(&self, thread_id: &str, full: bool) -> Result<Value> {
         let mut url = format!(
             "{GMAIL_API}/threads/{}?format={}",
@@ -402,9 +462,9 @@ impl GmailApi {
             if full { "full" } else { "metadata" }
         );
         if !full {
-            for header in METADATA_HEADERS {
+            for header in self.metadata_headers() {
                 url.push_str("&metadataHeaders=");
-                url.push_str(&urlencode(header));
+                url.push_str(&urlencode(&header));
             }
         }
         self.get_json(&url).await
@@ -468,6 +528,65 @@ impl GmailApi {
             self.delete_json(&format!("{GMAIL_API}/messages/{}", urlencode(message_id)))
                 .await,
         )
+    }
+
+    /// Mark read every unread message with `label` that arrived before
+    /// `before`, in seconds (#234). The ids come first, so taking UNREAD off
+    /// doesn't move the pages; then a thousand at a time, paced so a big
+    /// label stays inside a minute's quota. A retry finds only what is
+    /// still unread.
+    async fn mark_label_read(&self, label: &str, before: i64) -> Result<()> {
+        let query = format!("is:unread before:{before}");
+        let mut ids = Vec::new();
+        let mut page_token: Option<String> = None;
+        let mut seen_page_tokens = HashSet::new();
+        loop {
+            let mut url = format!(
+                "{GMAIL_API}/messages?labelIds={}&q={}&includeSpamTrash=true&maxResults=500",
+                urlencode(label),
+                urlencode(&query)
+            );
+            if let Some(token) = page_token.as_deref() {
+                url.push_str("&pageToken=");
+                url.push_str(&urlencode(token));
+            }
+            let page = self.get_json(&url).await?;
+            ids.extend(
+                page.get("messages")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|message| message.get("id").and_then(Value::as_str))
+                    .map(str::to_owned),
+            );
+            page_token = page
+                .get("nextPageToken")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            match page_token.as_deref() {
+                None => break,
+                Some(token)
+                    if token.len() > MAX_GMAIL_PAGE_TOKEN_BYTES
+                        || !seen_page_tokens.insert(token.to_owned()) =>
+                {
+                    return Err(CoreError::Network(
+                        "Gmail returned an invalid page cursor".into(),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        for (index, batch) in ids.chunks(MARK_READ_BATCH_SIZE).enumerate() {
+            if index > 0 {
+                tokio::time::sleep(MARK_READ_PACE).await;
+            }
+            self.post_json(
+                &format!("{GMAIL_API}/messages/batchModify"),
+                &json!({ "ids": batch, "removeLabelIds": ["UNREAD"] }),
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     async fn empty_trash(&self) -> Result<()> {
@@ -686,6 +805,18 @@ impl GmailApi {
         )
     }
 
+    /// Send a message as it is, in `thread_id`'s Gmail thread.
+    async fn send_raw(&self, raw: &[u8], thread_id: Option<&str>) -> Result<Value> {
+        self.post_json(
+            &format!("{GMAIL_API}/messages/send"),
+            &json!({
+                "raw": URL_SAFE_NO_PAD.encode(raw),
+                "threadId": thread_id,
+            }),
+        )
+        .await
+    }
+
     async fn send_draft(&self, draft_id: &str) -> Result<Value> {
         self.post_json(
             &format!("{GMAIL_API}/drafts/send"),
@@ -842,7 +973,7 @@ fn urlencode(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
-fn build_batch_body(ids: &[String], boundary: &str) -> String {
+fn build_batch_body(ids: &[String], boundary: &str, headers: &[String]) -> String {
     let mut output = String::new();
     for (index, id) in ids.iter().enumerate() {
         output.push_str("--");
@@ -852,7 +983,7 @@ fn build_batch_body(ids: &[String], boundary: &str) -> String {
         output.push_str(">\r\n\r\nGET /gmail/v1/users/me/messages/");
         output.push_str(&urlencode(id));
         output.push_str("?format=metadata");
-        for header in METADATA_HEADERS {
+        for header in headers {
             output.push_str("&metadataHeaders=");
             output.push_str(&urlencode(header));
         }
@@ -948,6 +1079,7 @@ fn split_header_block(value: &str) -> Option<(&str, &str)> {
 
 fn parse_history_page(value: &Value, base_history_id: &str) -> Result<HistoryPage> {
     let mut affected_threads = BTreeSet::new();
+    let mut added_messages = HashSet::new();
     for history in value
         .get("history")
         .and_then(Value::as_array)
@@ -968,6 +1100,11 @@ fn parse_history_page(value: &Value, base_history_id: &str) -> Result<HistoryPag
                 .flatten()
             {
                 let message = item.get("message").unwrap_or(item);
+                if key == "messagesAdded"
+                    && let Some(id) = message.get("id").and_then(Value::as_str)
+                {
+                    added_messages.insert(id.to_owned());
+                }
                 if let Some(thread_id) = message.get("threadId").and_then(Value::as_str) {
                     if affected_threads.len() >= MAX_HISTORY_THREADS_PER_PAGE
                         && !affected_threads.contains(thread_id)
@@ -998,6 +1135,7 @@ fn parse_history_page(value: &Value, base_history_id: &str) -> Result<HistoryPag
     };
     Ok(HistoryPage {
         affected_threads,
+        added_messages,
         next_page_token,
         completed_history_id,
     })
@@ -1281,6 +1419,170 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
         .await
 }
 
+/// Gmail's vacation responder, which sends the account's automatic replies
+/// (#239), as `users.settings.vacation` has it.
+#[derive(Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VacationSettings {
+    #[serde(default)]
+    enable_auto_reply: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    response_subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    response_body_plain_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    response_body_html: Option<String>,
+    #[serde(default)]
+    restrict_to_contacts: bool,
+    #[serde(default)]
+    restrict_to_domain: bool,
+    #[serde(
+        default,
+        with = "google_int64",
+        skip_serializing_if = "Option::is_none"
+    )]
+    start_time: Option<i64>,
+    #[serde(
+        default,
+        with = "google_int64",
+        skip_serializing_if = "Option::is_none"
+    )]
+    end_time: Option<i64>,
+}
+
+/// Google's JSON gives 64-bit numbers as strings, and takes them so too.
+mod google_int64 {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        value: &Option<i64>,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        match value {
+            Some(value) => serializer.serialize_str(&value.to_string()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Option<i64>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Number {
+            Text(String),
+            Value(i64),
+        }
+        match Option::<Number>::deserialize(deserializer)? {
+            None => Ok(None),
+            Some(Number::Value(value)) => Ok(Some(value)),
+            Some(Number::Text(text)) => text.parse().map(Some).map_err(serde::de::Error::custom),
+        }
+    }
+}
+
+impl From<VacationSettings> for AutoReply {
+    fn from(settings: VacationSettings) -> Self {
+        // Webmail saves replies as HTML. The app edits them as text.
+        let text = crate::mime::body_text(
+            settings.response_body_plain_text.as_deref(),
+            settings.response_body_html.as_deref(),
+        )
+        .map(|text| text.trim().to_owned())
+        .unwrap_or_default();
+        Self {
+            enabled: settings.enable_auto_reply,
+            subject: settings.response_subject.unwrap_or_default(),
+            text,
+            starts_at: settings.start_time,
+            ends_at: settings.end_time,
+            contacts_only: settings.restrict_to_contacts,
+            domain_only: settings.restrict_to_domain,
+        }
+    }
+}
+
+impl From<&AutoReply> for VacationSettings {
+    fn from(reply: &AutoReply) -> Self {
+        Self {
+            enable_auto_reply: reply.enabled,
+            response_subject: Some(reply.subject.clone()),
+            // Without HTML, Gmail sends the text as it is.
+            response_body_plain_text: Some(reply.text.clone()),
+            response_body_html: None,
+            restrict_to_contacts: reply.contacts_only,
+            restrict_to_domain: reply.domain_only,
+            start_time: reply.starts_at,
+            end_time: reply.ends_at,
+        }
+    }
+}
+
+async fn read_vacation(api: &GmailApi, base: &str) -> Result<AutoReply> {
+    let settings: VacationSettings =
+        serde_json::from_value(api.get_json(&format!("{base}/settings/vacation")).await?)?;
+    Ok(settings.into())
+}
+
+/// The vacation responder of one Gmail account, outside its sync, so that a
+/// missing permission comes back to the caller instead of pausing the sync.
+pub(crate) struct VacationResponder {
+    api: GmailApi,
+    base: String,
+}
+
+impl VacationResponder {
+    pub(crate) fn new(ctx: SyncCtx, config: AccountConfig) -> Result<Self> {
+        Ok(Self {
+            api: GmailApi::new(ctx, config)?,
+            base: GMAIL_API.to_owned(),
+        })
+    }
+
+    /// A responder that talks to a test server instead of Gmail.
+    #[cfg(test)]
+    pub(crate) fn with_base(ctx: SyncCtx, config: AccountConfig, origin: &str) -> Result<Self> {
+        Ok(Self {
+            api: GmailApi::new(ctx, config)?,
+            base: format!("{origin}/gmail/v1/users/me"),
+        })
+    }
+
+    /// Saves `reply`, which needs Gmail's settings permission, and gives the
+    /// replies as Gmail keeps them now.
+    pub(crate) async fn save(&self, reply: &AutoReply) -> Result<AutoReply> {
+        let body = serde_json::to_value(VacationSettings::from(reply))?;
+        let saved: VacationSettings = serde_json::from_value(
+            self.api
+                .put_json(&format!("{}/settings/vacation", self.base), &body)
+                .await?,
+        )?;
+        Ok(saved.into())
+    }
+}
+
+/// Reads the account's automatic replies back, so that replies set in
+/// webmail show in the app too.
+async fn sync_auto_reply(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> Result<()> {
+    let account_id = config.id;
+    let saved_at = ctx
+        .db
+        .read(move |conn| repo::auto_replies::saved_at(conn, account_id))
+        .await?;
+    let reply = read_vacation(api, GMAIL_API).await?;
+    let changed = ctx
+        .db
+        .write(move |conn| {
+            let read = repo::auto_replies::Origin::Read { saved_at };
+            repo::auto_replies::store(conn, account_id, &reply, now_ms(), read)
+        })
+        .await?;
+    if changed {
+        ctx.bus.emit(CoreEvent::AutoReplyChanged { account_id });
+    }
+    Ok(())
+}
+
 async fn sync_sender_identities(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -1508,6 +1810,8 @@ struct ParsedResource {
     size: Option<i64>,
     snippet: String,
     has_attachments: bool,
+    /// The header block, for rules on any header (#238).
+    raw_headers: Vec<u8>,
 }
 
 fn parse_resource(value: &Value) -> Result<ParsedResource> {
@@ -1571,6 +1875,7 @@ fn parse_resource(value: &Value) -> Result<ParsedResource> {
                 .unwrap_or_default(),
         ),
         has_attachments: payload_has_file_attachments(payload)?,
+        raw_headers,
     })
 }
 
@@ -1672,13 +1977,33 @@ struct LabelMapping {
     role: Option<String>,
 }
 
+/// Which of the mail `store_resources` stores is new mail that rules sort
+/// (#238).
+#[derive(Debug, Clone, Default)]
+enum Arrivals {
+    #[default]
+    None,
+    /// The messages the history added.
+    Added(HashSet<String>),
+    /// Mail received since the account last caught up, when it ever did: a
+    /// full sync after the history expired finds what came in meanwhile, and
+    /// a first one only history.
+    SinceCaughtUp,
+}
+
 #[derive(Default)]
 struct StoreOutcome {
     touched_threads: Vec<i64>,
     /// Threads that queued a new-mail notification.
     fresh_threads: Vec<i64>,
+    /// New read receipts that came back, by provider id, to read now.
+    receipts: Vec<String>,
+    /// New mail whose rules wait for its body (#238), by provider id, to
+    /// fetch now.
+    waiting: Vec<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn store_resources(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -1687,6 +2012,7 @@ async fn store_resources(
     complete_threads: bool,
     notify_new: bool,
     notification_cutoff: Option<i64>,
+    arrivals: Arrivals,
 ) -> Result<StoreOutcome> {
     let parsed = resources
         .iter()
@@ -1739,6 +2065,18 @@ async fn store_resources(
                 .values()
                 .filter_map(|mapping| mapping.local_label_id)
                 .collect::<HashSet<_>>();
+            let sorter = match arrivals {
+                Arrivals::None => None,
+                _ => Some(crate::rules::Sorter::load(&tx, account_id)?),
+            };
+            let caught_up_at = match arrivals {
+                Arrivals::SinceCaughtUp => tx.query_row(
+                    "SELECT caught_up_at FROM accounts WHERE id = ?1",
+                    params![account_id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )?,
+                _ => None,
+            };
             let mut outcome = StoreOutcome::default();
             let mut complete_by_thread = HashMap::<String, HashSet<String>>::new();
             let mut old_threads = Vec::<i64>::new();
@@ -1833,7 +2171,8 @@ async fn store_resources(
                              has_attachments = ?18, size = ?19, snippet = ?20,
                              list_unsubscribe = ?21, list_unsubscribe_post = ?22,
                              sender_addr = ?23, sender_verification = ?24,
-                             gmail_sync_generation = COALESCE(?25, gmail_sync_generation)
+                             gmail_sync_generation = COALESCE(?25, gmail_sync_generation),
+                             list_id = ?26
                          WHERE id = ?1",
                         params![
                             existing.id,
@@ -1865,6 +2204,7 @@ async fn store_resources(
                             resource.headers.via,
                             resource.headers.sender_verification.as_str(),
                             generation,
+                            resource.headers.list_id,
                         ],
                     )?;
                     existing.id
@@ -1894,8 +2234,15 @@ async fn store_resources(
                         references: resource.headers.references.clone(),
                         list_unsubscribe: resource.headers.list_unsubscribe.clone(),
                         list_unsubscribe_post: resource.headers.list_unsubscribe_post.clone(),
+                        list_id: resource.headers.list_id.clone(),
                         sender_addr: resource.headers.via.clone(),
                         sender_verification: resource.headers.sender_verification,
+                        receipt_to: resource.headers.receipt_to.clone(),
+                        receipt_confirm: resource.headers.receipt_confirm,
+                        // Gmail keeps no keywords for it; this device
+                        // records the answer.
+                        receipt_handled: false,
+                        importance: resource.headers.importance,
                     };
                     let id = repo::messages::insert(&tx, &message, thread_id)?;
                     tx.execute(
@@ -1915,6 +2262,30 @@ async fn store_resources(
                     repo::labels::add_to_message(&tx, local_message_id, local_id)?;
                 }
                 repo::search::index_message(&tx, local_message_id)?;
+                // Mail from a blocked sender goes to Spam as it arrives.
+                let turned_away = inserted && crate::turn_away(&tx, local_message_id)?;
+                // Then rules sort new mail. What they file away or mark read
+                // stays silent.
+                let arrived = match &arrivals {
+                    Arrivals::None => false,
+                    Arrivals::Added(ids) => ids.contains(&resource.provider_id),
+                    Arrivals::SinceCaughtUp => {
+                        caught_up_at.is_some_and(|at| resource.internal_date >= at)
+                    }
+                };
+                let sorted = match &sorter {
+                    Some(sorter) if inserted && !turned_away && arrived => sorter.arrived(
+                        &tx,
+                        local_message_id,
+                        crate::rules::Arrival {
+                            headers: Some(crate::mime::header_fields(&resource.raw_headers)),
+                            text: None,
+                            // Metadata lists no parts; the body tells.
+                            attachments_known: false,
+                        },
+                    )?,
+                    _ => Default::default(),
+                };
 
                 if inserted
                     && is_outgoing
@@ -1935,6 +2306,8 @@ async fn store_resources(
                         }
                     }
                 } else if inserted
+                    && !turned_away
+                    && !sorted.unwanted
                     && settings.collect_incoming_contacts
                     && resource.internal_date >= incoming_learning_since
                     && !resource.headers.is_automated
@@ -1949,10 +2322,17 @@ async fn store_resources(
                 if !outcome.touched_threads.contains(&thread_id) {
                     outcome.touched_threads.push(thread_id);
                 }
+                // A read receipt that came back is read now, so what it
+                // reports shows on the sent message (RFC 8098).
+                if inserted && !is_outgoing && resource.headers.disposition_report {
+                    outcome.receipts.push(resource.provider_id.clone());
+                }
                 // One notification per conversation in this batch, for mail
-                // that reached the Inbox after the cutoff.
-                if notify_new
+                // that reached the Inbox after the cutoff. Rules that wait
+                // for the body hold it back until they are done.
+                let eligible = notify_new
                     && inserted
+                    && !turned_away
                     && label_set.contains("INBOX")
                     && crate::sync::ingest::arrival_eligible(
                         notification_cutoff.is_none_or(|cutoff| resource.internal_date >= cutoff),
@@ -1960,14 +2340,20 @@ async fn store_resources(
                         is_outgoing,
                         resource.internal_date,
                         now_ms(),
-                    )
+                    );
+                let audible = || {
+                    crate::sync::ingest::chime_worthy(resource.headers.is_automated, &from_email)
+                };
+                if sorted.waiting {
+                    if eligible {
+                        crate::rules::hold(&tx, local_message_id, audible())?;
+                    }
+                    outcome.waiting.push(resource.provider_id.clone());
+                } else if eligible
+                    && !sorted.silent()
                     && !outcome.fresh_threads.contains(&thread_id)
                 {
-                    let audible = crate::sync::ingest::chime_worthy(
-                        resource.headers.is_automated,
-                        &from_email,
-                    );
-                    repo::notifications::enqueue(&tx, local_message_id, audible)?;
+                    repo::notifications::enqueue(&tx, local_message_id, audible())?;
                     outcome.fresh_threads.push(thread_id);
                 }
             }
@@ -2006,12 +2392,10 @@ async fn store_resources(
                 repo::threads::recompute(&tx, thread_id)?;
             }
             if settings.auto_labels_enabled {
-                let splits = repo::splits::list(&tx)?;
                 for &thread_id in &outcome.touched_threads {
                     if repo::threads::get_summary(&tx, thread_id)?.is_some() {
                         crate::route::route_thread_deterministic(
                             &tx,
-                            &splits,
                             settings.ai_categorize,
                             thread_id,
                         )?;
@@ -2246,6 +2630,8 @@ struct HydratedBody {
     html: Option<String>,
     calendar_parts: Vec<String>,
     attachments: Vec<HydratedAttachment>,
+    /// The message is a read receipt that came back.
+    disposition_report: Option<crate::mime::DispositionReport>,
 }
 
 async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody> {
@@ -2276,6 +2662,11 @@ async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody>
             }
             continue;
         }
+        if hydrated.disposition_report.is_none()
+            && crate::mime::is_disposition_report_part(&spec.mime_type)
+        {
+            hydrated.disposition_report = returned_receipt(resource, &bytes);
+        }
         let has_provider_attachment = spec.provider_attachment_id.is_some();
         hydrated.attachments.push(HydratedAttachment {
             part_id: spec.part_id,
@@ -2304,6 +2695,27 @@ async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody>
             .map(|text| format!("<pre>{}</pre>", escape_html(text)));
     }
     Ok(hydrated)
+}
+
+/// The read receipt a message is, from its report part: when the message is
+/// a multipart/report (RFC 6522), and not one forwarded inside another.
+fn returned_receipt(resource: &Value, report: &[u8]) -> Option<crate::mime::DispositionReport> {
+    let payload = resource.get("payload")?;
+    if !payload
+        .get("mimeType")
+        .and_then(Value::as_str)
+        .is_some_and(|mime_type| mime_type.eq_ignore_ascii_case("multipart/report"))
+    {
+        return None;
+    }
+    let headers = parse_resource(resource).ok()?.headers;
+    let in_reply_to = part_headers(payload).remove("in-reply-to");
+    crate::mime::disposition_report(
+        report,
+        in_reply_to.as_deref(),
+        headers.from.as_ref(),
+        headers.date_ms,
+    )
 }
 
 fn decode_text_part(bytes: &[u8], charset: Option<&str>) -> String {
@@ -2338,12 +2750,14 @@ fn escape_html(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// Store a hydrated message, and return the threads that changed: its own,
+/// and those holding the message a read receipt it is reports on.
 async fn store_hydrated_body(
     ctx: &SyncCtx,
     config: &AccountConfig,
     provider_message_id: String,
     body: HydratedBody,
-) -> Result<Option<i64>> {
+) -> Result<Vec<i64>> {
     let account_id = config.id;
     let text = body.text.clone();
     let html = body.html.clone();
@@ -2354,11 +2768,8 @@ async fn store_hydrated_body(
         .any(|attachment| !attachment.is_inline);
     let attachments = body.attachments;
     let calendar_parts = body.calendar_parts;
-    let parsed_calendar_events: Vec<_> = calendar_parts
-        .iter()
-        .flat_map(|ics| crate::calendar::parse_ics(ics))
-        .collect();
-    let (local_message_id, thread_id, cached_inline) = ctx
+    let disposition_report = body.disposition_report;
+    let (local_message_id, thread_ids, cached_inline, fresh) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
@@ -2468,29 +2879,42 @@ async fn store_hydrated_body(
             }
 
             repo::search::index_message(&tx, local_message_id)?;
-            let thread_id =
-                repo::messages::get_row(&tx, local_message_id)?.and_then(|row| row.thread_id);
-            if let Some(thread_id) = thread_id {
+            // Rules that waited for this body go on (#238).
+            let fresh = crate::rules::resume(&tx, local_message_id)?
+                .filter(|resumed| resumed.announced)
+                .map(|resumed| resumed.thread_id);
+            let mut thread_ids = match &disposition_report {
+                Some(report) => {
+                    crate::sync::ingest::record_returned_receipt(&tx, local_message_id, report)?
+                }
+                None => Vec::new(),
+            };
+            if let Some(thread_id) =
+                repo::messages::get_row(&tx, local_message_id)?.and_then(|row| row.thread_id)
+            {
                 repo::threads::recompute(&tx, thread_id)?;
+                if !thread_ids.contains(&thread_id) {
+                    thread_ids.push(thread_id);
+                }
             }
             tx.commit()?;
-            Ok((local_message_id, thread_id, cached_inline))
+            Ok((local_message_id, thread_ids, cached_inline, fresh))
         })
         .await?;
-
-    if !parsed_calendar_events.is_empty() {
-        ctx.calendar_db
-            .write(move |conn| {
-                let tx = conn.transaction()?;
-                for event in &parsed_calendar_events {
-                    repo::calendar::upsert(&tx, account_id, local_message_id, event)?;
-                }
-                tx.commit()?;
-                Ok(())
-            })
-            .await?;
-        ctx.bus.emit(CoreEvent::CalendarUpdated { account_id });
+    if let Some(thread_id) = fresh {
+        ctx.bus.emit(CoreEvent::MailNew {
+            account_id,
+            thread_ids: vec![thread_id],
+        });
     }
+
+    crate::sync::ingest::store_calendar_events(
+        ctx,
+        account_id,
+        vec![(local_message_id, calendar_parts)],
+        crate::sync::ingest::Arrival::Received,
+    )
+    .await?;
 
     for (attachment_id, bytes) in cached_inline {
         let dir = ctx
@@ -2511,7 +2935,40 @@ async fn store_hydrated_body(
             })
             .await?;
     }
-    Ok(thread_id)
+    Ok(thread_ids)
+}
+
+/// Read new read receipts whole, so what they report shows on the sent
+/// message without anyone opening them. Gmail sends bodies only on request.
+/// Fetch and store whole, now, messages sync needs read at once: read
+/// receipts that came back, and new mail whose rules wait for its body.
+async fn hydrate_now(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi, ids: Vec<String>) {
+    let mut touched = Vec::<i64>::new();
+    for provider_message_id in ids {
+        let stored = async {
+            let resource = api.message_full(&provider_message_id).await?;
+            let body = hydrate_parts(api, &resource).await?;
+            store_hydrated_body(ctx, config, provider_message_id.clone(), body).await
+        }
+        .await;
+        match stored {
+            Ok(thread_ids) => {
+                for thread_id in thread_ids {
+                    if !touched.contains(&thread_id) {
+                        touched.push(thread_id);
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(account_id = config.id, %error, "could not fetch a whole message");
+            }
+        }
+    }
+    if !touched.is_empty() {
+        ctx.bus.emit(CoreEvent::MailUpdated {
+            thread_ids: touched,
+        });
+    }
 }
 
 async fn hydrate_thread(
@@ -2531,18 +2988,33 @@ async fn hydrate_thread(
             "Gmail thread returned more than {MAX_MESSAGES_PER_THREAD} messages"
         )));
     }
-    let outcome = store_resources(ctx, config, &resources, None, true, false, None).await?;
+    let mut touched = store_resources(
+        ctx,
+        config,
+        &resources,
+        None,
+        true,
+        false,
+        None,
+        Arrivals::None,
+    )
+    .await?
+    .touched_threads;
     for resource in resources {
         let provider_message_id = required_string(&resource, "id")?.to_owned();
         let body = hydrate_parts(api, &resource).await?;
-        store_hydrated_body(ctx, config, provider_message_id, body).await?;
+        for thread_id in store_hydrated_body(ctx, config, provider_message_id, body).await? {
+            if !touched.contains(&thread_id) {
+                touched.push(thread_id);
+            }
+        }
     }
-    if !outcome.touched_threads.is_empty() {
+    if !touched.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated {
-            thread_ids: outcome.touched_threads.clone(),
+            thread_ids: touched.clone(),
         });
     }
-    Ok(outcome.touched_threads)
+    Ok(touched)
 }
 
 /// `live_since` is the receipt time from which new mail counts as arriving
@@ -2556,6 +3028,7 @@ async fn sync_once(
     live_since: i64,
 ) -> Result<bool> {
     let account_id = config.id;
+    let started = now_ms();
     let mut state = ctx
         .db
         .read(move |conn| repo::gmail::state(conn, account_id))
@@ -2601,6 +3074,7 @@ async fn sync_once(
             false,
             true,
             Some(cutoff),
+            Arrivals::SinceCaughtUp,
         )
         .await?;
         if !outcome.touched_threads.is_empty() {
@@ -2614,6 +3088,17 @@ async fn sync_once(
                 thread_ids: outcome.fresh_threads,
             });
         }
+        hydrate_now(
+            ctx,
+            config,
+            api,
+            outcome
+                .receipts
+                .into_iter()
+                .chain(outcome.waiting)
+                .collect(),
+        )
+        .await;
         ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
             account_id,
             folder: "Gmail".into(),
@@ -2724,10 +3209,30 @@ async fn sync_once(
             }
         }
         let resources = retain_history_threads(ctx, account_id, resources, mail_history).await?;
-        let outcome =
-            store_resources(ctx, config, &resources, None, true, true, Some(live_since)).await?;
+        let outcome = store_resources(
+            ctx,
+            config,
+            &resources,
+            None,
+            true,
+            true,
+            Some(live_since),
+            Arrivals::Added(page.added_messages.clone()),
+        )
+        .await?;
         touched.extend(outcome.touched_threads);
         fresh_threads.extend(outcome.fresh_threads);
+        hydrate_now(
+            ctx,
+            config,
+            api,
+            outcome
+                .receipts
+                .into_iter()
+                .chain(outcome.waiting)
+                .collect(),
+        )
+        .await;
     }
     for thread_id in removed {
         touched.extend(remove_provider_thread(ctx, account_id, thread_id).await?);
@@ -2763,6 +3268,10 @@ async fn sync_once(
         .await?;
     if page.next_page_token.is_none() && !page.affected_threads.is_empty() {
         sync_draft_map(ctx, config, api).await?;
+    }
+    if page.next_page_token.is_none() {
+        // The history ran out: everything up to this pass is stored.
+        caught_up(ctx, account_id, started).await;
     }
     Ok(true)
 }
@@ -2895,7 +3404,7 @@ async fn prepare_draft(
         attachment_bytes += bytes.len();
         attachments.push(crate::mime::OutgoingAttachment {
             filename: filename.clone(),
-            mime_type: mime_type.unwrap_or_else(|| mime_guess(&filename)),
+            mime_type: mime_type.unwrap_or_else(|| crate::queue::mime_guess_from_name(&filename)),
             bytes,
         });
     }
@@ -2940,7 +3449,8 @@ async fn prepare_draft(
             attachment_bytes += bytes.len();
             attachments.push(crate::mime::OutgoingAttachment {
                 filename: filename.clone(),
-                mime_type: mime_type.unwrap_or_else(|| mime_guess(&filename)),
+                mime_type: mime_type
+                    .unwrap_or_else(|| crate::queue::mime_guess_from_name(&filename)),
                 bytes,
             });
         }
@@ -2953,6 +3463,15 @@ async fn prepare_draft(
         .nth(1)
         .unwrap_or("localhost")
         .to_owned();
+    let (receipt_to, importance) = ctx
+        .db
+        .read(move |conn| {
+            Ok((
+                repo::messages::receipt_to(conn, draft_id)?,
+                repo::messages::importance(conn, draft_id)?,
+            ))
+        })
+        .await?;
     let outgoing = crate::mime::OutgoingMessage {
         from,
         reply_to,
@@ -2967,6 +3486,8 @@ async fn prepare_draft(
         message_id: stored_message_id.as_deref(),
         message_id_domain: &domain,
         attachments,
+        receipt_to: &receipt_to,
+        importance,
     };
     let security_recipients = outgoing
         .to
@@ -2998,30 +3519,6 @@ async fn prepare_draft(
         provider_thread_id,
         provider_draft_id,
     })
-}
-
-fn mime_guess(filename: &str) -> String {
-    match filename
-        .rsplit('.')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "pdf" => "application/pdf",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        "txt" | "md" | "log" => "text/plain",
-        "csv" => "text/csv",
-        "json" => "application/json",
-        "zip" => "application/zip",
-        "ics" => "text/calendar",
-        _ => "application/octet-stream",
-    }
-    .to_owned()
 }
 
 async fn save_remote_draft(
@@ -3403,6 +3900,13 @@ async fn apply_action(
             api.empty_trash().await?;
             return super::finish_empty_trash(ctx, config.id, snapshot_ids).await;
         }
+        "mark_folder_read" => {
+            let Some(label) = action.payload["labelId"].as_str() else {
+                return Ok(());
+            };
+            let before = action.payload["before"].as_i64().unwrap_or_else(now_ms);
+            return api.mark_label_read(label, before / 1000).await;
+        }
         "delete_permanently" => {
             let Some(message_id) = action.message_id else {
                 return Ok(());
@@ -3436,7 +3940,25 @@ async fn apply_action(
             }
             return super::finish_permanent_delete(ctx, action.message_id).await;
         }
-        "snooze" | "unsnooze" => return Ok(()),
+        "snooze" | "unsnooze" | "show_in" => return Ok(()),
+        // Gmail keeps no mark for an answered request; this device recorded
+        // it. Gmail files what it sends in Sent, as it does every message.
+        "read_receipt" => {
+            let (Some(message_id), true) = (
+                action.message_id,
+                action.payload["send"].as_bool() == Some(true),
+            ) else {
+                return Ok(());
+            };
+            let user_agreed = action.payload["userAgreed"].as_bool().unwrap_or(false);
+            if let Some(receipt) =
+                crate::read_receipts::prepare(ctx, config.id, message_id, user_agreed).await?
+            {
+                api.send_raw(&receipt.raw, receipt.gm_thread.as_deref())
+                    .await?;
+            }
+            return Ok(());
+        }
         "save_draft" => {
             let draft_id = action.payload["draftId"]
                 .as_i64()
@@ -3977,10 +4499,26 @@ async fn run_actor(
             if refresh_labels {
                 sync_sender_identities(&ctx, &config, &api).await?;
                 sync_labels(&ctx, &config, &api).await?;
+                // Replies set in webmail show too. Reading them never fails a sync.
+                if let Err(error) = sync_auto_reply(&ctx, &config, &api).await {
+                    tracing::warn!(account_id, %error, "Gmail automatic replies failed");
+                }
             }
-            let actions_remaining = execute_actions(&ctx, &config, &api).await?;
+            let mut actions_remaining = execute_actions(&ctx, &config, &api).await?;
+            // New mail's metadata brings the headers rules test.
+            api.set_rule_headers(
+                ctx.db
+                    .read(move |conn| crate::rules::header_names(conn, account_id))
+                    .await?,
+            );
             let backfill_done =
                 sync_once(&ctx, &config, &api, false, mail_history, live_since).await?;
+            super::engine::settle_waiting_rules(&ctx, account_id).await;
+            // Rules and blocked senders file away mail that just arrived.
+            // Change it on Gmail in this pass, not after the next wait.
+            if !actions_remaining {
+                actions_remaining = execute_actions(&ctx, &config, &api).await?;
+            }
             // The count only explains the Inbox's end, so it never fails a sync.
             if let Err(error) = sync_inbox_count(&ctx, account_id, &api).await {
                 tracing::warn!(account_id, %error, "Gmail Inbox count failed");
@@ -4099,6 +4637,25 @@ async fn run_reader(ctx: SyncCtx, config: AccountConfig, mut rx: mpsc::Receiver<
                     .map_err(|error| error.to_string());
                 let _ = complete.send(result);
             }
+            PriorityFetchCmd::Search {
+                tree,
+                cursor,
+                limit,
+                complete,
+            } => {
+                let result = search_server(
+                    &ctx,
+                    &config,
+                    &api,
+                    (GMAIL_API, GMAIL_BATCH_API),
+                    &tree,
+                    &cursor,
+                    limit,
+                )
+                .await
+                .map_err(|error| error.to_string());
+                let _ = complete.send(result);
+            }
             PriorityFetchCmd::Body(first_message_id) => {
                 let mut message_ids = vec![first_message_id];
                 tokio::time::sleep(Duration::from_millis(40)).await;
@@ -4109,17 +4666,39 @@ async fn run_reader(ctx: SyncCtx, config: AccountConfig, mut rx: mpsc::Receiver<
                         other => deferred.push(other),
                     }
                 }
-                // Attachment responses must never be stranded behind hydration.
+                // Attachment and search responses must never be stranded
+                // behind hydration.
                 for command in deferred {
-                    if let PriorityFetchCmd::Attachment {
-                        attachment_id,
-                        complete,
-                    } = command
-                    {
-                        let result = fetch_attachment(&ctx, &api, attachment_id)
+                    match command {
+                        PriorityFetchCmd::Attachment {
+                            attachment_id,
+                            complete,
+                        } => {
+                            let result = fetch_attachment(&ctx, &api, attachment_id)
+                                .await
+                                .map_err(|error| error.to_string());
+                            let _ = complete.send(result);
+                        }
+                        PriorityFetchCmd::Search {
+                            tree,
+                            cursor,
+                            limit,
+                            complete,
+                        } => {
+                            let result = search_server(
+                                &ctx,
+                                &config,
+                                &api,
+                                (GMAIL_API, GMAIL_BATCH_API),
+                                &tree,
+                                &cursor,
+                                limit,
+                            )
                             .await
                             .map_err(|error| error.to_string());
-                        let _ = complete.send(result);
+                            let _ = complete.send(result);
+                        }
+                        PriorityFetchCmd::Body(_) => {}
                     }
                 }
                 message_ids.sort_unstable();
@@ -4163,6 +4742,110 @@ async fn run_reader(ctx: SyncCtx, config: AccountConfig, mut rx: mpsc::Receiver<
     }
 }
 
+/// Searches the account's mail on Gmail for `tree` from `cursor`, in its own
+/// search syntax, through the API at `endpoints` (its base and its batch
+/// endpoint): the newest `limit` messages it finds that aren't kept here,
+/// which are fetched as their headers and kept, and the ones kept here
+/// already that it passes. Gmail's pages are taken whole. Bodies come when
+/// opened.
+async fn search_server(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    api: &GmailApi,
+    endpoints: (&str, &str),
+    tree: &crate::search::Expr,
+    cursor: &ServerSearchCursor,
+    limit: usize,
+) -> Result<ServerHits> {
+    let (base, batch) = endpoints;
+    let query = crate::search::server::gmail(tree);
+    let account_id = config.id;
+    // Gmail's results a page at a time, until a page of them isn't kept here
+    // or they end.
+    let mut token = cursor.page_token.clone().filter(|token| !token.is_empty());
+    let mut ids = Vec::new();
+    let mut missing = Vec::new();
+    for _ in 0..SERVER_SEARCH_PAGES {
+        let mut url = format!("{base}/messages?maxResults={limit}&q={}", urlencode(&query));
+        if let Some(token) = &token {
+            url.push_str("&pageToken=");
+            url.push_str(&urlencode(token));
+        }
+        let response = api.get_json(&url).await?;
+        let page = response
+            .get("messages")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|message| message.get("id").and_then(Value::as_str))
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        token = gmail_page_token(&response)?;
+        let wanted = page.clone();
+        missing.extend(
+            ctx.db
+                .read(move |conn| {
+                    let mut missing = Vec::new();
+                    for id in wanted {
+                        if repo::messages::by_gm_msgid(conn, account_id, &id)?.is_none() {
+                            missing.push(id);
+                        }
+                    }
+                    Ok(missing)
+                })
+                .await?,
+        );
+        ids.extend(page);
+        if token.is_none() || missing.len() >= limit {
+            break;
+        }
+    }
+    let mut resources = Vec::with_capacity(missing.len());
+    for chunk in missing.chunks(BATCH_SIZE) {
+        resources.extend(api.batch_metadata_at(batch, chunk).await?);
+    }
+    if !resources.is_empty() {
+        // Found mail notifies of nothing, isn't new mail for rules, and
+        // leaves the rest of its conversation as it is.
+        let outcome = store_resources(
+            ctx,
+            config,
+            &resources,
+            None,
+            false,
+            false,
+            None,
+            Arrivals::None,
+        )
+        .await?;
+        if !outcome.touched_threads.is_empty() {
+            ctx.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: outcome.touched_threads,
+            });
+        }
+    }
+    let message_ids = ctx
+        .db
+        .read(move |conn| {
+            let mut message_ids = Vec::with_capacity(ids.len());
+            for id in &ids {
+                if let Some(row) = repo::messages::by_gm_msgid(conn, account_id, id)? {
+                    message_ids.push(row.id);
+                }
+            }
+            Ok(message_ids)
+        })
+        .await?;
+    Ok(ServerHits {
+        message_ids,
+        next: token.map(|token| ServerSearchCursor {
+            page_token: Some(token),
+            ..ServerSearchCursor::default()
+        }),
+    })
+}
+
 async fn fetch_attachment(ctx: &SyncCtx, api: &GmailApi, attachment_id: i64) -> Result<Vec<u8>> {
     let (message_id, provider_attachment_id): (String, Option<String>) = ctx
         .db
@@ -4185,6 +4868,303 @@ async fn fetch_attachment(ctx: &SyncCtx, api: &GmailApi, attachment_id: i64) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Gmail account 1 with Inbox, Sent, Spam, Archive and All Mail.
+    pub(super) async fn gmail_account() -> (tempfile::TempDir, SyncCtx, AccountConfig) {
+        let dir = tempfile::tempdir().unwrap();
+        let credentials: crate::accounts::credentials::CredentialStoreHandle = std::sync::Arc::new(
+            crate::accounts::credentials::DevelopmentFileCredentialStore::new(
+                dir.path().join("credentials.json"),
+            ),
+        );
+        let ctx = SyncCtx {
+            db: crate::db::Db::open(&dir.path().join("mail.db")).unwrap(),
+            calendar_db: crate::db::Db::deferred_calendar(dir.path().join("calendar.db")),
+            bus: crate::events::EventBus::new(),
+            paths: std::sync::Arc::new(crate::config::Paths::for_tests(dir.path())),
+            tokens: crate::oauth::tokens::TokenProvider::new(
+                credentials.clone(),
+                std::sync::Arc::new(crate::oauth::redirect::LoopbackRedirectBroker::default()),
+            ),
+            credentials,
+        };
+        let config = ctx
+            .db
+            .write(|conn| {
+                crate::db::testutil::seed_account(conn);
+                conn.execute_batch(
+                    "UPDATE accounts SET mail_protocol = 'gmail', provider = 'gmail' WHERE id = 1;
+                     INSERT INTO folders (id, account_id, path, role) VALUES
+                       (2, 1, '[Gmail]/Spam', 'spam'),
+                       (3, 1, 'Archive', 'archive'),
+                       (4, 1, '[Gmail]/All Mail', 'all'),
+                       (5, 1, '[Gmail]/Sent Mail', 'sent');
+                     INSERT INTO gmail_labels (account_id, provider_id, name, folder_id) VALUES
+                       (1, 'INBOX', 'INBOX', 1),
+                       (1, 'SPAM', 'SPAM', 2),
+                       (1, 'SENT', 'SENT', 5);",
+                )?;
+                Ok(repo::accounts::get_config(conn, 1)?.unwrap())
+            })
+            .await
+            .unwrap();
+        (dir, ctx, config)
+    }
+
+    #[tokio::test]
+    async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
+        let (_dir, ctx, config) = gmail_account().await;
+        ctx.db
+            .write(|conn| repo::blocked::block(conn, "ads@shop.test", 0))
+            .await
+            .unwrap();
+        let now = now_ms();
+        let resource = |id: &str, from: &str| {
+            json!({
+                "id": id, "threadId": format!("thread-{id}"),
+                "labelIds": ["INBOX", "UNREAD"], "internalDate": now.to_string(),
+                "sizeEstimate": 100, "snippet": "Hello",
+                "payload": {"headers": [
+                    {"name": "From", "value": from},
+                    {"name": "To", "value": "me@test.dev"},
+                    {"name": "Subject", "value": "Hello"},
+                    {"name": "Message-ID", "value": format!("<{id}@shop.test>")},
+                ]}
+            })
+        };
+        let resources = [
+            resource("sale", "Shop <Ads@Shop.test>"),
+            resource("note", "Friend <friend@test.dev>"),
+        ];
+        store_resources(
+            &ctx,
+            &config,
+            &resources,
+            None,
+            false,
+            true,
+            None,
+            Arrivals::None,
+        )
+        .await
+        .unwrap();
+
+        ctx.db
+            .read(|conn| {
+                let placed = |gm_msgid: &str| -> rusqlite::Result<(i64, Vec<i64>)> {
+                    let (id, folder_id): (i64, i64) = conn.query_row(
+                        "SELECT id, folder_id FROM messages WHERE gm_msgid = ?1",
+                        [gm_msgid],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?;
+                    let mut stmt = conn.prepare(
+                        "SELECT folder_id FROM message_folders WHERE message_id = ?1
+                         ORDER BY folder_id",
+                    )?;
+                    let labels = stmt
+                        .query_map([id], |row| row.get(0))?
+                        .collect::<rusqlite::Result<Vec<i64>>>()?;
+                    Ok((folder_id, labels))
+                };
+                // It left the inbox for Spam. All Mail keeps it until the
+                // server's labels come back, as after Move to spam.
+                assert_eq!(placed("sale")?, (2, vec![2, 4]));
+                assert_eq!(placed("note")?, (1, vec![1, 4]));
+                let pending: Vec<String> = conn
+                    .prepare("SELECT kind FROM pending_actions")?
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                assert_eq!(pending, ["spam"]);
+                let notified: Vec<String> = conn
+                    .prepare(
+                        "SELECT m.gm_msgid FROM notification_outbox o
+                         JOIN messages m ON m.id = o.message_id",
+                    )?
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                assert_eq!(notified, ["note"]);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn rules_sort_only_the_mail_the_history_added() {
+        use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+        let (_dir, ctx, config) = gmail_account().await;
+        ctx.db
+            .write(|conn| {
+                repo::rules::save(
+                    conn,
+                    &MailRule {
+                        id: 0,
+                        account_id: None,
+                        name: "Shop".into(),
+                        enabled: true,
+                        match_all: true,
+                        conditions: vec![RuleCondition {
+                            field: RuleField::From,
+                            header: String::new(),
+                            op: RuleOp::EndsWith,
+                            value: "@shop.test".into(),
+                            negate: false,
+                        }],
+                        actions: vec![RuleAction::MarkRead, RuleAction::Archive],
+                        stop: false,
+                    },
+                    0,
+                )
+            })
+            .await
+            .unwrap();
+        let now = now_ms();
+        let resource = |id: &str| {
+            json!({
+                "id": id, "threadId": format!("thread-{id}"),
+                "labelIds": ["INBOX", "UNREAD"], "internalDate": now.to_string(),
+                "sizeEstimate": 100, "snippet": "Hello",
+                "payload": {"headers": [
+                    {"name": "From", "value": "Shop <ads@shop.test>"},
+                    {"name": "Subject", "value": "Sale"},
+                    {"name": "Message-ID", "value": format!("<{id}@shop.test>")},
+                ]}
+            })
+        };
+        // An older message of a conversation the history touched isn't new.
+        let resources = [resource("new"), resource("older")];
+        store_resources(
+            &ctx,
+            &config,
+            &resources,
+            None,
+            true,
+            true,
+            None,
+            Arrivals::Added(["new".to_owned()].into()),
+        )
+        .await
+        .unwrap();
+        ctx.db
+            .read(|conn| {
+                let state = |gm_msgid: &str| -> rusqlite::Result<(i64, bool)> {
+                    conn.query_row(
+                        "SELECT folder_id, is_read FROM messages WHERE gm_msgid = ?1",
+                        [gm_msgid],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                };
+                assert_eq!(state("new")?, (3, true));
+                assert_eq!(state("older")?, (1, false));
+                let pending: Vec<String> = conn
+                    .prepare("SELECT kind FROM pending_actions ORDER BY id")?
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                assert_eq!(pending, ["mark_read", "archive"]);
+                let notified: Vec<String> = conn
+                    .prepare(
+                        "SELECT m.gm_msgid FROM notification_outbox o
+                         JOIN messages m ON m.id = o.message_id",
+                    )?
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                assert_eq!(notified, ["older"]);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn rules_on_the_body_wait_for_the_whole_message() {
+        use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+        let (_dir, ctx, config) = gmail_account().await;
+        ctx.db
+            .write(|conn| {
+                repo::rules::save(
+                    conn,
+                    &MailRule {
+                        id: 0,
+                        account_id: None,
+                        name: "Lists".into(),
+                        enabled: true,
+                        match_all: true,
+                        conditions: vec![RuleCondition {
+                            field: RuleField::Body,
+                            header: String::new(),
+                            op: RuleOp::Contains,
+                            value: "unsubscribe".into(),
+                            negate: false,
+                        }],
+                        actions: vec![RuleAction::Archive],
+                        stop: false,
+                    },
+                    0,
+                )
+            })
+            .await
+            .unwrap();
+        let now = now_ms();
+        let resource = |id: &str| {
+            json!({
+                "id": id, "threadId": format!("thread-{id}"),
+                "labelIds": ["INBOX", "UNREAD"], "internalDate": now.to_string(),
+                "sizeEstimate": 100, "snippet": "Hello",
+                "payload": {"headers": [
+                    {"name": "From", "value": "Shop <ads@shop.test>"},
+                    {"name": "Subject", "value": "News"},
+                    {"name": "Message-ID", "value": format!("<{id}@shop.test>")},
+                ]}
+            })
+        };
+        let outcome = store_resources(
+            &ctx,
+            &config,
+            &[resource("list"), resource("note")],
+            None,
+            true,
+            true,
+            None,
+            Arrivals::Added(["list".to_owned(), "note".to_owned()].into()),
+        )
+        .await
+        .unwrap();
+        // Both wait for their bodies, and nothing notifies yet.
+        assert_eq!(outcome.waiting, ["list", "note"]);
+        assert!(outcome.fresh_threads.is_empty());
+        for (id, text) in [("list", "Unsubscribe here"), ("note", "Hello")] {
+            let body = HydratedBody {
+                text: Some(text.into()),
+                ..HydratedBody::default()
+            };
+            store_hydrated_body(&ctx, &config, id.into(), body)
+                .await
+                .unwrap();
+        }
+        ctx.db
+            .read(|conn| {
+                let folder = |gm_msgid: &str| -> rusqlite::Result<i64> {
+                    conn.query_row(
+                        "SELECT folder_id FROM messages WHERE gm_msgid = ?1",
+                        [gm_msgid],
+                        |row| row.get(0),
+                    )
+                };
+                assert_eq!(folder("list")?, 3);
+                assert_eq!(folder("note")?, 1);
+                let notified: Vec<String> = conn
+                    .prepare(
+                        "SELECT m.gm_msgid FROM notification_outbox o
+                         JOIN messages m ON m.id = o.message_id",
+                    )?
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                assert_eq!(notified, ["note"]);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
 
     #[test]
     fn single_message_actions_leave_the_rest_of_the_conversation() {
@@ -4209,10 +5189,10 @@ mod tests {
             "historyId": "200",
             "nextPageToken": "next",
             "history": [
-                { "messagesAdded": [{ "message": { "threadId": "a" } }] },
+                { "messagesAdded": [{ "message": { "id": "m1", "threadId": "a" } }] },
                 { "labelsRemoved": [
-                    { "message": { "threadId": "a" } },
-                    { "message": { "threadId": "b" } }
+                    { "message": { "id": "m0", "threadId": "a" } },
+                    { "message": { "id": "m2", "threadId": "b" } }
                 ] }
             ]
         });
@@ -4220,6 +5200,11 @@ mod tests {
         assert_eq!(
             page.affected_threads.into_iter().collect::<Vec<_>>(),
             vec!["a", "b"]
+        );
+        // Only an added message is new mail.
+        assert_eq!(
+            page.added_messages.into_iter().collect::<Vec<_>>(),
+            vec!["m1"]
         );
         assert_eq!(page.next_page_token.as_deref(), Some("next"));
         assert!(page.completed_history_id.is_none());
@@ -4230,7 +5215,11 @@ mod tests {
 
     #[test]
     fn metadata_batch_is_bounded_and_uses_requested_headers() {
-        let body = build_batch_body(&["a/b".into(), "two".into()], "boundary");
+        let headers = METADATA_HEADERS
+            .iter()
+            .map(|header| (*header).to_owned())
+            .collect::<Vec<_>>();
+        let body = build_batch_body(&["a/b".into(), "two".into()], "boundary", &headers);
         assert!(body.contains("messages/a%2Fb?format=metadata"));
         assert!(body.contains("metadataHeaders=List-Unsubscribe-Post"));
         assert!(body.contains("Content-ID: <flectar-1>"));
@@ -4279,6 +5268,40 @@ mod tests {
         let resources = parse_batch_response(body, "response", 2).unwrap();
         assert_eq!(resources.len(), 1);
         assert_eq!(resources[0]["id"], "one");
+    }
+
+    #[test]
+    fn the_vacation_responder_reads_as_the_app_s_automatic_replies() {
+        // Times as strings, and a reply written in webmail, as HTML only.
+        let settings: VacationSettings = serde_json::from_value(json!({
+            "enableAutoReply": true,
+            "responseSubject": "Away",
+            "responseBodyHtml": "<div>Back on <b>Monday</b>.</div><div>Alex</div>",
+            "restrictToContacts": false,
+            "restrictToDomain": true,
+            "startTime": "1763251200000",
+            "endTime": 1763683199999_i64,
+        }))
+        .unwrap();
+        let reply = AutoReply::from(settings);
+        assert!(reply.enabled && reply.domain_only && !reply.contacts_only);
+        assert_eq!(reply.subject, "Away");
+        assert!(reply.text.contains("Back on Monday."), "{:?}", reply.text);
+        assert!(reply.text.contains("Alex") && !reply.text.contains('<'));
+        assert_eq!(reply.starts_at, Some(1_763_251_200_000));
+        assert_eq!(reply.ends_at, Some(1_763_683_199_999));
+
+        // A responder that was never set reads as off.
+        let unset: VacationSettings = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(AutoReply::from(unset), AutoReply::default());
+
+        // Saved, the text goes as plain text, and times as strings.
+        let saved = serde_json::to_value(VacationSettings::from(&reply)).unwrap();
+        assert_eq!(saved["startTime"], "1763251200000");
+        assert!(saved.get("responseBodyHtml").is_none());
+        let open_ended =
+            serde_json::to_value(VacationSettings::from(&AutoReply::default())).unwrap();
+        assert!(open_ended.get("startTime").is_none() && open_ended.get("endTime").is_none());
     }
 
     #[test]
@@ -4374,5 +5397,359 @@ mod tests {
     fn arbitrary_local_colors_are_not_sent_to_gmail() {
         assert_eq!(gmail_palette_color("#4a86e8"), Some("#4a86e8"));
         assert_eq!(gmail_palette_color("#123456"), None);
+    }
+}
+
+#[cfg(test)]
+mod returned_receipt_tests {
+    use super::tests::gmail_account;
+    use super::*;
+
+    fn receipt_resource(id: &str, labels: &[&str], full: bool) -> Value {
+        let data = |text: &str| URL_SAFE_NO_PAD.encode(text);
+        let mut payload = json!({
+            "mimeType": "multipart/report",
+            "headers": [
+                {"name": "From", "value": "Ana Ruiz <ana@example.com>"},
+                {"name": "To", "value": "me@test.dev"},
+                {"name": "Subject", "value": "Read: Plan"},
+                {"name": "Date", "value": "Tue, 01 Sep 2026 12:30:00 +0000"},
+                {"name": "Message-ID", "value": format!("<{id}@example.com>")},
+                {"name": "Content-Type",
+                 "value": "multipart/report; report-type=disposition-notification; boundary=b"},
+            ]
+        });
+        if full {
+            payload["parts"] = json!([
+                {"partId": "0", "mimeType": "text/plain", "filename": "",
+                 "body": {"size": 9, "data": data("Displayed")}},
+                {"partId": "1", "mimeType": "message/disposition-notification", "filename": "",
+                 "body": {"size": 120, "data": data(
+                    "Final-Recipient: rfc822; ana@example.com\r\n\
+                     Original-Message-ID: <plan@example.org>\r\n\
+                     Disposition: manual-action/MDN-sent-manually; displayed\r\n")}},
+            ]);
+        }
+        json!({
+            "id": id, "threadId": format!("thread-{id}"),
+            "labelIds": labels, "internalDate": "1788265800000",
+            "sizeEstimate": 400, "snippet": "Displayed",
+            "payload": payload,
+        })
+    }
+
+    #[tokio::test]
+    async fn new_receipts_are_read_as_they_arrive() {
+        let (_dir, ctx, config) = gmail_account().await;
+        let mut ordinary = receipt_resource("note", &["INBOX"], false);
+        ordinary["payload"]["headers"][5]["value"] = json!("text/plain");
+        let resources = [
+            receipt_resource("receipt", &["INBOX", "UNREAD"], false),
+            ordinary,
+            // The receipt this account sent, in Sent.
+            receipt_resource("answer", &["SENT"], false),
+        ];
+        let outcome = store_resources(
+            &ctx,
+            &config,
+            &resources,
+            None,
+            false,
+            true,
+            None,
+            Arrivals::None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.receipts, vec!["receipt".to_owned()]);
+        // Only once.
+        let outcome = store_resources(
+            &ctx,
+            &config,
+            &resources,
+            None,
+            false,
+            true,
+            None,
+            Arrivals::None,
+        )
+        .await
+        .unwrap();
+        assert!(outcome.receipts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_hydrated_receipt_shows_on_the_sent_message() {
+        let (_dir, ctx, config) = gmail_account().await;
+        let sent_thread = ctx
+            .db
+            .write(|conn| {
+                conn.execute_batch(
+                    r#"INSERT INTO threads (id, account_id, subject_norm, unread_count, last_message_at)
+                           VALUES (70, 1, 'plan', 0, 1000);
+                       INSERT INTO messages (thread_id, account_id, folder_id, message_id, subject,
+                           to_json, date, is_outgoing)
+                           VALUES (70, 1, 5, 'plan@example.org', 'Plan',
+                                   '[{"name":"Ana Ruiz","email":"ana@example.com"}]', 1000, 1);"#,
+                )?;
+                Ok(70_i64)
+            })
+            .await
+            .unwrap();
+        let resource = receipt_resource("receipt", &["INBOX"], true);
+        store_resources(
+            &ctx,
+            &config,
+            std::slice::from_ref(&resource),
+            None,
+            false,
+            false,
+            None,
+            Arrivals::None,
+        )
+        .await
+        .unwrap();
+        let api = GmailApi::new(ctx.clone(), config.clone()).unwrap();
+        let body = hydrate_parts(&api, &resource).await.unwrap();
+        assert!(body.disposition_report.is_some());
+        let threads = store_hydrated_body(&ctx, &config, "receipt".into(), body)
+            .await
+            .unwrap();
+        assert!(threads.contains(&sent_thread), "{threads:?}");
+        let receipts = ctx
+            .db
+            .read(|conn| {
+                let id: i64 = conn.query_row(
+                    "SELECT id FROM messages WHERE message_id = 'plan@example.org'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                Ok(repo::messages::detail(conn, id)?.returned_receipts)
+            })
+            .await
+            .unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].recipient.name.as_deref(), Some("Ana Ruiz"));
+        assert_eq!(
+            receipts[0].disposition,
+            crate::models::Disposition::Displayed
+        );
+        assert_eq!(receipts[0].reported_at, 1_788_265_800_000);
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::tests::gmail_account;
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    /// A request the stand-in answered: method, target and body.
+    type Request = (String, String, String);
+
+    /// A stand-in for Gmail's API and batch endpoint that answers each
+    /// request with `answer`'s content type and body, and keeps the requests.
+    async fn stand_in(
+        answer: impl Fn(&Request) -> (String, String) + Send + Sync + 'static,
+    ) -> (String, Arc<Mutex<Vec<Request>>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let kept = Arc::clone(&requests);
+        let answer = Arc::new(answer);
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let (requests, answer) = (Arc::clone(&kept), Arc::clone(&answer));
+                tokio::spawn(async move {
+                    let mut stream = BufReader::new(stream);
+                    let mut line = String::new();
+                    stream.read_line(&mut line).await.unwrap();
+                    let mut words = line.split_whitespace();
+                    let method = words.next().unwrap_or_default().to_owned();
+                    let target = words.next().unwrap_or_default().to_owned();
+                    let mut length = 0;
+                    loop {
+                        let mut header = String::new();
+                        stream.read_line(&mut header).await.unwrap();
+                        if header.trim().is_empty() {
+                            break;
+                        }
+                        if let Some((name, value)) = header.split_once(':')
+                            && name.eq_ignore_ascii_case("content-length")
+                        {
+                            length = value.trim().parse().unwrap();
+                        }
+                    }
+                    let mut body = vec![0; length];
+                    stream.read_exact(&mut body).await.unwrap();
+                    let request = (method, target, String::from_utf8(body).unwrap());
+                    let (content_type, body) = answer(&request);
+                    requests.lock().unwrap().push(request);
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n\
+                         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    stream
+                        .get_mut()
+                        .write_all(response.as_bytes())
+                        .await
+                        .unwrap();
+                });
+            }
+        });
+        (origin, requests)
+    }
+
+    /// Message `m<day>` in Gmail's metadata format, from Ana on that day in
+    /// March 2020.
+    fn found(id: &str) -> Value {
+        let day = id.trim_start_matches('m').parse::<u32>().unwrap();
+        json!({
+            "id": id, "threadId": format!("thread-{id}"),
+            "labelIds": ["INBOX"],
+            "internalDate": (1_583_056_800_000_i64 + i64::from(day - 1) * 86_400_000).to_string(),
+            "sizeEstimate": 400, "snippet": "The invoice",
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": [
+                    {"name": "From", "value": "Ana <ana@example.com>"},
+                    {"name": "To", "value": "me@test.dev"},
+                    {"name": "Subject", "value": format!("Invoice {id}")},
+                    {"name": "Date", "value": format!("{day} Mar 2020 10:00:00 +0000")},
+                    {"name": "Message-ID", "value": format!("<{id}@example.com>")},
+                ]
+            }
+        })
+    }
+
+    /// Gmail's answer to a batch: each message it asked for.
+    fn batch_answer(body: &str) -> (String, String) {
+        let mut answer = String::new();
+        for line in body.lines() {
+            let Some(asked) = line.strip_prefix("GET /gmail/v1/users/me/messages/") else {
+                continue;
+            };
+            let id = asked.split('?').next().unwrap();
+            answer.push_str(&format!(
+                "--answer\r\nContent-Type: application/http\r\n\r\n\
+                 HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}\r\n",
+                found(id)
+            ));
+        }
+        answer.push_str("--answer--\r\n");
+        ("multipart/mixed; boundary=answer".into(), answer)
+    }
+
+    /// Gmail's search goes a page at a time with its page tokens, until a
+    /// page of mail not kept here is found. Only those messages are fetched,
+    /// as their metadata, and kept, and the ones kept here come along.
+    #[tokio::test]
+    async fn a_server_search_keeps_what_gmail_finds_a_page_at_a_time() {
+        let (_dir, ctx, config) = gmail_account().await;
+        ctx.tokens
+            .store_initial(
+                config.id,
+                "access".into(),
+                Some(3600),
+                Some("refresh".into()),
+                "client".into(),
+                None,
+            )
+            .await
+            .unwrap();
+        // m2 is kept here already.
+        store_resources(
+            &ctx,
+            &config,
+            &[found("m2")],
+            None,
+            false,
+            false,
+            None,
+            Arrivals::None,
+        )
+        .await
+        .unwrap();
+        let (origin, requests) = stand_in(|(_, target, body)| {
+            if target.starts_with("/batch/") {
+                return batch_answer(body);
+            }
+            assert!(
+                target.starts_with("/gmail/v1/users/me/messages?maxResults=1&q=invoice+from%3Aana"),
+                "{target}"
+            );
+            // A message a page, newest first.
+            let page = if target.ends_with("&pageToken=page-2") {
+                json!({"messages": [{"id": "m2", "threadId": "thread-m2"}], "nextPageToken": "page-3"})
+            } else if target.ends_with("&pageToken=page-3") {
+                json!({"messages": [{"id": "m1", "threadId": "thread-m1"}]})
+            } else {
+                json!({"messages": [{"id": "m3", "threadId": "thread-m3"}], "nextPageToken": "page-2"})
+            };
+            ("application/json".into(), page.to_string())
+        })
+        .await;
+        let api = GmailApi::new(ctx.clone(), config.clone()).unwrap();
+        let (base, batch) = (
+            format!("{origin}/gmail/v1/users/me"),
+            format!("{origin}/batch/gmail/v1"),
+        );
+        let endpoints = (base.as_str(), batch.as_str());
+        let tree = crate::search::parse("invoice from:ana").tree.unwrap();
+
+        let first = search_server(
+            &ctx,
+            &config,
+            &api,
+            endpoints,
+            &tree,
+            &ServerSearchCursor::default(),
+            1,
+        )
+        .await
+        .unwrap();
+        let next = first.next.clone().expect("Gmail had another page");
+        assert_eq!(next.page_token.as_deref(), Some("page-2"));
+        // m2 is kept here, so the page goes on to m1.
+        let second = search_server(&ctx, &config, &api, endpoints, &tree, &next, 1)
+            .await
+            .unwrap();
+        assert_eq!(second.next, None);
+
+        // Only m3 and m1 were fetched, each once.
+        let requests = requests.lock().unwrap().clone();
+        let fetched = requests
+            .iter()
+            .filter(|(_, target, _)| target.starts_with("/batch/"))
+            .flat_map(|(_, _, body)| {
+                body.lines()
+                    .filter_map(|line| line.strip_prefix("GET /gmail/v1/users/me/messages/"))
+                    .map(|asked| asked.split('?').next().unwrap().to_owned())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(fetched, ["m3", "m1"]);
+
+        // Each page's in Gmail's order, kept in the Inbox.
+        let (first_found, second_found) = ctx
+            .db
+            .read(move |conn| {
+                let found = |ids: &[i64]| -> Result<Vec<(String, Option<i64>)>> {
+                    ids.iter()
+                        .map(|id| {
+                            let row = repo::messages::get_row(conn, *id)?.unwrap();
+                            Ok((row.subject, row.folder_id))
+                        })
+                        .collect()
+                };
+                Ok((found(&first.message_ids)?, found(&second.message_ids)?))
+            })
+            .await
+            .unwrap();
+        let inbox = |subject: &str| (subject.to_owned(), Some(1));
+        assert_eq!(first_found, [inbox("Invoice m3")]);
+        assert_eq!(second_found, [inbox("Invoice m2"), inbox("Invoice m1")]);
     }
 }

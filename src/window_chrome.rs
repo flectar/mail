@@ -31,6 +31,19 @@ mod linux;
 mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
+/// The unread count over the taskbar button of a copy without package
+/// identity, which draws its own.
+#[cfg(target_os = "windows")]
+mod taskbar_badge;
+#[cfg(any(test, target_os = "windows"))]
+mod badge_pixels;
+
+/// Show the unread count on the main window's taskbar button, as a copy
+/// without package identity must: Windows' own badges need one.
+#[cfg(target_os = "windows")]
+pub(crate) fn set_taskbar_badge(badge: Option<(u32, String)>) {
+    windows::set_taskbar_badge(badge);
+}
 
 /// The integrated frame is the default; unknown saved values fall back to the
 /// system frame so a window can never start without any controls.
@@ -179,6 +192,27 @@ pub(crate) fn is_quit(
         && modifiers == winit::keyboard::ModifiersState::CONTROL
 }
 
+/// Quit for Control+Q pressed in any of the app's windows, as GNOME and KDE
+/// have it. Messages being written go to Drafts as the app ends; only the
+/// calendar editor's unsaved changes keep it from quitting. Control+Q is the
+/// only way out of a Flatpak running in the background where the desktop
+/// lists no background apps. Returns whether it quit.
+#[cfg(linux_desktop)]
+pub(crate) fn quit_key(
+    app: &AppWindow,
+    event: &winit::event::KeyEvent,
+    modifiers: winit::keyboard::ModifiersState,
+) -> bool {
+    let quits = event.state.is_pressed()
+        && !event.repeat
+        && is_quit(&event.logical_key, modifiers)
+        && !app.get_calendar_editor_open();
+    if quits {
+        crate::window_controller::quit(app);
+    }
+    quits
+}
+
 #[cfg(desktop)]
 fn register_desktop_events(app: &AppWindow) {
     let chrome = app.global::<WindowChrome>();
@@ -205,22 +239,21 @@ fn register_desktop_events(app: &AppWindow) {
         if !matches!(event, winit::event::WindowEvent::RedrawRequested) {
             crate::memory::release_free_heap_when_idle();
         }
+        #[cfg(linux_desktop)]
+        if let winit::event::WindowEvent::KeyboardInput { event, .. } = event
+            && quit_key(&app, event, modifiers.get())
+        {
+            return EventResult::PreventDefault;
+        }
         match event {
             winit::event::WindowEvent::ModifiersChanged(state) => modifiers.set(state.state()),
-            // Control+Q quits from anywhere, as GNOME and KDE have it, except
-            // over writing that the composer or calendar editor hasn't saved.
-            // It is the only way out of a Flatpak running in the background
-            // where the desktop lists no background apps.
-            #[cfg(linux_desktop)]
-            winit::event::WindowEvent::KeyboardInput { event, .. }
-                if event.state.is_pressed()
-                    && !event.repeat
-                    && is_quit(&event.logical_key, modifiers.get())
-                    && !app.global::<crate::ComposerUi>().get_open()
-                    && !app.get_calendar_editor_open() =>
-            {
-                crate::window_controller::quit(&app);
-                return EventResult::PreventDefault;
+            // Files dragged from elsewhere go into an open message.
+            winit::event::WindowEvent::HoveredFile(_) => crate::composer::files_hovered(true),
+            winit::event::WindowEvent::HoveredFileCancelled => {
+                crate::composer::files_hovered(false)
+            }
+            winit::event::WindowEvent::DroppedFile(path) => {
+                crate::composer::file_dropped(path.clone())
             }
             // Tab shortcuts work wherever focus is, as in a browser, except in
             // the composer and the calendar editor, which keep their keys.
@@ -228,7 +261,7 @@ fn register_desktop_events(app: &AppWindow) {
                 if event.state.is_pressed()
                     && app.global::<crate::TabsUi>().get_enabled()
                     && !app.global::<crate::ComposerUi>().get_open()
-                    && !app.get_calendar_editor_open() =>
+                    && !app.get_calendar_editor_shown() =>
             {
                 if let Some(command) = crate::tabs::shortcut(&event.logical_key, modifiers.get()) {
                     app.global::<crate::TabsUi>()

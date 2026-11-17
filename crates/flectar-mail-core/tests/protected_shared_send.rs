@@ -257,6 +257,8 @@ async fn scheduled_signed_message(binary: String, fingerprint: String) {
             in_reply_to_message_id: None,
             in_reply_to_header: None,
             attachments: vec![],
+            request_read_receipt: false,
+            importance: Default::default(),
         })
         .await
         .unwrap();

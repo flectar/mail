@@ -51,6 +51,7 @@ assert_contains "$badging" "targetSdkVersion:'36'" 'target SDK'
 assert_contains "$badging" "uses-permission: name='android.permission.INTERNET'" 'network permission'
 assert_contains "$badging" "uses-permission: name='android.permission.ACCESS_NETWORK_STATE'" 'network-state permission'
 assert_contains "$badging" "uses-permission: name='android.permission.POST_NOTIFICATIONS'" 'notification permission declaration'
+assert_contains "$badging" "uses-permission: name='android.permission.RECEIVE_BOOT_COMPLETED'" 'persisted mail check permission'
 assert_contains "$badging" "native-code: 'arm64-v8a'" 'arm64 ABI'
 assert_contains "$badging" 'application-icon-' 'launcher icon'
 assert_contains "$xmltree" 'android:usesCleartextTraffic(0x010104ec)=(type 0x12)0x0' 'cleartext traffic disabled'
@@ -58,6 +59,9 @@ assert_contains "$xmltree" 'android:scheme(0x01010027)="msauth"' 'Microsoft OAut
 assert_contains "$xmltree" 'android:host(0x01010028)="com.flectar.mail"' 'Microsoft OAuth callback host'
 assert_contains "$xmltree" 'android:exported(0x01010010)=(type 0x12)0xffffffff' 'explicitly exported callback/launcher Activity'
 assert_contains "$xmltree" 'com.flectar.mail.FlectarActivity' 'Google AuthorizationClient Activity host'
+assert_contains "$xmltree" 'com.flectar.mail.NotificationActionReceiver' 'notification button receiver'
+assert_contains "$xmltree" 'com.flectar.mail.MailCheckJob' 'background mail check job'
+assert_contains "$xmltree" 'android.permission.BIND_JOB_SERVICE' 'mail check job binding permission'
 assert_contains "$xmltree" 'android:allowBackup(0x01010280)=(type 0x12)0x0' 'Android backup disabled'
 
 if [[ "$badging" == *"application-debuggable"* ]]; then

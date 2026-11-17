@@ -72,6 +72,8 @@ async fn draft(core: &Core, account_id: i64) -> i64 {
         in_reply_to_message_id: None,
         in_reply_to_header: None,
         attachments: vec![],
+        request_read_receipt: false,
+        importance: Default::default(),
     })
     .await
     .expect("save draft")

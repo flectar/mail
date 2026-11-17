@@ -1097,8 +1097,20 @@ fn show_preferences(
     if app.get_language_mode().as_str() != normalized_language_preference(&settings.language) {
         apply_language(app, &settings.language);
     }
-    app.set_mark_read_on_open(settings.mark_read_on_open);
-    state.borrow_mut().mark_read_on_open = settings.mark_read_on_open;
+    app.set_mark_read(settings.mark_read.as_str().into());
+    state.borrow_mut().mark_read = settings.mark_read;
+    app.global::<crate::ReadReceipts>()
+        .set_policy(settings.read_receipts.as_str().into());
+    crate::apply_list_rows(app, settings);
+    app.set_compose_font(settings.compose_font.as_str().into());
+    app.set_compose_text_size(settings.compose_text_size.as_str().into());
+    crate::mail_rules::apply_cleanup(
+        app,
+        settings.empty_trash_after_days,
+        settings.empty_junk_after_days,
+    );
+    app.global::<crate::InvitationSettings>()
+        .set_add(settings.add_invitations.as_str().into());
     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
     app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
     app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);

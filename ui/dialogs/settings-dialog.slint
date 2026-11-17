@@ -1,9 +1,14 @@
 import { AccountMailPreferencesPanel } from "../components/account-mail-preferences.slint";
+import { LargeFilesCard } from "../link-services.slint";
+import { InvitationSettings } from "../invitation-settings.slint";
 import { RendererSettings } from "../renderer-settings.slint";
 import { WindowChrome } from "../window-chrome.slint";
 import { AppIcon } from "../app-icon.slint";
 import { DefaultEmailApp } from "../default-email-app.slint";
 import { SystemNotifications } from "../system-notifications.slint";
+import { Updates } from "../updates.slint";
+import { AgentAccess } from "../agent-access.slint";
+import { AgentAccessPage } from "../components/agent-access-page.slint";
 import { AppIconPicker } from "../components/app-icon-picker.slint";
 import { MessageColors } from "../message-colors.slint";
 import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
@@ -12,13 +17,14 @@ import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, CalendarConnectionRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
 import { AccountCalendars } from "../components/account-calendars.slint";
 import { InviteDeviceDialog, JoinDeviceDialog, RecoveryWordsDialog, RedeemCodeDialog, SyncSettingsPage, SyncUi } from "../device-sync.slint";
+import { AccountStatusText } from "../components/account-status.slint";
+import { ReadReceipts } from "../read-receipts.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
 import { IconButton, LineEdit, RadioButton, Switch } from "../components/controls.slint";
 import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
-import { OnScreenSurface } from "../components/on-screen-surface.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, ShortcutRow, ShortcutSection } from "../components/settings-components.slint";
 import { Shortcuts } from "../shortcuts.slint";
@@ -26,12 +32,15 @@ import { KeyboardKeys } from "../components/kbd.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { AccountProfilePicker, ProfileColorChoice, ProfileMemberChoice, ProfilePalette } from "../components/profile-controls.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
-import { TypeScale } from "../typography.slint";
-import { AppTheme, LayoutMetrics, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
+import { InterfaceText, TypeScale } from "../typography.slint";
+import { AppTheme, LayoutMetrics, MotionSettings, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
 import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/workspace-layout.slint";
 import { TabSwitcherButton } from "../components/tab-overview.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { Numbers } from "../numbers.slint";
+import { BlockSender } from "../block-sender.slint";
+import { MailRules } from "../rules.slint";
+import { RuleEditor } from "../components/rule-editor.slint";
 
 // Use the same focusable controls in both account-card layouts.
 component AccountActions inherits HorizontalLayout {
@@ -482,11 +491,19 @@ export component SettingsDialog inherits Rectangle {
     in property <color> surface;
     in property <color> surface-raised;
     in property <color> title-color;
-    in-out property <bool> settings_open: false;
+    // Closing goes back to the screen Settings was opened from.
+    callback close-requested();
     in-out property <string> settings_tab: "General";
+    // An account to sign in again as soon as its card shows, as the sidebar's
+    // Sign in again asks.
+    in-out property <int> sign-in-account: -1;
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
     in-out property <bool> show_tabs: true;
+    in property <bool> spelling_available: false;
+    in-out property <bool> spelling_enabled: true;
+    in property <bool> spelling_installed: false;
+    in property <string> spelling_system: "";
     in-out property <bool> group_mail_by_date: true;
     in-out property <bool> conversation_view: true;
     in-out property <bool> show_account_markers: false;
@@ -497,9 +514,22 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> monochrome_sidebar_icons: false;
     in-out property <bool> notifications_enabled: true;
     in-out property <bool> notification_sound_enabled: true;
+    in-out property <bool> unread_badge_enabled: true;
     in-out property <string> notification_scope: "important";
     in-out property <int> sync_interval_minutes: 5;
-    in-out property <bool> mark_read_on_open: true;
+    // How long a sent message waits before it leaves, so that it can be
+    // taken back; 0 sends it at once.
+    in-out property <int> undo_send_seconds: 10;
+    // The font and size new messages start in.
+    in-out property <string> compose_font: "default";
+    in-out property <string> compose_text_size: "normal";
+    // When an opened unread message counts as read: "immediately",
+    // "afterTwoSeconds", "afterFiveSeconds" or "never".
+    in-out property <string> mark_read: "immediately";
+    // Tighter mail list rows, and how many lines of each message's text
+    // they show (0 to 3).
+    in-out property <bool> compact_rows: false;
+    in-out property <int> preview_lines: 1;
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
     in-out property <bool> contact_suggest_all_accounts: false;
@@ -592,6 +622,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
     callback save_show_tabs(bool);
+    callback save_spelling_enabled(bool);
     callback save_group_mail_by_date(bool);
     callback save_conversation_view(bool);
     callback choose_download_directory();
@@ -611,8 +642,12 @@ export component SettingsDialog inherits Rectangle {
     callback save_time_format(string);
     callback save_sidebar_icon_style(bool);
     callback save_notification_settings(bool, bool, string);
+    callback save_unread_badge(bool);
     callback save_sync_interval(int);
-    callback save_mark_read_on_open(bool);
+    callback save_undo_send(int);
+    callback save_compose_text_style(string, string);
+    callback save_mark_read(string);
+    callback save_list_rows();
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
@@ -633,6 +668,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_account_mail_history(int, string);
     callback save_account_sent_copy_policy(int, string);
     callback save_account_keep_on_server(int, string);
+    callback save_account_subscribed_folders_only(int, bool);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -658,11 +694,74 @@ export component SettingsDialog inherits Rectangle {
     // Flectar Mail Sync's confirmation before deleting it everywhere.
     private property <bool> sync-delete-confirmation: false;
 
+    private property <[string]> density-options: [
+        @tr("list density" => "Comfortable"),
+        @tr("list density" => "Compact"),
+    ];
+    private property <[string]> preview-line-options: [
+        @tr("message preview" => "None"),
+        @tr("message preview" => "1 line"),
+        @tr("message preview" => "2 lines"),
+        @tr("message preview" => "3 lines"),
+    ];
+    // How long Trash and Junk keep mail, as MailRules counts them.
+    private property <[string]> cleanup-options: [
+        @tr("Never"),
+        @tr("After 7 days"),
+        @tr("After 14 days"),
+        @tr("After 30 days"),
+        @tr("After 60 days"),
+        @tr("After 90 days"),
+    ];
+    private property <[string]> mark-read-options: [
+        @tr("Immediately"),
+        @tr("After 2 seconds"),
+        @tr("After 5 seconds"),
+        @tr("Never"),
+    ];
+    private property <[string]> mark-read-values: ["immediately", "afterTwoSeconds", "afterFiveSeconds", "never"];
+    private property <int> mark-read-index: root.mark_read == "never" ? 3
+        : root.mark_read == "afterFiveSeconds" ? 2
+        : root.mark_read == "afterTwoSeconds" ? 1 : 0;
+    private property <[string]> read-receipt-options: [
+        @tr("Never send"),
+        @tr("Ask each time"),
+        @tr("Always send"),
+    ];
+    private property <int> read-receipt-index: ReadReceipts.policy == "always" ? 2
+        : ReadReceipts.policy == "ask" ? 1 : 0;
     private property <[string]> sync-interval-options: [
         @tr("Every minute"),
         @tr("Every 5 minutes"),
         @tr("Every 15 minutes"),
     ];
+    private property <[string]> undo-send-options: [
+        @tr("Off"),
+        @tr("5 seconds"),
+        @tr("10 seconds"),
+        @tr("20 seconds"),
+        @tr("30 seconds"),
+    ];
+    private property <int> undo-send-index: root.undo_send_seconds <= 0 ? 0
+        : root.undo_send_seconds <= 5 ? 1
+        : root.undo_send_seconds <= 10 ? 2
+        : root.undo_send_seconds <= 20 ? 3 : 4;
+    private property <[string]> compose-font-options: [
+        @tr("font" => "Default"),
+        @tr("font" => "Serif"),
+        @tr("font" => "Fixed width"),
+    ];
+    private property <int> compose-font-index: root.compose_font == "serif" ? 1
+        : root.compose_font == "monospace" ? 2 : 0;
+    private property <[string]> compose-size-options: [
+        @tr("text size" => "Small"),
+        @tr("text size" => "Normal"),
+        @tr("text size" => "Large"),
+        @tr("text size" => "Huge"),
+    ];
+    private property <int> compose-size-index: root.compose_text_size == "small" ? 0
+        : root.compose_text_size == "large" ? 2
+        : root.compose_text_size == "huge" ? 3 : 1;
     private property <[string]> notification-options: [
         @tr("Off"),
         @tr("Important mail"),
@@ -713,6 +812,32 @@ export component SettingsDialog inherits Rectangle {
         : @tr("This system has no notification service running, so notifications can't be shown.");
     private property <bool> notifications-settings-offered: SystemNotifications.availability == "denied"
         && SystemNotifications.settings-openable;
+    // A phone checks for new mail in the background when its system lets
+    // it; desktops follow the accounts while the app runs.
+    private property <string> notifications-title: SystemNotifications.background-checks == ""
+        ? @tr("Desktop notifications") : @tr("New mail notifications");
+    // When the system checks for new mail in the background, for what
+    // notifications and the app icon's count show.
+    // What the last check for a new version found (src/updates.rs).
+    private property <string> update-status: Updates.version != ""
+        ? @tr("Flectar Mail {} is out.", Updates.version)
+        : Updates.checking ? @tr("Checking for a new version…")
+        : Updates.failed ? @tr("GitHub couldn't be reached. Flectar Mail tries again later.")
+        : Updates.current ? @tr("Flectar Mail is up to date.")
+        : @tr("Flectar Mail checks soon after it starts.");
+    private property <bool> background-checks-noted: SystemNotifications.background-checks != ""
+        && (root.notifications_enabled || root.unread_badge_enabled) && !root.notifications-blocked;
+    private property <string> background-checks-text: AppIcon.platform == "android"
+        ? (SystemNotifications.background-checks == "off"
+            ? @tr("Android restricts Flectar Mail in the background, so new mail shows up only while the app is open.")
+            : SystemNotifications.background-checks == "low-power"
+            ? @tr("Battery Saver pauses checking for new mail while Flectar Mail is in the background.")
+            : @tr("Flectar Mail checks for new mail about every 15 minutes in the background, and less often while your phone is idle."))
+        : SystemNotifications.background-checks == "off"
+        ? @tr("Background App Refresh is off for Flectar Mail, so new mail shows up only while the app is open.")
+        : SystemNotifications.background-checks == "low-power"
+        ? @tr("Low Power Mode pauses checking for new mail while Flectar Mail is in the background.")
+        : @tr("iOS decides how often Flectar Mail checks for new mail in the background, so notifications can arrive late.");
     private property <int> language-index: root.language_mode == "en" ? 1
         : root.language_mode == "es" ? 2
         : root.language_mode == "tr" ? 3
@@ -729,9 +854,11 @@ export component SettingsDialog inherits Rectangle {
             : section == "Accounts" ? SettingsIconPalette.accounts
             : section == "Sync" ? ServiceIconPalette.sync
             : section == "Contacts" ? SettingsIconPalette.accounts
+            : section == "Rules" ? SettingsIconPalette.rules
             : section == "Notifications" ? SettingsIconPalette.notifications
             : section == "Shortcuts" ? SettingsIconPalette.shortcuts
             : section == "Data" ? SettingsIconPalette.storage
+            : section == "Agents" ? SettingsIconPalette.agents
             : section == "Services" ? SettingsIconPalette.services
             : SettingsIconPalette.about;
     }
@@ -739,32 +866,45 @@ export component SettingsDialog inherits Rectangle {
     pure function settings-section-visible(section: string) -> bool {
         // No notifications on this platform: nothing to set.
         if section == "Notifications" && SystemNotifications.availability == "" { return false; }
+        // Agents' apps run on computers; phones have none to connect.
+        if section == "Agents" && !AgentAccess.available { return false; }
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads")
+            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads reduce motion animation accessibility text size font") + " " + @tr("sending undo send delay take back") + " " + @tr("large files share by link cloud storage nextcloud owncloud google drive onedrive expiry password")
+                + " " + @tr("spelling spell check dictionary misspelled words")
+                + " " + @tr("writing default text style font typeface text size")
+                + " " + @tr("message list density compact comfortable rows preview lines")
+                + " " + @tr("mark read opened delay receipts")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap pop3 jmap caldav carddav mail history server oauth security signatures")
             : section == "Sync"
             ? @tr("sync devices phone computer pair qr code recovery code encrypted backup setup server subscription billing trial plan price redeem passwords sign-ins")
             : section == "Contacts"
             ? @tr("contacts people suggestions autocomplete recipients senders address book privacy clear")
+            : section == "Rules"
+            ? @tr("rules filters sort incoming new mail automatically move folder label mark read star archive trash spam junk conditions actions")
             : section == "Notifications"
-            ? @tr("notifications alerts sounds desktop new mail")
+            ? @tr("notifications alerts sounds desktop new mail unread count badge app icon dock taskbar background app refresh low power mode battery saver")
             : section == "Shortcuts"
             ? @tr("shortcuts keyboard keys compose search archive spam junk trash delete navigation messages reading find zoom caret tabs")
             : section == "Data"
             ? @tr("storage data usage mail attachments files databases backup snapshot import export delete")
+            : section == "Agents"
+            ? @tr("ai agents assistant local model llm mcp model context protocol automation connected apps access activity")
             : section == "Services"
             ? @tr("services flectar base account sign in subscription paid sync devices business email custom domain mailbox")
-            : @tr("about version credits contributors license flectar") + " " + @tr("Privacy policy");
+            : @tr("about version credits contributors license flectar") + " " + @tr("Privacy policy")
+                + (Updates.offered ? " " + @tr("updates new version release download check") : "");
         return root.settings-search-matches(terms, root.settings-search-query);
     }
 
     private property <bool> search-has-results: root.settings-section-visible("General")
         || root.settings-section-visible("Accounts") || root.settings-section-visible("Sync")
         || root.settings-section-visible("Contacts")
+        || root.settings-section-visible("Rules")
         || root.settings-section-visible("Notifications")
         || root.settings-section-visible("Shortcuts") || root.settings-section-visible("Data")
+        || root.settings-section-visible("Agents")
         || root.settings-section-visible("Services") || root.settings-section-visible("About");
 
     init => {
@@ -778,6 +918,21 @@ export component SettingsDialog inherits Rectangle {
             root.new-profile-requested = false;
             root.open-new-profile(-1);
         }
+    }
+
+    function select-compose-font(index: int) {
+        root.compose_font = index == 1 ? "serif" : index == 2 ? "monospace" : "default";
+        root.save_compose_text_style(root.compose_font, root.compose_text_size);
+    }
+
+    function select-compose-size(index: int) {
+        root.compose_text_size = index == 0 ? "small" : index == 2 ? "large" : index == 3 ? "huge" : "normal";
+        root.save_compose_text_style(root.compose_font, root.compose_text_size);
+    }
+
+    function select-undo-send(index: int) {
+        root.undo_send_seconds = index == 0 ? 0 : index == 1 ? 5 : index == 2 ? 10 : index == 3 ? 20 : 30;
+        root.save_undo_send(root.undo_send_seconds);
     }
 
     function select-sync-interval(index: int) {
@@ -816,9 +971,11 @@ export component SettingsDialog inherits Rectangle {
                 : root.settings-section-visible("Accounts") ? "Accounts"
                 : root.settings-section-visible("Sync") ? "Sync"
                 : root.settings-section-visible("Contacts") ? "Contacts"
+                : root.settings-section-visible("Rules") ? "Rules"
                 : root.settings-section-visible("Notifications") ? "Notifications"
                 : root.settings-section-visible("Shortcuts") ? "Shortcuts"
                 : root.settings-section-visible("Data") ? "Data"
+                : root.settings-section-visible("Agents") ? "Agents"
                 : root.settings-section-visible("Services") ? "Services"
                 : root.settings-section-visible("About") ? "About" : root.settings_tab;
         }
@@ -1024,7 +1181,6 @@ export component SettingsDialog inherits Rectangle {
     }
 
         Rectangle {
-            visible: root.settings_open;
             x: 0px;
             y: 0px;
             width: parent.width;
@@ -1058,9 +1214,11 @@ export component SettingsDialog inherits Rectangle {
                         if root.settings-section-visible("Accounts") : SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; } }
                         if root.settings-section-visible("Sync") : SettingsNavItem { text: @tr("Sync"); icon: @image-url("../icons/lucide/filled/cloud-sync.svg"); icon-color: root.settings-icon-color("Sync"); selected: root.settings_tab == "Sync"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Sync"; } }
                         if root.settings-section-visible("Contacts") : SettingsNavItem { text: @tr("Contacts"); icon: @image-url("../icons/lucide/filled/contacts.svg"); icon-color: root.settings-icon-color("Contacts"); selected: root.settings_tab == "Contacts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Contacts"; } }
+                        if root.settings-section-visible("Rules") : SettingsNavItem { text: @tr("Rules"); icon: @image-url("../icons/lucide/filled/filter.svg"); icon-color: root.settings-icon-color("Rules"); selected: root.settings_tab == "Rules"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Rules"; } }
                         if root.settings-section-visible("Notifications") : SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; } }
                         if root.settings-section-visible("Shortcuts") : SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; } }
                         if root.settings-section-visible("Data") : SettingsNavItem { text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; } }
+                        if root.settings-section-visible("Agents") : SettingsNavItem { text: @tr("AI agents"); icon: @image-url("../icons/lucide/filled/bot.svg"); icon-color: root.settings-icon-color("Agents"); selected: root.settings_tab == "Agents"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Agents"; } }
                         if root.settings-section-visible("Services") : SettingsNavItem { text: @tr("Services"); icon: @image-url("../icons/lucide/filled/cloud.svg"); icon-color: root.settings-icon-color("Services"); selected: root.settings_tab == "Services"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Services"; } }
                         if root.settings-section-visible("About") : SettingsNavItem { text: @tr("About"); icon: @image-url("../icons/lucide/filled/info.svg"); icon-color: root.settings-icon-color("About"); selected: root.settings_tab == "About"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "About"; } }
                         Rectangle { vertical-stretch: 1; }
@@ -1186,6 +1344,34 @@ export component SettingsDialog inherits Rectangle {
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Message list density");
+                                        description: @tr("Compact rows fit more messages on the screen.");
+                                        choices: root.density-options;
+                                        selected-index: root.compact_rows ? 1 : 0;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            root.compact_rows = index == 1;
+                                            root.save_list_rows();
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Message preview");
+                                        description: @tr("How many lines of each message's text the list shows below its subject.");
+                                        choices: root.preview-line-options;
+                                        selected-index: root.preview_lines;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            root.preview_lines = index;
+                                            root.save_list_rows();
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
                                     SettingsSwitchRow {
                                         compact: root.compact;
                                         title: @tr("Tabs");
@@ -1209,6 +1395,37 @@ export component SettingsDialog inherits Rectangle {
                                         toggled(checked) => { WindowChrome.choose(checked); }
                                     }
                                     if WindowChrome.available : Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Reduce motion");
+                                        description: @tr("Show changes at once instead of sliding or growing.");
+                                        choices: [@tr("System"), @tr("On"), @tr("Off")];
+                                        selected-index: MotionSettings.preference == "on" ? 1
+                                            : MotionSettings.preference == "off" ? 2 : 0;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            MotionSettings.choose(index == 1 ? "on" : index == 2 ? "off" : "system");
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Interface text size");
+                                        description: @tr("Text in menus, lists and settings. Message zoom stays separate.");
+                                        choices: [@tr("Smaller"), @tr("Default"), @tr("Large"), @tr("Larger"), @tr("Largest")];
+                                        selected-index: InterfaceText.size == "smaller" ? 0
+                                            : InterfaceText.size == "large" ? 2
+                                            : InterfaceText.size == "larger" ? 3
+                                            : InterfaceText.size == "largest" ? 4 : 1;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            InterfaceText.choose(index == 0 ? "smaller" : index == 2 ? "large"
+                                                : index == 3 ? "larger" : index == 4 ? "largest" : "default");
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
                                     Text { height: max(20px, self.preferred-height); text: @tr("Workspace layout"); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; }
                                     HorizontalBox {
                                         padding: 0px;
@@ -1263,6 +1480,31 @@ export component SettingsDialog inherits Rectangle {
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-time-format(index); }
                                     }
+                                    if root.spelling_available : Rectangle { height: 1px; background: root.border-subtle; }
+                                    if root.spelling_available : SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Check spelling");
+                                        description: !root.spelling_installed && root.spelling_system == "windows"
+                                            ? @tr("Add a language in Windows Settings, under Time & language, to check spelling.")
+                                            : !root.spelling_installed && root.spelling_system == "android"
+                                            ? @tr("Turn on the spell checker in Android's settings to check spelling.")
+                                            : !root.spelling_installed
+                                            ? @tr("Install Hunspell dictionaries for your languages from your system's software to check spelling.")
+                                            : root.spelling_system == "macos"
+                                            ? @tr("Underline misspelled words in messages you write, in the languages set in System Settings. Right-click a word for corrections.")
+                                            : root.spelling_system == "android"
+                                            ? @tr("Underline misspelled words in messages you write, in the language set for Android's spell checker. Tap a word for corrections.")
+                                            : root.spelling_system == "ios"
+                                            ? @tr("Underline misspelled words in messages you write, in your preferred languages from Settings. Tap a word for corrections.")
+                                            : @tr("Underline misspelled words in messages you write. Right-click a word for corrections and languages.");
+                                        checked: root.spelling_enabled;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.spelling_enabled = checked;
+                                            root.save_spelling_enabled(checked);
+                                        }
+                                    }
                                 }
                             }
 
@@ -1312,22 +1554,138 @@ export component SettingsDialog inherits Rectangle {
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }
-                                    HorizontalBox {
-                                        height: (root.compact ? 16px : 13px) + mark-read-title.height + mark-read-description.height;
-                                        spacing: 16px;
-                                        VerticalBox {
-                                            horizontal-stretch: 1;
-                                            min-width: 0px;
-                                            spacing: 3px;
-                                            mark-read-title := Text { height: max(18px, self.preferred-height); text: @tr("Mark messages as read when opened"); color: root.body-text; font-size: TypeScale.body; font-weight: 600; overflow: elide; }
-                                            mark-read-description := Text { height: max(root.compact ? 34px : 17px, self.preferred-height); text: @tr("Turn this off to keep unread status until you change it manually."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Mark messages as read");
+                                        description: @tr("When an unread message you open counts as read. With a delay, messages you only pass over stay unread. Never leaves them for you to mark.");
+                                        choices: root.mark-read-options;
+                                        selected-index: root.mark-read-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            root.mark_read = root.mark-read-values[index];
+                                            root.save_mark_read(root.mark_read);
                                         }
-                                        Switch {
-                                            checked: root.mark_read_on_open;
-                                            toggled => {
-                                                root.mark_read_on_open = self.checked;
-                                                root.save_mark_read_on_open(self.checked);
-                                            }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Read receipts");
+                                        description: @tr("When a sender asks to be notified that you read their message. Always send still asks when a request looks unusual.");
+                                        choices: root.read-receipt-options;
+                                        selected-index: root.read-receipt-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            ReadReceipts.choose(index == 2 ? "always" : index == 1 ? "ask" : "never");
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: max(root.compact ? 154px : 116px, self.preferred-height);
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding-top: 15px;
+                                    padding-right: 20px;
+                                    padding-bottom: 15px;
+                                    padding-left: 20px;
+                                    spacing: 5px;
+                                    Text { text: @tr("Writing"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Font");
+                                        description: @tr("New messages, replies and forwards start in this font. Default names none, so each reader sees their own.");
+                                        choices: root.compose-font-options;
+                                        selected-index: root.compose-font-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { root.select-compose-font(index); }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Text size");
+                                        description: @tr("New messages, replies and forwards start at this size.");
+                                        choices: root.compose-size-options;
+                                        selected-index: root.compose-size-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { root.select-compose-size(index); }
+                                    }
+                                }
+                            }
+
+                            LargeFilesCard {
+                                compact: root.compact;
+                                shown: root.settings_tab == "General";
+                                oauth-busy: root.oauth_in_progress || root.oauth_settings_saving || root.account_setup_in_progress;
+                                oauth-authorization-url: root.oauth_authorization_url;
+                                oauth-browser-error: root.oauth_browser_error;
+                                retry-oauth-browser => { root.retry_oauth_browser(); }
+                                copy-oauth-link => { root.copy_oauth_link(); }
+                                submit-oauth-redirect(address) => { root.submit_oauth_redirect(address); }
+                                surface: root.surface;
+                                border-subtle: root.border-subtle;
+                                heading: root.heading;
+                                body-text: root.body-text;
+                                faint-text: root.faint-text;
+                            }
+
+                            Rectangle {
+                                height: max(root.compact ? 150px : 112px, self.preferred-height);
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding-top: 18px;
+                                    padding-right: 20px;
+                                    padding-bottom: 18px;
+                                    padding-left: 20px;
+                                    spacing: 4px;
+                                    Text { height: max(22px, self.preferred-height); text: @tr("Sending"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; vertical-alignment: center; wrap: word-wrap; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Undo send");
+                                        description: @tr("How long a sent message waits before it leaves, so that you can take it back.");
+                                        choices: root.undo-send-options;
+                                        selected-index: root.undo-send-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { root.select-undo-send(index); }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: max(root.compact ? 150px : 112px, self.preferred-height);
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding-top: 18px;
+                                    padding-right: 20px;
+                                    padding-bottom: 18px;
+                                    padding-left: 20px;
+                                    spacing: 4px;
+                                    Text { height: max(22px, self.preferred-height); text: @tr("Calendar"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; vertical-alignment: center; wrap: word-wrap; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Add invitations to my calendar");
+                                        description: @tr("People you know are those you've emailed or saved as contacts.");
+                                        choices: [@tr("From everyone"), @tr("Only from people I know"), @tr("Only when I answer")];
+                                        selected-index: InvitationSettings.add == "everyone" ? 0
+                                            : InvitationSettings.add == "answered" ? 2 : 1;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            InvitationSettings.choose(index == 0 ? "everyone" : index == 2 ? "answered" : "known");
                                         }
                                     }
                                 }
@@ -1508,7 +1866,7 @@ export component SettingsDialog inherits Rectangle {
                                     Rectangle { height: 1px; background: root.border-subtle; }
                                     if SystemNotifications.availability != "" : SettingsSelectRow {
                                         compact: root.compact;
-                                        title: @tr("Desktop notifications");
+                                        title: root.notifications-title;
                                         description: @tr("Choose which incoming messages can alert you.");
                                         choices: root.notification-options;
                                         selected-index: root.notification-index;
@@ -1805,10 +2163,290 @@ export component SettingsDialog inherits Rectangle {
                                     }
                                 }
                             }
+                            Rectangle {
+                                height: max(112px, blocked-senders.preferred-height);
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                blocked-senders := VerticalBox {
+                                    padding: 18px;
+                                    spacing: 8px;
+                                    Text { text: @tr("Blocked senders"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+                                    Text {
+                                        height: self.preferred-height;
+                                        text: @tr("Their mail goes to Spam when Flectar Mail receives it. Block a sender from the menu of one of their messages.");
+                                        color: root.faint-text;
+                                        font-size: TypeScale.caption;
+                                        wrap: word-wrap;
+                                    }
+                                    if BlockSender.addresses.length == 0 : Text {
+                                        text: @tr("No one is blocked.");
+                                        color: root.secondary-text;
+                                        font-size: TypeScale.secondary;
+                                        wrap: word-wrap;
+                                    }
+                                    for address in BlockSender.addresses : HorizontalBox {
+                                        height: 36px;
+                                        // The buttons line up with the card's other buttons.
+                                        padding: 0px;
+                                        padding-right: 8px;
+                                        spacing: 8px;
+                                        Text {
+                                            text: address;
+                                            color: root.body-text;
+                                            font-size: TypeScale.secondary;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            horizontal-stretch: 1;
+                                        }
+                                        Button {
+                                            width: max(96px, self.content-width);
+                                            horizontal-stretch: 0;
+                                            text: @tr("Unblock");
+                                            accessible-label: @tr("Unblock {}", address);
+                                            clicked => { BlockSender.unblock(address); }
+                                        }
+                                    }
+                                }
+                            }
                             if root.sync_status != "" : CopyableDiagnostic {
                                 text: root.sync_status;
                                 text-color: root.secondary-text;
                                 font-size: TypeScale.secondary;
+                            }
+                        }
+                    }
+
+                    rules-settings-scroll := ScrollView {
+                        visible: root.settings_tab == "Rules";
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
+                        VerticalBox {
+                            x: root.compact ? 16px : max(24px, (rules-settings-scroll.visible-width - 920px) / 2);
+                            width: root.compact ? rules-settings-scroll.visible-width - 32px : min(920px, rules-settings-scroll.visible-width - 48px);
+                            padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px;
+                            padding-bottom: 32px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            SettingsPageTitle { label: @tr("Rules"); title-color: root.title-color; }
+                            Text {
+                                height: max(root.compact ? 86px : 51px, self.preferred-height);
+                                text: @tr("Rules sort new mail as it arrives in an Inbox, trying them from the top. Where the server can run a rule, it does, so the rule works while Flectar Mail is closed. Other rules run while Flectar Mail is open.");
+                                color: root.secondary-text;
+                                font-size: TypeScale.secondary;
+                                wrap: word-wrap;
+                            }
+                            // What a server needs before it runs the rules.
+                            for notice in MailRules.notices : Rectangle {
+                                height: notice-layout.preferred-height;
+                                background: root.accent-soft;
+                                border-radius: 8px;
+                                notice-layout := GridLayout {
+                                    padding: 12px;
+                                    spacing: 12px;
+                                    Text {
+                                        row: 0;
+                                        col: 0;
+                                        horizontal-stretch: 1;
+                                        vertical-alignment: center;
+                                        text: notice.kind == "run-before" ? @tr("The server for {} runs your filter script “{}”. Flectar Mail can run its rules there too, before that script, so they work while Flectar Mail is closed.", notice.account, notice.detail)
+                                            : notice.kind == "others" && notice.has-rules ? @tr("The server for {} runs rules saved on another device, so the rules here run while Flectar Mail is open.", notice.account)
+                                            : notice.kind == "others" ? @tr("The server for {} runs rules saved on another device.", notice.account)
+                                            : notice.kind == "edited" ? @tr("The script Flectar Mail keeps on the server for {} was changed elsewhere, so the rules here run while Flectar Mail is open.", notice.account)
+                                            : @tr("The rules couldn't go to the server for {}. {}", notice.account, notice.detail);
+                                        color: root.body-text;
+                                        font-size: TypeScale.secondary;
+                                        wrap: word-wrap;
+                                    }
+                                    // Below the text on a phone, beside it otherwise.
+                                    HorizontalLayout {
+                                        row: root.compact ? 1 : 0;
+                                        col: root.compact ? 0 : 1;
+                                        horizontal-stretch: 0;
+                                        alignment: start;
+                                        Button {
+                                            width: self.content-width;
+                                            text: notice.kind == "run-before" ? @tr("Run rules there")
+                                                : notice.kind == "others" && notice.has-rules ? @tr("Replace them")
+                                                : notice.kind == "others" ? @tr("Remove them")
+                                                : notice.kind == "edited" ? @tr("Replace the changes")
+                                                : @tr("Try again");
+                                            clicked => { MailRules.notice-action(notice.account-id); }
+                                        }
+                                    }
+                                }
+                            }
+                            HorizontalBox {
+                                padding: 0px;
+                                alignment: start;
+                                Button {
+                                    width: self.content-width;
+                                    text: @tr("New rule");
+                                    icon: @image-url("../icons/lucide/outline/plus.svg");
+                                    has-icon: true;
+                                    primary: true;
+                                    clicked => { MailRules.create(); }
+                                }
+                            }
+                            Rectangle {
+                                height: rules-list.preferred-height;
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                rules-list := VerticalLayout {
+                                    padding-top: 4px;
+                                    padding-bottom: 4px;
+                                    if MailRules.rows.length == 0 : HorizontalLayout {
+                                        padding: 16px;
+                                        Text {
+                                            text: @tr("No rules yet. New mail stays where it arrives.");
+                                            color: root.secondary-text;
+                                            font-size: TypeScale.secondary;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                    for rule[index] in MailRules.rows : VerticalLayout {
+                                        if index > 0 : Rectangle { height: 1px; background: root.border-subtle; }
+                                        HorizontalLayout {
+                                            padding-left: 16px;
+                                            padding-right: 10px;
+                                            padding-top: 10px;
+                                            padding-bottom: 10px;
+                                            spacing: 12px;
+                                            Switch {
+                                                checked: rule.enabled;
+                                                control-label: rule.name;
+                                                toggled => { MailRules.toggle(rule.id, self.checked); }
+                                            }
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                spacing: 2px;
+                                                Text {
+                                                    text: rule.name;
+                                                    color: rule.enabled ? root.body-text : root.secondary-text;
+                                                    font-size: TypeScale.body;
+                                                    font-weight: 600;
+                                                    overflow: elide;
+                                                }
+                                                // Where the rule runs shows beside its accounts, or
+                                                // below them on a phone.
+                                                private property <bool> place-below: root.compact && rule.enabled && !rule.problem && rule.place != "";
+                                                Text {
+                                                    private property <string> accounts: rule.account == "" ? @tr("All accounts") : rule.account;
+                                                    text: rule.problem ? @tr("A folder or label it uses is gone. Edit the rule to choose another.")
+                                                        : !rule.enabled || root.compact ? self.accounts
+                                                        : rule.place == "server" ? @tr("{} · On the server", self.accounts)
+                                                        : rule.place == "some" ? @tr("{} · On some servers", self.accounts)
+                                                        : rule.place == "app" ? @tr("{} · On this device", self.accounts)
+                                                        : self.accounts;
+                                                    color: rule.problem ? AppTheme.destructive : root.faint-text;
+                                                    font-size: TypeScale.caption;
+                                                    wrap: rule.problem ? word-wrap : no-wrap;
+                                                    overflow: elide;
+                                                }
+                                                if place-below : Text {
+                                                    text: rule.place == "server" ? @tr("On the server")
+                                                        : rule.place == "some" ? @tr("On some servers")
+                                                        : @tr("On this device");
+                                                    color: root.faint-text;
+                                                    font-size: TypeScale.caption;
+                                                    overflow: elide;
+                                                }
+                                            }
+                                            IconButton {
+                                                width: 36px;
+                                                height: 36px;
+                                                interactive: index > 0;
+                                                icon: @image-url("../icons/lucide/outline/chevron-up.svg");
+                                                icon-color: root.secondary-text;
+                                                ghost: true;
+                                                hover-background: root.accent-soft;
+                                                tooltip-text: @tr("Move {} up", rule.name);
+                                                clicked => { MailRules.move(rule.id, -1); }
+                                            }
+                                            IconButton {
+                                                width: 36px;
+                                                height: 36px;
+                                                interactive: index < MailRules.rows.length - 1;
+                                                icon: @image-url("../icons/lucide/outline/chevron-down.svg");
+                                                icon-color: root.secondary-text;
+                                                ghost: true;
+                                                hover-background: root.accent-soft;
+                                                tooltip-text: @tr("Move {} down", rule.name);
+                                                clicked => { MailRules.move(rule.id, 1); }
+                                            }
+                                            if !root.compact : Button {
+                                                width: max(80px, self.content-width);
+                                                text: @tr("Edit");
+                                                accessible-label: @tr("Edit {}", rule.name);
+                                                clicked => { MailRules.edit(rule.id); }
+                                            }
+                                            // A phone leaves the name the room.
+                                            if root.compact : IconButton {
+                                                width: 36px;
+                                                height: 36px;
+                                                icon: @image-url("../icons/lucide/outline/pencil.svg");
+                                                icon-color: root.secondary-text;
+                                                ghost: true;
+                                                hover-background: root.accent-soft;
+                                                tooltip-text: @tr("Edit {}", rule.name);
+                                                clicked => { MailRules.edit(rule.id); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Trash and Junk emptied of what sat there too long.
+                            Text {
+                                text: @tr("Clean up");
+                                color: root.title-color;
+                                font-size: TypeScale.subtitle;
+                                font-weight: 600;
+                            }
+                            Rectangle {
+                                height: cleanup-list.preferred-height;
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                cleanup-list := VerticalLayout {
+                                    padding-top: 4px;
+                                    padding-bottom: 4px;
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Empty Trash");
+                                        description: @tr("Deletes mail for good once it has been in Trash this long. Starred mail stays.");
+                                        choices: root.cleanup-options;
+                                        selected-index <=> MailRules.trash-days;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { MailRules.choose-cleanup(index, MailRules.junk-days); }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Empty Junk");
+                                        description: @tr("Deletes mail for good once it has been in Junk this long. Starred mail stays.");
+                                        choices: root.cleanup-options;
+                                        selected-index <=> MailRules.junk-days;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { MailRules.choose-cleanup(MailRules.trash-days, index); }
+                                    }
+                                }
+                            }
+                            Text {
+                                height: max(root.compact ? 52px : 34px, self.preferred-height);
+                                text: @tr("Flectar Mail empties them while it's open, counting from when mail went into each folder. Gmail and Outlook.com empty both after 30 days themselves.");
+                                color: root.secondary-text;
+                                font-size: TypeScale.secondary;
+                                wrap: word-wrap;
                             }
                         }
                     }
@@ -2036,13 +2674,23 @@ export component SettingsDialog inherits Rectangle {
                                 submit-redirect(address) => { root.submit_oauth_redirect(address); }
                             }
                             for account[account-index] in root.connected_accounts : drop-target := DropArea {
+                                private property <bool> signing-in: account.id == root.sign-in-account;
+                                init => { self.sign-in-requested(); }
+                                changed signing-in => { self.sign-in-requested(); }
+                                function sign-in-requested() {
+                                    if self.signing-in {
+                                        root.sign-in-account = -1;
+                                        root.edit-account(account);
+                                    }
+                                }
                                 private property <length> divider-y: account.sync_error != "" ? sync-error.y + sync-error.height + 4px : account-header.height;
                                 private property <bool> has-sent-copy: account.provider != "gmail" && account.mail_protocol == "imap";
                                 private property <bool> has-server-copies: account.mail_protocol == "pop3";
+                                private property <bool> has-subscriptions: account.mail_protocol == "imap";
                                 private property <bool> unencrypted: account.incoming_security == "none" || account.smtp_security == "none";
                                 // Preference rows keep their designed gaps below the last select row.
-                                private property <length> profile-y: self.has-sent-copy
-                                    ? sent-copy-row.y + sent-copy-row.height + (root.compact ? 10px : 8px)
+                                private property <length> profile-y: self.has-subscriptions
+                                    ? subscribed-row.y + subscribed-row.height + (root.compact ? 10px : 16px)
                                     : self.has-server-copies
                                         ? server-copies-note.y + server-copies-note.height + (root.compact ? 10px : 8px)
                                         : history-row.y + history-row.height + (root.compact ? 9px : 1px);
@@ -2056,9 +2704,7 @@ export component SettingsDialog inherits Rectangle {
                                     root.reorder_account(source, account.id, event.position.y > self.height / 2);
                                     return DragAction.move;
                                 }
-                                OnScreenSurface {
-                                    width: parent.width;
-                                    height: parent.height;
+                                Rectangle {
                                     background: drop-target.has-drag ? root.accent-soft : root.surface;
                                     border-radius: 10px;
                                     border-width: drop-target.has-drag ? 2px : 1px;
@@ -2067,7 +2713,9 @@ export component SettingsDialog inherits Rectangle {
                                         x: 0px;
                                         y: 0px;
                                         width: parent.width;
-                                        height: (account.sync_error != "" ? 27px : root.compact ? 41px : 37px) + account-name.height + account-email.height + account-state.height;
+                                        height: (account.sync_error != "" ? 27px : root.compact ? 41px : 37px) + account-name.height + account-email.height + account-state.height
+                                            // Last checked, a caption line like the state.
+                                            + (account.checked_at != "" ? account-state.height + 2px : 0px);
                                         padding-left: 14px;
                                         padding-right: 16px;
                                         spacing: 12px;
@@ -2109,7 +2757,8 @@ export component SettingsDialog inherits Rectangle {
                                             spacing: 2px;
                                             account-name := Text { height: max(19px, self.preferred-height); text: account.name; color: root.heading; font-size: TypeScale.body-large; font-weight: 700; overflow: elide; }
                                             account-email := Text { height: max(16px, self.preferred-height); text: account.email; color: root.secondary-text; font-size: TypeScale.caption; overflow: elide; }
-                                            account-state := Text { height: max(16px, self.preferred-height); text: account.status == "offline" ? @tr("Offline · retrying automatically") : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Syncing…") : account.status == "idle" ? (account.mail_protocol == "gmail" ? @tr("Connected · Gmail") : account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : account.mail_protocol == "pop3" ? (drop-target.unencrypted ? @tr("Connected without encryption · POP3 + SMTP") : @tr("Connected · POP3 + SMTP")) : drop-target.unencrypted ? @tr("Connected without encryption · IMAP + SMTP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : account.status == "idle" && drop-target.unencrypted ? AppTheme.destructive : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                                            account-state := Text { height: max(16px, self.preferred-height); text: account.status == "offline" ? @tr("Couldn't check mail · Retrying automatically") : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Checking for new mail…") : account.status == "idle" ? (account.mail_protocol == "gmail" ? @tr("Connected · Gmail") : account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : account.mail_protocol == "pop3" ? (drop-target.unencrypted ? @tr("Connected without encryption · POP3 + SMTP") : @tr("Connected · POP3 + SMTP")) : drop-target.unencrypted ? @tr("Connected without encryption · IMAP + SMTP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : account.status == "idle" && drop-target.unencrypted ? AppTheme.destructive : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                                            if account.checked_at != "" : Text { height: max(16px, self.preferred-height); text: AccountStatusText.last-checked(account.checked_day, account.checked_at); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                                         }
                                         AccountActions {
                                             edit-label: account.provider == "generic" ? @tr("Edit") : @tr("Reconnect");
@@ -2196,6 +2845,23 @@ export component SettingsDialog inherits Rectangle {
                                         selected(index, value) => {
                                             root.save_account_sent_copy_policy(account.id, index == 1 ? "server" : index == 2 ? "client" : "auto");
                                         }
+                                    }
+                                    subscribed-row := SettingsSwitchRow {
+                                        visible: drop-target.has-subscriptions;
+                                        // A compact switch row pads its texts 8px more than a
+                                        // select row; this lines them up.
+                                        x: root.compact ? 16px : 32px;
+                                        y: (drop-target.has-sent-copy ? sent-copy-row.y + sent-copy-row.height : history-row.y + history-row.height)
+                                            + (root.compact ? 7px : 5px);
+                                        width: parent.width - (root.compact ? 40px : 64px);
+                                        compact: root.compact;
+                                        compact-description-height: 51px;
+                                        title: @tr("Subscribed folders only");
+                                        description: @tr("Show and sync only the folders you subscribed to on the server, plus Inbox and the folders mail is filed into.");
+                                        checked: account.subscribed_folders_only;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => { root.save_account_subscribed_folders_only(account.id, checked); }
                                     }
                                     server-copies-row := SettingsSelectRow {
                                         visible: drop-target.has-server-copies;
@@ -2453,7 +3119,7 @@ export component SettingsDialog inherits Rectangle {
                                     spacing: 4px;
                                     SettingsSelectRow {
                                         compact: root.compact;
-                                        title: @tr("Desktop notifications");
+                                        title: root.notifications-title;
                                         description: @tr("Choose which incoming messages can alert you.");
                                         choices: root.notification-options;
                                         selected-index: root.notification-index;
@@ -2500,6 +3166,44 @@ export component SettingsDialog inherits Rectangle {
                                             clicked => { SystemNotifications.open-settings(); }
                                         }
                                     }
+                                    // When new mail can show, where the system decides.
+                                    if root.background-checks-noted && !root.compact : HorizontalBox {
+                                        padding-top: 0px;
+                                        spacing: 20px;
+                                        VerticalBox {
+                                            padding-top: 0px;
+                                            padding-bottom: 0px;
+                                            horizontal-stretch: 1;
+                                            Text {
+                                                text: root.background-checks-text;
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                vertical-alignment: center;
+                                                wrap: word-wrap;
+                                            }
+                                        }
+                                        if SystemNotifications.background-checks == "off" : Button {
+                                            width: max(132px, self.content-width);
+                                            height: 32px;
+                                            text: @tr("Open system settings");
+                                            clicked => { SystemNotifications.open-app-settings(); }
+                                        }
+                                    }
+                                    if root.background-checks-noted && root.compact : VerticalBox {
+                                        padding: 8px;
+                                        spacing: 7px;
+                                        Text {
+                                            text: root.background-checks-text;
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            wrap: word-wrap;
+                                        }
+                                        if SystemNotifications.background-checks == "off" : Button {
+                                            height: 36px;
+                                            text: @tr("Open system settings");
+                                            clicked => { SystemNotifications.open-app-settings(); }
+                                        }
+                                    }
                                     Rectangle { height: 1px; background: root.border-subtle; }
                                     SettingsSwitchRow {
                                         compact: root.compact;
@@ -2514,6 +3218,27 @@ export component SettingsDialog inherits Rectangle {
                                         toggled(checked) => {
                                             root.notification_sound_enabled = checked;
                                             root.save_notification_settings(root.notifications_enabled, checked, root.notification_scope);
+                                        }
+                                    }
+                                    if SystemNotifications.badge-supported : Rectangle { height: 1px; background: root.border-subtle; }
+                                    if SystemNotifications.badge-supported : SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Unread count on the app icon");
+                                        // It counts what notifications cover; docks on Linux
+                                        // show it only where they support counts.
+                                        description: WindowChrome.platform == "linux"
+                                            ? (root.notification_scope == "all"
+                                                ? @tr("Show how many unread messages are in your Inbox, on docks that show counts.")
+                                                : @tr("Show how many unread Important messages are in your Inbox, on docks that show counts."))
+                                            : (root.notification_scope == "all"
+                                                ? @tr("Show how many unread messages are in your Inbox.")
+                                                : @tr("Show how many unread Important messages are in your Inbox."));
+                                        checked: root.unread_badge_enabled;
+                                        title-color: root.heading;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.unread_badge_enabled = checked;
+                                            root.save_unread_badge(checked);
                                         }
                                     }
                                 }
@@ -2532,6 +3257,7 @@ export component SettingsDialog inherits Rectangle {
                             ShortcutSection { vertical-stretch: 0; title: @tr("Mail"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading;
                                 ShortcutRow { title: @tr("Compose a new message"); keys: [Shortcuts.compose]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Edit a message as new"); keys: [Shortcuts.edit-as-new]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Take back a message just sent"); keys: [Shortcuts.undo]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Check for new mail"); keys: [Shortcuts.check-mail]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Check every account for new mail"); keys: KeyboardKeys.apple ? [Shortcuts.check-all-mail, Shortcuts.check-all-mail-alternate] : [Shortcuts.check-all-mail]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Search mail"); keys: [Shortcuts.search, Shortcuts.search-alternate]; title-color: root.body-text; separator-color: root.faint-text; }
@@ -2591,6 +3317,35 @@ export component SettingsDialog inherits Rectangle {
                             accent: root.accent;
                             accent-soft: root.accent-soft;
                             confirm-delete => { root.sync-delete-confirmation = true; }
+                        }
+                    }
+
+                    agents-scroll := ScrollView {
+                        visible: root.settings_tab == "Agents";
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
+
+                        VerticalBox {
+                            x: root.compact ? 16px : max(24px, (agents-scroll.visible-width - 920px) / 2);
+                            width: root.compact ? agents-scroll.visible-width - 32px : min(920px, agents-scroll.visible-width - 48px);
+                            padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px;
+                            padding-bottom: 32px;
+                            spacing: 12px;
+
+                            SettingsPageTitle { label: @tr("AI agents"); title-color: root.title-color; }
+                            AgentAccessPage {
+                                compact: root.compact;
+                                surface: root.surface;
+                                card-border-color: root.border-subtle;
+                                code-background: root.surface-raised;
+                                heading: root.heading;
+                                body-text: root.body-text;
+                                secondary-text: root.secondary-text;
+                                faint-text: root.faint-text;
+                                warning-text: AppTheme.destructive;
+                            }
                         }
                     }
 
@@ -2754,6 +3509,106 @@ export component SettingsDialog inherits Rectangle {
                                 }
                             }
 
+                            if Updates.offered : Rectangle {
+                                height: updates-rows.y + updates-rows.height + 10px;
+                                vertical-stretch: 0;
+                                updates-card := SettingsCard { title: @tr("Updates"); description: @tr("Flectar Mail looks for new versions once a day."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
+                                updates-rows := VerticalBox {
+                                    x: 20px;
+                                    y: updates-card.content-y + 8px;
+                                    width: parent.width - 40px;
+                                    height: self.preferred-height;
+                                    padding-bottom: 8px;
+                                    spacing: 4px;
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Check for new versions");
+                                        description: @tr("It asks GitHub, without any account or mail details.");
+                                        checked: Updates.enabled;
+                                        title-color: root.heading;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            Updates.enabled = checked;
+                                            Updates.set-enabled(checked);
+                                        }
+                                    }
+                                    if Updates.enabled : Rectangle { height: 1px; background: root.border-subtle; }
+                                    // Laid out like the row above, so the texts and the right
+                                    // edge line up.
+                                    if Updates.enabled && !root.compact : HorizontalBox {
+                                        padding-top: 6px;
+                                        spacing: 20px;
+                                        VerticalBox {
+                                            padding-top: 0px;
+                                            padding-bottom: 0px;
+                                            spacing: 2px;
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            Text {
+                                                height: max(17px, self.preferred-height);
+                                                text: root.update-status;
+                                                color: root.heading;
+                                                font-size: TypeScale.secondary;
+                                                font-weight: Updates.version != "" ? 600 : 400;
+                                                wrap: word-wrap;
+                                            }
+                                            if Updates.version != "" && Updates.summary != "" : Text {
+                                                height: max(16px, self.preferred-height);
+                                                text: Updates.summary;
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                wrap: word-wrap;
+                                            }
+                                        }
+                                        if Updates.version != "" : Button {
+                                            width: max(112px, self.content-width);
+                                            height: 32px;
+                                            text: @tr("Download");
+                                            primary: true;
+                                            clicked => { Updates.open-release(); }
+                                        }
+                                        Button {
+                                            width: max(112px, self.content-width);
+                                            height: 32px;
+                                            text: @tr("Check now");
+                                            enabled: !Updates.checking;
+                                            clicked => { Updates.check-now(); }
+                                        }
+                                    }
+                                    if Updates.enabled && root.compact : VerticalBox {
+                                        padding: 8px;
+                                        spacing: 7px;
+                                        Text {
+                                            height: max(17px, self.preferred-height);
+                                            text: root.update-status;
+                                            color: root.heading;
+                                            font-size: TypeScale.secondary;
+                                            font-weight: Updates.version != "" ? 600 : 400;
+                                            wrap: word-wrap;
+                                        }
+                                        if Updates.version != "" && Updates.summary != "" : Text {
+                                            height: max(16px, self.preferred-height);
+                                            text: Updates.summary;
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            wrap: word-wrap;
+                                        }
+                                        if Updates.version != "" : Button {
+                                            height: 36px;
+                                            text: @tr("Download");
+                                            primary: true;
+                                            clicked => { Updates.open-release(); }
+                                        }
+                                        Button {
+                                            height: 36px;
+                                            text: @tr("Check now");
+                                            enabled: !Updates.checking;
+                                            clicked => { Updates.check-now(); }
+                                        }
+                                    }
+                                }
+                            }
+
                             Rectangle {
                                 height: credits-links.y + credits-links.height + 10px;
                                 vertical-stretch: 0;
@@ -2843,9 +3698,11 @@ export component SettingsDialog inherits Rectangle {
                     : root.settings_tab == "Accounts" ? @tr("Accounts")
                     : root.settings_tab == "Sync" ? @tr("Sync")
                     : root.settings_tab == "Contacts" ? @tr("Contacts")
+                    : root.settings_tab == "Rules" ? @tr("Rules")
                     : root.settings_tab == "Notifications" ? @tr("Notifications")
                     : root.settings_tab == "Shortcuts" ? @tr("Shortcuts")
                     : root.settings_tab == "Data" ? @tr("Storage")
+                    : root.settings_tab == "Agents" ? @tr("AI agents")
                     : root.settings_tab == "Services" ? @tr("Services") : @tr("About");
                 show-leading: true;
                 leading-icon: @image-url("../icons/lucide/filled/sliders.svg");
@@ -2865,7 +3722,7 @@ export component SettingsDialog inherits Rectangle {
                     accessible-id: "settings-close-button";
                     clicked => {
                         root.compact-nav-open = false;
-                        root.settings_open = false;
+                        root.close-requested();
                     }
                 }
             }
@@ -2899,9 +3756,9 @@ export component SettingsDialog inherits Rectangle {
                 drop-shadow-blur: root.compact-nav-open ? 24px : 0px;
                 drop-shadow-offset-x: 6px;
                 drop-shadow-color: #00000035;
-                animate x { duration: 260ms; easing: spring(0.08); }
+                animate x { duration: 260ms; easing: spring(0.08); enabled: MotionSettings.movement; }
                 animate opacity { duration: 180ms; easing: ease-out; }
-                animate drop-shadow-blur { duration: 180ms; easing: ease-out; }
+                animate drop-shadow-blur { duration: 180ms; easing: ease-out; enabled: MotionSettings.movement; }
                 VerticalBox {
                     padding-top: 18px;
                     padding-right: 12px;
@@ -2915,9 +3772,11 @@ export component SettingsDialog inherits Rectangle {
                     if root.settings-section-visible("Accounts") : SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Sync") : SettingsNavItem { text: @tr("Sync"); icon: @image-url("../icons/lucide/filled/cloud-sync.svg"); icon-color: root.settings-icon-color("Sync"); selected: root.settings_tab == "Sync"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Sync"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Contacts") : SettingsNavItem { text: @tr("Contacts"); icon: @image-url("../icons/lucide/filled/contacts.svg"); icon-color: root.settings-icon-color("Contacts"); selected: root.settings_tab == "Contacts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Contacts"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Rules") : SettingsNavItem { text: @tr("Rules"); icon: @image-url("../icons/lucide/filled/filter.svg"); icon-color: root.settings-icon-color("Rules"); selected: root.settings_tab == "Rules"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Rules"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Notifications") : SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Shortcuts") : SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Data") : SettingsNavItem { text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Agents") : SettingsNavItem { text: @tr("AI agents"); icon: @image-url("../icons/lucide/filled/bot.svg"); icon-color: root.settings-icon-color("Agents"); selected: root.settings_tab == "Agents"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Agents"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Services") : SettingsNavItem { text: @tr("Services"); icon: @image-url("../icons/lucide/filled/cloud.svg"); icon-color: root.settings-icon-color("Services"); selected: root.settings_tab == "Services"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Services"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("About") : SettingsNavItem { text: @tr("About"); icon: @image-url("../icons/lucide/filled/info.svg"); icon-color: root.settings-icon-color("About"); selected: root.settings_tab == "About"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "About"; root.compact-nav-open = false; } }
                     Rectangle { vertical-stretch: 1; }
@@ -2926,7 +3785,7 @@ export component SettingsDialog inherits Rectangle {
         }
 
         Rectangle {
-            visible: root.settings_open && root.caldav_account_id > 0;
+            visible: root.caldav_account_id > 0;
             width: parent.width;
             height: parent.height;
             background: #00000088;
@@ -3069,7 +3928,7 @@ export component SettingsDialog inherits Rectangle {
         }
 
         Rectangle {
-            visible: root.settings_open && root.account_form_open;
+            visible: root.account_form_open;
             width: parent.width;
             height: parent.height;
             background: #00000088;
@@ -3203,7 +4062,7 @@ export component SettingsDialog inherits Rectangle {
                             }
                         }
 
-                        if root.show_account_status && root.sync_status != "" : OnScreenSurface {
+                        if root.show_account_status && root.sync_status != "" : Rectangle {
                             height: max(36px, account-status.preferred-height + 16px);
                             background: root.account_setup_in_progress ? root.accent-soft : AppTheme.destructive.transparentize(0.9);
                             border-radius: 8px;
@@ -3248,7 +4107,7 @@ export component SettingsDialog inherits Rectangle {
         }
 
         Rectangle {
-            visible: root.settings_open && root.profile-editor-open;
+            visible: root.profile-editor-open;
             width: parent.width;
             height: parent.height;
             background: #00000088;
@@ -3394,7 +4253,27 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
-        if root.settings_open && root.account-profile-picker-open
+        if MailRules.editing : Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: #00000088;
+            z: 950;
+            accessible-role: groupbox;
+            accessible-label: MailRules.editing-id == 0 ? @tr("New rule") : @tr("Edit rule");
+
+            // A click beside the editor keeps what is written.
+            TouchArea { }
+            RuleEditor {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(640px, parent.width - 24px);
+                height: min(self.content-height, parent.height - 24px);
+                compact: root.compact;
+                close => { MailRules.close(); }
+            }
+        }
+
+        if root.account-profile-picker-open
             && root.account-profile-picker-account.id == root.account-profile-picker-id : Rectangle {
             width: parent.width;
             height: parent.height;

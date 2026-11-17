@@ -191,6 +191,25 @@ pub fn due_calendar(
     Ok(rows)
 }
 
+/// How many of these actions are still to be tried, or being tried: waiting
+/// without an error from an earlier try, or in flight. One that is gone
+/// counts as tried.
+pub fn untried(conn: &Connection, ids: &[i64]) -> Result<usize> {
+    let mut statement = conn.prepare_cached(
+        "SELECT EXISTS (SELECT 1 FROM pending_actions
+                        WHERE id = ?1
+                          AND (state = 'inflight'
+                               OR (state = 'pending' AND last_error IS NULL)))",
+    )?;
+    let mut untried = 0;
+    for id in ids {
+        if statement.query_row(params![id], |row| row.get::<_, bool>(0))? {
+            untried += 1;
+        }
+    }
+    Ok(untried)
+}
+
 pub fn next_due_at(conn: &Connection) -> Result<Option<i64>> {
     Ok(conn
         .query_row(
@@ -295,6 +314,39 @@ pub fn next_send_due_at(conn: &Connection, account_id: i64) -> Result<Option<i64
         )
         .optional()?
         .flatten())
+}
+
+/// Cancel the answers still waiting to reach the server of event
+/// `event_id`, for the same occurrence of it (`occurrence`, a RECURRENCE-ID)
+/// or, with None, for the whole event. Returns how many there were.
+pub fn cancel_waiting_answers(
+    conn: &Connection,
+    event_id: i64,
+    occurrence: Option<i64>,
+) -> Result<usize> {
+    Ok(conn.execute(
+        "UPDATE pending_actions SET state = 'cancelled'
+         WHERE kind = 'cal_answer' AND state = 'pending'
+           AND json_extract(payload, '$.eventId') = ?1
+           AND json_extract(payload, '$.occurrence') IS ?2",
+        params![event_id, occurrence],
+    )?)
+}
+
+/// The messages the actions `ids` act on, each once.
+pub fn message_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<i64>> {
+    let mut statement = conn.prepare("SELECT message_id FROM pending_actions WHERE id = ?1")?;
+    let mut messages = Vec::new();
+    for &id in ids {
+        let message: Option<Option<i64>> =
+            statement.query_row([id], |row| row.get(0)).optional()?;
+        if let Some(Some(message)) = message
+            && !messages.contains(&message)
+        {
+            messages.push(message);
+        }
+    }
+    Ok(messages)
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<PendingAction>> {
@@ -613,6 +665,33 @@ pub fn has_active_move_from(conn: &Connection, message_id: i64, folder_id: i64) 
 }
 
 /// Most recent undoable action (pending or just done, within the window).
+/// Where the first move of `message_id` queued after action `after` takes it
+/// from: its folder, and its UID there when known. Until that move runs, the
+/// server still has the message there, though the local row shows it moved.
+pub fn next_move_source(
+    conn: &Connection,
+    message_id: i64,
+    after: i64,
+) -> Result<Option<(i64, Option<i64>)>> {
+    let payload: Option<String> = conn
+        .query_row(
+            "SELECT payload FROM pending_actions
+             WHERE message_id = ?1 AND id > ?2 AND state IN ('pending', 'inflight')
+               AND kind IN ('archive', 'unarchive', 'trash', 'spam', 'not_spam', 'move')
+             ORDER BY id LIMIT 1",
+            params![message_id, after],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(payload) = payload else {
+        return Ok(None);
+    };
+    let payload: serde_json::Value = parse_json_column(&payload, 0)?;
+    Ok(payload["srcFolderId"]
+        .as_i64()
+        .map(|folder_id| (folder_id, payload["srcUid"].as_i64())))
+}
+
 pub fn last_undoable(conn: &Connection, since_ms: i64) -> Result<Option<PendingAction>> {
     let mut stmt = conn.prepare(
         "SELECT id, account_id, kind, message_id, thread_id, payload, state,
@@ -634,7 +713,7 @@ pub(crate) fn counts_settling_sql(account: &str) -> String {
                  WHERE a.account_id = {account} AND a.state IN ('pending', 'inflight')
                    AND a.kind IN ('mark_read', 'mark_unread', 'archive', 'unarchive', 'trash',
                                   'delete_permanently', 'spam', 'not_spam', 'move', 'copy',
-                                  'empty_trash', 'remove_transferred'))"
+                                  'empty_trash', 'remove_transferred', 'mark_folder_read'))"
     )
 }
 
@@ -649,13 +728,20 @@ pub fn counts_settling(conn: &Connection, account_id: i64) -> Result<bool> {
 
 /// Is there any pending action referencing this message (local intent wins over remote flags)?
 pub fn has_pending_for_message(conn: &Connection, message_id: i64) -> Result<bool> {
-    let n: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM pending_actions
-         WHERE message_id = ?1 AND state IN ('pending','inflight')",
+    // Its own actions, or marking its whole folder read, still on the way.
+    Ok(conn.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM pending_actions
+             WHERE message_id = ?1 AND state IN ('pending','inflight'))
+         OR EXISTS (
+             SELECT 1 FROM pending_actions a JOIN messages m ON m.id = ?1
+             WHERE a.kind = 'mark_folder_read' AND a.state IN ('pending','inflight')
+               AND a.account_id = m.account_id
+               AND json_extract(a.payload, '$.folderId') = m.folder_id
+               AND m.uid <= json_extract(a.payload, '$.throughUid'))",
         params![message_id],
         |r| r.get(0),
-    )?;
-    Ok(n > 0)
+    )?)
 }
 
 /// Whether local intent may recreate or submit an Email that disappeared
@@ -763,6 +849,70 @@ mod tests {
         // Nudged for it already: nothing new until the send comes due.
         assert!(!mail_due_between(&conn, 200, 4_000).unwrap());
         assert!(mail_due_between(&conn, 4_000, 6_000).unwrap());
+    }
+
+    #[test]
+    fn an_answer_gives_way_only_to_one_for_the_same_occurrence() {
+        let conn = testutil::calendar_conn();
+        let answer = |event: i64, occurrence: Option<i64>| {
+            let mut payload = serde_json::json!({ "eventId": event });
+            if let Some(occurrence) = occurrence {
+                payload["occurrence"] = occurrence.into();
+            }
+            enqueue(&conn, 1, "cal_answer", None, None, &payload, None).unwrap()
+        };
+        let (whole, first, second, other) = (
+            answer(7, None),
+            answer(7, Some(100)),
+            answer(7, Some(200)),
+            answer(8, None),
+        );
+        assert_eq!(cancel_waiting_answers(&conn, 7, Some(100)).unwrap(), 1);
+        assert_eq!(cancel_waiting_answers(&conn, 7, None).unwrap(), 1);
+        let state = |id: i64| -> String {
+            conn.query_row(
+                "SELECT state FROM pending_actions WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            [state(whole), state(first), state(second), state(other)],
+            ["cancelled", "cancelled", "pending", "pending"]
+        );
+    }
+
+    #[test]
+    fn an_action_counts_as_tried_once_it_ended_or_failed_once() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let action = || {
+            enqueue(
+                &conn,
+                1,
+                "archive",
+                None,
+                None,
+                &serde_json::json!({}),
+                None,
+            )
+            .unwrap()
+        };
+        let (waiting, inflight, done, failed, retrying) =
+            (action(), action(), action(), action(), action());
+        conn.execute_batch(&format!(
+            "UPDATE pending_actions SET state = 'inflight' WHERE id = {inflight};
+             UPDATE pending_actions SET state = 'done' WHERE id = {done};
+             UPDATE pending_actions SET state = 'failed', last_error = 'refused' WHERE id = {failed};
+             UPDATE pending_actions SET last_error = 'offline', not_before = 9 WHERE id = {retrying};"
+        ))
+        .unwrap();
+
+        assert_eq!(untried(&conn, &[waiting, inflight]).unwrap(), 2);
+        assert_eq!(untried(&conn, &[done, failed, retrying]).unwrap(), 0);
+        // One that is gone was tried, by whoever removed it.
+        assert_eq!(untried(&conn, &[999]).unwrap(), 0);
     }
 
     #[test]

@@ -48,17 +48,36 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/029_mail_transfers.sql")),
     Migration::Plain(include_str!("migrations/030_folder_server_only_unseen.sql")),
     Migration::Plain(include_str!("migrations/031_notification_tracking.sql")),
-    Migration::Plain(include_str!("migrations/032_device_sync.sql")),
-    Migration::Plain(include_str!("migrations/033_synced_templates.sql")),
-    Migration::Plain(include_str!("migrations/034_synced_snoozes.sql")),
-    Migration::Plain(include_str!("migrations/035_synced_sends.sql")),
-    Migration::Plain(include_str!("migrations/036_reply_reminders.sql")),
-    Migration::Plain(include_str!("migrations/037_shared_send_messages.sql")),
-    Migration::Plain(include_str!("migrations/038_shared_send_files.sql")),
-    Migration::Plain(include_str!("migrations/039_jmap_delayed_send.sql")),
-    Migration::Plain(include_str!("migrations/040_sign_in_sync.sql")),
-    Migration::Plain(include_str!("migrations/041_synced_send_turns.sql")),
-    Migration::Plain(include_str!("migrations/042_send_indexes.sql")),
+    Migration::Plain(include_str!("migrations/032_account_caught_up_at.sql")),
+    Migration::Plain(include_str!("migrations/033_list_id.sql")),
+    Migration::Plain(include_str!("migrations/034_blocked_senders.sql")),
+    Migration::Plain(include_str!("migrations/035_read_receipts.sql")),
+    Migration::Plain(include_str!("migrations/036_returned_receipts.sql")),
+    Migration::Plain(include_str!("migrations/037_mark_read.sql")),
+    Migration::Plain(include_str!("migrations/038_oldest_first_lists.sql")),
+    Migration::Plain(include_str!("migrations/039_link_services.sql")),
+    Migration::Plain(include_str!("migrations/040_agent_activity.sql")),
+    Migration::Plain(include_str!("migrations/041_agent_drafts.sql")),
+    Migration::Plain(include_str!("migrations/042_agent_undo.sql")),
+    Migration::Plain(include_str!("migrations/043_cloud_link_services.sql")),
+    Migration::Plain(include_str!("migrations/044_auto_replies.sql")),
+    Migration::Plain(include_str!("migrations/045_message_importance.sql")),
+    Migration::Plain(include_str!("migrations/046_mail_rules.sql")),
+    Migration::Plain(include_str!("migrations/047_rules_waiting.sql")),
+    Migration::Plain(include_str!("migrations/048_server_rules.sql")),
+    Migration::Plain(include_str!("migrations/049_folder_since.sql")),
+    Migration::Plain(include_str!("migrations/050_rule_tabs.sql")),
+    Migration::Plain(include_str!("migrations/051_device_sync.sql")),
+    Migration::Plain(include_str!("migrations/052_synced_templates.sql")),
+    Migration::Plain(include_str!("migrations/053_synced_snoozes.sql")),
+    Migration::Plain(include_str!("migrations/054_synced_sends.sql")),
+    Migration::Plain(include_str!("migrations/055_reply_reminders.sql")),
+    Migration::Plain(include_str!("migrations/056_shared_send_messages.sql")),
+    Migration::Plain(include_str!("migrations/057_shared_send_files.sql")),
+    Migration::Plain(include_str!("migrations/058_jmap_delayed_send.sql")),
+    Migration::Plain(include_str!("migrations/059_sign_in_sync.sql")),
+    Migration::Plain(include_str!("migrations/060_synced_send_turns.sql")),
+    Migration::Plain(include_str!("migrations/061_send_indexes.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -69,7 +88,7 @@ fn convert(conn: &Connection, version: i64) -> Result<()> {
         13 => super::repo::contact_entries::migrate(conn),
         19 => clean_snippets(conn),
         21 => find_verification_codes(conn),
-        34 => sync_existing_snoozes(conn),
+        53 => sync_existing_snoozes(conn),
         _ => Ok(()),
     }
 }
@@ -368,11 +387,17 @@ mod tests {
         let conn = fresh();
         let expected = [
             "accounts",
+            "agent_activity",
+            "agent_activity_actions",
+            "agent_activity_labels",
+            "agent_drafts",
             "ai_usage_events",
             "app_settings",
+            "auto_replies",
             "attachment_files_fts",
             "attachment_text_fts",
             "attachments",
+            "blocked_senders",
             "contact_accounts",
             "contact_entries",
             "contact_values",
@@ -395,6 +420,8 @@ mod tests {
             "jmap_full_sync_stored",
             "jmap_sync_state",
             "labels",
+            "link_services",
+            "mail_rules",
             "mail_transfers",
             "message_bodies",
             "message_embeddings",
@@ -404,17 +431,19 @@ mod tests {
             "messages",
             "messages_fts",
             "notification_outbox",
+            "oldest_first_lists",
             "pending_actions",
             "pop3_sync_state",
             "pop3_uidls",
             "reply_reminders",
+            "returned_receipts",
             "route_cache",
             "sender_identities",
+            "server_rules",
             "sign_in_arrivals",
             "sign_in_shares",
             "snippets",
             "snoozes",
-            "split_rules",
             "sync_failures",
             "synced_send_files_gone",
             "synced_sends",
@@ -551,6 +580,48 @@ mod tests {
         conn.execute("UPDATE messages SET body_state = 'cached' WHERE id = 1", [])
             .unwrap();
         assert_eq!(queued(&conn), 0);
+    }
+
+    #[test]
+    fn mark_read_upgrade_keeps_the_choice() {
+        for (stored, expected) in [
+            ("false", crate::models::MarkRead::Never),
+            ("true", crate::models::MarkRead::Immediately),
+        ] {
+            let mut conn = staged(36);
+            conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES ('settings', ?1)",
+                [format!(
+                    "{{\"theme\":\"snow\",\"undoSendSeconds\":20,\"loadRemoteImages\":true,\"markReadOnOpen\":{stored}}}"
+                )],
+            )
+            .unwrap();
+            run(&mut conn).unwrap();
+            let value: String = conn
+                .query_row(
+                    "SELECT value FROM app_settings WHERE key = 'settings'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(!value.contains("markReadOnOpen"), "{value}");
+            let settings = super::super::repo::settings::get(&conn).unwrap();
+            assert_eq!(settings.mark_read, expected);
+            assert_eq!(settings.theme, "snow");
+        }
+        // Settings that never stored it keep the default.
+        let mut conn = staged(36);
+        conn.execute(
+            "INSERT INTO app_settings (key, value)
+             VALUES ('settings', '{\"theme\":\"snow\",\"undoSendSeconds\":20,\"loadRemoteImages\":true}')",
+            [],
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        assert_eq!(
+            super::super::repo::settings::get(&conn).unwrap().mark_read,
+            crate::models::MarkRead::Immediately
+        );
     }
 
     #[test]
@@ -1244,16 +1315,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(queued_label_id, bindings[1].1);
-        let split_label_ids: String = conn
+        // Split rules made way for rules that show mail in a tab (050).
+        let split_rules: bool = conn
             .query_row(
-                "SELECT json_extract(query_json, '$.labels')
-                   FROM split_rules WHERE id = 9",
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'split_rules')",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        let split_label_ids: Vec<i64> = serde_json::from_str(&split_label_ids).unwrap();
-        assert_eq!(split_label_ids, vec![bindings[0].1, bindings[1].1, 999]);
+        assert!(!split_rules);
         let automation_states: String = conn
             .query_row(
                 "SELECT json_extract(value, '$.aiAutomationRules')

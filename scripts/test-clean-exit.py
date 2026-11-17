@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Close the app from its window and require a clean exit.
 
-Usage: python scripts/test-clean-exit.py target/package/windows/flectar-mail.exe
+Usage: python scripts/test-clean-exit.py target/package/windows/flectar-mail.exe [--gdi]
 
 Starts the app with the current user's profile (a fresh one on CI), waits
 until its local data is ready, posts WM_CLOSE to its window the way the title
@@ -10,6 +10,11 @@ Only a close from the window runs the full shutdown: ending the event loop
 while the window is still shown keeps the window's state alive. A profile
 that this run created is removed afterwards, so later checks, such as the
 Store package test, start from a clean profile. Windows only.
+
+A fresh profile starts in CPU mode, which must present its frames through a
+DXGI swap chain rather than GDI blits that tear (#343). With --gdi it must use
+the GDI fallback that SLINT_SOFTWARE_GDI selects. The result line includes the
+app's memory once it is ready, so the two can be compared.
 """
 import ctypes
 import json
@@ -23,6 +28,8 @@ import time
 from pathlib import Path
 
 METRIC_PREFIX = "FLECTAR_STARTUP_METRIC "
+DXGI_PRESENT = "Slint: Presenting software frames through DXGI"
+GDI_FALLBACK = "Presenting through DXGI"
 READY_EVENT = "core_ready_frame"
 READY_SECONDS = 180
 SETTLE_SECONDS = 2
@@ -141,6 +148,45 @@ def remove(paths):
                 print(f"warning: could not remove {path}: {error}", file=sys.stderr)
 
 
+def memory(pid):
+    """The process's private bytes and working set, in MiB."""
+    from ctypes import wintypes
+
+    class Counters(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+            ("PrivateUsage", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.K32GetProcessMemoryInfo.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+    kernel32.K32GetProcessMemoryInfo.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    # PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ
+    handle = kernel32.OpenProcess(0x1000 | 0x0010, False, pid)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        counters = Counters(cb=ctypes.sizeof(Counters))
+        if not kernel32.K32GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel32.CloseHandle(handle)
+    return counters.PrivateUsage / 1048576, counters.WorkingSetSize / 1048576
+
+
 def exit_code(code):
     return f"{code & 0xFFFFFFFF:#010x}" if code < 0 or code > 255 else str(code)
 
@@ -151,10 +197,12 @@ def fail(message, output):
     sys.exit(1)
 
 
-def main(binary):
+def main(binary, gdi=False):
     if os.name != "nt":
         sys.exit("test-clean-exit.py closes a native Windows window; run it on Windows")
     environment = dict(os.environ, FLECTAR_STARTUP_METRICS="1")
+    if gdi:
+        environment["SLINT_SOFTWARE_GDI"] = "1"
     # Only a profile this run creates is removed, never one that was there.
     created = [path for path in profile_dirs() if not path.exists()]
     process = subprocess.Popen(
@@ -175,6 +223,7 @@ def main(binary):
         if process.poll() is not None:
             drain(lines, output, 5)
             fail(f"the app exited with {exit_code(process.returncode)} before it was closed", output)
+        private, working_set = memory(process.pid)
         if close_windows(process.pid) == 0:
             fail("the app showed no window to close", output)
         closed = time.monotonic()
@@ -190,7 +239,15 @@ def main(binary):
             fail(f"the app exited with {exit_code(process.returncode)} after WM_CLOSE", output)
         if any("' panicked at " in line for line in output):
             fail("the app panicked while closing", output)
-        print(f"PASS: ready after {ready:.1f} s, exited cleanly {exited:.1f} s after WM_CLOSE")
+        if gdi and DXGI_PRESENT in output:
+            fail("SLINT_SOFTWARE_GDI did not select GDI", output)
+        if not gdi and (DXGI_PRESENT not in output or any(GDI_FALLBACK in line for line in output)):
+            fail("CPU mode did not present its frames through DXGI", output)
+        presenter = "GDI" if gdi else "DXGI"
+        print(
+            f"PASS ({presenter}): ready after {ready:.1f} s with {private:.1f} MiB private, "
+            f"{working_set:.1f} MiB working set, exited cleanly {exited:.1f} s after WM_CLOSE"
+        )
     finally:
         if process.poll() is None:
             process.kill()
@@ -199,6 +256,6 @@ def main(binary):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 3) or sys.argv[2:] not in ([], ["--gdi"]):
         sys.exit(__doc__)
-    main(sys.argv[1])
+    main(sys.argv[1], gdi=sys.argv[2:] == ["--gdi"])

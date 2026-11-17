@@ -1,0 +1,24 @@
+// Blocking the sender of the open message, whose mail then goes to Spam
+// (src/block_sender.rs).
+export global BlockSender {
+    // The open message has a sender who can be blocked.
+    in property <bool> available;
+    // Its sender is blocked already.
+    in property <bool> blocked;
+    // Where the dialog is: "" (closed), "confirm" or "working".
+    in property <string> stage;
+    // Whom the dialog is about.
+    in property <string> name;
+    in property <string> address;
+    // How many of their messages are in an inbox now.
+    in property <int> inbox-count;
+    // Every blocked address, for Settings.
+    in property <[string]> addresses;
+    // The menu: ask before blocking the open message's sender, or unblock
+    // them.
+    callback start();
+    callback confirm();
+    callback close();
+    // Settings: stop blocking this address.
+    callback unblock(string);
+}

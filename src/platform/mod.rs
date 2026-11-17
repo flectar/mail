@@ -22,6 +22,17 @@ mod keychain;
 #[cfg(any(test, target_os = "ios"))]
 mod web_authentication;
 
+/// Whether the system lets the app check for new mail in the background.
+#[cfg(background_checks)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackgroundRefresh {
+    On,
+    /// Turned off for the app, or not allowed on the device.
+    Off,
+    /// Paused by Low Power Mode.
+    LowPower,
+}
+
 #[cfg(target_env = "ohos")]
 mod ohos;
 #[cfg(target_env = "ohos")]
@@ -35,6 +46,9 @@ mod memory_levels;
 /// platform tests.
 #[cfg(any(test, target_os = "windows"))]
 pub(crate) mod windows_install;
+/// Pipes and other kernel objects only the current user can open.
+#[cfg(target_os = "windows")]
+pub(crate) mod windows_security;
 
 /// Fonts a host without Fontconfig hands to the email (Blitz/Parley) renderer
 /// and the composer: the platform font directory, and the fallback policy the

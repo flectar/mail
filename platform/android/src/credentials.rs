@@ -32,11 +32,17 @@ impl AndroidCredentialStore {
         // by AndroidApp remains valid for the process lifetime.
         let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }
             .map_err(|error| keystore_error("opening Java VM", error))?;
-        Ok(Self {
+        Ok(Self::with_vm(vm, private_root))
+    }
+
+    /// The store for a process that runs without the activity, such as a
+    /// check for new mail in the background.
+    pub(super) fn with_vm(vm: JavaVM, private_root: &Path) -> Self {
+        Self {
             vm,
             path: private_root.join("credentials/credentials-v1.json"),
             transaction: Mutex::new(()),
-        })
+        }
     }
 
     fn with_env<T>(

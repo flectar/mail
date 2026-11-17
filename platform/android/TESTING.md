@@ -61,6 +61,14 @@ default orange icon. The app switches entries only after it leaves the
 foreground; check that by choosing an icon in Settings and returning to the
 home screen.
 
+`SpellingTest` checks spelling through `Spelling.java` with the device's own
+spell checker: misspelled words and their UTF-16 places, a full stop at the
+end, corrections, and a session started again. It needs a spell checker that
+knows English, as Android's own keyboard does on the emulator's default images
+(`target: default`). Gboard on the Google APIs images answers late and passes
+every word, so the tests are skipped there, as on the release workflows'
+emulator.
+
 ## Sign-in acceptance check
 
 On the reported Pixel/GrapheneOS configuration and a supported stock Android

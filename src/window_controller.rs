@@ -351,30 +351,30 @@ pub(super) fn register_window_preference_callbacks(
     runtime: &tokio::runtime::Handle,
     ui_task_tx: &UiSender<UiTaskUpdate>,
 ) {
-    let app_weak = app.as_weak();
-    app.on_toggle_settings(move || {
-        if let Some(app) = app_weak.upgrade() {
-            app.set_settings_open(!app.get_settings_open());
-        }
-    });
-    // The startup entry and the default email app can also change in the
-    // system's own settings, so read them again whenever Settings appears:
-    // from the rail, a tab or a shortcut into a settings page.
+    // Spelling languages, the startup entry and the default email app can also
+    // change in the system's own settings, so read them again whenever
+    // Settings appears: from the rail, a tab or a shortcut into a settings page.
     #[cfg(desktop)]
-    {
-        let launch_at_login = LaunchAtLogin::register(app, runtime);
-        let default_email_app =
-            crate::default_email_app::DefaultEmailAppRow::register(app, runtime);
-        let app_weak = app.as_weak();
-        app.on_settings_shown(move || {
-            if let Some(app) = app_weak.upgrade() {
+    let launch_at_login = LaunchAtLogin::register(app, runtime);
+    #[cfg(desktop)]
+    let default_email_app = crate::default_email_app::DefaultEmailAppRow::register(app, runtime);
+    let app_weak = app.as_weak();
+    app.on_settings_shown(move || {
+        if let Some(app) = app_weak.upgrade() {
+            let window = app.as_weak();
+            crate::spelling::settings_shown(move |installed| {
+                let _ =
+                    window.upgrade_in_event_loop(move |app| app.set_spelling_installed(installed));
+            });
+            #[cfg(desktop)]
+            {
                 launch_at_login.refresh(&app, false);
                 if let Some(default_email_app) = &default_email_app {
                     default_email_app.refresh(&app);
                 }
             }
-        });
-    }
+        }
+    });
 
     let app_weak = app.as_weak();
     let state_for_frame = Rc::clone(state);
@@ -390,9 +390,7 @@ pub(super) fn register_window_preference_callbacks(
         };
         window_chrome::apply_preference(&app, frame);
         let Some(core) = state_for_frame.borrow().core.clone() else {
-            app.set_sync_status(UiMessage::plain(
-                "Window frame updated for this session.",
-            ));
+            app.set_sync_status(UiMessage::plain("Window frame updated for this session."));
             return;
         };
         match runtime_for_frame.block_on(core.set_window_frame(frame.key())) {
@@ -555,7 +553,10 @@ impl LaunchAtLogin {
         let app = app.as_weak();
         self.runtime.spawn_blocking(move || {
             use std::sync::atomic::Ordering;
-            let _guard = this.lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let _guard = this
+                .lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let requests = this.requests.load(Ordering::SeqCst);
             if repair && let Err(error) = crate::autostart::repair() {
                 eprintln!("could not update the sign-in entry: {error}");
@@ -576,7 +577,10 @@ impl LaunchAtLogin {
         let request = self.requests.fetch_add(1, Ordering::SeqCst) + 1;
         let this = self.clone();
         self.runtime.spawn_blocking(move || {
-            let _guard = this.lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let _guard = this
+                .lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             // Only the latest request is applied; it supersedes this one.
             if this.requests.load(Ordering::SeqCst) != request {
                 return;
@@ -591,18 +595,16 @@ impl LaunchAtLogin {
                     Ok(Applied::Done) if enabled => {
                         UiMessage::plain("Flectar Mail will start when you sign in.")
                     }
-                    Ok(Applied::Done) => UiMessage::plain(
-                        "Flectar Mail will no longer start when you sign in.",
-                    ),
+                    Ok(Applied::Done) => {
+                        UiMessage::plain("Flectar Mail will no longer start when you sign in.")
+                    }
                     Ok(Applied::NeedsApproval) if cfg!(target_os = "windows") => UiMessage::plain(
                         "Turn on Flectar Mail under Startup apps in Windows Settings to finish.",
                     ),
                     Ok(Applied::NeedsApproval) => UiMessage::plain(
                         "Allow Flectar Mail under Login Items in System Settings to finish.",
                     ),
-                    Err(error) => {
-                        UiMessage::detail("Could not change startup behavior: {}", error)
-                    }
+                    Err(error) => UiMessage::detail("Could not change startup behavior: {}", error),
                 });
             });
         });

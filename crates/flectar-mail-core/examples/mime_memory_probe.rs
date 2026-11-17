@@ -101,6 +101,8 @@ fn main() {
             mime_type: "application/octet-stream".into(),
             bytes: vec![0x5a; attachment_bytes],
         }],
+        receipt_to: &[],
+        importance: Default::default(),
     };
     let baseline = LIVE.load(Ordering::Relaxed);
     PEAK.store(baseline, Ordering::Relaxed);

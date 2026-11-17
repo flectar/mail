@@ -125,6 +125,10 @@ struct MockJmap {
     max_delayed_send: u64,
     /// The EmailSubmissions the server keeps.
     submissions: Arc<std::sync::Mutex<Vec<Value>>>,
+    /// Emails Email/set marked `$seen`.
+    seen: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Email/set answers as if it marked them, and doesn't.
+    forget_seen: bool,
 }
 
 impl Default for MockJmap {
@@ -141,6 +145,8 @@ impl Default for MockJmap {
             delay: None,
             max_delayed_send: 0,
             submissions: Arc::new(std::sync::Mutex::new(Vec::new())),
+            seen: Arc::default(),
+            forget_seen: false,
         }
     }
 }
@@ -357,19 +363,62 @@ impl MockJmap {
                 let received = |value: &Value| {
                     chrono::DateTime::parse_from_rfc3339(value.as_str().unwrap()).unwrap()
                 };
-                let after = args["filter"].get("after").map(received);
-                let ids = self
+                // One condition, or the conditions of an AND.
+                let conditions = match args["filter"].get("conditions") {
+                    Some(conditions) => conditions.as_array().unwrap().clone(),
+                    None => vec![args["filter"].clone()],
+                };
+                let condition = |name: &str| conditions.iter().find_map(|c| c.get(name).cloned());
+                let after = condition("after").map(|value| received(&value));
+                let before = condition("before").map(|value| received(&value));
+                let mailbox = condition("inMailbox");
+                let not_keyword = condition("notKeyword");
+                let seen = self.seen.lock().unwrap().clone();
+                let limit = args["limit"]
+                    .as_u64()
+                    .map_or(usize::MAX, |limit| limit as usize);
+                let position = args["position"].as_u64().unwrap_or(0) as usize;
+                let matching = self
                     .emails
                     .iter()
                     .filter(|email| {
                         after.is_none_or(|after| received(&email["receivedAt"]) > after)
+                            && before.is_none_or(|before| received(&email["receivedAt"]) < before)
+                            && mailbox.as_ref().is_none_or(|mailbox| {
+                                email["mailboxIds"][mailbox.as_str().unwrap()] == true
+                            })
+                            && not_keyword.as_ref().is_none_or(|keyword| {
+                                let keyword = keyword.as_str().unwrap();
+                                email["keywords"][keyword] != true
+                                    && !(keyword == "$seen"
+                                        && seen.iter().any(|id| email["id"] == id.as_str()))
+                            })
                     })
                     .map(|email| &email["id"])
                     .collect::<Vec<_>>();
+                let ids = matching
+                    .iter()
+                    .skip(position)
+                    .take(limit)
+                    .collect::<Vec<_>>();
                 json!({
                     "accountId": "mail-account", "queryState": "query-0",
-                    "canCalculateChanges": false, "position": 0,
-                    "total": ids.len(), "ids": ids
+                    "canCalculateChanges": false, "position": position,
+                    "total": matching.len(), "ids": ids
+                })
+            }
+            "Email/set" => {
+                let mut updated = serde_json::Map::new();
+                for (id, patch) in args["update"].as_object().into_iter().flatten() {
+                    if patch["keywords/$seen"] == true && !self.forget_seen {
+                        self.seen.lock().unwrap().push(id.clone());
+                    }
+                    updated.insert(id.clone(), Value::Null);
+                }
+                json!({
+                    "accountId": "mail-account", "oldState": "state-0", "newState": "state-1",
+                    "created": {}, "updated": updated, "destroyed": [],
+                    "notCreated": {}, "notUpdated": {}, "notDestroyed": {}
                 })
             }
             "Email/get" => {
@@ -526,19 +575,6 @@ impl MockJmap {
                     "destroyed": [], "notDestroyed": {}
                 })
             }
-            "Email/set" => {
-                let updated = args["update"]
-                    .as_object()
-                    .into_iter()
-                    .flatten()
-                    .map(|(id, _)| (id.clone(), Value::Null))
-                    .collect::<serde_json::Map<_, _>>();
-                json!({
-                    "accountId": "mail-account", "oldState": "state-0", "newState": "state-1",
-                    "created": {}, "updated": updated, "destroyed": [],
-                    "notCreated": {}, "notUpdated": {}, "notDestroyed": {}
-                })
-            }
             other => panic!("unexpected method {other}"),
         })
     }
@@ -584,6 +620,206 @@ async fn run_live_sync(
     )
     .await
     .expect("sync timed out")
+}
+
+#[tokio::test]
+async fn a_blocked_senders_new_mail_goes_to_spam_unannounced() {
+    let (_dir, ctx, config) = fixture().await;
+    ctx.db
+        .write(|conn| {
+            conn.execute_batch(
+                "INSERT INTO jmap_sync_state(account_id,email_state) VALUES(1,'state-0');
+                 INSERT INTO folders (id, account_id, path, role, jmap_id)
+                   VALUES (2, 1, 'Junk', 'spam', 'junk-remote');",
+            )?;
+            repo::blocked::block(conn, "sender@mail.example", 0)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let now = chrono::Utc::now();
+    let mut friend = received(email("friend", "conversation-friend"), now);
+    friend["from"] = json!([{"name": "Friend", "email": "friend@mail.example"}]);
+    let emails = vec![
+        received(email("blocked", "conversation-blocked"), now),
+        friend,
+    ];
+    let changes = json!({"created": ["blocked", "friend"], "updated": [], "destroyed": []});
+    let (connected, task) = server(emails, Some(changes), None).await;
+    run_live_sync(&ctx, &config, &connected, now.timestamp_millis() - 60_000)
+        .await
+        .unwrap();
+    task.abort();
+
+    ctx.db
+        .read(|conn| {
+            let placed = |jmap_id: &str| -> rusqlite::Result<(i64, Vec<i64>)> {
+                let (id, folder_id): (i64, i64) = conn.query_row(
+                    "SELECT id, folder_id FROM messages WHERE jmap_id = ?1",
+                    [jmap_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                let mut stmt = conn.prepare(
+                    "SELECT folder_id FROM message_folders WHERE message_id = ?1 ORDER BY folder_id",
+                )?;
+                let mailboxes = stmt
+                    .query_map([id], |row| row.get(0))?
+                    .collect::<rusqlite::Result<Vec<i64>>>()?;
+                Ok((folder_id, mailboxes))
+            };
+            // Its mailboxes were in place before it moved, so it left the
+            // inbox in all of them.
+            assert_eq!(placed("blocked")?, (2, vec![2]));
+            assert_eq!(placed("friend")?, (1, vec![1]));
+            let pending: Vec<String> = conn
+                .prepare("SELECT kind FROM pending_actions")?
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            assert_eq!(pending, ["spam"]);
+            let notified: Vec<String> = conn
+                .prepare(
+                    "SELECT m.jmap_id FROM notification_outbox o
+                     JOIN messages m ON m.id = o.message_id",
+                )?
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            assert_eq!(notified, ["friend"]);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn rules_sort_new_mail_but_not_what_a_first_sync_finds() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let (_dir, ctx, config) = fixture().await;
+    ctx.db
+        .write(|conn| {
+            conn.execute(
+                "INSERT INTO folders (id, account_id, path, role, jmap_id)
+                 VALUES (3, 1, 'Lists', NULL, 'lists-remote')",
+                [],
+            )?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(1),
+                    name: "Lists".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::From,
+                        header: String::new(),
+                        op: RuleOp::Is,
+                        value: "sender@mail.example".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::Move { folder: 3 }],
+                    stop: false,
+                },
+                0,
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let folder_of = |jmap_id: &'static str| {
+        let ctx = ctx.clone();
+        async move {
+            ctx.db
+                .read(move |conn| {
+                    Ok(repo::messages::by_jmap_id(conn, 1, jmap_id)?
+                        .and_then(|message| message.folder_id))
+                })
+                .await
+                .unwrap()
+        }
+    };
+    let (connected, task) = server(vec![email("old", "conversation-old")], None, None).await;
+    run_sync(&ctx, &config, &connected).await.unwrap();
+    task.abort();
+    assert_eq!(folder_of("old").await, Some(1));
+
+    let changes = json!({"created": ["new"], "updated": [], "destroyed": []});
+    let (connected, task) = server(
+        vec![
+            email("old", "conversation-old"),
+            email("new", "conversation-new"),
+        ],
+        Some(changes),
+        None,
+    )
+    .await;
+    run_sync(&ctx, &config, &connected).await.unwrap();
+    task.abort();
+    assert_eq!(folder_of("old").await, Some(1));
+    assert_eq!(folder_of("new").await, Some(3));
+}
+
+#[tokio::test]
+async fn rules_on_the_body_fetch_it_with_the_new_mail() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    let (_dir, ctx, config) = fixture().await;
+    ctx.db
+        .write(|conn| {
+            conn.execute_batch(
+                "INSERT INTO jmap_sync_state(account_id,email_state) VALUES(1,'state-0');
+                 INSERT INTO folders (id, account_id, path, role, jmap_id)
+                   VALUES (3, 1, 'Lists', NULL, 'lists-remote');",
+            )?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(1),
+                    name: "Bodies".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::Body,
+                        header: String::new(),
+                        op: RuleOp::Contains,
+                        // What the stand-in server sends as every body.
+                        value: "body".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::Move { folder: 3 }],
+                    stop: false,
+                },
+                0,
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let now = chrono::Utc::now();
+    let changes = json!({"created": ["new"], "updated": [], "destroyed": []});
+    let (connected, task) = server(
+        vec![received(email("new", "conversation-new"), now)],
+        Some(changes),
+        None,
+    )
+    .await;
+    run_live_sync(&ctx, &config, &connected, now.timestamp_millis() - 60_000)
+        .await
+        .unwrap();
+    task.abort();
+    ctx.db
+        .read(|conn| {
+            let message = repo::messages::by_jmap_id(conn, 1, "new")?.unwrap();
+            assert_eq!(message.folder_id, Some(3));
+            assert_eq!(message.body_state, "cached");
+            let notified: i64 =
+                conn.query_row("SELECT COUNT(*) FROM notification_outbox", [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(notified, 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -2158,4 +2394,188 @@ async fn a_cancelled_hold_does_not_stop_the_message_going_out() {
         folder_role_of(&ctx, draft).await.as_deref(),
         Some(roles::SENT)
     );
+}
+
+/// Inbox mail: a1 unread before the request, a2 already read, a3 unread
+/// but newer than it; elsewhere b1 unread.
+fn marking_mock() -> MockJmap {
+    let mut read = email("a2", "t2");
+    read["keywords"] = json!({"$seen": true});
+    let mut newer = email("a3", "t3");
+    newer["receivedAt"] = json!("2026-10-09T12:00:00Z");
+    let mut elsewhere = email("b1", "t4");
+    elsewhere["mailboxIds"] = json!({"archive-remote": true});
+    MockJmap {
+        emails: vec![email("a1", "t1"), read, newer, elsewhere],
+        ..MockJmap::default()
+    }
+}
+
+#[tokio::test]
+async fn marking_a_mailbox_read_marks_its_unread_mail_from_before_the_request() {
+    let mock = marking_mock().start().await;
+    let before = chrono::DateTime::parse_from_rfc3339("2026-10-09T00:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    mark_mailbox_read(&mock.connected, "inbox-remote", before)
+        .await
+        .unwrap();
+    let seen = mock.calls("Email/set");
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert_eq!(seen[0]["update"], json!({"a1": {"keywords/$seen": true}}));
+    // It asked again until nothing was left.
+    assert_eq!(mock.calls("Email/query").len(), 2);
+    mock.task.abort();
+}
+
+#[tokio::test]
+async fn a_server_that_keeps_mail_unread_stops_the_marking() {
+    let mock = MockJmap {
+        forget_seen: true,
+        ..marking_mock()
+    }
+    .start()
+    .await;
+    let before = chrono::DateTime::parse_from_rfc3339("2026-10-09T00:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    let result = mark_mailbox_read(&mock.connected, "inbox-remote", before).await;
+    assert!(matches!(result, Err(CoreError::Jmap(_))), "{result:?}");
+    assert_eq!(mock.calls("Email/set").len(), 1);
+    mock.task.abort();
+}
+
+/// A server search keeps what it finds and goes on where it stopped. A page
+/// brings mail not kept here, with the matches kept here that it passes.
+#[tokio::test]
+async fn a_server_search_keeps_what_it_finds_and_goes_on_where_it_stopped() {
+    use crate::models::{MailRule, RuleAction, RuleCondition, RuleField, RuleOp};
+    use chrono::TimeZone;
+    let (_dir, ctx, config) = fixture().await;
+    // A rule that would mark it read: found mail isn't new mail.
+    ctx.db
+        .write(|conn| {
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: None,
+                    name: "Sender".into(),
+                    enabled: true,
+                    match_all: true,
+                    conditions: vec![RuleCondition {
+                        field: RuleField::From,
+                        header: String::new(),
+                        op: RuleOp::Is,
+                        value: "sender@mail.example".into(),
+                        negate: false,
+                    }],
+                    actions: vec![RuleAction::MarkRead],
+                    stop: false,
+                },
+                0,
+            )
+        })
+        .await
+        .unwrap();
+    let at = |day| chrono::Utc.with_ymd_and_hms(2020, 3, day, 9, 0, 0).unwrap();
+    let emails = vec![
+        received(email("e3", "t3"), at(3)),
+        received(email("e2", "t2"), at(2)),
+        received(email("e1", "t1"), at(1)),
+    ];
+    let mock = MockJmap {
+        emails,
+        max_objects_in_get: 10,
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    let mut session = Some(mock.connected);
+    let tree = crate::search::parse("invoice from:sender").tree.unwrap();
+    let first = search_server(&ctx, &config, &mut session, &tree, &Default::default(), 2)
+        .await
+        .unwrap();
+    assert_eq!(first.message_ids.len(), 2);
+    let next = first
+        .next
+        .clone()
+        .expect("a page that came full may have more");
+    assert_eq!(next.position, 2);
+
+    // The server got the query newest first, and the fixture's one folder,
+    // the inbox, leaves nothing to keep out.
+    let calls = mock.calls.lock().unwrap().clone();
+    let query = &calls
+        .iter()
+        .find(|(method, _)| method == "Email/query")
+        .unwrap()
+        .1;
+    assert_eq!(
+        query["filter"],
+        json!({"operator": "AND", "conditions": [{"text": "invoice"}, {"from": "sender"}]})
+    );
+    assert_eq!(
+        query["sort"],
+        json!([{"property": "receivedAt", "isAscending": false}])
+    );
+    assert_eq!(
+        (query["position"].clone(), query["limit"].clone()),
+        (json!(0), json!(2))
+    );
+
+    let second = search_server(&ctx, &config, &mut session, &tree, &next, 2)
+        .await
+        .unwrap();
+    assert_eq!(second.message_ids.len(), 1);
+    assert!(
+        second.next.is_none(),
+        "a page short of full found all there is"
+    );
+
+    // Each found email is kept once, newest first as the server gave them.
+    let kept = ctx
+        .db
+        .read(|conn| {
+            let mut stmt = conn.prepare("SELECT jmap_id FROM messages ORDER BY date DESC")?;
+            Ok(stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(kept, ["e3", "e2", "e1"]);
+    let read = ctx
+        .db
+        .read(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM messages WHERE is_read = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(read, 0);
+
+    // Searched again, the first page has nothing new, so the search goes on
+    // to the end of the results and brings what it passed.
+    let again = search_server(&ctx, &config, &mut session, &tree, &Default::default(), 2)
+        .await
+        .unwrap();
+    let mut found = [first.message_ids, second.message_ids].concat();
+    found.sort_unstable();
+    let mut found_again = again.message_ids;
+    found_again.sort_unstable();
+    assert_eq!(found_again, found);
+    assert!(again.next.is_none());
+    let positions = mock
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(method, _)| method == "Email/query")
+        .map(|(_, query)| query["position"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(positions, [json!(0), json!(2), json!(0), json!(2)]);
 }

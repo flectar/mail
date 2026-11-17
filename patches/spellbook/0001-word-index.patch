@@ -1,0 +1,1080 @@
+diff --git a/src/aff.rs b/src/aff.rs
+index 3e932f0b..1b1b7e06 100644
+--- a/src/aff.rs
++++ b/src/aff.rs
+@@ -7,7 +7,7 @@ use crate::{
+         string::{String, ToString},
+         vec::Vec,
+     },
+-    AffixingMode, Flag, FlagSet, AT_COMPOUND_BEGIN, AT_COMPOUND_END, FULL_WORD,
++    AffixingMode, Flag, FlagSet, Flags, AT_COMPOUND_BEGIN, AT_COMPOUND_END, FULL_WORD,
+ };
+ 
+ use core::{marker::PhantomData, num::NonZeroU16, str::Chars};
+@@ -842,7 +842,7 @@ pub(crate) enum CompoundRuleModifier {
+ 
+ type CompoundRule = Box<[CompoundRuleElement]>;
+ 
+-fn compound_rule_matches(pattern: &[CompoundRuleElement], data: &[&FlagSet]) -> bool {
++fn compound_rule_matches(pattern: &[CompoundRuleElement], data: &[Flags<'_>]) -> bool {
+     use crate::alloc::vec;
+     use CompoundRuleModifier::*;
+ 
+@@ -926,8 +926,8 @@ impl CompoundRuleTable {
+     /// Checks whether the given flagset has any flags in common with flags used in any compound
+     /// rule.
+     #[inline]
+-    pub fn has_any_flags(&self, flagset: &FlagSet) -> bool {
+-        self.all_flags.has_intersection(flagset)
++    pub fn has_any_flags(&self, flagset: Flags<'_>) -> bool {
++        flagset.has_intersection(&self.all_flags)
+     }
+ 
+     /// Checks whether any rule in the compound table matches the sequence of flagsets.
+@@ -941,7 +941,7 @@ impl CompoundRuleTable {
+     /// digit, `*` meaning as many of those as you want (including none) and then a required `1`
+     /// flag and `t` flag - which match the input. compound_rule_matches tries different
+     /// interpretations of the modifiers to check if the pattern matches.
+-    pub fn any_rule_matches(&self, flagsets: &[&FlagSet]) -> bool {
++    pub fn any_rule_matches(&self, flagsets: &[Flags<'_>]) -> bool {
+         self.rules
+             .iter()
+             .any(|rule| compound_rule_matches(rule, flagsets))
+@@ -1660,7 +1660,7 @@ mod test {
+ 
+     fn compound_rule_matches(pattern: &[CompoundRuleElement], data: &str) -> bool {
+         let flagsets: Vec<_> = data.chars().map(|ch| flagset!(ch)).collect();
+-        let borrowed: Vec<_> = flagsets.iter().collect();
++        let borrowed: Vec<_> = flagsets.iter().map(Flags::from).collect();
+         super::compound_rule_matches(pattern, &borrowed)
+     }
+ 
+diff --git a/src/checker.rs b/src/checker.rs
+index ad1b9428..96aa1cfe 100644
+--- a/src/checker.rs
++++ b/src/checker.rs
+@@ -5,7 +5,7 @@ use crate::{
+         AffData, Affix, AffixKind, CompoundPattern, Pfx, Prefix, Sfx, Suffix, HIDDEN_HOMONYM_FLAG,
+     },
+     alloc::{fmt, string::String, vec::Vec},
+-    classify_casing, erase_chars, AffixingMode, Casing, Dictionary, Flag, FlagSet, Stem, WordList,
++    classify_casing, erase_chars, AffixingMode, Casing, Dictionary, Flag, Flags, WordList,
+     AT_COMPOUND_BEGIN, AT_COMPOUND_END, AT_COMPOUND_MIDDLE, FULL_WORD, MAX_WORD_LEN,
+ };
+ 
+@@ -192,7 +192,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+         false
+     }
+ 
+-    fn spell_casing(&self, word: &str) -> Option<&FlagSet> {
++    fn spell_casing(&self, word: &str) -> Option<Flags<'_>> {
+         let casing = classify_casing(word);
+         match casing {
+             Casing::None | Casing::Camel | Casing::Pascal => {
+@@ -228,7 +228,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+         word: &str,
+         allow_bad_forceucase: Forceucase,
+         hidden_homonym: HiddenHomonym,
+-    ) -> Option<&FlagSet> {
++    ) -> Option<Flags<'_>> {
+         if let Some(flags) = self.check_simple_word(word, hidden_homonym) {
+             return Some(flags);
+         }
+@@ -237,7 +237,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+             .map(|result| result.flags)
+     }
+ 
+-    fn spell_casing_upper(&self, word: &str) -> Option<&FlagSet> {
++    fn spell_casing_upper(&self, word: &str) -> Option<Flags<'_>> {
+         // First try the word as-is.
+         if let Some(flags) = self.check_word(
+             word,
+@@ -317,7 +317,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+         .filter(|flags| !has_flag!(flags, self.aff.options.keep_case_flag))
+     }
+ 
+-    fn spell_sharps(&self, word: &str) -> Option<&FlagSet> {
++    fn spell_sharps(&self, word: &str) -> Option<Flags<'_>> {
+         self.do_spell_sharps(&mut String::from(word), 0, 0, 0)
+     }
+ 
+@@ -327,7 +327,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+         position: usize,
+         depth: usize,
+         replacements: usize,
+-    ) -> Option<&FlagSet> {
++    ) -> Option<Flags<'_>> {
+         const MAX_DEPTH: usize = 5;
+         const SHARP_S_BYTES: &[u8] = "ß".as_bytes();
+         debug_assert_eq!(SHARP_S_BYTES.len(), 2);
+@@ -372,7 +372,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+         None
+     }
+ 
+-    fn spell_casing_title(&self, word: &str) -> Option<&FlagSet> {
++    fn spell_casing_title(&self, word: &str) -> Option<Flags<'_>> {
+         // First try the word as-is.
+         if let Some(flags) = self.check_word(
+             word,
+@@ -404,7 +404,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+         &self,
+         word: &str,
+         hidden_homonym: HiddenHomonym,
+-    ) -> Option<&FlagSet> {
++    ) -> Option<Flags<'_>> {
+         for (_stem, flags) in self.words.get(word) {
+             if has_flag!(flags, self.aff.options.need_affix_flag) {
+                 continue;
+@@ -509,7 +509,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+                 }
+ 
+                 if !self.is_valid_inside_compound::<MODE>(flags)
+-                    && !self.is_valid_inside_compound::<MODE>(&suffix.flags)
++                    && !self.is_valid_inside_compound::<MODE>(Flags::from(&suffix.flags))
+                 {
+                     continue;
+                 }
+@@ -570,7 +570,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+                 }
+ 
+                 if !self.is_valid_inside_compound::<MODE>(flags)
+-                    && !self.is_valid_inside_compound::<MODE>(&prefix.flags)
++                    && !self.is_valid_inside_compound::<MODE>(Flags::from(&prefix.flags))
+                 {
+                     continue;
+                 }
+@@ -607,7 +607,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+         has_flag!(affix.flags, self.aff.options.circumfix_flag)
+     }
+ 
+-    fn is_valid_inside_compound<const MODE: AffixingMode>(&self, flags: &FlagSet) -> bool {
++    fn is_valid_inside_compound<const MODE: AffixingMode>(&self, flags: Flags<'_>) -> bool {
+         let is_compound = has_flag!(flags, self.aff.options.compound_flag);
+ 
+         match MODE {
+@@ -703,8 +703,8 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+                     }
+ 
+                     if !self.is_valid_inside_compound::<MODE>(flags)
+-                        && !self.is_valid_inside_compound::<MODE>(&suffix.flags)
+-                        && !self.is_valid_inside_compound::<MODE>(&prefix.flags)
++                        && !self.is_valid_inside_compound::<MODE>(Flags::from(&suffix.flags))
++                        && !self.is_valid_inside_compound::<MODE>(Flags::from(&prefix.flags))
+                     {
+                         continue;
+                     }
+@@ -1625,7 +1625,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+                     part1_entry,
+                 );
+             }
+-            let part2_word = part2_entry.stem.as_ref();
++            let part2_word = part2_entry.stem;
+             if word
+                 .get(i..)
+                 .is_some_and(|tail| tail.starts_with(part2_word))
+@@ -1789,7 +1789,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+                 return None;
+             }
+ 
+-            let part2_word = part2_entry.stem.as_ref();
++            let part2_word = part2_entry.stem;
+             if word
+                 .get(i..)
+                 .is_some_and(|tail| tail.starts_with(part2_word))
+@@ -1986,7 +1986,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+         syllables.max(1) as u16
+     }
+ 
+-    fn calculate_syllable_modifier<const MODE: AffixingMode>(&self, flags: &FlagSet) -> i16 {
++    fn calculate_syllable_modifier<const MODE: AffixingMode>(&self, flags: Flags<'_>) -> i16 {
+         // TODO: what do these flags mean?
+         let subtract_syllable = MODE == AT_COMPOUND_END
+             && !self.aff.compound_syllable_vowels.is_empty()
+@@ -1998,7 +1998,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+ 
+     fn calculate_syllable_modifier_with_suffix<const MODE: AffixingMode>(
+         &self,
+-        flags: &FlagSet,
++        flags: Flags<'_>,
+         suffix: &Suffix,
+     ) -> i16 {
+         if MODE != AT_COMPOUND_END || self.aff.compound_syllable_vowels.is_empty() {
+@@ -2108,7 +2108,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+     fn check_compound_with_rules_impl(
+         &self,
+         word: &str,
+-        words_data: &mut Vec<&'a FlagSet>,
++        words_data: &mut Vec<Flags<'a>>,
+         start_pos: usize,
+         forceucase: Forceucase,
+     ) -> Option<CompoundingResult<'_>> {
+@@ -2136,7 +2136,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+             let Some((part1_stem, part1_flags)) =
+                 self.words.get(&word[start_pos..i]).find(|(_stem, flags)| {
+                     !has_flag!(flags, self.aff.options.need_affix_flag)
+-                        && self.aff.compound_rules.has_any_flags(flags)
++                        && self.aff.compound_rules.has_any_flags(*flags)
+                 })
+             else {
+                 continue;
+@@ -2147,7 +2147,7 @@ impl<'a, S: BuildHasher> Checker<'a, S> {
+             let direct_match = if let Some((_part2_stem, part2_flags)) =
+                 self.words.get(&word[i..]).find(|(_stem, flags)| {
+                     !has_flag!(flags, self.aff.options.need_affix_flag)
+-                        && self.aff.compound_rules.has_any_flags(flags)
++                        && self.aff.compound_rules.has_any_flags(*flags)
+                 }) {
+                 words_data.push(part2_flags);
+                 let ok = self.aff.compound_rules.any_rule_matches(words_data)
+@@ -2333,8 +2333,8 @@ impl HiddenHomonym {
+ // Similar to Nuspell's AffixingResult
+ #[derive(Debug)]
+ pub(crate) struct AffixForm<'aff> {
+-    stem: &'aff Stem,
+-    flags: &'aff FlagSet,
++    stem: &'aff str,
++    flags: Flags<'aff>,
+     // Up to 2 prefixes and/or 2 suffixes allowed.
+     prefixes: [Option<&'aff Prefix>; 2],
+     suffixes: [Option<&'aff Suffix>; 2],
+@@ -2343,15 +2343,15 @@ pub(crate) struct AffixForm<'aff> {
+ // TODO: docs.
+ #[derive(Debug, PartialEq, Eq)]
+ pub(crate) struct CompoundingResult<'aff> {
+-    stem: &'aff Stem,
+-    flags: &'aff FlagSet,
++    stem: &'aff str,
++    flags: Flags<'aff>,
+     num_words_modifier: u16,
+     num_syllable_modifier: i16,
+     affixed_and_modified: bool,
+ }
+ 
+ impl<'aff> CompoundingResult<'aff> {
+-    pub fn new(stem: &'aff Stem, flags: &'aff FlagSet) -> Self {
++    pub fn new(stem: &'aff str, flags: Flags<'aff>) -> Self {
+         Self {
+             stem,
+             flags,
+diff --git a/src/lib.rs b/src/lib.rs
+index 2bce73e1..0171e042 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -27,17 +27,18 @@ pub(crate) mod checker;
+ mod hash_bag;
+ mod suggester;
+ mod umbra_slice;
++mod word_list;
+ 
+ pub use aff::parser::{
+     ParseDictionaryError, ParseDictionaryErrorKind, ParseDictionaryErrorSource, ParseFlagError,
+ };
+ pub use checker::Checker;
+ pub use suggester::Suggester;
++pub use word_list::WordIndexError;
+ 
+ use crate::alloc::{borrow::Cow, slice, string::String, vec::Vec};
+ use aff::AffData;
+ use core::{cmp::Ordering, fmt, hash::BuildHasher};
+-use hash_bag::HashBag;
+ 
+ /// Default hasher for hash tables.
+ ///
+@@ -67,7 +68,7 @@ type Stem = umbra_slice::UmbraString;
+ /// Each line in a dictionary's `.dic` file is parsed and inserted into the hash bag. The word
+ /// list is central to checking. In a nutshell the checking procedure is to try to find an edit of
+ /// the input word's casing and prefixes/suffixes that produces a word in this hash table.
+-type WordList<S> = HashBag<Stem, FlagSet, S>;
++use word_list::WordList;
+ 
+ /// A data structure allowing for fast lookup of words in a dictionary.
+ ///
+@@ -113,6 +114,8 @@ type WordList<S> = HashBag<Stem, FlagSet, S>;
+ pub struct Dictionary<S = DefaultHashBuilder> {
+     words: WordList<S>,
+     aff_data: AffData,
++    /// Ties a word index written by [`Dictionary::word_index`] to this `.aff` file.
++    aff_hash: u64,
+ }
+ 
+ #[cfg(feature = "default-hasher")]
+@@ -162,7 +165,65 @@ impl<S: BuildHasher + Clone> Dictionary<S> {
+         build_hasher: S,
+     ) -> Result<Self, ParseDictionaryError> {
+         let (words, aff_data) = aff::parser::parse(aff, dic, build_hasher)?;
+-        Ok(Self { words, aff_data })
++        Ok(Self {
++            words,
++            aff_data,
++            aff_hash: word_list::aff_hash(aff),
++        })
++    }
++
++    /// Initializes a dictionary whose stems are read in place from `index`, a word index that
++    /// [`Dictionary::word_index`] wrote for the same `.aff` file.
++    ///
++    /// Only the `.aff` file is parsed into memory. `index` is usually a memory-mapped file, so
++    /// the word list occupies page cache rather than heap, and opening the dictionary takes
++    /// about as long as parsing its `.aff` file. Words given to [`Dictionary::add`] are kept in
++    /// memory as usual, and [`Dictionary::remove_stem`] only affects those.
++    pub fn new_with_word_index_and_hasher(
++        aff: &str,
++        index: impl AsRef<[u8]> + Send + Sync + 'static,
++        build_hasher: S,
++    ) -> Result<Self, OpenWordIndexError> {
++        let (mut words, aff_data) =
++            aff::parser::parse(aff, "0", build_hasher).map_err(OpenWordIndexError::Affix)?;
++        let aff_hash = word_list::aff_hash(aff);
++        let index = word_list::WordIndex::new(alloc::boxed::Box::new(index), aff_hash)
++            .map_err(OpenWordIndexError::Index)?;
++        words.set_index(index);
++        Ok(Self {
++            words,
++            aff_data,
++            aff_hash,
++        })
++    }
++}
++
++#[cfg(feature = "default-hasher")]
++impl Dictionary<DefaultHashBuilder> {
++    /// Like [`Dictionary::new_with_word_index_and_hasher`], with the default hasher.
++    pub fn new_with_word_index(
++        aff: &str,
++        index: impl AsRef<[u8]> + Send + Sync + 'static,
++    ) -> Result<Self, OpenWordIndexError> {
++        Self::new_with_word_index_and_hasher(aff, index, DefaultHashBuilder::default())
++    }
++}
++
++/// Why [`Dictionary::new_with_word_index`] failed.
++#[derive(Debug)]
++pub enum OpenWordIndexError {
++    /// The `.aff` file could not be parsed.
++    Affix(ParseDictionaryError),
++    /// The word index could not be read with this `.aff` file.
++    Index(WordIndexError),
++}
++
++impl fmt::Display for OpenWordIndexError {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        match self {
++            Self::Affix(error) => fmt::Display::fmt(error, f),
++            Self::Index(error) => fmt::Display::fmt(error, f),
++        }
+     }
+ }
+ 
+@@ -189,6 +250,12 @@ impl<S: BuildHasher> Dictionary<S> {
+         self.checker().check(word)
+     }
+ 
++    /// This dictionary's word list in the format [`Dictionary::new_with_word_index`] reads,
++    /// tied to the `.aff` file the dictionary was parsed with.
++    pub fn word_index(&self) -> Vec<u8> {
++        self.words.to_index(self.aff_hash)
++    }
++
+     /// Creates a [Checker] that borrows this dictionary.
+     ///
+     /// The [Checker] type can be used to customize the checking behavior. See the [Checker] docs.
+@@ -409,6 +476,107 @@ impl FlagSet {
+     }
+ }
+ 
++/// The flags of one stem, borrowed from parsed words or from a word index.
++#[derive(Clone, Copy)]
++pub(crate) struct Flags<'a>(FlagsRepr<'a>);
++
++#[derive(Clone, Copy)]
++enum FlagsRepr<'a> {
++    Parsed(&'a FlagSet),
++    /// Sorted little-endian flags from a word index.
++    Indexed(&'a [u8]),
++}
++
++impl<'a> From<&'a FlagSet> for Flags<'a> {
++    fn from(flags: &'a FlagSet) -> Self {
++        Self(FlagsRepr::Parsed(flags))
++    }
++}
++
++impl<'a> Flags<'a> {
++    pub(crate) fn from_le_bytes(bytes: &'a [u8]) -> Self {
++        Self(FlagsRepr::Indexed(bytes))
++    }
++
++    /// Checks whether the given flag is contained in the flagset.
++    #[inline]
++    pub fn contains(&self, flag: &Flag) -> bool {
++        match self.0 {
++            FlagsRepr::Parsed(flags) => flags.contains(flag),
++            FlagsRepr::Indexed(bytes) => {
++                let wanted = flag.get();
++                let (mut low, mut high) = (0, bytes.len() / 2);
++                while low < high {
++                    let middle = low + (high - low) / 2;
++                    let value = u16::from_le_bytes([bytes[2 * middle], bytes[2 * middle + 1]]);
++                    match value.cmp(&wanted) {
++                        Ordering::Less => low = middle + 1,
++                        Ordering::Greater => high = middle,
++                        Ordering::Equal => return true,
++                    }
++                }
++                false
++            }
++        }
++    }
++
++    pub fn iter(&self) -> FlagsIter<'a> {
++        match self.0 {
++            FlagsRepr::Parsed(flags) => FlagsIter::Parsed(flags.iter()),
++            FlagsRepr::Indexed(bytes) => FlagsIter::Indexed(bytes.chunks_exact(2)),
++        }
++    }
++
++    #[inline]
++    pub fn is_empty(&self) -> bool {
++        self.iter().next().is_none()
++    }
++
++    /// Returns `true` if both sets have at least one element in common.
++    pub fn has_intersection(&self, other: &FlagSet) -> bool {
++        match self.0 {
++            FlagsRepr::Parsed(flags) => flags.has_intersection(other),
++            FlagsRepr::Indexed(_) => self.iter().any(|flag| other.contains(&flag)),
++        }
++    }
++}
++
++pub(crate) enum FlagsIter<'a> {
++    Parsed(slice::Iter<'a, Flag>),
++    Indexed(core::slice::ChunksExact<'a, u8>),
++}
++
++impl Iterator for FlagsIter<'_> {
++    type Item = Flag;
++
++    fn next(&mut self) -> Option<Flag> {
++        match self {
++            Self::Parsed(flags) => flags.next().copied(),
++            // Zero is never a flag; one would only come from a damaged index.
++            Self::Indexed(chunks) => {
++                chunks.find_map(|pair| Flag::new(u16::from_le_bytes([pair[0], pair[1]])))
++            }
++        }
++    }
++}
++
++impl PartialEq for Flags<'_> {
++    fn eq(&self, other: &Self) -> bool {
++        self.iter().eq(other.iter())
++    }
++}
++
++impl Eq for Flags<'_> {}
++
++impl fmt::Debug for Flags<'_> {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_fmt(format_args!(
++            "flagset!{:?}",
++            self.iter().collect::<Vec<_>>()
++        ))
++    }
++}
++
+ impl fmt::Debug for FlagSet {
+     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+         f.write_fmt(format_args!("flagset!{:?}", self.0.as_slice()))
+@@ -516,6 +684,70 @@ static EN_US: once_cell::sync::Lazy<Dictionary> =
+ mod test {
+     use super::*;
+ 
++    #[test]
++    fn word_index_checks_and_suggests_like_parsed_words() {
++        use alloc::string::ToString;
++        let indexed = Dictionary::new_with_word_index(EN_US_AFF, EN_US.word_index()).unwrap();
++        assert_eq!(indexed.words.len(), EN_US.words.len());
++        for (stem, _) in EN_US.words.iter() {
++            let mut swapped: Vec<char> = stem.chars().collect();
++            if swapped.len() > 2 {
++                swapped.swap(0, 1);
++            }
++            for word in [
++                stem.to_string(),
++                stem.to_uppercase(),
++                EN_US.aff_data.options.case_handling.titlecase(stem),
++                swapped.into_iter().collect(),
++                alloc::format!("{stem}q"),
++            ] {
++                assert_eq!(EN_US.check(&word), indexed.check(&word), "{word:?}");
++            }
++        }
++        // Ngram suggestion keeps the best-scoring stems in word list order, which a parsed list
++        // takes from its randomly seeded hasher. So tied suggestions come in any order, and a
++        // tie at the cut-off can even change the set from run to run (as for "untill", which
++        // gets "untimely" with about half the seeds). These words give the same set with any
++        // seed.
++        let (mut expected, mut actual) = (Vec::new(), Vec::new());
++        for word in [
++            "recieve",
++            "definately",
++            "seperate",
++            "acommodate",
++            "teh",
++            "wierd",
++            "Thursady",
++            "occured",
++            "becuase",
++            "goverment",
++            "tommorow",
++            "begining",
++            "beleive",
++            "existance",
++        ] {
++            EN_US.suggest(word, &mut expected);
++            indexed.suggest(word, &mut actual);
++            expected.sort_unstable();
++            actual.sort_unstable();
++            assert_eq!(expected, actual, "{word:?}");
++        }
++        EN_US.suggest("untill", &mut expected);
++        indexed.suggest("untill", &mut actual);
++        assert_eq!(expected.first(), actual.first());
++
++        // Added words work on top of an index, and stay out of it.
++        let mut indexed = indexed;
++        assert!(!indexed.check("Flectar"));
++        indexed.add("Flectar").unwrap();
++        assert!(indexed.check("Flectar"));
++        assert_eq!(indexed.word_index(), {
++            let mut parsed = EN_US.clone();
++            parsed.add("Flectar").unwrap();
++            parsed.word_index()
++        });
++    }
++
+     macro_rules! flag {
+         ( $x:expr ) => {{
+             Flag::new($x as u16).unwrap()
+diff --git a/src/suggester/ngram.rs b/src/suggester/ngram.rs
+index 2ca52b8d..155c5f93 100644
+--- a/src/suggester/ngram.rs
++++ b/src/suggester/ngram.rs
+@@ -34,7 +34,7 @@ use core::slice;
+ use crate::alloc::{collections::BinaryHeap, string::String, vec::Vec};
+ 
+ use crate::aff::{CaseHandling, HIDDEN_HOMONYM_FLAG, MAX_SUGGESTIONS};
+-use crate::{FlagSet, FULL_WORD};
++use crate::{Flags, FULL_WORD};
+ 
+ use super::Suggester;
+ 
+@@ -86,7 +86,7 @@ impl<S: BuildHasher> Suggester<'_, S> {
+             {
+                 continue;
+             }
+-            let stem = CharsStr::new(stem.as_str(), &mut stem_buf);
++            let stem = CharsStr::new(stem, &mut stem_buf);
+             let mut score =
+                 left_common_substring_length(&self.checker.aff.options.case_handling, word, stem)
+                     as isize;
+@@ -151,7 +151,7 @@ impl<S: BuildHasher> Suggester<'_, S> {
+         {
+             expanded_cross_affix.clear();
+             self.expand_stem_for_ngram(
+-                stem.as_str(),
++                stem,
+                 flags,
+                 word_str,
+                 &mut expanded_list,
+@@ -294,7 +294,7 @@ impl<S: BuildHasher> Suggester<'_, S> {
+     fn expand_stem_for_ngram(
+         &self,
+         stem: &str,
+-        flags: &FlagSet,
++        flags: Flags<'_>,
+         word: &str,
+         expanded_list: &mut Vec<String>,
+         cross_affix: &mut Vec<bool>,
+diff --git a/src/umbra_slice.rs b/src/umbra_slice.rs
+index 59a0ef74..8cd4bd4c 100644
+--- a/src/umbra_slice.rs
++++ b/src/umbra_slice.rs
+@@ -351,7 +351,11 @@ extern "C" {
+     ///
+     /// Returns 0 for equal, < 0 for less than and > 0 for greater
+     /// than.
+-    fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> core::ffi::c_int;
++    fn memcmp(
++        s1: *const core::ffi::c_void,
++        s2: *const core::ffi::c_void,
++        n: usize,
++    ) -> core::ffi::c_int;
+ }
+ 
+ // This is a polyfill for `core::ptr::from_ref` introduced in Rust 1.76.0.
+diff --git a/src/word_list.rs b/src/word_list.rs
+new file mode 100644
+index 00000000..29235ea1
+--- /dev/null
++++ b/src/word_list.rs
+@@ -0,0 +1,367 @@
++//! The stems of a dictionary with their flags.
++//!
++//! Stems parsed from a `.dic` file live in a [`HashBag`]. A dictionary can instead read them in
++//! place from a word index, a file written by [`crate::Dictionary::word_index`]: an application
++//! can map that file into memory, so the word list takes up page cache, which the system can
++//! reclaim, rather than heap. Words added later always go to the hash bag.
++//!
++//! A word index is little-endian:
++//!
++//! | Bytes | Contents |
++//! | --- | --- |
++//! | 8 | [`MAGIC`] |
++//! | 8 | FNV-1a hash of the `.aff` file the flags were parsed with |
++//! | 4 | number of entries |
++//! | 4 | length of the stem pool |
++//! | 4 | length of the flag pool |
++//! | 4 | zero |
++//! | 12 per entry | stem offset (4), stem length (2), flag count (2), flag offset (4) |
++//! | | stem pool: UTF-8 stems, sorted by their bytes |
++//! | | flag pool: each stem's sorted flags, two bytes each |
++//!
++//! Entries are sorted by stem, and a stem's homonyms keep the order the hash bag yields them in.
++//! Reading never trusts the file: each read is bounds checked, and a damaged entry is skipped.
++
++use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
++use core::{cmp::Ordering, fmt, hash::BuildHasher, num::NonZeroU16};
++
++use crate::{hash_bag::HashBag, FlagSet, Flags, Stem};
++
++pub(crate) const MAGIC: &[u8; 8] = b"SBINDEX1";
++const HEADER_LEN: usize = 32;
++const ENTRY_LEN: usize = 12;
++
++/// FNV-1a, to tie a word index to the `.aff` file its flags came from.
++pub(crate) fn aff_hash(aff: &str) -> u64 {
++    aff.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
++        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
++    })
++}
++
++pub(crate) struct WordList<S> {
++    parsed: HashBag<Stem, FlagSet, S>,
++    index: Option<WordIndex>,
++}
++
++impl<S: Clone> Clone for WordList<S> {
++    fn clone(&self) -> Self {
++        // The index's bytes belong to the caller and can't be duplicated, so a clone keeps only
++        // the parsed words. `Dictionary::clone` documents this.
++        Self {
++            parsed: self.parsed.clone(),
++            index: None,
++        }
++    }
++}
++
++impl<S> WordList<S> {
++    pub fn len(&self) -> usize {
++        self.parsed.len() + self.index.as_ref().map_or(0, |index| index.entries)
++    }
++
++    /// Every stem with its flags, indexed ones first.
++    pub fn iter(&self) -> impl Iterator<Item = (&str, Flags<'_>)> {
++        self.index.iter().flat_map(WordIndex::iter).chain(
++            self.parsed
++                .iter()
++                .map(|(stem, flags)| (stem.as_str(), Flags::from(flags))),
++        )
++    }
++}
++
++impl<S: BuildHasher> WordList<S> {
++    pub fn with_capacity_and_hasher(capacity: usize, build_hasher: S) -> Self {
++        Self {
++            parsed: HashBag::with_capacity_and_hasher(capacity, build_hasher),
++            index: None,
++        }
++    }
++
++    pub fn set_index(&mut self, index: WordIndex) {
++        self.index = Some(index);
++    }
++
++    pub fn insert(&mut self, stem: Stem, flags: FlagSet) {
++        self.parsed.insert(stem, flags);
++    }
++
++    /// The entries for `word`, indexed ones first.
++    pub fn get<'list, 'word>(
++        &'list self,
++        word: &'word str,
++    ) -> impl Iterator<Item = (&'list str, Flags<'list>)> + use<'list, 'word, S> {
++        self.index
++            .iter()
++            .flat_map(move |index| index.get(word))
++            .chain(
++                self.parsed
++                    .get(word)
++                    .map(|(stem, flags)| (stem.as_str(), Flags::from(flags))),
++            )
++    }
++
++    /// The flags of the parsed entries for `word`. Indexed entries can't be changed.
++    pub fn get_mut<'list, 'word>(
++        &'list mut self,
++        word: &'word str,
++    ) -> impl Iterator<Item = &'list mut FlagSet> + use<'list, 'word, S> {
++        self.parsed.get_mut(word)
++    }
++
++    /// This list in the word index format.
++    pub fn to_index(&self, aff_hash: u64) -> Vec<u8> {
++        let mut stems: Vec<&str> = self.iter().map(|(stem, _)| stem).collect();
++        stems.sort_unstable();
++        stems.dedup();
++
++        let mut entries = Vec::with_capacity(self.len() * ENTRY_LEN);
++        let mut pool = Vec::new();
++        let mut flag_pool = Vec::new();
++        let mut flag_offsets: BTreeMap<Vec<u16>, u32> = BTreeMap::new();
++        let mut count = 0u32;
++        for stem in stems {
++            let stem_start = u32::try_from(pool.len()).expect("stem pool fits a word index");
++            let stem_len = u16::try_from(stem.len()).expect("stems are shorter than 64 KiB");
++            pool.extend_from_slice(stem.as_bytes());
++            for (_, flags) in self.get(stem) {
++                let flags: Vec<u16> = flags.iter().map(NonZeroU16::get).collect();
++                let flag_count =
++                    u16::try_from(flags.len()).expect("flag sets have at most 65535 flags");
++                let flag_start = *flag_offsets.entry(flags).or_insert_with_key(|flags| {
++                    let start =
++                        u32::try_from(flag_pool.len()).expect("flag pool fits a word index");
++                    for flag in flags {
++                        flag_pool.extend_from_slice(&flag.to_le_bytes());
++                    }
++                    start
++                });
++                entries.extend_from_slice(&stem_start.to_le_bytes());
++                entries.extend_from_slice(&stem_len.to_le_bytes());
++                entries.extend_from_slice(&flag_count.to_le_bytes());
++                entries.extend_from_slice(&flag_start.to_le_bytes());
++                count += 1;
++            }
++        }
++
++        let mut index =
++            Vec::with_capacity(HEADER_LEN + entries.len() + pool.len() + flag_pool.len());
++        index.extend_from_slice(MAGIC);
++        index.extend_from_slice(&aff_hash.to_le_bytes());
++        index.extend_from_slice(&count.to_le_bytes());
++        index.extend_from_slice(
++            &u32::try_from(pool.len())
++                .expect("stem pool fits")
++                .to_le_bytes(),
++        );
++        index.extend_from_slice(
++            &u32::try_from(flag_pool.len())
++                .expect("flag pool fits")
++                .to_le_bytes(),
++        );
++        index.extend_from_slice(&0u32.to_le_bytes());
++        index.extend_from_slice(&entries);
++        index.extend_from_slice(&pool);
++        index.extend_from_slice(&flag_pool);
++        index
++    }
++}
++
++/// Why a word index can't be read.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum WordIndexError {
++    /// The bytes aren't a word index in this format.
++    Format,
++    /// The index was written for a different `.aff` file.
++    OtherAffix,
++}
++
++impl fmt::Display for WordIndexError {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str(match self {
++            Self::Format => "not a word index in a known format",
++            Self::OtherAffix => "the word index was written for a different .aff file",
++        })
++    }
++}
++
++/// A word index in bytes the caller owns, often a memory-mapped file.
++pub(crate) struct WordIndex {
++    bytes: Box<dyn AsRef<[u8]> + Send + Sync>,
++    entries: usize,
++    pool_start: usize,
++    flags_start: usize,
++}
++
++struct Entry {
++    stem_start: usize,
++    stem_len: usize,
++    flag_count: usize,
++    flag_start: usize,
++}
++
++fn read_u32(bytes: &[u8], at: usize) -> Option<u32> {
++    bytes
++        .get(at..at.checked_add(4)?)?
++        .try_into()
++        .ok()
++        .map(u32::from_le_bytes)
++}
++
++impl WordIndex {
++    pub fn new(
++        bytes: Box<dyn AsRef<[u8]> + Send + Sync>,
++        aff_hash: u64,
++    ) -> Result<Self, WordIndexError> {
++        let data = (*bytes).as_ref();
++        if data.get(..8) != Some(MAGIC.as_slice()) || data.len() < HEADER_LEN {
++            return Err(WordIndexError::Format);
++        }
++        let hash = data[8..16]
++            .try_into()
++            .map(u64::from_le_bytes)
++            .map_err(|_| WordIndexError::Format)?;
++        if hash != aff_hash {
++            return Err(WordIndexError::OtherAffix);
++        }
++        let field = |at| {
++            read_u32(data, at)
++                .map(|value| value as usize)
++                .ok_or(WordIndexError::Format)
++        };
++        let entries = field(16)?;
++        let pool_len = field(20)?;
++        let flags_len = field(24)?;
++        let pool_start = entries
++            .checked_mul(ENTRY_LEN)
++            .and_then(|len| len.checked_add(HEADER_LEN))
++            .ok_or(WordIndexError::Format)?;
++        let flags_start = pool_start
++            .checked_add(pool_len)
++            .ok_or(WordIndexError::Format)?;
++        let end = flags_start
++            .checked_add(flags_len)
++            .ok_or(WordIndexError::Format)?;
++        if end != data.len() || flags_len % 2 != 0 {
++            return Err(WordIndexError::Format);
++        }
++        Ok(Self {
++            bytes,
++            entries,
++            pool_start,
++            flags_start,
++        })
++    }
++
++    fn data(&self) -> &[u8] {
++        (*self.bytes).as_ref()
++    }
++
++    fn entry(&self, i: usize) -> Option<Entry> {
++        let data = self.data();
++        let at = HEADER_LEN + i.checked_mul(ENTRY_LEN)?;
++        let raw = data.get(at..at + ENTRY_LEN)?;
++        Some(Entry {
++            stem_start: u32::from_le_bytes(raw[0..4].try_into().ok()?) as usize,
++            stem_len: u16::from_le_bytes(raw[4..6].try_into().ok()?) as usize,
++            flag_count: u16::from_le_bytes(raw[6..8].try_into().ok()?) as usize,
++            flag_start: u32::from_le_bytes(raw[8..12].try_into().ok()?) as usize,
++        })
++    }
++
++    fn stem_bytes(&self, entry: &Entry) -> Option<&[u8]> {
++        let start = self.pool_start.checked_add(entry.stem_start)?;
++        let end = start.checked_add(entry.stem_len)?;
++        if end > self.flags_start {
++            return None;
++        }
++        self.data().get(start..end)
++    }
++
++    fn resolve(&self, entry: &Entry) -> Option<(&str, Flags<'_>)> {
++        let stem = core::str::from_utf8(self.stem_bytes(entry)?).ok()?;
++        let start = self.flags_start.checked_add(entry.flag_start)?;
++        let end = start.checked_add(entry.flag_count.checked_mul(2)?)?;
++        Some((stem, Flags::from_le_bytes(self.data().get(start..end)?)))
++    }
++
++    /// The first entry whose stem is not less than `word`.
++    fn lower_bound(&self, word: &[u8]) -> usize {
++        let (mut low, mut high) = (0, self.entries);
++        while low < high {
++            let middle = low + (high - low) / 2;
++            let less = self
++                .entry(middle)
++                .and_then(|entry| self.stem_bytes(&entry))
++                .is_some_and(|stem| stem.cmp(word) == Ordering::Less);
++            if less {
++                low = middle + 1;
++            } else {
++                high = middle;
++            }
++        }
++        low
++    }
++
++    pub fn get<'index, 'word>(
++        &'index self,
++        word: &'word str,
++    ) -> impl Iterator<Item = (&'index str, Flags<'index>)> + use<'index, 'word> {
++        let start = self.lower_bound(word.as_bytes());
++        (start..self.entries)
++            .map_while(move |i| {
++                let entry = self.entry(i)?;
++                (self.stem_bytes(&entry)? == word.as_bytes()).then_some(entry)
++            })
++            .filter_map(move |entry| self.resolve(&entry))
++    }
++
++    pub fn iter(&self) -> impl Iterator<Item = (&str, Flags<'_>)> {
++        (0..self.entries).filter_map(move |i| self.resolve(&self.entry(i)?))
++    }
++}
++
++#[cfg(test)]
++mod test {
++    use super::*;
++    use crate::Flag;
++
++    #[test]
++    fn damaged_indexes_are_rejected_or_read_safely() {
++        let bag_entries = [
++            ("cat", alloc::vec![1u16, 4]),
++            ("cat", alloc::vec![2]),
++            ("dog", alloc::vec![3]),
++        ];
++        let mut list = WordList::with_capacity_and_hasher(4, crate::DefaultHashBuilder::default());
++        for (stem, flags) in bag_entries.iter() {
++            let flags: Vec<Flag> = flags.iter().map(|flag| Flag::new(*flag).unwrap()).collect();
++            list.insert(Stem::from(*stem), FlagSet::from(flags));
++        }
++        let bytes = list.to_index(7);
++        assert!(matches!(
++            WordIndex::new(Box::new(bytes.clone()), 8),
++            Err(WordIndexError::OtherAffix)
++        ));
++        let mut truncated = bytes.clone();
++        truncated.pop();
++        assert!(matches!(
++            WordIndex::new(Box::new(truncated), 7),
++            Err(WordIndexError::Format)
++        ));
++
++        let index = WordIndex::new(Box::new(bytes.clone()), 7).unwrap();
++        let cats: Vec<Vec<u16>> = index
++            .get("cat")
++            .map(|(_, flags)| flags.iter().map(NonZeroU16::get).collect())
++            .collect();
++        assert_eq!(cats.len(), 2);
++        assert!(index.get("cow").next().is_none());
++
++        // A stem offset pointing past the pool skips that entry instead of panicking.
++        let mut damaged = bytes;
++        damaged[HEADER_LEN..HEADER_LEN + 4].copy_from_slice(&u32::MAX.to_le_bytes());
++        let index = WordIndex::new(Box::new(damaged), 7).unwrap();
++        assert!(index.iter().count() < 3);
++        let _ = index.get("cat").count();
++    }
++}
+diff --git a/tests/legacy.rs b/tests/legacy.rs
+index 371a20b2..0cdcd30e 100644
+--- a/tests/legacy.rs
++++ b/tests/legacy.rs
+@@ -39,28 +39,32 @@ fn do_check_case(case: &str) {
+     let path = manifest_path.join("tests/legacy").join(case);
+     let aff = read_to_string(path.with_extension("aff")).unwrap();
+     let dic = read_to_string(path.with_extension("dic")).unwrap();
+-    let dict = Dictionary::new(&aff, &dic).unwrap();
++    let parsed = Dictionary::new(&aff, &dic).unwrap();
++    // The same words read in place from a word index must check the same.
++    let indexed = Dictionary::new_with_word_index(&aff, parsed.word_index()).unwrap();
+ 
+-    for good_word in fs::read_to_string(path.with_extension("good"))
+-        .iter()
+-        .flat_map(|text| text.lines())
+-    {
+-        let word = good_word.trim();
+-        assert!(
+-            dict.check(word),
+-            "expected {word:?} to be correct but it was incorrect"
+-        );
+-    }
++    for (source, dict) in [("parsed", &parsed), ("indexed", &indexed)] {
++        for good_word in fs::read_to_string(path.with_extension("good"))
++            .iter()
++            .flat_map(|text| text.lines())
++        {
++            let word = good_word.trim();
++            assert!(
++                dict.check(word),
++                "{source}: expected {word:?} to be correct but it was incorrect"
++            );
++        }
+ 
+-    for wrong_word in fs::read_to_string(path.with_extension("wrong"))
+-        .iter()
+-        .flat_map(|text| text.lines())
+-    {
+-        let word = wrong_word.trim();
+-        assert!(
+-            !dict.check(word),
+-            "expected {word:?} to be incorrect but it was correct"
+-        );
++        for wrong_word in fs::read_to_string(path.with_extension("wrong"))
++            .iter()
++            .flat_map(|text| text.lines())
++        {
++            let word = wrong_word.trim();
++            assert!(
++                !dict.check(word),
++                "{source}: expected {word:?} to be incorrect but it was correct"
++            );
++        }
+     }
+ }
+ 
+@@ -202,8 +206,14 @@ fn do_suggest_case(case: &str) {
+     let path = manifest_path.join("tests/legacy").join(case);
+     let aff = read_to_string(path.with_extension("aff")).unwrap();
+     let dic = read_to_string(path.with_extension("dic")).unwrap();
+-    let dict = Dictionary::new(&aff, &dic).unwrap();
++    let parsed = Dictionary::new(&aff, &dic).unwrap();
++    let indexed = Dictionary::new_with_word_index(&aff, parsed.word_index()).unwrap();
++    for (source, dict) in [("parsed", &parsed), ("indexed", &indexed)] {
++        suggest_case(&path, source, dict);
++    }
++}
+ 
++fn suggest_case(path: &Path, source: &str, dict: &Dictionary) {
+     let mut list_sugs = Vec::new();
+     let mut sugs = Vec::new();
+     for word in fs::read_to_string(path.with_extension("wrong"))
+@@ -213,7 +223,7 @@ fn do_suggest_case(case: &str) {
+     {
+         assert!(
+             !dict.check(word),
+-            "word {word:?} was in the .wrong file but was actually correct"
++            "{source}: word {word:?} was in the .wrong file but was actually correct"
+         );
+ 
+         dict.suggest(word, &mut sugs);
+@@ -237,7 +247,7 @@ fn do_suggest_case(case: &str) {
+ 
+     assert_eq!(
+         expected_list_sugs, list_sugs,
+-        "(left: expected, right: actual)"
++        "{source} (left: expected, right: actual)"
+     );
+ }
+ 

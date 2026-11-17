@@ -23,6 +23,9 @@ const MAX_OCCURRENCES: usize = 250;
 pub struct Occurrence {
     pub start: i64,
     pub end: i64,
+    /// The start the series gives it, which names it (its RECURRENCE-ID)
+    /// also when it was moved on its own.
+    pub original: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -345,6 +348,7 @@ pub fn expand(
         if exdates.iter().any(|ex| same_occurrence(*ex, start)) {
             continue;
         }
+        let original = start;
         let (start, end) = match overrides
             .iter()
             .find(|(orig, _, _)| same_occurrence(*orig, start))
@@ -353,7 +357,11 @@ pub fn expand(
             None => (start, start + duration_ms),
         };
         if start < window_end && end > window_start {
-            occurrences.push(Occurrence { start, end });
+            occurrences.push(Occurrence {
+                start,
+                end,
+                original,
+            });
             if occurrences.len() >= MAX_OCCURRENCES {
                 break;
             }

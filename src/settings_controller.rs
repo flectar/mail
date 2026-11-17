@@ -51,6 +51,66 @@ fn save_download_directory(
     }
 }
 
+/// Wires the Updates card and the sidebar notice to src/updates.rs, and
+/// starts checking in builds that offer it.
+pub(super) fn register_update_callbacks(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    cache_dir: &std::path::Path,
+) {
+    let updates = app.global::<Updates>();
+    updates.set_offered(crate::updates::offered());
+    let app_weak = app.as_weak();
+    let state_for_updates = Rc::clone(state);
+    let runtime_for_updates = runtime.clone();
+    updates.on_set_enabled(move |enabled| {
+        crate::updates::set_enabled(enabled);
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_updates.borrow().core.clone() else {
+            return;
+        };
+        match runtime_for_updates.block_on(core.set_check_for_updates(enabled)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Update preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save the update preference: {}",
+                error,
+            )),
+        }
+    });
+    updates.on_check_now(crate::updates::check_now);
+    updates.on_dismiss(crate::updates::dismiss);
+    let app_weak = app.as_weak();
+    updates.on_open_release(move || {
+        if let (Some(app), Some(page)) = (app_weak.upgrade(), crate::updates::release_page()) {
+            app.invoke_open_email_link(page.into());
+        }
+    });
+    let app_weak = app.as_weak();
+    crate::updates::start(runtime, cache_dir, move |view| {
+        let app_weak = app_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let updates = app.global::<Updates>();
+            updates.set_enabled(view.enabled);
+            updates.set_checking(view.checking);
+            updates.set_failed(view.failed);
+            updates.set_current(view.current);
+            updates.set_dismissed(view.dismissed);
+            let (version, summary) = view
+                .available
+                .map(|release| (release.version, release.summary))
+                .unwrap_or_default();
+            updates.set_version(version.into());
+            updates.set_summary(summary.into());
+        });
+    });
+}
+
 pub(super) fn register_settings_preference_callbacks(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -86,6 +146,30 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_badge = Rc::clone(state);
+    let runtime_for_badge = runtime.clone();
+    app.on_save_unread_badge(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_badge.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Notification preferences are active for this session.",
+            ));
+            return;
+        };
+        match runtime_for_badge.block_on(core.set_unread_badge(enabled)) {
+            Ok(()) => {
+                crate::notifications::preferences_changed();
+                app.set_sync_status(UiMessage::plain("Notification preferences saved."));
+            }
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not save notifications: {}", error))
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_sync_interval = Rc::clone(state);
     let runtime_for_sync_interval = runtime.clone();
     app.on_save_sync_interval(move |minutes| {
@@ -111,20 +195,64 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
-    let state_for_read_on_open = Rc::clone(state);
-    let runtime_for_read_on_open = runtime.clone();
-    app.on_save_mark_read_on_open(move |enabled| {
+    let state_for_undo_send = Rc::clone(state);
+    let runtime_for_undo_send = runtime.clone();
+    app.on_save_undo_send(move |seconds| {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        state_for_read_on_open.borrow_mut().mark_read_on_open = enabled;
-        let Some(core) = state_for_read_on_open.borrow().core.clone() else {
+        let Some(core) = state_for_undo_send.borrow().core.clone() else {
+            return;
+        };
+        match runtime_for_undo_send.block_on(core.set_undo_send_seconds(i64::from(seconds))) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Undo send preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save the undo send preference: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_text_style = Rc::clone(state);
+    let runtime_for_text_style = runtime.clone();
+    app.on_save_compose_text_style(move |font, size| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_text_style.borrow().core.clone() else {
+            return;
+        };
+        match runtime_for_text_style.block_on(core.set_compose_text_style(font.into(), size.into()))
+        {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Text style preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save the text style preference: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_mark_read = Rc::clone(state);
+    let runtime_for_mark_read = runtime.clone();
+    app.on_save_mark_read(move |choice| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(choice) = flectar_mail_core::models::MarkRead::parse(&choice) else {
+            return;
+        };
+        state_for_mark_read.borrow_mut().mark_read = choice;
+        // A wait that started under the old choice ends with it.
+        crate::read_marking::cancel();
+        let Some(core) = state_for_mark_read.borrow().core.clone() else {
             app.set_sync_status(UiMessage::plain(
                 "Message-opening preference updated for this session.",
             ));
             return;
         };
-        match runtime_for_read_on_open.block_on(core.set_mark_read_on_open(enabled)) {
+        match runtime_for_mark_read.block_on(core.set_mark_read(choice)) {
             Ok(()) => app.set_sync_status(UiMessage::plain("Message-opening preference saved.")),
             Err(error) => app.set_sync_status(UiMessage::detail(
                 "Could not save message-opening preference: {}",
@@ -345,6 +473,131 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_motion = Rc::clone(state);
+    let runtime_for_motion = runtime.clone();
+    app.global::<crate::MotionSettings>()
+        .on_choose(move |preference| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            if flectar_mail_core::models::ReduceMotion::parse(&preference).is_none() {
+                return;
+            }
+            let motion = app.global::<crate::MotionSettings>();
+            let previous = motion.get_preference();
+            motion.set_preference(preference.clone());
+            let Some(core) = state_for_motion.borrow().core.clone() else {
+                app.set_sync_status(UiMessage::plain("Reduce motion updated for this session."));
+                return;
+            };
+            match runtime_for_motion.block_on(core.set_reduce_motion(&preference)) {
+                Ok(()) => app.set_sync_status(UiMessage::plain("Reduce motion preference saved.")),
+                Err(error) => {
+                    motion.set_preference(previous);
+                    app.set_sync_status(UiMessage::detail(
+                        "Could not save the reduce motion preference: {}",
+                        error,
+                    ));
+                }
+            }
+        });
+
+    let app_weak = app.as_weak();
+    let state_for_text_size = Rc::clone(state);
+    let runtime_for_text_size = runtime.clone();
+    app.global::<crate::InterfaceText>()
+        .on_choose(move |choice| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let Some(size) = flectar_mail_core::models::InterfaceTextSize::parse(&choice) else {
+                return;
+            };
+            let previous = flectar_mail_core::models::InterfaceTextSize::parse(
+                &app.global::<crate::InterfaceText>().get_size(),
+            )
+            .unwrap_or_default();
+            crate::text_size::apply(&app, size);
+            let Some(core) = state_for_text_size.borrow().core.clone() else {
+                app.set_sync_status(UiMessage::plain(
+                    "Interface text size updated for this session.",
+                ));
+                return;
+            };
+            match runtime_for_text_size.block_on(core.set_interface_text_size(&choice)) {
+                Ok(()) => app.set_sync_status(UiMessage::plain("Interface text size saved.")),
+                Err(error) => {
+                    crate::text_size::apply(&app, previous);
+                    app.set_sync_status(UiMessage::detail(
+                        "Could not save the interface text size: {}",
+                        error,
+                    ));
+                }
+            }
+        });
+
+    let app_weak = app.as_weak();
+    let state_for_receipts = Rc::clone(state);
+    let runtime_for_receipts = runtime.clone();
+    app.global::<crate::ReadReceipts>()
+        .on_choose(move |choice| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            if flectar_mail_core::models::ReadReceiptPolicy::parse(&choice).is_none() {
+                return;
+            }
+            let receipts = app.global::<crate::ReadReceipts>();
+            let previous = receipts.get_policy();
+            receipts.set_policy(choice.clone());
+            let Some(core) = state_for_receipts.borrow().core.clone() else {
+                receipts.set_policy(previous);
+                return;
+            };
+            match runtime_for_receipts.block_on(core.set_read_receipts(&choice)) {
+                Ok(()) => app.set_sync_status(UiMessage::plain("Read receipt preference saved.")),
+                Err(error) => {
+                    receipts.set_policy(previous);
+                    app.set_sync_status(UiMessage::detail(
+                        "Could not save the read receipt preference: {}",
+                        error,
+                    ));
+                }
+            }
+        });
+
+    let app_weak = app.as_weak();
+    let state_for_invitations = Rc::clone(state);
+    let runtime_for_invitations = runtime.clone();
+    app.global::<InvitationSettings>().on_choose(move |choice| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        if flectar_mail_core::models::AddInvitations::parse(&choice).is_none() {
+            return;
+        }
+        let invitations = app.global::<InvitationSettings>();
+        let previous = invitations.get_add();
+        invitations.set_add(choice.clone());
+        let Some(core) = state_for_invitations.borrow().core.clone() else {
+            invitations.set_add(previous);
+            return;
+        };
+        match runtime_for_invitations.block_on(core.set_add_invitations(&choice)) {
+            Ok(()) => {
+                app.set_sync_status(UiMessage::plain("Calendar invitations preference saved."))
+            }
+            Err(error) => {
+                invitations.set_add(previous);
+                app.set_sync_status(UiMessage::detail(
+                    "Could not save the calendar invitations preference: {}",
+                    error,
+                ));
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_custom_theme = Rc::clone(state);
     let runtime_for_custom_theme = runtime.clone();
     app.on_save_custom_theme(
@@ -501,6 +754,52 @@ pub(super) fn register_settings_preference_callbacks(
                 error,
             )),
         }
+    });
+
+    // Density and preview lines shape the same rows, so they save together.
+    let app_weak = app.as_weak();
+    let state_for_rows = Rc::clone(state);
+    let runtime_for_rows = runtime.clone();
+    app.on_save_list_rows(move || {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let density = if app.get_mail_compact_rows() {
+            flectar_mail_core::models::ListDensity::Compact
+        } else {
+            flectar_mail_core::models::ListDensity::Comfortable
+        };
+        let preview_lines = u8::try_from(app.get_mail_preview_lines().clamp(0, 3)).unwrap_or(1);
+        let Some(core) = state_for_rows.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Message list preference updated for this session.",
+            ));
+            return;
+        };
+        match runtime_for_rows.block_on(core.set_list_rows(density, preview_lines)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Message list preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save message list preference: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_spelling = Rc::clone(state);
+    let runtime_for_spelling = runtime.clone();
+    app.on_save_spelling_enabled(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let languages = crate::spelling::service().and_then(|spelling| spelling.chosen_languages());
+        save_spelling(
+            &app,
+            &state_for_spelling,
+            &runtime_for_spelling,
+            enabled,
+            languages,
+        );
     });
 
     let app_weak = app.as_weak();
@@ -876,6 +1175,28 @@ pub(super) fn register_settings_preference_callbacks(
 }
 
 /// Both entry points share one asynchronous persistence path and busy state.
+/// Check spelling or not, in `languages` or the system's, from the settings or a message's
+/// menu. Open messages follow at once.
+pub(super) fn save_spelling(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    enabled: bool,
+    languages: Option<Vec<String>>,
+) {
+    crate::spelling::apply_settings(enabled, languages.clone());
+    crate::spelling::apply_to_window(app);
+    let Some(core) = state.borrow().core.clone() else {
+        return;
+    };
+    if let Err(error) = runtime.block_on(core.set_spelling(enabled, languages)) {
+        app.set_sync_status(UiMessage::detail(
+            "Could not save spelling preference: {}",
+            error,
+        ));
+    }
+}
+
 pub(super) fn register_oauth_settings_callbacks(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -995,25 +1316,25 @@ mod tests {
         let theme = app.global::<AppTheme>();
         let draft = app.global::<ThemeDraft>();
         let saved = theme.get_custom_light_primary();
-        app.set_settings_open(true);
+        app.invoke_open_settings();
         slint::platform::update_timers_and_animations();
 
         // The editor previews a color before it is saved.
         draft.invoke_begin();
         theme.set_custom_light_primary(slint::Color::from_rgb_u8(0xff, 0, 0));
-        app.set_settings_open(false);
+        app.invoke_close_settings();
         slint::platform::update_timers_and_animations();
         assert_eq!(theme.get_custom_light_primary(), saved);
         assert!(!draft.get_dirty());
 
         // A saved palette stays.
-        app.set_settings_open(true);
+        app.invoke_open_settings();
         slint::platform::update_timers_and_animations();
         draft.invoke_begin();
         let chosen = slint::Color::from_rgb_u8(0, 0x80, 0);
         theme.set_custom_light_primary(chosen);
         draft.set_dirty(false);
-        app.set_settings_open(false);
+        app.invoke_close_settings();
         slint::platform::update_timers_and_animations();
         assert_eq!(theme.get_custom_light_primary(), chosen);
     }

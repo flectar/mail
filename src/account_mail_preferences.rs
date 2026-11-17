@@ -4,7 +4,7 @@ use flectar_mail_core::{
     Core,
     mail_security::{MailSecurity, OpenedMessage},
     models::{
-        AccountConfig, SenderIdentity, SenderIdentitySource, Settings, Signature,
+        AccountConfig, MessageFormat, SenderIdentity, SenderIdentitySource, Settings, Signature,
         SignatureDefaults,
     },
     sender_identities::{ManualIdentityPolicy, manual_identity_policy},
@@ -82,6 +82,22 @@ fn status(app: &AppWindow, result: Result<(), String>, success: &str) {
             Err(e) => e.into(),
         });
 }
+/// A signature written in the composer was saved: Settings shows it, chosen, when it still
+/// shows that signature's account.
+pub(super) fn signature_saved(app: &AppWindow, saved: &Signature, settings: &Settings) {
+    let ui = app.global::<AccountMailPreferences>();
+    if i64::from(ui.get_account_id()) != saved.account_id {
+        return;
+    }
+    project(app, settings, saved.account_id);
+    let index = choices(settings, saved.account_id)
+        .iter()
+        .position(|signature| signature.id == saved.id)
+        .unwrap_or(0);
+    ui.invoke_edit_signature(index as i32);
+    ui.set_status("Signature saved.".into());
+}
+
 pub(super) fn choices(settings: &Settings, account_id: i64) -> Vec<Signature> {
     settings
         .signature_list
@@ -99,7 +115,7 @@ fn project(app: &AppWindow, settings: &Settings, account_id: i64) {
             .map(|s| SignatureChoice {
                 id: s.id.clone().into(),
                 name: s.name.clone().into(),
-                text: flectar_mail_core::signatures::plain_text(s).into(),
+                text: crate::rich_compose::signature_preview(&s.html).into(),
             })
             .collect::<Vec<_>>(),
     )));
@@ -373,6 +389,7 @@ pub(super) fn register(
         if ui.get_busy() {
             return;
         }
+        let (replies_core, replies_runtime) = (Arc::clone(&core), work.runtime.clone());
         work.spawn(
             &app,
             true,
@@ -390,6 +407,17 @@ pub(super) fn register(
                             clear_sender_form(&ui);
                             project_identities(&app, config, &identities, warning.as_deref());
                             ui.invoke_edit_signature(-1);
+                            ui.set_message_format_index(i32::from(
+                                config.settings.message_format == MessageFormat::PlainText,
+                            ));
+                            ui.set_plain_text_replies(config.settings.plain_text_replies);
+                            ui.set_request_read_receipts(config.settings.request_read_receipts);
+                            crate::auto_replies::load_tab(
+                                &app,
+                                &replies_runtime,
+                                replies_core,
+                                config,
+                            );
                             let p = &config.settings.security;
                             ui.set_fingerprint(p.signing_fingerprint.clone().into());
                             ui.set_sign(p.sign_by_default);
@@ -405,6 +433,71 @@ pub(super) fn register(
                         }
                     }
                     Err(e) => ui.set_status(e.into()),
+                }
+            },
+        );
+    });
+    let weak = app.as_weak();
+    let state_message_format = state.clone();
+    let work = tasks.clone();
+    ui.on_save_message_format(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let ui = app.global::<AccountMailPreferences>();
+        if ui.get_account_id() <= 0 {
+            return;
+        }
+        let Some(core) = core(&state_message_format) else {
+            return;
+        };
+        let account_id = i64::from(ui.get_account_id());
+        let format = if ui.get_message_format_index() == 1 {
+            MessageFormat::PlainText
+        } else {
+            MessageFormat::Formatted
+        };
+        let plain_text_replies = ui.get_plain_text_replies();
+        work.spawn(
+            &app,
+            false,
+            async move {
+                core.set_account_message_format(account_id, format, plain_text_replies)
+                    .await
+                    .map_err(|error| error.to_string())
+            },
+            |app, result| {
+                if let Err(error) = result {
+                    app.global::<AccountMailPreferences>()
+                        .set_status(error.into());
+                }
+            },
+        );
+    });
+    let weak = app.as_weak();
+    let state_read_receipts = state.clone();
+    let work = tasks.clone();
+    ui.on_save_read_receipt_requests(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let ui = app.global::<AccountMailPreferences>();
+        if ui.get_account_id() <= 0 {
+            return;
+        }
+        let Some(core) = core(&state_read_receipts) else {
+            return;
+        };
+        let account_id = i64::from(ui.get_account_id());
+        let request = ui.get_request_read_receipts();
+        work.spawn(
+            &app,
+            false,
+            async move {
+                core.set_account_read_receipt_requests(account_id, request)
+                    .await
+                    .map_err(|error| error.to_string())
+            },
+            |app, result| {
+                if let Err(error) = result {
+                    app.global::<AccountMailPreferences>()
+                        .set_status(error.into());
                 }
             },
         );
@@ -590,57 +683,40 @@ pub(super) fn register(
             .and_then(|i| ui.get_signatures().row_data(i));
         ui.set_editing_index(index);
         ui.set_editing_id(signature.as_ref().map(|s| s.id.clone()).unwrap_or_default());
-        ui.set_signature_name(
-            signature
-                .as_ref()
-                .map(|s| s.name.clone())
-                .unwrap_or_default(),
-        );
         ui.set_signature_text(signature.map(|s| s.text).unwrap_or_default());
     });
     let weak = app.as_weak();
-    let state_save = state.clone();
+    let state_open = state.clone();
     let work = tasks.clone();
-    ui.on_save_signature(move || {
+    ui.on_open_signature(move |new| {
         let Some(app) = weak.upgrade() else { return };
-        let Some(core) = core(&state_save) else {
+        let Some(core) = core(&state_open) else {
             return;
         };
         let ui = app.global::<AccountMailPreferences>();
         if ui.get_busy() {
             return;
         }
-        let signature = Signature {
-            id: ui.get_editing_id().to_string(),
-            account_id: i64::from(ui.get_account_id()),
-            name: ui.get_signature_name().to_string(),
-            html: flectar_mail_core::signatures::text_html(ui.get_signature_text().as_str()),
-        };
+        let account_id = i64::from(ui.get_account_id());
+        if new {
+            crate::composer::edit_signature(&app, account_id, None);
+            return;
+        }
+        let id = ui.get_editing_id().to_string();
         work.spawn(
             &app,
             true,
-            async move {
-                let saved = core
-                    .save_signature(signature)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let settings = core.get_settings().await.map_err(|e| e.to_string())?;
-                Ok((saved, settings))
-            },
-            |app, result| {
-                let ui = app.global::<AccountMailPreferences>();
-                match result {
-                    Ok((saved, settings)) => {
-                        project(&app, &settings, saved.account_id);
-                        let index = choices(&settings, saved.account_id)
-                            .iter()
-                            .position(|s| s.id == saved.id)
-                            .unwrap_or(0);
-                        ui.invoke_edit_signature(index as i32);
-                        ui.set_status("Signature saved.".into());
+            async move { core.get_settings().await.map_err(|e| e.to_string()) },
+            move |app, result| match result {
+                Ok(settings) => {
+                    if let Some(signature) = choices(&settings, account_id)
+                        .into_iter()
+                        .find(|signature| signature.id == id)
+                    {
+                        crate::composer::edit_signature(&app, account_id, Some(signature));
                     }
-                    Err(e) => ui.set_status(e.into()),
                 }
+                Err(e) => app.global::<AccountMailPreferences>().set_status(e.into()),
             },
         );
     });

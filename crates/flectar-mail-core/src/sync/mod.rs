@@ -220,6 +220,65 @@ pub(crate) async fn finish_empty_trash(
     Ok(())
 }
 
+/// Take the folders an account showing only subscribed folders no longer
+/// lists off this device with their mail, which the server keeps: each is
+/// (folder, whether the folder itself goes, not only its mail). One that
+/// queued work involves waits for the next folder list.
+pub(crate) async fn forget_unlisted_folders(
+    ctx: &SyncCtx,
+    account_id: i64,
+    folders: Vec<(i64, bool)>,
+) -> Result<()> {
+    let (thread_ids, paths, staged_paths, changed) = ctx
+        .db
+        .write(move |conn| {
+            let tx = conn.transaction()?;
+            let mut thread_ids = std::collections::HashSet::new();
+            let mut paths = Vec::new();
+            let mut staged_paths = Vec::new();
+            let mut changed = false;
+            for (folder_id, remove_folder) in folders {
+                if repo::folders::has_queued_work(&tx, account_id, folder_id)? {
+                    continue;
+                }
+                for message in repo::folders::messages_in(&tx, folder_id)? {
+                    staged_paths.extend(repo::messages::take_draft_attachment_paths(
+                        &tx, message.id,
+                    )?);
+                    repo::messages::delete(&tx, message.id)?;
+                    thread_ids.extend(message.thread_id);
+                    paths.extend(message.raw_path);
+                    changed = true;
+                }
+                if remove_folder {
+                    tx.execute("DELETE FROM folders WHERE id = ?1", params![folder_id])?;
+                    changed = true;
+                }
+            }
+            for &thread_id in &thread_ids {
+                repo::threads::recompute(&tx, thread_id)?;
+            }
+            tx.commit()?;
+            Ok((
+                thread_ids.into_iter().collect::<Vec<_>>(),
+                paths,
+                staged_paths,
+                changed,
+            ))
+        })
+        .await?;
+    for path in paths {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    for path in staged_paths {
+        crate::remove_staged_attachment(&ctx.paths.draft_attachments_dir(), &path).await;
+    }
+    if changed {
+        ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+    }
+    Ok(())
+}
+
 /// Delete a folder and its subfolders from this device together with the
 /// messages they hold, including each message's search entry and files. For
 /// server folders this follows their deletion on the server.

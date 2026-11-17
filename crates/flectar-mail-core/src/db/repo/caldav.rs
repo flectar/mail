@@ -125,6 +125,57 @@ pub fn get_connection(conn: &Connection, connection_id: i64) -> Result<Option<Co
 }
 
 /// The account's Google or Microsoft connection, which exists at most once.
+/// How the connection's server schedules for the account, as last asked
+/// ([`crate::caldav::discovery::scheduling`]), and when it was asked. None
+/// until then.
+pub fn scheduling(
+    conn: &Connection,
+    connection_id: i64,
+) -> Result<Option<(crate::caldav::discovery::Scheduling, i64)>> {
+    let row: Option<(Option<bool>, Option<String>, Option<i64>)> = conn
+        .query_row(
+            "SELECT auto_schedule, schedule_addresses, schedule_checked_at
+             FROM calendar_connections WHERE id = ?1",
+            params![connection_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    let Some((Some(auto_schedule), addresses, Some(checked_at))) = row else {
+        return Ok(None);
+    };
+    let addresses = match addresses {
+        Some(json) => serde_json::from_str(&json)?,
+        None => Vec::new(),
+    };
+    Ok(Some((
+        crate::caldav::discovery::Scheduling {
+            auto_schedule,
+            addresses,
+        },
+        checked_at,
+    )))
+}
+
+pub fn set_scheduling(
+    conn: &Connection,
+    connection_id: i64,
+    scheduling: &crate::caldav::discovery::Scheduling,
+    checked_at: i64,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE calendar_connections
+         SET auto_schedule = ?2, schedule_addresses = ?3, schedule_checked_at = ?4
+         WHERE id = ?1",
+        params![
+            connection_id,
+            scheduling.auto_schedule,
+            serde_json::to_string(&scheduling.addresses)?,
+            checked_at
+        ],
+    )?;
+    Ok(())
+}
+
 pub fn provider_connection(
     conn: &Connection,
     account_id: i64,

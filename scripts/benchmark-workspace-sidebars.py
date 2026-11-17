@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check bounded contacts/calendar sidebar construction with slint-viewer 1.18+.
+"""Check bounded contacts/calendar sidebar construction with slint-viewer 1.19+.
 
 Screenshots are written to /tmp/workspace-sidebars. This measures UI delegate
 construction, not compiled application timing or hardware performance.
@@ -102,7 +102,7 @@ def main():
                     (directory / "data.json").write_text(json.dumps(data))
                     screenshot = OUTPUT / f"{workspace}-{count}-{state}.png"
                     result = subprocess.run([
-                        "slint-viewer", "--style", "fluent", "--load-data", str(directory / "data.json"),
+                        "slint-viewer", "--edition", "1.19", "--style", "fluent", "--load-data", str(directory / "data.json"),
                         "--screenshot", str(screenshot), str(directory / "main.slint"),
                     ], capture_output=True, text=True, check=True)
                     delegates = (result.stdout + result.stderr).count(MARKER)

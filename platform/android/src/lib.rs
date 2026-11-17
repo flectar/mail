@@ -131,26 +131,50 @@ fn android_main(app: slint::android::AndroidApp) {
     if oauth::route_callback_activity(&app, &oauth_redirects) {
         return;
     }
+    // A store opened for a background check closes before the window opens
+    // its own: two would sync the same accounts.
+    flectar_mail::window_starting();
+    let notifications =
+        notifications::window_host(&app).expect("failed to initialize Android notifications");
     let credential_store = credentials::AndroidCredentialStore::new(&app, &internal)
         .expect("failed to initialize Android Keystore credential storage");
     pdf::configure(&app).expect("failed to configure bundled PDF preview");
     if let Err(error) = launcher_icon::install(&app) {
         tracing::warn!(%error, "launcher icon choice unavailable");
     }
+    if let Err(error) = motion::install(&app) {
+        tracing::warn!(%error, "the system's reduce motion setting is unavailable");
+    }
     let documents =
         documents::AndroidDocuments::new(&app).expect("failed to initialize document access");
-    let platform = flectar_mail::PlatformContext::app_private(
+    let mut platform = flectar_mail::PlatformContext::app_private(
         internal.clone(),
         cache_dir,
         documents,
         std::sync::Arc::new(credential_store),
         oauth_redirects,
     );
+    let host: std::sync::Arc<dyn flectar_mail::NotificationHost> = notifications.clone();
+    platform.notifications = Some(host);
+    match spelling::AndroidSpelling::new(&app) {
+        Ok(spelling) => platform.spelling = Some(std::sync::Arc::new(spelling)),
+        Err(error) => tracing::warn!(%error, "spell checking unavailable"),
+    }
     slint::android::init(app).expect("failed to initialize Slint's Android backend");
     flectar_mail::run(platform).expect("Flectar Mail terminated with an error");
+    // Work that outlives the activity, such as a check for new mail, asks
+    // for tokens through the Application from now on, and can't ask for
+    // permission.
+    oauth::AndroidOAuthBroker::activity_ended();
+    notifications.set_activity(None);
+    flectar_mail::window_ended();
 }
 #[cfg(target_os = "android")]
 mod credentials;
+#[cfg(target_os = "android")]
+mod java;
+#[cfg(target_os = "android")]
+mod notifications;
 #[cfg(target_os = "android")]
 mod oauth;
 #[cfg(target_os = "android")]
@@ -164,6 +188,10 @@ mod launcher_icon;
 #[cfg(target_os = "android")]
 mod memory;
 #[cfg(target_os = "android")]
+mod motion;
+#[cfg(target_os = "android")]
 mod pdf;
+#[cfg(target_os = "android")]
+mod spelling;
 #[cfg(target_os = "android")]
 mod store;

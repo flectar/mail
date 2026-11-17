@@ -10,6 +10,7 @@ use std::{
 };
 
 slint::slint! {
+    #[edition = "1.19"]
     import { Palette } from "std-widgets.slint";
     import { EmailRow, MailListEntry } from "../ui/models.slint";
     export { MailListNavigation, MailNavigationTarget, EmailReader, ReaderItem } from "../ui/models.slint";
@@ -78,7 +79,6 @@ slint::slint! {
         in property <bool> dark: false;
         in-out property <bool> text-mode: false;
         in-out property <bool> source-mode: false;
-        in-out property <bool> settings-open: false;
         in-out property <int> checked-count: 0;
         in-out property <bool> trash: false;
         in-out property <bool> draft: false;
@@ -107,7 +107,6 @@ slint::slint! {
             compact: root.compact;
             text_mode: root.text-mode;
             source_mode: root.source-mode;
-            settings_open <=> root.settings-open;
             search_query <=> root.query;
             selection-count: root.checked-count;
             trash_view: root.trash;
@@ -497,13 +496,7 @@ fn keyboard_navigation_keeps_focus_scrolls_and_respects_text_inputs() {
     assert_eq!(selected.get(), 1, "Escape restores usable list focus");
 
     key(workspace.window(), Key::Escape);
-    workspace.set_settings_open(true);
     workspace.set_layout_mode("default".into());
-    workspace.set_settings_open(false);
-    render(&window, 1200, 600, "workspace-settings-return");
-    selected.set(-1);
-    key(workspace.window(), Key::DownArrow);
-    assert_eq!(selected.get(), 2, "closing Settings restores list focus");
 
     for (text_mode, source_mode) in [(true, false), (false, true)] {
         workspace.set_text_mode(text_mode);

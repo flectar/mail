@@ -327,6 +327,8 @@ fn materialize(conn: &Connection, send: &SyncedSend, mime: &[u8]) -> Result<Opti
             draft: true,
             has_attachments,
             size: i64::try_from(mime.len()).ok(),
+            // The user's own message: no read receipt is owed for it.
+            receipt_handled: true,
         },
     )?;
     // Its files open from the copy that goes out; this one only shows it.

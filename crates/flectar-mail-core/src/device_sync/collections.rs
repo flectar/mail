@@ -54,7 +54,8 @@ pub(crate) fn schema(collection: &str) -> Option<u32> {
 /// Preferences that follow the user to every device: how the app looks and
 /// reads, and how mail and contacts behave. Window, notification, sound,
 /// battery and storage choices stay per device, as do AI and OAuth app
-/// settings, which go with secrets kept on each device.
+/// settings, which go with secrets kept on each device, accessibility and
+/// update choices, and spelling, whose dictionaries differ between devices.
 pub(crate) const SYNCED_PREFERENCES: &[&str] = &[
     "theme",
     "messageAppearance",
@@ -72,7 +73,17 @@ pub(crate) const SYNCED_PREFERENCES: &[&str] = &[
     "calendarWeekStart",
     "undoSendSeconds",
     "loadRemoteImages",
-    "markReadOnOpen",
+    "markRead",
+    "readReceipts",
+    "listDensity",
+    "previewLines",
+    "composeFont",
+    "composeTextSize",
+    "emptyTrashAfterDays",
+    "emptyJunkAfterDays",
+    "linkExpiryDays",
+    "linkPassword",
+    "addInvitations",
     "autoAdvance",
     "selectAdvance",
     "autoLabelsEnabled",

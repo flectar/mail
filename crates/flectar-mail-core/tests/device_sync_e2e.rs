@@ -918,6 +918,8 @@ async fn a_scheduled_send_goes_out_from_one_device() {
             in_reply_to_message_id: None,
             in_reply_to_header: None,
             attachments: vec![],
+            request_read_receipt: false,
+            importance: Default::default(),
         })
         .await
         .unwrap();
@@ -1093,6 +1095,8 @@ async fn an_imap_message_scheduled_on_one_device_waits_on_the_other() {
             in_reply_to_message_id: None,
             in_reply_to_header: None,
             attachments: vec![],
+            request_read_receipt: false,
+            importance: Default::default(),
         })
         .await
         .unwrap();
@@ -1264,7 +1268,10 @@ async fn a_large_imap_message_waits_in_a_file_until_a_device_sends_it() {
             attachments: vec![DraftAttachmentIn {
                 file_path: attachment.to_string_lossy().into_owned(),
                 filename: "plans.bin".into(),
+                mime_type: None,
             }],
+            request_read_receipt: false,
+            importance: Default::default(),
         })
         .await
         .unwrap();

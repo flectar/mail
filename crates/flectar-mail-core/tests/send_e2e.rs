@@ -138,6 +138,8 @@ async fn reply_send_reaches_smtp_and_sent_folder() {
             in_reply_to_message_id: Some(parent.id),
             in_reply_to_header: None,
             attachments: vec![],
+            request_read_receipt: false,
+            importance: Default::default(),
         })
         .await
         .expect("save draft");

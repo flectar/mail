@@ -177,7 +177,31 @@ pub(crate) enum PriorityFetchCmd {
         attachment_id: i64,
         complete: oneshot::Sender<std::result::Result<Vec<u8>, String>>,
     },
+    /// Search the account's server past the mail kept here.
+    Search {
+        tree: crate::search::Expr,
+        cursor: ServerSearchCursor,
+        limit: usize,
+        complete: oneshot::Sender<std::result::Result<ServerHits, String>>,
+    },
 }
+
+/// What a server search of one account found: its messages, kept here as
+/// their headers, newest first, and where the search goes on from unless it
+/// found all there is.
+#[derive(Debug)]
+pub(crate) struct ServerHits {
+    pub message_ids: Vec<i64>,
+    pub next: Option<ServerSearchCursor>,
+}
+
+/// How long a server search may take, a slow server's whole folder list
+/// included.
+const SERVER_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// How many pages of a server's results one page of a server search goes
+/// through for mail not kept here, when the newest are kept here already.
+pub(crate) const SERVER_SEARCH_PAGES: usize = 20;
 
 impl AccountHandle {
     pub fn send(&self, cmd: SyncCmd) -> bool {
@@ -262,6 +286,34 @@ impl AccountHandle {
             .await
             .map_err(|_| CoreError::Other("downloading the message again timed out".into()))?
             .map_err(|_| CoreError::Other("mail worker stopped".into()))?
+            .map_err(CoreError::Other)
+    }
+
+    /// Searches the account's server for `tree` from `cursor`: the newest
+    /// `limit` messages it finds, kept here as their headers.
+    pub(crate) async fn search_server(
+        &self,
+        tree: crate::search::Expr,
+        cursor: ServerSearchCursor,
+        limit: usize,
+    ) -> Result<ServerHits> {
+        let (tx, rx) = oneshot::channel();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.body_tx.send(PriorityFetchCmd::Search {
+                tree,
+                cursor,
+                limit,
+                complete: tx,
+            }),
+        )
+        .await
+        .map_err(|_| CoreError::Other("the mail reader is busy".into()))?
+        .map_err(|_| CoreError::Other("the mail reader stopped".into()))?;
+        tokio::time::timeout(SERVER_SEARCH_TIMEOUT, rx)
+            .await
+            .map_err(|_| CoreError::Network("the server took too long to search".into()))?
+            .map_err(|_| CoreError::Other("the mail reader stopped".into()))?
             .map_err(CoreError::Other)
     }
 
@@ -366,7 +418,7 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
             // from retaining memory.
             let (pool_tx, pool_rx) = mpsc::channel(1);
             let (hist_tx, hist_rx) = mpsc::channel(1);
-            let joins = vec![
+            let mut joins = vec![
                 tokio::spawn(run_send_dispatcher(
                     ctx.clone(),
                     config.clone(),
@@ -379,6 +431,7 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
                     rx,
                     pool_tx.clone(),
                     hist_tx,
+                    settings_rx.clone(),
                 )),
                 tokio::spawn(run_body_fetcher(ctx.clone(), config.clone(), body_rx)),
                 tokio::spawn(run_backfill_pool(
@@ -388,13 +441,18 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
                     settings_rx.clone(),
                 )),
                 tokio::spawn(run_history_backfill(
-                    ctx,
-                    config,
+                    ctx.clone(),
+                    config.clone(),
                     hist_rx,
                     pool_tx,
                     settings_rx,
                 )),
             ];
+            // Other IMAP servers may keep automatic replies in a Sieve
+            // script. Microsoft keeps them in the mailbox settings.
+            if config.provider == Provider::Generic {
+                joins.push(tokio::spawn(crate::sieve::watch(ctx, config)));
+            }
             (joins, Some(send_tx), None)
         }
         MailProtocol::Pop3 => {
@@ -589,6 +647,48 @@ async fn run_body_fetcher(
                     match fetch_attachment_bytes(&ctx, active_session, attachment_id).await {
                         Ok(bytes) => {
                             result = Ok(bytes);
+                            break;
+                        }
+                        Err(error) => {
+                            result = Err(error);
+                            if let Some(value) = session.take() {
+                                imap::logout(value).await;
+                            }
+                        }
+                    }
+                }
+                let _ = complete.send(result.map_err(|error| error.to_string()));
+                continue;
+            }
+            PriorityFetchCmd::Search {
+                tree,
+                cursor,
+                limit,
+                complete,
+            } => {
+                let mut result = Err(CoreError::Other("the server search did not run".into()));
+                for _ in 0..2 {
+                    if session.is_none() {
+                        match connect(&ctx, &config).await {
+                            Ok(value) => session = Some(value),
+                            Err(error) => {
+                                result = Err(error);
+                                break;
+                            }
+                        }
+                    }
+                    let Some(active_session) = session.as_mut() else {
+                        break;
+                    };
+                    match search_server(&ctx, &config, active_session, &tree, &cursor, limit).await
+                    {
+                        Ok(hits) => {
+                            result = Ok(hits);
+                            break;
+                        }
+                        // The server refused the search itself: asking again won't help.
+                        Err(error @ CoreError::ImapRefused(_)) => {
+                            result = Err(error);
                             break;
                         }
                         Err(error) => {
@@ -899,6 +999,7 @@ async fn run_actor(
     mut rx: mpsc::Receiver<SyncCmd>,
     pool_tx: mpsc::Sender<()>,
     hist_tx: mpsc::Sender<()>,
+    settings_rx: watch::Receiver<AccountSettings>,
 ) {
     let account_id = config.id;
     crate::events::sync_diagnostic("imap_worker", Some(account_id), "started");
@@ -1021,6 +1122,7 @@ async fn run_actor(
         // cycle is only folder/header/flag/action work and stays short.
         tracing::debug!(account_id, cycle, "sync cycle start");
         set_state(&ctx, account_id, "syncing").await;
+        listing.subscribed_only(settings_rx.borrow().subscribed_folders_only);
         let foreground_only = !sync_waiters.is_empty();
         let cycle_result = run_cycle(
             &ctx,
@@ -1280,6 +1382,68 @@ pub(crate) async fn set_state_error(ctx: &SyncCtx, account_id: i64, state: &str,
     set_state_inner(ctx, account_id, state, Some(error)).await;
 }
 
+/// Note that a sync of the account that started at `started` stored all the
+/// mail its Inbox had by then. A check in the background tells of what
+/// arrives after it while the app isn't running (see
+/// `Core::announce_missed`), and the app shows it as the account's last
+/// check.
+/// Settle the rules that waited too long for a body (#238), such as one the
+/// server wouldn't send: what can't be told doesn't match, and the held
+/// notifications show.
+pub(crate) async fn settle_waiting_rules(ctx: &SyncCtx, account_id: i64) {
+    let settled = ctx
+        .db
+        .write(move |conn| {
+            let ids =
+                crate::rules::overdue(conn, account_id, now_ms() - crate::rules::WAIT_LIMIT_MS)?;
+            let tx = conn.transaction()?;
+            let (mut touched, mut fresh) = (Vec::new(), Vec::new());
+            for id in ids {
+                if let Some(resumed) = crate::rules::give_up(&tx, id)? {
+                    touched.push(resumed.thread_id);
+                    if resumed.announced {
+                        fresh.push(resumed.thread_id);
+                    }
+                }
+            }
+            tx.commit()?;
+            Ok((touched, fresh))
+        })
+        .await;
+    match settled {
+        Ok((touched, fresh)) => {
+            if !touched.is_empty() {
+                ctx.bus.emit(CoreEvent::MailUpdated {
+                    thread_ids: touched,
+                });
+            }
+            if !fresh.is_empty() {
+                ctx.bus.emit(CoreEvent::MailNew {
+                    account_id,
+                    thread_ids: fresh,
+                });
+            }
+        }
+        Err(error) => tracing::warn!(account_id, %error, "receive: settling rules failed"),
+    }
+}
+
+pub(crate) async fn caught_up(ctx: &SyncCtx, account_id: i64, started: i64) {
+    let noted = ctx
+        .db
+        .write(move |conn| repo::accounts::set_caught_up(conn, account_id, started))
+        .await;
+    match noted {
+        Ok(()) => ctx.bus.emit(CoreEvent::AccountCaughtUp {
+            account_id,
+            at: started,
+        }),
+        Err(error) => {
+            tracing::warn!(account_id, %error, "could not note how far a sync caught up");
+        }
+    }
+}
+
 async fn set_state_inner(ctx: &SyncCtx, account_id: i64, state: &str, error: Option<&str>) {
     let st = state.to_string();
     let error = error.map(str::to_owned);
@@ -1469,12 +1633,20 @@ async fn run_cycle(
         inbox_pushed,
     } = mode;
     let account_id = config.id;
+    let started = now_ms();
 
     // The folder list: first thing, then once it is FOLDER_LIST_INTERVAL old.
     let listed_now = !immediate_follow_up && listing.due(tokio::time::Instant::now());
     if listed_now {
-        discover_folders(ctx, config, session).await?;
+        discover_folders(ctx, config, session, listing.subscribed_only).await?;
         listing.listed_at = Some(tokio::time::Instant::now());
+        // A Microsoft account's automatic replies live in its mailbox
+        // settings. Reading them never fails a sync.
+        if config.provider == Provider::Microsoft
+            && let Err(error) = crate::auto_replies::read_back_from_graph(ctx, account_id).await
+        {
+            tracing::warn!(account_id, %error, "Microsoft automatic replies failed");
+        }
     }
 
     let folders = {
@@ -1497,7 +1669,7 @@ async fn run_cycle(
     // Give queued mutations one bounded turn before checking Inbox. This keeps
     // an Inbox catch-up from starving moves while the following Inbox pass
     // ensures a large mutation queue cannot starve newly arrived mail.
-    let action_slice = queue::execute_due(ctx, config, session).await?;
+    let mut action_slice = queue::execute_due(ctx, config, session).await?;
 
     // Every fifth cycle re-checks read state and removals in every folder:
     // STATUS does not report stars, labels, or a message read while another
@@ -1508,7 +1680,8 @@ async fn run_cycle(
     let (reported, known) = if foreground_only {
         (HashMap::new(), HashMap::new())
     } else {
-        let reported = report_folders(session, &ordered, list_status).await;
+        let reported =
+            report_folders(session, &ordered, list_status, listing.subscribed_only).await;
         let known = ctx
             .db
             .read(move |conn| repo::folders::server_statuses(conn, account_id))
@@ -1545,6 +1718,21 @@ async fn run_cycle(
             inbox_baseline,
         )
         .await?;
+        if !inbox_forward_remaining {
+            caught_up(ctx, account_id, started).await;
+        }
+    }
+
+    settle_waiting_rules(ctx, account_id).await;
+    // Rules and blocked senders file away mail that just arrived. Move it on
+    // the server in this pass, not after the next wait for new mail.
+    if !action_slice.due_remaining
+        && ctx
+            .db
+            .read(move |conn| repo::actions::has_due_except_send(conn, account_id, now_ms()))
+            .await?
+    {
+        action_slice = queue::execute_due(ctx, config, session).await?;
     }
 
     // A manual Sync Now resolves at the foreground Inbox boundary. Finish any
@@ -1608,7 +1796,7 @@ async fn run_cycle(
     let mut listed_new = false;
     if listing.recheck(&refused) {
         if !listed_now {
-            discover_folders(ctx, config, session).await?;
+            discover_folders(ctx, config, session, listing.subscribed_only).await?;
             listing.listed_at = Some(tokio::time::Instant::now());
         }
         let known = folders
@@ -1693,7 +1881,9 @@ async fn count_inbox(ctx: &SyncCtx, session: &mut Session, inbox: &Folder) -> Re
 }
 
 /// The STATUS the server reports for each folder, by path. LIST-STATUS
-/// answers for every folder in one command. Without it, STATUS asks each
+/// answers for every folder in one command, or, when the account lists only
+/// subscribed folders, for just the folders it syncs, so the server doesn't
+/// count the mail of every folder it has. Without it, STATUS asks each
 /// folder but the Inbox: RFC 9051 asks clients not to use STATUS on the
 /// selected mailbox, which IDLE keeps the Inbox, and every cycle opens the
 /// Inbox anyway. A folder without a report is synced as before.
@@ -1701,9 +1891,16 @@ async fn report_folders(
     session: &mut Session,
     folders: &[&Folder],
     list_status: bool,
+    subscribed_only: bool,
 ) -> HashMap<String, imap::MailboxStatus> {
     if list_status {
-        match imap::list_status(session).await {
+        let paths = subscribed_only.then(|| {
+            folders
+                .iter()
+                .map(|folder| folder.path.as_str())
+                .collect::<Vec<_>>()
+        });
+        match imap::list_status(session, paths.as_deref()).await {
             Ok(reported) => return reported,
             Err(error) => tracing::warn!("LIST-STATUS failed; asking each folder: {error}"),
         }
@@ -1784,6 +1981,9 @@ struct FolderListing {
     /// Folders the server refused to open that a folder list read since
     /// still had. Refusing them again doesn't call for another LIST.
     refused_but_listed: HashSet<i64>,
+    /// Whether the account lists only subscribed folders
+    /// ([`AccountSettings::subscribed_folders_only`]).
+    subscribed_only: bool,
 }
 
 impl FolderListing {
@@ -1796,6 +1996,15 @@ impl FolderListing {
         })
     }
 
+    /// Follow the account's choice to list only subscribed folders. Changing
+    /// it makes the folder list due at once.
+    fn subscribed_only(&mut self, subscribed_only: bool) {
+        if self.subscribed_only != subscribed_only {
+            self.subscribed_only = subscribed_only;
+            self.listed_at = None;
+        }
+    }
+
     /// Whether the folders the server just refused call for reading the
     /// folder list again: one it hasn't listed since may be gone.
     fn recheck(&self, refused: &[i64]) -> bool {
@@ -1805,10 +2014,15 @@ impl FolderListing {
     }
 }
 
+/// Read the server's folder list into the account's folders. With
+/// `subscribed_only` ([`AccountSettings::subscribed_folders_only`]), it lists
+/// the folders [`crate::sync::folder_map::subscribed_only`] keeps, and the
+/// others go from this device with their mail, which the server keeps.
 pub(crate) async fn discover_folders(
     ctx: &SyncCtx,
     config: &AccountConfig,
     session: &mut Session,
+    subscribed_only: bool,
 ) -> Result<()> {
     let account_id = config.id;
     ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
@@ -1818,8 +2032,45 @@ pub(crate) async fn discover_folders(
         done: 0,
         total: 0,
     }));
-    let remote = imap::list_folders(session).await?;
-    ctx.db
+    let mut remote = imap::list_folders(session).await?;
+    // A LIST without folders can only be a server fault; keep them.
+    let listed_any = !remote.is_empty();
+    // Every folder the server has, those it doesn't list here among them.
+    let mut on_server = None;
+    let subscribed = if subscribed_only {
+        match imap::list_subscribed(session, "*").await {
+            Ok(subscribed) => Some(subscribed),
+            // A server that keeps no subscriptions has every folder listed.
+            Err(CoreError::ImapRefused(reply)) => {
+                tracing::warn!(account_id, "folder subscriptions unavailable: {reply}");
+                None
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        None
+    };
+    if let Some(subscribed) = subscribed {
+        on_server = Some(
+            remote
+                .iter()
+                .map(|folder| folder.name.clone())
+                .collect::<HashSet<_>>(),
+        );
+        let ruled = ctx
+            .db
+            .read(move |conn| {
+                let mut paths = HashSet::new();
+                for folder_id in repo::rules::target_folders(conn, account_id)? {
+                    paths.extend(repo::folders::get(conn, folder_id)?.map(|folder| folder.path));
+                }
+                Ok(paths)
+            })
+            .await?;
+        remote = crate::sync::folder_map::subscribed_only(remote, &subscribed, &ruled);
+    }
+    let unlisted = ctx
+        .db
         .write(move |conn| {
             let tx = conn.transaction()?;
             let mut discovered = Vec::with_capacity(remote.len());
@@ -1888,14 +2139,30 @@ pub(crate) async fn discover_folders(
                     .and_then(|(parent, _)| ids_by_name.get(parent).copied());
                 repo::folders::set_parent(&tx, id, parent_id)?;
             }
-            // A LIST without folders can only be a server fault; keep them.
-            if !remote.is_empty() {
+            let mut unlisted = Vec::new();
+            if let Some(mut on_server) = on_server {
+                let synced = remote
+                    .iter()
+                    .map(|folder| folder.name.clone())
+                    .collect::<HashSet<_>>();
+                unlisted =
+                    repo::folders::unlisted(&tx, account_id, &on_server, &known_names, &synced)?;
+                // The containers made up for listed folders aren't on the
+                // server, and stay too.
+                on_server.extend(known_names);
+                known_names = on_server;
+            }
+            if listed_any {
                 repo::folders::mark_missing_on_server(&tx, account_id, &known_names)?;
             }
             tx.commit()?;
-            Ok(())
+            Ok(unlisted)
         })
-        .await
+        .await?;
+    if !unlisted.is_empty() {
+        crate::sync::forget_unlisted_folders(ctx, account_id, unlisted).await?;
+    }
+    Ok(())
 }
 
 async fn sync_folder(
@@ -2008,7 +2275,15 @@ async fn sync_folder(
             .copied()
         {
             let set = imap::uid_set(&new_uids[..chunk_len]);
-            let headers = imap::fetch_headers(session, &set).await?;
+            // New Inbox mail brings the headers rules test (#238).
+            let rule_headers = if is_inbox {
+                ctx.db
+                    .read(move |conn| crate::rules::header_names(conn, account_id))
+                    .await?
+            } else {
+                Vec::new()
+            };
+            let headers = imap::fetch_headers_with(session, &set, &rule_headers).await?;
             let new: Vec<FetchedHeader> = headers
                 .into_iter()
                 .filter(|h| h.uid > last_seen && h.uid <= scanned_through)
@@ -2053,6 +2328,9 @@ async fn sync_folder(
                         account_id,
                         thread_ids: fresh,
                     });
+                }
+                if is_inbox {
+                    fetch_waiting_bodies(ctx, config, session, &fresh_folder).await?;
                 }
             }
             // The exact UID batch was scanned successfully. Advance even when
@@ -2669,10 +2947,50 @@ async fn extend_history(
     Ok(())
 }
 
+/// Fetch on this connection, now, the bodies of `folder`'s new mail that
+/// rules wait for (#238), as Thunderbird downloads new mail's bodies when its
+/// filters need them. The background download walks the history and could
+/// reach new mail only much later. Storing a body goes on with its rules.
+async fn fetch_waiting_bodies(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Session,
+    folder: &Folder,
+) -> Result<()> {
+    let folder_id = folder.id;
+    let items = ctx
+        .db
+        .read(move |conn| repo::messages::rules_waiting_in(conn, folder_id))
+        .await?;
+    if items.is_empty() {
+        return Ok(());
+    }
+    let chunk = BodyChunk {
+        folder_id,
+        folder_name: folder.path.clone(),
+        uid_validity: folder.uidvalidity,
+        items,
+    };
+    match fetch_body_chunk(ctx, config, session, &mut None, &chunk).await {
+        Ok(_) => Ok(()),
+        Err(BodyChunkError::Reconnect(error)) => Err(error),
+        // The rules settle without the body once they have waited long
+        // enough.
+        Err(BodyChunkError::Fatal(error)) => {
+            tracing::warn!(account_id = config.id, %error, "receive: bodies for rules failed");
+            Ok(())
+        }
+    }
+}
+
 /// What `store_headers` does with headers that match no local message.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum NewHeaders {
     Insert,
+    /// Mail a server search found, kept like any other, with the folder's scan
+    /// position where the live sync left it: it may be past mail the sync
+    /// hasn't fetched yet.
+    Found,
     /// Mail fetched only to link waiting local messages with the same
     /// Message-ID. Nothing else about it is kept, and the folder's scan
     /// position stays where the live sync left it.
@@ -2683,6 +3001,11 @@ enum NewHeaders {
 /// refreshes, of the newly inserted messages and of those that moved to the
 /// folder of their server copy, `fresh` only for threads that queued a
 /// notification for an unread, incoming, recent message.
+///
+/// `notify_min_uid` is set for the Inbox's forward scan, whose new mail is
+/// what rules sort (#238), as Thunderbird filters UIDs past the highest it
+/// has seen. Mail from that UID on arrived while the account was followed,
+/// and may notify.
 async fn store_headers(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -2702,6 +3025,9 @@ async fn store_headers(
         .write(move |conn| {
             let tx = conn.transaction()?;
             let mut importer = super::ingest::Importer::new(&tx, account_id)?;
+            let sorter = notify_min_uid
+                .map(|_| crate::rules::Sorter::load(&tx, account_id))
+                .transpose()?;
             let mut max_uid: i64 = 0;
             let mut inserted = 0u32;
             let mut moved_threads = Vec::new();
@@ -2824,6 +3150,7 @@ async fn store_headers(
                         draft: fh.flags.draft,
                         has_attachments: fh.has_attachments,
                         size: fh.size.map(|s| s as i64),
+                        receipt_handled: fh.flags.mdn_sent,
                     },
                 )?;
                 let msg_id = imported.message_id;
@@ -2836,11 +3163,36 @@ async fn store_headers(
                 repo::labels::reconcile_keywords(&tx, msg_id, &fh.flags.keywords)?;
                 repo::threads::recompute(&tx, imported.thread_id)?;
                 repo::search::index_message(&tx, msg_id)?;
-                importer.learn_contacts(&tx, &parsed, &imported)?;
+                // Mail from a blocked sender goes to Spam as it arrives.
+                if crate::turn_away(&tx, msg_id)? {
+                    continue;
+                }
+                // Then rules sort it. What they file away or mark read stays
+                // silent.
+                let sorted = match &sorter {
+                    Some(sorter) => sorter.arrived(
+                        &tx,
+                        msg_id,
+                        crate::rules::Arrival {
+                            headers: Some(crate::mime::header_fields(&fh.header_bytes)),
+                            text: None,
+                            // The attachments are known with the body.
+                            attachments_known: false,
+                        },
+                    )?,
+                    None => Default::default(),
+                };
+                if !sorted.unwanted {
+                    importer.learn_contacts(&tx, &parsed, &imported)?;
+                }
                 // Only mail past the inbox watermark arrived while this
                 // account was being followed.
                 let live = notify_min_uid.is_some_and(|min_uid| fh.uid >= min_uid);
-                importer.announce(&tx, &imported, live)?;
+                if sorted.waiting {
+                    importer.hold(&tx, &imported, live)?;
+                } else {
+                    importer.announce(&tx, &imported, live && !sorted.silent())?;
+                }
             }
 
             if max_uid > 0 && new_headers == NewHeaders::Insert {
@@ -2900,7 +3252,10 @@ async fn reconcile_flags(ctx: &SyncCtx, session: &mut Session, folder: &Folder) 
                     }
                     let labels_changed =
                         repo::labels::reconcile_keywords(&tx, row.id, &flags.keywords)?;
-                    if (flags_changed || labels_changed)
+                    // Another device sent or declined the read receipt.
+                    let receipt_answered =
+                        flags.mdn_sent && repo::messages::mark_receipt_handled(&tx, row.id)?;
+                    if (flags_changed || labels_changed || receipt_answered)
                         && let Some(tid) = row.thread_id
                     {
                         repo::threads::recompute(&tx, tid)?;
@@ -3000,6 +3355,205 @@ async fn reconcile_mailbox(
     Ok(())
 }
 
+/// One folder's matches for a page of a server search, below where the last
+/// page stopped in it.
+struct FolderMatches {
+    /// Those not kept here, newest UID first and a page of them at most, each
+    /// with when the server got it.
+    queue: std::collections::VecDeque<(u32, i64)>,
+    /// The server matched more of those than the queue holds.
+    truncated: bool,
+    /// Those kept here, as (UID, message id), newest first.
+    kept: Vec<(u32, i64)>,
+}
+
+/// Searches the account's folders on its IMAP server for `tree`, below where
+/// `cursor` left each folder: the newest `limit` matches not kept here, which
+/// are fetched as their headers and kept, and the matches kept here already
+/// that the page passes. Their bodies come when opened.
+async fn search_server(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Session,
+    tree: &crate::search::Expr,
+    cursor: &ServerSearchCursor,
+    limit: usize,
+) -> Result<ServerHits> {
+    use crate::search::server::{self, Folders, ImapSearch};
+    let criteria = match server::imap(tree, &chrono::Local) {
+        ImapSearch::Nothing => {
+            return Ok(ServerHits {
+                message_ids: Vec::new(),
+                next: None,
+            });
+        }
+        ImapSearch::Criteria { criteria, utf8 } if utf8 => format!("CHARSET UTF-8 {criteria}"),
+        ImapSearch::Criteria { criteria, .. } => criteria,
+    };
+    let scope = server::imap_folders(tree);
+    let account_id = config.id;
+    let folders = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await?
+        .into_iter()
+        .filter(|folder| folder.selectable)
+        .filter(|folder| match &scope {
+            Folders::Roles(roles) => folder
+                .role
+                .as_deref()
+                .is_some_and(|role| roles.contains(&role)),
+            Folders::All => true,
+            Folders::Usual => !matches!(folder.role.as_deref(), Some("trash" | "spam")),
+        })
+        .collect::<Vec<_>>();
+
+    // One UID SEARCH covers one folder.
+    let mut matches = Vec::with_capacity(folders.len());
+    for folder in &folders {
+        let below = cursor
+            .below
+            .iter()
+            .find(|(id, _)| *id == folder.id)
+            .map(|(_, uid)| *uid);
+        match imap::select(session, &folder.path).await {
+            Ok(_) => {}
+            // A folder the server won't open has nothing to find.
+            Err(CoreError::ImapRefused(reply)) => {
+                tracing::debug!(account_id, folder = %folder.path, %reply, "search skips a folder");
+                matches.push(FolderMatches {
+                    queue: Default::default(),
+                    truncated: false,
+                    kept: Vec::new(),
+                });
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
+        let mut uids = imap::uid_search_matching(session, &criteria).await?;
+        uids.retain(|uid| below.is_none_or(|below| *uid < below));
+        let folder_id = folder.id;
+        let wanted = uids.clone();
+        let kept_ids = ctx
+            .db
+            .read(move |conn| repo::messages::by_uids(conn, folder_id, &wanted))
+            .await?;
+        let kept = uids
+            .iter()
+            .filter_map(|uid| Some((*uid, *kept_ids.get(uid)?)))
+            .collect::<Vec<_>>();
+        let mut missing = uids
+            .into_iter()
+            .filter(|uid| !kept_ids.contains_key(uid))
+            .collect::<Vec<_>>();
+        let truncated = missing.len() > limit;
+        missing.truncate(limit);
+        let dates = if missing.is_empty() {
+            HashMap::new()
+        } else {
+            imap::fetch_internal_dates(session, &imap::normalized_uid_set(&missing)?)
+                .await?
+                .into_iter()
+                .collect::<HashMap<_, _>>()
+        };
+        // One expunged since the SEARCH has nothing to show.
+        let queue = missing
+            .into_iter()
+            .filter_map(|uid| Some((uid, dates.get(&uid)?.unwrap_or_default())))
+            .collect();
+        matches.push(FolderMatches {
+            queue,
+            truncated,
+            kept,
+        });
+    }
+
+    // The newest new mail of every folder's, one page of it. Each folder
+    // gives its own in UID order, so a page stops in a folder at one UID and
+    // the next page goes on below it without missing any.
+    let mut taken: Vec<Vec<u32>> = folders.iter().map(|_| Vec::new()).collect();
+    for _ in 0..limit {
+        let Some(newest) = matches
+            .iter()
+            .enumerate()
+            .filter_map(|(index, found)| {
+                found.queue.front().map(|(uid, date)| (index, *date, *uid))
+            })
+            .max_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)))
+            .map(|(index, ..)| index)
+        else {
+            break;
+        };
+        if let Some((uid, _)) = matches[newest].queue.pop_front() {
+            taken[newest].push(uid);
+        }
+    }
+
+    // What the page passed in each folder: all of it once nothing new is
+    // left there, else down to the last new message it took. The matches
+    // kept here among that come with the page.
+    let mut message_ids = Vec::new();
+    let mut below = cursor.below.clone();
+    let mut more = false;
+    for ((folder, found), uids) in folders.iter().zip(&matches).zip(&taken) {
+        let exhausted = found.queue.is_empty() && !found.truncated;
+        more |= !exhausted;
+        let lowest = if exhausted {
+            found
+                .kept
+                .iter()
+                .map(|(uid, _)| *uid)
+                .chain(uids.iter().copied())
+                .min()
+        } else {
+            uids.last().copied()
+        };
+        let Some(lowest) = lowest else { continue };
+        message_ids.extend(
+            found
+                .kept
+                .iter()
+                .filter(|(uid, _)| *uid >= lowest)
+                .map(|(_, message_id)| *message_id),
+        );
+        match below.iter_mut().find(|(id, _)| *id == folder.id) {
+            Some((_, uid)) => *uid = (*uid).min(lowest),
+            None => below.push((folder.id, lowest)),
+        }
+    }
+
+    // The new mail comes as its headers.
+    for (folder, uids) in folders.iter().zip(taken) {
+        if uids.is_empty() {
+            continue;
+        }
+        match imap::select(session, &folder.path).await {
+            Ok(_) => {}
+            Err(CoreError::ImapRefused(_)) => continue,
+            Err(error) => return Err(error),
+        }
+        let headers = imap::fetch_headers(session, &imap::normalized_uid_set(&uids)?).await?;
+        let (thread_ids, _) =
+            store_headers(ctx, config, folder, headers, None, NewHeaders::Found).await?;
+        let folder_id = folder.id;
+        let stored = ctx
+            .db
+            .read(move |conn| repo::messages::by_uids(conn, folder_id, &uids))
+            .await?;
+        message_ids.extend(stored.into_values());
+        if !thread_ids.is_empty() {
+            ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+        }
+    }
+    Ok(ServerHits {
+        message_ids,
+        next: more.then(|| ServerSearchCursor {
+            below,
+            ..ServerSearchCursor::default()
+        }),
+    })
+}
+
 /// One unit of backfill-pool work: a single folder's chunk of UIDs, pulled in
 /// one batched FETCH.
 struct BodyChunk {
@@ -3081,6 +3635,25 @@ struct DecodedSelectiveContent {
 enum SelectivePersistGuard {
     Background { folder_id: i64 },
     Priority { folder_id: i64 },
+}
+
+impl SelectivePersistGuard {
+    fn folder_id(self) -> i64 {
+        match self {
+            Self::Background { folder_id } | Self::Priority { folder_id } => folder_id,
+        }
+    }
+}
+
+/// A read receipt that came back (RFC 8098) is fetched whole when it's this
+/// small, as they nearly always are: its report part and the fields that
+/// stand in for what some reporters leave out then arrive together. A
+/// larger one returns the original message with its files, and is cached
+/// like any other message.
+const WHOLE_RECEIPT_LIMIT: u64 = 256 * 1024;
+
+fn fetch_receipt_whole(plan: &crate::mime::MimePlan) -> bool {
+    plan.carries_disposition_report() && plan.encoded_size() <= WHOLE_RECEIPT_LIMIT
 }
 
 fn can_persist_selective_content(
@@ -3834,7 +4407,12 @@ async fn fetch_body_chunk(
         .map_err(classify_body_chunk_error)?;
     let mut groups: std::collections::BTreeMap<Vec<String>, Vec<PlannedBodyFetch>> =
         std::collections::BTreeMap::new();
+    let mut receipts = Vec::new();
     for item in planned {
+        if fetch_receipt_whole(&item.plan) {
+            receipts.push(item);
+            continue;
+        }
         if item.plan.text_sections.is_empty() {
             failures.push((
                 item.message_id,
@@ -3853,6 +4431,23 @@ async fn fetch_body_chunk(
         .map_err(BodyChunkError::Fatal)?;
 
     let mut cached = 0u64;
+    for item in receipts {
+        let Some(raw) = imap::fetch_full(session, item.uid)
+            .await
+            .map_err(BodyChunkError::Reconnect)?
+        else {
+            // Expunged since it was planned.
+            continue;
+        };
+        let guard = SelectivePersistGuard::Background {
+            folder_id: chunk.folder_id,
+        };
+        match persist_body(ctx, config, item.message_id, guard, item.uid, &raw).await {
+            Ok(true) => cached += 1,
+            Ok(false) => {}
+            Err(error) => record_content_failure(ctx, item.message_id, &error).await,
+        }
+    }
     for (sections, items) in groups {
         let max_bytes = match config.provider {
             Provider::Microsoft => MAX_MICROSOFT_BATCH_BYTES,
@@ -4216,8 +4811,9 @@ fn decode_selective_content(
 }
 
 /// Fetch only the MIME sections required to make a message readable and
-/// searchable. Full raw MIME is a user-open fallback only; the background path
-/// never downloads attachment bytes implicitly.
+/// searchable. Full raw MIME is a user-open fallback, and the form a small
+/// read receipt arrives in; the background path never downloads attachment
+/// bytes implicitly.
 async fn fetch_selective_content(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -4311,6 +4907,17 @@ async fn fetch_selective_content(
             "server did not provide a usable BODYSTRUCTURE".into(),
         ));
     };
+    if fetch_receipt_whole(&plan) {
+        return fetch_full_open_fallback(
+            ctx,
+            config,
+            session.as_mut().ok_or(CoreError::Offline)?,
+            message_id,
+            folder_id,
+            uid,
+        )
+        .await;
+    }
 
     // Keep persistence errors distinct: only selective protocol/decode
     // failures are eligible for the user-open full-MIME fallback.
@@ -4407,7 +5014,16 @@ async fn fetch_full_open_fallback(
     let Some(raw) = imap::fetch_full(session, uid).await? else {
         return Err(CoreError::NotFound(format!("remote message UID {uid}")));
     };
-    persist_body(ctx, config, message_id, folder_id, uid, &raw).await
+    persist_body(
+        ctx,
+        config,
+        message_id,
+        SelectivePersistGuard::Priority { folder_id },
+        uid,
+        &raw,
+    )
+    .await
+    .map(|_| ())
 }
 
 async fn persist_selective_batch(
@@ -4420,22 +5036,18 @@ async fn persist_selective_batch(
     if contents.is_empty() {
         return Ok(0);
     }
-    let calendar_events: Vec<(i64, crate::calendar::IcsEvent)> = contents
+    let calendar_events: Vec<(i64, Vec<String>)> = contents
         .iter()
-        .flat_map(|content| {
-            content.calendar_parts.iter().flat_map(move |ics| {
-                crate::calendar::parse_ics(ics)
-                    .into_iter()
-                    .map(move |event| (content.message_id, event))
-            })
-        })
+        .filter(|content| !content.calendar_parts.is_empty())
+        .map(|content| (content.message_id, content.calendar_parts.clone()))
         .collect();
-    let (thread_ids, count) = ctx
+    let (thread_ids, count, fresh) = ctx
         .db
         .write(move |conn| {
             let _memory_permit = memory_permit;
             let tx = conn.transaction()?;
             let mut thread_ids = Vec::new();
+            let mut fresh = Vec::new();
             let mut count = 0u64;
             for content in contents {
                 let message_id = content.message_id;
@@ -4462,6 +5074,12 @@ async fn persist_selective_batch(
                 )?;
                 repo::search::index_message(&tx, message_id)?;
                 let _ = repo::sync_failures::clear_content(&tx, message_id);
+                // Rules that waited for this body go on (#238).
+                if let Some(resumed) = crate::rules::resume(&tx, message_id)?
+                    && resumed.announced
+                {
+                    fresh.push(resumed.thread_id);
+                }
                 if let Some(thread_id) =
                     repo::messages::get_row(&tx, message_id)?.and_then(|row| row.thread_id)
                     && !thread_ids.contains(&thread_id)
@@ -4474,40 +5092,42 @@ async fn persist_selective_batch(
                 repo::threads::recompute(&tx, thread_id)?;
             }
             tx.commit()?;
-            Ok((thread_ids, count))
+            Ok((thread_ids, count, fresh))
         })
         .await?;
-    if !calendar_events.is_empty() {
-        ctx.calendar_db
-            .write(move |conn| {
-                let tx = conn.transaction()?;
-                for (message_id, event) in &calendar_events {
-                    repo::calendar::upsert(&tx, account_id, *message_id, event)?;
-                }
-                tx.commit()?;
-                Ok(())
-            })
-            .await?;
-        ctx.bus.emit(CoreEvent::CalendarUpdated { account_id });
-    }
+    super::ingest::store_calendar_events(
+        ctx,
+        account_id,
+        calendar_events,
+        super::ingest::Arrival::Received,
+    )
+    .await?;
     if !thread_ids.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+    }
+    if !fresh.is_empty() {
+        ctx.bus.emit(CoreEvent::MailNew {
+            account_id,
+            thread_ids: fresh,
+        });
     }
     Ok(count)
 }
 
 /// Parse one already-fetched raw message, persist it to disk + DB, and notify
-/// the UI. Shared by the single-body path and the bulk backfill.
+/// the UI. `guard` names the fetch it came from: a reader opening it, or the
+/// background caching a read receipt whole.
 async fn persist_body(
     ctx: &SyncCtx,
     config: &AccountConfig,
     message_id: i64,
-    folder_id: i64,
+    guard: SelectivePersistGuard,
     uid: u32,
     raw: &[u8],
-) -> Result<()> {
+) -> Result<bool> {
+    let folder_id = guard.folder_id();
     if !remote_location_is_current(ctx, message_id, folder_id, i64::from(uid)).await? {
-        return Ok(());
+        return Ok(false);
     }
     let dir = ctx.paths.mail_dir(config.id);
     tokio::fs::create_dir_all(&dir).await?;
@@ -4518,44 +5138,57 @@ async fn persist_body(
     let path_str = path.to_string_lossy().to_string();
 
     let parsed = crate::mime::parse_message(raw)?;
-    let calendar_events = super::ingest::calendar_events(&parsed);
-    let (persisted, thread_id) = ctx
+    let calendar_events = super::ingest::calendar_parts(&parsed);
+    let (persisted, thread_ids, fresh) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
             let Some(current) = current_body_row(&tx, message_id)? else {
-                return Ok((false, None));
+                return Ok((false, Vec::new(), None));
             };
-            if !can_persist_selective_content(
-                &current,
-                SelectivePersistGuard::Priority { folder_id },
-                uid,
-            ) {
-                return Ok((false, None));
+            if !can_persist_selective_content(&current, guard, uid) {
+                return Ok((false, Vec::new(), None));
             }
-            super::ingest::store_body(&tx, message_id, &path_str, &parsed)?;
+            let mut thread_ids = super::ingest::store_body(&tx, message_id, &path_str, &parsed)?;
             let _ = repo::sync_failures::clear_content(&tx, message_id);
+            // Rules that waited for this body go on (#238).
+            let fresh = crate::rules::resume(&tx, message_id)?
+                .filter(|resumed| resumed.announced)
+                .map(|resumed| resumed.thread_id);
             let tid: Option<i64> =
                 repo::messages::get_row(&tx, message_id)?.and_then(|r| r.thread_id);
             if let Some(tid) = tid {
                 repo::threads::recompute(&tx, tid)?;
+                if !thread_ids.contains(&tid) {
+                    thread_ids.push(tid);
+                }
             }
             tx.commit()?;
-            Ok((true, tid))
+            Ok((true, thread_ids, fresh))
         })
         .await?;
 
     if !persisted {
         let _ = tokio::fs::remove_file(&path).await;
-        return Ok(());
+        return Ok(false);
     }
-    super::ingest::store_calendar_events(ctx, config.id, message_id, calendar_events).await?;
-    if let Some(tid) = thread_id {
-        ctx.bus.emit(CoreEvent::MailUpdated {
-            thread_ids: vec![tid],
+    super::ingest::store_calendar_events(
+        ctx,
+        config.id,
+        vec![(message_id, calendar_events)],
+        super::ingest::Arrival::Received,
+    )
+    .await?;
+    if !thread_ids.is_empty() {
+        ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+    }
+    if let Some(thread_id) = fresh {
+        ctx.bus.emit(CoreEvent::MailNew {
+            account_id: config.id,
+            thread_ids: vec![thread_id],
         });
     }
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(all(test, desktop))]

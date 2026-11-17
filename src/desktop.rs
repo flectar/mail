@@ -3,7 +3,7 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(glibc)]
     tune_allocator();
-    // Slint 1.18 keeps the native window and its rendering surface when
+    // Slint 1.19 keeps the native window and its rendering surface when
     // hidden on X11 and Windows. Use its window recreation path for tray mode,
     // as it already does on Wayland, so a hidden window holds no surface.
     // macOS keeps its window: AppKit attributes set after creation would be
@@ -21,6 +21,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     #[cfg(desktop)]
     if let Some(code) = flectar_mail::pdf_preview::run_worker_if_requested() {
+        std::process::exit(code);
+    }
+    #[cfg(desktop)]
+    if let Some(code) = flectar_mail::agents::run_bridge_if_requested() {
+        std::process::exit(code);
+    }
+    #[cfg(linux_desktop)]
+    if let Some(code) = flectar_mail::spelling::run_index_worker_if_requested() {
         std::process::exit(code);
     }
     flectar_mail::run_desktop(flectar_mail::platform::launch_context()?)

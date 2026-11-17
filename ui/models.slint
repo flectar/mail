@@ -29,6 +29,32 @@ export global MailDragApi {
     callback drop-on-mailbox(data-transfer, string, int, int) -> bool;
 }
 
+// What stops an account's mail checks.
+export enum AccountProblem {
+    none,
+    // The server turned the sign-in down; signing in again fixes it.
+    sign-in,
+    // A check failed, and the app keeps trying again on its own.
+    failed,
+}
+
+// How an account's mail checks are going, as its sidebar heading shows it.
+export struct AccountStatus {
+    // A check has been running for a moment.
+    checking: bool,
+    problem: AccountProblem,
+    // The heading shows the problem: at once after a check someone asked
+    // for, otherwise once it has lasted, so a dropped connection that comes
+    // straight back marks nothing.
+    marked: bool,
+    // The server's or the network's own account of the failure.
+    reason: string,
+    // When a check last brought the Inbox up to date, for
+    // AccountStatusText.last-checked.
+    checked_day: int,
+    checked_at: string,
+}
+
 export struct MailboxRow {
     account_id: int,
     folder_id: int,
@@ -53,6 +79,8 @@ export struct MailboxRow {
     count: string,
     color: color,
     has_custom_color: bool,
+    // Account rows only.
+    status: AccountStatus,
 }
 
 // Provider labels and local auto-categories share one presentation model.
@@ -82,6 +110,7 @@ export enum SidebarRowKind {
     unified-heading, unified-section, unified-inbox, unified-mailbox,
     categories-section, important, other, category, snoozed, scheduled,
     global-labels-section, global-label,
+    saved-searches-section, saved-search,
     accounts-heading, account, folder, account-labels-section, account-label,
     new-folder, new-label,
 }
@@ -130,6 +159,8 @@ export struct EmailRow {
     has_replied: bool,
     // Nobody replied in time to mail the user asked to be reminded about.
     reply_due: bool,
+    // Sent with high importance (#236), for a marker in the list.
+    high_importance: bool,
     message_count: int,
     label_summary: string,
     labels: [MailLabelRow],
@@ -241,6 +272,10 @@ export struct AccountRow {
     mail_protocol: string,
     status: string,
     sync_error: string,
+    // When a check last brought the Inbox up to date, for
+    // AccountStatusText.last-checked.
+    checked_day: int,
+    checked_at: string,
     initials: string,
     avatar: image,
     avatar_small: image,
@@ -262,6 +297,8 @@ export struct AccountRow {
     mail_history: string,
     sent_copy_policy: string,
     keep_on_server: string,
+    // IMAP: the account lists only the folders the user subscribed to.
+    subscribed_folders_only: bool,
     // Days a POP3 server keeps downloaded mail on its own; -1 when it
     // keeps it or hasn't said.
     server_keeps_mail_days: int,
@@ -303,6 +340,12 @@ export struct ComposeEditorTile {
     image: image,
     y: float,
     height: float,
+}
+
+// A language spelling can be checked in, as the editor menu lists it.
+export struct SpellingLanguage {
+    name: string,
+    checked: bool,
 }
 
 export struct EmailTemplateRow {
@@ -356,6 +399,15 @@ export struct CalendarEventRow {
     recurrence: string,
     status: string,
     source: string,
+    // An invitation the user can answer: they are among its guests, don't
+    // organize it, and it isn't cancelled.
+    answerable: bool,
+    // A cancelled event from someone else, which the user can take out of
+    // their calendar.
+    removable: bool,
+    // For one occurrence of a repeating event, its RECURRENCE-ID (ms since
+    // the epoch, as text), else empty.
+    recurrence_id: string,
 }
 
 // A flat model lets ListView virtualize individual events, including busy days.
@@ -407,6 +459,13 @@ export struct CalendarSourceRow {
 export struct ComposeAttachment {
     name: string,
     detail: string,
+}
+
+// A file the message sends by link: its name, and how its upload went.
+export struct ComposeLink {
+    name: string,
+    detail: string,
+    failed: bool,
 }
 
 // A deliberately small contact shape for compose autocomplete. The core

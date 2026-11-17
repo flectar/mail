@@ -4,13 +4,14 @@
 //! keeps its own rules for recognizing a message it already has.
 
 use super::engine::SyncCtx;
-use crate::calendar::IcsEvent;
-use crate::db::repo::{self, messages::NewMessage, sender_identities::OwnAddresses};
+use crate::db::repo::{
+    self, calendar::NewEvents, messages::NewMessage, sender_identities::OwnAddresses,
+};
 use crate::error::Result;
 use crate::events::CoreEvent;
 use crate::mime::{ParsedBody, ParsedHeaders};
-use crate::models::{Settings, now_ms, roles};
-use rusqlite::Connection;
+use crate::models::{AddInvitations, Settings, now_ms, roles};
+use rusqlite::{Connection, OptionalExtension};
 
 /// A message older than this never triggers a new-mail notification, even if
 /// it lands unread, so old mail that a server replays as new stays silent.
@@ -41,6 +42,9 @@ pub(crate) struct Delivery<'a> {
     pub draft: bool,
     pub has_attachments: bool,
     pub size: Option<i64>,
+    /// The server says a read receipt was already sent or declined
+    /// ($MDNSent), or the mail is imported and was answered long ago.
+    pub receipt_handled: bool,
 }
 
 /// A message row created by [`Importer::insert`].
@@ -142,8 +146,13 @@ impl Importer {
             references: headers.references.clone(),
             list_unsubscribe: headers.list_unsubscribe.clone(),
             list_unsubscribe_post: headers.list_unsubscribe_post.clone(),
+            list_id: headers.list_id.clone(),
             sender_addr: headers.via.clone(),
             sender_verification: headers.sender_verification,
+            receipt_to: headers.receipt_to.clone(),
+            receipt_confirm: headers.receipt_confirm,
+            receipt_handled: delivery.receipt_handled,
+            importance: headers.importance,
         };
         let message_id = repo::messages::insert(conn, &message, thread_id)?;
         if !self.thread_ids.contains(&thread_id) {
@@ -202,6 +211,22 @@ impl Importer {
         Ok(())
     }
 
+    /// Hold back the notification [`Self::announce`] would queue while a
+    /// rule waits for the message's body (see `crate::rules::hold`).
+    pub(crate) fn hold(&self, conn: &Connection, imported: &Imported, live: bool) -> Result<()> {
+        if !arrival_eligible(
+            live,
+            imported.is_read,
+            imported.is_outgoing,
+            imported.arrival_ms,
+            now_ms(),
+        ) {
+            return Ok(());
+        }
+        let audible = chime_worthy(imported.is_automated, &imported.from_email);
+        crate::rules::hold(conn, imported.message_id, audible)
+    }
+
     /// Queue the notification for a live arrival: mail that reached the
     /// mailbox while the account was being followed, rather than history
     /// caught up on.
@@ -251,11 +276,9 @@ impl Importer {
     /// threads that queued a notification.
     pub(crate) fn finish(self, conn: &Connection) -> Result<(Vec<i64>, Vec<i64>)> {
         if self.settings.auto_labels_enabled {
-            let splits = repo::splits::list(conn)?;
             for &thread_id in &self.thread_ids {
                 crate::route::route_thread_deterministic(
                     conn,
-                    &splits,
                     self.settings.ai_categorize,
                     thread_id,
                 )?;
@@ -301,13 +324,15 @@ pub(crate) fn parse_or_text(raw: &[u8]) -> ParsedBody {
 }
 
 /// Store a parsed full message: its text and sanitized HTML, the raw file,
-/// attachments, sender verification, and the search index.
+/// attachments, sender verification, list fields, the search index, and what
+/// a read receipt reports. Returns the threads holding the message such a
+/// receipt is about, which now show it.
 pub(crate) fn store_body(
     conn: &Connection,
     message_id: i64,
     raw_path: &str,
     parsed: &ParsedBody,
-) -> Result<()> {
+) -> Result<Vec<i64>> {
     repo::messages::store_body(
         conn,
         message_id,
@@ -324,6 +349,13 @@ pub(crate) fn store_body(
         Some(&parsed.snippet),
     )?;
     repo::messages::set_sender_verification(conn, message_id, parsed.headers.sender_verification)?;
+    repo::messages::fill_list_headers(
+        conn,
+        message_id,
+        parsed.headers.list_unsubscribe.as_deref(),
+        parsed.headers.list_unsubscribe_post.as_deref(),
+        parsed.headers.list_id.as_deref(),
+    )?;
     let attachments: Vec<_> = parsed
         .attachments
         .iter()
@@ -338,33 +370,131 @@ pub(crate) fn store_body(
         })
         .collect();
     repo::messages::replace_attachments(conn, message_id, &attachments)?;
-    repo::search::index_message(conn, message_id)
+    repo::search::index_message(conn, message_id)?;
+    match &parsed.disposition_report {
+        Some(report) => record_returned_receipt(conn, message_id, report),
+        None => Ok(Vec::new()),
+    }
 }
 
-/// The meeting invitations a message carries.
-pub(crate) fn calendar_events(parsed: &ParsedBody) -> Vec<IcsEvent> {
-    parsed
-        .calendar_parts
-        .iter()
-        .flat_map(|ics| crate::calendar::parse_ics(ics))
-        .collect()
+/// Keep what a read receipt that came back reports, and return the threads
+/// that show it. A receipt the account sent itself, such as the copy Gmail
+/// files in Sent, reports on someone else's message.
+pub(crate) fn record_returned_receipt(
+    conn: &Connection,
+    message_id: i64,
+    report: &crate::mime::DispositionReport,
+) -> Result<Vec<i64>> {
+    let receipt = conn
+        .query_row(
+            "SELECT account_id, date FROM messages WHERE id = ?1 AND is_outgoing = 0",
+            [message_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?;
+    match receipt {
+        Some((account_id, date)) => repo::returned_receipts::record(conn, account_id, report, date),
+        None => Ok(Vec::new()),
+    }
 }
 
-/// Record a stored message's invitations in the calendar.
+/// The calendars a message carries: its text/calendar parts, such as a
+/// meeting invitation or an answer to one.
+pub(crate) fn calendar_parts(parsed: &ParsedBody) -> Vec<String> {
+    parsed.calendar_parts.clone()
+}
+
+/// How the messages came to the account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Arrival {
+    /// They arrived, or the user moved them back from Spam.
+    Received,
+    /// They were imported from saved mail: an archive's invitations join the
+    /// calendar only once answered.
+    Imported,
+}
+
+/// Apply the calendars of stored messages to the account's calendar, by the
+/// rules of [`repo::calendar::apply_invitation`]. Mail in Spam or Trash and
+/// mail from a blocked sender never changes the calendar: RFC 9671 §5 has
+/// calendar data in spam left alone, and invitations are how calendar spam
+/// arrives. Which new invitations join the calendar before an answer
+/// follows the user's setting ([`AddInvitations`]).
 pub(crate) async fn store_calendar_events(
     ctx: &SyncCtx,
     account_id: i64,
-    message_id: i64,
-    events: Vec<IcsEvent>,
+    messages: Vec<(i64, Vec<String>)>,
+    arrival: Arrival,
 ) -> Result<()> {
-    if events.is_empty() {
+    let mut messages: Vec<(i64, Vec<String>)> = messages
+        .into_iter()
+        .filter(|(_, calendars)| !calendars.is_empty())
+        .collect();
+    if messages.is_empty() {
         return Ok(());
     }
+    // Every message keeps its calendar for the card above it, also those
+    // whose calendar stays out of the user's.
+    let kept: Vec<(i64, String)> = messages
+        .iter()
+        .filter_map(|(id, calendars)| {
+            calendars
+                .iter()
+                .find(|calendar| !crate::calendar::parse_ics(calendar).is_empty())
+                .map(|calendar| (*id, calendar.clone()))
+        })
+        .collect();
+    if !kept.is_empty() {
+        ctx.calendar_db
+            .write(move |conn| {
+                for (message_id, calendar) in &kept {
+                    repo::calendar::keep_message_calendar(conn, account_id, *message_id, calendar)?;
+                }
+                Ok(())
+            })
+            .await?;
+    }
+    let ids: Vec<i64> = messages.iter().map(|(id, _)| *id).collect();
+    let (own, kept_out, adding, known) = ctx
+        .db
+        .read(move |conn| {
+            let adding = repo::settings::get(conn)?.add_invitations;
+            let known = match adding {
+                AddInvitations::Known => repo::messages::from_known_senders(conn, &ids)?,
+                _ => Default::default(),
+            };
+            Ok((
+                repo::sender_identities::own_addresses(conn, account_id)?,
+                repo::messages::kept_from_calendar(conn, &ids)?,
+                adding,
+                known,
+            ))
+        })
+        .await?;
+    messages.retain(|(id, _)| !kept_out.contains(id));
+    if messages.is_empty() {
+        return Ok(());
+    }
+    let new_events = move |message_id: i64| match (arrival, adding) {
+        (Arrival::Imported, _) | (_, AddInvitations::Answered) => NewEvents::Hold,
+        (_, AddInvitations::Everyone) => NewEvents::Invited,
+        (_, AddInvitations::Known) if known.contains(&message_id) => NewEvents::Invited,
+        (_, AddInvitations::Known) => NewEvents::Hold,
+    };
     ctx.calendar_db
         .write(move |conn| {
             let tx = conn.transaction()?;
-            for event in &events {
-                repo::calendar::upsert(&tx, account_id, message_id, event)?;
+            for (message_id, calendars) in &messages {
+                for calendar in calendars {
+                    repo::calendar::apply_invitation(
+                        &tx,
+                        account_id,
+                        *message_id,
+                        calendar,
+                        &own,
+                        new_events(*message_id),
+                    )?;
+                }
             }
             tx.commit()?;
             Ok(())
@@ -401,5 +531,57 @@ mod tests {
         assert!(chime_worthy(false, "alice@example.com"));
         assert!(!chime_worthy(true, "digest@example.com"));
         assert!(!chime_worthy(false, "notifications@example.com"));
+    }
+
+    #[test]
+    fn a_stored_receipt_is_kept_unless_the_account_sent_it() {
+        use crate::db::testutil;
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let (_, received) = testutil::seed_message(&conn, "ana@example.com", "Read: Plan", true);
+        let (_, sent) = testutil::seed_message(&conn, "me@test.dev", "Read: Plan", true);
+        conn.execute("UPDATE messages SET is_outgoing = 1 WHERE id = ?1", [sent])
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO threads (id, account_id, subject_norm, unread_count, last_message_at)
+                 VALUES (50, 1, 'plan', 0, 1000);
+             INSERT INTO messages (thread_id, account_id, folder_id, message_id, subject, date,
+                 is_outgoing)
+                 VALUES (50, 1, 1, 'plan@example.org', 'Plan', 1000, 1);",
+        )
+        .unwrap();
+        let receipt = crate::mime::parse_message(
+            b"From: Ana <ana@example.com>\r\n\
+              Date: Tue, 01 Sep 2026 12:30:00 +0000\r\n\
+              Content-Type: multipart/report; report-type=disposition-notification; boundary=b\r\n\
+              \r\n\
+              --b\r\n\
+              Content-Type: message/disposition-notification\r\n\
+              \r\n\
+              Final-Recipient: rfc822; ana@example.com\r\n\
+              Original-Message-ID: <plan@example.org>\r\n\
+              Disposition: manual-action/MDN-sent-manually; displayed\r\n\
+              --b--\r\n",
+        )
+        .unwrap();
+        assert!(receipt.disposition_report.is_some());
+        // One the account sent reports on someone else's message.
+        assert!(
+            super::store_body(&conn, sent, "/sent.eml", &receipt)
+                .unwrap()
+                .is_empty()
+        );
+        let count = |conn: &rusqlite::Connection| -> i64 {
+            conn.query_row("SELECT count(*) FROM returned_receipts", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(count(&conn), 0);
+        assert_eq!(
+            super::store_body(&conn, received, "/received.eml", &receipt).unwrap(),
+            vec![50]
+        );
+        assert_eq!(count(&conn), 1);
     }
 }

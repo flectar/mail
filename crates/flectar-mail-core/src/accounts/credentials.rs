@@ -48,6 +48,9 @@ pub enum Slot {
     /// id 0). Not a secret: the credential store keeps it because it outlives
     /// the app's own data where the platform allows.
     SyncTrial,
+    /// The app password of the storage service with this id that files go by link from,
+    /// kept under account id 0 as the service belongs to no account.
+    LinkServicePassword(i64),
 }
 
 impl Slot {
@@ -68,6 +71,9 @@ impl Slot {
             Slot::CarddavPassword => "carddav_password".into(),
             Slot::DeviceSync => "device_sync".into(),
             Slot::SyncTrial => "sync_trial".into(),
+            Slot::LinkServicePassword(service_id) => {
+                format!("link_service_password:{service_id}").into()
+            }
         }
     }
 }

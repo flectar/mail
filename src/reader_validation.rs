@@ -660,7 +660,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert!(renderer_settings.get_restart_required());
     app.set_theme_mode("light".into());
     app.set_settings_tab("General".into());
-    app.set_settings_open(true);
+    app.invoke_open_settings();
     draw("renderer-settings-desktop", 1280, 900);
     draw("renderer-settings-phone", 390, 844);
     renderer_settings.invoke_choose("cpu".into());
@@ -693,7 +693,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert!(renderer_settings.get_gpu_failed());
     assert_eq!(renderer_settings.get_preferred(), "gpu");
     assert_eq!(renderer_settings.get_active(), "cpu");
-    app.set_settings_open(false);
+    app.invoke_close_settings();
     app.set_active_view("contacts".into());
     app.set_contacts(ModelRc::default());
     app.set_contact_loading_more(true);
@@ -789,6 +789,7 @@ fn mailto_links_open_without_losing_the_draft(
         sync_error: None,
         can_create_top_level_mailbox: true,
         server_keeps_mail_days: None,
+        caught_up_at: None,
     }];
     app.set_compose_account_id(1);
     let frame = || {
@@ -802,6 +803,7 @@ fn mailto_links_open_without_losing_the_draft(
         state,
         runtime,
         crate::documents::default_provider(),
+        std::env::temp_dir(),
         false,
     );
     mailto_links::install(app, composers);
@@ -854,9 +856,9 @@ fn mailto_links_open_without_losing_the_draft(
 }
 
 /// The desktop mail view at scale 2, drawn by Slint's software renderer like
-/// CPU mode. That renderer panics when it paints a rectangle reaching past
-/// ±32767 physical pixels (#35), so reader surfaces sized by a long message
-/// must keep painting within the visible window.
+/// CPU mode. Before Slint 1.19, that renderer panicked when it painted a
+/// rectangle reaching past ±32767 physical pixels (#35), and reader surfaces
+/// are as tall as a long message.
 struct SoftwareReader {
     window: Rc<MinimalSoftwareWindow>,
     app: AppWindow,

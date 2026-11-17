@@ -1,0 +1,26 @@
+// What the app knows about newer releases (src/updates.rs). Only builds made
+// for direct download tell of them; app stores and package managers update
+// the app themselves.
+export global Updates {
+    // This build tells of newer releases.
+    in property <bool> offered;
+    // The user wants the app to check once a day. The switch in Settings
+    // sets it at once, and Rust from the saved settings.
+    in-out property <bool> enabled: true;
+    in property <bool> checking;
+    // The last check failed.
+    in property <bool> failed;
+    // A check found nothing newer.
+    in property <bool> current;
+    // The newest release after this one, or "".
+    in property <string> version;
+    // The first paragraph of its notes.
+    in property <string> summary;
+    // The user put away the notice of `version`.
+    in property <bool> dismissed;
+    callback set-enabled(bool);
+    callback check-now();
+    // The release's page, with its notes and files.
+    callback open-release();
+    callback dismiss();
+}

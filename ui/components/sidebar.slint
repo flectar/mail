@@ -12,6 +12,8 @@ import {
 } from "workspace-layout.slint";
 import { LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 import { LocalMailUi } from "../local-mail.slint";
+import { SavedSearchUi } from "../saved-searches.slint";
+import { Updates } from "../updates.slint";
 import { TypeScale } from "../typography.slint";
 
 // The profile switcher across a sidebar, as tall as its buttons.
@@ -37,6 +39,70 @@ component SidebarProfileSwitcher inherits Rectangle {
         choose(id) => { root.choose(id); }
         create-profile => { root.create-profile(); }
         manage-profiles => { root.manage-profiles(); }
+    }
+}
+
+// A newer release is out: a quiet line at the foot of the sidebar that leads
+// to its page, until the user puts it away (src/updates.rs).
+component UpdateNotice inherits Rectangle {
+    in property <bool> touch-mode;
+    in property <color> background-color;
+    in property <color> hover-background;
+    in property <color> accent-color;
+    in property <color> title-color;
+    in property <color> muted-color;
+
+    height: max(root.touch-mode ? 52px : 44px, labels.preferred-height + 14px);
+    border-radius: 8px;
+    background: open.has-hover ? root.hover-background : root.background-color;
+
+    Image {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        width: LayoutMetrics.icon-size;
+        height: LayoutMetrics.icon-size;
+        source: @image-url("../icons/lucide/outline/download.svg");
+        colorize: root.accent-color;
+        image-fit: contain;
+        accessible-role: none;
+    }
+    labels := VerticalLayout {
+        x: 12px + LayoutMetrics.icon-size + 10px;
+        width: parent.width - self.x - 38px;
+        alignment: center;
+        Text {
+            text: @tr("New version available");
+            color: root.title-color;
+            font-size: TypeScale.caption;
+            font-weight: 600;
+            overflow: elide;
+        }
+        Text {
+            text: @tr("Version {}", Updates.version);
+            color: root.muted-color;
+            font-size: TypeScale.caption;
+            overflow: elide;
+        }
+    }
+    open := TouchArea {
+        width: parent.width - 38px;
+        accessible-role: button;
+        accessible-label: @tr("Flectar Mail {} is out. Open its release page.", Updates.version);
+        accessible-action-default => { Updates.open-release(); }
+        mouse-cursor: pointer;
+        clicked => { Updates.open-release(); }
+    }
+    IconButton {
+        x: parent.width - 34px;
+        y: (parent.height - self.height) / 2;
+        width: 28px;
+        height: 28px;
+        icon: @image-url("../icons/lucide/outline/x.svg");
+        icon-size: 12px;
+        icon-color: root.muted-color;
+        hover-background: root.hover-background;
+        tooltip-text: @tr("Hide until the next version");
+        clicked => { Updates.dismiss(); }
     }
 }
 
@@ -67,6 +133,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     callback compose;
     callback manage-accounts;
     callback sync-account(int);
+    // Sign the account in again, where its settings are.
+    callback sign-in-account(int);
     callback choose-profile(string);
     callback create-profile();
     callback manage-profiles();
@@ -78,6 +146,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     callback request-rename-folder(int, string);
     callback request-delete-folder(int, string);
     callback request-empty-trash(int);
+    // Mark all as read for a row: its scope and the name it shows (#234).
+    callback request-mark-all-read(string, string);
     callback request-rename-label(int, string, color, string, bool);
     callback request-delete-label(int, string, string, bool, bool);
 
@@ -260,7 +330,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                 for entry in root.rows: Rectangle {
                     private property <bool> reveal-ready: !entry.reveal_row;
                     width: max(0px, mailbox-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
-                    height: !entry.show_row || (entry.reveal_row && !self.reveal-ready && MotionSettings.enabled) ? 0px
+                    height: !entry.show_row || (entry.reveal_row && !self.reveal-ready && MotionSettings.movement) ? 0px
                         : entry.kind == SidebarRowKind.unified-heading ? 21px
                         : entry.kind == SidebarRowKind.accounts-heading ? 25px
                         : entry.kind == SidebarRowKind.account ? (entry.mailbox.detail == "" ? 35px : root.account-row-height)
@@ -269,11 +339,11 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         : 31px;
                     background: transparent;
                     clip: true;
-                    animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.enabled; }
+                    animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.movement; }
 
                     Timer {
                         interval: 16ms;
-                        running: entry.reveal_row && !parent.reveal-ready && MotionSettings.enabled;
+                        running: entry.reveal_row && !parent.reveal-ready && MotionSettings.movement;
                         triggered => { parent.reveal-ready = true; }
                     }
 
@@ -308,12 +378,14 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: @tr("Inbox");
                         count: root.unified-count;
+                        can-mark-all-read: root.unified-count != "" && root.unified-count != "0";
                         scope: "Unified Inbox";
                         account-id: 0;
                         folder-id: -1;
                         mail-drop-enabled: true;
                         icon: @image-url("../icons/lucide/filled/inbox-flectar.svg");
-                        selected: root.selected-scope == "Unified Inbox";
+                        // A saved search runs in the inbox's scope but has its own row.
+                        selected: root.selected-scope == "Unified Inbox" && SavedSearchUi.selected-id < 0;
                         row-height: 32px;
                         sidebar-background: root.background-color;
                         selection-background: root.selection-background;
@@ -321,6 +393,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         body-color: root.body-color;
                         muted-color: root.muted-color;
                         icon-color: root.monochrome-icons ? (root.selected-scope == "Unified Inbox" ? root.accent-color : root.muted-color) : MailIconPalette.inbox;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
@@ -331,6 +404,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: entry.mailbox.label;
                         count: entry.mailbox.count;
+                        can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0" && entry.mailbox.scope != "Unified Drafts";
                         scope: entry.mailbox.scope;
                         account-id: entry.mailbox.account_id;
                         can-empty-trash: entry.mailbox.scope == "Unified Trash";
@@ -359,6 +433,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                             : entry.mailbox.scope == "Unified Trash" ? MailIconPalette.trash
                             : entry.mailbox.scope == "Unified Archive" ? MailIconPalette.archive
                             : MailIconPalette.drafts;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                         empty-trash(account-id) => { root.request-empty-trash(account-id); }
                     }
@@ -424,6 +499,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: @tr("Important");
                         count: entry.mailbox.count;
+                        can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0";
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Important";
                         mail-drop-enabled: true;
@@ -435,6 +511,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         body-color: root.body-color;
                         muted-color: root.muted-color;
                         icon-color: root.monochrome-icons ? (root.selected-scope == "Important" ? root.accent-color : root.muted-color) : MailIconPalette.inbox;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
@@ -445,6 +522,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: @tr("Other");
                         count: entry.mailbox.count;
+                        can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0";
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Other";
                         mail-drop-enabled: true;
@@ -456,6 +534,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         body-color: root.body-color;
                         muted-color: root.muted-color;
                         icon-color: root.monochrome-icons ? (root.selected-scope == "Other" ? root.accent-color : root.muted-color) : MailIconPalette.other;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
@@ -466,6 +545,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: entry.label.name;
                         count: entry.label.count;
+                        can-mark-all-read: entry.label.count != "" && entry.label.count != "0";
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Category:" + entry.label.id;
@@ -480,6 +560,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         icon-color: root.monochrome-icons
                             ? (root.selected-scope == "Category:" + entry.label.id ? root.accent-color : root.muted-color)
                             : entry.label.color;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
@@ -509,6 +590,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         label: entry.label.name;
                         accessible-name: @tr("Global label {}", entry.label.name);
                         count: entry.label.count;
+                        can-mark-all-read: entry.label.count != "" && entry.label.count != "0";
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         label-id: entry.label.id;
@@ -528,11 +610,56 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         icon-color: root.monochrome-icons
                             ? (root.selected-scope == "GlobalLabel:" + entry.label.id ? root.accent-color : root.muted-color)
                             : entry.label.color;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                         rename-label(id, name, color, account, global) => { root.request-rename-label(id, name, color, account, global); }
                         delete-label(id, name, account, global, has-children) => {
                             root.request-delete-label(id, name, account, global, has-children);
                         }
+                    }
+
+                    if entry.kind == SidebarRowKind.saved-searches-section: SidebarSectionHeader {
+                        x: 0px;
+                        interactive: entry.show_row;
+                        y: 0px;
+                        width: parent.width;
+                        label: @tr("Saved searches");
+                        label-font-weight: 500;
+                        folder-row-style: true;
+                        sidebar-background: root.background-color;
+                        hover-background: root.hover-background;
+                        body-color: root.body-color;
+                        muted-color: root.muted-color;
+                        icon: @image-url("../icons/lucide/filled/search.svg");
+                        icon-color: root.monochrome-icons ? root.body-color : MailIconPalette.folders;
+                        open: entry.open;
+                        toggled(open) => { root.toggle-section(entry.key, open); }
+                    }
+
+                    // A saved search runs its query in the accounts in view.
+                    if entry.kind == SidebarRowKind.saved-search: SidebarItem {
+                        x: 0px;
+                        interactive: entry.show_row;
+                        y: 0px;
+                        width: parent.width;
+                        label: entry.label.name;
+                        accessible-name: @tr("Saved search {}", entry.label.name);
+                        count: entry.label.count;
+                        label-has-emoji: entry.label.name_has_emoji;
+                        left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
+                        label-id: entry.label.id;
+                        saved-search: true;
+                        icon: @image-url("../icons/lucide/filled/search.svg");
+                        selected: SavedSearchUi.selected-id == entry.label.id;
+                        sidebar-background: root.background-color;
+                        selection-background: root.selection-background;
+                        accent-color: root.accent-color;
+                        body-color: root.body-color;
+                        muted-color: root.muted-color;
+                        icon-color: root.monochrome-icons
+                            ? (SavedSearchUi.selected-id == entry.label.id ? root.accent-color : root.muted-color)
+                            : MailIconPalette.folders;
+                        clicked(scope) => { SavedSearchUi.open(entry.label.id); }
                     }
 
                     if entry.kind == SidebarRowKind.accounts-heading: WorkspaceMiniHeading {
@@ -570,9 +697,12 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         // Mail on this device has no server or settings page.
                         account-menu: !self.local;
                         can-check-mail: !root.sync-in-progress;
+                        status: entry.mailbox.status;
+                        touch-mode: root.touch-mode;
                         toggled(open) => { root.toggle-section(entry.key, open); }
                         check-mail => { root.sync-account(entry.mailbox.account_id); }
                         account-settings => { root.manage-accounts(); }
+                        sign-in => { root.sign-in-account(entry.mailbox.account_id); }
                     }
 
                     if entry.kind == SidebarRowKind.folder: SidebarItem {
@@ -584,6 +714,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         label: entry.mailbox.label;
                         label-has-emoji: entry.mailbox.label_has_emoji;
                         count: entry.mailbox.count;
+                        can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0" && entry.mailbox.label != "Drafts";
                         scope: entry.mailbox.scope;
                         account-id: entry.mailbox.account_id;
                         folder-id: entry.mailbox.folder_id;
@@ -633,6 +764,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                             : entry.mailbox.label == "Drafts" ? MailIconPalette.drafts
                             : entry.mailbox.has_custom_color ? entry.mailbox.color
                             : MailIconPalette.folders;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => {
                             if (entry.mailbox.is_selectable || entry.mailbox.is_standard) {
                                 root.select-scope(scope);
@@ -676,6 +808,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         label-path: entry.label.name;
                         accessible-name: @tr("{} label, {} account", entry.label.name, entry.label.account_name);
                         count: entry.label.count;
+                        can-mark-all-read: entry.label.count != "" && entry.label.count != "0";
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent
                             + entry.label.depth * SidebarStyle.branch-indent;
@@ -701,6 +834,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         icon-color: root.monochrome-icons
                             ? (root.selected-scope == "AccountLabel:" + entry.label.id ? root.accent-color : root.muted-color)
                             : entry.label.color;
+                        mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => { root.select-scope(scope); }
                         toggled(label-id, expanded) => { root.toggle-section(entry.key, expanded); }
                         new-child-label(account-id, label-id, path, account) => {
@@ -770,6 +904,18 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                 content-y: mailbox-scroll.content-y;
                 content-height: mailbox-scroll.content-height;
                 visible-height: mailbox-scroll.visible-height;
+            }
+        }
+
+        if Updates.offered && Updates.enabled && Updates.version != "" && !Updates.dismissed : VerticalLayout {
+            padding-bottom: 10px;
+            UpdateNotice {
+                touch-mode: root.touch-mode;
+                background-color: root.hover-background;
+                hover-background: root.selection-background;
+                accent-color: root.accent-color;
+                title-color: root.title-color;
+                muted-color: root.muted-color;
             }
         }
     }

@@ -33,6 +33,10 @@ pub(crate) async fn run(
                         "attachments of local mail are read from the stored message".into(),
                     ));
                 }
+                // Mail on this device has no server to search.
+                Some(PriorityFetchCmd::Search { complete, .. }) => {
+                    let _ = complete.send(Err("mail on this device has no server".into()));
+                }
             },
         }
     }

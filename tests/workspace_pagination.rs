@@ -4,6 +4,7 @@ use slint::platform::{Platform, WindowAdapter};
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { InfiniteScrollController } from "../ui/components/infinite-scroll-controller.slint";
     export component PaginationHarness inherits Window {
         in-out property <bool> active: true;
