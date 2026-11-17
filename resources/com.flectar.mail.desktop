@@ -11,6 +11,9 @@ Keywords=Mail;Email;IMAP;Gmail;Outlook;Calendar;
 MimeType=x-scheme-handler/mailto;
 Terminal=false
 StartupNotify=true
+# The window's app id, so docks group it under entries that AppImage
+# integrators install under another file name.
+StartupWMClass=com.flectar.mail
 Actions=new-email;
 X-AppImage-Name=Flectar Mail
 # Packaging replaces these with the Cargo.toml version and the executable's
