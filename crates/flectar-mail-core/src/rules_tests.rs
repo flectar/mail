@@ -617,3 +617,80 @@ fn rules_that_wait_too_long_settle_without_the_body() {
     assert!(sorted.filed && !sorted.waiting);
     assert_eq!(waiting_json(&conn, message_id), None);
 }
+
+#[test]
+fn a_rule_counts_and_runs_on_the_inbox_mail_it_matches_now() {
+    let (mut conn, digest) = mailbox("news@example.com", "Weekly digest");
+    let (_, note) = testutil::seed_message(&conn, "alex@team.dev", "Lunch?", false);
+    let (_, archived) = testutil::seed_message(&conn, "news@example.com", "Old digest", false);
+    conn.execute(
+        "UPDATE messages SET folder_id = 2 WHERE id = ?1",
+        [archived],
+    )
+    .unwrap();
+    let from_news = rule(
+        vec![condition(RuleField::From, RuleOp::EndsWith, "@example.com")],
+        vec![RuleAction::MarkRead, RuleAction::Move { folder: 5 }],
+    );
+    // Only Inbox mail counts.
+    let found = inbox_matches(&conn, &from_news).unwrap();
+    assert_eq!(found.message_ids, [digest]);
+    assert_eq!(found.unknown, 0);
+
+    // A rule on the body can't tell for mail whose body isn't here.
+    let on_body = rule(
+        vec![condition(RuleField::Body, RuleOp::Contains, "lunch")],
+        vec![RuleAction::Star],
+    );
+    assert_eq!(
+        inbox_matches(&conn, &on_body).unwrap(),
+        InboxMatches {
+            message_ids: Vec::new(),
+            unknown: 2
+        }
+    );
+    repo::messages::store_body(&conn, note, Some("Lunch at noon?"), None, None, false, None)
+        .unwrap();
+    let found = inbox_matches(&conn, &on_body).unwrap();
+    assert_eq!((found.message_ids, found.unknown), (vec![note], 1));
+
+    let tx = conn.transaction().unwrap();
+    let queued = run_on(&tx, &from_news, &[digest, archived]).unwrap();
+    tx.commit().unwrap();
+    // Marked, then moved; mail that wasn't in the Inbox is left alone.
+    assert_eq!(queued.len(), 2);
+    assert_eq!(
+        state(&conn, digest),
+        (5, true, false, vec!["mark_read".into(), "move".into()])
+    );
+    assert_eq!(state(&conn, archived).0, 2);
+}
+
+#[test]
+fn a_rule_made_from_a_message_is_for_its_list_or_its_sender() {
+    let (conn, message_id) = mailbox("news@example.com", "Weekly digest");
+    let draft = draft_for(&conn, message_id).unwrap();
+    assert_eq!(draft.id, 0);
+    assert_eq!(draft.account_id, Some(1));
+    assert_eq!(draft.name, "news@example.com");
+    assert_eq!(
+        draft.conditions,
+        [condition(RuleField::From, RuleOp::Is, "news@example.com")]
+    );
+    conn.execute(
+        "UPDATE messages SET list_id = 'digest.example.com', from_name = 'Example News'
+         WHERE id = ?1",
+        [message_id],
+    )
+    .unwrap();
+    let draft = draft_for(&conn, message_id).unwrap();
+    assert_eq!(draft.name, "Example News");
+    assert_eq!(
+        draft.conditions,
+        [condition(
+            RuleField::MailingList,
+            RuleOp::Is,
+            "digest.example.com"
+        )]
+    );
+}

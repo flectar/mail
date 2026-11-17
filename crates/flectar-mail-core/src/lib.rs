@@ -4125,6 +4125,81 @@ impl Core {
             .await
     }
 
+    /// The Inbox mail `rule` matches now, saved or not, to tell the user
+    /// before running it on that mail.
+    pub async fn mail_rule_matches(&self, rule: MailRule) -> Result<rules::InboxMatches> {
+        self.db
+            .read(move |conn| {
+                rules::check(conn, &rule)?;
+                rules::inbox_matches(conn, &rule)
+            })
+            .await
+    }
+
+    /// Run `rule` on the Inbox mail it matches now, as the user would act on
+    /// each message: the actions it queued, for Undo.
+    pub async fn run_mail_rule(&self, rule: MailRule) -> Result<Vec<i64>> {
+        let (action_ids, thread_ids, accounts) = self
+            .db
+            .write(move |conn| {
+                rules::check(conn, &rule)?;
+                let found = rules::inbox_matches(conn, &rule)?;
+                let tx = conn.transaction()?;
+                let action_ids = rules::run_on(&tx, &rule, &found.message_ids)?;
+                let mut thread_ids = Vec::new();
+                let mut accounts = Vec::new();
+                for &message_id in &found.message_ids {
+                    let (thread_id, account_id): (Option<i64>, i64) = tx.query_row(
+                        "SELECT thread_id, account_id FROM messages WHERE id = ?1",
+                        [message_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?;
+                    thread_ids.extend(thread_id.filter(|id| !thread_ids.contains(id)));
+                    if !accounts.contains(&account_id) {
+                        accounts.push(account_id);
+                    }
+                }
+                tx.commit()?;
+                Ok((action_ids, thread_ids, accounts))
+            })
+            .await?;
+        if !thread_ids.is_empty() {
+            self.bus.emit(CoreEvent::MailUpdated { thread_ids });
+        }
+        for account_id in accounts {
+            self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+        }
+        Ok(action_ids)
+    }
+
+    /// A new rule for mail like `message_id`, not saved yet: for the list
+    /// it came from, when it came from one, otherwise for its sender.
+    pub async fn rule_from_message(&self, message_id: i64) -> Result<MailRule> {
+        self.db
+            .read(move |conn| rules::draft_for(conn, message_id))
+            .await
+    }
+
+    /// [`Self::rule_from_message`] for the newest message of conversation
+    /// `thread_id` that someone else sent.
+    pub async fn rule_from_thread(&self, thread_id: i64) -> Result<MailRule> {
+        self.db
+            .read(move |conn| {
+                let message_id: i64 = conn
+                    .query_row(
+                        "SELECT id FROM messages
+                         WHERE thread_id = ?1 AND is_outgoing = 0 AND is_draft = 0
+                         ORDER BY date DESC, id DESC LIMIT 1",
+                        [thread_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .ok_or_else(|| CoreError::NotFound(format!("mail in thread {thread_id}")))?;
+                rules::draft_for(conn, message_id)
+            })
+            .await
+    }
+
     /// When a mail-list row's timeline puts it, which a page that starts at
     /// the row pages from: a conversation's latest message, or a message's
     /// own date. None for a row that is gone.
