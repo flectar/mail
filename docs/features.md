@@ -162,7 +162,8 @@ Flectar Mail checks every account for new mail on its own: as soon as the
 server announces new mail, where it can, and otherwise every 5 minutes, or as
 often as **Check for new mail** in Settings → General says. To check now, press
 F5 for the accounts the mail view shows, or Shift+F5 or the refresh button
-beside the search field for every account. An account's menu in the sidebar
+beside the search field for every account. On a phone, pull the mail list down
+from its top to check the accounts it shows. An account's menu in the sidebar
 (right-click, or hold a finger on it on a phone) checks just that account.
 
 While a check runs for more than a moment, a small spinner turns beside the

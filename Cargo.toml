@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/flectar-mail-core", "crates/flectar-spell", "crates/renderer-probe"]
-exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/i-slint-renderer-software", "crates/smithay-clipboard", "crates/spellbook"]
+exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/i-slint-renderer-software", "crates/smithay-clipboard", "crates/spellbook", "crates/vello"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -23,6 +23,8 @@ smithay-clipboard = { path = "crates/smithay-clipboard" }
 # Slint 1.19's software renderer panics on a rounded clip far out of view; see
 # patches/slint-renderer-software/README.md.
 i-slint-renderer-software = { path = "crates/i-slint-renderer-software" }
+# Vello drops Calibri's letters on the GPU; see patches/vello/README.md.
+vello = { path = "crates/vello" }
 
 [package]
 name = "flectar-mail"
@@ -154,7 +156,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 # The Microsoft Store build's startup task and new-mail toasts are WinRT
-# APIs; the toast activator is a COM server. Slint and wgpu already build
+# APIs, as are the accent colours of the taskbar's unread count; the toast
+# activator is a COM server. Slint and wgpu already build
 # this version of the crate.
 windows = { version = "0.62", default-features = false, features = [
     "std",
@@ -163,6 +166,7 @@ windows = { version = "0.62", default-features = false, features = [
     "Foundation",
     "Foundation_Collections",
     "UI_Notifications",
+    "UI_ViewManagement",
     "Win32_Foundation",
     "Win32_Globalization",
     "Win32_System_Com",
