@@ -93,6 +93,10 @@ pub enum CoreEvent {
     AutoReplyChanged {
         account_id: i64,
     },
+    /// Where an account's rules run changed: on its server or in the app.
+    ServerRulesChanged {
+        account_id: i64,
+    },
     /// A check stored all the mail the account's Inbox had when it started
     /// at `at` (milliseconds since the epoch), as `Account::caught_up_at`.
     AccountCaughtUp {

@@ -1,10 +1,13 @@
-//! The Sieve script the app keeps on a server (#239), and what it reads in
-//! scripts. The app's script is generated from what the user set and carries
-//! it as data in a comment, which the app reads back, so another device sees
-//! the same replies. A check value tells when someone changed it elsewhere.
-//! Scripts the app didn't write are only read, to find which extensions they
-//! use and which scripts they run.
+//! The Sieve script the app keeps on a server, for automatic replies (#239)
+//! and rules (#238), and what it reads in scripts. The app's script is
+//! generated from what the user set and carries the replies as data in a
+//! comment, which the app reads back, so another device sees the same
+//! replies. The rules a device wrote go in their own part, which a device
+//! saving replies keeps as it found it. A check value tells when someone
+//! changed the script elsewhere. Scripts the app didn't write are only read,
+//! to find which extensions they use and which scripts they run.
 
+use super::rules::Section;
 use crate::models::AutoReply;
 use chrono::{Local, Offset, TimeZone};
 use serde::{Deserialize, Serialize};
@@ -22,6 +25,10 @@ const DAYS: u32 = 4;
 /// Lines up the tests of `if allof (`.
 const INDENT: &str = "          ";
 
+/// The first and last lines of the rules' part.
+pub(super) const RULES_START: &str = "# Rules";
+pub(super) const RULES_END: &str = "# End of rules";
+
 /// What the app wrote in its script, as JSON in a comment.
 #[derive(Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
@@ -31,6 +38,16 @@ struct Data {
     text: String,
     starts_at: Option<i64>,
     ends_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rules: Option<RulesData>,
+}
+
+/// What the script says of its rules.
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct RulesData {
+    digest: String,
+    needs: Vec<String>,
 }
 
 /// The app's script as found on a server.
@@ -38,6 +55,8 @@ struct Data {
 pub(crate) struct Found {
     /// The replies it holds, as the app wrote them.
     pub(crate) reply: AutoReply,
+    /// The rules it runs, as a device wrote them.
+    pub(crate) rules: Option<Section>,
     /// The user's own script it runs after its rules.
     pub(crate) beside: Option<String>,
     /// Someone changed it since the app wrote it.
@@ -60,19 +79,39 @@ pub(crate) fn needs(reply: &AutoReply, beside: Option<&str>) -> Vec<&'static str
 }
 
 /// The app's script for `reply`, sent for mail that reaches any of
-/// `addresses`, then running the user's own script `beside`. Days compare as
-/// dates in the zone the user is in.
-pub(crate) fn generate(reply: &AutoReply, addresses: &[String], beside: Option<&str>) -> String {
+/// `addresses`, then `rules`, then the user's own script `beside`. Days
+/// compare as dates in the zone the user is in. The reply comes first, so
+/// the rules that file mail away, and end the run, don't keep it from
+/// going out. The user's script comes last, so a message a rule files away
+/// isn't filed twice, as filing doesn't end a run.
+pub(crate) fn generate(
+    reply: &AutoReply,
+    addresses: &[String],
+    rules: Option<&Section>,
+    beside: Option<&str>,
+) -> String {
     let data = serde_json::to_string(&Data {
         enabled: reply.enabled,
         subject: reply.subject.clone(),
         text: reply.text.clone(),
         starts_at: reply.starts_at,
         ends_at: reply.ends_at,
+        rules: rules.map(|rules| RulesData {
+            digest: rules.digest.clone(),
+            needs: rules.needs.clone(),
+        }),
     })
     .unwrap_or_default();
     let mut body = format!("{DATA}{data}\r\n");
-    let needed = needs(reply, beside);
+    let mut needed = needs(reply, beside)
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    for extension in rules.iter().flat_map(|rules| &rules.needs) {
+        if !needed.contains(extension) {
+            needed.push(extension.clone());
+        }
+    }
     if !needed.is_empty() {
         body.push_str(&format!("require {};\r\n", list(&needed)));
     }
@@ -114,6 +153,9 @@ pub(crate) fn generate(reply: &AutoReply, addresses: &[String], beside: Option<&
             string(&reply.text)
         ));
     }
+    if let Some(rules) = rules {
+        body.push_str(&rules.text);
+    }
     // Their script runs after the reply, so a `stop` in it can't keep the
     // reply from going out, and isn't an error if they delete it.
     if let Some(beside) = beside {
@@ -140,6 +182,16 @@ pub(crate) fn read(text: &str) -> Found {
         .find_map(|line| line.strip_prefix(DATA))
         .and_then(|json| serde_json::from_str::<Data>(json).ok())
         .unwrap_or_default();
+    let rules = data.rules.and_then(|rules| {
+        let start = line(text, RULES_START)?;
+        let end = start + line(&text[start..], RULES_END)?;
+        let end = end + text[end..].find('\n')? + 1;
+        Some(Section {
+            text: text[start..end].to_owned(),
+            needs: rules.needs,
+            digest: rules.digest,
+        })
+    });
     Found {
         reply: AutoReply {
             enabled: data.enabled,
@@ -150,9 +202,37 @@ pub(crate) fn read(text: &str) -> Found {
             contacts_only: false,
             domain_only: false,
         },
+        rules,
         beside,
         edited,
     }
+}
+
+/// Where the line that is `wanted` starts in `text`, outside the strings,
+/// where a reply's text or a rule's could hold such a line.
+fn line(text: &str, wanted: &str) -> Option<usize> {
+    let mut quoted = false;
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        if !quoted && line.trim_end_matches(['\r', '\n']) == wanted {
+            return Some(at);
+        }
+        let mut chars = line.chars();
+        while let Some(c) = chars.next() {
+            match (quoted, c) {
+                (true, '\\') => {
+                    chars.next();
+                }
+                (true, '"') => quoted = false,
+                // The rest of the line is a comment.
+                (false, '#') => break,
+                (false, '"') => quoted = true,
+                _ => {}
+            }
+        }
+        at += line.len();
+    }
+    None
 }
 
 fn check(body: &str) -> String {
@@ -177,7 +257,7 @@ fn day(at: i64) -> Option<(String, String)> {
 
 /// `text` as a Sieve quoted string (RFC 5228 section 2.4.2). Line breaks
 /// become CRLF, as a lone CR or a NUL can't be in a script.
-fn string(text: &str) -> String {
+pub(super) fn string(text: &str) -> String {
     let text = text
         .replace("\r\n", "\n")
         .replace(['\r', '\n'], "\r\n")
@@ -185,7 +265,7 @@ fn string(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-fn list(items: &[impl AsRef<str>]) -> String {
+pub(super) fn list(items: &[impl AsRef<str>]) -> String {
     let items = items
         .iter()
         .map(|item| string(item.as_ref()))
@@ -355,6 +435,7 @@ mod tests {
             &away(),
             &["me@example.test".into(), "alias@example.test".into()],
             None,
+            None,
         );
         assert!(script.starts_with(&format!("{HEADER}\r\n{CHECK}{FORMAT} ")));
         assert!(script.contains("require [\"vacation\", \"date\", \"relational\"];"));
@@ -372,17 +453,40 @@ mod tests {
     }
 
     #[test]
+    fn the_rules_part_reads_back_as_written_whatever_the_reply_says() {
+        let rules = Section {
+            text: "# Rules\r\n# Rule: A\r\nif true {\r\n  stop;\r\n}\r\n# End of rules\r\n".into(),
+            needs: vec!["fileinto".into()],
+            digest: "d1".into(),
+        };
+        let tricky = AutoReply {
+            text: "Away\n# Rules\n# End of rules\nBack \"soon\"".into(),
+            ..away()
+        };
+        let script = generate(&tricky, &[], Some(&rules), Some("filters"));
+        assert!(script.contains("# End of rules\r\ninclude :personal :optional \"filters\";"));
+        let found = read(&script);
+        assert_eq!(found.rules, Some(rules));
+        assert_eq!(found.reply, tricky);
+        assert_eq!(found.beside.as_deref(), Some("filters"));
+        assert!(!found.edited);
+        // Without data for the rules, there are none.
+        assert_eq!(read(&generate(&tricky, &[], None, None)).rules, None);
+    }
+
+    #[test]
     fn line_breaks_become_crlf_and_nul_goes() {
         assert_eq!(string("a\rb\nc\r\nd\0e"), "\"a\r\nb\r\nc\r\nde\"");
     }
 
     #[test]
     fn the_script_reads_back_as_written() {
-        let script = generate(&away(), &[], Some("roundcube"));
+        let script = generate(&away(), &[], None, Some("roundcube"));
         assert_eq!(
             read(&script),
             Found {
                 reply: away(),
+                rules: None,
                 beside: Some("roundcube".into()),
                 edited: false,
             }
@@ -401,12 +505,12 @@ mod tests {
             ..away()
         };
         assert_eq!(needs(&off, None), Vec::<&str>::new());
-        let script = generate(&off, &[], None);
+        let script = generate(&off, &[], None, None);
         assert!(!script.contains("require"));
         assert!(!script.contains("vacation :days"));
         assert_eq!(read(&script).reply, off);
         // Their script still runs.
-        let beside = generate(&off, &[], Some("filters"));
+        let beside = generate(&off, &[], None, Some("filters"));
         assert!(beside.contains("require [\"include\"];"));
         assert!(beside.ends_with("include :personal :optional \"filters\";\r\n"));
     }
@@ -419,7 +523,7 @@ mod tests {
             ..AutoReply::default()
         };
         assert_eq!(needs(&always, None), ["vacation"]);
-        let script = generate(&always, &[], None);
+        let script = generate(&always, &[], None, None);
         assert!(script.contains("require [\"vacation\"];"));
         assert!(!script.contains("currentdate"));
         assert!(script.contains("vacation :days 4\r\n    \"Away\";"));

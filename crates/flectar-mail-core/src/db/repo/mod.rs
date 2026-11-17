@@ -25,6 +25,7 @@ pub mod returned_receipts;
 pub mod rules;
 pub mod search;
 pub mod sender_identities;
+pub mod server_rules;
 pub mod settings;
 pub mod snippets;
 pub mod snoozes;

@@ -1,12 +1,14 @@
-//! Automatic replies for IMAP accounts whose server runs Sieve scripts
-//! (#239), managed over ManageSieve (RFC 5804). The app keeps its replies in
-//! a script of its own and never changes the user's scripts. A server runs
-//! one script at a time: when the user's own one runs, the app's runs only
-//! with the user's go-ahead, and then runs theirs after it with `include`
-//! (RFC 6609), so their filters keep working. Turned off, the replies step
-//! aside, and the server runs what it ran before.
+//! Automatic replies (#239) and rules (#238) for accounts whose server runs
+//! Sieve scripts, managed over ManageSieve (RFC 5804) or JMAP (RFC 9661).
+//! The app keeps them in a script of its own and never changes the user's
+//! scripts. A server runs one script at a time. When the user's own one
+//! runs, the app's runs only with the user's go-ahead, and then runs theirs
+//! after it with `include` (RFC 6609), so their filters keep working. With
+//! no replies or rules left, the app's script steps aside, and the server
+//! runs what it ran before.
 
 pub(crate) mod managesieve;
+pub(crate) mod rules;
 pub(crate) mod script;
 
 use crate::accounts::credentials::{self, Slot};
@@ -14,10 +16,12 @@ use crate::db::repo;
 use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
 use crate::models::{
-    AccountConfig, AutoReply, AutoReplyQuestion, AutoReplySaved, ConnectionSecurity, now_ms,
+    AccountConfig, AutoReply, AutoReplyQuestion, AutoReplySaved, ConnectionSecurity,
+    ServerRulesState, now_ms,
 };
 use crate::sync::engine::SyncCtx;
 use managesieve::{Error, Script, Server, Session};
+use rules::Section;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -54,6 +58,8 @@ pub(crate) fn server(config: &AccountConfig) -> Server<'_> {
 pub(crate) trait Scripts {
     /// Whether scripts there may use Sieve extension `name`.
     fn has_extension(&self, name: &str) -> bool;
+    /// The Sieve implementation's name and version, if the server gave one.
+    fn implementation(&self) -> &str;
     /// The scripts, and which one the server runs.
     async fn list(&mut self) -> Result<Vec<Script>>;
     /// The script named `name`, if there is one, once the scripts were
@@ -69,6 +75,10 @@ pub(crate) trait Scripts {
 impl Scripts for Session {
     fn has_extension(&self, name: &str) -> bool {
         self.capabilities().has_extension(name)
+    }
+
+    fn implementation(&self) -> &str {
+        &self.capabilities().implementation
     }
 
     async fn list(&mut self) -> Result<Vec<Script>> {
@@ -98,22 +108,6 @@ impl Scripts for Session {
     }
 }
 
-/// The account's automatic replies as the app's script on its server holds
-/// them, off unless the server runs it. None when the server can't send
-/// them.
-pub(crate) async fn read(
-    server: &Server<'_>,
-    user: &str,
-    password: &str,
-) -> Result<Option<AutoReply>> {
-    let Some(mut session) = sign_in(server, user, password).await? else {
-        return Ok(None);
-    };
-    let reply = read_from(&mut session).await;
-    let _ = session.logout().await;
-    reply.map(Some)
-}
-
 /// The automatic replies the app's script among `scripts` holds, off unless
 /// the server runs it.
 pub(crate) async fn read_from(scripts: &mut impl Scripts) -> Result<AutoReply> {
@@ -135,7 +129,7 @@ pub(crate) async fn save(
     addresses: &[String],
     allowed: Option<&AutoReplyQuestion>,
 ) -> Result<AutoReplySaved> {
-    let Some(mut session) = sign_in(server, user, password).await? else {
+    let Some(mut session) = open(server, user, password, &["vacation"]).await? else {
         return Err(CoreError::Other(
             "This account's server can't send automatic replies".into(),
         ));
@@ -145,7 +139,8 @@ pub(crate) async fn save(
     saved
 }
 
-/// Saves `reply` in the app's script among `scripts`, as [`save`] does.
+/// Saves `reply` in the app's script among `scripts`, as [`save`] does,
+/// keeping the rules there.
 pub(crate) async fn save_to(
     scripts: &mut impl Scripts,
     reply: &AutoReply,
@@ -153,14 +148,162 @@ pub(crate) async fn save_to(
     allowed: Option<&AutoReplyQuestion>,
 ) -> Result<AutoReplySaved> {
     let state = State::read(scripts).await?;
+    let rules = state.ours.as_ref().and_then(|ours| ours.rules.clone());
+    let allowed = allowed.map(|question| match question {
+        AutoReplyQuestion::RunBefore(theirs) => Question::RunBefore(theirs.clone()),
+        AutoReplyQuestion::ReplaceChanges => Question::ReplaceChanges,
+    });
+    let refused = match write(
+        scripts,
+        state,
+        reply,
+        addresses,
+        rules.as_ref(),
+        allowed.as_ref(),
+    )
+    .await?
+    {
+        Written::Done => {
+            return Ok(AutoReplySaved::Done(AutoReply {
+                contacts_only: false,
+                domain_only: false,
+                ..reply.clone()
+            }));
+        }
+        Written::Ask(Question::RunBefore(theirs)) => {
+            return Ok(AutoReplySaved::Ask(AutoReplyQuestion::RunBefore(theirs)));
+        }
+        Written::Ask(Question::ReplaceChanges) => {
+            return Ok(AutoReplySaved::Ask(AutoReplyQuestion::ReplaceChanges));
+        }
+        Written::Refused(refused) => refused,
+    };
+    Err(CoreError::Other(match refused {
+        Refused::TheirsReply(theirs) => format!(
+            "Your filter script \u{201c}{theirs}\u{201d} on the server sends automatic \
+             replies of its own. Change them where you set them up, such as your webmail"
+        ),
+        Refused::NoInclude(theirs) => format!(
+            "Your server runs your filter script \u{201c}{theirs}\u{201d} and can't \
+             run automatic replies beside it"
+        ),
+        Refused::Missing("include") => {
+            "Your server can't run automatic replies beside your filter script".into()
+        }
+        Refused::Missing(_) => {
+            "Your server can't limit automatic replies to certain days. Leave the days empty".into()
+        }
+    }))
+}
+
+/// What putting rules in the app's script came to.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Mirrored {
+    /// The server runs them, or has no rules to drop.
+    Done,
+    /// The app's script holds other rules, which another device wrote.
+    Others,
+    /// Nothing changed: the user must allow this first.
+    Ask(Question),
+    Refused(Refused),
+}
+
+/// Puts `rules` in the app's script among `scripts`, keeping its replies,
+/// which go out for mail to any of `addresses`. Rules found there that this
+/// device didn't write, as their digest isn't `written`, stay unless
+/// `replace` says otherwise.
+pub(crate) async fn put_rules(
+    scripts: &mut impl Scripts,
+    rules: Option<&Section>,
+    written: Option<&str>,
+    addresses: &[String],
+    replace: bool,
+    allowed: Option<&Question>,
+) -> Result<Mirrored> {
+    let state = State::read(scripts).await?;
+    let runs_ours = state.runs_ours();
+    let found = state
+        .ours
+        .as_ref()
+        .and_then(|ours| ours.rules.as_ref())
+        .map(|found| found.digest.clone());
+    let wanted = rules.map(|rules| rules.digest.clone());
+    if found == wanted && (wanted.is_none() || runs_ours) {
+        return Ok(Mirrored::Done);
+    }
+    // Rules already as this device wants them are its own, also when it
+    // wrote them without getting to run them.
+    if found.is_some() && found.as_deref() != written && found != wanted && !replace {
+        return Ok(Mirrored::Others);
+    }
+    // The replies stay as the app shows them, off unless the server ran
+    // them, so a reply turned off elsewhere doesn't start again.
+    let mut reply = state
+        .ours
+        .as_ref()
+        .map(|ours| ours.reply.clone())
+        .unwrap_or_default();
+    reply.enabled &= runs_ours;
+    Ok(
+        match write(scripts, state, &reply, addresses, rules, allowed).await? {
+            Written::Done => Mirrored::Done,
+            Written::Ask(question) => Mirrored::Ask(question),
+            Written::Refused(refused) => Mirrored::Refused(refused),
+        },
+    )
+}
+
+/// What writing the app's script would change on the server, beyond the
+/// script, which the user must allow first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Question {
+    /// The server runs the user's own filter script, named here. The app's
+    /// would run first, then that script, unchanged.
+    RunBefore(String),
+    /// The app's script was changed elsewhere since the app wrote it.
+    ReplaceChanges,
+}
+
+/// Why the app's script can't be written as wanted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// The user's script, named here, sends automatic replies of its own,
+    /// and two would fail the whole run (RFC 5230 section 4.7).
+    TheirsReply(String),
+    /// The server runs the user's script, named here, and can't run the
+    /// app's before it.
+    NoInclude(String),
+    /// The server lacks an extension the replies need.
+    Missing(&'static str),
+}
+
+enum Written {
+    Done,
+    Ask(Question),
+    Refused(Refused),
+}
+
+/// Writes the app's script among `scripts`, which `state` describes, with
+/// `reply`, sent for mail to any of `addresses`, and `rules`. When writing
+/// would change which script the server runs, or replace changes made
+/// elsewhere, nothing changes unless the user `allowed` it.
+async fn write(
+    scripts: &mut impl Scripts,
+    state: State,
+    reply: &AutoReply,
+    addresses: &[String],
+    rules: Option<&Section>,
+    allowed: Option<&Question>,
+) -> Result<Written> {
     let runs_ours = state.runs_ours();
     let ours_active = state.active.as_deref() == Some(script::NAME);
     let ours = state.ours.unwrap_or_default();
-    // The user's script the app's runs after its rules, and the script the
-    // server runs once saved, when that changes.
-    let (mut beside, then) = if !reply.enabled {
-        // Turned off, the app's script steps aside for what ran before it,
-        // if that's still there.
+    let wanted = reply.enabled || rules.is_some();
+    // The user's script the app's runs after its own, and the script the
+    // server runs once written, when that changes.
+    let (mut beside, then) = if !wanted {
+        // With nothing left to run, the app's script steps aside for what
+        // ran before it, if that's still there.
         let before = ours
             .beside
             .clone()
@@ -175,66 +318,57 @@ pub(crate) async fn save_to(
             Some(Activate(Some(script::NAME.into()))),
         )
     };
-    let activate = then.is_some() && reply.enabled;
-    if reply.enabled
-        && let Some(theirs) = beside.clone()
-    {
+    let activate = then.is_some() && wanted;
+    if wanted && let Some(theirs) = beside.clone() {
         let runs = match state.theirs {
             Some(runs) if activate => runs,
             _ => Runs::read(scripts, &theirs).await?,
         };
-        // Their script must not reply too: a second vacation action fails
-        // the whole run (RFC 5230 section 4.7), and their filters with it.
-        if runs.replies {
-            return Err(CoreError::Other(format!(
-                "Your filter script \u{201c}{theirs}\u{201d} on the server sends automatic \
-                 replies of its own. Change them where you set them up, such as your webmail"
-            )));
+        if reply.enabled && runs.replies {
+            return Ok(Written::Refused(Refused::TheirsReply(theirs)));
         }
         if activate {
             if !scripts.has_extension("include") {
-                return Err(CoreError::Other(format!(
-                    "Your server runs your filter script \u{201c}{theirs}\u{201d} and can't \
-                     run automatic replies beside it"
-                )));
+                return Ok(Written::Refused(Refused::NoInclude(theirs)));
             }
-            let question = AutoReplyQuestion::RunBefore(theirs);
+            let question = Question::RunBefore(theirs);
             if allowed != Some(&question) {
-                return Ok(AutoReplySaved::Ask(question));
+                return Ok(Written::Ask(question));
             }
         } else if !runs.found {
             // They deleted it.
             beside = None;
         }
     }
-    if runs_ours && ours.edited && allowed != Some(&AutoReplyQuestion::ReplaceChanges) {
-        return Ok(AutoReplySaved::Ask(AutoReplyQuestion::ReplaceChanges));
+    if runs_ours && ours.edited && allowed != Some(&Question::ReplaceChanges) {
+        return Ok(Written::Ask(Question::ReplaceChanges));
     }
     if let Some(missing) = script::needs(reply, beside.as_deref())
         .into_iter()
         .find(|extension| !scripts.has_extension(extension))
     {
-        return Err(CoreError::Other(if missing == "include" {
-            "Your server can't run automatic replies beside your filter script".into()
-        } else {
-            "Your server can't limit automatic replies to certain days. Leave the days empty".into()
-        }));
+        return Ok(Written::Refused(Refused::Missing(missing)));
     }
-    let text = script::generate(reply, addresses, beside.as_deref());
+    let text = script::generate(reply, addresses, rules, beside.as_deref());
     scripts.put(script::NAME, &text).await?;
     if let Some(Activate(name)) = then {
         scripts.activate(name.as_deref()).await?;
     }
-    Ok(AutoReplySaved::Done(AutoReply {
-        contacts_only: false,
-        domain_only: false,
-        ..reply.clone()
-    }))
+    Ok(Written::Done)
 }
 
+/// The extensions that let the app's script send automatic replies or sort
+/// mail.
+pub(crate) const USEFUL: [&str; 3] = ["vacation", "fileinto", "imap4flags"];
+
 /// Opens a session and signs in, or None when the server has no ManageSieve
-/// that can send automatic replies.
-async fn sign_in(server: &Server<'_>, user: &str, password: &str) -> Result<Option<Session>> {
+/// that offers any of the extensions the app `wants`.
+pub(crate) async fn open(
+    server: &Server<'_>,
+    user: &str,
+    password: &str,
+    wants: &[&str],
+) -> Result<Option<Session>> {
     let mut session = match Session::open(server).await {
         Ok(session) => session,
         Err(error) if absent(&error) => return Ok(None),
@@ -245,7 +379,10 @@ async fn sign_in(server: &Server<'_>, user: &str, password: &str) -> Result<Opti
         "ManageSieve server found"
     );
     // Asking first keeps the password away from servers that can't use it.
-    if !session.capabilities().has_extension("vacation") {
+    if !wants
+        .iter()
+        .any(|extension| session.capabilities().has_extension(extension))
+    {
         let _ = session.logout().await;
         return Ok(None);
     }
@@ -293,7 +430,7 @@ fn refused_script(error: Error) -> CoreError {
             CoreError::Other(if quota {
                 "Your server has no room for another filter script".into()
             } else {
-                format!("Your server refused the automatic replies: {text}")
+                format!("Your server refused Flectar Mail's script. It said \u{201c}{text}\u{201d}")
             })
         }
         error => core_error(error),
@@ -388,12 +525,12 @@ impl Runs {
     }
 }
 
-/// Reads an IMAP account's automatic replies back from its server while
-/// the account syncs: soon after it starts, then every half hour while the
-/// server offers them, so a change made on another device shows. A server
-/// without them is asked again a day later. A refused password ends the
-/// reading until the account starts again, as repeated failed sign-ins can
-/// get the user's address blocked.
+/// Reads an IMAP account's automatic replies back from its server, and
+/// puts its rules there, while the account syncs: soon after it starts,
+/// then every half hour while the server runs Sieve scripts, so a change
+/// made on another device shows. A server without them is asked again a day
+/// later. A refused password ends the reading until the account starts
+/// again, as repeated failed sign-ins can get the user's address blocked.
 pub(crate) async fn watch(ctx: SyncCtx, config: AccountConfig) {
     tokio::time::sleep(FIRST_READ_AFTER).await;
     loop {
@@ -401,11 +538,11 @@ pub(crate) async fn watch(ctx: SyncCtx, config: AccountConfig) {
             Ok(true) => READ_EVERY,
             Ok(false) => ASK_AGAIN_AFTER,
             Err(error @ CoreError::Auth(_)) => {
-                tracing::warn!(account_id = config.id, %error, "automatic replies: sign-in refused");
+                tracing::warn!(account_id = config.id, %error, "Sieve: sign-in refused");
                 return;
             }
             Err(error) => {
-                tracing::warn!(account_id = config.id, %error, "automatic replies failed");
+                tracing::warn!(account_id = config.id, %error, "Sieve failed");
                 READ_EVERY
             }
         };
@@ -413,8 +550,9 @@ pub(crate) async fn watch(ctx: SyncCtx, config: AccountConfig) {
     }
 }
 
-/// Reads the account's automatic replies from its server and keeps them.
-/// Whether the server offers them.
+/// Reads the account's automatic replies from its server and keeps them,
+/// then puts the account's rules there. Whether the server runs Sieve
+/// scripts.
 pub(crate) async fn read_back(ctx: &SyncCtx, config: &AccountConfig) -> Result<bool> {
     let account_id = config.id;
     let password =
@@ -423,24 +561,43 @@ pub(crate) async fn read_back(ctx: &SyncCtx, config: &AccountConfig) -> Result<b
         .db
         .read(move |conn| repo::auto_replies::saved_at(conn, account_id))
         .await?;
-    let Some(reply) = read(&server(config), &config.username, &password).await? else {
+    let writer = crate::server_rules::writer(account_id);
+    let _writing = writer.lock().await;
+    let Some(mut session) = open(&server(config), &config.username, &password, &USEFUL).await?
+    else {
+        crate::server_rules::store_state(ctx, account_id, ServerRulesState::Unavailable).await?;
         return Ok(false);
     };
-    let changed = ctx
-        .db
-        .write(move |conn| {
-            let read = repo::auto_replies::Origin::Read { saved_at };
-            repo::auto_replies::store(conn, account_id, &reply, now_ms(), read)
-        })
-        .await?;
-    if changed {
-        ctx.bus.emit(CoreEvent::AutoReplyChanged { account_id });
+    let reply = if session.has_extension("vacation") {
+        Some(read_from(&mut session).await)
+    } else {
+        None
+    };
+    let rules = crate::server_rules::mirror(ctx, account_id, &mut session, None).await;
+    let _ = session.logout().await;
+    if let Err(error) = rules {
+        tracing::warn!(account_id, %error, "rules on the server failed");
+        let failed = ServerRulesState::Failed(error.to_string());
+        crate::server_rules::store_state(ctx, account_id, failed).await?;
+    }
+    if let Some(reply) = reply {
+        let reply = reply?;
+        let changed = ctx
+            .db
+            .write(move |conn| {
+                let read = repo::auto_replies::Origin::Read { saved_at };
+                repo::auto_replies::store(conn, account_id, &reply, now_ms(), read)
+            })
+            .await?;
+        if changed {
+            ctx.bus.emit(CoreEvent::AutoReplyChanged { account_id });
+        }
     }
     Ok(true)
 }
 
 #[cfg(test)]
-mod test_server;
+pub(crate) mod test_server;
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;

@@ -1,5 +1,5 @@
 // Rules that sort new mail as it arrives in an Inbox (#238): the list in
-// Settings and the editor (src/rules.rs).
+// Settings and the editor (src/mail_rules.rs).
 
 // A rule in the list, in the order rules are tried.
 export struct RuleRow {
@@ -11,6 +11,24 @@ export struct RuleRow {
     // Something keeps it from running as written, such as a folder it moves
     // mail to that is gone.
     problem: bool,
+    // Where it runs, once some server can run rules: "server", "some" for
+    // the servers of some of its accounts, or "app" while Flectar Mail is
+    // open. "" when no server of its accounts runs rules.
+    place: string,
+}
+
+// What an account's server needs before it runs the rules.
+export struct RulesNotice {
+    account-id: int,
+    account: string,
+    // "run-before": the server runs the user's own filter script, named in
+    // `detail`. "others": it runs rules saved on another device. "edited":
+    // Flectar Mail's script there was changed elsewhere. "failed": the
+    // server can't take them, for the reason in `detail`.
+    kind: string,
+    detail: string,
+    // This device has rules for the account to put there.
+    has-rules: bool,
 }
 
 // A condition in the editor. `field` indexes the fields and `op` that
@@ -33,6 +51,9 @@ export struct RuleActionRow {
 
 export global MailRules {
     in property <[RuleRow]> rows;
+    in property <[RulesNotice]> notices;
+    // Do what the notice for account `account-id` offers.
+    callback notice-action(int);
 
     // The editor, open for the rule `editing-id`, or 0 for a new one.
     in-out property <bool> editing;
@@ -53,6 +74,11 @@ export global MailRules {
     // copy mail too.
     in property <bool> can-copy;
     in-out property <bool> stop;
+    // Where the rule in the editor runs, as `RuleRow.place` says, and why
+    // it runs in the app: "pattern", "attachments", "case", "name",
+    // "folder", "label", "unsupported" or "after". "" for a new rule.
+    in property <string> place;
+    in property <string> place-why;
     in property <string> error;
     in property <bool> busy;
 

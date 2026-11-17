@@ -2,7 +2,8 @@
 //! in its order, and the folders and labels a rule's account can use.
 
 use flectar_mail_core::models::{
-    Account, FolderInfo, Label, MailRule, RuleAction, RuleField, RuleOp,
+    Account, FolderInfo, Label, MailProtocol, MailRule, RuleAction, RuleField, RuleHereWhy, RuleOp,
+    ServerRules, ServerRulesState,
 };
 
 /// The fields the editor lists, in its order. Those that need the whole
@@ -177,10 +178,264 @@ pub(super) fn targets_exist(rule: &MailRule, folders: &[FolderInfo], labels: &[L
     })
 }
 
+/// Where `rule` runs, as the list and the editor tell: "server" when the
+/// servers of all its accounts run it, "some" for some of them, or "app"
+/// while Flectar Mail is open, with why. Empty when no server of its
+/// accounts runs rules, or the rule is off.
+pub(super) fn place(
+    rule: &MailRule,
+    accounts: &[Account],
+    servers: &[ServerRules],
+) -> (&'static str, &'static str) {
+    if !rule.enabled {
+        return ("", "");
+    }
+    let ids = match rule.account_id {
+        Some(id) => vec![id],
+        None => accounts
+            .iter()
+            .filter(|account| account.mail_protocol != MailProtocol::Local)
+            .map(|account| account.id)
+            .collect(),
+    };
+    let checked = ids
+        .iter()
+        .filter_map(|id| servers.iter().find(|server| server.account_id == *id))
+        .filter(|server| server.state != ServerRulesState::Unavailable)
+        .collect::<Vec<_>>();
+    if checked.is_empty() {
+        return ("", "");
+    }
+    let on = checked
+        .iter()
+        .filter(|server| server.on_server.contains(&rule.id))
+        .count();
+    if on == ids.len() {
+        return ("server", "");
+    }
+    if on > 0 {
+        return ("some", "");
+    }
+    let why = checked
+        .iter()
+        .find_map(|server| server.here.iter().find(|here| here.rule_id == rule.id))
+        .map_or("", |here| match here.why {
+            RuleHereWhy::Pattern => "pattern",
+            RuleHereWhy::Attachments => "attachments",
+            RuleHereWhy::Case => "case",
+            RuleHereWhy::Name => "name",
+            RuleHereWhy::Folder => "folder",
+            RuleHereWhy::Label => "label",
+            RuleHereWhy::Unsupported => "unsupported",
+            RuleHereWhy::After => "after",
+        });
+    ("app", why)
+}
+
+/// What an account's server needs before it runs the rules, as its notice
+/// tells.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Notice {
+    pub(super) account_id: i64,
+    pub(super) account: String,
+    /// As `RulesNotice.kind` says.
+    pub(super) kind: &'static str,
+    pub(super) detail: String,
+    pub(super) has_rules: bool,
+}
+
+/// The notices for the servers that need the user before they run the
+/// rules, in the order of `accounts`.
+pub(super) fn notices(
+    accounts: &[Account],
+    servers: &[ServerRules],
+    rules: &[MailRule],
+) -> Vec<Notice> {
+    accounts
+        .iter()
+        .filter_map(|account| {
+            let server = servers
+                .iter()
+                .find(|server| server.account_id == account.id)?;
+            let (kind, detail) = match &server.state {
+                ServerRulesState::RunBefore(theirs) => ("run-before", theirs.clone()),
+                ServerRulesState::Others => ("others", String::new()),
+                ServerRulesState::Edited => ("edited", String::new()),
+                // As the notice's second sentence.
+                ServerRulesState::Failed(why) if why.ends_with(['.', '!', '?']) => {
+                    ("failed", why.clone())
+                }
+                ServerRulesState::Failed(why) => ("failed", format!("{why}.")),
+                ServerRulesState::Runs | ServerRulesState::Unavailable => return None,
+            };
+            Some(Notice {
+                account_id: account.id,
+                account: account.email.clone(),
+                kind,
+                detail,
+                has_rules: rules
+                    .iter()
+                    .any(|rule| rule.enabled && rule.account_id.is_none_or(|id| id == account.id)),
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flectar_mail_core::models::MailProtocol;
+    use flectar_mail_core::models::RuleHere;
+
+    fn account(id: i64, mail_protocol: MailProtocol) -> Account {
+        Account {
+            id,
+            email: format!("{id}@test.dev"),
+            display_name: None,
+            avatar_url: None,
+            provider: flectar_mail_core::models::Provider::Generic,
+            auth_kind: flectar_mail_core::models::AuthKind::Password,
+            mail_protocol,
+            sync_state: String::new(),
+            sync_error: None,
+            can_create_top_level_mailbox: true,
+            server_keeps_mail_days: None,
+            caught_up_at: None,
+        }
+    }
+
+    fn mail_rule(id: i64, account_id: Option<i64>) -> MailRule {
+        MailRule {
+            id,
+            account_id,
+            name: format!("Rule {id}"),
+            enabled: true,
+            match_all: true,
+            conditions: vec![],
+            actions: vec![RuleAction::MarkRead],
+            stop: false,
+        }
+    }
+
+    fn server(
+        account_id: i64,
+        state: ServerRulesState,
+        on_server: &[i64],
+        here: &[(i64, RuleHereWhy)],
+    ) -> ServerRules {
+        ServerRules {
+            account_id,
+            state,
+            on_server: on_server.to_vec(),
+            here: here
+                .iter()
+                .map(|(rule_id, why)| RuleHere {
+                    rule_id: *rule_id,
+                    why: *why,
+                })
+                .collect(),
+            checked_at: 0,
+        }
+    }
+
+    #[test]
+    fn rules_tell_where_they_run() {
+        let accounts = [
+            account(1, MailProtocol::Imap),
+            account(2, MailProtocol::Jmap),
+            account(3, MailProtocol::Local),
+        ];
+        let servers = [
+            server(
+                1,
+                ServerRulesState::Runs,
+                &[10, 11],
+                &[(12, RuleHereWhy::Pattern)],
+            ),
+            server(
+                2,
+                ServerRulesState::Runs,
+                &[11],
+                &[(10, RuleHereWhy::After)],
+            ),
+        ];
+        assert_eq!(
+            place(&mail_rule(10, Some(1)), &accounts, &servers),
+            ("server", "")
+        );
+        assert_eq!(
+            place(&mail_rule(12, Some(1)), &accounts, &servers),
+            ("app", "pattern")
+        );
+        // For every account that receives mail.
+        assert_eq!(
+            place(&mail_rule(11, None), &accounts, &servers),
+            ("server", "")
+        );
+        assert_eq!(
+            place(&mail_rule(10, None), &accounts, &servers),
+            ("some", "")
+        );
+        // A server that can't run rules leaves nothing to tell.
+        let unavailable = [server(1, ServerRulesState::Unavailable, &[], &[])];
+        assert_eq!(
+            place(&mail_rule(10, Some(1)), &accounts, &unavailable),
+            ("", "")
+        );
+        assert_eq!(place(&mail_rule(10, Some(1)), &accounts, &[]), ("", ""));
+        // Nor does a rule that is off.
+        let off = MailRule {
+            enabled: false,
+            ..mail_rule(10, Some(1))
+        };
+        assert_eq!(place(&off, &accounts, &servers), ("", ""));
+        // Waiting for the user, the rules run in the app.
+        let waiting = [server(1, ServerRulesState::Others, &[], &[])];
+        assert_eq!(
+            place(&mail_rule(10, Some(1)), &accounts, &waiting),
+            ("app", "")
+        );
+    }
+
+    #[test]
+    fn servers_that_need_the_user_get_a_notice() {
+        let accounts = [
+            account(1, MailProtocol::Imap),
+            account(2, MailProtocol::Imap),
+        ];
+        let servers = [
+            server(2, ServerRulesState::RunBefore("roundcube".into()), &[], &[]),
+            server(1, ServerRulesState::Others, &[], &[]),
+        ];
+        let rules = [mail_rule(10, Some(2))];
+        assert_eq!(
+            notices(&accounts, &servers, &rules),
+            [
+                Notice {
+                    account_id: 1,
+                    account: "1@test.dev".into(),
+                    kind: "others",
+                    detail: String::new(),
+                    has_rules: false,
+                },
+                Notice {
+                    account_id: 2,
+                    account: "2@test.dev".into(),
+                    kind: "run-before",
+                    detail: "roundcube".into(),
+                    has_rules: true,
+                },
+            ]
+        );
+        let fine = [server(1, ServerRulesState::Runs, &[], &[])];
+        assert!(notices(&accounts, &fine, &rules).is_empty());
+        let failed = [server(
+            1,
+            ServerRulesState::Failed("No room".into()),
+            &[],
+            &[],
+        )];
+        assert_eq!(notices(&accounts, &failed, &rules)[0].detail, "No room.");
+    }
 
     #[test]
     fn every_field_lists_comparisons_its_rules_can_save() {

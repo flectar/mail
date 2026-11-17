@@ -1,10 +1,13 @@
 //! Rules that sort new mail as it arrives (#238): their list in Settings and
 //! the editor. The core runs them as sync stores new mail
-//! (`flectar_mail_core::rules`).
+//! (`flectar_mail_core::rules`), and puts them on servers that can run them.
 
 use super::*;
+use flectar_mail_core::Core;
+use flectar_mail_core::events::CoreEvent;
 use flectar_mail_core::models::{
-    MailProtocol, MailRule, RuleAction, RuleCondition, RuleField, RuleOp,
+    MailProtocol, MailRule, RuleAction, RuleCondition, RuleField, RuleOp, ServerRules,
+    ServerRulesAnswer, ServerRulesState,
 };
 use slint::SharedString;
 use std::future::Future;
@@ -27,9 +30,13 @@ struct Controller {
     state: Rc<RefCell<InboxState>>,
     runtime: tokio::runtime::Handle,
     rows: Rc<VecModel<RuleRow>>,
+    notices: Rc<VecModel<RulesNotice>>,
     conditions: Rc<VecModel<RuleConditionRow>>,
     actions: Rc<VecModel<RuleActionRow>>,
     rules: RefCell<Vec<MailRule>>,
+    /// The accounts, and where their rules run, as last shown.
+    accounts: RefCell<Vec<Account>>,
+    servers: RefCell<Vec<ServerRules>>,
     editor: RefCell<Editor>,
 }
 
@@ -54,13 +61,17 @@ pub(super) fn install(
         state: Rc::clone(state),
         runtime: runtime.clone(),
         rows: Rc::new(VecModel::default()),
+        notices: Rc::new(VecModel::default()),
         conditions: Rc::new(VecModel::default()),
         actions: Rc::new(VecModel::default()),
         rules: RefCell::default(),
+        accounts: RefCell::default(),
+        servers: RefCell::default(),
         editor: RefCell::default(),
     });
     let ui = app.global::<MailRules>();
     ui.set_rows(ModelRc::from(controller.rows.clone()));
+    ui.set_notices(ModelRc::from(controller.notices.clone()));
     ui.set_conditions(ModelRc::from(controller.conditions.clone()));
     ui.set_actions(ModelRc::from(controller.actions.clone()));
     CONTROLLER.with(|slot| *slot.borrow_mut() = Some(controller));
@@ -73,6 +84,7 @@ pub(super) fn install(
         with_controller(|controller| controller.toggle(i64::from(id), enabled));
     });
     ui.on_move(|id, by| with_controller(|controller| controller.reorder(i64::from(id), by)));
+    ui.on_notice_action(|id| with_controller(|controller| controller.answer(i64::from(id))));
     ui.on_choose_account(|index| with_controller(|controller| controller.choose_account(index)));
     ui.on_add_condition(|| with_controller(|controller| controller.add_condition()));
     ui.on_remove_condition(|index| {
@@ -107,6 +119,23 @@ fn choices_of(
     }
 }
 
+/// Shows where the rules run again whenever that changes.
+pub(super) fn core_ready(runtime: &tokio::runtime::Handle, core: Arc<Core>) {
+    let mut events = core.bus.subscribe();
+    runtime.spawn(async move {
+        loop {
+            match events.recv().await {
+                Ok(CoreEvent::ServerRulesChanged { .. })
+                | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let _ = slint::invoke_from_event_loop(refresh);
+                }
+                Ok(_) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    });
+}
+
 /// Remove row `index`, keeping one: a rule needs a condition and an action.
 fn remove<T: Clone + 'static>(model: &VecModel<T>, index: i32) {
     if let Ok(index) = usize::try_from(index)
@@ -127,9 +156,15 @@ impl Controller {
             return;
         };
         self.spawn(
-            async move { Ok((core.mail_rules().await?, core.rule_choices().await?)) },
+            async move {
+                Ok((
+                    core.mail_rules().await?,
+                    core.rule_choices().await?,
+                    core.server_rules().await?,
+                ))
+            },
             |_app, result| {
-                let Ok((rules, (accounts, folders, labels))) = result else {
+                let Ok((rules, (accounts, folders, labels), servers)) = result else {
                     return;
                 };
                 with_controller(|controller| {
@@ -146,8 +181,23 @@ impl Controller {
                                 .into(),
                             enabled: rule.enabled,
                             problem: !targets_exist(rule, &folders, &labels),
+                            place: place(rule, &accounts, &servers).0.into(),
                         })
                         .collect::<Vec<_>>();
+                    controller.notices.set_vec(
+                        notices(&accounts, &servers, &rules)
+                            .into_iter()
+                            .map(|notice| RulesNotice {
+                                account_id: i32::try_from(notice.account_id).unwrap_or_default(),
+                                account: notice.account.into(),
+                                kind: notice.kind.into(),
+                                detail: notice.detail.into(),
+                                has_rules: notice.has_rules,
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+                    *controller.accounts.borrow_mut() = accounts;
+                    *controller.servers.borrow_mut() = servers;
                     // In place, so a switch that was just turned keeps its
                     // row.
                     if controller.rows.row_count() == rows.len() {
@@ -354,6 +404,13 @@ impl Controller {
             stop: false,
         });
         ui.set_editing_id(i32::try_from(rule.id).unwrap_or_default());
+        let (place, why) = if rule.id == 0 {
+            ("", "")
+        } else {
+            place(&rule, &self.accounts.borrow(), &self.servers.borrow())
+        };
+        ui.set_place(place.into());
+        ui.set_place_why(why.into());
         ui.set_name(rule.name.as_str().into());
         ui.set_match(if rule.match_all { 0 } else { 1 });
         ui.set_stop(rule.stop);
@@ -461,6 +518,36 @@ impl Controller {
             kind: index_of(&KINDS, &Kind::MarkRead),
             target: 0,
         });
+    }
+
+    /// Do what the notice for account `account_id`'s server offers: run the
+    /// rules there, replace what is there, or try again.
+    fn answer(&self, account_id: i64) {
+        let Some(core) = self.core() else {
+            return;
+        };
+        let answer = self
+            .servers
+            .borrow()
+            .iter()
+            .find(|server| server.account_id == account_id)
+            .and_then(|server| match &server.state {
+                ServerRulesState::RunBefore(theirs) => {
+                    Some(ServerRulesAnswer::RunBefore(theirs.clone()))
+                }
+                ServerRulesState::Others => Some(ServerRulesAnswer::ReplaceOthers),
+                ServerRulesState::Edited => Some(ServerRulesAnswer::ReplaceChanges),
+                _ => None,
+            });
+        self.spawn(
+            async move { core.put_rules_on_server(account_id, answer).await },
+            move |_app, result| {
+                if let Err(error) = result {
+                    tracing::warn!(account_id, %error, "rules on the server failed");
+                }
+                with_controller(|controller| controller.refresh());
+            },
+        );
     }
 
     fn close(&self) {
