@@ -445,6 +445,7 @@ export component MailView inherits FocusScope {
                 load_more => { root.load_more(); }
                 load_earlier => { root.load_earlier_mail(); }
                 sync_mail => { root.sync_mail(); }
+                check_mail_in_view => { root.check_mail_in_view(); }
                 open_compose => { root.open_compose(); }
                 message_action_for_email(id, action) => {
                     root.message_action_for_email(id, action);
@@ -702,6 +703,7 @@ export component MailView inherits FocusScope {
                 load_more => { root.load_more(); }
                 load_earlier => { root.load_earlier_mail(); }
                 sync_mail => { root.sync_mail(); }
+                check_mail_in_view => { root.check_mail_in_view(); }
                 open_folders => { root.folders-open = true; }
                 open_compose => { root.open_compose(); }
                 message_action_for_email(id, action) => {
