@@ -682,9 +682,14 @@ jobs:
 
       - name: Configure Android NDK compiler
         run: |
-          toolchain="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          # Slint's prebuilt Skia binaries need the C++ library of NDK r30 or
+          # newer, and the runner's default NDK is older.
+          ndk="$ANDROID_NDK_LATEST_HOME"
+          toolchain="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
           test -x "$toolchain/aarch64-linux-android26-clang"
           {
+            echo "ANDROID_NDK_ROOT=$ndk"
+            echo "ANDROID_NDK_HOME=$ndk"
             echo "CC_aarch64_linux_android=$toolchain/aarch64-linux-android26-clang"
             echo "CXX_aarch64_linux_android=$toolchain/aarch64-linux-android26-clang++"
             echo "AR_aarch64_linux_android=$toolchain/llvm-ar"

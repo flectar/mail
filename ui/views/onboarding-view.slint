@@ -6,7 +6,6 @@ import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
 import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
 import { LineEdit, TextLink } from "../components/controls.slint";
-import { OnScreenSurface } from "../components/on-screen-surface.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { OAuthSetupDialog } from "../dialogs/oauth-setup-dialog.slint";
 import { AppTheme } from "../design-system.slint";
@@ -388,7 +387,7 @@ export component OnboardingView inherits Rectangle {
                     import-certificate => { root.import-mail-certificate(); }
                 }
                 Rectangle { height: 2px; }
-                if root.show-account-status && root.status != "" : OnScreenSurface {
+                if root.show-account-status && root.status != "" : Rectangle {
                     height: max(36px, setup-status.preferred-height + 16px);
                     background: root.account-setup-in-progress ? root.hover-surface : AppTheme.destructive.transparentize(0.9);
                     border-radius: 8px;

@@ -10,6 +10,7 @@ use slint::platform::{
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { SidebarItem, SidebarSectionHeader } from "../ui/components/sidebar-controls.slint";
 
     export component SidebarRowHarness inherits Window {
@@ -73,6 +74,8 @@ fn touch(window: &slint::Window, x: f32, y: f32, phase: TouchPhase) {
         id: 0,
         position: LogicalPoint::new(x, y),
         phase,
+        event_time: None,
+        history: Default::default(),
     }));
 }
 

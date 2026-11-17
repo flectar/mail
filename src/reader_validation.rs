@@ -856,9 +856,9 @@ fn mailto_links_open_without_losing_the_draft(
 }
 
 /// The desktop mail view at scale 2, drawn by Slint's software renderer like
-/// CPU mode. That renderer panics when it paints a rectangle reaching past
-/// ±32767 physical pixels (#35), so reader surfaces sized by a long message
-/// must keep painting within the visible window.
+/// CPU mode. Before Slint 1.19, that renderer panicked when it painted a
+/// rectangle reaching past ±32767 physical pixels (#35), and reader surfaces
+/// are as tall as a long message.
 struct SoftwareReader {
     window: Rc<MinimalSoftwareWindow>,
     app: AppWindow,

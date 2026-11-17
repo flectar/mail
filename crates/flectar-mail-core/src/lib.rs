@@ -9827,9 +9827,186 @@ impl Core {
                 if settings.mail_profiles.len() == before {
                     return Err(CoreError::NotFound(format!("mail profile {profile_id}")));
                 }
+                // Its saved searches stay, covering the accounts in view.
+                for saved in &mut settings.saved_searches {
+                    if saved.profile_id.as_deref() == Some(profile_id.as_str()) {
+                        saved.profile_id = None;
+                    }
+                }
                 retire_active_mail_profile(&mut settings);
                 repo::settings::set(conn, &settings)?;
                 Ok(settings)
+            })
+            .await
+    }
+
+    /// Keeps a search in the sidebar, or changes one kept there: its name,
+    /// what it searches for, and the profile whose accounts it covers.
+    pub async fn save_search(
+        &self,
+        id: Option<i64>,
+        name: String,
+        query: String,
+        profile_id: Option<String>,
+    ) -> Result<(Settings, SavedSearch)> {
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            return Err(CoreError::Other("a saved search needs a name".into()));
+        }
+        if name.chars().count() > 100 {
+            return Err(CoreError::Other(
+                "a saved search's name can have at most 100 characters".into(),
+            ));
+        }
+        let query = query.trim().to_owned();
+        if search::parse(&query).tree.is_none() {
+            return Err(CoreError::Other(
+                "a saved search needs something to search for".into(),
+            ));
+        }
+        let profile_id = profile_id
+            .map(|profile_id| profile_id.trim().to_owned())
+            .filter(|profile_id| !profile_id.is_empty());
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                if let Some(profile_id) = &profile_id
+                    && !settings
+                        .mail_profiles
+                        .iter()
+                        .any(|profile| &profile.id == profile_id)
+                {
+                    return Err(CoreError::NotFound(format!("mail profile {profile_id}")));
+                }
+                let duplicate = settings
+                    .saved_searches
+                    .iter()
+                    .any(|saved| Some(saved.id) != id && saved.name.eq_ignore_ascii_case(&name));
+                if duplicate {
+                    return Err(CoreError::Other(format!(
+                        "a saved search named {name:?} already exists"
+                    )));
+                }
+                let saved = if let Some(id) = id {
+                    let saved = settings
+                        .saved_searches
+                        .iter_mut()
+                        .find(|saved| saved.id == id)
+                        .ok_or_else(|| CoreError::NotFound(format!("saved search {id}")))?;
+                    saved.name = name;
+                    saved.query = query;
+                    saved.profile_id = profile_id;
+                    saved.clone()
+                } else {
+                    if settings.saved_searches.len() >= 100 {
+                        return Err(CoreError::Other(
+                            "no more than 100 searches can be saved".into(),
+                        ));
+                    }
+                    // Small ids, which the sidebar can carry.
+                    let id = settings
+                        .saved_searches
+                        .iter()
+                        .map(|saved| saved.id)
+                        .max()
+                        .unwrap_or(0)
+                        + 1;
+                    let saved = SavedSearch {
+                        id,
+                        name,
+                        query,
+                        profile_id,
+                    };
+                    settings.saved_searches.push(saved.clone());
+                    saved
+                };
+                repo::settings::set(conn, &settings)?;
+                Ok((settings, saved))
+            })
+            .await
+    }
+
+    /// Takes a search out of the sidebar. Its mail stays where it is.
+    pub async fn delete_saved_search(&self, id: i64) -> Result<Settings> {
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                let before = settings.saved_searches.len();
+                settings.saved_searches.retain(|saved| saved.id != id);
+                if settings.saved_searches.len() == before {
+                    return Err(CoreError::NotFound(format!("saved search {id}")));
+                }
+                repo::settings::set(conn, &settings)?;
+                Ok(settings)
+            })
+            .await
+    }
+
+    /// Moves a saved search to `index` in the sidebar's order, or to the end
+    /// past the last one.
+    pub async fn move_saved_search(&self, id: i64, index: usize) -> Result<Settings> {
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                let from = settings
+                    .saved_searches
+                    .iter()
+                    .position(|saved| saved.id == id)
+                    .ok_or_else(|| CoreError::NotFound(format!("saved search {id}")))?;
+                let saved = settings.saved_searches.remove(from);
+                let index = index.min(settings.saved_searches.len());
+                settings.saved_searches.insert(index, saved);
+                repo::settings::set(conn, &settings)?;
+                Ok(settings)
+            })
+            .await
+    }
+
+    /// Each saved search's unread conversations, or with `conversations`
+    /// false its unread messages, as (saved search, count), from the mail
+    /// kept here. A search with a profile covers that profile's accounts, and
+    /// one without covers `shown`, the accounts the mail view shows, or every
+    /// account with `None`. Mail kept only on this device counts in each.
+    pub async fn saved_search_counts(
+        &self,
+        conversations: bool,
+        shown: Option<Vec<i64>>,
+    ) -> Result<Vec<(i64, i64)>> {
+        self.db
+            .read(move |conn| {
+                let settings = repo::settings::get(conn)?;
+                let local_mail = repo::accounts::list(conn)?
+                    .into_iter()
+                    .find(|account| account.mail_protocol == MailProtocol::Local)
+                    .map(|account| account.id);
+                settings
+                    .saved_searches
+                    .iter()
+                    .map(|saved| {
+                        let mut parsed = search::parse(&saved.query);
+                        let profile = saved.profile_id.as_ref().and_then(|profile_id| {
+                            settings
+                                .mail_profiles
+                                .iter()
+                                .find(|profile| &profile.id == profile_id)
+                        });
+                        parsed.account_ids = match profile {
+                            Some(profile) => Some(
+                                profile
+                                    .account_ids
+                                    .iter()
+                                    .copied()
+                                    .chain(local_mail)
+                                    .collect(),
+                            ),
+                            None => shown.clone(),
+                        };
+                        Ok((
+                            saved.id,
+                            repo::search::unread_matches(conn, &parsed, conversations)?,
+                        ))
+                    })
+                    .collect()
             })
             .await
     }
@@ -11325,6 +11502,10 @@ pub(crate) fn apply_thread_action_in(
     repo::threads::recompute(tx, thread_id)?;
     Ok(out)
 }
+
+#[cfg(test)]
+#[path = "saved_search_tests.rs"]
+mod saved_search_tests;
 
 #[cfg(test)]
 mod sync_accounts_tests {

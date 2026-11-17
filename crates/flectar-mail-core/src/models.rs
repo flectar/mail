@@ -2210,6 +2210,21 @@ impl Default for CustomTheme {
     }
 }
 
+/// A search kept in the sidebar. Its mail stays where it is: the search only
+/// shows it, as the search field would.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedSearch {
+    pub id: i64,
+    pub name: String,
+    /// What it searches for, as typed in the search field.
+    pub query: String,
+    /// The mail profile whose accounts it covers. Without one it covers the
+    /// accounts the mail view shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+}
+
 /// A local, user-owned grouping for connected mail accounts.
 ///
 /// Profiles organize account provenance in Flectar Mail only. They never map
@@ -2819,6 +2834,9 @@ pub struct Settings {
     /// to at most one profile; provider state is never affected.
     #[serde(default)]
     pub mail_profiles: Vec<MailProfile>,
+    /// Searches kept in the sidebar, in its order.
+    #[serde(default)]
+    pub saved_searches: Vec<SavedSearch>,
     /// The profile whose accounts the mail view shows. `None` shows every
     /// account. Never names a deleted or empty profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3074,6 +3092,7 @@ impl Default for Settings {
             account_colors: std::collections::HashMap::new(),
             account_short_names: std::collections::HashMap::new(),
             mail_profiles: Vec::new(),
+            saved_searches: Vec::new(),
             active_mail_profile: None,
             agent_access: AgentAccess::default(),
         }

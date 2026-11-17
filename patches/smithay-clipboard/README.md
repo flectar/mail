@@ -26,7 +26,7 @@ Without a key, or when the portal can't resolve it, the drop gives the local
 files the list names, and the app says so when a sandbox hides them. Sources
 that never close their end are given up after 10 seconds.
 `crates/i-slint-backend-winit` connects the handler to the event loop
-(`0003-wayland-file-drops.patch` there).
+(`0002-wayland-file-drops.patch` there).
 
 The archive's lockfile is kept, so its tests run with `--locked`.
 
@@ -43,8 +43,8 @@ checks that the root, Android and OHOS workspaces patch the crate and that
 their lockfiles resolve it locally.
 
 When Flectar Mail moves to a Slint release on winit 0.31, which reports drops
-on Wayland itself, remove the vendored crate, this directory,
-`0003-wayland-file-drops.patch` in `patches/slint-winit`, the three manifest
-patches, the `.gitattributes` entry, the notice in `THIRD_PARTY_NOTICES.md`,
-the verifier, and its CI step. Then update the three lockfiles and
-`packaging/flatpak/cargo-sources.json`.
+on Wayland itself, remove this vendored crate and `crates/i-slint-backend-winit`,
+their directories in `patches`, their manifest patches in the three
+workspaces, their `.gitignore` and `.gitattributes` entries, their notices in
+`THIRD_PARTY_NOTICES.md`, both verifiers, and their CI steps. Then update the
+three lockfiles and `packaging/flatpak/cargo-sources.json`.

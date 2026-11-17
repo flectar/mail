@@ -11,6 +11,7 @@ use slint::platform::{
 use std::{ops::ControlFlow, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { SidebarItem } from "../ui/components/sidebar-controls.slint";
 
     export component MarkAllHarness inherits Window {
@@ -83,7 +84,7 @@ fn open_menu(window: &slint::Window) {
     slint::platform::update_timers_and_animations();
 }
 
-/// Click the middle of `item`. Menu items in Slint 1.18 take clicks; they
+/// Click the middle of `item`. Menu items in Slint 1.19 take clicks; they
 /// have no default accessibility action.
 fn click(window: &slint::Window, item: &ItemRc) {
     let geometry = item.geometry();

@@ -329,6 +329,9 @@ export component WorkspaceSearchToolbar inherits Rectangle {
     in property <bool> show-sort: false;
     in property <bool> sort-enabled: true;
     in property <bool> oldest-first: false;
+    // Save search… at the end of the menu, for fields whose searches can be
+    // kept in the sidebar.
+    in property <bool> show-save-search: false;
     // Search tips at the end of the menu, for fields that take operators.
     in property <bool> show-search-tips: false;
     in property <bool> filter-active: false;
@@ -341,6 +344,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
     callback submitted(string);
     callback filter-selected(string);
     callback sort-selected(/* oldest first */ bool);
+    callback save-search;
     callback search-tips;
     callback leading-clicked;
     callback refresh;
@@ -401,6 +405,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
             search-edit := LineEdit {
                 width: parent.width;
                 height: parent.height;
+                outlined: false;
                 text <=> root.text;
                 placeholder-text: root.placeholder-text;
                 show-leading-icon: true;
@@ -450,6 +455,12 @@ export component WorkspaceSearchToolbar inherits Rectangle {
                         checkable: true;
                         checked: root.oldest-first;
                         activated => { root.sort-selected(true); }
+                    }
+                    if root.show-save-search : MenuSeparator {}
+                    if root.show-save-search : MenuItem {
+                        title: @tr("Save search…");
+                        enabled: root.text != "";
+                        activated => { root.save-search(); }
                     }
                     if root.show-search-tips : MenuSeparator {}
                     if root.show-search-tips : MenuItem {

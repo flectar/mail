@@ -8,7 +8,7 @@ repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 template="$repo_root/lang/flectar-mail.pot"
 output=${1:-$template}
 command -v slint-tr-extractor >/dev/null || {
-  echo "slint-tr-extractor 1.18.1 is required" >&2
+  echo "slint-tr-extractor 1.19.0 is required" >&2
   exit 1
 }
 

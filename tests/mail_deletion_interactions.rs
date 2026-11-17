@@ -11,6 +11,7 @@ use std::{
 };
 
 slint::slint! {
+    #[edition = "1.19"]
     import { Palette } from "std-widgets.slint";
     import { AppTheme } from "../ui/design-system.slint";
     export { MotionSettings } from "../ui/design-system.slint";

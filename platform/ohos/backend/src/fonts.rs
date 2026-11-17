@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use slint::fontique_011::fontique::{Blob, FallbackKey, GenericFamily, Script};
+use slint::fontique_012::fontique::{Blob, FallbackKey, GenericFamily, Script};
 
 /// The platform font directory as seen from inside an app process.
 pub const SYSTEM_FONT_DIR: &str = "/system/fonts";
@@ -45,7 +45,7 @@ pub fn register_system_fonts() -> usize {
         return 0;
     }
 
-    let mut collection = slint::fontique_011::shared_collection();
+    let mut collection = slint::fontique_012::shared_collection();
     collection.load_fonts_from_paths([dir]);
 
     // Find the Chinese faces by family-name fragment; fall back to registering

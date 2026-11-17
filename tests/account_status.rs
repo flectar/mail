@@ -13,6 +13,7 @@ use slint::platform::{
 use std::{ops::ControlFlow, rc::Rc};
 
 slint::slint! {
+    #[edition = "1.19"]
     import { SidebarSectionHeader } from "../ui/components/sidebar-controls.slint";
     import { AccountProblem } from "../ui/models.slint";
 
