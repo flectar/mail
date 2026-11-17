@@ -513,7 +513,7 @@ mod tests {
             },
         ])));
         app.set_settings_tab("General".into());
-        app.set_settings_open(true);
+        app.invoke_open_settings();
         app.show().unwrap();
         slint::platform::update_timers_and_animations();
 

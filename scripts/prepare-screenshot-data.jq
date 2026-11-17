@@ -1,25 +1,28 @@
 def favicon_path(address):
   ($favicon_dir + "/" + (address | split("@") | last | ascii_downcase) + ".png");
-.theme_mode = $theme
+# Settings is a screen of its own, which goes back to the given view.
+(if $settings_tab == "" then $active_view else "settings" end) as $shown_view
+| .theme_mode = $theme
 | .["MotionSettings.enabled"] = false
 # Notifications show, as on a desktop that allows them.
 | .["SystemNotifications.availability"] = "allowed"
 | .workspace_layout = $workspace_layout
 | .screenshot_theme_preset = $theme_preset
-| .active_view = $active_view
+| .active_view = $shown_view
+| .settings_return_view = $active_view
 | .FilesUi["preview-image"] = $pdf_preview
 # The app always has at least one tab; show the same strip as the frameless
 # screenshots: the current view, a background conversation and the calendar.
 # The tabs showcase adds more conversations and every other workspace.
 | .["TabsUi.rows"] = (if $tab_strip == "showcase" then [
-    {"id": 1, "workspace": $active_view, "title": "", "active": true},
+    {"id": 1, "workspace": $shown_view, "title": "", "active": true},
     {"id": 2, "workspace": "mail", "title": .emails[1].subject, "active": false},
     {"id": 3, "workspace": "mail", "title": .emails[2].subject, "active": false},
     {"id": 4, "workspace": "calendar", "title": "", "active": false},
     {"id": 5, "workspace": "contacts", "title": "", "active": false},
     {"id": 6, "workspace": "files", "title": "", "active": false}
   ] else [
-    {"id": 1, "workspace": $active_view, "title": "", "active": true},
+    {"id": 1, "workspace": $shown_view, "title": "", "active": true},
     {"id": 2, "workspace": "mail", "title": .emails[1].subject, "active": false},
     {"id": 3, "workspace": (if $active_view == "calendar" then "mail" else "calendar" end), "title": "", "active": false}
   ] end)
@@ -31,7 +34,6 @@ def favicon_path(address):
 | .startup_hydrated = true
 | .calendar_view_mode = $calendar_mode
 | .calendar_period_title = (if $calendar_mode == "agenda" then .calendar_month_title else .calendar_period_title end)
-| .settings_open = ($settings_tab != "")
 | .settings_tab = (if $settings_tab == "" then (.settings_tab // "General") else $settings_tab end)
 | .text_mode = false
 | .show_account_markers = $show_account_markers

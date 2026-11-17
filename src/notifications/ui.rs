@@ -129,8 +129,7 @@ async fn on_screen(accounts: BTreeSet<i64>) -> Option<BTreeSet<i64>> {
         let looking = window.is_visible()
             && !window.is_minimized()
             && app.global::<WindowChrome>().get_active()
-            && app.get_active_view() == "mail"
-            && !app.get_settings_open();
+            && app.get_active_view() == "mail";
         // A phone's window stays focused while the app is in the background.
         #[cfg(background_checks)]
         let looking = looking && crate::platform::app_is_active();
@@ -334,7 +333,6 @@ pub(crate) fn core_ready() {
 /// account out. It opens once its page arrives, the way a restored tab
 /// opens its conversation.
 fn reveal(app: &AppWindow, state: &Rc<RefCell<InboxState>>, route: Route) {
-    app.set_settings_open(false);
     app.set_active_view("mail".into());
     // The active mail profile can leave the account out; every account's
     // mail shows without one.

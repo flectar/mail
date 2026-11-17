@@ -969,7 +969,6 @@ export component AppWindow inherits Window {
     callback delete_folder(int);
     callback load_more();
     callback load_earlier_mail();
-    callback toggle_settings();
     callback sync_mail();
     callback sync_account(int);
     // F5: the accounts whose mail the view shows.
@@ -1221,6 +1220,9 @@ export component AppWindow inherits Window {
     in-out property <bool> calendar_sidebar_collapsed: false;
     in-out property <string> calendar_view_mode: "week";
     in-out property <bool> calendar_editor_open: false;
+    // The event editor belongs to the calendar. Another screen, shown from a
+    // tab, keeps the editor open for when the calendar shows again.
+    out property <bool> calendar_editor_shown: root.calendar_editor_open && root.active_view == "calendar";
     in-out property <bool> calendar_event_editing: false;
     in-out property <string> calendar_event_title: "";
     in-out property <string> calendar_event_date: "";
@@ -1291,13 +1293,12 @@ export component AppWindow inherits Window {
     in-out property <length> email-viewport-height: 0px;
     in-out property <length> email-scroll-document-height: 0px;
     in-out property <length> email-scroll-y: 0px;
-    in-out property <bool> settings_open: false;
-    changed settings_open => {
-        root.product-changed(root.active_view);
-        // Hiding Settings destroys the dialog before its own change handlers
+    private property <bool> settings-open: root.active_view == "settings";
+    changed settings-open => {
+        // Leaving Settings destroys the dialog before its own change handlers
         // run, so an unsaved palette and open forms are discarded here. The
         // dialog's private state starts over when it is created again.
-        if root.settings_open {
+        if root.settings-open {
             root.settings-shown();
         } else {
             ThemeDraft.revert();
@@ -1310,11 +1311,29 @@ export component AppWindow inherits Window {
             root.carddav_password = "";
             root.carddav_manage_existing = false;
         }
-        TabsUi.navigated();
     }
     // Settings appeared, whichever way it was opened.
     callback settings-shown();
+    // The screen shown: "mail", "calendar", "contacts", "files" or "settings".
     in-out property <string> active_view: "mail";
+    // The screen closing Settings goes back to. A tab saves Settings with it.
+    in-out property <string> settings_return_view: "mail";
+    // Settings replaces the screen it is opened from, which closing it shows
+    // again.
+    public function open-settings() {
+        if root.active_view != "settings" {
+            root.settings_return_view = root.active_view;
+            root.active_view = "settings";
+        }
+    }
+    public function close-settings() {
+        if root.active_view == "settings" {
+            root.active_view = root.settings_return_view;
+        }
+    }
+    function toggle-settings() {
+        if root.settings-open { root.close-settings(); } else { root.open-settings(); }
+    }
     callback product-changed(string);
     private property <string> mail-compact-page: "list";
     private property <bool> mail-folders-open: false;
@@ -1347,9 +1366,9 @@ export component AppWindow inherits Window {
     // close, so its own change handlers cannot reliably cancel a running scan.
     // Settings → AI agents lists the accounts, folders and activity as
     // they are when it's shown.
-    private property <bool> agents-page-open: root.settings_open && root.settings_tab == "Agents";
+    private property <bool> agents-page-open: root.settings-open && root.settings_tab == "Agents";
     changed agents-page-open => { AgentAccess.page-shown(root.agents-page-open); }
-    private property <bool> storage-page-open: root.settings_open && root.settings_tab == "Data";
+    private property <bool> storage-page-open: root.settings-open && root.settings_tab == "Data";
     changed storage-page-open => {
         if root.storage-page-open { root.load_storage_usage(); }
         else { root.cancel_storage_usage(); }
@@ -1531,7 +1550,7 @@ export component AppWindow inherits Window {
     // window outline that the window manager would otherwise draw.
     private property <bool> client-frame: root.no-frame && !root.maximized && !root.full-screen;
     private property <bool> compact-primary-nav-visible: root.compact-layout
-        && !ComposerUi.open && !root.calendar_editor_open
+        && !ComposerUi.open && !root.calendar-editor-shown
         && !(root.active_view == "mail" && root.mail-compact-page == "message")
         && !(root.active_view == "mail" && root.mail-folders-open)
         && !(root.active_view == "contacts" && root.contacts-detail-visible)
@@ -1674,12 +1693,12 @@ export component AppWindow inherits Window {
             root.compose-back-request += 1;
             return true;
         }
-        if (root.calendar_editor_open) {
+        if (root.calendar-editor-shown) {
             root.calendar_editor_open = false;
             return true;
         }
-        if (root.settings_open) {
-            root.settings_open = false;
+        if (root.settings-open) {
+            root.close-settings();
             return true;
         }
         if (root.active_view == "mail" && root.mail-folders-open) {
@@ -1820,19 +1839,14 @@ export component AppWindow inherits Window {
             width: LayoutMetrics.product-rail-width;
             height: parent.height;
             active-view <=> root.active_view;
-            settings-active: root.settings_open;
             background-color: root.sidebar-bg;
             divider-color: root.border;
             accent-color: root.accent;
             accent-background: root.accent-soft;
             title-color: root.title-color;
             muted-color: root.muted-text;
-            open-settings => { root.toggle_settings(); }
-            select-view(view) => {
-                root.active_view = view;
-                root.settings_open = false;
-
-            }
+            open-settings => { root.toggle-settings(); }
+            select-view(view) => { root.active_view = view; }
         }
 
         if root.active_view == "mail" : WorkspaceFrame {
@@ -1871,7 +1885,7 @@ export component AppWindow inherits Window {
             select_mail_profile(id) => { root.select_mail_profile(id); }
             create_mail_profile => {
                 root.settings_tab = "Accounts";
-                root.settings_open = true;
+                root.open-settings();
                 root.new_profile_requested = true;
             }
             folder_filter_query <=> root.folder_filter_query;
@@ -1928,8 +1942,10 @@ export component AppWindow inherits Window {
             rendering_info_open <=> root.rendering_info_open;
             email-content-aspect <=> root.email-content-aspect;
             email-scroll-y <=> root.email-scroll-y;
-            settings_open <=> root.settings_open;
-            settings_tab <=> root.settings_tab;
+            open-settings(page) => {
+                root.settings_tab = page;
+                root.open-settings();
+            }
             settings_sign_in_account <=> root.settings-sign-in-account;
             accent: root.accent;
             accent-soft: root.accent-soft;
@@ -2202,76 +2218,7 @@ export component AppWindow inherits Window {
             }
         }
 
-        CompactProductNav {
-            // Keep compact navigation mounted so entering/leaving a detail
-            // screen can slide it instead of popping it in and out.
-            visible: root.compact-layout
-                && (root.compact-primary-nav-visible || self.opacity > 0);
-            x: 0px;
-            y: root.compact-primary-nav-visible
-                ? parent.height - root.compact-primary-nav-height
-                : parent.height;
-            width: parent.width;
-            height: root.compact-primary-nav-height;
-            opacity: root.compact-primary-nav-visible ? 1 : 0;
-            interactive: root.compact-primary-nav-visible;
-            animate y { duration: 240ms; easing: spring(0); enabled: MotionSettings.movement; }
-            animate opacity { duration: 160ms; easing: ease-out; }
-            active-view <=> root.active_view;
-            settings-active: root.settings_open;
-            background-color: root.sidebar-bg;
-            divider-color: root.border;
-            accent-color: root.accent;
-            accent-background: root.accent-soft;
-            muted-color: root.muted-text;
-            open-settings => { root.toggle_settings(); }
-            select-view(view) => {
-                root.active_view = view;
-                root.settings_open = false;
-
-            }
-        }
-
-        // Over the compact layout and its navigation, below the dialogs.
-        if TabsUi.enabled && TabsUi.compact && TabsUi.overview-open : TabOverview {
-            x: 0px;
-            y: 0px;
-            width: parent.width;
-            height: parent.height;
-            live-workspace: root.settings_open ? "settings" : root.active_view;
-            live-title: root.settings_open || root.active_view != "mail" ? ""
-                : root.has_selected && root.selected_subject != "" ? root.selected_subject
-                : root.selected_scope_title;
-        }
-
-        if root.calendar_editor_open : CalendarEventDialog {
-            compact: root.compact-layout;
-            x: 0px;
-            y: 0px;
-            width: parent.width;
-            height: parent.height;
-            dark-mode: root.dark-mode;
-            accent: root.accent;
-            border: root.border;
-            border-subtle: root.border-subtle;
-            control-bg: root.control-bg;
-            muted-text: root.muted-text;
-            surface: root.surface;
-            title-color: root.title-color;
-            calendar_editor_open <=> root.calendar_editor_open;
-            calendar_event_editing: root.calendar_event_editing;
-            calendar_event_title <=> root.calendar_event_title;
-            calendar_event_date <=> root.calendar_event_date;
-            calendar_event_time <=> root.calendar_event_time;
-            time-placeholder: root.time_format_sample;
-            calendar_event_duration <=> root.calendar_event_duration;
-            calendar_event_color <=> root.calendar_event_color;
-            calendar-save-event(title, date, time, duration, color) => {
-                root.calendar-save-event(title, date, time, duration, color);
-            }
-        }
-
-        if root.settings_open : WorkspaceFrame {
+        if root.settings-open : WorkspaceFrame {
             compact: root.compact-layout;
             reserve-compact-navigation: root.compact-primary-nav-visible;
             available-width: parent.width;
@@ -2325,7 +2272,7 @@ export component AppWindow inherits Window {
             surface: root.surface;
             surface-raised: root.surface-raised;
             title-color: root.title-color;
-            settings_open <=> root.settings_open;
+            close-requested => { root.close-settings(); }
             settings_tab <=> root.settings_tab;
             sign-in-account <=> root.settings-sign-in-account;
             theme_mode <=> root.theme_mode;
@@ -2504,6 +2451,70 @@ export component AppWindow inherits Window {
             load_storage_usage => { root.load_storage_usage(); }
             open-link(url) => { root.open_email_link(url); }
         }
+        }
+
+        CompactProductNav {
+            // Keep compact navigation mounted so entering/leaving a detail
+            // screen can slide it instead of popping it in and out.
+            visible: root.compact-layout
+                && (root.compact-primary-nav-visible || self.opacity > 0);
+            x: 0px;
+            y: root.compact-primary-nav-visible
+                ? parent.height - root.compact-primary-nav-height
+                : parent.height;
+            width: parent.width;
+            height: root.compact-primary-nav-height;
+            opacity: root.compact-primary-nav-visible ? 1 : 0;
+            interactive: root.compact-primary-nav-visible;
+            animate y { duration: 240ms; easing: spring(0); enabled: MotionSettings.movement; }
+            animate opacity { duration: 160ms; easing: ease-out; }
+            active-view <=> root.active_view;
+            background-color: root.sidebar-bg;
+            divider-color: root.border;
+            accent-color: root.accent;
+            accent-background: root.accent-soft;
+            muted-color: root.muted-text;
+            open-settings => { root.toggle-settings(); }
+            select-view(view) => { root.active_view = view; }
+        }
+
+        // Over the compact layout and its navigation, below the dialogs.
+        if TabsUi.enabled && TabsUi.compact && TabsUi.overview-open : TabOverview {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            live-workspace: root.active_view;
+            live-title: root.active_view != "mail" ? ""
+                : root.has_selected && root.selected_subject != "" ? root.selected_subject
+                : root.selected_scope_title;
+        }
+
+        if root.calendar-editor-shown : CalendarEventDialog {
+            compact: root.compact-layout;
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            dark-mode: root.dark-mode;
+            accent: root.accent;
+            border: root.border;
+            border-subtle: root.border-subtle;
+            control-bg: root.control-bg;
+            muted-text: root.muted-text;
+            surface: root.surface;
+            title-color: root.title-color;
+            calendar_editor_open <=> root.calendar_editor_open;
+            calendar_event_editing: root.calendar_event_editing;
+            calendar_event_title <=> root.calendar_event_title;
+            calendar_event_date <=> root.calendar_event_date;
+            calendar_event_time <=> root.calendar_event_time;
+            time-placeholder: root.time_format_sample;
+            calendar_event_duration <=> root.calendar_event_duration;
+            calendar_event_color <=> root.calendar_event_color;
+            calendar-save-event(title, date, time, duration, color) => {
+                root.calendar-save-event(title, date, time, duration, color);
+            }
         }
 
         // A message on its way out, with a way to take it back. A phone's
@@ -2734,12 +2745,9 @@ export component AppWindow inherits Window {
         compact: root.compact-layout;
         open-accounts => {
             root.settings_tab = "Accounts";
-            root.settings_open = true;
+            root.open-settings();
         }
-        show-mail => {
-            root.active_view = "mail";
-            root.settings_open = false;
-        }
+        show-mail => { root.active_view = "mail"; }
     }
 
     if MovePickerUi.open : MoveDialog {
@@ -2988,14 +2996,14 @@ export component AppWindow inherits Window {
         z: 40000;
         // The active tab follows Settings, the workspace, and in Mail the
         // open conversation or mailbox.
-        live-workspace: root.settings_open ? "settings" : root.active_view;
-        live-title: root.settings_open || root.active_view != "mail" ? ""
+        live-workspace: root.active_view;
+        live-title: root.active_view != "mail" ? ""
             : root.has_selected && root.selected_subject != "" ? root.selected_subject
             : root.selected_scope_title;
         background-color: root.tab-strip-bg;
         // The active tab opens into what lies under the strip: the raised
         // surface across Settings, the plain one across every workspace.
-        active-tab-background: root.settings_open ? root.surface-raised : root.surface;
+        active-tab-background: root.settings-open ? root.surface-raised : root.surface;
         hover-background: AppTheme.sidebar-tint.mix(AppTheme.title, 0.90);
         divider-color: root.border;
         title-color: root.title-color;
@@ -3007,12 +3015,12 @@ export component AppWindow inherits Window {
         choose-profile(id) => { root.select_mail_profile(id); }
         create-profile => {
             root.settings_tab = "Accounts";
-            root.settings_open = true;
+            root.open-settings();
             root.new_profile_requested = true;
         }
         manage-profiles => {
             root.settings_tab = "Accounts";
-            root.settings_open = true;
+            root.open-settings();
         }
     }
 

@@ -25,7 +25,6 @@ slint::slint! {
             width: parent.width;
             height: parent.height;
             compact: root.compact;
-            settings_open: true;
             settings_tab: "Accounts";
             sync_status: root.status;
             caldav_account_id <=> root.account;

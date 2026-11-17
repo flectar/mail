@@ -273,7 +273,7 @@ impl Controller {
             |app, result| match result {
                 Ok((rule, (accounts, folders, labels))) => {
                     app.set_settings_tab("Rules".into());
-                    app.set_settings_open(true);
+                    app.invoke_open_settings();
                     let choices = choices_of(accounts, folders, labels);
                     with_controller(|controller| controller.show(&app, choices, Some(rule)));
                 }
