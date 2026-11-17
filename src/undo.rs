@@ -159,6 +159,19 @@ pub(super) fn blocked(app: &AppWindow, address: String, action_ids: Vec<i64>) {
     });
 }
 
+/// A rule just ran on `count` messages in the Inbox: tell of it, with Undo.
+pub(super) fn ruled(app: &AppWindow, count: i32, action_ids: Vec<i64>) {
+    with_undo(|undo| {
+        undo.show(
+            app,
+            Shown::Gesture { action_ids },
+            UiMessage::detail("Rule applied to {} messages.", count),
+            "undo",
+            Some(GESTURE_NOTICE_FOR),
+        );
+    });
+}
+
 /// Tell of something done that cannot be taken back here, such as leaving
 /// a mailing list.
 pub(super) fn tell(app: &AppWindow, message: UiMessage) {
