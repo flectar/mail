@@ -598,6 +598,18 @@ fetches the message whole first and holds its notification until the rules are
 done. Mail that came while the app was closed is sorted when it next checks for
 mail. What it finds when it first downloads an account stays where it is.
 
+Where an account's server runs Sieve filters, as many IMAP servers do and JMAP
+servers such as Stalwart and Cyrus, Flectar Mail puts its rules there too, so
+they sort mail while the app is closed. They go into a script of its own beside
+the automatic replies, and filters you made elsewhere keep running after them
+once you allow it. The server takes the rules from the top for as long as it
+can do what each one asks just as Flectar Mail does. A rule that looks for a
+pattern or for attachments stays in the app, and so do the rules after it,
+since the server sorts mail first. Each rule says where it runs, and its editor
+says why. Each device keeps its own rules. When the server already runs rules
+another device put there, Flectar Mail leaves them until you choose to replace
+them.
+
 ## Importance
 
 **High importance** and **Low importance** under **More options** in the
