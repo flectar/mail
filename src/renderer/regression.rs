@@ -1571,3 +1571,71 @@ fn relative_resource_urls_do_not_fail_the_message() {
         assert!(prepared.plain_text.contains("Order shipped"));
     }
 }
+
+/// Where the left edge of an italic `text` is, a quarter of the way down what
+/// it paints and a quarter of the way up, through the CPU renderer.
+fn italic_left_edges(
+    ctx: parley::FontContext,
+    font: &str,
+    text: &str,
+    scale: f32,
+) -> (usize, usize) {
+    let mut prepared = prepare_email_html_with_font_ctx(
+        &format!(
+            "<body style='margin:0;background:#fff'><p style=\"margin:0 0 0 40px;font:italic 120px {font};color:#000\">{text}</p></body>"
+        ),
+        ctx,
+    )
+    .unwrap();
+    let frame = render_prepared_cpu(&mut prepared, 240, 200, scale).unwrap();
+    let pixels = frame.tiles[0].image.to_rgba8().unwrap();
+    let left_edges: Vec<usize> = pixels
+        .as_slice()
+        .chunks(pixels.width() as usize)
+        .filter_map(|row| row.iter().position(|p| p.r < 80 && p.g < 80 && p.b < 80))
+        .collect();
+    assert!(
+        left_edges.len() > 40,
+        "{text} in {font} was not painted at {scale}x"
+    );
+    let quarter = left_edges.len() / 4;
+    (
+        left_edges[quarter],
+        left_edges[left_edges.len() - 1 - quarter],
+    )
+}
+
+#[test]
+fn synthetic_italics_lean_forward_on_the_cpu_renderer() {
+    // Noto Emoji has no italic face and no `ital` or `slnt` axis, so an italic
+    // square gets the skew of a synthetic italic.
+    use parley::fontique::Blob;
+    for scale in [1.0, 2.0] {
+        let mut ctx = create_email_font_ctx_with_system_fonts(false);
+        ctx.collection.register_fonts(
+            Blob::new(Arc::new(
+                include_bytes!("../../resources/fonts/noto-emoji/NotoEmoji[wght].ttf").as_slice(),
+            ) as _),
+            None,
+        );
+        let (top, bottom) = italic_left_edges(ctx, "'Noto Emoji'", "\u{2b1b}", scale);
+        assert!(
+            top > bottom + 4,
+            "the italic square leans backwards at {scale}x, its left edge is at {top} near the top and {bottom} near the bottom"
+        );
+    }
+}
+
+#[test]
+fn slant_axis_italics_lean_forward() {
+    // The bundled Google Sans Flex has no italic face and no `ital` axis, so
+    // its italics come from its `slnt` axis.
+    for scale in [1.0, 2.0] {
+        let ctx = create_email_font_ctx_with_system_fonts(false);
+        let (top, bottom) = italic_left_edges(ctx, "'Google Sans Flex'", "l", scale);
+        assert!(
+            top > bottom + 4,
+            "the italic l doesn't lean forward at {scale}x, its left edge is at {top} near the top and {bottom} near the bottom"
+        );
+    }
+}
