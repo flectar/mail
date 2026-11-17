@@ -431,6 +431,7 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
                     rx,
                     pool_tx.clone(),
                     hist_tx,
+                    settings_rx.clone(),
                 )),
                 tokio::spawn(run_body_fetcher(ctx.clone(), config.clone(), body_rx)),
                 tokio::spawn(run_backfill_pool(
@@ -998,6 +999,7 @@ async fn run_actor(
     mut rx: mpsc::Receiver<SyncCmd>,
     pool_tx: mpsc::Sender<()>,
     hist_tx: mpsc::Sender<()>,
+    settings_rx: watch::Receiver<AccountSettings>,
 ) {
     let account_id = config.id;
     crate::events::sync_diagnostic("imap_worker", Some(account_id), "started");
@@ -1120,6 +1122,7 @@ async fn run_actor(
         // cycle is only folder/header/flag/action work and stays short.
         tracing::debug!(account_id, cycle, "sync cycle start");
         set_state(&ctx, account_id, "syncing").await;
+        listing.subscribed_only(settings_rx.borrow().subscribed_folders_only);
         let foreground_only = !sync_waiters.is_empty();
         let cycle_result = run_cycle(
             &ctx,
@@ -1635,7 +1638,7 @@ async fn run_cycle(
     // The folder list: first thing, then once it is FOLDER_LIST_INTERVAL old.
     let listed_now = !immediate_follow_up && listing.due(tokio::time::Instant::now());
     if listed_now {
-        discover_folders(ctx, config, session).await?;
+        discover_folders(ctx, config, session, listing.subscribed_only).await?;
         listing.listed_at = Some(tokio::time::Instant::now());
         // A Microsoft account's automatic replies live in its mailbox
         // settings. Reading them never fails a sync.
@@ -1677,7 +1680,8 @@ async fn run_cycle(
     let (reported, known) = if foreground_only {
         (HashMap::new(), HashMap::new())
     } else {
-        let reported = report_folders(session, &ordered, list_status).await;
+        let reported =
+            report_folders(session, &ordered, list_status, listing.subscribed_only).await;
         let known = ctx
             .db
             .read(move |conn| repo::folders::server_statuses(conn, account_id))
@@ -1792,7 +1796,7 @@ async fn run_cycle(
     let mut listed_new = false;
     if listing.recheck(&refused) {
         if !listed_now {
-            discover_folders(ctx, config, session).await?;
+            discover_folders(ctx, config, session, listing.subscribed_only).await?;
             listing.listed_at = Some(tokio::time::Instant::now());
         }
         let known = folders
@@ -1877,7 +1881,9 @@ async fn count_inbox(ctx: &SyncCtx, session: &mut Session, inbox: &Folder) -> Re
 }
 
 /// The STATUS the server reports for each folder, by path. LIST-STATUS
-/// answers for every folder in one command. Without it, STATUS asks each
+/// answers for every folder in one command, or, when the account lists only
+/// subscribed folders, for just the folders it syncs, so the server doesn't
+/// count the mail of every folder it has. Without it, STATUS asks each
 /// folder but the Inbox: RFC 9051 asks clients not to use STATUS on the
 /// selected mailbox, which IDLE keeps the Inbox, and every cycle opens the
 /// Inbox anyway. A folder without a report is synced as before.
@@ -1885,9 +1891,16 @@ async fn report_folders(
     session: &mut Session,
     folders: &[&Folder],
     list_status: bool,
+    subscribed_only: bool,
 ) -> HashMap<String, imap::MailboxStatus> {
     if list_status {
-        match imap::list_status(session).await {
+        let paths = subscribed_only.then(|| {
+            folders
+                .iter()
+                .map(|folder| folder.path.as_str())
+                .collect::<Vec<_>>()
+        });
+        match imap::list_status(session, paths.as_deref()).await {
             Ok(reported) => return reported,
             Err(error) => tracing::warn!("LIST-STATUS failed; asking each folder: {error}"),
         }
@@ -1968,6 +1981,9 @@ struct FolderListing {
     /// Folders the server refused to open that a folder list read since
     /// still had. Refusing them again doesn't call for another LIST.
     refused_but_listed: HashSet<i64>,
+    /// Whether the account lists only subscribed folders
+    /// ([`AccountSettings::subscribed_folders_only`]).
+    subscribed_only: bool,
 }
 
 impl FolderListing {
@@ -1980,6 +1996,15 @@ impl FolderListing {
         })
     }
 
+    /// Follow the account's choice to list only subscribed folders. Changing
+    /// it makes the folder list due at once.
+    fn subscribed_only(&mut self, subscribed_only: bool) {
+        if self.subscribed_only != subscribed_only {
+            self.subscribed_only = subscribed_only;
+            self.listed_at = None;
+        }
+    }
+
     /// Whether the folders the server just refused call for reading the
     /// folder list again: one it hasn't listed since may be gone.
     fn recheck(&self, refused: &[i64]) -> bool {
@@ -1989,10 +2014,15 @@ impl FolderListing {
     }
 }
 
+/// Read the server's folder list into the account's folders. With
+/// `subscribed_only` ([`AccountSettings::subscribed_folders_only`]), it lists
+/// the folders [`crate::sync::folder_map::subscribed_only`] keeps, and the
+/// others go from this device with their mail, which the server keeps.
 pub(crate) async fn discover_folders(
     ctx: &SyncCtx,
     config: &AccountConfig,
     session: &mut Session,
+    subscribed_only: bool,
 ) -> Result<()> {
     let account_id = config.id;
     ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
@@ -2002,8 +2032,45 @@ pub(crate) async fn discover_folders(
         done: 0,
         total: 0,
     }));
-    let remote = imap::list_folders(session).await?;
-    ctx.db
+    let mut remote = imap::list_folders(session).await?;
+    // A LIST without folders can only be a server fault; keep them.
+    let listed_any = !remote.is_empty();
+    // Every folder the server has, those it doesn't list here among them.
+    let mut on_server = None;
+    let subscribed = if subscribed_only {
+        match imap::list_subscribed(session, "*").await {
+            Ok(subscribed) => Some(subscribed),
+            // A server that keeps no subscriptions has every folder listed.
+            Err(CoreError::ImapRefused(reply)) => {
+                tracing::warn!(account_id, "folder subscriptions unavailable: {reply}");
+                None
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        None
+    };
+    if let Some(subscribed) = subscribed {
+        on_server = Some(
+            remote
+                .iter()
+                .map(|folder| folder.name.clone())
+                .collect::<HashSet<_>>(),
+        );
+        let ruled = ctx
+            .db
+            .read(move |conn| {
+                let mut paths = HashSet::new();
+                for folder_id in repo::rules::target_folders(conn, account_id)? {
+                    paths.extend(repo::folders::get(conn, folder_id)?.map(|folder| folder.path));
+                }
+                Ok(paths)
+            })
+            .await?;
+        remote = crate::sync::folder_map::subscribed_only(remote, &subscribed, &ruled);
+    }
+    let unlisted = ctx
+        .db
         .write(move |conn| {
             let tx = conn.transaction()?;
             let mut discovered = Vec::with_capacity(remote.len());
@@ -2072,14 +2139,30 @@ pub(crate) async fn discover_folders(
                     .and_then(|(parent, _)| ids_by_name.get(parent).copied());
                 repo::folders::set_parent(&tx, id, parent_id)?;
             }
-            // A LIST without folders can only be a server fault; keep them.
-            if !remote.is_empty() {
+            let mut unlisted = Vec::new();
+            if let Some(mut on_server) = on_server {
+                let synced = remote
+                    .iter()
+                    .map(|folder| folder.name.clone())
+                    .collect::<HashSet<_>>();
+                unlisted =
+                    repo::folders::unlisted(&tx, account_id, &on_server, &known_names, &synced)?;
+                // The containers made up for listed folders aren't on the
+                // server, and stay too.
+                on_server.extend(known_names);
+                known_names = on_server;
+            }
+            if listed_any {
                 repo::folders::mark_missing_on_server(&tx, account_id, &known_names)?;
             }
             tx.commit()?;
-            Ok(())
+            Ok(unlisted)
         })
-        .await
+        .await?;
+    if !unlisted.is_empty() {
+        crate::sync::forget_unlisted_folders(ctx, account_id, unlisted).await?;
+    }
+    Ok(())
 }
 
 async fn sync_folder(

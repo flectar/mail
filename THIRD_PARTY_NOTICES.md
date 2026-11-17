@@ -67,6 +67,16 @@ under MIT. Its copyright and license are included in
 [`LICENSES/Parley-Emoji-MIT.txt`](LICENSES/Parley-Emoji-MIT.txt).
 Published packages and checksums are pinned in `Cargo.lock`.
 
+## fontique
+
+Slint, Parley and Flectar Mail share the locally patched `fontique` 0.12.0
+crate, which finds and matches fonts. It is copyright © the Parley Authors and,
+like Parley, used under the Apache-2.0 option, whose text it retains in
+[`crates/fontique/LICENSE-APACHE`](crates/fontique/LICENSE-APACHE). The upstream
+source is <https://github.com/linebender/parley>. The source checksum, the
+patch, and its removal condition are documented in
+[`patches/fontique/README.md`](patches/fontique/README.md).
+
 ## Candle
 
 The optional CPU embedding runtime uses the published Candle crates under

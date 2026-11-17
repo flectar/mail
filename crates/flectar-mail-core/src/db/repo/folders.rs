@@ -257,6 +257,75 @@ pub fn messages_in_tree(
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// Every message in one folder.
+pub fn messages_in(conn: &Connection, folder_id: i64) -> Result<Vec<TreeMessage>> {
+    let mut stmt =
+        conn.prepare("SELECT id, thread_id, raw_path FROM messages WHERE folder_id = ?1")?;
+    Ok(stmt
+        .query_map(params![folder_id], |row| {
+            Ok(TreeMessage {
+                id: row.get(0)?,
+                thread_id: row.get(1)?,
+                raw_path: row.get(2)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Whether queued work not yet done involves the folder: a change to mail
+/// in it, or mail moved or copied into or out of it.
+pub fn has_queued_work(conn: &Connection, account_id: i64, folder_id: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM pending_actions p
+           WHERE p.account_id = ?1 AND p.state IN ('pending', 'inflight')
+             AND (p.message_id IN (SELECT id FROM messages WHERE folder_id = ?2)
+               OR json_extract(p.payload, '$.folderId') = ?2
+               OR json_extract(p.payload, '$.srcFolderId') = ?2
+               OR json_extract(p.payload, '$.targetFolderId') = ?2))",
+        params![account_id, folder_id],
+        |row| row.get(0),
+    )?)
+}
+
+/// The account's IMAP folders that are still on the server (`on_server`)
+/// but no longer listed: one outside `listed` goes with its mail (true), and
+/// one listed only as the container of listed folders, not among `synced`,
+/// keeps its place and loses its mail (false).
+pub fn unlisted(
+    conn: &Connection,
+    account_id: i64,
+    on_server: &HashSet<String>,
+    listed: &HashSet<String>,
+    synced: &HashSet<String>,
+) -> Result<Vec<(i64, bool)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, EXISTS(SELECT 1 FROM messages m WHERE m.folder_id = folders.id)
+         FROM folders
+         WHERE account_id = ?1 AND jmap_id IS NULL AND missing_on_server = 0",
+    )?;
+    let folders = stmt
+        .query_map(params![account_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, bool>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(folders
+        .into_iter()
+        .filter(|(_, path, _)| on_server.contains(path) && !synced.contains(path))
+        .filter_map(|(id, path, has_mail)| {
+            if !listed.contains(&path) {
+                Some((id, true))
+            } else {
+                has_mail.then_some((id, false))
+            }
+        })
+        .collect())
+}
+
 /// Delete a folder and its subfolders. Their messages go first, with their
 /// search entries and files (see `crate::sync::delete_folder_tree`).
 pub fn delete_tree(
