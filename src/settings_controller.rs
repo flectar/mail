@@ -1315,25 +1315,25 @@ mod tests {
         let theme = app.global::<AppTheme>();
         let draft = app.global::<ThemeDraft>();
         let saved = theme.get_custom_light_primary();
-        app.set_settings_open(true);
+        app.invoke_open_settings();
         slint::platform::update_timers_and_animations();
 
         // The editor previews a color before it is saved.
         draft.invoke_begin();
         theme.set_custom_light_primary(slint::Color::from_rgb_u8(0xff, 0, 0));
-        app.set_settings_open(false);
+        app.invoke_close_settings();
         slint::platform::update_timers_and_animations();
         assert_eq!(theme.get_custom_light_primary(), saved);
         assert!(!draft.get_dirty());
 
         // A saved palette stays.
-        app.set_settings_open(true);
+        app.invoke_open_settings();
         slint::platform::update_timers_and_animations();
         draft.invoke_begin();
         let chosen = slint::Color::from_rgb_u8(0, 0x80, 0);
         theme.set_custom_light_primary(chosen);
         draft.set_dirty(false);
-        app.set_settings_open(false);
+        app.invoke_close_settings();
         slint::platform::update_timers_and_animations();
         assert_eq!(theme.get_custom_light_primary(), chosen);
     }

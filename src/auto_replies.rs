@@ -54,7 +54,7 @@ pub(crate) fn register(
     app.global::<AutoReplies>().on_open_settings(move || {
         if let Some(app) = weak.upgrade() {
             app.set_settings_tab("Accounts".into());
-            app.set_settings_open(true);
+            app.invoke_open_settings();
         }
     });
 }

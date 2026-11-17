@@ -97,13 +97,12 @@ export component MailView inherits FocusScope {
     in-out property <bool> rendering_info_open: false;
     in-out property <float> email-content-aspect: 900 / 520;
     in-out property <length> email-scroll-y: 0px;
-    in-out property <bool> settings_open: false;
-    in-out property <string> settings_tab: "General";
+    // Settings replaces this view, showing the given page.
+    callback open-settings(string);
     // An account Settings signs in again once it shows the account.
     in-out property <int> settings_sign_in_account: -1;
     in-out property <string> compact-page: "list";
     in-out property <bool> folders-open: false;
-    private property <bool> focus-list-after-settings: false;
     private property <bool> focus-search-after-page-change: false;
     out property <bool> list-focus-visible: root.single-pane
         ? compact-list-pane.keyboard-focus-visible : desktop-list-pane.keyboard-focus-visible;
@@ -303,8 +302,7 @@ export component MailView inherits FocusScope {
     // account's own sign-in there.
     function sign-in-again(account-id: int) {
         root.settings_sign_in_account = account-id;
-        root.settings_tab = "Accounts";
-        root.settings_open = true;
+        root.open-settings("Accounts");
     }
 
     changed layout-mode => {
@@ -312,14 +310,7 @@ export component MailView inherits FocusScope {
             root.compact-page = "list";
             root.folders-open = false;
         }
-        if root.settings_open { root.focus-list-after-settings = true; }
-        else { root.focus-list(false); }
-    }
-    changed settings_open => {
-        if !root.settings_open && root.focus-list-after-settings {
-            root.focus-list-after-settings = false;
-            root.focus-list(false);
-        }
+        root.focus-list(false);
     }
     // Focus goes back to where Move to was opened from.
     private property <bool> move-picker-open: MovePickerUi.open;
@@ -354,8 +345,7 @@ export component MailView inherits FocusScope {
                 choose-profile(id) => { root.select_mail_profile(id); }
                 create-profile => { root.create_mail_profile(); }
                 manage-profiles => {
-                    root.settings_tab = "Accounts";
-                    root.settings_open = true;
+                    root.open-settings("Accounts");
                 }
                 height: parent.height;
                 touch-mode: false;
@@ -393,8 +383,7 @@ export component MailView inherits FocusScope {
                 sign-in-account(account-id) => { root.sign-in-again(account-id); }
                 compose => { root.open_compose(); }
                 manage-accounts => {
-                    root.settings_tab = "Accounts";
-                    root.settings_open = true;
+                    root.open-settings("Accounts");
                 }
             }
 
@@ -453,8 +442,7 @@ export component MailView inherits FocusScope {
                 edit-as-new => { root.compose_message_action("edit_as_new"); }
                 toggle_mail_group(key) => { root.toggle_mail_group(key); }
                 open-mail-history => {
-                    root.settings_tab = "Accounts";
-                    root.settings_open = true;
+                    root.open-settings("Accounts");
                 }
                 set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
@@ -586,8 +574,7 @@ export component MailView inherits FocusScope {
                 choose-profile(id) => { root.select_mail_profile(id); }
                 create-profile => { root.create_mail_profile(); }
                 manage-profiles => {
-                    root.settings_tab = "Accounts";
-                    root.settings_open = true;
+                    root.open-settings("Accounts");
                 }
                 x: 0px;
                 y: 0px;
@@ -629,8 +616,7 @@ export component MailView inherits FocusScope {
                 sign-in-account(account-id) => { root.sign-in-again(account-id); }
                 compose => { root.open_compose(); }
                 manage-accounts => {
-                    root.settings_tab = "Accounts";
-                    root.settings_open = true;
+                    root.open-settings("Accounts");
                 }
             }
 
@@ -711,8 +697,7 @@ export component MailView inherits FocusScope {
                 edit-as-new => { root.compose_message_action("edit_as_new"); }
                 toggle_mail_group(key) => { root.toggle_mail_group(key); }
                 open-mail-history => {
-                    root.settings_tab = "Accounts";
-                    root.settings_open = true;
+                    root.open-settings("Accounts");
                 }
                 set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
@@ -863,8 +848,7 @@ export component MailView inherits FocusScope {
                 }
                 manage-profiles => {
                     root.folders-open = false;
-                    root.settings_tab = "Accounts";
-                    root.settings_open = true;
+                    root.open-settings("Accounts");
                 }
                 rows: root.sidebar_rows;
                 scroll-y <=> root.sidebar-scroll-y;
@@ -908,8 +892,7 @@ export component MailView inherits FocusScope {
                 }
                 manage-accounts => {
                     root.folders-open = false;
-                    root.settings_tab = "Accounts";
-                    root.settings_open = true;
+                    root.open-settings("Accounts");
                 }
             }
         }

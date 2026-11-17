@@ -1280,7 +1280,9 @@ pub(super) fn register_data_management_callbacks(
         let Some(app) = storage_app.upgrade() else {
             return;
         };
-        if app.get_storage_loading() || !app.get_settings_open() || app.get_settings_tab() != "Data"
+        if app.get_storage_loading()
+            || app.get_active_view() != "settings"
+            || app.get_settings_tab() != "Data"
         {
             return;
         }
@@ -1850,14 +1852,14 @@ mod tests {
         slint::platform::update_timers_and_animations();
         calls.borrow_mut().clear();
 
-        app.set_settings_open(true);
+        app.invoke_open_settings();
         slint::platform::update_timers_and_animations();
         assert!(calls.borrow().is_empty());
         app.set_settings_tab("Data".into());
         slint::platform::update_timers_and_animations();
-        app.set_settings_open(false);
+        app.invoke_close_settings();
         slint::platform::update_timers_and_animations();
-        app.set_settings_open(true);
+        app.invoke_open_settings();
         slint::platform::update_timers_and_animations();
         app.set_settings_tab("About".into());
         slint::platform::update_timers_and_animations();

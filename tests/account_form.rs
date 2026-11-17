@@ -27,7 +27,6 @@ slint::slint! {
         SettingsDialog {
             width: parent.width;
             height: parent.height;
-            settings_open: true;
             settings_tab: "Accounts";
             account_form_open <=> root.form-open;
             account_email <=> root.email;
@@ -167,7 +166,7 @@ fn account_form_fields_follow_their_values() {
     // run, so the window closes the forms and forgets typed passwords.
     let app = AppWindow::new().unwrap();
     app.show().unwrap();
-    app.set_settings_open(true);
+    app.invoke_open_settings();
     slint::platform::update_timers_and_animations();
     app.set_account_form_open(true);
     app.set_account_password("typed".into());
@@ -177,7 +176,7 @@ fn account_form_fields_follow_their_values() {
     app.set_carddav_account_id(4);
     app.set_carddav_password("contacts".into());
     app.set_carddav_manage_existing(true);
-    app.set_settings_open(false);
+    app.invoke_close_settings();
     slint::platform::update_timers_and_animations();
     assert!(!app.get_account_form_open());
     assert_eq!(app.get_account_password(), "");
