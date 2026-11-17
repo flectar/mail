@@ -17,6 +17,7 @@ export { Notice } from "notice.slint";
 export { Unsubscribe } from "unsubscribe.slint";
 export { BlockSender } from "block-sender.slint";
 export { MailRules, RuleActionRow, RuleConditionRow, RuleRow } from "rules.slint";
+import { MailRules } from "rules.slint";
 export { Invitation } from "invitation.slint";
 export { InvitationSettings } from "invitation-settings.slint";
 import { AppIcon, AppIconVariant } from "app-icon.slint";
@@ -307,6 +308,9 @@ export global I18n {
         if (key == "A rule can move mail out of the Inbox only once. Keep one of moving, archiving, trash and spam.") { return @tr("A rule can move mail out of the Inbox only once. Keep one of moving, archiving, trash and spam."); }
         if (key == "Could not save the rule: {}") { return @tr("Could not save the rule: {}", argument); }
         if (key == "Could not delete the rule: {}") { return @tr("Could not delete the rule: {}", argument); }
+        if (key == "Could not run the rule: {}") { return @tr("Could not run the rule: {}", argument); }
+        if (key == "This rule matches no mail in the Inbox now.") { return @tr("This rule matches no mail in the Inbox now."); }
+        if (key == "Rule applied to {} messages.") { return @tr("Rule applied to one message." | "Rule applied to {0} messages." % round(argument.to-float()), argument); }
         if (key == "Notification preferences are active for this session.") { return @tr("Notification preferences are active for this session."); }
         if (key == "Notification preferences saved.") { return @tr("Notification preferences saved."); }
         if (key == "Update preference saved.") { return @tr("Update preference saved."); }
@@ -2654,6 +2658,30 @@ export component AppWindow inherits Window {
         body-color: root.body-text;
         muted-color: root.muted-text;
         confirmed => { root.mark_all_read(root.mark-all-read-scope); }
+    }
+
+    if MailRules.run-open : ConfirmationDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        z: 16000;
+        open <=> MailRules.run-open;
+        title: @tr("Run this rule on the Inbox?");
+        subject: MailRules.name;
+        description: @tr("It matches one message there now." | "It matches {n} messages there now." % MailRules.run-count);
+        detail: MailRules.run-unknown > 0
+            ? @tr("One more can only be checked once its body is downloaded." | "{n} more can only be checked once their bodies are downloaded." % MailRules.run-unknown)
+            : @tr("Undo takes it back.");
+        confirm-label: @tr("Run rule");
+        destructive: false;
+        icon: @image-url("icons/lucide/outline/list-filter.svg");
+        surface: root.surface;
+        dialog-border-color: root.border;
+        title-color: root.title-color;
+        body-color: root.body-text;
+        muted-color: root.muted-text;
+        confirmed => { MailRules.confirm-run(); }
     }
 
     if AutoReplies.question-open : ConfirmationDialog {

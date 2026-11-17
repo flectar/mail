@@ -79,12 +79,32 @@ pub(super) fn install(
         with_controller(|controller| remove(&controller.conditions, index));
     });
     ui.on_add_action(|| with_controller(|controller| controller.add_action()));
+    ui.on_run(|| with_controller(|controller| controller.run()));
+    ui.on_confirm_run(|| with_controller(|controller| controller.confirm_run()));
+    ui.on_create_from_message(|| with_controller(|controller| controller.create_from_message()));
     ui.on_remove_action(|index| with_controller(|controller| remove(&controller.actions, index)));
 }
 
 /// Show the rules in Settings, once the core is there.
 pub(super) fn refresh() {
     with_controller(|controller| controller.refresh());
+}
+
+/// What the editor offers: the accounts that receive mail, their folders
+/// and the labels.
+fn choices_of(
+    accounts: Vec<flectar_mail_core::models::Account>,
+    folders: Vec<flectar_mail_core::models::FolderInfo>,
+    labels: Vec<flectar_mail_core::models::Label>,
+) -> Choices {
+    Choices {
+        accounts: accounts
+            .into_iter()
+            .filter(|account| account.mail_protocol != MailProtocol::Local)
+            .collect(),
+        folders,
+        labels,
+    }
 }
 
 /// Remove row `index`, keeping one: a rule needs a condition and an action.
@@ -166,15 +186,123 @@ impl Controller {
                 let Ok((accounts, folders, labels)) = result else {
                     return;
                 };
-                let choices = Choices {
-                    accounts: accounts
-                        .into_iter()
-                        .filter(|account| account.mail_protocol != MailProtocol::Local)
-                        .collect(),
-                    folders,
-                    labels,
-                };
+                let choices = choices_of(accounts, folders, labels);
                 with_controller(|controller| controller.show(&app, choices, rule));
+            },
+        );
+    }
+
+    /// The message menu: Settings opens on a new rule for mail like the
+    /// open message, for its mailing list or its sender.
+    fn create_from_message(&self) {
+        let (core, target) = {
+            let state = self.state.borrow();
+            let target = state
+                .selected_id
+                .and_then(|id| state.messages.iter().find(|message| message.id == id))
+                .and_then(crate::mail::MailTarget::of);
+            (state.core.clone(), target)
+        };
+        let (Some(core), Some(target)) = (core, target) else {
+            return;
+        };
+        self.spawn(
+            async move { Ok((core.rule_from(target).await?, core.rule_choices().await?)) },
+            |app, result| match result {
+                Ok((rule, (accounts, folders, labels))) => {
+                    app.set_settings_tab("Rules".into());
+                    app.set_settings_open(true);
+                    let choices = choices_of(accounts, folders, labels);
+                    with_controller(|controller| controller.show(&app, choices, Some(rule)));
+                }
+                Err(error) => crate::undo::tell(
+                    &app,
+                    UiMessage::detail("Could not save the rule: {}", error),
+                ),
+            },
+        );
+    }
+
+    /// Run on Inbox: how much the rule as written matches there now, to ask
+    /// before running it.
+    fn run(&self) {
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        let ui = app.global::<MailRules>();
+        if ui.get_busy() {
+            return;
+        }
+        let rule = match self.written(&app) {
+            Ok(rule) => rule,
+            Err(message) => {
+                ui.set_error(translated(&app, &message));
+                return;
+            }
+        };
+        let Some(core) = self.core() else {
+            return;
+        };
+        ui.set_busy(true);
+        ui.set_error(SharedString::new());
+        self.spawn(
+            async move { core.mail_rule_matches(rule).await },
+            |app, result| {
+                let ui = app.global::<MailRules>();
+                ui.set_busy(false);
+                match result {
+                    Ok(found) if found.message_ids.is_empty() => ui.set_error(translated(
+                        &app,
+                        &UiMessage::plain("This rule matches no mail in the Inbox now."),
+                    )),
+                    Ok(found) => {
+                        ui.set_run_count(
+                            i32::try_from(found.message_ids.len()).unwrap_or(i32::MAX),
+                        );
+                        ui.set_run_unknown(i32::try_from(found.unknown).unwrap_or(i32::MAX));
+                        ui.set_run_open(true);
+                    }
+                    Err(error) => ui.set_error(translated(
+                        &app,
+                        &UiMessage::detail("Could not run the rule: {}", error),
+                    )),
+                }
+            },
+        );
+    }
+
+    /// The question's Run: the rule as written runs on the Inbox mail it
+    /// matches, with Undo.
+    fn confirm_run(&self) {
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        let ui = app.global::<MailRules>();
+        ui.set_run_open(false);
+        let rule = match self.written(&app) {
+            Ok(rule) => rule,
+            Err(message) => {
+                ui.set_error(translated(&app, &message));
+                return;
+            }
+        };
+        let Some(core) = self.core() else {
+            return;
+        };
+        let count = ui.get_run_count();
+        ui.set_busy(true);
+        self.spawn(
+            async move { core.run_mail_rule(rule).await },
+            move |app, result| {
+                let ui = app.global::<MailRules>();
+                ui.set_busy(false);
+                match result {
+                    Ok(action_ids) => crate::undo::ruled(&app, count, action_ids),
+                    Err(error) => ui.set_error(translated(
+                        &app,
+                        &UiMessage::detail("Could not run the rule: {}", error),
+                    )),
+                }
             },
         );
     }

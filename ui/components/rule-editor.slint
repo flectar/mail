@@ -472,6 +472,13 @@ export component RuleEditor inherits Rectangle {
                 HorizontalLayout {
                     spacing: 8px;
                     padding-top: 2px;
+                    Button {
+                        height: root.compact ? 44px : 34px;
+                        width: self.content-width;
+                        text: @tr("Run on Inbox…");
+                        enabled: !MailRules.busy;
+                        clicked => { MailRules.run(); }
+                    }
                     if MailRules.editing-id != 0 : Button {
                         height: root.compact ? 44px : 34px;
                         width: self.content-width;

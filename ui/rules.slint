@@ -69,4 +69,14 @@ export global MailRules {
     callback remove-condition(int);
     callback add-action();
     callback remove-action(int);
+
+    // Running the rule on mail already in the Inbox: the question, with how
+    // much it matches there now and how much it can't tell about yet.
+    in-out property <bool> run-open;
+    in property <int> run-count;
+    in property <int> run-unknown;
+    callback run();
+    callback confirm-run();
+    // The message menu: a new rule for mail like the open message.
+    callback create-from-message();
 }

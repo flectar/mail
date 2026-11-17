@@ -2493,6 +2493,34 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// The Inbox mail `rule` matches now.
+    pub async fn mail_rule_matches(
+        &self,
+        rule: MailRule,
+    ) -> Result<flectar_mail_core::rules::InboxMatches, String> {
+        self.core
+            .mail_rule_matches(rule)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Run `rule` on the Inbox mail it matches now: the actions, for Undo.
+    pub async fn run_mail_rule(&self, rule: MailRule) -> Result<Vec<i64>, String> {
+        self.core
+            .run_mail_rule(rule)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// A new rule for mail like `target`'s.
+    pub async fn rule_from(&self, target: MailTarget) -> Result<MailRule, String> {
+        match target {
+            MailTarget::Message { id, .. } => self.core.rule_from_message(id).await,
+            MailTarget::Thread(thread_id) => self.core.rule_from_thread(thread_id).await,
+        }
+        .map_err(|error| error.to_string())
+    }
+
     /// Take back the actions of one gesture. False when none could be.
     pub async fn undo_actions(&self, action_ids: Vec<i64>) -> Result<bool, String> {
         self.core

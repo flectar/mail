@@ -23,6 +23,7 @@ import { LocalMailUi } from "../local-mail.slint";
 import { Unsubscribe } from "../unsubscribe.slint";
 import { ReadReceipts, ReceiptRequestBar, ReturnedReceiptList } from "../read-receipts.slint";
 import { BlockSender } from "../block-sender.slint";
+import { MailRules } from "../rules.slint";
 import { Invitation } from "../invitation.slint";
 import { InvitationCard } from "../components/invitation-card.slint";
 
@@ -361,6 +362,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "unsubscribe", title: @tr("Unsubscribe…"), icon: @image-url("../icons/lucide/outline/mail-x.svg"), disabled: !Unsubscribe.available },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: "block", title: BlockSender.blocked ? @tr("Unblock sender") : @tr("Block sender…"), icon: @image-url("../icons/lucide/outline/ban.svg"), disabled: !BlockSender.available },
+        { id: "rule", title: @tr("Create rule…"), icon: @image-url("../icons/lucide/outline/list-filter-plus.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
     private property <[ActionMenuEntry]> message-action-menu-no-print: [
@@ -384,6 +386,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "unsubscribe", title: @tr("Unsubscribe…"), icon: @image-url("../icons/lucide/outline/mail-x.svg"), disabled: !Unsubscribe.available },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: "block", title: BlockSender.blocked ? @tr("Unblock sender") : @tr("Block sender…"), icon: @image-url("../icons/lucide/outline/ban.svg"), disabled: !BlockSender.available },
+        { id: "rule", title: @tr("Create rule…"), icon: @image-url("../icons/lucide/outline/list-filter-plus.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
     // Local mail has no archive or spam.
@@ -1102,6 +1105,8 @@ export component MailReadingPane inherits FocusScope {
                                         Unsubscribe.start();
                                     } else if action == "block" {
                                         BlockSender.start();
+                                    } else if action == "rule" {
+                                        MailRules.create-from-message();
                                     } else if action == "print" {
                                         root.print_message();
                                     } else if action == "browser" {
