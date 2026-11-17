@@ -2892,6 +2892,52 @@ pub struct Settings {
     /// MCP server. Off until the user turns it on.
     #[serde(default)]
     pub agent_access: AgentAccess,
+    /// Translating messages (#240). Off until the user picks a service.
+    #[serde(default)]
+    pub translation: TranslationSettings,
+}
+
+/// How messages are translated (#240). The services' keys are in the
+/// system's credential store, not here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TranslationSettings {
+    /// "deepl", "libretranslate" or "model", or "" while none is set up.
+    pub service: String,
+    /// The language messages are translated into, as a language tag such as
+    /// "de" or "pt-BR". "" follows the app's language.
+    pub target: String,
+    /// Offer to translate a message in a language the user doesn't read.
+    pub offer: bool,
+    /// Languages translated as soon as a message opens, and languages never
+    /// offered, as primary language subtags. A language is on one list at
+    /// most.
+    pub always: Vec<String>,
+    pub never: Vec<String>,
+    /// The LibreTranslate server's address.
+    pub libretranslate_url: String,
+    /// The address of a server that speaks the OpenAI chat API, and the
+    /// model it translates with.
+    pub model_url: String,
+    pub model: String,
+    /// The language a message being written was last translated into.
+    pub compose_target: String,
+}
+
+impl Default for TranslationSettings {
+    fn default() -> Self {
+        TranslationSettings {
+            service: String::new(),
+            target: String::new(),
+            offer: true,
+            always: Vec::new(),
+            never: Vec::new(),
+            libretranslate_url: String::new(),
+            model_url: String::new(),
+            model: String::new(),
+            compose_target: String::new(),
+        }
+    }
 }
 
 /// What AI agents may see and do through `flectar-mail mcp`, the same for
@@ -3144,6 +3190,7 @@ impl Default for Settings {
             saved_searches: Vec::new(),
             active_mail_profile: None,
             agent_access: AgentAccess::default(),
+            translation: TranslationSettings::default(),
         }
     }
 }

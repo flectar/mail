@@ -74,6 +74,10 @@ async-trait = "0.1"
 
 # misc
 ammonia = "4.1.9"
+# The version ammonia parses with, so no second copy is built.
+html5ever = "0.39"
+# Finds the language a message is written in, for translation (#240).
+whatlang = "0.18"
 deunicode = "1"
 rand = "0.9"
 regex = "1"

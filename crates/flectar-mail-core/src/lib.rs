@@ -50,6 +50,7 @@ pub mod signatures;
 pub mod smtp;
 pub mod sync;
 mod transfer;
+pub mod translate;
 pub mod unsubscribe;
 pub mod verification_code;
 
