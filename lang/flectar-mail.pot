@@ -2458,8 +2458,8 @@ msgstr ""
 msgid "Email template inserted."
 msgstr ""
 
-#: ui/app.slint:806 ui/components/composer-actions.slint:897
-#: ui/app.slint:806 ui/components/composer-actions.slint:897
+#: ui/app.slint:806 ui/components/composer-actions.slint:904
+#: ui/app.slint:806 ui/components/composer-actions.slint:904
 msgid "Share files by link"
 msgstr ""
 
@@ -4041,329 +4041,329 @@ msgstr ""
 msgid "{0}, dark {1}"
 msgstr ""
 
-#: ui/components/composer-actions.slint:422
-#: ui/components/composer-actions.slint:422
+#: ui/components/composer-actions.slint:429
+#: ui/components/composer-actions.slint:429
 msgid "Font"
 msgstr ""
 
-#: ui/components/composer-actions.slint:427
-#: ui/components/composer-actions.slint:427
+#: ui/components/composer-actions.slint:434
+#: ui/components/composer-actions.slint:434
 msgctxt "font"
 msgid "Default"
 msgstr ""
 
-#: ui/components/composer-actions.slint:428
-#: ui/components/composer-actions.slint:428
+#: ui/components/composer-actions.slint:435
+#: ui/components/composer-actions.slint:435
 msgctxt "font"
 msgid "Serif"
 msgstr ""
 
-#: ui/components/composer-actions.slint:429
-#: ui/components/composer-actions.slint:429
+#: ui/components/composer-actions.slint:436
+#: ui/components/composer-actions.slint:436
 msgctxt "font"
 msgid "Fixed width"
 msgstr ""
 
-#: ui/components/composer-actions.slint:441
-#: ui/components/composer-actions.slint:441
+#: ui/components/composer-actions.slint:448
+#: ui/components/composer-actions.slint:448
 msgid "Text size"
 msgstr ""
 
-#: ui/components/composer-actions.slint:446
-#: ui/components/composer-actions.slint:446
+#: ui/components/composer-actions.slint:453
+#: ui/components/composer-actions.slint:453
 msgctxt "text size"
 msgid "Small"
 msgstr ""
 
-#: ui/components/composer-actions.slint:447
-#: ui/components/composer-actions.slint:447
+#: ui/components/composer-actions.slint:454
+#: ui/components/composer-actions.slint:454
 msgctxt "text size"
 msgid "Normal"
 msgstr ""
 
-#: ui/components/composer-actions.slint:448
-#: ui/components/composer-actions.slint:448
+#: ui/components/composer-actions.slint:455
+#: ui/components/composer-actions.slint:455
 msgctxt "text size"
 msgid "Large"
 msgstr ""
 
-#: ui/components/composer-actions.slint:449
-#: ui/components/composer-actions.slint:449
+#: ui/components/composer-actions.slint:456
+#: ui/components/composer-actions.slint:456
 msgctxt "text size"
 msgid "Huge"
 msgstr ""
 
-#: ui/components/composer-actions.slint:455
+#: ui/components/composer-actions.slint:462
 msgid "Bold · Ctrl+B"
 msgstr ""
 
-#: ui/components/composer-actions.slint:456
+#: ui/components/composer-actions.slint:463
 msgid "Italic · Ctrl+I"
 msgstr ""
 
-#: ui/components/composer-actions.slint:457
+#: ui/components/composer-actions.slint:464
 msgid "Underline · Ctrl+U"
 msgstr ""
 
-#: ui/components/composer-actions.slint:458
+#: ui/components/composer-actions.slint:465
 msgid "Strikethrough"
 msgstr ""
 
-#: ui/components/composer-actions.slint:463
+#: ui/components/composer-actions.slint:470
 msgid "Text color"
 msgstr ""
 
-#: ui/components/composer-actions.slint:464
+#: ui/components/composer-actions.slint:471
 msgctxt "text color"
 msgid "Automatic"
 msgstr ""
 
-#: ui/components/composer-actions.slint:478
+#: ui/components/composer-actions.slint:485
 msgid "Highlight"
 msgstr ""
 
-#: ui/components/composer-actions.slint:479
+#: ui/components/composer-actions.slint:486
 msgid "No highlight"
 msgstr ""
 
-#: ui/components/composer-actions.slint:490
+#: ui/components/composer-actions.slint:497
 msgid "Remove formatting · Ctrl+\\"
 msgstr ""
 
-#: ui/components/composer-actions.slint:504
+#: ui/components/composer-actions.slint:511
 msgid "Align"
 msgstr ""
 
-#: ui/components/composer-actions.slint:509
+#: ui/components/composer-actions.slint:516
 msgid "Align left"
 msgstr ""
 
-#: ui/components/composer-actions.slint:510
+#: ui/components/composer-actions.slint:517
 msgid "Align center"
 msgstr ""
 
-#: ui/components/composer-actions.slint:511
+#: ui/components/composer-actions.slint:518
 msgid "Align right"
 msgstr ""
 
-#: ui/components/composer-actions.slint:515
+#: ui/components/composer-actions.slint:522
 msgid "Bulleted list"
 msgstr ""
 
-#: ui/components/composer-actions.slint:516
+#: ui/components/composer-actions.slint:523
 msgid "Numbered list"
 msgstr ""
 
-#: ui/components/composer-actions.slint:517
+#: ui/components/composer-actions.slint:524
 msgid "Quote"
 msgstr ""
 
-#: ui/components/composer-actions.slint:518
+#: ui/components/composer-actions.slint:525
 msgid "Inline code"
 msgstr ""
 
-#: ui/components/composer-actions.slint:519
+#: ui/components/composer-actions.slint:526
 msgid "Add or edit link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:519
+#: ui/components/composer-actions.slint:526
 msgid "Select text to add a link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:520
+#: ui/components/composer-actions.slint:527
 msgid "Insert image"
 msgstr ""
 
-#: ui/components/composer-actions.slint:525
-#: ui/components/composer-actions.slint:525
-#: ui/components/composer-actions.slint:525
+#: ui/components/composer-actions.slint:532
+#: ui/components/composer-actions.slint:532
+#: ui/components/composer-actions.slint:532
 msgid "Email templates"
 msgstr ""
 
-#: ui/components/composer-actions.slint:539
+#: ui/components/composer-actions.slint:546
 msgid "Formatted text"
 msgstr ""
 
-#: ui/components/composer-actions.slint:539
+#: ui/components/composer-actions.slint:546
 msgid "Plain text"
 msgstr ""
 
-#: ui/components/composer-actions.slint:543
+#: ui/components/composer-actions.slint:550
 msgid "Write this message with formatting"
 msgstr ""
 
-#: ui/components/composer-actions.slint:544
+#: ui/components/composer-actions.slint:551
 msgid "Send this message as plain text only"
 msgstr ""
 
-#: ui/components/composer-actions.slint:548
+#: ui/components/composer-actions.slint:555
 msgid "Undo · Ctrl+Z"
 msgstr ""
 
-#: ui/components/composer-actions.slint:549
+#: ui/components/composer-actions.slint:556
 msgid "Redo · Ctrl+Shift+Z"
 msgstr ""
 
-#: ui/components/composer-actions.slint:651
+#: ui/components/composer-actions.slint:658
 msgid "Remove attachment"
 msgstr ""
 
-#: ui/components/composer-actions.slint:706
-#: ui/components/composer-actions.slint:706
+#: ui/components/composer-actions.slint:713
+#: ui/components/composer-actions.slint:713
 msgid "Remove link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:769
-#: ui/components/composer-actions.slint:769
+#: ui/components/composer-actions.slint:776
+#: ui/components/composer-actions.slint:776
 msgid "Shrink photos"
 msgstr ""
 
-#: ui/components/composer-actions.slint:781
+#: ui/components/composer-actions.slint:788
 msgid "Shrinking…"
 msgstr ""
 
-#: ui/components/composer-actions.slint:783
+#: ui/components/composer-actions.slint:790
 msgid "{n} photo, {0} ({1} at full size)"
 msgid_plural "{n} photos, {0} ({1} at full size)"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/components/composer-actions.slint:784
+#: ui/components/composer-actions.slint:791
 msgid "{n} photo, {0}"
 msgid_plural "{n} photos, {0}"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/components/composer-actions.slint:846
+#: ui/components/composer-actions.slint:853
 msgid "Save signature"
 msgstr ""
 
-#: ui/components/composer-actions.slint:867
+#: ui/components/composer-actions.slint:874
 msgid "Sending…"
 msgstr ""
 
-#: ui/components/composer-actions.slint:867
+#: ui/components/composer-actions.slint:874
 msgid "Send"
 msgstr ""
 
-#: ui/components/composer-actions.slint:884
-#: ui/components/composer-actions.slint:884
+#: ui/components/composer-actions.slint:891
+#: ui/components/composer-actions.slint:891
 msgid "Attach files"
 msgstr ""
 
-#: ui/components/composer-actions.slint:919
+#: ui/components/composer-actions.slint:926
 msgid "Save draft"
 msgstr ""
 
-#: ui/components/composer-actions.slint:939
+#: ui/components/composer-actions.slint:946
 msgid "More options"
 msgstr ""
 
-#: ui/components/composer-actions.slint:945
+#: ui/components/composer-actions.slint:952
 msgid "Request a read receipt"
 msgstr ""
 
-#: ui/components/composer-actions.slint:951 ui/views/mail-list-pane.slint:1171
+#: ui/components/composer-actions.slint:958 ui/views/mail-list-pane.slint:1171
 msgid "High importance"
 msgstr ""
 
-#: ui/components/composer-actions.slint:957
+#: ui/components/composer-actions.slint:964
 msgid "Low importance"
 msgstr ""
 
-#: ui/components/composer-actions.slint:968
-#: ui/components/composer-actions.slint:968
-#: ui/components/composer-actions.slint:968
+#: ui/components/composer-actions.slint:975
+#: ui/components/composer-actions.slint:975
+#: ui/components/composer-actions.slint:975
 msgid "Discard"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1026
+#: ui/components/composer-actions.slint:1033
 msgctxt "image"
 msgid "Size"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1034
-#: ui/components/composer-actions.slint:1034
+#: ui/components/composer-actions.slint:1041
+#: ui/components/composer-actions.slint:1041
 msgctxt "image size"
 msgid "Small"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1035
-#: ui/components/composer-actions.slint:1035
+#: ui/components/composer-actions.slint:1042
+#: ui/components/composer-actions.slint:1042
 msgctxt "image size"
 msgid "Medium"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1036
-#: ui/components/composer-actions.slint:1036
+#: ui/components/composer-actions.slint:1043
+#: ui/components/composer-actions.slint:1043
 msgctxt "image size"
 msgid "Large"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1037
-#: ui/components/composer-actions.slint:1037
+#: ui/components/composer-actions.slint:1044
+#: ui/components/composer-actions.slint:1044
 msgctxt "image size"
 msgid "Original size"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1042
-#: ui/components/composer-actions.slint:1042
-#: ui/components/composer-actions.slint:1042
+#: ui/components/composer-actions.slint:1049
+#: ui/components/composer-actions.slint:1049
+#: ui/components/composer-actions.slint:1049
 msgid "Alt text"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1057
+#: ui/components/composer-actions.slint:1064
 msgid "Remove image"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1206
+#: ui/components/composer-actions.slint:1213
 msgid ""
 "Screen readers read it in place of the image. Leave it empty if the image is "
 "only decoration."
 msgstr ""
 
-#: ui/components/composer-actions.slint:1227
+#: ui/components/composer-actions.slint:1234
 msgid "Describe the image"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1273
-#: ui/components/composer-actions.slint:1273
+#: ui/components/composer-actions.slint:1280
+#: ui/components/composer-actions.slint:1280
 msgid "Apply"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1322
+#: ui/components/composer-actions.slint:1329
 msgid "Edit link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1322
+#: ui/components/composer-actions.slint:1329
 msgid "Add link"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1333
+#: ui/components/composer-actions.slint:1340
 msgid "The selected text will open this address."
 msgstr ""
 
-#: ui/components/composer-actions.slint:1354 ui/views/contacts-view.slint:803
+#: ui/components/composer-actions.slint:1361 ui/views/contacts-view.slint:803
 msgid "https://example.com"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1449
+#: ui/components/composer-actions.slint:1456
 msgid "Discard changes to this signature?"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1449
+#: ui/components/composer-actions.slint:1456
 msgid "Discard this draft?"
 msgstr ""
 
-#: ui/components/composer-actions.slint:1460
+#: ui/components/composer-actions.slint:1467
 msgid "What you changed since it was last saved won't be kept."
 msgstr ""
 
-#: ui/components/composer-actions.slint:1460
+#: ui/components/composer-actions.slint:1467
 msgid "The message and its attachments will be removed from this composer."
 msgstr ""
 
-#: ui/components/composer-actions.slint:1471
+#: ui/components/composer-actions.slint:1478
 msgid "Keep"
 msgstr ""
 
@@ -4468,11 +4468,11 @@ msgstr ""
 msgid "Select"
 msgstr ""
 
-#: ui/components/controls.slint:496
+#: ui/components/controls.slint:506
 msgid "Hide password"
 msgstr ""
 
-#: ui/components/controls.slint:496
+#: ui/components/controls.slint:506
 msgid "Show password"
 msgstr ""
 

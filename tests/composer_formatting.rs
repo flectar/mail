@@ -229,3 +229,14 @@ fn shortcuts_format_what_the_message_has_selected() {
     harness.control("i");
     assert_eq!(harness.take_format(), ("italic".to_owned(), 0, 11));
 }
+
+#[test]
+fn a_toolbar_menu_closed_unused_leaves_typing_in_the_message() {
+    let harness = Harness::new();
+    harness.select_first_word();
+    // The toolbar leaves the focus in the message, so closing a menu gives it back there.
+    harness.click("Text size");
+    harness.key(Key::Escape);
+    harness.key("x");
+    assert_eq!(harness.ui.get_body(), "x world");
+}
