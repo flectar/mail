@@ -635,6 +635,8 @@ pub(crate) struct DeviceSyncUpdates {
     pub(crate) settings_changed: bool,
     /// Another device changed accounts; these were removed.
     pub(crate) accounts_changed: bool,
+    /// Another device blocked a sender, or stopped blocking one.
+    pub(crate) blocked_changed: bool,
     pub(crate) removed_accounts: Vec<i64>,
     /// Events were lost, so the accounts are read again, without saying
     /// another device changed them.
@@ -892,6 +894,14 @@ pub(crate) fn spawn_core_event_listener(
                         .settings_changed = true;
                     true
                 }
+                Ok(CoreEvent::BlockedSendersChanged) => {
+                    pending
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .device_sync
+                        .blocked_changed = true;
+                    true
+                }
                 Ok(CoreEvent::AccountsChanged { removed }) => {
                     // Before the window reads the accounts again, so a
                     // snapshot read earlier can't bring the old ones back.
@@ -919,6 +929,7 @@ pub(crate) fn spawn_core_event_listener(
                         pending.device_sync.status = status;
                     }
                     pending.device_sync.settings_changed = true;
+                    pending.device_sync.blocked_changed = true;
                     pending.device_sync.accounts_reread = true;
                     true
                 }

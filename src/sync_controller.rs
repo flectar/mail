@@ -160,6 +160,9 @@ impl SyncController {
         if updates.settings_changed {
             reload_preferences(app, state, runtime);
         }
+        if updates.blocked_changed {
+            crate::block_sender::reload();
+        }
         if updates.accounts_changed || updates.accounts_reread {
             reload_accounts(
                 state,
