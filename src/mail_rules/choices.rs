@@ -66,10 +66,11 @@ pub(super) enum Kind {
     Archive,
     Trash,
     Junk,
+    ShowIn,
     Copy,
 }
 
-pub(super) const KINDS: [Kind; 8] = [
+pub(super) const KINDS: [Kind; 9] = [
     Kind::Move,
     Kind::Label,
     Kind::MarkRead,
@@ -77,6 +78,7 @@ pub(super) const KINDS: [Kind; 8] = [
     Kind::Archive,
     Kind::Trash,
     Kind::Junk,
+    Kind::ShowIn,
     Kind::Copy,
 ];
 
@@ -90,6 +92,7 @@ pub(super) fn kind_of(action: &RuleAction) -> Kind {
         RuleAction::Archive => Kind::Archive,
         RuleAction::Trash => Kind::Trash,
         RuleAction::Junk => Kind::Junk,
+        RuleAction::ShowIn { .. } => Kind::ShowIn,
     }
 }
 
@@ -151,6 +154,20 @@ impl Choices {
         names.join(" / ")
     }
 
+    /// The Inbox's categories a rule can show mail in, by key, with the
+    /// automatic categories' names: Important and Other come first, and the
+    /// app names them.
+    pub(super) fn tabs(&self) -> Vec<(String, Option<String>)> {
+        let mut tabs = vec![("important".to_owned(), None), ("other".to_owned(), None)];
+        tabs.extend(
+            self.labels
+                .iter()
+                .filter(|label| label.is_auto)
+                .map(|label| (format!("label:{}", label.id), Some(label.name.clone()))),
+        );
+        tabs
+    }
+
     /// The labels a rule for `account` can add: the account's own and those
     /// of this device, or only this device's for every account.
     pub(super) fn labels(&self, account: Option<&Account>) -> Vec<(i64, String)> {
@@ -188,6 +205,11 @@ pub(super) fn targets_exist(rule: &MailRule, folders: &[FolderInfo], labels: &[L
             folders.iter().any(|candidate| candidate.id == *folder)
         }
         RuleAction::Label { label } => labels.iter().any(|candidate| candidate.id == *label),
+        RuleAction::ShowIn { tab } => tab.strip_prefix("label:").is_none_or(|id| {
+            labels
+                .iter()
+                .any(|candidate| candidate.is_auto && id.parse() == Ok(candidate.id))
+        }),
         _ => true,
     })
 }
@@ -485,7 +507,8 @@ mod tests {
             index_of(&ops(RuleField::Subject), &(RuleOp::Matches, true)),
             7
         );
-        assert_eq!(index_of(&KINDS, &Kind::Copy), 7);
+        assert_eq!(index_of(&KINDS, &Kind::ShowIn), 7);
+        assert_eq!(index_of(&KINDS, &Kind::Copy), 8);
         // The Slint editor names fields and comparisons by these places.
         assert_eq!(index_of(&FIELDS, &RuleField::MailingList), 5);
         assert_eq!(index_of(&FIELDS, &RuleField::Size), 6);
@@ -570,5 +593,45 @@ mod tests {
             [(1, "Mine".to_owned()), (2, "Work".to_owned())]
         );
         assert_eq!(choices.labels(None), [(1, "Mine".to_owned())]);
+        // Important and Other, then the automatic categories.
+        assert_eq!(
+            choices.tabs(),
+            [
+                ("important".to_owned(), None),
+                ("other".to_owned(), None),
+                ("label:4".to_owned(), Some("News".to_owned())),
+            ]
+        );
+        let show_in = |tab: &str| MailRule {
+            id: 1,
+            account_id: None,
+            name: "Tab".into(),
+            enabled: true,
+            match_all: true,
+            conditions: vec![],
+            actions: vec![RuleAction::ShowIn { tab: tab.into() }],
+            stop: false,
+        };
+        assert!(targets_exist(
+            &show_in("other"),
+            &choices.folders,
+            &choices.labels
+        ));
+        assert!(targets_exist(
+            &show_in("label:4"),
+            &choices.folders,
+            &choices.labels
+        ));
+        // A category that is gone, or a label that isn't one.
+        assert!(!targets_exist(
+            &show_in("label:9"),
+            &choices.folders,
+            &choices.labels
+        ));
+        assert!(!targets_exist(
+            &show_in("label:1"),
+            &choices.folders,
+            &choices.labels
+        ));
     }
 }
