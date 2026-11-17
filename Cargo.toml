@@ -156,7 +156,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 # The Microsoft Store build's startup task and new-mail toasts are WinRT
-# APIs; the toast activator is a COM server. Slint and wgpu already build
+# APIs, as are the accent colours of the taskbar's unread count; the toast
+# activator is a COM server. Slint and wgpu already build
 # this version of the crate.
 windows = { version = "0.62", default-features = false, features = [
     "std",
@@ -165,6 +166,7 @@ windows = { version = "0.62", default-features = false, features = [
     "Foundation",
     "Foundation_Collections",
     "UI_Notifications",
+    "UI_ViewManagement",
     "Win32_Foundation",
     "Win32_Globalization",
     "Win32_System_Com",
