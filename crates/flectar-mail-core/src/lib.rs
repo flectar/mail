@@ -194,6 +194,56 @@ fn normalize_mail_profile_color(value: &str) -> Result<String> {
     Ok(value.to_ascii_uppercase())
 }
 
+/// The subscribed folders among `path` and its subfolders. Subscriptions
+/// only help other clients, so failing to read them leaves none.
+async fn subscriptions_in_tree(
+    session: &mut imap::Session,
+    path: &str,
+    delimiter: &str,
+) -> Vec<String> {
+    let prefix = format!("{path}{delimiter}");
+    let mut subscribed = Vec::new();
+    for pattern in [path.to_owned(), format!("{prefix}*")] {
+        match imap::list_subscribed(session, &pattern).await {
+            // Wildcards in the folder's own name match more than it.
+            Ok(names) => subscribed.extend(
+                names
+                    .into_iter()
+                    .filter(|name| name == path || name.starts_with(&prefix)),
+            ),
+            Err(error) => {
+                tracing::warn!(%error, "could not read the subscriptions of a folder");
+                return Vec::new();
+            }
+        }
+    }
+    subscribed.sort();
+    subscribed.dedup();
+    subscribed
+}
+
+/// Subscribe to the renamed folders that were subscribed under their old
+/// names, and drop those. RFC 9051 leaves a RENAME's subscriptions to the
+/// server, and many keep the old names, so the folders would drop out of
+/// clients that show only subscribed folders. Failing never fails the rename.
+async fn move_subscriptions(
+    session: &mut imap::Session,
+    subscribed: &[String],
+    old_path: &str,
+    new_path: &str,
+) {
+    for old in subscribed {
+        let new = format!("{new_path}{}", &old[old_path.len()..]);
+        if let Err(error) = imap::subscribe(session, &new).await {
+            tracing::warn!(%error, "could not subscribe to a renamed folder");
+        }
+        // A server that moved the subscription itself has none left here.
+        if let Err(error) = imap::unsubscribe(session, old).await {
+            tracing::debug!(%error, "old folder name kept no subscription");
+        }
+    }
+}
+
 fn validate_folder_leaf(value: &str) -> Result<String> {
     let value = value.trim();
     if value.is_empty() {
@@ -1735,6 +1785,42 @@ impl Core {
             handle.update_settings(settings);
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        Ok(())
+    }
+
+    /// Choose whether an IMAP account lists and syncs only the folders the
+    /// user subscribed to. Its sync reads the folder list again at once.
+    pub async fn set_account_subscribed_folders_only(
+        &self,
+        account_id: i64,
+        enabled: bool,
+    ) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                match config.mail_protocol {
+                    MailProtocol::Imap => {}
+                    MailProtocol::Gmail
+                    | MailProtocol::Jmap
+                    | MailProtocol::Pop3
+                    | MailProtocol::Local => {
+                        return Err(CoreError::Other(
+                            "only IMAP accounts have folder subscriptions".into(),
+                        ));
+                    }
+                }
+                config.settings.subscribed_folders_only = enabled;
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
         Ok(())
     }
 
@@ -4680,6 +4766,11 @@ impl Core {
                     .unwrap_or(encoded_leaf);
                 let mut session = self.connect_folder_imap(&config).await?;
                 imap::create_folder(&mut session, &remote_name).await?;
+                // Clients that show only subscribed folders, this one among
+                // them, list it then.
+                if let Err(error) = imap::subscribe(&mut session, &remote_name).await {
+                    tracing::warn!(account_id, %error, "could not subscribe to a new folder");
+                }
                 imap::logout(session).await;
                 self.db
                     .write(move |conn| {
@@ -4839,7 +4930,9 @@ impl Core {
                     .map(|parent| format!("{parent}{delimiter}{encoded}"))
                     .unwrap_or(encoded);
                 let mut session = self.connect_folder_imap(&config).await?;
+                let subscribed = subscriptions_in_tree(&mut session, &old_name, &delimiter).await;
                 imap::rename_folder(&mut session, &old_name, &new_name).await?;
+                move_subscriptions(&mut session, &subscribed, &old_name, &new_name).await;
                 imap::logout(session).await;
                 self.db
                     .write(move |conn| {
@@ -4937,6 +5030,11 @@ impl Core {
                 let mut session = self.connect_folder_imap(&config).await?;
                 for candidate in &tree {
                     imap::delete_folder(&mut session, &candidate.path).await?;
+                    // A server keeps the subscription of a deleted folder,
+                    // which would list a folder made later under its name.
+                    if let Err(error) = imap::unsubscribe(&mut session, &candidate.path).await {
+                        tracing::debug!(%error, "deleted folder kept its subscription");
+                    }
                 }
                 imap::logout(session).await;
                 sync::delete_folder_tree(&self.sync_ctx(), account_id, folder.path, delimiter)

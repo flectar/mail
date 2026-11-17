@@ -2340,3 +2340,274 @@ async fn a_server_search_pages_through_the_folders_newest_first() {
         "found mail moved the folder's sync position"
     );
 }
+
+/// Issue #371: a server can list thousands of shared folders. With
+/// subscribed folders only, the account lists the folders the user
+/// subscribed to, the Inbox, a folder for each purpose mail is filed into,
+/// and those its rules file into. The others go from this device with their
+/// mail, unless queued work still involves them, and LIST-STATUS asks the
+/// server about the listed folders alone.
+#[tokio::test]
+async fn subscribed_folders_only_lists_and_syncs_just_those() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let server = serve(listener, commands.clone(), move |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => format!(
+                "* CAPABILITY IMAP4rev1 LIST-EXTENDED LIST-STATUS\r\n{tag} OK capability\r\n"
+            ),
+            "LIST" if command.contains(" RETURN ") => format!(
+                "* LIST () \"/\" INBOX\r\n\
+                 * STATUS INBOX (MESSAGES 1 UIDNEXT 2 UNSEEN 0 UIDVALIDITY 7)\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            "LIST" => format!(
+                "* LIST (\\HasNoChildren) \"/\" INBOX\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Projects\r\n\
+                 * LIST (\\Noselect \\HasChildren) \"/\" Shared\r\n\
+                 * LIST (\\HasChildren) \"/\" \"Shared/alice\"\r\n\
+                 * LIST (\\HasNoChildren) \"/\" \"Shared/alice/Reports\"\r\n\
+                 * LIST (\\HasNoChildren) \"/\" \"Shared/alice/Trash\"\r\n\
+                 * LIST (\\HasNoChildren) \"/\" \"Shared/bob\"\r\n\
+                 * LIST (\\HasNoChildren \\Trash) \"/\" Bin\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Receipts\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Busy\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            // A subscription can outlive its folder.
+            "LSUB" => format!(
+                "* LSUB () \"/\" Projects\r\n\
+                 * LSUB () \"/\" \"Shared/alice/Reports\"\r\n\
+                 * LSUB () \"/\" Gone\r\n\
+                 {tag} OK lsub completed\r\n"
+            ),
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+
+    let (_dir, ctx, config, _inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let (alice_mail, bob_id, bob_mail, busy_id) = ctx
+        .db
+        .write(move |conn| {
+            let alice_id = synced_folder(conn, account_id, "Shared/alice", 2, 1, 1)?;
+            let alice_mail = seed_unread(conn, account_id, alice_id, 1)?;
+            let bob_id = synced_folder(conn, account_id, "Shared/bob", 2, 1, 1)?;
+            let bob_mail = seed_unread(conn, account_id, bob_id, 1)?;
+            let busy_id = synced_folder(conn, account_id, "Busy", 2, 1, 1)?;
+            let busy_mail = seed_unread(conn, account_id, busy_id, 1)?;
+            repo::actions::enqueue(
+                conn,
+                account_id,
+                "markRead",
+                Some(busy_mail),
+                None,
+                &serde_json::json!({}),
+                None,
+            )?;
+            let receipts_id = synced_folder(conn, account_id, "Receipts", 2, 1, 1)?;
+            repo::rules::save(
+                conn,
+                &MailRule {
+                    id: 0,
+                    account_id: Some(account_id),
+                    name: "Receipts".into(),
+                    enabled: false,
+                    match_all: true,
+                    conditions: Vec::new(),
+                    actions: vec![RuleAction::Move {
+                        folder: receipts_id,
+                    }],
+                    stop: true,
+                },
+                0,
+            )?;
+            Ok((alice_mail, bob_id, bob_mail, busy_id))
+        })
+        .await
+        .unwrap();
+    let mut events = ctx.bus.subscribe();
+
+    let mut session = connect(&ctx, &config).await.unwrap();
+    discover_folders(&ctx, &config, &mut session, true)
+        .await
+        .unwrap();
+    let listed = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await
+        .unwrap();
+    let mut paths = listed
+        .iter()
+        .map(|folder| (folder.path.as_str(), folder.selectable))
+        .collect::<Vec<_>>();
+    paths.sort();
+    assert_eq!(
+        paths,
+        [
+            ("Bin", true),
+            // Queued work still involves it.
+            ("Busy", true),
+            ("INBOX", true),
+            ("Projects", true),
+            ("Receipts", true),
+            ("Shared", false),
+            // Only the container of a subscribed folder now.
+            ("Shared/alice", false),
+            ("Shared/alice/Reports", true),
+        ]
+    );
+    assert!(listed.iter().any(|folder| folder.id == busy_id));
+    assert!(matches!(events.try_recv(), Ok(CoreEvent::SyncProgress(_))));
+    assert!(matches!(
+        events.try_recv(),
+        Ok(CoreEvent::MailUpdated { .. })
+    ));
+    ctx.db
+        .read(move |conn| {
+            assert!(repo::messages::get_row(conn, alice_mail)?.is_none());
+            assert!(repo::messages::get_row(conn, bob_mail)?.is_none());
+            assert!(repo::folders::get(conn, bob_id)?.is_none());
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // Each cycle asks about the listed folders alone.
+    let synced = listed
+        .iter()
+        .filter(|folder| folder.selectable)
+        .collect::<Vec<_>>();
+    let reported = report_folders(&mut session, &synced, true, true).await;
+    assert!(reported.contains_key("INBOX"));
+
+    // Showing every folder again lists the others anew.
+    discover_folders(&ctx, &config, &mut session, false)
+        .await
+        .unwrap();
+    imap::logout(session).await;
+    server.await.unwrap();
+    let listed = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await
+        .unwrap();
+    assert!(listed.iter().any(|folder| folder.path == "Shared/bob"));
+    assert!(
+        listed
+            .iter()
+            .any(|folder| folder.path == "Shared/alice/Trash")
+    );
+
+    let commands = commands.lock().unwrap().clone();
+    let status = commands
+        .iter()
+        .find(|command| command.contains(" RETURN "))
+        .unwrap();
+    assert!(
+        status.starts_with(&format!(
+            "{} LIST \"\" (",
+            status.split_whitespace().next().unwrap()
+        )),
+        "{status:?}"
+    );
+    for path in [
+        "INBOX",
+        "Projects",
+        "Shared/alice/Reports",
+        "Bin",
+        "Receipts",
+        "Busy",
+    ] {
+        assert!(status.contains(&format!("\"{path}\"")), "{status:?}");
+    }
+    assert!(
+        !status.contains("bob") && !status.contains('*'),
+        "{status:?}"
+    );
+    assert_eq!(
+        commands
+            .iter()
+            .filter(|command| command.split_whitespace().nth(1) == Some("LSUB"))
+            .count(),
+        1,
+        "only the subscribed-only listing reads subscriptions: {commands:?}"
+    );
+}
+
+/// The folders listed with subscribed folders only from a server that turns
+/// down LSUB, which RFC 9051 deprecates, and answers LIST (SUBSCRIBED) or
+/// not, by path, with the commands it got.
+async fn listed_without_lsub(list_subscribed: bool) -> (Vec<String>, Vec<String>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let server = serve(listener, commands.clone(), move |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => {
+                format!("* CAPABILITY IMAP4rev1 IMAP4rev2 LIST-EXTENDED\r\n{tag} OK capability\r\n")
+            }
+            "LSUB" => format!("{tag} BAD unknown command\r\n"),
+            "LIST" if command.contains("(SUBSCRIBED)") && list_subscribed => format!(
+                "* LIST (\\Subscribed) \"/\" Projects\r\n\
+                 * LIST (\\Subscribed \\NonExistent) \"/\" Archive\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            "LIST" if command.contains("(SUBSCRIBED)") => {
+                format!("{tag} BAD unknown selection option\r\n")
+            }
+            "LIST" => format!(
+                "* LIST (\\HasNoChildren) \"/\" INBOX\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Projects\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Archive2\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Shared\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+    let (_dir, ctx, config, _inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let mut session = connect(&ctx, &config).await.unwrap();
+    discover_folders(&ctx, &config, &mut session, true)
+        .await
+        .unwrap();
+    imap::logout(session).await;
+    server.await.unwrap();
+    let mut paths = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|folder| folder.path)
+        .collect::<Vec<_>>();
+    paths.sort();
+    let commands = commands.lock().unwrap().clone();
+    (paths, commands)
+}
+
+#[tokio::test]
+async fn subscriptions_come_from_list_subscribed_when_lsub_is_refused() {
+    let (paths, commands) = listed_without_lsub(true).await;
+    assert_eq!(paths, ["INBOX", "Projects"]);
+    assert!(
+        commands
+            .iter()
+            .any(|command| command.contains(" LIST (SUBSCRIBED) \"\" \"*\"")),
+        "{commands:?}"
+    );
+}
+
+/// A server that keeps no subscriptions has every folder listed rather than
+/// stop the account's sync.
+#[tokio::test]
+async fn without_subscriptions_on_the_server_every_folder_is_listed() {
+    let (paths, _) = listed_without_lsub(false).await;
+    assert_eq!(paths, ["Archive2", "INBOX", "Projects", "Shared"]);
+}

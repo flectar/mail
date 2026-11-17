@@ -295,6 +295,8 @@ export struct AccountRow {
     mail_history: string,
     sent_copy_policy: string,
     keep_on_server: string,
+    // IMAP: the account lists only the folders the user subscribed to.
+    subscribed_folders_only: bool,
     // Days a POP3 server keeps downloaded mail on its own; -1 when it
     // keeps it or hasn't said.
     server_keeps_mail_days: int,

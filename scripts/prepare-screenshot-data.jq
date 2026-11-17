@@ -73,6 +73,7 @@ def favicon_path(address):
     | .trusted_certificate_pem = (.trusted_certificate_pem // "")
     | .mail_history = (.mail_history // "sixMonths")
     | .keep_on_server = (.keep_on_server // "always")
+    | .subscribed_folders_only = (.subscribed_folders_only // false)
     | .server_keeps_mail_days = (.server_keeps_mail_days // -1)
     | .calendar_connections = (.calendar_connections // [])
     | .provider_calendar_connected = (.provider_calendar_connected // false)

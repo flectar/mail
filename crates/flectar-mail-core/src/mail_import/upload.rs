@@ -131,8 +131,13 @@ impl crate::Core {
             // ends first: some servers allow few at a time.
             Remote::Imap { .. } => {
                 let mut session = sync::engine::connect(&self.sync_ctx(), &config).await?;
-                let listed =
-                    sync::engine::discover_folders(&self.sync_ctx(), &config, &mut session).await;
+                let listed = sync::engine::discover_folders(
+                    &self.sync_ctx(),
+                    &config,
+                    &mut session,
+                    config.settings.subscribed_folders_only,
+                )
+                .await;
                 imap::logout(session).await;
                 listed?;
             }
