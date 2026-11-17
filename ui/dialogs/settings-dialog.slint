@@ -664,6 +664,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_account_mail_history(int, string);
     callback save_account_sent_copy_policy(int, string);
     callback save_account_keep_on_server(int, string);
+    callback save_account_subscribed_folders_only(int, bool);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -2673,10 +2674,11 @@ export component SettingsDialog inherits Rectangle {
                                 private property <length> divider-y: account.sync_error != "" ? sync-error.y + sync-error.height + 4px : account-header.height;
                                 private property <bool> has-sent-copy: account.provider != "gmail" && account.mail_protocol == "imap";
                                 private property <bool> has-server-copies: account.mail_protocol == "pop3";
+                                private property <bool> has-subscriptions: account.mail_protocol == "imap";
                                 private property <bool> unencrypted: account.incoming_security == "none" || account.smtp_security == "none";
                                 // Preference rows keep their designed gaps below the last select row.
-                                private property <length> profile-y: self.has-sent-copy
-                                    ? sent-copy-row.y + sent-copy-row.height + (root.compact ? 10px : 8px)
+                                private property <length> profile-y: self.has-subscriptions
+                                    ? subscribed-row.y + subscribed-row.height + (root.compact ? 10px : 16px)
                                     : self.has-server-copies
                                         ? server-copies-note.y + server-copies-note.height + (root.compact ? 10px : 8px)
                                         : history-row.y + history-row.height + (root.compact ? 9px : 1px);
@@ -2831,6 +2833,23 @@ export component SettingsDialog inherits Rectangle {
                                         selected(index, value) => {
                                             root.save_account_sent_copy_policy(account.id, index == 1 ? "server" : index == 2 ? "client" : "auto");
                                         }
+                                    }
+                                    subscribed-row := SettingsSwitchRow {
+                                        visible: drop-target.has-subscriptions;
+                                        // A compact switch row pads its texts 8px more than a
+                                        // select row; this lines them up.
+                                        x: root.compact ? 16px : 32px;
+                                        y: (drop-target.has-sent-copy ? sent-copy-row.y + sent-copy-row.height : history-row.y + history-row.height)
+                                            + (root.compact ? 7px : 5px);
+                                        width: parent.width - (root.compact ? 40px : 64px);
+                                        compact: root.compact;
+                                        compact-description-height: 51px;
+                                        title: @tr("Subscribed folders only");
+                                        description: @tr("Show and sync only the folders you subscribed to on the server, plus Inbox and the folders mail is filed into.");
+                                        checked: account.subscribed_folders_only;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => { root.save_account_subscribed_folders_only(account.id, checked); }
                                     }
                                     server-copies-row := SettingsSelectRow {
                                         visible: drop-target.has-server-copies;
