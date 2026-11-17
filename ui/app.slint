@@ -655,6 +655,10 @@ export global I18n {
         if (key == "Updating server mail settings…") { return @tr("Updating server mail settings…"); }
         if (key == "Server mail settings updated.") { return @tr("Server mail settings updated."); }
         if (key == "Could not update server mail settings: {}") { return @tr("Could not update server mail settings: {}", argument); }
+        if (key == "Folder settings require local mail data.") { return @tr("Folder settings require local mail data."); }
+        if (key == "Updating folder settings…") { return @tr("Updating folder settings…"); }
+        if (key == "Folder settings updated.") { return @tr("Folder settings updated."); }
+        if (key == "Could not update folder settings: {}") { return @tr("Could not update folder settings: {}", argument); }
         if (key == "Mail history requires local mail data.") { return @tr("Mail history requires local mail data."); }
         if (key == "Updating mail history…") { return @tr("Updating mail history…"); }
         if (key == "Remote images are unavailable in this minimal build.") { return @tr("Remote images are unavailable in this minimal build."); }
@@ -1051,6 +1055,7 @@ export component AppWindow inherits Window {
     callback save_account_mail_history(int, string);
     callback save_account_sent_copy_policy(int, string);
     callback save_account_keep_on_server(int, string);
+    callback save_account_subscribed_folders_only(int, bool);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -2442,6 +2447,7 @@ export component AppWindow inherits Window {
             save_account_mail_history(account-id, value) => { root.save_account_mail_history(account-id, value); }
             save_account_sent_copy_policy(account-id, value) => { root.save_account_sent_copy_policy(account-id, value); }
             save_account_keep_on_server(account-id, value) => { root.save_account_keep_on_server(account-id, value); }
+            save_account_subscribed_folders_only(account-id, enabled) => { root.save_account_subscribed_folders_only(account-id, enabled); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
             connect_caldav(account-id, connection-id, url, username, password) => { root.connect_caldav(account-id, connection-id, url, username, password); }
             set_calendar_connection_enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }

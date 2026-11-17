@@ -850,6 +850,102 @@ async fn list_folders_inner(session: &mut Session) -> Result<Vec<RemoteFolder>> 
     Ok(out)
 }
 
+/// The names of the mailboxes the user subscribed to that match `pattern`
+/// (RFC 9051 6.3.7). A subscription can outlive its mailbox, so a name here
+/// may name none. Every IMAP4rev1 server answers LSUB; RFC 9051 deprecates it
+/// in favour of LIST (SUBSCRIBED), which a server that turns LSUB down is
+/// asked instead.
+pub async fn list_subscribed(session: &mut Session, pattern: &str) -> Result<HashSet<String>> {
+    with_deadline(
+        "LSUB",
+        METADATA_TIMEOUT,
+        list_subscribed_inner(session, pattern),
+    )
+    .await
+}
+
+async fn list_subscribed_inner(session: &mut Session, pattern: &str) -> Result<HashSet<String>> {
+    let pattern = quoted_mailbox(pattern)
+        .ok_or_else(|| CoreError::Imap("folder name pattern can't be quoted".into()))?;
+    match subscribed_names(session, &format!("LSUB \"\" {pattern}")).await {
+        Err(CoreError::ImapRefused(_)) => {
+            subscribed_names(session, &format!("LIST (SUBSCRIBED) \"\" {pattern}")).await
+        }
+        result => result,
+    }
+}
+
+/// The mailbox names an LSUB or LIST (SUBSCRIBED) `command` lists. Read
+/// here rather than through async-imap's `lsub`, whose stream ends at the
+/// tagged reply without telling a refusal from an empty list.
+async fn subscribed_names(session: &mut Session, command: &str) -> Result<HashSet<String>> {
+    use async_imap::imap_proto::{MailboxDatum, NameAttribute, Response, Status};
+    let tag = session.run_command(command).await.map_err(command_error)?;
+    let mut names = HashSet::new();
+    loop {
+        let response = session
+            .read_response()
+            .await
+            .map_err(|e| CoreError::Imap(e.to_string()))?
+            .ok_or_else(|| CoreError::Imap("connection closed during LSUB".into()))?;
+        match response.parsed() {
+            Response::Done {
+                tag: done,
+                status,
+                outcome,
+            } if *done == tag => {
+                return match status {
+                    Status::Ok => Ok(names),
+                    _ => Err(refusal(ServerReply::from_outcome(
+                        *status == Status::Bad,
+                        outcome,
+                    ))),
+                };
+            }
+            // imap-proto reads LSUB replies as LIST ones.
+            Response::MailboxData(MailboxDatum::List(listed)) => {
+                // RFC 5258 also lists subscriptions whose mailbox is gone.
+                let gone = listed.name_attributes.iter().any(|attribute| {
+                    matches!(attribute, NameAttribute::Extension(name)
+                        if name.eq_ignore_ascii_case("\\NonExistent"))
+                });
+                if !gone {
+                    names.insert(listed.name.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Add `name` to the user's subscribed mailboxes, so clients that show only
+/// those, this one among them, list it.
+pub async fn subscribe(session: &mut Session, name: &str) -> Result<()> {
+    with_deadline("SUBSCRIBE", METADATA_TIMEOUT, async {
+        session.subscribe(name).await.map_err(command_error)
+    })
+    .await
+}
+
+pub async fn unsubscribe(session: &mut Session, name: &str) -> Result<()> {
+    with_deadline("UNSUBSCRIBE", METADATA_TIMEOUT, async {
+        session.unsubscribe(name).await.map_err(command_error)
+    })
+    .await
+}
+
+/// `name` as an IMAP quoted string, escaped as APPEND does, or None when it
+/// holds a line break or NUL, which no quoted string can carry.
+fn quoted_mailbox(name: &str) -> Option<String> {
+    if name.chars().any(|c| matches!(c, '\r' | '\n' | '\0')) {
+        return None;
+    }
+    Some(format!(
+        "\"{}\"",
+        name.replace('\\', "\\\\").replace('"', "\\\"")
+    ))
+}
+
 #[derive(Debug, Clone)]
 pub struct SelectedFolder {
     pub uid_validity: Option<i64>,
@@ -2037,20 +2133,67 @@ pub async fn status(session: &mut Session, folder: &str) -> Result<MailboxStatus
     .await
 }
 
-/// The STATUS of every mailbox, from one LIST-STATUS command, by mailbox
-/// name as LIST names it. A server may leave out a mailbox it could not
-/// look up (RFC 5819), so a missing name means "unknown", not "unchanged".
-pub async fn list_status(session: &mut Session) -> Result<HashMap<String, MailboxStatus>> {
-    with_deadline("LIST-STATUS", METADATA_TIMEOUT, list_status_inner(session)).await
+/// RFC 7162 section 4 asks clients to keep a command line near 8192 octets
+/// and split longer requests; this leaves room for the rest of LIST-STATUS.
+const LIST_PATTERNS_MAX: usize = 8000;
+
+/// The STATUS of every mailbox, or of just `mailboxes`, by mailbox name as
+/// LIST names it: one LIST-STATUS command for every mailbox, and as few as
+/// keep each command line short for a list of them (RFC 5258 patterns). A
+/// server may leave out a mailbox it could not look up (RFC 5819), so a
+/// missing name means "unknown", not "unchanged".
+pub async fn list_status(
+    session: &mut Session,
+    mailboxes: Option<&[&str]>,
+) -> Result<HashMap<String, MailboxStatus>> {
+    with_deadline("LIST-STATUS", METADATA_TIMEOUT, async {
+        let mut statuses = HashMap::new();
+        for patterns in list_status_patterns(mailboxes) {
+            list_status_inner(session, &patterns, &mut statuses).await?;
+        }
+        Ok(statuses)
+    })
+    .await
 }
 
-async fn list_status_inner(session: &mut Session) -> Result<HashMap<String, MailboxStatus>> {
+/// The mailbox argument of each LIST-STATUS command that reports
+/// `mailboxes`: all of them when None. A name no quoted string can carry
+/// goes unreported.
+fn list_status_patterns(mailboxes: Option<&[&str]>) -> Vec<String> {
+    let Some(mailboxes) = mailboxes else {
+        return vec!["\"*\"".into()];
+    };
+    let mut commands = Vec::new();
+    let mut patterns = String::new();
+    for quoted in mailboxes.iter().filter_map(|name| quoted_mailbox(name)) {
+        // The space before the name and the parentheses around the list.
+        if !patterns.is_empty() && patterns.len() + quoted.len() + 3 > LIST_PATTERNS_MAX {
+            commands.push(format!("({patterns})"));
+            patterns.clear();
+        }
+        if !patterns.is_empty() {
+            patterns.push(' ');
+        }
+        patterns.push_str(&quoted);
+    }
+    if !patterns.is_empty() {
+        commands.push(format!("({patterns})"));
+    }
+    commands
+}
+
+async fn list_status_inner(
+    session: &mut Session,
+    patterns: &str,
+    statuses: &mut HashMap<String, MailboxStatus>,
+) -> Result<()> {
     use async_imap::imap_proto::{MailboxDatum, Response, Status};
     let tag = session
-        .run_command(format!("LIST \"\" \"*\" RETURN (STATUS {STATUS_ITEMS})"))
+        .run_command(format!(
+            "LIST \"\" {patterns} RETURN (STATUS {STATUS_ITEMS})"
+        ))
         .await
         .map_err(command_error)?;
-    let mut statuses = HashMap::new();
     loop {
         let response = session
             .read_response()
@@ -2064,7 +2207,7 @@ async fn list_status_inner(session: &mut Session) -> Result<HashMap<String, Mail
                 outcome,
             } if *done == tag => {
                 return match status {
-                    Status::Ok => Ok(statuses),
+                    Status::Ok => Ok(()),
                     _ => Err(refusal(ServerReply::from_outcome(
                         *status == Status::Bad,
                         outcome,
@@ -2798,5 +2941,36 @@ mod tests {
         for excluded in ["FLAGS", "INTERNALDATE", "RFC822.SIZE", "HEADER.FIELDS"] {
             assert!(!MIME_PLAN_QUERY.contains(excluded));
         }
+    }
+
+    #[test]
+    fn list_status_asks_for_every_mailbox_or_the_named_ones() {
+        use super::{LIST_PATTERNS_MAX, list_status_patterns, quoted_mailbox};
+        assert_eq!(list_status_patterns(None), ["\"*\""]);
+        assert!(list_status_patterns(Some(&[])).is_empty());
+        assert_eq!(
+            list_status_patterns(Some(&["INBOX", r#"Say "hi"\now"#, "Bad\r\nname"])),
+            [r#"("INBOX" "Say \"hi\"\\now")"#]
+        );
+        assert_eq!(quoted_mailbox("a\0b"), None);
+
+        // A long list is split so no command line runs past the limit, and
+        // every name is asked for once.
+        let names = (0..2000)
+            .map(|i| format!("Shared/Folder {i}"))
+            .collect::<Vec<_>>();
+        let names = names.iter().map(String::as_str).collect::<Vec<_>>();
+        let commands = list_status_patterns(Some(&names));
+        assert!(commands.len() > 1);
+        assert!(
+            commands
+                .iter()
+                .all(|command| command.len() <= LIST_PATTERNS_MAX)
+        );
+        let asked = commands
+            .iter()
+            .flat_map(|command| command.trim_matches(['(', ')']).split("\" \""))
+            .count();
+        assert_eq!(asked, names.len());
     }
 }

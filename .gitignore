@@ -34,6 +34,7 @@
 /crates/i-slint-backend-winit/Cargo.lock
 /crates/i-slint-backend-android-activity/Cargo.lock
 /crates/i-slint-renderer-software/Cargo.lock
+/crates/fontique/Cargo.lock
 /crates/vello/Cargo.lock
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).

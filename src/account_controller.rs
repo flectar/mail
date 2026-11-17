@@ -283,6 +283,7 @@ pub(super) fn apply_connected_accounts(
                 mail_history: config.settings.mail_history.as_str().into(),
                 sent_copy_policy: config.settings.sent_copy_policy.as_str().into(),
                 keep_on_server: config.settings.keep_on_server.as_str().into(),
+                subscribed_folders_only: config.settings.subscribed_folders_only,
                 server_keeps_mail_days: account
                     .server_keeps_mail_days
                     .and_then(|days| i32::try_from(days).ok())

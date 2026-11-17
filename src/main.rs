@@ -5542,6 +5542,48 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let app_weak = app.as_weak();
+    let state_for_subscribed_folders = Rc::clone(&state);
+    let runtime_for_subscribed_folders = runtime.clone();
+    let ui_task_tx_for_subscribed_folders = ui_task_tx.clone();
+    app.on_save_account_subscribed_folders_only(move |account_id, enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_subscribed_folders.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Folder settings require local mail data."));
+            return;
+        };
+        let account_id = i64::from(account_id);
+        app.set_sync_status(UiMessage::plain("Updating folder settings…"));
+        let updates = ui_task_tx_for_subscribed_folders.clone();
+        runtime_for_subscribed_folders.spawn(async move {
+            let message = match core
+                .set_account_subscribed_folders_only(account_id, enabled)
+                .await
+            {
+                Ok(()) => UiMessage::plain("Folder settings updated."),
+                Err(error) => UiMessage::detail("Could not update folder settings: {}", error),
+            };
+            // Reload either way so the switch shows the saved choice.
+            let accounts = core.load_account_snapshot().await.ok();
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts,
+                    calendar_connections: None,
+                    carddav_connections: None,
+                    calendar_error: None,
+                    account_removal: None,
+                    clear_account_form: false,
+                    finishes_account_setup: false,
+                    finishes_oauth: false,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
+    let app_weak = app.as_weak();
     let state_for_sent_copy_policy = Rc::clone(&state);
     let runtime_for_sent_copy_policy = runtime.clone();
     let ui_task_tx_for_sent_copy_policy = ui_task_tx.clone();

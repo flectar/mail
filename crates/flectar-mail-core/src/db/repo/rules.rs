@@ -60,6 +60,20 @@ pub fn enabled_for(conn: &Connection, account_id: i64) -> Result<Vec<MailRule>> 
     )
 }
 
+/// The folders `account_id`'s rules move or copy mail into, on or off.
+pub fn target_folders(conn: &Connection, account_id: i64) -> Result<Vec<i64>> {
+    use crate::models::RuleAction;
+    Ok(list(conn)?
+        .into_iter()
+        .filter(|rule| rule.account_id == Some(account_id))
+        .flat_map(|rule| rule.actions)
+        .filter_map(|action| match action {
+            RuleAction::Move { folder } | RuleAction::Copy { folder } => Some(folder),
+            _ => None,
+        })
+        .collect())
+}
+
 pub fn get(conn: &Connection, id: i64) -> Result<Option<MailRule>> {
     Ok(conn
         .query_row(
