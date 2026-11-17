@@ -58,6 +58,8 @@ thread_local! {
     static TARGETS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     /// The settings as last loaded.
     static SETTINGS: RefCell<TranslationSettings> = RefCell::new(TranslationSettings::default());
+    /// The composer's Translate dialog's languages, as language tags.
+    static DRAFT_TARGETS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 fn core(state: &Rc<RefCell<InboxState>>) -> Option<Arc<Core>> {
@@ -92,7 +94,7 @@ fn app_language() -> String {
 
 /// What went wrong, as the bar and Settings name it, with what the service
 /// said when that's all there is.
-fn failure(error: &CoreError) -> (&'static str, String) {
+pub(super) fn failure(error: &CoreError) -> (&'static str, String) {
     match error {
         CoreError::Translation(error) => match error {
             TranslationError::NotSetUp => ("not-set-up", String::new()),
@@ -359,6 +361,71 @@ fn choose(app: &AppWindow, choice: &str) {
     });
 }
 
+// ---- The composer ---------------------------------------------------------
+
+/// A translation service is set up, so the composer offers to translate.
+pub(super) fn ready() -> bool {
+    SETTINGS.with_borrow(|settings| !settings.service.is_empty())
+}
+
+/// The composer's Translate dialog's choices: the service's languages by name,
+/// with the one a message was last translated into chosen, else the language
+/// of the message a reply answers.
+pub(super) fn draft_choices(
+    targets: Vec<(String, String)>,
+    last: &str,
+    answered: Option<&str>,
+) -> (Vec<SharedString>, i32) {
+    let language = app_language();
+    let mut named: Vec<(String, String)> = targets
+        .into_iter()
+        .map(|(code, name)| {
+            let shown = names::menu_name(&language, &code, &name);
+            (code, shown)
+        })
+        .collect();
+    named.sort_by(|a, b| a.1.cmp(&b.1));
+    let position = |wanted: &str| {
+        named
+            .iter()
+            .position(|(code, _)| code.eq_ignore_ascii_case(wanted))
+            .or_else(|| {
+                let primary = wanted.split(['-', '_']).next().unwrap_or_default();
+                named.iter().position(|(code, _)| {
+                    code.split(['-', '_'])
+                        .next()
+                        .is_some_and(|code| code.eq_ignore_ascii_case(primary))
+                })
+            })
+    };
+    let index = Some(last)
+        .filter(|last| !last.is_empty())
+        .and_then(position)
+        .or_else(|| answered.and_then(position))
+        .unwrap_or(0);
+    let names = named
+        .iter()
+        .map(|(_, name)| SharedString::from(name.as_str()))
+        .collect();
+    DRAFT_TARGETS.set(named.into_iter().map(|(code, _)| code).collect());
+    (names, i32::try_from(index).unwrap_or(0))
+}
+
+/// The language tag of the composer dialog's choice `index`.
+pub(super) fn draft_target(index: i32) -> Option<String> {
+    let index = usize::try_from(index).ok()?;
+    DRAFT_TARGETS.with_borrow(|targets| targets.get(index).cloned())
+}
+
+/// Remembers the language a message was translated into, for the next one.
+pub(super) fn remember_draft_target(target: &str) {
+    if SETTINGS.with_borrow(|settings| settings.compose_target == target) {
+        return;
+    }
+    let target = target.to_owned();
+    save_settings_quietly(move |settings| settings.compose_target = target);
+}
+
 // ---- Settings → Translation -----------------------------------------------
 
 /// The lists as Settings shows them, named in the app's language.
@@ -467,6 +534,39 @@ fn refresh() {
                 project_settings(&app);
                 app.global::<Translation>().set_key_saved(key_saved);
                 project_targets(&app, targets);
+            });
+        });
+    });
+}
+
+/// Saves the settings as `change` leaves them, without showing them again.
+fn save_settings_quietly(change: impl FnOnce(&mut TranslationSettings)) {
+    let mut settings = SETTINGS.with_borrow(Clone::clone);
+    change(&mut settings);
+    SETTINGS.set(settings.clone());
+    ENV.with_borrow(|env| {
+        let Some(env) = env else { return };
+        let Some(core) = core(&env.state) else { return };
+        env.runtime.spawn(async move {
+            if let Err(error) = core.set_translation_settings(settings).await {
+                tracing::warn!(%error, "saving the translation settings failed");
+            }
+        });
+    });
+}
+
+/// The core is ready: the settings come in, without asking any service.
+pub(super) fn core_ready(core: Arc<Core>) {
+    ENV.with_borrow(|env| {
+        let Some(env) = env else { return };
+        let weak = env.app.clone();
+        env.runtime.spawn(async move {
+            let Ok(settings) = core.translation_settings().await else {
+                return;
+            };
+            let _ = weak.upgrade_in_event_loop(move |app| {
+                SETTINGS.set(settings);
+                project_settings(&app);
             });
         });
     });

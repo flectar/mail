@@ -5,6 +5,8 @@ import { IconButton, Switch } from "controls.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
+import { SettingsSelect } from "settings-components.slint";
+import { TranslationWords } from "../translation.slint";
 
 // A color the composer offers, with its name for screen readers.
 struct ComposerSwatch {
@@ -382,6 +384,9 @@ export component ComposerToolbar inherits Rectangle {
     callback plain-text-chosen(bool);
     callback insert-image();
     callback open-templates();
+    // A translation service is set up (#240).
+    in property <bool> translate-shown: false;
+    callback open-translate();
     callback undo();
     callback redo();
 
@@ -523,6 +528,7 @@ export component ComposerToolbar inherits Rectangle {
             if root.templates-shown && !root.plain-text : Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
             if root.templates-shown : IconButton { icon: @image-url("../icons/lucide/outline/book.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
+            if root.translate-shown : IconButton { icon: @image-url("../icons/lucide/outline/languages.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Translate"); clicked => { root.open-translate(); } }
 
         }
     }
@@ -1409,6 +1415,117 @@ export component LinkEditor inherits Rectangle {
             primary: true;
             enabled: root.url != "";
             clicked => { root.apply(root.url); }
+        }
+    }
+}
+
+// Translates the selection, or the whole message when nothing is selected,
+// into a language the user picks (#240). The translation takes the place of
+// what was translated, as one step undo takes back.
+export component TranslateEditor inherits Rectangle {
+    in property <bool> compact: false;
+    in property <bool> open: false;
+    // Text is selected, and only that is translated.
+    in property <bool> selection: false;
+    // The languages to translate into, by name, and the one chosen.
+    in property <[string]> choices: [];
+    in-out property <int> choice-index: 0;
+    in property <bool> busy: false;
+    // Why the last try failed, as Translation.failure names it, and what the
+    // service said.
+    in property <string> failure: "";
+    in property <string> detail: "";
+    private property <string> error: root.failure == "" ? "" : TranslationWords.failure(root.failure, root.detail, "", false);
+    in property <color> background-color;
+    in property <color> body-color;
+    in property <color> frame-border-color;
+    in property <color> muted-color;
+    in property <color> title-color;
+    in property <color> error-color: #d04a43;
+    callback cancel();
+    callback apply(int);
+
+    visible: root.open;
+    background: #00000066;
+    z: 6000;
+    TouchArea { }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.compact ? min(380px, parent.width - 32px) : 420px;
+        height: translate-apply.y + translate-apply.height + 20px;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: root.frame-border-color;
+        background: root.background-color;
+
+        translate-heading := Text {
+            x: 20px;
+            y: 18px;
+            width: parent.width - 40px;
+            height: max(24px, self.preferred-height);
+            text: root.selection ? @tr("Translate the selection") : @tr("Translate the message");
+            color: root.title-color;
+            font-size: TypeScale.heading-small;
+            font-weight: 700;
+            wrap: word-wrap;
+        }
+
+        translate-note := Text {
+            x: 20px;
+            y: translate-heading.y + translate-heading.height + 6px;
+            width: parent.width - 40px;
+            height: max(20px, self.preferred-height);
+            text: root.selection
+                ? @tr("The translation takes the place of the selected text. Undo brings the original back.")
+                : @tr("The translation takes the place of what you wrote. Undo brings the original back.");
+            color: root.muted-color;
+            font-size: TypeScale.secondary;
+            wrap: word-wrap;
+        }
+
+        translate-into := SettingsSelect {
+            x: 20px;
+            y: translate-note.y + translate-note.height + 12px;
+            width: parent.width - 40px;
+            height: 36px;
+            choices: root.choices;
+            selected-index <=> root.choice-index;
+            enabled: !root.busy && root.choices.length > 0;
+            accessible-label: @tr("Translate into");
+        }
+
+        translate-error := Text {
+            x: 20px;
+            y: translate-into.y + translate-into.height + 8px;
+            width: parent.width - 40px;
+            height: root.error == "" ? 0px : max(18px, self.preferred-height);
+            visible: root.error != "";
+            text: root.error;
+            color: root.error-color;
+            font-size: TypeScale.caption;
+            wrap: word-wrap;
+        }
+
+        Button {
+            x: translate-apply.x - self.width - 8px;
+            y: translate-apply.y;
+            width: max(78px, self.content-width);
+            height: 34px;
+            text: @tr("Cancel");
+            clicked => { root.cancel(); }
+        }
+
+        translate-apply := Button {
+            x: parent.width - self.width - 20px;
+            y: translate-error.y + translate-error.height + 16px;
+            width: max(96px, self.content-width);
+            height: 34px;
+            text: root.busy ? @tr("Translating…") : @tr("Translate");
+            primary: true;
+            enabled: !root.busy && root.choices.length > 0;
+            clicked => { root.apply(root.choice-index); }
         }
     }
 }

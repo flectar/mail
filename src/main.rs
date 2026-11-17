@@ -4744,6 +4744,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     notifications::ui::core_ready();
                     auto_replies::core_ready(&app, &startup_runtime, core.file_core());
                     mail_rules::core_ready(&startup_runtime, core.file_core());
+                    translation::core_ready(core.file_core());
                     if !startup_benchmark_disable_background {
                         core.notify_ui_ready();
                     }

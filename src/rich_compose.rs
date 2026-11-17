@@ -19,6 +19,17 @@ pub(crate) const CODE: u8 = 1 << 4;
 pub(crate) const QUOTE_MARKER: &str = "│ ";
 /// Marks HTML the composer copied, which pastes back as it was.
 const COPIED_MARK: &str = "<!--flectar-mail-composer-->";
+
+/// HTML the composer copied, without the mark that says so, for a translation
+/// service, which keeps no comments (#240).
+pub(crate) fn without_copied_mark(html: &str) -> &str {
+    html.strip_prefix(COPIED_MARK).unwrap_or(html)
+}
+
+/// HTML the composer copied, marked so, which pastes back as it was.
+pub(crate) fn marked_as_copied(html: &str) -> String {
+    format!("{COPIED_MARK}{html}")
+}
 /// The line a signature starts under, after a blank line, as mail has long marked them.
 pub(crate) const SIGNATURE_SEPARATOR: &str = "\n\n-- \n";
 /// Holds an image's place in the text, as in other rich text: its style carries the image.

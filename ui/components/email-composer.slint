@@ -3,7 +3,7 @@ import { SettingsSelectRow } from "settings-components.slint";
 import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, ComposeAttachment, ComposeLink, ComposeContact, ComposeEditorTile, EmailTemplateRow, SpellingLanguage } from "../models.slint";
 import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } from "composer-fields.slint";
-import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerPhotos, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, ImageResizeFrame, LinkEditor } from "composer-actions.slint";
+import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerPhotos, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, ImageResizeFrame, LinkEditor, TranslateEditor } from "composer-actions.slint";
 import { EmailTemplates } from "email-templates.slint";
 import { TypeScale } from "../typography.slint";
 import { ConfirmationDialog } from "confirmation-dialog.slint";
@@ -153,6 +153,19 @@ export component EmailComposer inherits Rectangle {
     callback paste-requested(string, int, int) -> bool;
     callback copy-requested(bool, string, int, int) -> bool;
     callback link-requested(string, string, int, int);
+    // Translating the message (#240): a service is set up, the languages to
+    // translate into and the one chosen, and how the translation goes. The
+    // app closes the dialog once the translation is in.
+    in property <bool> translate-shown: false;
+    in property <[string]> translate-choices: [];
+    in-out property <int> translate-index: 0;
+    in-out property <bool> translate-open: false;
+    in property <bool> translating: false;
+    in property <string> translate-failure: "";
+    in property <string> translate-detail: "";
+    callback translate-opened();
+    // The language chosen, the body, and the selection's offsets.
+    callback translate-requested(int, string, int, int);
     callback body-edited(string, int, int, string);
     callback selection-changed(string, int, int);
     callback history-requested(string);
@@ -180,6 +193,8 @@ export component EmailComposer inherits Rectangle {
 
     private property <bool> confirm-discard: false;
     private property <bool> link-editor-open: false;
+    private property <int> translate-selection-start: 0;
+    private property <int> translate-selection-end: 0;
     private property <bool> templates-open: false;
     private property <string> link-url: "";
     private property <int> link-selection-start: 0;
@@ -536,6 +551,13 @@ export component EmailComposer inherits Rectangle {
             apply-format(kind) => { root.apply-format(kind); }
             insert-image => { root.insert-images(); }
             open-templates => { root.templates-open = true; }
+            translate-shown: root.translate-shown && !root.signature-mode;
+            open-translate => {
+                root.translate-selection-start = root.selection-start;
+                root.translate-selection-end = root.selection-end;
+                root.translate-open = true;
+                root.translate-opened();
+            }
             undo => {
                 root.history-requested("undo");
                 body-input.set-selection-offsets(root.selection-start, root.selection-end);
@@ -1231,6 +1253,34 @@ export component EmailComposer inherits Rectangle {
             root.format-requested("image-alt:" + alt, root.body, root.image-selection-start, root.image-selection-end);
             body-input.set-selection-offsets(root.selection-start, root.selection-end);
             body-input.focus();
+        }
+    }
+
+    TranslateEditor {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        compact: root.compact;
+        open: root.translate-open;
+        selection: root.translate-selection-start != root.translate-selection-end;
+        choices: root.translate-choices;
+        choice-index <=> root.translate-index;
+        busy: root.translating;
+        failure: root.translate-failure;
+        detail: root.translate-detail;
+        background-color: root.background-color;
+        body-color: root.body-color;
+        frame-border-color: root.frame-border-color;
+        muted-color: root.muted-color;
+        title-color: root.title-color;
+        cancel => {
+            root.translate-open = false;
+            body-input.set-selection-offsets(root.translate-selection-start, root.translate-selection-end);
+            body-input.focus();
+        }
+        apply(index) => {
+            root.translate-requested(index, root.body, root.translate-selection-start, root.translate-selection-end);
         }
     }
 
