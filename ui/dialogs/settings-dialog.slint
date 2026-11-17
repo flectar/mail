@@ -696,6 +696,15 @@ export component SettingsDialog inherits Rectangle {
         @tr("message preview" => "2 lines"),
         @tr("message preview" => "3 lines"),
     ];
+    // How long Trash and Junk keep mail, as MailRules counts them.
+    private property <[string]> cleanup-options: [
+        @tr("Never"),
+        @tr("After 7 days"),
+        @tr("After 14 days"),
+        @tr("After 30 days"),
+        @tr("After 60 days"),
+        @tr("After 90 days"),
+    ];
     private property <[string]> mark-read-options: [
         @tr("Immediately"),
         @tr("After 2 seconds"),
@@ -2379,6 +2388,52 @@ export component SettingsDialog inherits Rectangle {
                                         }
                                     }
                                 }
+                            }
+                            // Trash and Junk emptied of what sat there too long.
+                            Text {
+                                text: @tr("Clean up");
+                                color: root.title-color;
+                                font-size: TypeScale.subtitle;
+                                font-weight: 600;
+                            }
+                            Rectangle {
+                                height: cleanup-list.preferred-height;
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                cleanup-list := VerticalLayout {
+                                    padding-top: 4px;
+                                    padding-bottom: 4px;
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Empty Trash");
+                                        description: @tr("Deletes mail for good once it has been in Trash this long. Starred mail stays.");
+                                        choices: root.cleanup-options;
+                                        selected-index <=> MailRules.trash-days;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { MailRules.choose-cleanup(index, MailRules.junk-days); }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Empty Junk");
+                                        description: @tr("Deletes mail for good once it has been in Junk this long. Starred mail stays.");
+                                        choices: root.cleanup-options;
+                                        selected-index <=> MailRules.junk-days;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { MailRules.choose-cleanup(MailRules.trash-days, index); }
+                                    }
+                                }
+                            }
+                            Text {
+                                height: max(root.compact ? 52px : 34px, self.preferred-height);
+                                text: @tr("Flectar Mail empties them while it's open, counting from when mail went into each folder. Gmail and Outlook.com empty both after 30 days themselves.");
+                                color: root.secondary-text;
+                                font-size: TypeScale.secondary;
+                                wrap: word-wrap;
                             }
                         }
                     }

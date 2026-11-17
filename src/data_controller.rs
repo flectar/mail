@@ -469,6 +469,18 @@ pub(super) fn restore_account_backup(
             {
                 settings.read_receipts = policy;
             }
+            let days = |key: &str| {
+                preferences
+                    .get(key)
+                    .and_then(|value| value.as_u64())
+                    .and_then(|days| u32::try_from(days).ok())
+            };
+            if let Some(days) = days("emptyTrashAfterDays") {
+                settings.empty_trash_after_days = days;
+            }
+            if let Some(days) = days("emptyJunkAfterDays") {
+                settings.empty_junk_after_days = days;
+            }
             if let Some(width) = preferences
                 .get("workspaceListPaneWidth")
                 .and_then(|value| value.as_i64())
@@ -679,6 +691,11 @@ pub(super) fn restore_account_backup(
     crate::text_size::apply(app, settings.interface_text_size);
     app.global::<crate::ReadReceipts>()
         .set_policy(settings.read_receipts.as_str().into());
+    crate::mail_rules::apply_cleanup(
+        app,
+        settings.empty_trash_after_days,
+        settings.empty_junk_after_days,
+    );
     app.set_show_avatars(settings.show_avatars);
     crate::apply_list_rows(app, &settings);
     app.set_show_tabs(settings.show_tabs);
@@ -1363,6 +1380,8 @@ pub(super) fn register_data_management_callbacks(
                     "reduceMotion": settings.reduce_motion,
                     "interfaceTextSize": settings.interface_text_size,
                     "readReceipts": settings.read_receipts,
+                    "emptyTrashAfterDays": settings.empty_trash_after_days,
+                    "emptyJunkAfterDays": settings.empty_junk_after_days,
                     "showAvatars": settings.show_avatars,
                     "showTabs": settings.show_tabs,
                     "conversationView": settings.conversation_view,
@@ -1692,6 +1711,7 @@ pub(super) fn register_data_management_callbacks(
                             .as_str()
                             .into(),
                     );
+                    crate::mail_rules::apply_cleanup(&app, 0, 0);
                     app.set_monochrome_sidebar_icons(false);
                     crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);
