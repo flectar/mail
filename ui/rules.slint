@@ -54,6 +54,11 @@ export global MailRules {
     in property <[RulesNotice]> notices;
     // Do what the notice for account `account-id` offers.
     callback notice-action(int);
+    // How long Trash and Junk keep mail, as places in the cleanup choices:
+    // for ever, then 7, 14, 30, 60 or 90 days.
+    in-out property <int> trash-days;
+    in-out property <int> junk-days;
+    callback choose-cleanup(int, int);
 
     // The editor, open for the rule `editing-id`, or 0 for a new one.
     in-out property <bool> editing;

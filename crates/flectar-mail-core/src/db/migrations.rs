@@ -65,6 +65,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/046_mail_rules.sql")),
     Migration::Plain(include_str!("migrations/047_rules_waiting.sql")),
     Migration::Plain(include_str!("migrations/048_server_rules.sql")),
+    Migration::Plain(include_str!("migrations/049_folder_since.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

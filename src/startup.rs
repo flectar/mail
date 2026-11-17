@@ -866,6 +866,11 @@ pub(crate) fn refresh_oauth_availability(app: &AppWindow) {
 pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.global::<MessageColors>()
         .set_preference(settings.message_appearance.as_str().into());
+    crate::mail_rules::apply_cleanup(
+        app,
+        settings.empty_trash_after_days,
+        settings.empty_junk_after_days,
+    );
     app.global::<InvitationSettings>()
         .set_add(settings.add_invitations.as_str().into());
     refresh_oauth_availability(app);

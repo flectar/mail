@@ -2616,6 +2616,15 @@ impl CoreMailSource {
         .map_err(|error| error.to_string())
     }
 
+    /// Keep mail in Trash and Junk for these days, 0 for ever, and empty
+    /// them of older mail now.
+    pub async fn set_folder_cleanup(&self, trash_days: u32, junk_days: u32) -> Result<(), String> {
+        self.core
+            .set_folder_cleanup(trash_days, junk_days)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     /// Where each account's rules run, as last checked.
     pub async fn server_rules(&self) -> Result<Vec<ServerRules>, String> {
         self.core

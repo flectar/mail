@@ -85,6 +85,9 @@ pub(super) fn install(
     });
     ui.on_move(|id, by| with_controller(|controller| controller.reorder(i64::from(id), by)));
     ui.on_notice_action(|id| with_controller(|controller| controller.answer(i64::from(id))));
+    ui.on_choose_cleanup(|trash, junk| {
+        with_controller(|controller| controller.choose_cleanup(trash, junk));
+    });
     ui.on_choose_account(|index| with_controller(|controller| controller.choose_account(index)));
     ui.on_add_condition(|| with_controller(|controller| controller.add_condition()));
     ui.on_remove_condition(|index| {
@@ -117,6 +120,13 @@ fn choices_of(
         folders,
         labels,
     }
+}
+
+/// Show for how many days Trash and Junk keep mail.
+pub(super) fn apply_cleanup(app: &AppWindow, trash_days: u32, junk_days: u32) {
+    let ui = app.global::<MailRules>();
+    ui.set_trash_days(cleanup_choice(trash_days));
+    ui.set_junk_days(cleanup_choice(junk_days));
 }
 
 /// Shows where the rules run again whenever that changes.
@@ -546,6 +556,32 @@ impl Controller {
                     tracing::warn!(account_id, %error, "rules on the server failed");
                 }
                 with_controller(|controller| controller.refresh());
+            },
+        );
+    }
+
+    /// Keep mail in Trash and Junk for the days of cleanup choices `trash`
+    /// and `junk`.
+    fn choose_cleanup(&self, trash: i32, junk: i32) {
+        let Some(core) = self.core() else {
+            return;
+        };
+        let days = |choice: i32| {
+            usize::try_from(choice)
+                .ok()
+                .and_then(|choice| CLEANUP_DAYS.get(choice))
+                .copied()
+                .unwrap_or(0)
+        };
+        let (trash, junk) = (days(trash), days(junk));
+        self.spawn(
+            async move { core.set_folder_cleanup(trash, junk).await },
+            |app, result| match result {
+                Ok(()) => app.set_sync_status(UiMessage::plain("Cleanup preference saved.")),
+                Err(error) => app.set_sync_status(UiMessage::detail(
+                    "Could not save the cleanup preference: {}",
+                    error,
+                )),
             },
         );
     }

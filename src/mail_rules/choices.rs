@@ -167,6 +167,20 @@ impl Choices {
     }
 }
 
+/// The days Trash and Junk keep mail, as the cleanup choices list them. 0
+/// keeps it for ever.
+pub(super) const CLEANUP_DAYS: [u32; 6] = [0, 7, 14, 30, 60, 90];
+
+/// The cleanup choice for `days`: its own, or the longest shorter one for a
+/// count the choices don't list, such as one a backup brought.
+pub(super) fn cleanup_choice(days: u32) -> i32 {
+    let index = CLEANUP_DAYS
+        .iter()
+        .rposition(|choice| *choice <= days)
+        .unwrap_or(0);
+    i32::try_from(index).unwrap_or_default()
+}
+
 /// Whether the folders and labels `rule` files into are still there.
 pub(super) fn targets_exist(rule: &MailRule, folders: &[FolderInfo], labels: &[Label]) -> bool {
     rule.actions.iter().all(|action| match action {
@@ -435,6 +449,21 @@ mod tests {
             &[],
         )];
         assert_eq!(notices(&accounts, &failed, &rules)[0].detail, "No room.");
+    }
+
+    #[test]
+    fn cleanup_choices_show_the_days_set() {
+        assert_eq!(cleanup_choice(0), 0);
+        assert_eq!(cleanup_choice(30), 3);
+        assert_eq!(cleanup_choice(90), 5);
+        // Not listed: the longest shorter choice, or for ever.
+        assert_eq!(cleanup_choice(45), 3);
+        assert_eq!(cleanup_choice(3), 0);
+        assert_eq!(cleanup_choice(400), 5);
+        assert_eq!(
+            CLEANUP_DAYS[usize::try_from(cleanup_choice(14)).unwrap()],
+            14
+        );
     }
 
     #[test]

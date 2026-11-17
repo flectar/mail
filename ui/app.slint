@@ -314,6 +314,8 @@ export global I18n {
         if (key == "Could not run the rule: {}") { return @tr("Could not run the rule: {}", argument); }
         if (key == "This rule matches no mail in the Inbox now.") { return @tr("This rule matches no mail in the Inbox now."); }
         if (key == "Rule applied to {} messages.") { return @tr("Rule applied to one message." | "Rule applied to {0} messages." % round(argument.to-float()), argument); }
+        if (key == "Cleanup preference saved.") { return @tr("Cleanup preference saved."); }
+        if (key == "Could not save the cleanup preference: {}") { return @tr("Could not save the cleanup preference: {}", argument); }
         if (key == "Notification preferences are active for this session.") { return @tr("Notification preferences are active for this session."); }
         if (key == "Notification preferences saved.") { return @tr("Notification preferences saved."); }
         if (key == "Update preference saved.") { return @tr("Update preference saved."); }

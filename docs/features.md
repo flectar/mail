@@ -610,6 +610,12 @@ says why. Each device keeps its own rules. When the server already runs rules
 another device put there, Flectar Mail leaves them until you choose to replace
 them.
 
+Below the rules, **Clean up** empties Trash and Junk of mail that has been
+there for a week up to three months, as you choose. The time counts from when a
+message went into the folder, not from when it arrived, and starred mail stays.
+Flectar Mail deletes such mail for good while it's open. Gmail and Outlook.com
+already empty both folders after 30 days on their own.
+
 ## Importance
 
 **High importance** and **Low importance** under **More options** in the
