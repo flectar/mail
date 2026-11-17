@@ -437,6 +437,11 @@ pub struct AccountSettings {
     /// can still change.
     #[serde(default)]
     pub request_read_receipts: bool,
+    /// IMAP accounts only: list and sync the folders the user subscribed to
+    /// (RFC 9051 6.3.7), plus the Inbox, a folder for each purpose Flectar
+    /// Mail files mail into, and the folders rules file into.
+    #[serde(default)]
+    pub subscribed_folders_only: bool,
 }
 
 const fn plain_text_replies_default() -> bool {
@@ -457,6 +462,7 @@ impl AccountSettings {
             message_format: MessageFormat::Formatted,
             plain_text_replies: plain_text_replies_default(),
             request_read_receipts: false,
+            subscribed_folders_only: false,
         }
     }
 }
@@ -540,6 +546,17 @@ mod account_settings_tests {
         }
         assert!(SentCopyPolicy::Client.should_append(Provider::Microsoft));
         assert!(!SentCopyPolicy::Server.should_append(Provider::Generic));
+    }
+
+    #[test]
+    fn subscribed_folders_only_starts_off_and_survives_serialization() {
+        let mut settings: AccountSettings = serde_json::from_str(MINIMAL_SETTINGS).unwrap();
+        assert!(!settings.subscribed_folders_only);
+        settings.subscribed_folders_only = true;
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains(r#""subscribedFoldersOnly":true"#));
+        let restored: AccountSettings = serde_json::from_str(&json).unwrap();
+        assert!(restored.subscribed_folders_only);
     }
 
     #[test]
