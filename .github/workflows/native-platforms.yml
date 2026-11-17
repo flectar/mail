@@ -478,6 +478,9 @@ jobs:
         run: |
           python scripts/test-clean-exit.py target/package/windows/flectar-mail.exe
           if ($LASTEXITCODE -ne 0) { throw "The packaged app did not exit cleanly" }
+          # The GDI fallback, and how its memory compares.
+          python scripts/test-clean-exit.py target/package/windows/flectar-mail.exe --gdi
+          if ($LASTEXITCODE -ne 0) { throw "The packaged app did not exit cleanly with GDI" }
 
       - name: Install pinned Inno Setup compiler
         shell: pwsh
