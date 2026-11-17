@@ -1484,6 +1484,84 @@ pub enum RuleAction {
     Junk,
 }
 
+/// Where an account's rules run (#238), as last checked. The rules its
+/// server runs work while the app is closed. The app tries every rule on
+/// new mail while it's open, whatever the server ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerRules {
+    pub account_id: i64,
+    pub state: ServerRulesState,
+    /// The rules the server runs, in order.
+    pub on_server: Vec<i64>,
+    /// The account's other rules, which run in the app alone, and why.
+    pub here: Vec<RuleHere>,
+    /// Milliseconds since the epoch.
+    pub checked_at: i64,
+}
+
+/// What an account's server does with its rules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "detail", rename_all = "camelCase")]
+pub enum ServerRulesState {
+    /// The server can't run rules.
+    Unavailable,
+    /// The server runs the rules it can.
+    Runs,
+    /// The server runs rules another device put there, so this device's
+    /// rules run in the app until the user replaces those.
+    Others,
+    /// The server runs the user's own filter script, named here. Rules run
+    /// on the server once the user lets the app's script run before it.
+    RunBefore(String),
+    /// Flectar Mail's script on the server was changed elsewhere. Rules run
+    /// there again once the user lets the app replace those changes.
+    Edited,
+    /// The server can't take the rules, for this reason.
+    Failed(String),
+}
+
+/// A rule that runs in the app alone, and why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleHere {
+    pub rule_id: i64,
+    pub why: RuleHereWhy,
+}
+
+/// Why a rule runs in the app alone, though its server runs rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuleHereWhy {
+    /// It looks for a pattern.
+    Pattern,
+    /// It asks whether files are attached.
+    Attachments,
+    /// It compares text beyond ASCII, which the server compares with case.
+    Case,
+    /// It compares a whole name, or the start or end of one.
+    Name,
+    /// The server can't name one of its folders, or the folder is gone.
+    Folder,
+    /// One of its labels has a name the server can't keep.
+    Label,
+    /// The server lacks something the rule needs.
+    Unsupported,
+    /// A rule before it runs in the app, and server rules run first.
+    After,
+}
+
+/// The user's go-ahead for a [`ServerRulesState`] that waits for one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerRulesAnswer {
+    /// Run the app's script before the user's own one, named here.
+    RunBefore(String),
+    /// Replace the changes made to the app's script elsewhere.
+    ReplaceChanges,
+    /// Replace the rules another device put on the server.
+    ReplaceOthers,
+}
+
 /// How the user can leave a mailing list, for the confirmation shown before
 /// anything is sent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

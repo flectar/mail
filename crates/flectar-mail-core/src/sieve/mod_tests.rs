@@ -40,6 +40,18 @@ async fn save_to(
     .await
 }
 
+/// The account's automatic replies as the app's script on the server holds
+/// them, as another device reads them, signing in only to a server that can
+/// send them.
+async fn read(server: &Server<'_>, user: &str, password: &str) -> Result<Option<AutoReply>> {
+    let Some(mut session) = open(server, user, password, &["vacation"]).await? else {
+        return Ok(None);
+    };
+    let reply = super::read_from(&mut session).await;
+    let _ = session.logout().await;
+    reply.map(Some)
+}
+
 async fn read_from(keeper: &Keeper) -> Option<AutoReply> {
     read(&server_at(keeper.port), "me@example.test", "secret")
         .await
@@ -246,7 +258,7 @@ async fn a_deleted_script_of_theirs_is_no_longer_run() {
     let keeper = Keeper::start(EVERYTHING).await;
     keeper.put(
         script::NAME,
-        &script::generate(&away(), &[], Some("filters")),
+        &script::generate(&away(), &[], None, Some("filters")),
         true,
     );
     save_to(&keeper, &away(), None).await.unwrap();
@@ -255,7 +267,7 @@ async fn a_deleted_script_of_theirs_is_no_longer_run() {
     // Turned off with nothing of theirs left, nothing runs.
     keeper.put(
         script::NAME,
-        &script::generate(&away(), &[], Some("filters")),
+        &script::generate(&away(), &[], None, Some("filters")),
         true,
     );
     save_to(&keeper, &off(), None).await.unwrap();
@@ -325,4 +337,200 @@ fn the_server_is_the_imap_host_secured_as_its_mail_is() {
     assert_eq!(found.security, ConnectionSecurity::Starttls);
     config.settings.connection.incoming_security = ConnectionSecurity::None;
     assert_eq!(server(&config).security, ConnectionSecurity::None);
+}
+
+fn section(digest: &str) -> Section {
+    Section {
+        text: "# Rules\r\n# Rule: Lists\r\nif exists \"List-Id\" {\r\n  fileinto \"Lists\";\r\n  \
+               stop;\r\n}\r\n# End of rules\r\n"
+            .into(),
+        needs: vec!["fileinto".into()],
+        digest: digest.into(),
+    }
+}
+
+async fn put(
+    keeper: &Keeper,
+    rules: Option<&Section>,
+    written: Option<&str>,
+    replace: bool,
+    allowed: Option<Question>,
+) -> Mirrored {
+    let mut session = open(
+        &server_at(keeper.port),
+        "me@example.test",
+        "secret",
+        &USEFUL,
+    )
+    .await
+    .unwrap()
+    .expect("a server that sorts mail");
+    let mirrored = put_rules(
+        &mut session,
+        rules,
+        written,
+        &["me@example.test".into()],
+        replace,
+        allowed.as_ref(),
+    )
+    .await
+    .unwrap();
+    let _ = session.logout().await;
+    mirrored
+}
+
+#[tokio::test]
+async fn rules_go_in_the_apps_script_beside_the_replies() {
+    let keeper = Keeper::start(EVERYTHING).await;
+    save_to(&keeper, &away(), None).await.unwrap();
+    assert_eq!(
+        put(&keeper, Some(&section("a1")), None, false, None).await,
+        Mirrored::Done
+    );
+    let ours = keeper.script(script::NAME).unwrap();
+    let reply = ours.find("vacation :days").unwrap();
+    let rules = ours.find("# Rules\r\n").unwrap();
+    assert!(
+        reply < rules,
+        "the reply goes out whatever the rules file away"
+    );
+    assert!(ours.contains("require [\"vacation\", \"date\", \"relational\", \"fileinto\"];"));
+    assert!(ours.contains("\"rules\":{\"digest\":\"a1\",\"needs\":[\"fileinto\"]}"));
+    assert_eq!(read_from(&keeper).await, Some(away()));
+    assert_eq!(
+        script::read(&ours).rules,
+        Some(section("a1")),
+        "another device finds them as written"
+    );
+
+    // Saving the replies again keeps the rules, and turning them off keeps
+    // the script running for the rules.
+    save_to(&keeper, &off(), None).await.unwrap();
+    let ours = keeper.script(script::NAME).unwrap();
+    assert_eq!(script::read(&ours).rules, Some(section("a1")));
+    assert!(!ours.contains("vacation :days"));
+    assert_eq!(keeper.active().as_deref(), Some(script::NAME));
+
+    // The same rules again change nothing.
+    let changes = keeper.changes().len();
+    assert_eq!(
+        put(&keeper, Some(&section("a1")), Some("a1"), false, None).await,
+        Mirrored::Done
+    );
+    assert_eq!(keeper.changes().len(), changes);
+
+    // With no rules and no replies left, the script steps aside.
+    assert_eq!(
+        put(&keeper, None, Some("a1"), false, None).await,
+        Mirrored::Done
+    );
+    assert_eq!(
+        script::read(&keeper.script(script::NAME).unwrap()).rules,
+        None
+    );
+    assert_eq!(keeper.active(), None);
+}
+
+#[tokio::test]
+async fn rules_run_before_the_users_own_script_once_allowed() {
+    let keeper = Keeper::start(EVERYTHING).await;
+    keeper.put("filters", FILTERS, true);
+    let question = Question::RunBefore("filters".into());
+    assert_eq!(
+        put(&keeper, Some(&section("a1")), None, false, None).await,
+        Mirrored::Ask(question.clone())
+    );
+    assert!(keeper.changes().is_empty());
+    assert_eq!(
+        put(&keeper, Some(&section("a1")), None, false, Some(question)).await,
+        Mirrored::Done
+    );
+    assert_eq!(keeper.active().as_deref(), Some(script::NAME));
+    assert_eq!(keeper.script("filters").as_deref(), Some(FILTERS));
+    let ours = keeper.script(script::NAME).unwrap();
+    assert!(ours.ends_with("# End of rules\r\ninclude :personal :optional \"filters\";\r\n"));
+
+    // Without rules, theirs runs again as before.
+    assert_eq!(
+        put(&keeper, None, Some("a1"), false, None).await,
+        Mirrored::Done
+    );
+    assert_eq!(keeper.active().as_deref(), Some("filters"));
+}
+
+#[tokio::test]
+async fn rules_another_device_put_there_stay_until_replaced() {
+    let keeper = Keeper::start(EVERYTHING).await;
+    assert_eq!(
+        put(&keeper, Some(&section("a1")), None, false, None).await,
+        Mirrored::Done
+    );
+    // This device wrote other rules last, or none.
+    let changes = keeper.changes().len();
+    for written in [Some("b0"), None] {
+        assert_eq!(
+            put(&keeper, Some(&section("b1")), written, false, None).await,
+            Mirrored::Others
+        );
+        assert_eq!(
+            put(&keeper, None, written, false, None).await,
+            Mirrored::Others
+        );
+    }
+    assert_eq!(keeper.changes().len(), changes);
+    assert_eq!(
+        put(&keeper, Some(&section("b1")), Some("b0"), true, None).await,
+        Mirrored::Done
+    );
+    let ours = keeper.script(script::NAME).unwrap();
+    assert_eq!(script::read(&ours).rules, Some(section("b1")));
+}
+
+#[tokio::test]
+async fn rules_ask_before_replacing_changes_made_to_the_script() {
+    let keeper = Keeper::start(EVERYTHING).await;
+    put(&keeper, Some(&section("a1")), None, false, None).await;
+    let edited = keeper
+        .script(script::NAME)
+        .unwrap()
+        .replace("Lists", "Listas");
+    keeper.put(script::NAME, &edited, true);
+    assert_eq!(
+        put(&keeper, Some(&section("a2")), Some("a1"), false, None).await,
+        Mirrored::Ask(Question::ReplaceChanges)
+    );
+    assert_eq!(
+        put(
+            &keeper,
+            Some(&section("a2")),
+            Some("a1"),
+            false,
+            Some(Question::ReplaceChanges)
+        )
+        .await,
+        Mirrored::Done
+    );
+    assert!(!script::read(&keeper.script(script::NAME).unwrap()).edited);
+}
+
+#[tokio::test]
+async fn a_server_that_only_sorts_mail_takes_rules_and_no_replies() {
+    let keeper = Keeper::start("fileinto imap4flags").await;
+    assert_eq!(read_from(&keeper).await, None);
+    assert_eq!(
+        put(&keeper, Some(&section("a1")), None, false, None).await,
+        Mirrored::Done
+    );
+    assert_eq!(keeper.active().as_deref(), Some(script::NAME));
+    // A server with neither never gets the password.
+    let keeper = Keeper::start("envelope").await;
+    let none = open(
+        &server_at(keeper.port),
+        "me@example.test",
+        "secret",
+        &USEFUL,
+    )
+    .await
+    .unwrap();
+    assert!(none.is_none());
 }

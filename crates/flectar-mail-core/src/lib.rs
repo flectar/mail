@@ -43,6 +43,7 @@ pub mod rules;
 pub mod scheduler;
 pub mod search;
 pub mod sender_identities;
+mod server_rules;
 mod sieve;
 pub mod signatures;
 pub mod smtp;
@@ -4098,31 +4099,54 @@ impl Core {
     /// Save `rule`, a new one (id 0) or a changed one, once it checks out. A
     /// new rule goes last. Rules sort mail that arrives from then on.
     pub async fn save_mail_rule(&self, rule: MailRule) -> Result<MailRule> {
-        self.db
+        let (saved, before) = self
+            .db
             .write(move |conn| {
                 rules::check(conn, &rule)?;
-                repo::rules::save(conn, &rule, now_ms())
+                let before = repo::rules::get(conn, rule.id)?.map(|before| before.account_id);
+                Ok((repo::rules::save(conn, &rule, now_ms())?, before))
             })
-            .await
+            .await?;
+        // A rule moved to another account leaves the first one's server.
+        match before {
+            Some(before) if before != saved.account_id => self.rules_changed(None),
+            _ => self.rules_changed(saved.account_id),
+        }
+        Ok(saved)
     }
 
     pub async fn delete_mail_rule(&self, id: i64) -> Result<()> {
-        self.db
-            .write(move |conn| repo::rules::delete(conn, id))
-            .await
+        let account_id = self
+            .db
+            .write(move |conn| {
+                let account_id = repo::rules::get(conn, id)?.and_then(|rule| rule.account_id);
+                repo::rules::delete(conn, id)?;
+                Ok(account_id)
+            })
+            .await?;
+        self.rules_changed(account_id);
+        Ok(())
     }
 
     pub async fn set_mail_rule_enabled(&self, id: i64, enabled: bool) -> Result<()> {
-        self.db
-            .write(move |conn| repo::rules::set_enabled(conn, id, enabled, now_ms()))
-            .await
+        let account_id = self
+            .db
+            .write(move |conn| {
+                repo::rules::set_enabled(conn, id, enabled, now_ms())?;
+                Ok(repo::rules::get(conn, id)?.and_then(|rule| rule.account_id))
+            })
+            .await?;
+        self.rules_changed(account_id);
+        Ok(())
     }
 
     /// Try the rules in the order of `ids` from now on.
     pub async fn reorder_mail_rules(&self, ids: Vec<i64>) -> Result<()> {
         self.db
             .write(move |conn| repo::rules::reorder(conn, &ids))
-            .await
+            .await?;
+        self.rules_changed(None);
+        Ok(())
     }
 
     /// The Inbox mail `rule` matches now, saved or not, to tell the user
@@ -4843,6 +4867,8 @@ impl Core {
             }
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        // Rules that file into it name it anew on the server.
+        self.rules_changed(Some(account_id));
         Ok(())
     }
 
@@ -4919,6 +4945,8 @@ impl Core {
             }
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        // Rules that filed into it stay on this device.
+        self.rules_changed(Some(account_id));
         Ok(())
     }
 

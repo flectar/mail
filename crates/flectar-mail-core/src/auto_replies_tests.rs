@@ -629,8 +629,11 @@ async fn jmap_servers_name_their_sieve_extensions_where_they_can() {
     let connected = jmap_connect(&origin).await;
     let scripts = crate::jmap::sieve::scripts(&connected).expect("draft extensions");
     assert!(crate::sieve::Scripts::has_extension(&scripts, "Include"));
-    // A server whose scripts can't reply offers no script replies.
+    // A server whose scripts can't reply offers no script replies, but
+    // takes rules.
     let (origin, _) = jmap_sieve_server(&["fileinto"], false).await;
     let connected = jmap_connect(&origin).await;
-    assert!(crate::jmap::sieve::scripts(&connected).is_none());
+    assert!(crate::jmap::sieve::replies(&connected).is_none());
+    let scripts = crate::jmap::sieve::scripts(&connected).expect("Sieve for rules");
+    assert!(crate::sieve::Scripts::has_extension(&scripts, "fileinto"));
 }

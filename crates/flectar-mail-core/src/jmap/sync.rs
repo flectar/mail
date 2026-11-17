@@ -7,7 +7,8 @@ use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
 use crate::jmap::client::{self, ConnectedClient};
 use crate::models::{
-    AccountConfig, Address, MailProtocol, SenderDeliveryStatus, ServerSearchCursor, now_ms, roles,
+    AccountConfig, Address, MailProtocol, SenderDeliveryStatus, ServerRulesState,
+    ServerSearchCursor, now_ms, roles,
 };
 use crate::sync::engine::{
     PriorityFetchCmd, SERVER_SEARCH_PAGES, ServerHits, SyncCmd, SyncCtx, caught_up,
@@ -68,7 +69,7 @@ async fn sync_auto_reply(
         .db
         .read(move |conn| repo::auto_replies::saved_at(conn, account_id))
         .await?;
-    let reply = match crate::jmap::sieve::scripts(connected) {
+    let reply = match crate::jmap::sieve::replies(connected) {
         Some(mut scripts) => crate::sieve::read_from(&mut scripts).await?,
         None => crate::jmap::vacation::read(connected).await?,
     };
@@ -83,6 +84,27 @@ async fn sync_auto_reply(
         ctx.bus.emit(CoreEvent::AutoReplyChanged { account_id });
     }
     Ok(())
+}
+
+/// Puts the account's rules on its server, when it runs Sieve scripts.
+async fn sync_server_rules(ctx: &SyncCtx, account_id: i64, connected: &ConnectedClient) {
+    let writer = crate::server_rules::writer(account_id);
+    let _writing = writer.lock().await;
+    let state = match crate::jmap::sieve::scripts(connected) {
+        Some(mut scripts) => {
+            match crate::server_rules::mirror(ctx, account_id, &mut scripts, None).await {
+                Ok(_) => return,
+                Err(error) => {
+                    tracing::warn!(account_id, %error, "JMAP rules on the server failed");
+                    ServerRulesState::Failed(error.to_string())
+                }
+            }
+        }
+        None => ServerRulesState::Unavailable,
+    };
+    if let Err(error) = crate::server_rules::store_state(ctx, account_id, state).await {
+        tracing::warn!(account_id, %error, "JMAP rules on the server unrecorded");
+    }
 }
 
 async fn sync_sender_identities(
@@ -153,12 +175,14 @@ async fn actor(
                     ),
                 }
                 // Replies set in webmail show too. Reading them never fails a sync.
-                if (crate::jmap::sieve::scripts(&connected).is_some()
+                if (crate::jmap::sieve::replies(&connected).is_some()
                     || crate::jmap::vacation::offered(&connected))
                     && let Err(error) = sync_auto_reply(&ctx, config.id, &connected).await
                 {
                     tracing::warn!(account_id = config.id, %error, "JMAP automatic replies failed");
                 }
+                // So do rules, nor do they fail a sync.
+                sync_server_rules(&ctx, config.id, &connected).await;
             }
             let started = now_ms();
             set_state(&ctx, config.id, "syncing").await;

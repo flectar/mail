@@ -1,8 +1,8 @@
 //! The user's Sieve scripts over JMAP (RFC 9661), on servers such as
-//! Stalwart and Cyrus. The app keeps its automatic replies there in a script
-//! of its own, as it does over ManageSieve (#239): those servers keep their
-//! own VacationResponse as a script too, which would turn the user's filters
-//! off.
+//! Stalwart and Cyrus. The app keeps its automatic replies (#239) and rules
+//! (#238) there in a script of its own, as it does over ManageSieve. Those
+//! servers keep their own VacationResponse as a script too, which would turn
+//! the user's filters off.
 
 use super::client::{ConnectedClient, map_error};
 use crate::error::{CoreError, Result};
@@ -23,30 +23,40 @@ pub(crate) struct JmapScripts<'a> {
     connected: &'a ConnectedClient,
     /// The extensions scripts may use.
     extensions: Vec<String>,
+    /// The Sieve implementation's name and version, if the server gave one.
+    implementation: String,
     /// Each script's id and blob, by name, as last listed.
     known: HashMap<String, (String, String)>,
 }
 
-/// The account's scripts, when its server runs Sieve scripts that can send
-/// automatic replies.
+/// The account's scripts, when its server runs Sieve scripts.
 pub(crate) fn scripts(connected: &ConnectedClient) -> Option<JmapScripts<'_>> {
     let session = connected.client.session();
     let account = session.account(&connected.account_id)?;
     let listed = account.capability(SIEVE_CAPABILITY)?;
     // RFC 9661 lists the extensions with the account. Earlier drafts, which
     // some servers still follow, listed them with the session.
-    let extensions = match listed {
-        Capabilities::Sieve(sieve) => sieve.sieve_extensions().to_vec(),
-        _ => session.sieve_capabilities()?.sieve_extensions().to_vec(),
+    let sieve = match listed {
+        Capabilities::Sieve(sieve) => sieve,
+        _ => session.sieve_capabilities()?,
     };
-    extensions
-        .iter()
-        .any(|extension| extension.eq_ignore_ascii_case("vacation"))
-        .then(|| JmapScripts {
-            connected,
-            extensions,
-            known: HashMap::new(),
-        })
+    // The client keeps the implementation without giving it out.
+    let implementation = serde_json::to_value(sieve)
+        .ok()
+        .and_then(|value| Some(value.get("implementation")?.as_str()?.to_owned()))
+        .unwrap_or_default();
+    Some(JmapScripts {
+        connected,
+        extensions: sieve.sieve_extensions().to_vec(),
+        implementation,
+        known: HashMap::new(),
+    })
+}
+
+/// The account's scripts, when its server runs Sieve scripts that can send
+/// automatic replies.
+pub(crate) fn replies(connected: &ConnectedClient) -> Option<JmapScripts<'_>> {
+    scripts(connected).filter(|scripts| scripts.has_extension("vacation"))
 }
 
 impl Scripts for JmapScripts<'_> {
@@ -54,6 +64,10 @@ impl Scripts for JmapScripts<'_> {
         self.extensions
             .iter()
             .any(|extension| extension.eq_ignore_ascii_case(name))
+    }
+
+    fn implementation(&self) -> &str {
+        &self.implementation
     }
 
     async fn list(&mut self) -> Result<Vec<Script>> {
@@ -207,10 +221,12 @@ fn refused(error: jmap_client::Error) -> CoreError {
             SetErrorType::OverQuota | SetErrorType::TooLarge => {
                 "Your server has no room for another filter script".into()
             }
-            _ => format!(
-                "Your server refused the automatic replies: {}",
-                set.description().unwrap_or("no reason given")
-            ),
+            _ => match set.description() {
+                Some(said) => format!(
+                    "Your server refused Flectar Mail's script. It said \u{201c}{said}\u{201d}"
+                ),
+                None => "Your server refused Flectar Mail's script".into(),
+            },
         }),
         _ => map_error(error),
     }

@@ -131,8 +131,10 @@ impl Core {
                 let connected = crate::jmap::client::connect(&config, &secret).await?;
                 // A server that runs Sieve scripts keeps them in the app's
                 // script, as over ManageSieve.
-                if let Some(mut scripts) = crate::jmap::sieve::scripts(&connected) {
+                if let Some(mut scripts) = crate::jmap::sieve::replies(&connected) {
                     let addresses = self.reply_addresses(account_id).await?;
+                    let writer = crate::server_rules::writer(account_id);
+                    let _writing = writer.lock().await;
                     match crate::sieve::save_to(&mut scripts, &reply, &addresses, allowed.as_ref())
                         .await?
                     {
@@ -155,6 +157,8 @@ impl Core {
                 )
                 .await?;
                 let addresses = self.reply_addresses(account_id).await?;
+                let writer = crate::server_rules::writer(account_id);
+                let _writing = writer.lock().await;
                 match crate::sieve::save(
                     &crate::sieve::server(&config),
                     &config.username,
@@ -189,13 +193,7 @@ impl Core {
     /// replies answer mail to.
     async fn reply_addresses(&self, account_id: i64) -> Result<Vec<String>> {
         self.db
-            .read(move |conn| {
-                Ok(repo::sender_identities::list(conn, account_id)?
-                    .into_iter()
-                    .filter(|identity| identity.is_verified() && !identity.is_wildcard())
-                    .map(|identity| identity.email)
-                    .collect())
-            })
+            .read(move |conn| crate::server_rules::reply_addresses(conn, account_id))
             .await
     }
 
