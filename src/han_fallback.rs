@@ -36,6 +36,8 @@
 //! - fontique files Simplified Chinese and text without a language under one
 //!   key, so mail marked `zh-CN` follows the UI order. When it keeps them
 //!   apart, give `zh-CN` its own key in `HanFonts::install`.
+//! - `ComposeFallback` is about cosmic-text, not fontique: it stays while the
+//!   composer uses cosmic-text.
 
 use parley::fontique::{Collection, FallbackKey, FamilyId, Language, Script};
 use std::cell::RefCell;
@@ -314,6 +316,7 @@ pub(crate) fn warm_up() {}
 pub(crate) struct HanFallback {
     fonts: HanFonts,
     generation: u64,
+    chain: Vec<FamilyId>,
 }
 
 impl HanFallback {
@@ -327,8 +330,12 @@ impl HanFallback {
     /// Install families [`HanFonts::discover`] found in `collection`.
     pub(crate) fn install_discovered(fonts: HanFonts, collection: &mut Collection) -> Self {
         let generation = GENERATION.load(Ordering::Acquire);
-        fonts.install(collection, &current_order());
-        Self { fonts, generation }
+        let chain = fonts.install(collection, &current_order());
+        Self {
+            fonts,
+            generation,
+            chain,
+        }
     }
 
     /// Reinstall when the UI language changed the order since the last
@@ -336,7 +343,7 @@ impl HanFallback {
     pub(crate) fn follow(&mut self, collection: &mut Collection) {
         let generation = GENERATION.load(Ordering::Acquire);
         if generation != self.generation {
-            self.fonts.install(collection, &current_order());
+            self.chain = self.fonts.install(collection, &current_order());
             self.generation = generation;
         }
     }
@@ -350,6 +357,7 @@ thread_local! {
 /// Install the fallback in the UI's collection, before any text is laid out.
 pub(crate) fn install_ui(collection: &mut Collection) {
     let fallback = HanFallback::install(collection);
+    remember_ui_names(collection, &fallback.chain);
     UI_FALLBACK.with(|ui| *ui.borrow_mut() = Some(fallback));
 }
 
@@ -371,9 +379,83 @@ pub(crate) fn set_ui_language(language: &str, collection: impl FnOnce() -> Colle
     GENERATION.fetch_add(1, Ordering::AcqRel);
     UI_FALLBACK.with(|ui| {
         if let Some(fallback) = ui.borrow_mut().as_mut() {
-            fallback.follow(&mut collection());
+            let mut collection = collection();
+            fallback.follow(&mut collection);
+            remember_ui_names(&mut collection, &fallback.chain);
         }
     });
+}
+
+/// The UI's Han fallback families by name, for the composer, whose
+/// cosmic-text font database is separate.
+static UI_NAMES: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+fn remember_ui_names(collection: &mut Collection, chain: &[FamilyId]) {
+    let names = chain
+        .iter()
+        .filter_map(|family| collection.family_name(*family).map(intern))
+        .collect();
+    *UI_NAMES.lock().unwrap_or_else(|error| error.into_inner()) = names;
+}
+
+/// cosmic-text takes fallback names as `&'static str`. The few Han family
+/// names are kept for the life of the process, each once.
+fn intern(name: &str) -> &'static str {
+    static NAMES: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+    let mut names = NAMES.lock().unwrap_or_else(|error| error.into_inner());
+    if let Some(known) = names.iter().find(|known| **known == name) {
+        return known;
+    }
+    let leaked: &'static str = Box::leak(name.into());
+    names.push(leaked);
+    leaked
+}
+
+/// cosmic-text's fallback lists for the composer, with the UI's Han
+/// families first, so typed CJK text uses the fonts the UI and mail bodies
+/// draw it with. cosmic-text picks one family by the system language.
+pub(crate) struct ComposeFallback {
+    platform: cosmic_text::PlatformFallback,
+    han: Vec<&'static str>,
+}
+
+impl ComposeFallback {
+    pub(crate) fn new(locale: &str) -> Self {
+        use cosmic_text::Fallback;
+        let platform = cosmic_text::PlatformFallback;
+        let ui = UI_NAMES
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let han = ui
+            .into_iter()
+            .chain(
+                platform
+                    .script_fallback(unicode_script::Script::Han, locale)
+                    .iter()
+                    .copied(),
+            )
+            .fold(Vec::new(), push_new);
+        Self { platform, han }
+    }
+}
+
+impl cosmic_text::Fallback for ComposeFallback {
+    fn common_fallback(&self) -> &[&'static str] {
+        self.platform.common_fallback()
+    }
+
+    fn forbidden_fallback(&self) -> &[&'static str] {
+        self.platform.forbidden_fallback()
+    }
+
+    fn script_fallback(&self, script: unicode_script::Script, locale: &str) -> &[&'static str] {
+        if script == unicode_script::Script::Han {
+            &self.han
+        } else {
+            self.platform.script_fallback(script, locale)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -511,6 +593,26 @@ mod tests {
         assert_eq!(fallbacks(&mut collection, None), [pan, platform]);
         assert_eq!(fallbacks(&mut collection, Some("ja")), [pan, platform]);
         assert_eq!(fallbacks(&mut collection, Some("zh-TW")), [pan, platform]);
+    }
+
+    #[test]
+    fn the_composer_tries_the_ui_families_first_for_han_only() {
+        use cosmic_text::Fallback;
+        use unicode_script::Script;
+        *UI_NAMES.lock().unwrap() = vec![intern("Heiti SC"), intern("Hiragino Sans")];
+        let fallback = ComposeFallback::new("ja-JP");
+        let platform = cosmic_text::PlatformFallback;
+        let han = fallback.script_fallback(Script::Han, "ja-JP");
+        assert_eq!(&han[..2], ["Heiti SC", "Hiragino Sans"]);
+        for name in platform.script_fallback(Script::Han, "ja-JP") {
+            assert_eq!(han.iter().filter(|known| *known == name).count(), 1);
+        }
+        assert_eq!(
+            fallback.script_fallback(Script::Hangul, "ja-JP"),
+            platform.script_fallback(Script::Hangul, "ja-JP")
+        );
+        assert_eq!(fallback.common_fallback(), platform.common_fallback());
+        assert!(std::ptr::eq(intern("Heiti SC"), intern("Heiti SC")));
     }
 
     #[test]

@@ -1877,6 +1877,7 @@ dependencies = [
  "tokio",
  "tracing",
  "unicode-properties",
+ "unicode-script",
  "unicode-segmentation",
  "url",
  "wayland-backend",
