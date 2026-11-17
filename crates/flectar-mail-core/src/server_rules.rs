@@ -79,9 +79,12 @@ fn resolve(conn: &Connection, account_id: i64) -> Result<Vec<Rule>> {
     repo::rules::enabled_for(conn, account_id)?
         .into_iter()
         .map(|rule| {
+            // Tabs are this device's alone, and the app puts mail in them as
+            // it sees it, so the rest of the rule can still go to the server.
             let actions = rule
                 .actions
                 .iter()
+                .filter(|action| !matches!(action, RuleAction::ShowIn { .. }))
                 .map(|action| {
                     Ok(match action {
                         RuleAction::Move { folder: id } => Action::Move {
@@ -111,6 +114,7 @@ fn resolve(conn: &Connection, account_id: i64) -> Result<Vec<Rule>> {
                         RuleAction::Junk => Action::Move {
                             folder: folder(role(roles::SPAM)?),
                         },
+                        RuleAction::ShowIn { .. } => unreachable!("left out above"),
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;

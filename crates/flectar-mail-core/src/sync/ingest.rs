@@ -276,11 +276,9 @@ impl Importer {
     /// threads that queued a notification.
     pub(crate) fn finish(self, conn: &Connection) -> Result<(Vec<i64>, Vec<i64>)> {
         if self.settings.auto_labels_enabled {
-            let splits = repo::splits::list(conn)?;
             for &thread_id in &self.thread_ids {
                 crate::route::route_thread_deterministic(
                     conn,
-                    &splits,
                     self.settings.ai_categorize,
                     thread_id,
                 )?;

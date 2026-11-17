@@ -1482,6 +1482,11 @@ pub enum RuleAction {
     Archive,
     Trash,
     Junk,
+    /// Under a tab of the Inbox: "important", "other", or "label:<id>" for
+    /// an automatic category. The conversation stays there.
+    ShowIn {
+        tab: String,
+    },
 }
 
 /// Where an account's rules run (#238), as last checked. The rules its
@@ -1986,46 +1991,6 @@ pub struct Snippet {
     pub usage_count: i64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SplitRuleQuery {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub senders: Option<Vec<String>>,
-    /// Never match threads from these addresses/domains, even when every
-    /// positive criterion holds. Exclusions alone never make a rule match.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exclude_senders: Option<Vec<String>>,
-    /// Match a recipient (To or Cc) address/domain.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recipients: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subject_contains: Option<Vec<String>>,
-    /// Match threads carrying any of these user (non-auto) label ids. Lets an
-    /// AI-applied label like "INVOICE" route mail into a tab even when the
-    /// subject holds no keyword.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub labels: Option<Vec<i64>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub is_automated: Option<bool>,
-    /// Match threads that have (true) or lack (false) an attachment.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub has_attachment: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SplitRule {
-    pub id: i64,
-    pub name: String,
-    pub position: i64,
-    pub query: SplitRuleQuery,
-    /// Where matching mail is routed. `None` = the rule is its own tab (legacy,
-    /// route key `"split:<id>"`); otherwise a route key: `"important"`,
-    /// `"other"`, or `"label:<id>"` to drop matches into an existing tab.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderInfo {
@@ -2208,9 +2173,6 @@ pub struct MailboxBadgeCounts {
     /// Unread per label id, ascending: manual labels count their members,
     /// categories the inbox mail routed to them.
     pub labels: Vec<(i64, i64)>,
-    /// Unread inbox mail per custom split id, ascending. Splits have no
-    /// sidebar row; notifications and the app icon count them.
-    pub splits: Vec<(i64, i64)>,
 }
 
 /// One deterministic action attached to an AI-matched automation. `value` is

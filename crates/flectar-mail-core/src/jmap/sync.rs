@@ -2312,7 +2312,7 @@ async fn execute_action(
             destroy_email_if_present(c, remote_id).await
         }
         "send" => send_action(ctx, config, c, action).await,
-        "snooze" | "unsnooze" => Ok(()),
+        "snooze" | "unsnooze" | "show_in" => Ok(()),
         other => Err(CoreError::Jmap(format!(
             "unsupported queued JMAP action: {other}"
         ))),
