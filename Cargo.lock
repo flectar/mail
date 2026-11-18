@@ -2321,6 +2321,7 @@ dependencies = [
  "encoding_rs",
  "futures",
  "hf-hub",
+ "html5ever 0.39.0",
  "jmap-client",
  "keyring",
  "lettre",
@@ -2350,6 +2351,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "webpki-roots",
+ "whatlang",
  "windows-sys 0.61.2",
  "zip",
 ]
@@ -3120,6 +3122,8 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash 0.1.5",
 ]
 
@@ -9234,6 +9238,15 @@ checksum = "5277f9d30e7087f1eeb0034206dce7d3377e76da017fdceb8aa4faebb1df68e2"
 dependencies = [
  "futures-intrusive",
  "wgpu",
+]
+
+[[package]]
+name = "whatlang"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5e8f38b596e2a359b755342473520a99421e43658548c79489ee221b728c107"
+dependencies = [
+ "hashbrown 0.15.5",
 ]
 
 [[package]]

@@ -50,6 +50,7 @@ pub mod signatures;
 pub mod smtp;
 pub mod sync;
 mod transfer;
+pub mod translate;
 pub mod unsubscribe;
 pub mod verification_code;
 
@@ -8251,8 +8252,9 @@ impl Core {
 
     pub async fn set_ai_key(&self, api_key: String) -> Result<()> {
         if api_key.trim().is_empty() {
-            credentials::delete_all_async(self.credentials.clone(), 0).await?;
-            return Ok(());
+            // Only this key: account 0 also holds the translation services'
+            // keys and the passwords of the services files go by link from.
+            return credentials::delete_async(self.credentials.clone(), 0, Slot::AiApiKey).await;
         }
         credentials::store_async(
             self.credentials.clone(),

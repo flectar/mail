@@ -67,6 +67,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/048_server_rules.sql")),
     Migration::Plain(include_str!("migrations/049_folder_since.sql")),
     Migration::Plain(include_str!("migrations/050_rule_tabs.sql")),
+    Migration::Plain(include_str!("migrations/051_message_translations.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -389,6 +390,7 @@ mod tests {
             "message_folders",
             "message_labels",
             "message_refs",
+            "message_translations",
             "messages",
             "messages_fts",
             "notification_outbox",

@@ -10792,6 +10792,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/whatlang/whatlang-0.18.0.crate",
+        "sha256": "f5e8f38b596e2a359b755342473520a99421e43658548c79489ee221b728c107",
+        "dest": "cargo/vendor/whatlang-0.18.0"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"f5e8f38b596e2a359b755342473520a99421e43658548c79489ee221b728c107\", \"files\": {}}",
+        "dest": "cargo/vendor/whatlang-0.18.0",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/whoami/whoami-2.1.3.crate",
         "sha256": "626c4bac6755d76ffc12cb01b2eac751db1996b9e0041de9aa02c8c211ddc82c",
         "dest": "cargo/vendor/whoami-2.1.3"

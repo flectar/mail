@@ -44,6 +44,11 @@ pub enum Slot {
     /// The app password of the storage service with this id that files go by link from,
     /// kept under account id 0 as the service belongs to no account.
     LinkServicePassword(i64),
+    /// The keys of the translation services (#240), under account id 0.
+    /// Each service keeps its own, so switching services keeps them.
+    DeeplKey,
+    LibreTranslateKey,
+    TranslationModelKey,
 }
 
 impl Slot {
@@ -65,6 +70,9 @@ impl Slot {
             Slot::LinkServicePassword(service_id) => {
                 format!("link_service_password:{service_id}").into()
             }
+            Slot::DeeplKey => "deepl_key".into(),
+            Slot::LibreTranslateKey => "libretranslate_key".into(),
+            Slot::TranslationModelKey => "translation_model_key".into(),
         }
     }
 }
