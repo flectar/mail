@@ -464,6 +464,8 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> microsoft_oauth_bundled: false;
     in property <bool> remote-images-available: true;
     in property <bool> account-transfer-supported: true;
+    // Hosts that gate first use on a persisted consent expose withdrawal here.
+    in property <bool> privacy-consent-withdrawable: false;
     in property <bool> sync_in_progress: false;
     in property <bool> account_setup_in_progress: false;
     in property <bool> oauth_in_progress: false;
@@ -591,6 +593,7 @@ export component SettingsDialog inherits Rectangle {
     // The account being removed keeps its mail only on this device (POP3).
     private property <bool> delete_account_device_mail: false;
     private property <bool> delete_local_mail_confirmation: false;
+    private property <bool> withdraw_privacy_confirmation: false;
     // Some account keeps its mail only on this device (POP3).
     in property <bool> has_device_mail: false;
     in property <bool> mail_export_running: false;
@@ -681,6 +684,7 @@ export component SettingsDialog inherits Rectangle {
     // Export the mail of one account, or of every POP3 account for -1.
     callback export_device_mail(int);
     callback delete_all_data();
+    callback withdraw_privacy_consent();
     callback load_storage_usage();
     pure callback settings-search-matches(string, string) -> bool;
     callback open-link(string);
@@ -889,6 +893,7 @@ export component SettingsDialog inherits Rectangle {
             : section == "Services"
             ? @tr("services flectar base account sign in subscription paid sync devices business email custom domain mailbox")
             : @tr("about version credits contributors license flectar") + " " + @tr("Privacy policy")
+                + (root.privacy-consent-withdrawable ? " " + @tr("Withdraw consent…") : "")
                 + (Updates.offered ? " " + @tr("updates new version release download check") : "");
         return root.settings-search-matches(terms, root.settings-search-query);
     }
@@ -3661,6 +3666,13 @@ export component SettingsDialog inherits Rectangle {
                                         hover-background: root.accent-soft;
                                         clicked => { root.open-link(root.privacy-policy-url); }
                                     }
+                                    // Hosts that gate first use on a stored consent let it be withdrawn here.
+                                    if root.privacy-consent-withdrawable : Rectangle {
+                                        height: root.compact ? withdraw-button.y + withdraw-button.height + 8px : max(withdraw-note.y + withdraw-note.height, withdraw-button.y + withdraw-button.height) + 8px;
+                                        Image { x: 10px; y: withdraw-note.y + (withdraw-note.height - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/check-circle.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
+                                        withdraw-note := Text { x: 48px; y: 10px; width: root.compact ? parent.width - 48px : withdraw-button.x - 68px; height: max(42px, self.preferred-height); text: @tr("You agreed to this policy when you started Flectar Mail. Withdrawing consent closes the app until you agree again."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
+                                        withdraw-button := Button { x: root.compact ? 0px : parent.width - self.width; y: root.compact ? withdraw-note.y + withdraw-note.height + 12px : withdraw-note.y + (withdraw-note.height - self.height) / 2; width: root.compact ? parent.width : max(170px, self.content-width); text: @tr("Withdraw consent…"); clicked => { root.withdraw_privacy_confirmation = true; } }
+                                    }
                                 }
                             }
 
@@ -4326,6 +4338,24 @@ export component SettingsDialog inherits Rectangle {
             body-color: root.body-text;
             muted-color: root.secondary-text;
             confirmed => { root.delete_all_data(); }
+        }
+
+        ConfirmationDialog {
+            width: parent.width;
+            height: parent.height;
+            open <=> root.withdraw_privacy_confirmation;
+            title: @tr("Withdraw privacy consent?");
+            description: @tr("Flectar Mail will stop and show the privacy consent screen the next time you open it.");
+            detail: @tr("Your local mail and settings stay on this device. You can delete them on the Storage page in Settings.");
+            confirm-label: @tr("Withdraw consent");
+            cancel-label: @tr("Cancel");
+            icon: @image-url("../icons/lucide/outline/shield.svg");
+            surface: root.surface;
+            dialog-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-color: root.body-text;
+            muted-color: root.secondary-text;
+            confirmed => { root.withdraw_privacy_consent(); }
         }
 
         ConfirmationDialog {
