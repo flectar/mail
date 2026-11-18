@@ -2,10 +2,15 @@
 //!
 //! Each host reads its platform's settings through [`SystemProxies`]. They
 //! answer with proxy URLs in the form GLib and the desktop portal use:
-//! `http://proxy:3128`, `socks5://proxy:1080`, `direct://`. Without a host
-//! source, the environment's proxy variables are read as curl reads them.
+//! `http://proxy:3128`, `socks5://proxy:1080`, `direct://`. The environment's
+//! proxy variables come first when any is set, as in .NET, so a program
+//! started with its own proxy settings uses them. Without either, connections
+//! go direct.
 
 use super::{Bypass, Credentials, ProxyKind, ProxyServer, Route};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use url::Url;
 
 /// The system's proxy settings, as the host reads them.
@@ -14,9 +19,102 @@ pub trait SystemProxies: Send + Sync {
     /// to try them, as URLs such as `http://proxy:3128`, `socks5://proxy:1080`
     /// or `direct://`. An empty list means a direct connection.
     ///
-    /// Connections ask as they open, from async code: answer quickly, and
-    /// keep anything slow, such as a proxy auto-configuration script, cached.
+    /// It may take a while, as when it runs a proxy auto-configuration
+    /// script. Connections ask from a thread that can wait, and answers are
+    /// kept for a minute.
     fn lookup(&self, url: &Url) -> Vec<Url>;
+}
+
+impl<T: SystemProxies + ?Sized> SystemProxies for Box<T> {
+    fn lookup(&self, url: &Url) -> Vec<Url> {
+        (**self).lookup(url)
+    }
+}
+
+/// A host's source with its answers kept, per scheme, server and port, for a
+/// minute and until the proxy settings change. A platform can run a proxy
+/// auto-configuration script for each server, so asking again for every
+/// connection would cost time.
+pub(super) struct Cached {
+    source: Box<dyn SystemProxies>,
+    /// Answers by `scheme://host:port`.
+    entries: Mutex<HashMap<String, Kept>>,
+    /// Which proxy settings are in force; see [`super::generation`].
+    generation: fn() -> u64,
+}
+
+struct Kept {
+    at: Instant,
+    generation: u64,
+    proxies: Vec<Url>,
+}
+
+impl Cached {
+    /// How long an answer is kept: the system's settings can change at any
+    /// time, as when the computer joins another network.
+    const KEEP: Duration = Duration::from_secs(60);
+    /// Answers kept at most, so a long session doesn't collect every server.
+    const MOST: usize = 256;
+
+    pub(super) fn new(source: impl SystemProxies + 'static) -> Self {
+        Self {
+            source: Box::new(source),
+            entries: Mutex::new(HashMap::new()),
+            generation: super::generation,
+        }
+    }
+}
+
+impl SystemProxies for Cached {
+    fn lookup(&self, url: &Url) -> Vec<Url> {
+        let key = format!(
+            "{}://{}:{}",
+            url.scheme(),
+            url.host_str().unwrap_or_default(),
+            url.port_or_known_default().unwrap_or_default()
+        );
+        let generation = (self.generation)();
+        let entries = || {
+            self.entries
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        };
+        if let Some(kept) = entries().get(&key)
+            && kept.generation == generation
+            && kept.at.elapsed() < Self::KEEP
+        {
+            return kept.proxies.clone();
+        }
+        // Asked without the lock held, and without holding up the other
+        // tasks of an async worker thread.
+        let proxies = blocking(|| self.source.lookup(url));
+        let mut entries = entries();
+        if entries.len() >= Self::MOST {
+            entries.clear();
+        }
+        entries.insert(
+            key,
+            Kept {
+                at: Instant::now(),
+                generation,
+                proxies: proxies.clone(),
+            },
+        );
+        proxies
+    }
+}
+
+/// Run `work`, which may block for a while. On a worker thread of Tokio's
+/// multi-threaded runtime, the worker's other tasks move to another thread
+/// meanwhile. Elsewhere, as on a thread for blocking work, it just runs.
+fn blocking<T>(work: impl FnOnce() -> T) -> T {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(work)
+        }
+        _ => work(),
+    }
 }
 
 /// The proxy variables of the environment, read as reqwest read them before
@@ -37,10 +135,14 @@ pub struct Environment {
 impl Environment {
     /// The process's own variables, read once: they don't change while it
     /// runs.
-    pub fn read() -> Self {
+    pub fn read() -> &'static Self {
         static READ: std::sync::OnceLock<Environment> = std::sync::OnceLock::new();
         READ.get_or_init(|| Self::from_lookup(|name| std::env::var(name).ok()))
-            .clone()
+    }
+
+    /// Whether a variable names a proxy. `NO_PROXY` alone doesn't count.
+    fn is_set(&self) -> bool {
+        self.http.is_some() || self.https.is_some() || self.all.is_some()
     }
 
     pub(crate) fn from_lookup(variable: impl Fn(&str) -> Option<String>) -> Self {
@@ -68,6 +170,18 @@ impl Environment {
                     .unwrap_or_default(),
             ),
         }
+    }
+}
+
+/// What lookups ask: the environment when one of its variables names a
+/// proxy, the host's source otherwise, and the empty environment without one.
+fn chosen<'a>(
+    environment: &'a Environment,
+    host: Option<&'a dyn SystemProxies>,
+) -> &'a dyn SystemProxies {
+    match host {
+        Some(host) if !environment.is_set() => host,
+        _ => environment,
     }
 }
 
@@ -104,18 +218,21 @@ pub(super) fn mail_routes(
     host: &str,
     port: u16,
 ) -> Vec<Route> {
+    routes_from(chosen(Environment::read(), source), scheme, host, port)
+}
+
+fn routes_from(source: &dyn SystemProxies, scheme: &str, host: &str, port: u16) -> Vec<Route> {
     let Some(url) = target_url(scheme, host, port) else {
         return vec![Route::Direct];
     };
-    let environment;
-    let source = match source {
-        Some(source) => source,
-        None => {
-            environment = Environment::read();
-            &environment
+    let mut routes = Vec::new();
+    for route in source.lookup(&url).iter().filter_map(mail_route) {
+        // Systems that don't say which SOCKS version a server speaks name it
+        // once for each, and two of those versions go the same way here.
+        if !routes.contains(&route) {
+            routes.push(route);
         }
-    };
-    let routes: Vec<Route> = source.lookup(&url).iter().filter_map(mail_route).collect();
+    }
     if routes.is_empty() {
         // No proxy for mail: no SOCKS proxy, or no proxy at all.
         return vec![Route::Direct];
@@ -140,14 +257,10 @@ fn mail_route(proxy: &Url) -> Option<Route> {
 
 /// The proxy for an HTTP request when the app follows the system's settings.
 pub(super) fn http_proxy(source: Option<&dyn SystemProxies>, url: &Url) -> Option<Url> {
-    let environment;
-    let source = match source {
-        Some(source) => source,
-        None => {
-            environment = Environment::read();
-            &environment
-        }
-    };
+    proxy_from(chosen(Environment::read(), source), url)
+}
+
+fn proxy_from(source: &dyn SystemProxies, url: &Url) -> Option<Url> {
     let proxy = source.lookup(url).into_iter().next()?;
     let mut proxy = match proxy.scheme() {
         "direct" => return None,
