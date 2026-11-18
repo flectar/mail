@@ -171,8 +171,8 @@ handled (and asserted) in the script, do not "simplify" them away:
   the stored consent. Consent copy comes from HarmonyOS string resources
   (English, Simplified Chinese, Spanish, Turkish and Russian, with English as
   the base fallback); Traditional Chinese falls back to English. The
-  notification permission is requested only after consent, when the first
-  account is added.
+  notification permission is requested only after consent, once an account
+  exists, and the page records that it asked so the prompt shows once.
 - **Clipboard**: copying needs no permission, but pasting reads the system
   pasteboard and therefore requires `ohos.permission.READ_PASTEBOARD`, an ACL
   (restricted) permission. The module declares it and the page requests it on

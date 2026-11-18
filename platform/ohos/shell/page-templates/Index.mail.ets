@@ -1118,8 +1118,8 @@ struct Index {
   }
 
   // The page owns the system notification state. Rust asks through the host
-  // hook when the first account is added; this keeps the cache current so the
-  // request is not repeated after a refusal.
+  // hook once an account exists; this keeps the cache current so the request
+  // is not repeated after a refusal.
   private refreshNotificationAvailability(): void {
     notificationManager.isNotificationEnabled()
       .then((enabled: boolean): void => {
@@ -1144,9 +1144,9 @@ struct Index {
     }
   }
 
-  // Rust calls this once, when the first account is added. A refusal must not
-  // bring the prompt back on the next account change, so the page records that
-  // it asked; only a failure to show the dialog leaves a retry open.
+  // Rust calls this when the accounts change, starting with the first one. A
+  // refusal must not bring the prompt back, so the page records that it asked;
+  // only a failure to show the dialog leaves a retry open.
   private requestNotificationPermission(): void {
     if (this.notificationAsked) {
       this.refreshNotificationAvailability();
