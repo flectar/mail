@@ -47,6 +47,17 @@ upstream source is <https://github.com/smithay/smithay-clipboard>. The source
 checksum, the patch, and its removal condition are documented in
 [`patches/smithay-clipboard/README.md`](patches/smithay-clipboard/README.md).
 
+## jmap-client
+
+Flectar Mail talks to JMAP servers with the locally patched `jmap-client` 0.4.2
+crate, copyright © Stalwart Labs LLC and used under its `MIT` option. It
+retains its license texts in
+[`crates/jmap-client/LICENSE-MIT`](crates/jmap-client/LICENSE-MIT) and
+[`crates/jmap-client/LICENSE-APACHE`](crates/jmap-client/LICENSE-APACHE). The
+upstream source is <https://github.com/stalwartlabs/jmap-client>. Its proxy
+patch, source checksum, and removal condition are documented in
+[`patches/jmap-client/README.md`](patches/jmap-client/README.md).
+
 ## Blitz
 
 The locally patched `blitz-dom` and `blitz-paint` crates originate from the

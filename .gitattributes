@@ -5,3 +5,4 @@ crates/i-slint-renderer-software/** linguist-vendored -whitespace
 crates/smithay-clipboard/** linguist-vendored -whitespace
 crates/fontique/** linguist-vendored -whitespace
 crates/vello/** linguist-vendored -whitespace
+crates/jmap-client/** linguist-vendored -whitespace
