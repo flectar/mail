@@ -1,8 +1,9 @@
 //! The AI server (#241). Settings → AI is where the user sets it up, for the
 //! app's AI features and translation by a model, and saves their own prompts.
 //! The card above a conversation shows its summary, or the answer to a prompt
-//! on text the user selected. Nothing is preset, and nothing goes to the
-//! server until the user uses a feature.
+//! on text the user selected, and the composer's writing tools take their
+//! prompts from here too. Nothing is preset, and nothing goes to the server
+//! until the user uses a feature.
 
 use super::*;
 use flectar_mail_core::Core;
@@ -72,6 +73,26 @@ fn failure(error: &CoreError) -> (&'static str, String) {
     }
 }
 
+/// What went wrong, for a notice outside Settings.
+pub(super) fn failure_notice(error: &CoreError) -> UiMessage {
+    if matches!(error, CoreError::AiNotConfigured) {
+        return UiMessage::plain("Set up an AI server in Settings to use AI features.");
+    }
+    match failure(error) {
+        ("offline", _) => UiMessage::plain(
+            "The AI server can't be reached. Check its address in Settings and that it's running.",
+        ),
+        ("address", _) => UiMessage::plain(
+            "The AI server's address in Settings has to start with https://, or with http://localhost for a server on this computer.",
+        ),
+        ("key", _) => UiMessage::plain("The AI server didn't accept the key in Settings."),
+        (_, detail) => UiMessage::detail(
+            "The AI server didn't answer as expected. It said: {}",
+            detail,
+        ),
+    }
+}
+
 /// Runs `work` with the core on the runtime and `then` with its result on
 /// the UI thread.
 fn with_core<T: Send + 'static>(
@@ -105,7 +126,7 @@ pub(super) fn open_settings(app: &AppWindow) {
     app.invoke_open_settings();
 }
 
-// ---- For translation and the card -------------------------------------------
+// ---- For translation, the card and the composer -----------------------------
 
 /// An AI server and model are set up.
 pub(super) fn ready() -> bool {
@@ -125,6 +146,15 @@ fn prompt(index: i32) -> Option<String> {
             .get(index)
             .map(|prompt| prompt.instruction.clone())
     })
+}
+
+/// What Proofread, -1, or the user's prompt `index` asks of a draft.
+pub(super) fn instruction(index: i32) -> Option<String> {
+    if index < 0 {
+        Some(flectar_mail_core::ai::PROOFREAD.to_owned())
+    } else {
+        prompt(index)
+    }
 }
 
 // ---- The card above the conversation ---------------------------------------
