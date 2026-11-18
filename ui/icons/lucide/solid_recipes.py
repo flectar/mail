@@ -163,6 +163,8 @@ def build(sources):
             "Solid head; original eyes become cutouts; antenna and ears stay lines."),
         "gear": Recipe("settings", cut(solid(p("settings", 0)), solid(p("settings", 1))),
             "Solid gear; central hole."),
+        "globe": Recipe("globe", cut(solid(p("globe", 0)), line(p("globe", 1)), line(p("globe", 2))),
+            "Solid globe; meridians and equator cutouts."),
         "inbox": Recipe("inbox", cut(solid(p("inbox", 1)), line(p("inbox", 0), 1.8)),
             "Solid tray; original lip becomes a cutout."),
         "inbox-flectar": Recipe(None, inbox_flectar,

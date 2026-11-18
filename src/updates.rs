@@ -368,27 +368,28 @@ pub(crate) struct Release {
 
 /// Ask GitHub for the newest release after `current` on its channel.
 pub(crate) async fn newest_release(current: &Version) -> Result<Option<Release>, String> {
-    let client = reqwest::Client::builder()
-        // GitHub wants every request to name its client. Nothing else about
-        // the app, the device or its user goes with it.
-        .user_agent("Flectar Mail update check")
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
-        // GitHub redirects the API of a moved repository: follow that only
-        // within the API, over HTTPS.
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            let url = attempt.url();
-            if attempt.previous().len() < 3
-                && url.scheme() == "https"
-                && url.host_str() == Some("api.github.com")
-            {
-                attempt.follow()
-            } else {
-                attempt.stop()
-            }
-        }))
-        .build()
-        .map_err(|error| format!("could not create the update client: {error}"))?;
+    let client =
+        flectar_mail_core::net::proxy::http_builder(flectar_mail_core::net::proxy::Owner::App)
+            // GitHub wants every request to name its client. Nothing else about the
+            // app, the device or its user goes with it.
+            .user_agent("Flectar Mail update check")
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            // GitHub redirects the API of a moved repository: follow that only
+            // within the API, over HTTPS.
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                let url = attempt.url();
+                if attempt.previous().len() < 3
+                    && url.scheme() == "https"
+                    && url.host_str() == Some("api.github.com")
+                {
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }))
+            .build()
+            .map_err(|error| format!("could not create the update client: {error}"))?;
     let mut response = client
         .get(RELEASES_URL)
         .header(ACCEPT, "application/vnd.github+json")

@@ -1,6 +1,7 @@
 import { AccountMailPreferencesPanel } from "../components/account-mail-preferences.slint";
 import { LargeFilesCard } from "../link-services.slint";
 import { TranslationPage } from "../translation.slint";
+import { NetworkPage } from "../network.slint";
 import { InvitationSettings } from "../invitation-settings.slint";
 import { RendererSettings } from "../renderer-settings.slint";
 import { WindowChrome } from "../window-chrome.slint";
@@ -857,6 +858,7 @@ export component SettingsDialog inherits Rectangle {
             : section == "Notifications" ? SettingsIconPalette.notifications
             : section == "Shortcuts" ? SettingsIconPalette.shortcuts
             : section == "Data" ? SettingsIconPalette.storage
+            : section == "Network" ? SettingsIconPalette.network
             : section == "Agents" ? SettingsIconPalette.agents
             : section == "Services" ? SettingsIconPalette.services
             : SettingsIconPalette.about;
@@ -888,6 +890,8 @@ export component SettingsDialog inherits Rectangle {
             ? @tr("shortcuts keyboard keys compose search archive spam junk trash delete navigation messages reading find zoom caret tabs")
             : section == "Data"
             ? @tr("storage data usage mail attachments files databases backup snapshot import export delete")
+            : section == "Network"
+            ? @tr("network proxy socks http connect internet connection firewall tor vpn office no proxy")
             : section == "Agents"
             ? @tr("ai agents assistant local model llm mcp model context protocol automation connected apps access activity")
             : section == "Services"
@@ -903,6 +907,7 @@ export component SettingsDialog inherits Rectangle {
         || root.settings-section-visible("Rules") || root.settings-section-visible("Translation")
         || root.settings-section-visible("Notifications")
         || root.settings-section-visible("Shortcuts") || root.settings-section-visible("Data")
+        || root.settings-section-visible("Network")
         || root.settings-section-visible("Agents")
         || root.settings-section-visible("Services") || root.settings-section-visible("About");
 
@@ -974,6 +979,7 @@ export component SettingsDialog inherits Rectangle {
                 : root.settings-section-visible("Notifications") ? "Notifications"
                 : root.settings-section-visible("Shortcuts") ? "Shortcuts"
                 : root.settings-section-visible("Data") ? "Data"
+                : root.settings-section-visible("Network") ? "Network"
                 : root.settings-section-visible("Agents") ? "Agents"
                 : root.settings-section-visible("Services") ? "Services"
                 : root.settings-section-visible("About") ? "About" : root.settings_tab;
@@ -1217,6 +1223,7 @@ export component SettingsDialog inherits Rectangle {
                         if root.settings-section-visible("Notifications") : SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; } }
                         if root.settings-section-visible("Shortcuts") : SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; } }
                         if root.settings-section-visible("Data") : SettingsNavItem { text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; } }
+                        if root.settings-section-visible("Network") : SettingsNavItem { text: @tr("Network"); icon: @image-url("../icons/lucide/filled/globe.svg"); icon-color: root.settings-icon-color("Network"); selected: root.settings_tab == "Network"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Network"; } }
                         if root.settings-section-visible("Agents") : SettingsNavItem { text: @tr("AI agents"); icon: @image-url("../icons/lucide/filled/bot.svg"); icon-color: root.settings-icon-color("Agents"); selected: root.settings_tab == "Agents"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Agents"; } }
                         if root.settings-section-visible("Services") : SettingsNavItem { text: @tr("Services"); icon: @image-url("../icons/lucide/filled/cloud.svg"); icon-color: root.settings-icon-color("Services"); selected: root.settings_tab == "Services"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Services"; } }
                         if root.settings-section-visible("About") : SettingsNavItem { text: @tr("About"); icon: @image-url("../icons/lucide/filled/info.svg"); icon-color: root.settings-icon-color("About"); selected: root.settings_tab == "About"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "About"; } }
@@ -3025,6 +3032,35 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
+                    network-settings-scroll := ScrollView {
+                        visible: root.settings_tab == "Network";
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
+                        VerticalBox {
+                            x: root.compact ? 16px : max(24px, (network-settings-scroll.visible-width - 920px) / 2);
+                            width: root.compact ? network-settings-scroll.visible-width - 32px : min(920px, network-settings-scroll.visible-width - 48px);
+                            padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px;
+                            padding-bottom: 32px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            SettingsPageTitle { label: @tr("Network"); title-color: root.title-color; }
+                            NetworkPage {
+                                compact: root.compact;
+                                shown: root.settings_tab == "Network";
+                                surface: root.surface;
+                                border-subtle: root.border-subtle;
+                                heading: root.heading;
+                                body-text: root.body-text;
+                                secondary-text: root.secondary-text;
+                                faint-text: root.faint-text;
+                                error-color: #d04a43;
+                            }
+                        }
+                    }
+
                     data-scroll := ScrollView {
                         visible: root.settings_tab == "Data";
                         width: parent.width;
@@ -3710,6 +3746,7 @@ export component SettingsDialog inherits Rectangle {
                     : root.settings_tab == "Notifications" ? @tr("Notifications")
                     : root.settings_tab == "Shortcuts" ? @tr("Shortcuts")
                     : root.settings_tab == "Data" ? @tr("Storage")
+                    : root.settings_tab == "Network" ? @tr("Network")
                     : root.settings_tab == "Agents" ? @tr("AI agents")
                     : root.settings_tab == "Services" ? @tr("Services") : @tr("About");
                 show-leading: true;
@@ -3784,6 +3821,7 @@ export component SettingsDialog inherits Rectangle {
                     if root.settings-section-visible("Notifications") : SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Shortcuts") : SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Data") : SettingsNavItem { text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Network") : SettingsNavItem { text: @tr("Network"); icon: @image-url("../icons/lucide/filled/globe.svg"); icon-color: root.settings-icon-color("Network"); selected: root.settings_tab == "Network"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Network"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Agents") : SettingsNavItem { text: @tr("AI agents"); icon: @image-url("../icons/lucide/filled/bot.svg"); icon-color: root.settings-icon-color("Agents"); selected: root.settings_tab == "Agents"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Agents"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Services") : SettingsNavItem { text: @tr("Services"); icon: @image-url("../icons/lucide/filled/cloud.svg"); icon-color: root.settings-icon-color("Services"); selected: root.settings_tab == "Services"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Services"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("About") : SettingsNavItem { text: @tr("About"); icon: @image-url("../icons/lucide/filled/info.svg"); icon-color: root.settings-icon-color("About"); selected: root.settings_tab == "About"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "About"; root.compact-nav-open = false; } }
