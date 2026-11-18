@@ -449,6 +449,13 @@ pub(super) fn refresh_local_mail(
     });
 }
 
+/// Whether this update adds the first account after the window is up: the
+/// moment a phone asks about notifications.
+#[cfg(any(mobile, test))]
+fn first_account_added(hydrated: bool, known_accounts: usize, current_accounts: usize) -> bool {
+    hydrated && known_accounts == 0 && current_accounts > 0
+}
+
 pub(super) fn update_connected_accounts(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -468,6 +475,17 @@ pub(super) fn update_connected_accounts(
                     .iter()
                     .any(|known| known.id == account.id)
             })
+    };
+    // The first account is the clear moment to ask about notifications: the
+    // prompt only appears for a reason, and the system only shows it once.
+    #[cfg(mobile)]
+    let first_account = {
+        let state = state.borrow();
+        first_account_added(
+            app.get_startup_hydrated(),
+            state.connected_accounts.len(),
+            accounts.len(),
+        )
     };
     let scope_changed = {
         let mut state = state.borrow_mut();
@@ -494,6 +512,10 @@ pub(super) fn update_connected_accounts(
         state.set_connected_accounts(accounts)
     };
     refresh_connected_accounts(app, state);
+    #[cfg(mobile)]
+    if first_account {
+        crate::notifications::ui::ask_for_permission(app);
+    }
     // Adding or removing an account can make the selected mailbox invisible.
     // Reload as a navigation so pages for the previous selection are retired.
     if scope_changed {
@@ -557,8 +579,6 @@ pub(super) fn apply_connected_account_rows(app: &AppWindow, rows: Vec<AccountRow
     set_compose_account(app, selected);
     app.set_connected_accounts(ModelRc::new(VecModel::from(rows)));
     composer::accounts_changed(app);
-    #[cfg(background_checks)]
-    crate::notifications::ui::ask_for_permission(app);
 }
 
 /// New mail starts from the account the last message was written from.
@@ -844,5 +864,28 @@ mod mail_transport_suggestion_tests {
         assert_eq!(host(MailProtocol::Pop3), Some("pop.example.com"));
         assert_eq!(host(MailProtocol::Imap), Some("imap.example.com"));
         assert_eq!(host(MailProtocol::Jmap), None);
+    }
+}
+
+#[cfg(test)]
+mod account_notification_tests {
+    use super::first_account_added;
+
+    #[test]
+    fn asks_when_the_first_account_is_added_after_startup() {
+        assert!(first_account_added(true, 0, 1));
+    }
+
+    #[test]
+    fn stays_quiet_at_startup_and_for_later_account_changes() {
+        // The startup snapshot arrives before the window is hydrated, so it
+        // must not bring the prompt back on every launch.
+        assert!(!first_account_added(false, 0, 1));
+        // No accounts yet, or no change.
+        assert!(!first_account_added(true, 0, 0));
+        // A second account, a removal, or an unchanged list is not the first.
+        assert!(!first_account_added(true, 1, 2));
+        assert!(!first_account_added(true, 1, 0));
+        assert!(!first_account_added(true, 2, 1));
     }
 }

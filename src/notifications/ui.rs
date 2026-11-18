@@ -231,9 +231,9 @@ pub(crate) fn came_to_front() {
 
 /// On a phone, ask the user to allow notifications while the app is in
 /// front with an account to tell of, rather than once mail arrives: a check
-/// in the background can't ask. Called as the app comes to the front and
-/// when the accounts change.
-#[cfg(background_checks)]
+/// in the background can't ask. Called when the first account is added, and
+/// as the app comes to the front where the system wakes it to check.
+#[cfg(mobile)]
 pub(crate) fn ask_for_permission(app: &AppWindow) {
     use slint::Model;
     if !app.get_notifications_enabled()
