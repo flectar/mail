@@ -1,7 +1,8 @@
 //! The AI server (#241). Settings → AI is where the user sets it up, for the
 //! app's AI features and translation by a model, and saves their own prompts.
-//! Nothing is preset, and nothing goes to the server until the user uses a
-//! feature.
+//! The card above a conversation shows its summary, or the answer to a prompt
+//! on text the user selected. Nothing is preset, and nothing goes to the
+//! server until the user uses a feature.
 
 use super::*;
 use flectar_mail_core::Core;
@@ -15,6 +16,13 @@ struct Env {
     runtime: tokio::runtime::Handle,
 }
 
+/// What the card asked the server for, to ask again.
+#[derive(Clone)]
+enum Request {
+    Summary(i64),
+    Answer { instruction: String, text: String },
+}
+
 thread_local! {
     static ENV: RefCell<Option<Env>> = const { RefCell::new(None) };
     /// The settings as last loaded.
@@ -25,6 +33,15 @@ thread_local! {
     /// The models a server offered, in the order Settings lists them, and
     /// that server's address.
     static MODELS: RefCell<(String, Vec<String>)> = const { RefCell::new((String::new(), Vec::new())) };
+    /// The conversation the reader shows, and what tells it from others: its
+    /// thread, or the message when it has none.
+    static SHOWN_THREAD: Cell<Option<i64>> = const { Cell::new(None) };
+    static SHOWN_KEY: Cell<Option<i64>> = const { Cell::new(None) };
+    /// The conversation the card is for, what it asked, and a count that
+    /// tells its answer from those it asked for before.
+    static CARD_KEY: Cell<Option<i64>> = const { Cell::new(None) };
+    static CARD_REQUEST: RefCell<Option<Request>> = const { RefCell::new(None) };
+    static CARD_GENERATION: Cell<u64> = const { Cell::new(0) };
 }
 
 fn core(state: &Rc<RefCell<InboxState>>) -> Option<Arc<Core>> {
@@ -82,11 +99,190 @@ fn strings(list: impl IntoIterator<Item = impl AsRef<str>>) -> ModelRc<SharedStr
     ))
 }
 
-// ---- For translation --------------------------------------------------------
+/// Opens Settings at the AI page.
+pub(super) fn open_settings(app: &AppWindow) {
+    app.set_settings_tab("AI".into());
+    app.invoke_open_settings();
+}
+
+// ---- For translation and the card -------------------------------------------
 
 /// An AI server and model are set up.
 pub(super) fn ready() -> bool {
     SETTINGS.with_borrow(AiSettings::ready)
+}
+
+/// The names of the user's prompts, as menus list them.
+pub(super) fn prompt_names() -> ModelRc<SharedString> {
+    SETTINGS.with_borrow(|settings| strings(settings.prompts.iter().map(|prompt| &prompt.name)))
+}
+
+fn prompt(index: i32) -> Option<String> {
+    let index = usize::try_from(index).ok()?;
+    SETTINGS.with_borrow(|settings| {
+        settings
+            .prompts
+            .get(index)
+            .map(|prompt| prompt.instruction.clone())
+    })
+}
+
+// ---- The card above the conversation ---------------------------------------
+
+/// The reader shows `message`: a card for another conversation goes.
+pub(super) fn project(app: &AppWindow, message: &MailMessage) {
+    let key = message.thread_id.unwrap_or(-i64::from(message.id));
+    SHOWN_THREAD.set(message.thread_id);
+    SHOWN_KEY.set(Some(key));
+    if CARD_KEY.get().is_some_and(|card| card != key) {
+        close_card(app);
+    }
+}
+
+/// No message is shown.
+pub(super) fn clear(app: &AppWindow) {
+    SHOWN_THREAD.set(None);
+    SHOWN_KEY.set(None);
+    close_card(app);
+}
+
+fn close_card(app: &AppWindow) {
+    CARD_GENERATION.set(CARD_GENERATION.get() + 1);
+    CARD_KEY.set(None);
+    CARD_REQUEST.set(None);
+    let ui = app.global::<AiSummary>();
+    ui.set_state("".into());
+    ui.set_replies_state("".into());
+    ui.set_replies(ModelRc::default());
+}
+
+fn card_failed(app: &AppWindow, error: &CoreError) {
+    let ui = app.global::<AiSummary>();
+    let (kind, detail) = match error {
+        CoreError::AiNotConfigured => ("not-set-up", String::new()),
+        other => failure(other),
+    };
+    ui.set_failure(kind.into());
+    ui.set_detail(detail.into());
+}
+
+/// Asks the server for `request`, in the card, in place of what it showed.
+fn ask_server(app: &AppWindow, request: Request) {
+    let generation = CARD_GENERATION.get() + 1;
+    CARD_GENERATION.set(generation);
+    CARD_KEY.set(SHOWN_KEY.get());
+    CARD_REQUEST.set(Some(request.clone()));
+    let ui = app.global::<AiSummary>();
+    ui.set_mode(match request {
+        Request::Summary(_) => "summary".into(),
+        Request::Answer { .. } => "answer".into(),
+    });
+    ui.set_state("summarizing".into());
+    ui.set_replies_state("".into());
+    ui.set_replies(ModelRc::default());
+    ui.set_unverified(ModelRc::default());
+    let current = move || CARD_GENERATION.get() == generation;
+    match request {
+        Request::Summary(thread_id) => with_core(
+            move |core| Box::pin(async move { core.ai_summarize(thread_id).await }),
+            move |app, result| {
+                if !current() {
+                    return;
+                }
+                let ui = app.global::<AiSummary>();
+                match result {
+                    Ok(summary) => {
+                        ui.set_key_points(strings(&summary.key_points));
+                        ui.set_next_action(summary.next_action.unwrap_or_default().into());
+                        ui.set_warning(summary.warning.unwrap_or_default().into());
+                        ui.set_unverified(strings(&summary.unverified));
+                        ui.set_omitted(i32::try_from(summary.omitted).unwrap_or(i32::MAX));
+                        ui.set_proposed_reply(summary.proposed_reply.unwrap_or_default().into());
+                        ui.set_state("shown".into());
+                    }
+                    Err(error) => {
+                        card_failed(app, &error);
+                        ui.set_state("failed".into());
+                    }
+                }
+            },
+        ),
+        Request::Answer { instruction, text } => with_core(
+            move |core| Box::pin(async move { core.ai_answer(text, instruction).await }),
+            move |app, result| {
+                if !current() {
+                    return;
+                }
+                let ui = app.global::<AiSummary>();
+                match result {
+                    Ok(answer) => {
+                        ui.set_answer(answer.text.into());
+                        ui.set_unverified(strings(&answer.unverified));
+                        ui.set_state("shown".into());
+                    }
+                    Err(error) => {
+                        card_failed(app, &error);
+                        ui.set_state("failed".into());
+                    }
+                }
+            },
+        ),
+    }
+}
+
+fn summarize(app: &AppWindow) {
+    if let Some(thread_id) = SHOWN_THREAD.get() {
+        ask_server(app, Request::Summary(thread_id));
+    }
+}
+
+/// Runs Explain, -1, or the user's prompt `index` on `text` the user selected
+/// in a message.
+fn ask(app: &AppWindow, index: i32, text: &str) {
+    let text = text.trim();
+    let instruction = if index < 0 {
+        Some(flectar_mail_core::ai::EXPLAIN.to_owned())
+    } else {
+        prompt(index)
+    };
+    if let Some(instruction) = instruction.filter(|_| !text.is_empty()) {
+        let text = text.to_owned();
+        ask_server(app, Request::Answer { instruction, text });
+    }
+}
+
+fn retry(app: &AppWindow) {
+    if let Some(request) = CARD_REQUEST.with_borrow(Clone::clone) {
+        ask_server(app, request);
+    }
+}
+
+fn suggest_replies(app: &AppWindow) {
+    let Some(Request::Summary(thread_id)) = CARD_REQUEST.with_borrow(Clone::clone) else {
+        return;
+    };
+    let generation = CARD_GENERATION.get();
+    app.global::<AiSummary>()
+        .set_replies_state("loading".into());
+    with_core(
+        move |core| Box::pin(async move { core.ai_quick_replies(thread_id).await }),
+        move |app, result| {
+            if CARD_GENERATION.get() != generation {
+                return;
+            }
+            let ui = app.global::<AiSummary>();
+            match result {
+                Ok(replies) => {
+                    ui.set_replies(strings(&replies));
+                    ui.set_replies_state("shown".into());
+                }
+                Err(error) => {
+                    card_failed(app, &error);
+                    ui.set_replies_state("failed".into());
+                }
+            }
+        },
+    );
 }
 
 // ---- Settings → AI ---------------------------------------------------------
@@ -114,8 +310,9 @@ fn project_prompts(app: &AppWindow, prompts: &[AiPrompt]) {
 }
 
 /// The saved settings changed: the reader's and composers' menus follow.
-fn settings_changed(settings: AiSettings) {
+fn settings_changed(app: &AppWindow, settings: AiSettings) {
     SETTINGS.set(settings);
+    app.global::<AiSummary>().set_prompts(prompt_names());
     crate::composer::services_changed();
 }
 
@@ -166,7 +363,7 @@ fn refresh() {
             if SHOWN_PROMPTS.with_borrow(|shown| shown.as_ref() != Some(&settings.prompts)) {
                 project_prompts(app, &settings.prompts);
             }
-            settings_changed(settings);
+            settings_changed(app, settings);
         },
     );
 }
@@ -293,7 +490,7 @@ fn save_prompts(app: &AppWindow) {
         |app, result: Result<AiSettings, CoreError>| match result {
             Ok(saved) => {
                 project_prompts(app, &saved.prompts);
-                settings_changed(saved);
+                settings_changed(app, saved);
                 app.global::<Ai>().set_prompts_state("saved".into());
             }
             Err(error) => crate::undo::tell(
@@ -362,6 +559,44 @@ pub(super) fn install(
     ui.on_save_prompts(move || {
         if let Some(app) = weak.upgrade() {
             save_prompts(&app);
+        }
+    });
+
+    let card = app.global::<AiSummary>();
+    let weak = app.as_weak();
+    card.on_summarize(move || {
+        if let Some(app) = weak.upgrade() {
+            summarize(&app);
+        }
+    });
+    let weak = app.as_weak();
+    card.on_ask(move |index, text| {
+        if let Some(app) = weak.upgrade() {
+            ask(&app, index, &text);
+        }
+    });
+    let weak = app.as_weak();
+    card.on_retry(move || {
+        if let Some(app) = weak.upgrade() {
+            retry(&app);
+        }
+    });
+    let weak = app.as_weak();
+    card.on_close(move || {
+        if let Some(app) = weak.upgrade() {
+            close_card(&app);
+        }
+    });
+    let weak = app.as_weak();
+    card.on_suggest_replies(move || {
+        if let Some(app) = weak.upgrade() {
+            suggest_replies(&app);
+        }
+    });
+    let weak = app.as_weak();
+    card.on_open_settings(move || {
+        if let Some(app) = weak.upgrade() {
+            open_settings(&app);
         }
     });
 }
