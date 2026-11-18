@@ -2992,6 +2992,57 @@ mod tests {
     }
 
     #[test]
+    fn bold_italic_underline_and_strike_show_on_their_text() {
+        // The UI font has no bold or italic face of its own. Bold comes from its weight axis,
+        // and cosmic-text slants it for italic.
+        let paint = |kind: Option<&str>| {
+            let mut document = RichComposeDocument::default();
+            document.load("Illinois", 0, 0);
+            if let Some(kind) = kind {
+                let text = document.text().to_owned();
+                document.format(kind, &text, 0, text.len() as i32);
+            }
+            document.update_selection(0, 0);
+            let mut editor = CosmicComposeEditor::default();
+            painted(&mut editor, &document, 320.0, 4.0, spelling_style())
+        };
+        let width = 320 * 4;
+        let rows = |pixels: &[[u8; 4]]| -> Vec<(usize, usize)> {
+            // Each row with ink, and where its ink starts.
+            pixels
+                .chunks(width)
+                .enumerate()
+                .filter_map(|(y, row)| row.iter().position(|pixel| pixel[3] > 128).map(|x| (y, x)))
+                .collect()
+        };
+        let ink = |pixels: &[[u8; 4]]| pixels.iter().filter(|pixel| pixel[3] > 128).count();
+        let plain = paint(None);
+        let plain_rows = rows(&plain);
+        let plain_bottom = plain_rows.last().unwrap().0;
+
+        let bold = paint(Some("bold"));
+        assert!(ink(&bold) > ink(&plain) * 6 / 5, "bold adds no weight");
+
+        let italic = rows(&paint(Some("italic")));
+        let quarter = italic.len() / 4;
+        let (top, bottom) = (italic[quarter].1, italic[italic.len() - 1 - quarter].1);
+        assert!(
+            top > bottom + 2,
+            "italic doesn't lean forward, its left edge is at {top} near the top and {bottom} near the bottom"
+        );
+
+        let underline = paint(Some("underline"));
+        assert!(
+            rows(&underline).iter().any(|(y, _)| *y > plain_bottom),
+            "no underline below the text"
+        );
+        assert!(
+            ink(&paint(Some("strike"))) > ink(&plain),
+            "no strikethrough"
+        );
+    }
+
+    #[test]
     fn paragraphs_line_up_as_the_document_says() {
         let mut document = RichComposeDocument::default();
         document.load("left\ncenter\nright\n", 0, 0);
