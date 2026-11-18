@@ -8474,11 +8474,14 @@ impl Core {
         .await
     }
 
-    /// Copy-edit a draft body (plain text or simple HTML) without changing
-    /// meaning, tone, or language. Returns the corrected draft.
-    pub async fn ai_proofread(&self, body: String) -> Result<String> {
+    /// The user's draft, or the part of it they selected, changed as
+    /// `instruction` says, in plain text for the composer to put in its
+    /// place (#241).
+    pub async fn ai_rewrite(&self, text: String, instruction: String) -> Result<String> {
         let cfg = self.ai_config(Scenario::Draft).await?;
-        ai::chat(&cfg, ai::proofread_prompt(&body)).await
+        // The draft keeps its own language, whatever the app's is.
+        let output = ai::chat(&cfg, ai::rewrite_prompt(&text, &instruction)).await?;
+        Ok(ai::strip_reasoning(&output).trim().to_owned())
     }
 
     /// The user's `instruction` carried out on text they selected in a
