@@ -31,6 +31,14 @@
     {
       "name": "privacy_consent_decline",
       "value": "Rechazar"
+    },
+    {
+      "name": "notification_new_mail",
+      "value": "Correo nuevo"
+    },
+    {
+      "name": "notification_no_subject",
+      "value": "(Sin asunto)"
     }
   ]
 }

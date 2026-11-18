@@ -13,7 +13,7 @@
     },
     {
       "name": "privacy_consent_bullet_local",
-      "value": "邮件、附件、联系人和日历只在本设备与你添加的服务商之间传输。"
+      "value": "邮件、附件、联系人和日历只在本设备与您添加的服务商之间传输。"
     },
     { "name": "privacy_consent_bullet_clipboard", "value": "剪贴板仅在您主动粘贴时读取纯文本。" },
     { "name": "privacy_consent_bullet_withdraw", "value": "您可以在“设置 → 关于”中撤回同意。" },

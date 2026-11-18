@@ -31,6 +31,14 @@
     {
       "name": "privacy_consent_decline",
       "value": "Reddet"
+    },
+    {
+      "name": "notification_new_mail",
+      "value": "Yeni e-posta"
+    },
+    {
+      "name": "notification_no_subject",
+      "value": "(Konu yok)"
     }
   ]
 }

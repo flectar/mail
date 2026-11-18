@@ -31,6 +31,14 @@
     {
       "name": "privacy_consent_decline",
       "value": "Отклонить"
+    },
+    {
+      "name": "notification_new_mail",
+      "value": "Новая почта"
+    },
+    {
+      "name": "notification_no_subject",
+      "value": "(Без темы)"
     }
   ]
 }
