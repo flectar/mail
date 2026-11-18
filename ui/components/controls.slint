@@ -302,6 +302,10 @@ export component IconButton inherits Rectangle {
     in property <string> tooltip-text: "";
     in property <bool> tooltip-above: false;
     in property <bool> tooltip-align-left: false;
+    // A click focuses the button, as it does a FocusScope. The buttons of a text editor's
+    // toolbar turn this off, so the text keeps the focus and its selection. Tab still
+    // reaches them.
+    in property <bool> focus-on-click: true;
     callback clicked;
 
     public function pointer-activated() {
@@ -361,7 +365,13 @@ export component IconButton inherits Rectangle {
     hit-area := TouchArea {
         enabled: root.interactive;
         moved => { IconButtonInput.keyboard = false; }
-        clicked => { keyboard.focus(); root.pointer-activated(); root.clicked(); }
+        clicked => {
+            if root.focus-on-click {
+                keyboard.focus();
+            }
+            root.pointer-activated();
+            root.clicked();
+        }
         mouse-cursor: pointer;
     }
 

@@ -267,22 +267,22 @@ export component EmailComposer inherits Rectangle {
     }
 
     function apply-format(kind: string) {
+        // Toolbar buttons and menus take the focus first, and a TextInput that loses it drops
+        // its selection, so they act on the selection the message last reported. Shortcuts
+        // come while the message still has the focus and read its selection there.
+        let anchor = body-input.has-focus ? body-input.anchor-position-byte-offset : root.selection-start;
+        let cursor = body-input.has-focus ? body-input.cursor-position-byte-offset : root.selection-end;
         if (kind == "link") {
-            if (body-input.anchor-position-byte-offset == body-input.cursor-position_byte_offset) {
+            if (anchor == cursor) {
                 return;
             }
-            root.link-selection-start = body-input.anchor-position-byte-offset;
-            root.link-selection-end = body-input.cursor-position_byte_offset;
+            root.link-selection-start = anchor;
+            root.link-selection-end = cursor;
             root.link-url = root.active-link-url;
             root.link-editor-open = true;
             return;
         }
-        root.format-requested(
-            kind,
-            root.body,
-            body-input.anchor-position-byte-offset,
-            body-input.cursor-position_byte-offset,
-        );
+        root.format-requested(kind, root.body, anchor, cursor);
         body-input.set-selection-offsets(root.selection-start, root.selection-end);
         body-input.focus();
     }
