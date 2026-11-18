@@ -1801,6 +1801,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     normalize_appimage_environment();
     // Overlaps the system's font lookups with the rest of startup.
     han_fallback::warm_up();
+    // Before any connection: those that follow the system's proxy settings
+    // read them through the platform.
+    platform::install_system_proxy();
 
     // Created before the backend: claiming the profile uses its reactor, and
     // a launch that only forwards to a running instance should exit before
