@@ -2121,6 +2121,16 @@ pub struct AiThreadSummary {
     /// A reliable, explicitly dated event/deadline the user may add after review.
     #[serde(default)]
     pub calendar_suggestion: Option<AiCalendarSuggestion>,
+    /// The model saw a message try to instruct it, in its words (#241).
+    #[serde(default)]
+    pub warning: Option<String>,
+    /// Older messages the summary leaves out, as the model's input ran out.
+    #[serde(default)]
+    pub omitted: usize,
+    /// Links, addresses and phone numbers the summary has and the messages
+    /// don't, which the reader should not trust.
+    #[serde(default)]
+    pub unverified: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2924,6 +2934,16 @@ impl AiSettings {
     pub fn ready(&self) -> bool {
         !self.url.trim().is_empty() && !self.model.trim().is_empty()
     }
+}
+
+/// What the AI server answered about selected text (#241).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiAnswer {
+    pub text: String,
+    /// Links, addresses and phone numbers the answer has and the selected
+    /// text doesn't.
+    pub unverified: Vec<String>,
 }
 
 /// How messages are translated (#240). The services' keys are in the

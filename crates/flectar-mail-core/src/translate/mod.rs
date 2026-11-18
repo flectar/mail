@@ -23,7 +23,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 mod detect;
-mod document;
+pub(crate) mod document;
 mod languages;
 mod service;
 #[cfg(test)]
