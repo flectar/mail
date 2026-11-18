@@ -1,0 +1,326 @@
+import { VerticalBox } from "std-widgets.slint";
+import { Button } from "components/button.slint";
+import { LineEdit } from "components/controls.slint";
+import { SettingsSelect } from "components/settings-components.slint";
+import { TypeScale } from "typography.slint";
+
+// A prompt the user saved: its name in menus, and what it asks for.
+export struct AiPromptRow {
+    name: string,
+    instruction: string,
+}
+
+// The AI server the app's AI features use (#241, src/ai_features.rs), and
+// translation by a model too. Nothing is preset.
+export global Ai {
+    // The server's address and model, as saved or being typed.
+    in-out property <string> url;
+    in-out property <string> model;
+    // A server and a model are saved.
+    in property <bool> ready;
+    in property <bool> key-saved;
+    // The models the server offers, once asked for.
+    in property <[string]> models;
+    in-out property <int> model-index;
+    // "" until saved, "checking", "ready" once the server answered, or
+    // "failed" with `failure` and `detail`: "key", "offline", "address",
+    // "model", "missing" with the model's name, or "service" with what the
+    // server said.
+    in property <string> state;
+    in property <string> failure;
+    in property <string> detail;
+    // The page shows: what it lists comes up to date.
+    callback refresh();
+    // Saves the address, the model and a newly typed key.
+    callback save(string);
+    callback remove-key();
+    callback list-models();
+    callback model-chosen(int);
+    // The user's own prompts, as Settings edits them.
+    in-out property <[AiPromptRow]> prompts;
+    // "" or "saved" once the prompts are saved, until they change.
+    in-out property <string> prompts-state;
+    callback add-prompt();
+    callback remove-prompt(int);
+    callback save-prompts();
+}
+
+// What went wrong with the server, in a sentence.
+export global AiWords {
+    public pure function failure(failure: string, detail: string) -> string {
+        return failure == "key" ? @tr("The server didn't accept the key.")
+            : failure == "offline" ? @tr("The server can't be reached. Check the address and that the server is running.")
+            : failure == "address" ? @tr("The server address has to start with https://, or with http://localhost for a server on this computer.")
+            : failure == "model" ? @tr("Choose a model first.")
+            : failure == "missing" ? @tr("The server has no model called {}. Choose one of its models and save again.", detail)
+            : detail != "" ? @tr("The server didn't answer as expected. It said: {}", detail)
+            : @tr("The server didn't answer as expected.");
+    }
+}
+
+// A field with its name above it, which stays when the field is filled.
+component Field inherits VerticalLayout {
+    in property <string> label;
+    in property <string> placeholder;
+    in property <bool> secret: false;
+    in property <color> label-color;
+    in-out property <string> text;
+    callback edited();
+    spacing: 4px;
+    Text {
+        text: root.label;
+        color: root.label-color;
+        font-size: TypeScale.caption;
+        wrap: word-wrap;
+    }
+    LineEdit {
+        height: 36px;
+        text <=> root.text;
+        input-label: root.label;
+        placeholder-text: root.placeholder;
+        input-type: root.secret ? InputType.password : InputType.text;
+        edited => { root.edited(); }
+    }
+}
+
+// Settings → AI: the server, its model and key, and what goes there.
+export component AiPage inherits VerticalLayout {
+    in property <bool> compact: false;
+    in property <color> surface;
+    in property <color> border-subtle;
+    in property <color> heading;
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> faint-text;
+    in property <color> error-color;
+
+    private property <string> key: "";
+    private property <bool> changed: false;
+
+    // The page is built when it shows: what it lists comes up to date.
+    init => {
+        Ai.refresh();
+    }
+
+    spacing: 14px;
+
+    Text {
+        text: @tr("Summaries, suggested replies and help with writing come from an AI server you choose, on this computer or hosted. Nothing is sent until you use one of them.");
+        color: root.secondary-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+
+    Rectangle {
+        height: max(120px, server-box.preferred-height);
+        background: root.surface;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.border-subtle;
+        server-box := VerticalBox {
+            padding-top: 15px;
+            padding-right: 20px;
+            padding-bottom: 15px;
+            padding-left: 20px;
+            spacing: 10px;
+
+            Text { text: @tr("Server"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+            Text {
+                text: @tr("Any server with the OpenAI chat API works. Ollama and LM Studio run models on this computer, so what you send stays here.");
+                color: root.faint-text;
+                font-size: TypeScale.secondary;
+                wrap: word-wrap;
+            }
+            Field {
+                label: @tr("Server address");
+                placeholder: "http://localhost:11434/v1";
+                label-color: root.secondary-text;
+                text <=> Ai.url;
+                edited => { root.changed = true; }
+            }
+            VerticalLayout {
+                spacing: 4px;
+                Text {
+                    text: @tr("Model");
+                    color: root.secondary-text;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+                // The server's models once listed, else the model's name typed in.
+                HorizontalLayout {
+                    spacing: 8px;
+                    if Ai.models.length > 0 : SettingsSelect {
+                        horizontal-stretch: 1;
+                        choices: Ai.models;
+                        selected-index <=> Ai.model-index;
+                        accessible-label: @tr("Model");
+                        selection-changed(index, value) => {
+                            root.changed = true;
+                            Ai.model-chosen(index);
+                        }
+                    }
+                    if Ai.models.length == 0 : LineEdit {
+                        horizontal-stretch: 1;
+                        height: 36px;
+                        text <=> Ai.model;
+                        input-label: @tr("Model");
+                        placeholder-text: @tr("The model's name on the server");
+                        edited => { root.changed = true; }
+                    }
+                    Button {
+                        width: max(110px, self.content-width);
+                        height: 36px;
+                        text: @tr("List models");
+                        enabled: Ai.url != "" && Ai.state != "checking";
+                        clicked => { Ai.list-models(); }
+                    }
+                }
+            }
+            if Ai.key-saved : HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                Text {
+                    text: @tr("A key is saved.");
+                    color: root.body-text;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+                Button {
+                    width: max(80px, self.content-width);
+                    text: @tr("Remove key");
+                    clicked => { Ai.remove-key(); }
+                }
+            }
+            if !Ai.key-saved : Field {
+                label: @tr("API key, if the server asks for one");
+                placeholder: "";
+                secret: true;
+                label-color: root.secondary-text;
+                text <=> root.key;
+                edited => { root.changed = true; }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                Button {
+                    width: max(96px, self.content-width);
+                    primary: true;
+                    text: @tr("Save");
+                    enabled: Ai.state != "checking" && Ai.url != "" && Ai.model != "";
+                    clicked => {
+                        Ai.save(root.key);
+                        root.key = "";
+                        root.changed = false;
+                    }
+                }
+                Text {
+                    text: Ai.state == "checking" ? @tr("Checking the server…")
+                        : Ai.state == "ready" && !root.changed ? @tr("The server is ready.")
+                        : "";
+                    color: root.faint-text;
+                    font-size: TypeScale.secondary;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+            if Ai.state == "failed" : Text {
+                text: AiWords.failure(Ai.failure, Ai.detail);
+                color: root.error-color;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    Rectangle {
+        height: max(60px, prompts-box.preferred-height);
+        background: root.surface;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.border-subtle;
+        prompts-box := VerticalBox {
+            padding-top: 15px;
+            padding-right: 20px;
+            padding-bottom: 15px;
+            padding-left: 20px;
+            spacing: 10px;
+            Text { text: @tr("Your prompts"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+            Text {
+                text: @tr("Your prompts show in the composer's writing tools, to run on what you write, and under Ask AI when you select text in a message. Proofread is always there.");
+                color: root.faint-text;
+                font-size: TypeScale.secondary;
+                wrap: word-wrap;
+            }
+            for prompt[index] in Ai.prompts : VerticalLayout {
+                spacing: 6px;
+                if index > 0 : Rectangle { height: 1px; background: root.border-subtle; }
+                Field {
+                    label: @tr("Name");
+                    placeholder: @tr("Shorter");
+                    label-color: root.secondary-text;
+                    text <=> prompt.name;
+                    edited => { Ai.prompts-state = ""; }
+                }
+                Field {
+                    label: @tr("What it asks for");
+                    placeholder: @tr("Make it shorter, keeping what matters.");
+                    label-color: root.secondary-text;
+                    text <=> prompt.instruction;
+                    edited => { Ai.prompts-state = ""; }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Button {
+                        width: max(80px, self.content-width);
+                        text: @tr("Remove");
+                        accessible-label: @tr("Remove {}", prompt.name);
+                        clicked => { Ai.remove-prompt(index); }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Button {
+                    width: max(110px, self.content-width);
+                    text: @tr("Add a prompt");
+                    clicked => { Ai.add-prompt(); }
+                }
+                Button {
+                    width: max(96px, self.content-width);
+                    primary: true;
+                    text: @tr("Save prompts");
+                    clicked => { Ai.save-prompts(); }
+                }
+                Text {
+                    text: Ai.prompts-state == "saved" ? @tr("Prompts saved.") : "";
+                    color: root.faint-text;
+                    font-size: TypeScale.secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        height: max(60px, privacy-box.preferred-height);
+        background: root.surface;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.border-subtle;
+        privacy-box := VerticalBox {
+            padding-top: 15px;
+            padding-right: 20px;
+            padding-bottom: 15px;
+            padding-left: 20px;
+            spacing: 8px;
+            Text { text: @tr("What the server gets"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+            Text {
+                text: @tr("Only what you use an AI feature on: the conversation you summarize, or the text you ask it to work on. It gets the text a message shows, not text a sender hid in it, and never your other mail. AI text can be wrong, so Flectar Mail marks it, and nothing it writes goes out until you send it.");
+                color: root.body-text;
+                font-size: TypeScale.secondary;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

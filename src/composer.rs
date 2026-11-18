@@ -533,6 +533,19 @@ fn new_window(_app: &AppWindow) -> Option<Host> {
     None
 }
 
+/// Translation's or the AI server's settings changed: composers offer to
+/// translate the message once a service is set up (#240).
+pub(super) fn services_changed() {
+    with_composers(|composers| {
+        let sessions = composers.sessions.borrow().clone();
+        for session in sessions {
+            if let Some(host) = session.host() {
+                host.ui().set_translate_shown(crate::translation::ready());
+            }
+        }
+    });
+}
+
 /// Everything a composer shows, for a message moving to another window.
 fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_mode(from.get_mode());
