@@ -721,6 +721,12 @@ the message, links and formatting included, and **Show original** brings the
 message back. Translations stay on your device for 15 days, so a message opened
 again isn't sent again, and search never sees them.
 
+In the composer, **Translate** in the toolbar translates the selected text, or
+the whole message when nothing is selected, into the language you pick. A
+reply starts with the language of the message it answers, and after that the
+language you used last. The translation takes the place of the text as one
+step that Undo takes back.
+
 With a free DeepL key, DeepL may keep the text it translates and use it to
 train its models. With a paid key, it deletes the text once it's translated. A
 LibreTranslate server or a model's server receives the text of what you

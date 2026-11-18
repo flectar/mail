@@ -551,6 +551,9 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_links(from.get_links());
     to.set_link_sharing(from.get_link_sharing());
     to.set_plain_text(from.get_plain_text());
+    to.set_translate_shown(from.get_translate_shown());
+    to.set_translate_choices(from.get_translate_choices());
+    to.set_translate_index(from.get_translate_index());
     to.set_request_receipt(from.get_request_receipt());
     to.set_importance(from.get_importance());
     to.set_templates(from.get_templates());
@@ -1426,6 +1429,9 @@ impl ComposeSession {
         ui.set_attaching_files(false);
         photos::apply_photos(&ui, &photos::PhotoSummary::default());
         ui.set_plain_text(false);
+        ui.set_translate_shown(crate::translation::ready());
+        ui.set_translate_open(false);
+        ui.set_translating(false);
         apply_compose_contacts(&ui, &[]);
         ui.set_sending(false);
         ui.set_mode("new".into());
@@ -1799,6 +1805,18 @@ impl ComposeSession {
         ui.on_insert_images(move || {
             if let Some(session) = weak.upgrade() {
                 session.pick_images();
+            }
+        });
+        let weak = self.reference();
+        ui.on_translate_opened(move || {
+            if let Some(session) = weak.upgrade() {
+                session.translate_opened();
+            }
+        });
+        let weak = self.reference();
+        ui.on_translate(move |index, body, anchor, cursor| {
+            if let Some(session) = weak.upgrade() {
+                session.translate(index, &body, anchor, cursor);
             }
         });
         let weak = self.reference();
@@ -2230,6 +2248,186 @@ impl ComposeSession {
         self.check_spelling_soon();
         self.refresh_photos();
         true
+    }
+
+    /// Fills the Translate dialog (#240) with the service's languages, the one the last message
+    /// was translated into chosen, else the language of the message a reply answers.
+    fn translate_opened(&self) {
+        let (Some(composers), Some(host)) = (self.composers(), self.host()) else {
+            return;
+        };
+        let ui = host.ui();
+        ui.set_translate_failure("".into());
+        ui.set_translate_detail("".into());
+        let Some(core) = composers.core().map(|core| core.file_core()) else {
+            return;
+        };
+        let answered = self.intent.borrow().in_reply_to_message_id;
+        let task = composers.runtime.spawn(async move {
+            let settings = core.translation_settings().await?;
+            let targets = core.translation_targets().await?;
+            let language = match answered {
+                Some(id) => core
+                    .translation_offer(id, Default::default())
+                    .await
+                    .ok()
+                    .and_then(|offer| offer.language),
+                None => None,
+            };
+            Ok::<_, flectar_mail_core::error::CoreError>((
+                settings.compose_target,
+                targets
+                    .into_iter()
+                    .map(|target| (target.code, target.name))
+                    .collect::<Vec<_>>(),
+                language,
+            ))
+        });
+        let weak = self.this.clone();
+        let abort = task.abort_handle();
+        if slint::spawn_local(async move {
+            let result = task.await;
+            let Some(session) = weak.upgrade() else {
+                return;
+            };
+            let Some(host) = session.host() else {
+                return;
+            };
+            let ui = host.ui();
+            match result {
+                Ok(Ok((last, targets, language))) => {
+                    let (names, index) =
+                        crate::translation::draft_choices(targets, &last, language.as_deref());
+                    ui.set_translate_choices(ModelRc::new(VecModel::from(names)));
+                    ui.set_translate_index(index);
+                }
+                Ok(Err(error)) => {
+                    let (kind, detail) = crate::translation::failure(&error);
+                    ui.set_translate_failure(kind.into());
+                    ui.set_translate_detail(detail.into());
+                }
+                Err(_) => {}
+            }
+        })
+        .is_err()
+        {
+            abort.abort();
+        }
+    }
+
+    /// Translates the selection of `body`, or the whole message when nothing is selected, into
+    /// the dialog's choice `index` (#240). The translation takes the place of what was
+    /// translated, as one step undo takes back. Text edited while the service works stays as
+    /// it is.
+    fn translate(&self, index: i32, body: &str, anchor: i32, cursor: i32) {
+        let (Some(composers), Some(host)) = (self.composers(), self.host()) else {
+            return;
+        };
+        let Some(target) = crate::translation::draft_target(index) else {
+            return;
+        };
+        let Some(core) = composers.core().map(|core| core.file_core()) else {
+            return;
+        };
+        let plain = self.plain_text.get();
+        let (revision, range, html, text) = {
+            let mut document = self.document.borrow_mut();
+            if document.text() != body {
+                document.synchronize(body, anchor, cursor);
+            } else {
+                document.update_selection(anchor, cursor);
+            }
+            let selection = document.selection();
+            let (mut start, mut end) = (
+                selection.start.min(selection.end),
+                selection.start.max(selection.end),
+            );
+            if start == end {
+                start = 0;
+                end = i32::try_from(document.text().len()).unwrap_or(i32::MAX);
+                document.update_selection(start, end);
+            }
+            let Some((html, text)) = document.selection_html() else {
+                return;
+            };
+            let (Ok(start), Ok(end)) = (usize::try_from(start), usize::try_from(end)) else {
+                return;
+            };
+            (document.revision(), start..end, html, text)
+        };
+        let ui = host.ui();
+        ui.set_translating(true);
+        ui.set_translate_failure("".into());
+        ui.set_translate_detail("".into());
+        crate::translation::remember_draft_target(&target);
+        let html = crate::rich_compose::without_copied_mark(&html).to_owned();
+        let task = composers.runtime.spawn(async move {
+            if plain {
+                core.translate_draft_text(text, target).await
+            } else {
+                core.translate_draft_html(html, target).await
+            }
+        });
+        let weak = self.this.clone();
+        let abort = task.abort_handle();
+        if slint::spawn_local(async move {
+            let result = task.await;
+            if let Some(session) = weak.upgrade() {
+                session.translated(revision, range, plain, result);
+            }
+        })
+        .is_err()
+        {
+            abort.abort();
+            ui.set_translating(false);
+        }
+    }
+
+    fn translated(
+        &self,
+        revision: u64,
+        range: std::ops::Range<usize>,
+        plain: bool,
+        result: Result<Result<String, flectar_mail_core::error::CoreError>, tokio::task::JoinError>,
+    ) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        ui.set_translating(false);
+        let translation = match result {
+            Ok(Ok(translation)) => translation,
+            Ok(Err(error)) => {
+                let (kind, detail) = crate::translation::failure(&error);
+                ui.set_translate_failure(kind.into());
+                ui.set_translate_detail(detail.into());
+                return;
+            }
+            Err(error) => {
+                ui.set_translate_failure("service".into());
+                ui.set_translate_detail(error.to_string().into());
+                return;
+            }
+        };
+        let followed = self.document.borrow().follow(revision, range);
+        let range = match followed {
+            crate::rich_compose::Followed::Kept(range)
+            | crate::rich_compose::Followed::Bordered(range) => range,
+            crate::rich_compose::Followed::Lost => {
+                ui.set_translate_failure("changed".into());
+                return;
+            }
+        };
+        let (Ok(start), Ok(end)) = (i32::try_from(range.start), i32::try_from(range.end)) else {
+            return;
+        };
+        self.document.borrow_mut().update_selection(start, end);
+        if plain {
+            self.edit(|document| document.insert_text(&translation));
+        } else {
+            self.paste_html(&host, &crate::rich_compose::marked_as_copied(&translation));
+        }
+        ui.set_translate_open(false);
     }
 
     /// Puts the selection on the clipboard as HTML and plain text, so that it pastes back with
