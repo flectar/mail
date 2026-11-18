@@ -209,6 +209,7 @@ pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::err
         // it reaches the app.
         notifications: crate::notifications::host(),
         privacy_consent: crate::PrivacyConsent::default(),
+        app_language: crate::AppLanguage::default(),
         // The app's own, through crate::platform::spell_checker.
         spelling: None,
         paths: flectar_mail_core::config::Paths::new(

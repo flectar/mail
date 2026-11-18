@@ -3,6 +3,7 @@ import { accessibility } from '@kit.AccessibilityKit';
 import { BusinessError, deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { fileIo, fileUri, picker, statfs } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
+import { i18n } from '@kit.LocalizationKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
@@ -29,6 +30,7 @@ interface FlectarBridge {
   hideIme: () => void;
   requestPasteboard: () => void;
   notify: (sender: string, subject: string, threadId: number, messageId: number) => void;
+  setAppPreferredLanguage: (language: string) => void;
 }
 
 interface ImeCursor {
@@ -256,6 +258,9 @@ struct Index {
       },
       notify: (sender: string, subject: string, threadId: number, messageId: number): void => {
         this.notify(sender, subject, threadId, messageId);
+      },
+      setAppPreferredLanguage: (language: string): void => {
+        this.updateAppPreferredLanguage(language);
       },
     });
     this.applySystemColorScheme(this.colorMode);
@@ -705,6 +710,18 @@ struct Index {
   // fixed fallback text comes from resources so the notification follows the
   // application language. Tapping it opens the app; the want carries the
   // thread id for opening the thread once the app handles it.
+  // Keep ArkTS resource loading aligned with the Slint language setting. The
+  // preferred language is applied by the system on the next cold start.
+  private updateAppPreferredLanguage(language: string): void {
+    try {
+      i18n.System.setAppPreferredLanguage(language);
+      hilog.info(0x0000, LOG_TAG, 'app preferred language set: %{public}s', language);
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'could not set app preferred language: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
   private async notify(
     sender: string, subject: string, threadId: number, messageId: number): Promise<void> {
     try {
