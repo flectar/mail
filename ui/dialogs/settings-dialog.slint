@@ -3032,8 +3032,10 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    network-settings-scroll := ScrollView {
-                        visible: root.settings_tab == "Network";
+                    // Made only while it shows. Slint builds the account view's
+                    // elements in one stack frame, which every page always there
+                    // makes larger.
+                    if root.settings_tab == "Network" : network-settings-scroll := ScrollView {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
@@ -3049,7 +3051,6 @@ export component SettingsDialog inherits Rectangle {
                             SettingsPageTitle { label: @tr("Network"); title-color: root.title-color; }
                             NetworkPage {
                                 compact: root.compact;
-                                shown: root.settings_tab == "Network";
                                 surface: root.surface;
                                 border-subtle: root.border-subtle;
                                 heading: root.heading;

@@ -218,8 +218,6 @@ export global NetworkWords {
 // Settings → Network: the app's proxy, then the accounts' own choices.
 export component NetworkPage inherits VerticalLayout {
     in property <bool> compact: false;
-    // The page shows, which brings what it lists up to date.
-    in property <bool> shown: false;
     in property <color> surface;
     in property <color> border-subtle;
     in property <color> heading;
@@ -233,10 +231,10 @@ export component NetworkPage inherits VerticalLayout {
     private property <string> account-password: "";
     private property <bool> account-changed: false;
 
-    changed shown => {
-        if self.shown {
-            Network.refresh();
-        }
+    // The page is made each time it shows, and brings what it lists up to
+    // date.
+    init => {
+        Network.refresh();
     }
 
     spacing: 14px;
