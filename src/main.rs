@@ -1929,8 +1929,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let privacy_consent = platform.privacy_consent.clone();
     app.set_privacy_consent_withdrawable(privacy_consent.is_supported());
     app.on_withdraw_privacy_consent(move || {
+        // Withdrawal only fails when the host never wired its hook. Hosts log
+        // `tracing` where stderr is not visible, such as OpenHarmony's hilog.
         if let Err(error) = privacy_consent.withdraw() {
-            eprintln!("could not withdraw privacy consent: {error}");
+            tracing::warn!(%error, "withdrawing privacy consent failed");
         }
     });
     app.on_settings_search_matches(|haystack, query| {

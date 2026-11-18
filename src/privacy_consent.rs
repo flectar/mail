@@ -35,3 +35,36 @@ impl PrivacyConsent {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PrivacyConsent;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn hosts_without_a_stored_consent_offer_no_withdrawal() {
+        let consent = PrivacyConsent::default();
+        assert!(!consent.is_supported());
+        assert!(consent.withdraw().is_err());
+    }
+
+    #[test]
+    fn withdrawing_runs_the_host_hook_and_returns_its_error() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&calls);
+        let consent = PrivacyConsent::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+        assert!(consent.is_supported());
+        consent.withdraw().unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let failing = PrivacyConsent::new(|| Err("the preference could not be cleared".into()));
+        assert_eq!(
+            failing.withdraw().unwrap_err(),
+            "the preference could not be cleared"
+        );
+    }
+}
