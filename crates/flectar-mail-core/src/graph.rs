@@ -8,6 +8,7 @@
 
 use crate::error::{CoreError, Result};
 use crate::http_body;
+use crate::net::proxy::{Owner, SharedClient};
 
 pub const GRAPH_BASE: &str = "https://graph.microsoft.com/v1.0";
 const MAX_GRAPH_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -15,19 +16,16 @@ const MAX_GRAPH_PAGINATION_URL_BYTES: usize = 16 * 1024;
 const MAX_GRAPH_CALENDAR_PAGES: usize = 100;
 const MAX_GRAPH_CALENDARS: usize = 10_000;
 
-fn graph_http_client() -> Result<&'static reqwest::Client> {
-    static HTTP: once_cell::sync::Lazy<std::result::Result<reqwest::Client, String>> =
-        once_cell::sync::Lazy::new(|| {
-            reqwest::Client::builder()
-                .user_agent("flectar-mail-graph/0.1")
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .timeout(std::time::Duration::from_secs(30))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .map_err(|error| format!("graph HTTP client: {error}"))
-        });
-    HTTP.as_ref()
-        .map_err(|message| CoreError::Network(message.clone()))
+fn graph_http_client(owner: Owner) -> Result<reqwest::Client> {
+    static HTTP: SharedClient = SharedClient::new(|builder| {
+        builder
+            .user_agent("flectar-mail-graph/0.1")
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+    });
+    HTTP.get(owner)
+        .map_err(|error| CoreError::Network(format!("graph HTTP client: {error}")))
 }
 
 /// A created Teams online meeting (only the fields we surface today).
@@ -57,6 +55,7 @@ pub struct GraphEvent<'a> {
 /// `401`/`403` map to `NeedsReauth` so callers can trigger consent. Returns
 /// the HTTP status and raw body so callers can react to e.g. `410 Gone`.
 async fn request_raw(
+    owner: Owner,
     method: reqwest::Method,
     access_token: &str,
     path_or_url: &str,
@@ -65,7 +64,7 @@ async fn request_raw(
     let url = validated_graph_url(path_or_url)?;
     // reqwest is built without the `json` feature here, so set the body/headers
     // by hand rather than `.json()`.
-    let mut req = graph_http_client()?
+    let mut req = graph_http_client(owner)?
         .request(method, url)
         .bearer_auth(access_token);
     if let Some(body) = body {
@@ -93,13 +92,14 @@ async fn request_raw(
 
 /// Like `request_raw`, but any non-2xx is an error and the body is parsed.
 async fn request_json(
+    owner: Owner,
     method: reqwest::Method,
     access_token: &str,
     path_or_url: &str,
     body: Option<&serde_json::Value>,
 ) -> Result<serde_json::Value> {
     let m = method.clone();
-    let (status, text) = request_raw(method, access_token, path_or_url, body).await?;
+    let (status, text) = request_raw(owner, method, access_token, path_or_url, body).await?;
     if !(200..300).contains(&status) {
         return Err(CoreError::Network(format!(
             "graph {m} request failed ({status}): {}",
@@ -158,11 +158,12 @@ fn response_excerpt(body: &str) -> String {
 }
 
 async fn post(
+    owner: Owner,
     access_token: &str,
     path: &str,
     body: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    request_json(reqwest::Method::POST, access_token, path, Some(body)).await
+    request_json(owner, reqwest::Method::POST, access_token, path, Some(body)).await
 }
 
 /// Create an ad-hoc Teams meeting via `POST /me/onlineMeetings`.
@@ -171,6 +172,7 @@ async fn post(
 /// is advisory for an online meeting (the join URL stays valid regardless), but
 /// a sensible start/end keeps it tidy in the organizer's Teams calendar.
 pub async fn create_online_meeting(
+    owner: Owner,
     access_token: &str,
     subject: &str,
     start_ms: i64,
@@ -181,7 +183,7 @@ pub async fn create_online_meeting(
         "startDateTime": rfc3339(start_ms)?,
         "endDateTime": rfc3339(end_ms)?,
     });
-    let parsed = post(access_token, "/me/onlineMeetings", &payload).await?;
+    let parsed = post(owner, access_token, "/me/onlineMeetings", &payload).await?;
     // v1.0 returns `joinWebUrl`; older payloads used `joinUrl`. Accept either.
     let join_url = parsed
         .get("joinWebUrl")
@@ -226,6 +228,7 @@ fn event_payload(ev: &GraphEvent<'_>) -> Result<serde_json::Value> {
 /// Outlook/Teams render them in the viewer's own timezone. Returns the Graph
 /// event id so sync can track the resource.
 pub async fn create_calendar_event(
+    owner: Owner,
     access_token: &str,
     calendar_id: Option<&str>,
     ev: &GraphEvent<'_>,
@@ -234,7 +237,7 @@ pub async fn create_calendar_event(
         Some(id) => graph_resource_url(&["me", "calendars", id, "events"])?.to_string(),
         None => "/me/events".to_string(),
     };
-    let created = post(access_token, &path, &event_payload(ev)?).await?;
+    let created = post(owner, access_token, &path, &event_payload(ev)?).await?;
     Ok(created
         .get("id")
         .and_then(|v| v.as_str())
@@ -244,12 +247,14 @@ pub async fn create_calendar_event(
 
 /// Update an existing event via `PATCH /me/events/{id}`.
 pub async fn update_calendar_event(
+    owner: Owner,
     access_token: &str,
     event_id: &str,
     ev: &GraphEvent<'_>,
 ) -> Result<()> {
     let url = graph_resource_url(&["me", "events", event_id])?;
     request_json(
+        owner,
         reqwest::Method::PATCH,
         access_token,
         url.as_str(),
@@ -261,10 +266,16 @@ pub async fn update_calendar_event(
 
 /// Delete an event via `DELETE /me/events/{id}`. A 404 counts as success
 /// (already gone remotely).
-pub async fn delete_calendar_event(access_token: &str, event_id: &str) -> Result<()> {
+pub async fn delete_calendar_event(owner: Owner, access_token: &str, event_id: &str) -> Result<()> {
     let url = graph_resource_url(&["me", "events", event_id])?;
-    let (status, text) =
-        request_raw(reqwest::Method::DELETE, access_token, url.as_str(), None).await?;
+    let (status, text) = request_raw(
+        owner,
+        reqwest::Method::DELETE,
+        access_token,
+        url.as_str(),
+        None,
+    )
+    .await?;
     if (200..300).contains(&status) || status == 404 {
         Ok(())
     } else {
@@ -300,6 +311,7 @@ fn answer_body(comment: Option<&str>, send_response: bool) -> serde_json::Value 
 /// `tentativelyAccept` or `decline`. With `send_response` Exchange sends the
 /// organizer the answer and its comment.
 pub async fn answer_event(
+    owner: Owner,
     access_token: &str,
     event_id: &str,
     partstat: &str,
@@ -310,6 +322,7 @@ pub async fn answer_event(
     let url = graph_resource_url(&["me", "events", event_id, action])?;
     let body = answer_body(comment, send_response);
     let (status, text) = request_raw(
+        owner,
         reqwest::Method::POST,
         access_token,
         url.as_str(),
@@ -332,6 +345,7 @@ pub async fn answer_event(
 /// for covers both the original start and `moved_to`, where an occurrence
 /// changed on its own takes place now.
 pub async fn occurrence_id(
+    owner: Owner,
     access_token: &str,
     series_id: &str,
     original: i64,
@@ -345,7 +359,14 @@ pub async fn occurrence_id(
         .append_pair("endDateTime", &utc_time(original.max(moved_to) + DAY_MS))
         .append_pair("$select", "id,originalStart,start")
         .append_pair("$top", "100");
-    let page = request_json(reqwest::Method::GET, access_token, url.as_str(), None).await?;
+    let page = request_json(
+        owner,
+        reqwest::Method::GET,
+        access_token,
+        url.as_str(),
+        None,
+    )
+    .await?;
     Ok(occurrence_in(&page, original, all_day))
 }
 
@@ -395,13 +416,13 @@ pub struct GraphCalendar {
 }
 
 /// List the account's calendars.
-pub async fn list_calendars(access_token: &str) -> Result<Vec<GraphCalendar>> {
+pub async fn list_calendars(owner: Owner, access_token: &str) -> Result<Vec<GraphCalendar>> {
     let mut out = Vec::new();
     let mut url =
         "/me/calendars?$select=id,name,hexColor,isDefaultCalendar,canEdit&$top=100".to_string();
     let mut seen_links = std::collections::HashSet::new();
     for _ in 0..MAX_GRAPH_CALENDAR_PAGES {
-        let page = request_json(reqwest::Method::GET, access_token, &url, None).await?;
+        let page = request_json(owner, reqwest::Method::GET, access_token, &url, None).await?;
         for c in page
             .get("value")
             .and_then(|v| v.as_array())
@@ -502,8 +523,8 @@ pub fn delta_url(calendar_id: &str, start_ms: i64, end_ms: i64) -> Result<String
 /// Fetch one delta page (initial URL, nextLink or deltaLink). `Ok(None)`
 /// means the delta token expired (`410 Gone`): the caller restarts from a
 /// fresh `delta_url`.
-pub async fn delta_page(access_token: &str, url: &str) -> Result<Option<DeltaPage>> {
-    let (status, text) = request_raw(reqwest::Method::GET, access_token, url, None).await?;
+pub async fn delta_page(owner: Owner, access_token: &str, url: &str) -> Result<Option<DeltaPage>> {
+    let (status, text) = request_raw(owner, reqwest::Method::GET, access_token, url, None).await?;
     if status == 410 {
         return Ok(None);
     }

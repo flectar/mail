@@ -48,6 +48,7 @@ impl Core {
             credentials::load_async(self.credentials.clone(), account, Slot::Password).await?;
         let base = crate::jmap::client::normalize_base_url(&config.jmap_url, &config.email)?;
         let transport = Transport::new(
+            crate::net::proxy::Owner::Account(account),
             &base,
             if config.username.is_empty() {
                 &config.email

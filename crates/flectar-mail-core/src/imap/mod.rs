@@ -501,7 +501,8 @@ where
     }
 }
 
-/// Connect with TLS from the first byte, trusting only the system roots.
+/// Connect with TLS from the first byte, trusting only the system roots,
+/// through the app's proxy.
 pub async fn connect(host: &str, port: u16, creds: ImapCredentials) -> Result<Session> {
     use crate::models::{ConnectionSecurity, MailConnectionSettings};
     connect_with_settings(
@@ -513,7 +514,19 @@ pub async fn connect(host: &str, port: u16, creds: ImapCredentials) -> Result<Se
     .await
 }
 
+/// Connect as `settings` say, through the app's proxy.
 pub async fn connect_with_settings(
+    host: &str,
+    port: u16,
+    creds: ImapCredentials,
+    settings: &crate::models::MailConnectionSettings,
+) -> Result<Session> {
+    connect_as(net::proxy::Owner::App, host, port, creds, settings).await
+}
+
+/// Connect as `settings` say, through the proxy of `owner`.
+pub async fn connect_as(
+    owner: net::proxy::Owner,
     host: &str,
     port: u16,
     creds: ImapCredentials,
@@ -523,15 +536,19 @@ pub async fn connect_with_settings(
     // greeting, or an AUTHENTICATE that never gets a tagged response) surfaces
     // as an error instead of hanging the sync actor forever.
     const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-    tokio::time::timeout(CONNECT_TIMEOUT, connect_inner(host, port, creds, settings))
-        .await
-        .map_err(|_| {
-            tracing::warn!(%host, port, "imap connect: timed out after 30s");
-            CoreError::Imap(format!("connect {host}:{port}: timed out"))
-        })?
+    tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        connect_inner(owner, host, port, creds, settings),
+    )
+    .await
+    .map_err(|_| {
+        tracing::warn!(%host, port, "imap connect: timed out after 30s");
+        CoreError::Imap(format!("connect {host}:{port}: timed out"))
+    })?
 }
 
 async fn connect_inner(
+    owner: net::proxy::Owner,
     host: &str,
     port: u16,
     creds: ImapCredentials,
@@ -545,7 +562,12 @@ async fn connect_inner(
         ));
     }
     let connector = net::tls::connector(&settings.trusted_certificate_pem)?;
-    let tcp = net::connect_tcp(host, port)
+    let scheme = if security == ConnectionSecurity::Tls {
+        "imaps"
+    } else {
+        "imap"
+    };
+    let tcp = net::proxy::connect_for(owner, scheme, host, port)
         .await
         .map_err(|e| CoreError::Imap(format!("connect {host}:{port}: {e}")))?;
     let stream = match security {

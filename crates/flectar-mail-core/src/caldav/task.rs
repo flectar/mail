@@ -16,6 +16,7 @@ use crate::db::repo::caldav::ConnectionConfig;
 use crate::error::{CoreError, Result};
 use crate::events::{CoreEvent, EventBus};
 use crate::models::{CalendarConnectionKind, Provider, now_ms};
+use crate::net::proxy::Owner;
 use crate::oauth::tokens::TokenProvider;
 
 use super::http::{DavAuth, HttpTransport};
@@ -133,7 +134,11 @@ async fn sign_in(
         CalendarConnectionKind::Google => {
             let token = tokens.access_token(cfg.account_id, Provider::Gmail).await?;
             Ok(Session::Dav {
-                transport: HttpTransport::new(DavAuth::Bearer(token.clone()), &cfg.base_url)?,
+                transport: HttpTransport::new(
+                    Owner::Account(cfg.account_id),
+                    DavAuth::Bearer(token.clone()),
+                    &cfg.base_url,
+                )?,
                 google_token: Some(token),
             })
         }
@@ -141,6 +146,7 @@ async fn sign_in(
             let password = connection_password(db, credentials.clone(), cfg).await?;
             Ok(Session::Dav {
                 transport: HttpTransport::new(
+                    Owner::Account(cfg.account_id),
                     DavAuth::Basic(cfg.username.clone(), password),
                     &cfg.base_url,
                 )?,
@@ -534,6 +540,7 @@ impl Cycle<'_> {
                             .and_then(|raw| crate::calendar::occurrence_start(raw, original))
                             .unwrap_or(original);
                         crate::graph::occurrence_id(
+                            Owner::Account(self.account_id),
                             token,
                             meeting,
                             original,
@@ -550,6 +557,7 @@ impl Cycle<'_> {
                     None => meeting.to_owned(),
                 };
                 crate::graph::answer_event(
+                    Owner::Account(self.account_id),
                     token,
                     &meeting,
                     &answer.partstat,
@@ -564,13 +572,16 @@ impl Cycle<'_> {
             } => {
                 let calendar_id = super::google_calendar_id(&calendar.url)
                     .ok_or_else(|| CoreError::Other("not a Google calendar".into()))?;
-                let copy = crate::googlecal::find_meeting(token, &calendar_id, &row.ical_uid)
-                    .await?
-                    .ok_or_else(|| {
-                        CoreError::CalDav("Google Calendar doesn't have this meeting".into())
-                    })?;
+                let owner = Owner::Account(self.account_id);
+                let copy =
+                    crate::googlecal::find_meeting(owner, token, &calendar_id, &row.ical_uid)
+                        .await?
+                        .ok_or_else(|| {
+                            CoreError::CalDav("Google Calendar doesn't have this meeting".into())
+                        })?;
                 let copy = match answer.occurrence {
                     Some(original) => crate::googlecal::find_occurrence(
+                        owner,
                         token,
                         &calendar_id,
                         &copy,
@@ -584,6 +595,7 @@ impl Cycle<'_> {
                     None => copy,
                 };
                 crate::googlecal::answer_meeting(
+                    owner,
                     token,
                     &calendar_id,
                     &copy,
@@ -630,7 +642,9 @@ impl Cycle<'_> {
                 let mut refreshed = false;
                 let mut list_changed = false;
                 if let Some(token) = google_token.as_deref().filter(|_| refresh_list) {
-                    let listed = crate::googlecal::list_calendars(token).await?;
+                    let listed =
+                        crate::googlecal::list_calendars(Owner::Account(self.account_id), token)
+                            .await?;
                     // An empty answer is never a reason to forget every
                     // calendar.
                     if !listed.is_empty() {

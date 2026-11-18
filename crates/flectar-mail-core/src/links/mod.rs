@@ -13,6 +13,7 @@ use crate::accounts::credentials::{self, Slot};
 use crate::db::repo;
 use crate::error::{CoreError, Result};
 use crate::models::{Account, CalendarConnectionKind, Provider, Settings};
+use crate::net::proxy::Owner;
 use crate::oauth;
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -81,6 +82,14 @@ pub struct LinkService {
     pub login_name: String,
     /// What the server calls itself, or its host, or the storage's name.
     pub display_name: String,
+}
+
+impl LinkService {
+    /// Whose proxy settings the service's requests follow: its account's,
+    /// or the app's for a storage server of its own.
+    fn owner(&self) -> Owner {
+        self.account_id.map_or(Owner::App, Owner::Account)
+    }
 }
 
 /// A sign-in started in the browser, which [`Core::finish_link_service_login`] waits for.
@@ -304,7 +313,7 @@ impl Core {
                     .access_token(account_id, Provider::Gmail)
                     .await?;
                 // Looking for the app's folder shows that Drive answers the app.
-                drive::Drive::new(drive::API, token)?
+                drive::Drive::new(Owner::Account(account_id), drive::API, token)?
                     .find_folder(FOLDER)
                     .await?;
                 (LinkServiceKind::GoogleDrive, drive::API, "Google Drive")
@@ -317,7 +326,7 @@ impl Core {
                         open_url,
                     )
                     .await?;
-                onedrive::OneDrive::new(onedrive::API, token)?
+                onedrive::OneDrive::new(Owner::Account(account_id), onedrive::API, token)?
                     .check()
                     .await?;
                 (LinkServiceKind::OneDrive, onedrive::API, "OneDrive")
@@ -483,12 +492,16 @@ impl Core {
                 self.share_on_server(&service, &settings, path, name).await
             }
             LinkServiceKind::GoogleDrive => {
-                let drive =
-                    drive::Drive::new(&service.server_url, self.drive_token(&service).await?)?;
+                let drive = drive::Drive::new(
+                    service.owner(),
+                    &service.server_url,
+                    self.drive_token(&service).await?,
+                )?;
                 share_on_drive(&drive, service.id, path, name).await
             }
             LinkServiceKind::OneDrive => {
                 let drive = onedrive::OneDrive::new(
+                    service.owner(),
                     &service.server_url,
                     self.onedrive_token(&service).await?,
                 )?;
@@ -613,15 +626,23 @@ impl Core {
             }
             // Deleting the file takes its link with it.
             LinkServiceKind::GoogleDrive => {
-                drive::Drive::new(&service.server_url, self.drive_token(&service).await?)?
-                    .delete(&link.share_id)
-                    .await
+                drive::Drive::new(
+                    service.owner(),
+                    &service.server_url,
+                    self.drive_token(&service).await?,
+                )?
+                .delete(&link.share_id)
+                .await
             }
             // The file's folder of its own goes, and the file and its link with it.
             LinkServiceKind::OneDrive => {
-                onedrive::OneDrive::new(&service.server_url, self.onedrive_token(&service).await?)?
-                    .delete(&link.folder)
-                    .await
+                onedrive::OneDrive::new(
+                    service.owner(),
+                    &service.server_url,
+                    self.onedrive_token(&service).await?,
+                )?
+                .delete(&link.folder)
+                .await
             }
         }
     }

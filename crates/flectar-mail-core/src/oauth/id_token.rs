@@ -490,18 +490,22 @@ fn cache_ttl(headers: &reqwest::header::HeaderMap) -> Duration {
         .min(MAX_KEY_TTL)
 }
 
-fn oidc_http_client() -> Result<&'static reqwest::Client> {
-    static HTTP: Lazy<std::result::Result<reqwest::Client, String>> = Lazy::new(|| {
-        reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent(concat!("Flectar-Mail/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|error| format!("identity HTTP client configuration failed: {error}"))
-    });
-    HTTP.as_ref()
-        .map_err(|message| CoreError::Network(message.clone()))
+/// The identity providers' published keys are the same for everyone, so they
+/// come through the app's proxy.
+fn oidc_http_client() -> Result<reqwest::Client> {
+    static HTTP: crate::net::proxy::SharedClient =
+        crate::net::proxy::SharedClient::new(|builder| {
+            builder
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(30))
+                .redirect(reqwest::redirect::Policy::none())
+                .user_agent(concat!("Flectar-Mail/", env!("CARGO_PKG_VERSION")))
+        });
+    HTTP.get(crate::net::proxy::Owner::App).map_err(|error| {
+        CoreError::Network(format!(
+            "identity HTTP client configuration failed: {error}"
+        ))
+    })
 }
 
 #[cfg(test)]

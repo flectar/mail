@@ -324,6 +324,7 @@ async fn connect(
 ) -> std::result::Result<pop3::Session, Failure> {
     let connection = &config.settings.connection;
     let server = pop3::Server {
+        owner: config.proxy_owner(),
         host: &config.incoming_host,
         port: config.incoming_port,
         security: connection.incoming_security,

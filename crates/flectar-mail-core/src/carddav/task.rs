@@ -6,6 +6,7 @@ use crate::{
     db::{Db, repo},
     error::{CoreError, Result},
     events::EventBus,
+    net::proxy::Owner,
 };
 use std::collections::HashSet;
 use tokio::sync::mpsc;
@@ -92,7 +93,12 @@ async fn run_cycle(
         return Ok(());
     };
     let password = credentials::load_async(credentials, account_id, Slot::CarddavPassword).await?;
-    let transport = HttpTransport::new(config.username.clone(), password, &config.base_url)?;
+    let transport = HttpTransport::new(
+        Owner::Account(account_id),
+        config.username.clone(),
+        password,
+        &config.base_url,
+    )?;
     if refresh_collections {
         let discovered = super::discovery::discover(&transport, &config.base_url).await?;
         let urls = discovered

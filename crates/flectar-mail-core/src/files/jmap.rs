@@ -6,6 +6,7 @@ use super::{
     validate_name,
 };
 use crate::error::Result;
+use crate::net::proxy::Owner;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -90,13 +91,25 @@ pub struct FileClient {
     pub compare_case_insensitively: bool,
 }
 impl FileClient {
+    /// Connect through the app's proxy.
     pub async fn connect(
         base: &str,
         user: &str,
         secret: &str,
         preferred: Option<&str>,
     ) -> Result<Self> {
-        let transport = Transport::new(base, user, secret)?;
+        Self::connect_as(Owner::App, base, user, secret, preferred).await
+    }
+
+    /// Connect through the proxy of `owner`.
+    pub async fn connect_as(
+        owner: Owner,
+        base: &str,
+        user: &str,
+        secret: &str,
+        preferred: Option<&str>,
+    ) -> Result<Self> {
+        let transport = Transport::new(owner, base, user, secret)?;
         let session = transport
             .discover(&format!("{}/.well-known/jmap", base.trim_end_matches('/')))
             .await?;

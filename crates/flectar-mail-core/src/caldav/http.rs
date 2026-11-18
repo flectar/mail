@@ -3,6 +3,7 @@
 
 use crate::error::{CoreError, Result};
 use crate::http_body;
+use crate::net::proxy::Owner;
 
 const MAX_DAV_RESPONSE_BODY_BYTES: usize = 32 * 1024 * 1024;
 const MAX_DAV_URL_BYTES: usize = 16 * 1024;
@@ -96,11 +97,12 @@ pub struct HttpTransport {
 impl HttpTransport {
     /// Bind credentials to one origin. Server-provided hrefs, persisted
     /// calendar URLs, and redirects can never forward them elsewhere.
-    pub fn new(auth: DavAuth, base_url: &str) -> Result<Self> {
+    /// Requests go through the proxy of `owner`.
+    pub fn new(owner: Owner, auth: DavAuth, base_url: &str) -> Result<Self> {
         let base_url = validated_dav_url(base_url)?;
         let origin = base_url.origin();
         let redirect_origin = origin.clone();
-        let client = reqwest::Client::builder()
+        let client = crate::net::proxy::http_builder(owner)
             .user_agent("flectar-mail-caldav/0.1")
             .timeout(std::time::Duration::from_secs(45))
             .redirect(reqwest::redirect::Policy::custom(move |attempt| {

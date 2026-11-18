@@ -55,6 +55,8 @@ fn detail(text: &str) -> String {
 
 /// Where the ManageSieve server is, and how to reach it.
 pub(crate) struct Server<'a> {
+    /// Whose proxy settings the connection follows.
+    pub(crate) owner: net::proxy::Owner,
     pub(crate) host: &'a str,
     pub(crate) port: u16,
     pub(crate) security: ConnectionSecurity,
@@ -164,7 +166,7 @@ impl Session {
     async fn start(server: &Server<'_>) -> Result<Self> {
         let connector = net::tls::connector(server.trusted_certificate_pem)
             .map_err(|error| Error::Tls(error.to_string()))?;
-        let tcp = net::connect_tcp(server.host, server.port).await?;
+        let tcp = net::proxy::connect_for(server.owner, "sieve", server.host, server.port).await?;
         let stream = match server.security {
             ConnectionSecurity::Tls => tls_handshake(&connector, tcp, server.host).await?,
             ConnectionSecurity::Starttls | ConnectionSecurity::None => MailStream::Plain(tcp),

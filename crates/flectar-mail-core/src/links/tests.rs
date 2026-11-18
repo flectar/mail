@@ -767,7 +767,8 @@ async fn a_large_file_goes_up_to_drive_from_where_google_says() {
             reply(201, json!({"id": "big"})),
         ],
     );
-    let drive = drive::Drive::new(&url, "drive-token".into()).unwrap();
+    let drive =
+        drive::Drive::new(crate::net::proxy::Owner::App, &url, "drive-token".into()).unwrap();
     let (id, uploaded) = drive.upload(&file, "big.bin", "folder1").await.unwrap();
     assert_eq!((id.as_str(), uploaded), ("big", size as u64));
     let requests = requests.await.unwrap();
@@ -813,7 +814,8 @@ async fn a_drive_link_the_organization_refuses_leaves_nothing_behind() {
             (204, None).into(),
         ],
     );
-    let drive = drive::Drive::new(&url, "drive-token".into()).unwrap();
+    let drive =
+        drive::Drive::new(crate::net::proxy::Owner::App, &url, "drive-token".into()).unwrap();
     let error = share_on_drive(&drive, 1, &file, "notes.txt")
         .await
         .unwrap_err();
@@ -864,7 +866,8 @@ async fn a_file_goes_up_to_onedrive_in_a_folder_of_its_own() {
             (204, None).into(),
         ],
     );
-    let drive = onedrive::OneDrive::new(&url, "graph-token".into()).unwrap();
+    let drive =
+        onedrive::OneDrive::new(crate::net::proxy::Owner::App, &url, "graph-token".into()).unwrap();
     let link = share_on_onedrive(&drive, 4, &file, "Q3: plan?.pdf", Some("2026-12-15".into()))
         .await
         .unwrap();
@@ -946,7 +949,8 @@ async fn a_large_file_goes_up_to_onedrive_from_where_the_session_says() {
             reply(201, json!({"id": "big", "parentReference": {"id": "f2"}})),
         ],
     );
-    let drive = onedrive::OneDrive::new(&url, "graph-token".into()).unwrap();
+    let drive =
+        onedrive::OneDrive::new(crate::net::proxy::Owner::App, &url, "graph-token".into()).unwrap();
     let (id, uploaded) = drive.upload(&file, "f2", "big.bin").await.unwrap();
     assert_eq!((id.as_str(), uploaded), ("big", size as u64));
     let requests = requests.await.unwrap();
@@ -977,7 +981,8 @@ async fn an_empty_file_goes_up_to_onedrive_in_one_request() {
         json!({"id": "e1", "parentReference": {"id": "f3"}}),
     )])
     .await;
-    let drive = onedrive::OneDrive::new(&url, "graph-token".into()).unwrap();
+    let drive =
+        onedrive::OneDrive::new(crate::net::proxy::Owner::App, &url, "graph-token".into()).unwrap();
     let (id, size) = drive.upload(&file, "f3", "empty.txt").await.unwrap();
     assert_eq!((id.as_str(), size), ("e1", 0));
     let requests = requests.await.unwrap();
@@ -1020,7 +1025,8 @@ async fn a_onedrive_link_the_organization_refuses_leaves_nothing_behind() {
             (204, None).into(),
         ],
     );
-    let drive = onedrive::OneDrive::new(&url, "graph-token".into()).unwrap();
+    let drive =
+        onedrive::OneDrive::new(crate::net::proxy::Owner::App, &url, "graph-token".into()).unwrap();
     let error = share_on_onedrive(&drive, 1, &file, "notes.txt", None)
         .await
         .unwrap_err();
