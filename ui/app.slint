@@ -5,6 +5,7 @@ import { AttachmentPreviewDialog } from "dialogs/attachment-preview-dialog.slint
 export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
+export { Translation, TranslationLanguage } from "translation.slint";
 export { LinkServices, LinkServiceRow } from "link-services.slint";
 export { RendererSettings } from "renderer-settings.slint";
 export { WindowChrome } from "window-chrome.slint";
@@ -614,6 +615,11 @@ export global I18n {
         if (key == "Read receipt preference saved.") { return @tr("Read receipt preference saved."); }
         if (key == "Could not save the read receipt preference: {}") { return @tr("Could not save the read receipt preference: {}", argument); }
         if (key == "Could not answer the read receipt request: {}") { return @tr("Could not answer the read receipt request: {}", argument); }
+        if (key == "Could not show the message: {}") { return @tr("Could not show the message: {}", argument); }
+        if (key == "Could not save the translation setting: {}") { return @tr("Could not save the translation setting: {}", argument); }
+        if (key == "Could not remove the key: {}") { return @tr("Could not remove the key: {}", argument); }
+        // Translate into: the language translations go into until one is chosen.
+        if (key == "Automatic ({})") { return @tr("Automatic ({})", argument); }
         if (key == "Could not mark all as read: {}") { return @tr("Could not mark all as read: {}", argument); }
         if (key == "Use YYYY-MM-DD for the date and a time such as {}.") { return @tr("Use YYYY-MM-DD for the date and a time such as {}.", argument); }
         if (key == "Event duration must be a number of minutes.") { return @tr("Event duration must be a number of minutes."); }

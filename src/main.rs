@@ -109,6 +109,7 @@ mod tabs;
 mod tall_surface_tests;
 mod text_size;
 mod theme;
+mod translation;
 mod ui_dispatch;
 mod ui_message;
 mod undo;
@@ -1244,6 +1245,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
     app.set_privacy_policy_url(privacy_policy_url(selected).into());
     date_format::reload(app);
     notifications::ui::language_changed(app);
+    translation::language_changed(app, selected, language_mode != "system");
 }
 
 impl InboxState {
@@ -6419,6 +6421,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
     link_services::install(&app, &state, &runtime, platform.external_urls.clone());
     read_receipts::install(&app, &state, &runtime);
+    translation::install(&app, &state, &runtime);
     block_sender::install(&app, &state, &runtime);
     saved_searches::install(&app, &state, &runtime);
     server_search::install(&app, &state, &runtime);

@@ -553,6 +553,14 @@ pub(super) fn restore_account_backup(
                         .collect()
                 });
             }
+            if let Some(translation) = preferences.get("translation").and_then(|value| {
+                serde_json::from_value::<flectar_mail_core::models::TranslationSettings>(
+                    value.clone(),
+                )
+                .ok()
+            }) {
+                settings.translation = translation;
+            }
             if let Some(enabled) = preferences
                 .get("notificationsEnabled")
                 .and_then(|value| value.as_bool())
@@ -1402,6 +1410,8 @@ pub(super) fn register_data_management_callbacks(
                     "suggestLearnedContacts": settings.suggest_learned_contacts,
                     "spellingEnabled": settings.spelling_enabled,
                     "spellingLanguages": settings.spelling_languages,
+                    // The services' keys stay in the system's credential store.
+                    "translation": settings.translation,
                     "notificationsEnabled": settings.notifications_enabled,
                     "notificationScope": settings.notification_scope,
                     "soundEnabled": settings.sound_enabled,

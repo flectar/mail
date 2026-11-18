@@ -205,7 +205,7 @@ def build(sources):
             "Close solid bin; slot cutouts; separate lid and handle."),
     }
     for filename, source in {
-        "bold": "bold", "code": "code-xml", "italic": "italic",
+        "bold": "bold", "code": "code-xml", "italic": "italic", "languages": "languages",
         "link": "link-2", "paperclip": "paperclip", "screen-full": "maximize",
         "search": "search", "strikethrough": "strikethrough", "typography": "underline",
     }.items():
