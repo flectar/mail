@@ -709,6 +709,7 @@ pub(super) fn render_current(
         clear_reader_projection(app);
         crate::attachment_controller::clear(app);
         crate::translation::clear(app);
+        crate::ai_features::clear(app);
         app.global::<EmailReader>().set_message_id(-1);
         app.global::<EmailReader>().set_authored_text("".into());
         app.global::<EmailReader>().set_notice("".into());

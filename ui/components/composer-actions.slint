@@ -394,6 +394,13 @@ export component ComposerToolbar inherits Rectangle {
     // A translation service is set up (#240).
     in property <bool> translate-shown: false;
     callback open-translate();
+    // An AI server is set up (#241): the writing tools run Proofread or one
+    // of the user's prompts, by index, -1 for Proofread.
+    in property <bool> improve-shown: false;
+    in property <[string]> ai-prompts: [];
+    in property <bool> improving: false;
+    callback improve(int);
+    callback edit-prompts();
     callback undo();
     callback redo();
 
@@ -418,6 +425,32 @@ export component ComposerToolbar inherits Rectangle {
         toolbar-row := HorizontalLayout {
             height: 32px;
             spacing: 2px;
+
+            // The writing tools come first, where they show however narrow the
+            // composer is (#241). Translating is one of them then, which keeps
+            // the toolbar as wide as without them.
+            if root.improve-shown : improve-menu := ContextMenuArea {
+                width: 32px;
+                height: 32px;
+                ToolbarButton {
+                    width: parent.width;
+                    height: parent.height;
+                    icon: @image-url("../icons/lucide/outline/sparkles.svg");
+                    icon-color: root.improving ? root.accent-color : root.secondary-color;
+                    hover-background: root.control-hover-color;
+                    tooltip-text: root.improving ? @tr("Improving the text…") : @tr("Writing tools");
+                    clicked => { improve-menu.show({ x: 0px, y: parent.height + 4px }); }
+                }
+                Menu {
+                    MenuItem { title: @tr("Proofread"); enabled: !root.improving; activated => { root.improve(-1); } }
+                    for prompt[index] in root.ai-prompts : MenuItem { title: prompt; enabled: !root.improving; activated => { root.improve(index); } }
+                    if root.translate-shown : MenuSeparator {}
+                    if root.translate-shown : MenuItem { title: @tr("Translate…"); activated => { root.open-translate(); } }
+                    MenuSeparator {}
+                    MenuItem { title: @tr("Edit prompts…"); activated => { root.edit-prompts(); } }
+                }
+            }
+            if root.improve-shown : Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
             // Plain text has no formatting, lists, links or pictures to offer.
             if !root.plain-text : HorizontalLayout {
@@ -535,8 +568,7 @@ export component ComposerToolbar inherits Rectangle {
             if root.templates-shown && !root.plain-text : Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
             if root.templates-shown : ToolbarButton { icon: @image-url("../icons/lucide/outline/book.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
-            if root.translate-shown : ToolbarButton { icon: @image-url("../icons/lucide/outline/languages.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Translate"); clicked => { root.open-translate(); } }
-
+            if root.translate-shown && !root.improve-shown : ToolbarButton { icon: @image-url("../icons/lucide/outline/languages.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Translate"); clicked => { root.open-translate(); } }
         }
     }
 
