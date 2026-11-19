@@ -2820,6 +2820,9 @@ impl Core {
                     .signature_list
                     .retain(|signature| signature.account_id != account_id);
                 repo::settings::set(conn, &settings)?;
+                // Notifications keep their sender and subject, so they go
+                // too, all but those on screen, which go as they come down.
+                repo::notifications::forget_account(conn, account_id)?;
                 repo::accounts::delete(conn, account_id)
             })
             .await?;
@@ -3080,7 +3083,9 @@ impl Core {
         }
 
         // Account cascades remove mail/folders/actions. These tables also hold
-        // profile-level data, so clear them explicitly for a genuine reset.
+        // profile-level data, so clear them explicitly for a genuine reset,
+        // blocked senders, large-file servers not tied to an account (their
+        // passwords go with account 0's below) and what agents did among them.
         self.db
             .write(|conn| {
                 conn.execute_batch(
@@ -3089,6 +3094,9 @@ impl Core {
                      DELETE FROM snippets;
                      DELETE FROM route_cache;
                      DELETE FROM ai_usage_events;
+                     DELETE FROM blocked_senders;
+                     DELETE FROM link_services;
+                     DELETE FROM agent_activity;
                      DELETE FROM app_settings;",
                 )?;
                 Ok(())
@@ -13898,6 +13906,23 @@ mod local_data_reset_tests {
                     "INSERT INTO snippets (name, body_text) VALUES ('Hello', 'Hi')",
                     [],
                 )?;
+                conn.execute(
+                    "INSERT INTO blocked_senders (address, blocked_at) VALUES ('spam@example.com', 1)",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO link_services (server_url, login_name, display_name, created_at)
+                     VALUES ('https://cloud.example.com', 'me', 'Cloud', 1)",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO agent_activity (occurred_at, agent, tool, account_id, items, outcome)
+                     VALUES (1, 'Assistant', 'search_messages', 1, 3, 'done')",
+                    [],
+                )?;
+                let message_id: i64 =
+                    conn.query_row("SELECT id FROM messages LIMIT 1", [], |row| row.get(0))?;
+                repo::notifications::enqueue_at(conn, message_id, false, 1)?;
                 repo::settings::set(
                     conn,
                     &Settings {
@@ -13952,6 +13977,23 @@ mod local_data_reset_tests {
             .await
             .unwrap();
         assert_eq!(counts, (0, 0, 0, 0));
+        // Nothing the profile held is left: who was blocked, the large-file
+        // server, what agents did, or what a notification said.
+        let left = core
+            .db
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT (SELECT COUNT(*) FROM blocked_senders)
+                          + (SELECT COUNT(*) FROM link_services)
+                          + (SELECT COUNT(*) FROM agent_activity)
+                          + (SELECT COUNT(*) FROM notification_outbox)",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
         let calendar_count = core
             .calendar_db
             .read(|conn| {
