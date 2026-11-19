@@ -118,6 +118,8 @@ fn open(services: impl FnOnce() -> Result<EngineServices, String>) -> Result<Hol
         oauth_redirects,
         host,
     } = services()?;
+    // A check in the background may run in a process the window never ran in.
+    crate::platform::install_system_proxy();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()

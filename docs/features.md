@@ -836,6 +836,13 @@ SOCKS proxy, if one is set, and everything else through the system's web
 proxy. Web proxies often refuse connections to mail servers, so mail goes
 through one only when you enter it yourself.
 
+The system's settings are Internet Options on Windows, the network settings on
+macOS and iOS, the desktop's own settings on Linux (GNOME's, KDE's and others,
+read through the desktop portal) and the Wi-Fi settings on Android, with
+automatic proxy configuration scripts too. Proxy environment variables such as
+`https_proxy` and `ALL_PROXY` come first when they're set, so a program started
+with a proxy of its own keeps it.
+
 You can also turn proxies off, or enter one by hand. A SOCKS5 proxy also looks
 up the servers' names, so the network you're on doesn't see them. An HTTP
 proxy carries every connection through CONNECT tunnels. A proxy's password

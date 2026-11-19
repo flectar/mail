@@ -25,6 +25,11 @@ enum Rule {
     Domain(String),
     /// Only the subdomains.
     Subdomains(String),
+    /// Only this name, as system settings read a name in their lists.
+    Host(String),
+    /// Names or addresses matching a pattern where `*` stands for any
+    /// characters.
+    Pattern(String),
     Network {
         address: IpAddr,
         prefix: u8,
@@ -34,6 +39,31 @@ enum Rule {
 impl Bypass {
     pub fn parse(list: &str) -> Self {
         let rules = entries(list).filter_map(Rule::parse).collect();
+        Self { rules }
+    }
+
+    /// A list as the system settings of Windows, macOS and Android write it:
+    /// a name names only that server, and `*` stands for any characters, as
+    /// in `*.example.com` or `intranet*`. Windows' `<-loopback>`, which
+    /// takes back the loopback bypass, is ignored: loopback stays direct.
+    pub fn parse_wildcards(list: &str) -> Self {
+        let rules = entries(list)
+            .filter(|entry| !entry.eq_ignore_ascii_case("<-loopback>"))
+            .filter_map(|entry| {
+                let rest = entry.strip_prefix("*.").unwrap_or(entry);
+                if entry != "*"
+                    && rest.contains('*')
+                    && ipv4_wildcard(entry).is_none()
+                    && !entry.contains(['/', ':', '<'])
+                {
+                    return Some(Rule::Pattern(entry.to_ascii_lowercase()));
+                }
+                match Rule::parse(entry)? {
+                    Rule::Domain(name) if !entry.starts_with('.') => Some(Rule::Host(name)),
+                    rule => Some(rule),
+                }
+            })
+            .collect();
         Self { rules }
     }
 
@@ -103,11 +133,12 @@ impl Rule {
             .and_then(|entry| entry.strip_suffix(']'))
             .unwrap_or(entry);
         if let Some((address, prefix)) = bare.split_once('/') {
+            let address = address.trim_start_matches('[').trim_end_matches(']');
+            // macOS writes networks short, as `169.254/16`.
             let address = address
-                .trim_start_matches('[')
-                .trim_end_matches(']')
                 .parse::<IpAddr>()
-                .ok()?;
+                .ok()
+                .or_else(|| short_ipv4(address))?;
             let prefix: u8 = prefix.parse().ok()?;
             let bits = if address.is_ipv4() { 32 } else { 128 };
             return (prefix <= bits).then_some(Self::Network { address, prefix });
@@ -137,12 +168,25 @@ impl Rule {
                     && (host.eq_ignore_ascii_case(domain) || is_subdomain(host, domain))
             }
             Self::Subdomains(domain) => address.is_none() && is_subdomain(host, domain),
+            Self::Host(name) => address.is_none() && host.eq_ignore_ascii_case(name),
+            Self::Pattern(pattern) => wildcard_match(pattern, host),
             Self::Network {
                 address: network,
                 prefix,
             } => address.is_some_and(|address| in_network(address, *network, *prefix)),
         }
     }
+}
+
+/// An IPv4 address with its trailing zeros left out, as in `169.254`.
+fn short_ipv4(text: &str) -> Option<IpAddr> {
+    let mut octets = [0u8; 4];
+    let mut count = 0;
+    for part in text.split('.') {
+        *octets.get_mut(count)? = part.parse().ok()?;
+        count += 1;
+    }
+    (count > 0).then(|| IpAddr::from(octets))
 }
 
 /// Windows writes networks as `192.168.*`.
@@ -158,6 +202,37 @@ fn ipv4_wildcard(entry: &str) -> Option<Rule> {
         address: IpAddr::from(octets),
         prefix: 8 * count as u8,
     })
+}
+
+/// Whether `text` matches `pattern`, where `*` stands for any characters,
+/// ignoring ASCII case.
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let (pattern, text) = (pattern.as_bytes(), text.as_bytes());
+    let (mut at_pattern, mut at_text) = (0, 0);
+    // The last `*` seen, and where in the text its match ends for now.
+    let mut star = None;
+    while at_text < text.len() {
+        match pattern.get(at_pattern) {
+            Some(b'*') => {
+                star = Some((at_pattern, at_text));
+                at_pattern += 1;
+            }
+            Some(byte) if byte.eq_ignore_ascii_case(&text[at_text]) => {
+                at_pattern += 1;
+                at_text += 1;
+            }
+            _ => {
+                // Let the last `*` take one more character, and go on.
+                let Some((star_at, matched_to)) = star else {
+                    return false;
+                };
+                star = Some((star_at, matched_to + 1));
+                at_pattern = star_at + 1;
+                at_text = matched_to + 1;
+            }
+        }
+    }
+    pattern[at_pattern..].iter().all(|&byte| byte == b'*')
 }
 
 /// Whether `host` ends with `.domain`.
@@ -275,6 +350,61 @@ mod tests {
         let all = Bypass::parse("*");
         assert!(all.skips("example.com"));
         assert!(all.skips("10.0.0.1"));
+    }
+
+    #[test]
+    fn system_lists_name_hosts_exactly() {
+        let list =
+            Bypass::parse_wildcards("intranet.example;*.corp.example;<local>;<-loopback>;10.*");
+        assert!(list.skips("intranet.example"));
+        assert!(!list.skips("mail.intranet.example"));
+        assert!(list.skips("mail.corp.example"));
+        assert!(!list.skips("corp.example"));
+        assert!(list.skips("printer"));
+        assert!(list.skips("10.1.2.3"));
+        assert!(list.skips("localhost"));
+    }
+
+    #[test]
+    fn system_lists_take_wildcards_anywhere() {
+        let list = Bypass::parse_wildcards("*example.com;wiki*;192.168.*.1;*.lab.*");
+        assert!(list.skips("example.com"));
+        assert!(list.skips("myexample.com"));
+        assert!(list.skips("mail.EXAMPLE.com"));
+        assert!(!list.skips("example.org"));
+        assert!(list.skips("wiki"));
+        assert!(list.skips("wiki.intranet"));
+        assert!(!list.skips("mywiki"));
+        assert!(list.skips("192.168.7.1"));
+        assert!(!list.skips("192.168.7.2"));
+        assert!(list.skips("printer.lab.example"));
+        assert!(!list.skips("lab.example"));
+    }
+
+    #[test]
+    fn wildcards_match_like_globs() {
+        for (pattern, text, expected) in [
+            ("*", "", true),
+            ("a*", "a", true),
+            ("a*c", "abbbc", true),
+            ("a*c", "abbbd", false),
+            ("*a*a*", "banana", true),
+            ("*a*a*a*a", "banana", false),
+            ("a**b", "ab", true),
+            ("", "", true),
+            ("", "a", false),
+        ] {
+            assert_eq!(wildcard_match(pattern, text), expected, "{pattern} {text}");
+        }
+    }
+
+    #[test]
+    fn reads_short_macos_networks() {
+        let list = Bypass::parse("169.254/16, 192.168.1/24, *.local");
+        assert!(list.skips("169.254.10.20"));
+        assert!(list.skips("192.168.1.9"));
+        assert!(!list.skips("192.168.2.9"));
+        assert!(list.skips("printer.local"));
     }
 
     #[test]

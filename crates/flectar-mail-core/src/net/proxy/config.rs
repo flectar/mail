@@ -251,8 +251,10 @@ fn system_source() -> Option<Arc<dyn SystemProxies>> {
 }
 
 /// Read the system's proxy settings through `source`, which the host
-/// provides. Without one, only the environment's proxy variables count.
-pub fn set_system_source(source: Arc<dyn SystemProxies>) {
+/// provides. Its answers are kept for a minute. Without one, only the
+/// environment's proxy variables count.
+pub fn set_system_source(source: impl SystemProxies + 'static) {
+    let source: Arc<dyn SystemProxies> = Arc::new(system::Cached::new(source));
     *system_slot()
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(source);
@@ -260,7 +262,8 @@ pub fn set_system_source(source: Arc<dyn SystemProxies>) {
 }
 
 /// Tell connections that the system's proxy settings changed, as when the
-/// computer joins another network.
+/// computer joins another network: answers kept from before go, and so do
+/// HTTP clients with their idle connections.
 pub fn system_changed() {
     GENERATION.fetch_add(1, Ordering::AcqRel);
 }
