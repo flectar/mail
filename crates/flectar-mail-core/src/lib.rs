@@ -800,6 +800,45 @@ impl Scenario {
     }
 }
 
+/// How much of a thread a model gets, in characters. A server on this
+/// device runs small models with short contexts: Ollama's default is 4,096
+/// tokens, about 12,000 characters with the answer, and it cuts what
+/// doesn't fit without telling. Hosted models take far more.
+fn ai_budget(settings: &Settings) -> usize {
+    let local = url::Url::parse(settings.ai.url.trim())
+        .ok()
+        .and_then(|url| {
+            url.host().map(|host| match host {
+                url::Host::Domain(domain) => domain.eq_ignore_ascii_case("localhost"),
+                url::Host::Ipv4(address) => address.is_loopback() || address.is_private(),
+                url::Host::Ipv6(address) => address.is_loopback(),
+            })
+        })
+        .unwrap_or(false);
+    if local { 9_000 } else { 40_000 }
+}
+
+/// Everything a summary says, to check against the messages.
+fn summary_text(summary: &crate::models::AiThreadSummary) -> String {
+    let mut said: Vec<&str> = Vec::new();
+    said.extend(
+        summary
+            .timeline
+            .iter()
+            .flat_map(|entry| [entry.actor.as_str(), entry.event.as_str()]),
+    );
+    said.extend(summary.key_points.iter().map(String::as_str));
+    said.extend(summary.next_action.as_deref());
+    said.extend(summary.proposed_reply.as_deref());
+    said.extend(summary.warning.as_deref());
+    if let Some(event) = &summary.calendar_suggestion {
+        said.push(&event.title);
+        said.extend(event.location.as_deref());
+        said.extend(event.description.as_deref());
+    }
+    said.join("\n")
+}
+
 fn oauth_calendar_scopes(provider: Provider, enabled: bool) -> &'static [&'static str] {
     if !enabled {
         return &[];
@@ -8316,17 +8355,35 @@ impl Core {
     }
 
     pub async fn ai_summarize(&self, thread_id: i64) -> Result<crate::models::AiThreadSummary> {
-        let cfg = self.ai_config(Scenario::Summarize).await?;
+        let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
+        let cfg = self.ai_config_from(&settings, Scenario::Summarize).await?;
         let detail = self.get_thread(thread_id).await?;
-        let context = ai::thread_context(&detail.messages, 24_000);
+        let context = ai::thread_context(&detail.messages, ai_budget(&settings));
         let bus = self.bus.clone();
-        ai::summarize_thread_stream(&cfg, &detail.thread.subject, &context, move |delta| {
-            bus.emit(CoreEvent::AiSummaryDelta {
-                thread_id,
-                delta: delta.to_owned(),
-            });
-        })
-        .await
+        let mut summary = ai::summarize_thread_stream(
+            &cfg,
+            &detail.thread.subject,
+            &context.json,
+            move |delta| {
+                bus.emit(CoreEvent::AiSummaryDelta {
+                    thread_id,
+                    delta: delta.to_owned(),
+                });
+            },
+        )
+        .await?;
+        summary.omitted = context.omitted;
+        if summary
+            .warning
+            .as_deref()
+            .is_some_and(|warning| warning.trim().is_empty())
+        {
+            summary.warning = None;
+        }
+        let said = summary_text(&summary);
+        let source = format!("{}\n{}", detail.thread.subject, context.source);
+        summary.unverified = ai::unverified(&said, &source);
+        Ok(summary)
     }
 
     /// Up to 3 short one-tap reply suggestions grounded in the thread, shown
@@ -8336,7 +8393,7 @@ impl Core {
         let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
         let cfg = self.ai_config_from(&settings, Scenario::QuickReply).await?;
         let detail = self.get_thread(thread_id).await?;
-        let context = ai::thread_context(&detail.messages, 12_000);
+        let context = ai::thread_context(&detail.messages, ai_budget(&settings) / 2).json;
         // Match the user's learned voice when voice drafting is enabled, same as
         // full AI drafts; otherwise pass an empty profile for the neutral prompt.
         let profile = if settings.voice_drafting {
@@ -8369,7 +8426,7 @@ impl Core {
                 let detail = self.get_thread(tid).await?;
                 (
                     detail.thread.subject.clone(),
-                    ai::thread_context(&detail.messages, 24_000),
+                    ai::thread_context(&detail.messages, ai_budget(&settings)).json,
                     ai::reply_target_line(&detail.messages, reply_to_message_id),
                 )
             }
@@ -8422,6 +8479,23 @@ impl Core {
     pub async fn ai_proofread(&self, body: String) -> Result<String> {
         let cfg = self.ai_config(Scenario::Draft).await?;
         ai::chat(&cfg, ai::proofread_prompt(&body)).await
+    }
+
+    /// The user's `instruction` carried out on text they selected in a
+    /// message, with what the answer adds that the text doesn't have.
+    pub async fn ai_answer(&self, text: String, instruction: String) -> Result<AiAnswer> {
+        let cfg = self.ai_config(Scenario::Ask).await?;
+        let output = ai::chat(
+            &cfg,
+            ai::apply_language(ai::answer_prompt(&text, &instruction), &cfg),
+        )
+        .await?;
+        let answer = ai::strip_reasoning(&output).trim().to_owned();
+        let unverified = ai::unverified(&answer, &text);
+        Ok(AiAnswer {
+            text: answer,
+            unverified,
+        })
     }
 
     /// Generate a clean email signature for an account from its name and

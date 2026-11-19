@@ -1,0 +1,270 @@
+import { Button } from "components/button.slint";
+import { ToolbarIconButton } from "components/controls.slint";
+import { LayoutMetrics, SettingsIconPalette } from "design-system.slint";
+import { TypeScale } from "typography.slint";
+import { AiWords } from "ai.slint";
+
+// A conversation's summary and suggested replies from the AI server (#241,
+// src/ai_features.rs). Shown only when the user asks for them.
+export global AiSummary {
+    // "summary" of the conversation, or "answer" to a prompt on selected
+    // text.
+    in property <string> mode: "summary";
+    // "" for none, "summarizing", "shown" or "failed".
+    in property <string> state;
+    // The answer to a prompt, in plain text.
+    in property <string> answer;
+    // The user's prompts by name, for the reader's selection menu.
+    in property <[string]> prompts;
+    in property <[string]> key-points;
+    in property <string> next-action;
+    // The model saw a message try to instruct it, in its words.
+    in property <string> warning;
+    // Links, addresses and phone numbers the summary has and the messages
+    // don't.
+    in property <[string]> unverified;
+    // Older messages the summary leaves out.
+    in property <int> omitted;
+    in property <string> proposed-reply;
+    // Why it failed: "not-set-up", or as `Ai.failure` names it, with `detail`.
+    in property <string> failure;
+    in property <string> detail;
+    // Suggested replies: "" until asked for, "loading", "shown" or "failed".
+    in property <string> replies-state;
+    in property <[string]> replies;
+    callback summarize();
+    // Runs prompt `index` on the selected text: -1 explains it.
+    callback ask(int, string);
+    // Asks for what failed again.
+    callback retry();
+    callback close();
+    // Opens a reply to the shown message with this text in it, to edit.
+    callback reply-with(string);
+    callback suggest-replies();
+    callback open-settings();
+}
+
+// Above the conversation, under its subject, as Outlook and Gmail put
+// theirs: the summary, marked as AI text that can be wrong, in plain text
+// with no links.
+export component SummaryCard inherits Rectangle {
+    in property <bool> compact;
+    in property <color> surface;
+    in property <color> border;
+    in property <color> heading;
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> error-color;
+
+    height: content.preferred-height;
+    background: root.surface;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.border;
+    accessible-role: groupbox;
+    accessible-label: AiSummary.mode == "answer" ? @tr("Answer by AI") : @tr("Summary by AI");
+
+    content := VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            Image {
+                width: LayoutMetrics.icon-size;
+                height: LayoutMetrics.icon-size;
+                y: (parent.height - self.height) / 2;
+                source: @image-url("icons/lucide/outline/sparkles.svg");
+                // As the AI page in Settings marks it.
+                colorize: SettingsIconPalette.ai;
+                image-fit: contain;
+                accessible-role: none;
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                Text {
+                    text: AiSummary.mode == "answer" ? @tr("Answer by AI") : @tr("Summary by AI");
+                    color: root.heading;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+                Text {
+                    text: @tr("AI can be wrong. Check what matters in the messages.");
+                    color: root.secondary-text;
+                    font-size: TypeScale.caption;
+                    font-italic: true;
+                    wrap: word-wrap;
+                }
+            }
+            ToolbarIconButton {
+                compact: root.compact;
+                icon: @image-url("icons/lucide/outline/x.svg");
+                icon-color: root.secondary-text;
+                tooltip-text: @tr("Close the summary");
+                clicked => { AiSummary.close(); }
+            }
+        }
+
+        if AiSummary.state == "summarizing" : Text {
+            text: AiSummary.mode == "answer" ? @tr("Asking the AI server…") : @tr("Summarizing the conversation…");
+            color: root.secondary-text;
+            wrap: word-wrap;
+        }
+
+        if AiSummary.state == "failed" : HorizontalLayout {
+            spacing: 12px;
+            Text {
+                horizontal-stretch: 1;
+                text: AiSummary.failure == "not-set-up" ? @tr("Set up an AI server in Settings to use AI features.")
+                    : AiWords.failure(AiSummary.failure, AiSummary.detail);
+                color: root.body-text;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+            Button {
+                width: max(96px, self.content-width);
+                text: AiSummary.failure == "not-set-up" ? @tr("AI settings") : @tr("Try again");
+                clicked => {
+                    if AiSummary.failure == "not-set-up" {
+                        AiSummary.open-settings();
+                    } else {
+                        AiSummary.retry();
+                    }
+                }
+            }
+        }
+
+        if AiSummary.state == "shown" && AiSummary.mode == "answer" : Text {
+            text: AiSummary.answer;
+            color: root.body-text;
+            wrap: word-wrap;
+        }
+
+        if AiSummary.state == "shown" && AiSummary.mode == "summary" && AiSummary.warning != "" : VerticalLayout {
+            spacing: 2px;
+            Text {
+                text: @tr("A message in this conversation tries to instruct the AI.");
+                color: root.error-color;
+                font-weight: 600;
+                wrap: word-wrap;
+            }
+            Text {
+                text: AiSummary.warning;
+                color: root.body-text;
+                wrap: word-wrap;
+            }
+        }
+
+        if AiSummary.state == "shown" && AiSummary.mode == "summary" : VerticalLayout {
+            spacing: 4px;
+            for point in AiSummary.key-points : HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: "•";
+                    color: root.secondary-text;
+                    vertical-alignment: top;
+                    accessible-role: none;
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: point;
+                    color: root.body-text;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if AiSummary.state == "shown" && AiSummary.mode == "summary" && AiSummary.next-action != "" : Text {
+            text: @tr("Next: {}", AiSummary.next-action);
+            color: root.body-text;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+
+        if AiSummary.state == "shown" && AiSummary.unverified.length > 0 : VerticalLayout {
+            spacing: 2px;
+            Text {
+                text: @tr("Not in the messages, so don't trust these:");
+                color: root.error-color;
+                font-weight: 600;
+                wrap: word-wrap;
+            }
+            for contact in AiSummary.unverified : Text {
+                text: contact;
+                color: root.error-color;
+                wrap: word-wrap;
+            }
+        }
+
+        if AiSummary.state == "shown" && AiSummary.mode == "summary" && AiSummary.omitted > 0 : Text {
+            text: AiSummary.omitted == 1 ? @tr("Leaves out the oldest message, which didn't fit.")
+                : @tr("Leaves out the {} oldest messages, which didn't fit.", AiSummary.omitted);
+            color: root.secondary-text;
+            font-size: TypeScale.caption;
+            wrap: word-wrap;
+        }
+
+        if AiSummary.state == "shown" && AiSummary.mode == "summary" && AiSummary.proposed-reply != "" : VerticalLayout {
+            spacing: 2px;
+            Text {
+                text: @tr("Proposed reply");
+                color: root.secondary-text;
+                font-size: TypeScale.caption;
+            }
+            Text {
+                text: AiSummary.proposed-reply;
+                color: root.body-text;
+                font-italic: true;
+                wrap: word-wrap;
+            }
+        }
+
+        if AiSummary.state == "shown" && AiSummary.mode == "summary" && AiSummary.replies-state == "shown" : VerticalLayout {
+            spacing: 6px;
+            Text {
+                text: @tr("Suggested replies");
+                color: root.secondary-text;
+                font-size: TypeScale.caption;
+            }
+            for reply in AiSummary.replies : HorizontalLayout {
+                alignment: start;
+                Button {
+                    preferred-width: self.content-width;
+                    height: max(30px, self.preferred-height);
+                    text: reply;
+                    label-overflow: elide;
+                    clicked => { AiSummary.reply-with(reply); }
+                }
+            }
+        }
+
+        if AiSummary.state == "shown" && AiSummary.mode == "summary" && AiSummary.replies-state == "failed" : Text {
+            text: AiWords.failure(AiSummary.failure, AiSummary.detail);
+            color: root.error-color;
+            font-size: TypeScale.caption;
+            wrap: word-wrap;
+        }
+
+        if AiSummary.state == "shown" && AiSummary.mode == "summary" : HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            if AiSummary.proposed-reply != "" : Button {
+                width: max(110px, self.content-width);
+                text: @tr("Reply with this");
+                accessible-description: AiSummary.proposed-reply;
+                clicked => { AiSummary.reply-with(AiSummary.proposed-reply); }
+            }
+            if AiSummary.replies-state == "" || AiSummary.replies-state == "failed" : Button {
+                width: max(110px, self.content-width);
+                text: @tr("Suggest replies");
+                clicked => { AiSummary.suggest-replies(); }
+            }
+            if AiSummary.replies-state == "loading" : Text {
+                text: @tr("Suggesting replies…");
+                color: root.secondary-text;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

@@ -281,6 +281,20 @@ pub(super) fn install(
             }
         }
     });
+    // The AI summary's reply, or a suggested one, goes into a reply to the
+    // shown message, for the user to edit and send or not (#241).
+    let weak = Rc::downgrade(&composers);
+    app.global::<AiSummary>().on_reply_with(move |text| {
+        if let Some(composers) = weak.upgrade()
+            && let Some(app) = composers.app.upgrade()
+            && let Some(session) = composers.open_from_message(&app, "reply")
+        {
+            session.edit(|document| {
+                document.update_selection(0, 0);
+                document.insert_text(&format!("{}\n", text.trim()))
+            });
+        }
+    });
     let weak = Rc::downgrade(&composers);
     app.on_refresh_composer_quotes(move || {
         let Some(composers) = weak.upgrade() else {
@@ -843,29 +857,35 @@ impl Composers {
     }
 
     /// Reply, reply all, forward, edit as new, or edit the selected draft.
-    fn open_from_message(self: &Rc<Self>, app: &AppWindow, action: &str) {
+    /// Opens the composer to answer, forward or edit the shown message, and
+    /// returns its session.
+    fn open_from_message(
+        self: &Rc<Self>,
+        app: &AppWindow,
+        action: &str,
+    ) -> Option<Rc<ComposeSession>> {
         let (row, conversation_message_id) = self.shown_message();
         let core = self.core();
         let Some(core) = core else {
             app.set_render_status(UiMessage::plain(
                 "Connect an account before replying or forwarding.",
             ));
-            return;
+            return None;
         };
         let Some(row) = row else {
             app.set_render_status(UiMessage::plain("Choose a message first."));
-            return;
+            return None;
         };
 
         if action == "edit_draft" {
             self.open_draft(app, &core, &row);
-            return;
+            return None;
         }
 
         // Local mail is answered from an account.
         if self.state.borrow().connected_accounts.is_empty() {
             app.set_render_status(UiMessage::plain("Add an account to send mail."));
-            return;
+            return None;
         }
         let source = match self
             .runtime
@@ -874,7 +894,7 @@ impl Composers {
             Ok(source) => source,
             Err(error) => {
                 app.set_render_status(UiMessage::detail("Could not open composer: {}", error));
-                return;
+                return None;
             }
         };
         let account_name = self
@@ -899,22 +919,18 @@ impl Composers {
             Ok(prepared) => prepared,
             Err(error) => {
                 app.set_render_status(UiMessage::detail("Could not open composer: {}", error));
-                return;
+                return None;
             }
         };
         let Ok(account_id) = i32::try_from(prepared.account_id) else {
             app.set_render_status(UiMessage::plain(
                 "Could not open composer: invalid account identifier",
             ));
-            return;
+            return None;
         };
 
-        let Some(session) = self.open(app) else {
-            return;
-        };
-        let Some(host) = session.host() else {
-            return;
-        };
+        let session = self.open(app)?;
+        let host = session.host()?;
         let ui = host.ui();
         ui.set_account_id(account_id);
         let display_name = account_name.unwrap_or_else(|| source.account_email.clone());
@@ -970,6 +986,7 @@ impl Composers {
         if matches!(action, "forward" | "edit_as_new") {
             session.attach_original_files(&core, source.attachments);
         }
+        Some(session)
     }
 
     fn open_draft(self: &Rc<Self>, app: &AppWindow, core: &CoreMailSource, row: &MailMessage) {
