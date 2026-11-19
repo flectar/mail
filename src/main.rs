@@ -1621,9 +1621,7 @@ fn desktop_credential_store(
             flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore::new(path),
         );
     }
-    #[cfg(not(all(linux_desktop, debug_assertions)))]
-    let _ = paths;
-    Arc::new(flectar_mail_core::accounts::credentials::SystemCredentialStore)
+    Arc::new(flectar_mail_core::accounts::credentials::SystemCredentialStore::for_profile(paths))
 }
 
 #[cfg(all(linux_desktop, debug_assertions))]
