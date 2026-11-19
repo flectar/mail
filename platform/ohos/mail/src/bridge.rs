@@ -36,6 +36,8 @@ static WITHDRAW_PRIVACY: AtomicUsize = AtomicUsize::new(0);
 static REQUEST_NOTIFICATION_PERMISSION: AtomicUsize = AtomicUsize::new(0);
 /// 0 = not asked/unknown, 1 = allowed, 2 = denied, as the page reports it.
 static NOTIFICATION_AVAILABILITY: AtomicI32 = AtomicI32::new(0);
+static SET_APP_LANGUAGE: AtomicUsize = AtomicUsize::new(0);
+static APP_LANGUAGE: OnceLock<flectar_mail::AppLanguage> = OnceLock::new();
 
 /// Request ids for the callback-based picker flows.
 static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
@@ -148,6 +150,18 @@ pub(super) unsafe extern "C" fn set_bridge(
             &REQUEST_NOTIFICATION_PERMISSION,
             call_notification_permission,
         );
+        install_property(
+            env,
+            argv[0],
+            b"setAppPreferredLanguage\0",
+            &SET_APP_LANGUAGE,
+            call_app_language,
+        );
+        // The shared app may apply the saved language before ArkTS installs
+        // its callback. Flush the host hook's last value now.
+        if let Some(language) = APP_LANGUAGE.get() {
+            language.replay();
+        }
         undefined(env)
     }
 }
@@ -435,6 +449,26 @@ pub(super) unsafe extern "C" fn set_notification_availability(
         }
         undefined(env)
     }
+}
+
+/// Give the host hook the shared app's language selection.
+pub(super) fn install_app_language(language: flectar_mail::AppLanguage) {
+    let _ = APP_LANGUAGE.set(language);
+}
+
+/// Set the HarmonyOS app-preferred language so ArkTS resources load in the
+/// same language as the Slint UI. The system applies a chosen language at
+/// once, and "default", which follows the system, from the next cold start.
+pub(super) fn set_app_language(mode: &str, selected: &str) -> Result<(), String> {
+    let language = if mode == "system" {
+        "default"
+    } else if selected == "zh_Hans" {
+        "zh-Hans"
+    } else {
+        selected
+    };
+    let language = CString::new(language).map_err(|_| "app language is malformed".to_owned())?;
+    call_closure(&SET_APP_LANGUAGE, "setAppPreferredLanguage", language)
 }
 
 /// Arguments of one `imeUpdateCursor` call.
@@ -791,6 +825,25 @@ unsafe extern "C" fn call_open_url(
             return;
         };
         call_with_args(env, js_callback, &[argument], "openUrl");
+    }
+}
+
+/// JS-thread half of [`set_app_language`].
+unsafe extern "C" fn call_app_language(
+    env: napi_env,
+    js_callback: napi_value,
+    _context: *mut c_void,
+    data: *mut c_void,
+) {
+    // SAFETY: `data` is the `CString` boxed in `set_app_language`; this
+    // callback owns it.
+    let language = unsafe { Box::from_raw(data.cast::<CString>()) };
+    // SAFETY: NAPI calls are made on the JS thread with live handles.
+    unsafe {
+        let Some(argument) = string_value(env, language.as_bytes()) else {
+            return;
+        };
+        call_with_args(env, js_callback, &[argument], "setAppPreferredLanguage");
     }
 }
 

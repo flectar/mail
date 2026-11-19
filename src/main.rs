@@ -67,6 +67,8 @@ pub use notifications::{
     Act, Alert, AlertId, Availability, Badge, Controls, Failure, FixedWords, HostFuture,
     NewMailNotification, NotificationHost, Response, Route, parse_payload, payload, respond,
 };
+mod app_language;
+pub use app_language::AppLanguage;
 mod number_format;
 mod privacy_consent;
 pub use privacy_consent::PrivacyConsent;
@@ -1245,6 +1247,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
     }
     app.set_language_mode(language_mode.into());
     app.set_privacy_policy_url(privacy_policy_url(selected).into());
+    app.invoke_app_language_changed(language_mode.into(), selected.into());
     date_format::reload(app);
     notifications::ui::language_changed(app);
     translation::language_changed(app, selected, language_mode != "system");
@@ -1542,6 +1545,8 @@ pub struct PlatformContext {
     /// Host hook for withdrawing a first-use privacy consent, when the host
     /// stores one.
     pub privacy_consent: PrivacyConsent,
+    /// Host hook for a native app language that must follow the shared UI.
+    pub app_language: AppLanguage,
     /// The system's spell checker, where the app has none of its own for the
     /// platform: Android's. `None` elsewhere.
     pub spelling: Option<Arc<dyn SpellingHost>>,
@@ -1561,6 +1566,7 @@ impl PlatformContext {
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
             privacy_consent: PrivacyConsent::default(),
+            app_language: AppLanguage::default(),
             spelling: None,
             documents: documents::default_provider(),
             credentials,
@@ -1584,6 +1590,7 @@ impl PlatformContext {
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
             privacy_consent: PrivacyConsent::default(),
+            app_language: AppLanguage::default(),
             spelling: None,
             documents,
             credentials,
@@ -1938,6 +1945,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         if let Err(error) = privacy_consent.withdraw() {
             tracing::warn!(%error, "withdrawing privacy consent failed");
         }
+    });
+    let app_language = platform.app_language.clone();
+    app.on_app_language_changed(move |mode, selected| {
+        app_language.set(mode.as_str(), selected.as_str());
     });
     app.on_settings_search_matches(|haystack, query| {
         let query = query.to_string().trim().to_lowercase();
