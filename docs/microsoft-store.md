@@ -1,7 +1,7 @@
 # Microsoft Store package
 
 Release builds package Flectar Mail for the Microsoft Store as MSIX, next to
-the GitHub installer and portable ZIP. The Store signs the package and
+the GitHub installer and ZIP. The Store signs the package and
 delivers updates, so no code-signing certificate is needed for it.
 
 ## What CI builds
@@ -38,7 +38,7 @@ outside the Store, Windows only installs signed packages.
 3. The package declares the `runFullTrust` restricted capability, which every
    packaged desktop app needs. Explain it as: "Flectar Mail is a desktop email
    client packaged with MSIX. It runs as a full-trust desktop app, like its
-   installer and portable builds."
+   installer and ZIP builds."
 4. Complete the pages below. Later releases only need a new package and the
    **What's new in this version** text.
 
@@ -117,5 +117,5 @@ password and IMAP and SMTP servers in the notes. Tell testers to add it with
 - **App data** of a new install stays in
   `%LOCALAPPDATA%\Packages\<package family name>\LocalCache`, which Windows
   removes when the app is uninstalled. On a PC that already ran the installer
-  or portable build, the Store build picks up that build's data instead.
+  or ZIP build, the Store build picks up that build's data instead.
 - **Updates** come from the Store.
