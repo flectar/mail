@@ -1,8 +1,9 @@
 //! Desktop credential storage against a stand-in Secret Service on a private
 //! D-Bus. A session without a default collection gets one through the
 //! provider's prompt, as libsecret creates it, and a missing provider or a
-//! dismissed prompt is named in the error. The bus needs `dbus-daemon`; CI
-//! fails instead of skipping without it.
+//! dismissed prompt is named in the error. Profiles that share the keyring
+//! keep their secrets apart. The bus needs `dbus-daemon`; CI fails instead
+//! of skipping without it.
 #![cfg(secret_service)]
 
 use dbus::arg::{PropMap, RefArg, Variant};
@@ -11,6 +12,7 @@ use dbus::message::MessageType;
 use dbus::strings::ErrorName;
 use dbus::{Message, Path};
 use flectar_mail_core::accounts::credentials::{CredentialStore, Slot, SystemCredentialStore};
+use flectar_mail_core::config::Paths;
 use flectar_mail_core::error::CoreError;
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -115,6 +117,18 @@ struct Item {
 }
 
 impl Keyring {
+    /// A keyring whose default collection exists and is unlocked.
+    fn with_default_collection() -> Self {
+        Self {
+            default: Some(Collection {
+                path: "/org/freedesktop/secrets/collection/login".into(),
+                label: "Login".into(),
+                items: Vec::new(),
+            }),
+            ..Self::default()
+        }
+    }
+
     fn object_path(&mut self, parent: &str) -> String {
         self.objects += 1;
         format!("{parent}/o{}", self.objects)
@@ -345,8 +359,10 @@ fn nothing_stored(result: Result<String, CoreError>) -> bool {
     matches!(result, Err(CoreError::Auth(message)) if message == "no stored credential")
 }
 
+/// libdbus reads the session bus address once per process, so this binary
+/// has one test, which takes the scenarios in turn on one private bus.
 #[test]
-fn account_setup_creates_a_missing_default_keyring() {
+fn desktop_credentials_on_the_secret_service() {
     let Some(bus) = Bus::start() else {
         assert!(
             std::env::var_os("CI").is_none(),
@@ -364,23 +380,48 @@ fn account_setup_creates_a_missing_default_keyring() {
     // keyring waits as long as a prompt stays open. Fail instead of stalling
     // the run when one never completes; dropping the bus ends the stuck call.
     let (finished, outcome) = mpsc::channel();
-    let setup = std::thread::spawn({
+    let scenarios = std::thread::spawn({
         let address = bus.address.clone();
         move || {
+            // A new profile, with no provider on the bus at first.
             set_up_accounts(&address);
+            keep_profiles_apart(&address);
             let _ = finished.send(());
         }
     });
     if let Err(mpsc::RecvTimeoutError::Timeout) = outcome.recv_timeout(Duration::from_secs(60)) {
         panic!("the credential store was still waiting after a minute");
     }
-    if let Err(panic) = setup.join() {
+    if let Err(panic) = scenarios.join() {
         std::panic::resume_unwind(panic);
     }
 }
 
+/// A profile that has run before: its mail database exists.
+fn profile_from_before(directory: &std::path::Path) -> Paths {
+    let paths = Paths::for_tests(directory);
+    std::fs::write(paths.db_file(), b"").unwrap();
+    paths
+}
+
+/// Store `secret` the way every profile named its secrets before.
+fn store_shared(user: &str, secret: &str) {
+    keyring::Entry::new("flectar-mail", user)
+        .unwrap()
+        .set_password(secret)
+        .unwrap();
+}
+
+fn shared_owner() -> String {
+    keyring::Entry::new("flectar-mail", "profile")
+        .unwrap()
+        .get_password()
+        .unwrap()
+}
+
 fn set_up_accounts(address: &str) {
-    let store = SystemCredentialStore;
+    let profile = tempfile::tempdir().unwrap();
+    let store = SystemCredentialStore::for_profile(&Paths::for_tests(profile.path()));
 
     let error = store.check_available().unwrap_err().to_string();
     assert!(
@@ -438,4 +479,89 @@ fn set_up_accounts(address: &str) {
         2,
         "one keyring was created"
     );
+}
+
+fn keep_profiles_apart(address: &str) {
+    let provider = Provider::start(address, Keyring::with_default_collection());
+    store_shared("1:password", "native");
+    store_shared("0:ai_api_key", "native key");
+
+    // The first profile from before to start keeps its secrets where they are.
+    let native = tempfile::tempdir().unwrap();
+    let native_paths = profile_from_before(native.path());
+    let native_store = SystemCredentialStore::for_profile(&native_paths);
+    assert_eq!(native_store.load(1, Slot::Password).unwrap(), "native");
+    assert_eq!(native_store.load(0, Slot::AiApiKey).unwrap(), "native key");
+
+    // A second one from before can't tell its own from the first one's, so it
+    // starts over under a service of its own.
+    let flatpak = tempfile::tempdir().unwrap();
+    let flatpak_store = SystemCredentialStore::for_profile(&profile_from_before(flatpak.path()));
+    assert!(nothing_stored(flatpak_store.load(1, Slot::Password)));
+    assert!(nothing_stored(flatpak_store.load(0, Slot::AiApiKey)));
+    assert_eq!(shared_owner(), "contested");
+
+    // Storing and removing no longer reach the other profile's secrets.
+    flatpak_store.store(1, Slot::Password, "flatpak").unwrap();
+    assert_eq!(flatpak_store.load(1, Slot::Password).unwrap(), "flatpak");
+    assert_eq!(native_store.load(1, Slot::Password).unwrap(), "native");
+    native_store
+        .store(1, Slot::Password, "native again")
+        .unwrap();
+    assert_eq!(flatpak_store.load(1, Slot::Password).unwrap(), "flatpak");
+    flatpak_store.delete_all(1).unwrap();
+    assert!(nothing_stored(flatpak_store.load(1, Slot::Password)));
+    assert_eq!(
+        native_store.load(1, Slot::Password).unwrap(),
+        "native again"
+    );
+
+    // Its secrets may be the second one's, so the first one starts over too
+    // when it next starts.
+    let restarted = SystemCredentialStore::for_profile(&native_paths);
+    assert!(nothing_stored(restarted.load(1, Slot::Password)));
+    restarted.store(1, Slot::Password, "native, own").unwrap();
+    assert_eq!(restarted.load(1, Slot::Password).unwrap(), "native, own");
+
+    // A new profile has a service of its own from the start.
+    let new = tempfile::tempdir().unwrap();
+    let new_store = SystemCredentialStore::for_profile(&Paths::for_tests(new.path()));
+    assert!(nothing_stored(new_store.load(1, Slot::Password)));
+    new_store.store(1, Slot::Password, "new").unwrap();
+    assert_eq!(new_store.load(1, Slot::Password).unwrap(), "new");
+    assert_eq!(restarted.load(1, Slot::Password).unwrap(), "native, own");
+    assert_eq!(shared_owner(), "contested");
+    drop(provider);
+
+    // The only profile from before keeps its secrets across starts.
+    let _provider = Provider::start(address, Keyring::with_default_collection());
+    store_shared("1:password", "only");
+    let only = tempfile::tempdir().unwrap();
+    let only_paths = profile_from_before(only.path());
+    assert_eq!(
+        SystemCredentialStore::for_profile(&only_paths)
+            .load(1, Slot::Password)
+            .unwrap(),
+        "only"
+    );
+    let owner = shared_owner();
+    assert_ne!(owner, "contested");
+    let next_start = SystemCredentialStore::for_profile(&only_paths);
+    assert_eq!(next_start.load(1, Slot::Password).unwrap(), "only");
+    next_start
+        .store(1, Slot::Password, "only, changed")
+        .unwrap();
+    assert_eq!(next_start.load(1, Slot::Password).unwrap(), "only, changed");
+    assert_eq!(shared_owner(), owner);
+
+    // Starting only reads the claim: a keyring that lost it, or hides it while
+    // locked, keeps the profile's secrets and isn't written to.
+    let claim = keyring::Entry::new("flectar-mail", "profile").unwrap();
+    claim.delete_credential().unwrap();
+    let after_reset = SystemCredentialStore::for_profile(&only_paths);
+    assert_eq!(
+        after_reset.load(1, Slot::Password).unwrap(),
+        "only, changed"
+    );
+    assert!(matches!(claim.get_password(), Err(keyring::Error::NoEntry)));
 }
