@@ -122,6 +122,7 @@ async fn server(
 
 fn server_at(port: u16, security: ConnectionSecurity) -> Server<'static> {
     Server {
+        owner: crate::net::proxy::Owner::App,
         host: "127.0.0.1",
         port,
         security,

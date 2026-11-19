@@ -9,6 +9,7 @@ use std::collections::HashSet;
 
 use crate::error::{CoreError, Result};
 use crate::http_body;
+use crate::net::proxy::{Owner, SharedClient};
 use crate::{caldav, db::repo, models::Calendar};
 
 const CALENDAR_LIST_URL: &str = "https://www.googleapis.com/calendar/v3/users/me/calendarList";
@@ -17,19 +18,16 @@ const MAX_CALENDAR_LIST_PAGES: usize = 100;
 const MAX_CALENDARS: usize = 10_000;
 const MAX_PAGE_TOKEN_BYTES: usize = 16 * 1024;
 
-fn calendar_http_client() -> Result<&'static reqwest::Client> {
-    static HTTP: once_cell::sync::Lazy<std::result::Result<reqwest::Client, String>> =
-        once_cell::sync::Lazy::new(|| {
-            reqwest::Client::builder()
-                .user_agent("flectar-mail-google-calendar/0.1")
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .timeout(std::time::Duration::from_secs(30))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .map_err(|error| format!("Google Calendar HTTP client: {error}"))
-        });
-    HTTP.as_ref()
-        .map_err(|message| CoreError::Network(message.clone()))
+fn calendar_http_client(owner: Owner) -> Result<reqwest::Client> {
+    static HTTP: SharedClient = SharedClient::new(|builder| {
+        builder
+            .user_agent("flectar-mail-google-calendar/0.1")
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+    });
+    HTTP.get(owner)
+        .map_err(|error| CoreError::Network(format!("Google Calendar HTTP client: {error}")))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,8 +42,8 @@ pub struct GoogleCalendar {
 }
 
 /// List all calendars in the signed-in user's Google Calendar sidebar.
-pub async fn list_calendars(access_token: &str) -> Result<Vec<GoogleCalendar>> {
-    let client = calendar_http_client()?;
+pub async fn list_calendars(owner: Owner, access_token: &str) -> Result<Vec<GoogleCalendar>> {
+    let client = calendar_http_client(owner)?;
     let mut page_token: Option<String> = None;
     let mut calendars = Vec::new();
     let mut seen_page_tokens = std::collections::HashSet::new();
@@ -204,6 +202,7 @@ fn events_url(calendar_id: &str, event_id: Option<&str>) -> Result<url::Url> {
 /// Google calendar `calendar_id` (`events.list` with `iCalUID`). For a series
 /// the copy is the series, not one of its changed occurrences.
 pub async fn find_meeting(
+    owner: Owner,
     access_token: &str,
     calendar_id: &str,
     ical_uid: &str,
@@ -213,7 +212,7 @@ pub async fn find_meeting(
         .append_pair("iCalUID", ical_uid)
         .append_pair("showDeleted", "false")
         .append_pair("maxResults", "50");
-    let response = calendar_http_client()?
+    let response = calendar_http_client(owner)?
         .get(url)
         .bearer_auth(access_token)
         .send()
@@ -272,6 +271,7 @@ fn parse_meeting_copy(body: &str) -> Result<Option<MeetingCopy>> {
 /// instance whose original start is `original`, its RECURRENCE-ID
 /// (`events.instances` with `originalStart`).
 pub async fn find_occurrence(
+    owner: Owner,
     access_token: &str,
     calendar_id: &str,
     series: &MeetingCopy,
@@ -288,7 +288,7 @@ pub async fn find_occurrence(
         .append_pair("originalStart", &original_start(original, all_day))
         .append_pair("showDeleted", "false")
         .append_pair("maxResults", "10");
-    let response = calendar_http_client()?
+    let response = calendar_http_client(owner)?
         .get(url)
         .bearer_auth(access_token)
         .send()
@@ -398,7 +398,9 @@ fn answer_patch(email: &str, partstat: &str, comment: Option<&str>) -> Result<se
 /// Answer a meeting on the user's copy of it (`events.patch`). With
 /// `notify` Google sends the change on (`sendUpdates=all`), which is how the
 /// organizer hears of it.
+#[allow(clippy::too_many_arguments)]
 pub async fn answer_meeting(
+    owner: Owner,
     access_token: &str,
     calendar_id: &str,
     copy: &MeetingCopy,
@@ -412,7 +414,7 @@ pub async fn answer_meeting(
     let mut url = events_url(calendar_id, Some(&copy.event_id))?;
     url.query_pairs_mut()
         .append_pair("sendUpdates", if notify { "all" } else { "none" });
-    let response = calendar_http_client()?
+    let response = calendar_http_client(owner)?
         .patch(url)
         .bearer_auth(access_token)
         .header(reqwest::header::CONTENT_TYPE, "application/json")

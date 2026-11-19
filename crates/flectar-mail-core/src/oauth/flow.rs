@@ -4,6 +4,7 @@
 
 use crate::error::{CoreError, Result};
 use crate::models::Provider;
+use crate::net::proxy::{Owner, SharedClient};
 use crate::oauth::providers::for_provider;
 use crate::oauth::redirect::{
     LoopbackRedirectBroker, OAUTH_REDIRECT_TIMEOUT, OAuthRedirectBrokerHandle,
@@ -203,9 +204,11 @@ pub async fn authorize_with_broker(
         form.push(("scope".to_string(), cfg.scopes.join(" ")));
     }
 
-    let body = post_form(cfg.token_url, &form).await.inspect_err(
-        |e| tracing::warn!(?provider, error = %e, "oauth: token endpoint unreachable"),
-    )?;
+    let body = post_form(Owner::App, cfg.token_url, &form)
+        .await
+        .inspect_err(
+            |e| tracing::warn!(?provider, error = %e, "oauth: token endpoint unreachable"),
+        )?;
     let tok: ExchangeResponse = serde_json::from_str(&body).map_err(|_| {
         let detail = crate::http_body::single_line_excerpt(&body, 512);
         tracing::warn!(?provider, response = %detail, "oauth: token exchange rejected");
@@ -278,18 +281,16 @@ async fn google_identity_from_access_token(access_token: &str) -> Result<OAuthId
         picture: Option<String>,
     }
 
-    static HTTP: once_cell::sync::Lazy<std::result::Result<reqwest::Client, String>> =
-        once_cell::sync::Lazy::new(|| {
-            reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .timeout(std::time::Duration::from_secs(30))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .map_err(|error| format!("Google identity HTTP client: {error}"))
-        });
+    // Signing in belongs to no account yet, so it takes the app's proxy.
+    static HTTP: SharedClient = SharedClient::new(|builder| {
+        builder
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+    });
     let http = HTTP
-        .as_ref()
-        .map_err(|message| CoreError::Network(message.clone()))?;
+        .get(Owner::App)
+        .map_err(|error| CoreError::Network(format!("Google identity HTTP client: {error}")))?;
     let response = http
         .get("https://openidconnect.googleapis.com/v1/userinfo")
         .bearer_auth(access_token)

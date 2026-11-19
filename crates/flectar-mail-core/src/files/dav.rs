@@ -6,6 +6,7 @@ use super::{
     validate_name,
 };
 use crate::error::Result;
+use crate::net::proxy::Owner;
 use quick_xml::{NsReader, events::Event, name::ResolveResult};
 use std::{collections::HashMap, path::Path};
 use url::Url;
@@ -75,7 +76,18 @@ pub struct DavClient {
     locks: HashMap<String, String>,
 }
 impl DavClient {
+    /// Connect through the app's proxy.
     pub async fn connect(endpoint: &str, user: &str, secret: &str) -> Result<Self> {
+        Self::connect_as(Owner::App, endpoint, user, secret).await
+    }
+
+    /// Connect through the proxy of `owner`.
+    pub async fn connect_as(
+        owner: Owner,
+        endpoint: &str,
+        user: &str,
+        secret: &str,
+    ) -> Result<Self> {
         let mut url = canonical_url(validated_url(endpoint)?)?;
         if url.query().is_some() {
             return Err(err("WebDAV storage URLs cannot contain a query."));
@@ -83,7 +95,7 @@ impl DavClient {
         if !url.path().ends_with('/') {
             url.set_path(&format!("{}/", url.path()));
         }
-        let transport = Transport::new(url.as_str(), user, secret)?;
+        let transport = Transport::new(owner, url.as_str(), user, secret)?;
         let response = transport
             .send(transport.request("OPTIONS", url.as_str())?)
             .await?;

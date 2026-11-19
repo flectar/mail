@@ -5,6 +5,7 @@
 
 use crate::error::{CoreError, Result};
 use crate::models::{AutoReply, now_ms};
+use crate::net::proxy::Owner;
 use chrono::{Local, NaiveDateTime, TimeZone, Utc};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -145,12 +146,13 @@ pub(crate) struct GraphReplies {
 }
 
 impl GraphReplies {
-    pub(crate) fn new() -> Result<Self> {
-        Self::with_url(MAILBOX_SETTINGS)
+    /// Requests go through the proxy of `owner`, the account.
+    pub(crate) fn new(owner: Owner) -> Result<Self> {
+        Self::with_url(owner, MAILBOX_SETTINGS)
     }
 
-    pub(crate) fn with_url(url: &str) -> Result<Self> {
-        let http = Client::builder()
+    pub(crate) fn with_url(owner: Owner, url: &str) -> Result<Self> {
+        let http = crate::net::proxy::http_builder(owner)
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::none())
@@ -272,7 +274,9 @@ mod tests {
                 ),
             })
             .await;
-        let graph = GraphReplies::with_url(&format!("{origin}/v1.0/me/mailboxSettings")).unwrap();
+        let graph =
+            GraphReplies::with_url(Owner::App, &format!("{origin}/v1.0/me/mailboxSettings"))
+                .unwrap();
         let reply = AutoReply {
             enabled: true,
             text: "Away".into(),
@@ -304,7 +308,9 @@ mod tests {
             )
         })
         .await;
-        let graph = GraphReplies::with_url(&format!("{origin}/v1.0/me/mailboxSettings")).unwrap();
+        let graph =
+            GraphReplies::with_url(Owner::App, &format!("{origin}/v1.0/me/mailboxSettings"))
+                .unwrap();
         assert!(matches!(
             graph.save("token", &AutoReply::default()).await,
             Err(CoreError::NeedsReauth)

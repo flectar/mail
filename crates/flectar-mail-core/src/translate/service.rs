@@ -208,19 +208,18 @@ fn batches(
 
 // ---- HTTP -----------------------------------------------------------------
 
-fn client() -> Result<&'static reqwest::Client, TranslationError> {
-    static CLIENT: std::sync::LazyLock<Result<reqwest::Client, String>> =
-        std::sync::LazyLock::new(|| {
-            reqwest::Client::builder()
+/// Translation belongs to no account, so it goes through the app's proxy.
+fn client() -> Result<reqwest::Client, TranslationError> {
+    static CLIENT: crate::net::proxy::SharedClient =
+        crate::net::proxy::SharedClient::new(|builder| {
+            builder
                 .connect_timeout(Duration::from_secs(15))
                 .redirect(reqwest::redirect::Policy::none())
                 .user_agent(concat!("Flectar-Mail/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .map_err(|error| error.to_string())
         });
     CLIENT
-        .as_ref()
-        .map_err(|error| TranslationError::Service(error.clone()))
+        .get(crate::net::proxy::Owner::App)
+        .map_err(|error| TranslationError::Service(error.to_string()))
 }
 
 /// A server address the user typed: HTTPS, or plain HTTP to this device

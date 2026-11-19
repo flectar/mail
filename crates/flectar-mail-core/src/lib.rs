@@ -35,6 +35,7 @@ pub mod migration;
 pub mod mime;
 pub mod models;
 pub mod net;
+mod network;
 pub mod oauth;
 pub mod pop3;
 pub mod queue;
@@ -267,6 +268,7 @@ pub use crate::db::repo::notifications::{
     NewMailNotification, NotificationBatch, NotificationOutcome, ShownNotification, Withdrawal,
 };
 pub use crate::db::snapshot::DatabaseSnapshotManifest;
+pub use crate::network::{AccountNetwork, NetworkCheck, NetworkSettings, ProxyPassword};
 
 /// Read the presentation state needed to lay out the first application frame.
 ///
@@ -1097,6 +1099,8 @@ impl Core {
         // needs a token refresh.
         let settings = core.db.read(|conn| repo::settings::get(conn)).await?;
         apply_oauth_settings(&settings);
+        // And the proxy settings before any connection opens.
+        core.load_proxy_settings().await?;
 
         // Recover any actions orphaned mid-flight by a previous crash/kill, so a
         // send that was executing when the app died retries instead of sticking
@@ -2783,6 +2787,7 @@ impl Core {
             handle.abort();
         }
         self.tokens.forget_account(account_id).await;
+        Self::forget_account_proxy(account_id);
         self.delete_calendar_passwords(account_id).await?;
         self.purge_calendar_account(account_id).await?;
         self.files_db
@@ -3123,6 +3128,8 @@ impl Core {
             .await?;
         // Account id 0 owns app-level secrets such as the optional AI key.
         credentials::delete_all_async(self.credentials.clone(), 0).await?;
+        // Connections go back to the default proxy setting.
+        self.load_proxy_settings().await?;
         let _ = tokio::fs::remove_dir_all(self.paths.draft_attachments_dir()).await;
         let _ = tokio::fs::remove_dir_all(self.paths.models_dir()).await;
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
@@ -5136,7 +5143,8 @@ impl Core {
                 access_token: self.tokens.access_token(config.id, config.provider).await?,
             },
         };
-        imap::connect_with_settings(
+        imap::connect_as(
+            config.proxy_owner(),
             &config.incoming_host,
             config.incoming_port,
             credentials,
@@ -6757,6 +6765,7 @@ impl Core {
         }
         credentials::check_available_async(self.credentials.clone()).await?;
         let transport = carddav::http::HttpTransport::new(
+            net::proxy::Owner::Account(args.account_id),
             args.username.clone(),
             args.password.clone(),
             &base_url,
@@ -7125,6 +7134,7 @@ impl Core {
             })
             .collect();
         graph::create_calendar_event(
+            net::proxy::Owner::Account(account_id),
             &token,
             None,
             &graph::GraphEvent {
@@ -7591,8 +7601,11 @@ impl Core {
             (None, None) => return Err(CoreError::CalDav("password is required".into())),
         };
 
-        let transport =
-            caldav::HttpTransport::new(caldav::DavAuth::Basic(username.clone(), password), &url)?;
+        let transport = caldav::HttpTransport::new(
+            net::proxy::Owner::Account(args.account_id),
+            caldav::DavAuth::Basic(username.clone(), password),
+            &url,
+        )?;
         // Google answers for one calendar at its own address without always
         // naming it a calendar collection.
         let discovery = if caldav::google_calendar_id(&url).is_some() {
@@ -7729,10 +7742,11 @@ impl Core {
             .tokens
             .access_token(account_id, Provider::Gmail)
             .await?;
+        let owner = net::proxy::Owner::Account(account_id);
         let transport =
-            caldav::HttpTransport::new(caldav::DavAuth::Bearer(token.clone()), &base_url)?;
+            caldav::HttpTransport::new(owner, caldav::DavAuth::Bearer(token.clone()), &base_url)?;
         caldav::discovery::discover_known_collection(&transport, &base_url).await?;
-        let listed = googlecal::list_calendars(&token).await?;
+        let listed = googlecal::list_calendars(owner, &token).await?;
         if listed.is_empty() {
             return Err(CoreError::CalDav("no Google calendars found".into()));
         }
@@ -7892,7 +7906,14 @@ impl Core {
                 open_url,
             )
             .await?;
-        graph::create_online_meeting(&token, subject, start_ms, end_ms).await
+        graph::create_online_meeting(
+            net::proxy::Owner::Account(account_id),
+            &token,
+            subject,
+            start_ms,
+            end_ms,
+        )
+        .await
     }
 
     /// Microsoft calendar connection: Outlook / Microsoft 365 has no CalDAV
@@ -7908,7 +7929,8 @@ impl Core {
         let token = self
             .graph_token_with_consent(account_id, oauth::providers::MS_CALENDARS_SCOPE, open_url)
             .await?;
-        let discovered = graph::list_calendars(&token).await?;
+        let discovered =
+            graph::list_calendars(net::proxy::Owner::Account(account_id), &token).await?;
         if discovered.is_empty() {
             return Err(CoreError::CalDav("no calendars found".into()));
         }

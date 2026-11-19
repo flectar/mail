@@ -43,6 +43,7 @@ const MOST_SCRIPTS: usize = 20;
 pub(crate) fn server(config: &AccountConfig) -> Server<'_> {
     let connection = &config.settings.connection;
     Server {
+        owner: config.proxy_owner(),
         host: &config.incoming_host,
         port: managesieve::PORT,
         security: match connection.incoming_security {

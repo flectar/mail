@@ -3,6 +3,7 @@
 
 use super::err;
 use crate::error::Result;
+use crate::net::proxy::Owner;
 use serde_json::{Value, json};
 use std::path::Path;
 use std::time::Duration;
@@ -27,9 +28,10 @@ pub(super) struct Drive {
 }
 
 impl Drive {
-    pub(super) fn new(api: &str, token: String) -> Result<Self> {
+    /// Requests go through the proxy of `owner`, the account the Drive is.
+    pub(super) fn new(owner: Owner, api: &str, token: String) -> Result<Self> {
         Ok(Self {
-            http: reqwest::Client::builder()
+            http: crate::net::proxy::http_builder(owner)
                 .connect_timeout(Duration::from_secs(10))
                 .redirect(reqwest::redirect::Policy::none())
                 .build()

@@ -124,7 +124,7 @@ struct HistoryPage {
 
 impl GmailApi {
     fn new(ctx: SyncCtx, account: AccountConfig) -> Result<Self> {
-        let http = Client::builder()
+        let http = crate::net::proxy::http_builder(account.proxy_owner())
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(HTTP_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())

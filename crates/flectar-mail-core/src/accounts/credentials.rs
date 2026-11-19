@@ -49,6 +49,9 @@ pub enum Slot {
     /// uses the AI server's key.
     DeeplKey,
     LibreTranslateKey,
+    /// The password of a proxy (#250): the app's under account id 0, and an
+    /// account's own proxy under the account.
+    ProxyPassword,
 }
 
 impl Slot {
@@ -72,6 +75,7 @@ impl Slot {
             }
             Slot::DeeplKey => "deepl_key".into(),
             Slot::LibreTranslateKey => "libretranslate_key".into(),
+            Slot::ProxyPassword => "proxy_password".into(),
         }
     }
 }

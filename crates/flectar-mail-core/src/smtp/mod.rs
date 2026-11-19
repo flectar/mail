@@ -292,7 +292,12 @@ async fn connect(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<AsyncSmtpConnec
         ));
     }
     let open = async {
-        let tcp = net::connect_tcp(&cfg.smtp_host, cfg.smtp_port)
+        let scheme = if security == ConnectionSecurity::Tls {
+            "smtps"
+        } else {
+            "smtp"
+        };
+        let tcp = net::proxy::connect_for(cfg.proxy_owner(), scheme, &cfg.smtp_host, cfg.smtp_port)
             .await
             .map_err(|error| {
                 CoreError::Smtp(format!(

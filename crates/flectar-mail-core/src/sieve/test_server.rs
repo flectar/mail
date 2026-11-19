@@ -61,6 +61,7 @@ pub(crate) async fn read_command(
 
 pub(crate) fn server_at(port: u16) -> Server<'static> {
     Server {
+        owner: crate::net::proxy::Owner::App,
         host: "127.0.0.1",
         port,
         security: ConnectionSecurity::Starttls,

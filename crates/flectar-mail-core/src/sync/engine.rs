@@ -1578,7 +1578,8 @@ pub(crate) async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Ses
     crate::events::sync_diagnostic("imap_credentials", Some(config.id), "loading");
     let creds = imap_credentials(ctx, config).await?;
     crate::events::sync_diagnostic("imap_connect", Some(config.id), "connecting");
-    match imap::connect_with_settings(
+    match imap::connect_as(
+        config.proxy_owner(),
         &config.incoming_host,
         config.incoming_port,
         creds,
@@ -1601,7 +1602,8 @@ pub(crate) async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Ses
             );
             ctx.tokens.invalidate(config.id).await;
             let creds = imap_credentials(ctx, config).await?;
-            imap::connect_with_settings(
+            imap::connect_as(
+                config.proxy_owner(),
                 &config.incoming_host,
                 config.incoming_port,
                 creds,

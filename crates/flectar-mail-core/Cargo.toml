@@ -68,7 +68,7 @@ url = "2"
 percent-encoding = "2"
 
 # CalDAV (HTTP + multistatus XML); rustls keeps the no-native-TLS property
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "form", "json", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "form", "json", "socks", "stream"] }
 quick-xml = { version = "0.42", features = ["encoding"] }
 async-trait = "0.1"
 

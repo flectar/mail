@@ -21,6 +21,7 @@ use crate::{
     accounts::credentials::{self, Slot},
     error::{CoreError, Result},
     models::AuthKind,
+    net::proxy::Owner,
 };
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -306,7 +307,13 @@ impl Core {
         };
         if settings.webdav {
             Ok(FileClient::Dav(
-                dav::DavClient::connect(&settings.endpoint, user, &secret).await?,
+                dav::DavClient::connect_as(
+                    Owner::Account(account),
+                    &settings.endpoint,
+                    user,
+                    &secret,
+                )
+                .await?,
             ))
         } else {
             let endpoint = if settings.endpoint.is_empty() {
@@ -316,8 +323,14 @@ impl Core {
             };
             let base = crate::jmap::client::normalize_base_url(endpoint, &config.email)?;
             Ok(FileClient::Jmap(
-                jmap::FileClient::connect(&base, user, &secret, config.jmap_account_id.as_deref())
-                    .await?,
+                jmap::FileClient::connect_as(
+                    Owner::Account(account),
+                    &base,
+                    user,
+                    &secret,
+                    config.jmap_account_id.as_deref(),
+                )
+                .await?,
             ))
         }
     }

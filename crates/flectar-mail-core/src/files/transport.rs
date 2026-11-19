@@ -1,5 +1,6 @@
 use super::err;
 use crate::error::Result;
+use crate::net::proxy::Owner;
 use reqwest::{Client, Method, RequestBuilder, Response};
 use url::Url;
 
@@ -11,10 +12,11 @@ pub struct Transport {
     secret: String,
 }
 impl Transport {
-    pub fn new(endpoint: &str, user: &str, secret: &str) -> Result<Self> {
+    /// Requests go through the proxy of `owner`.
+    pub fn new(owner: Owner, endpoint: &str, user: &str, secret: &str) -> Result<Self> {
         let url = validated_url(endpoint)?;
         Ok(Self {
-            http: Client::builder()
+            http: crate::net::proxy::http_builder(owner)
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .timeout(std::time::Duration::from_secs(120))
                 .redirect(reqwest::redirect::Policy::none())

@@ -276,18 +276,17 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-fn ai_http_client() -> Result<&'static reqwest::Client> {
-    static HTTP: once_cell::sync::Lazy<std::result::Result<reqwest::Client, String>> =
-        once_cell::sync::Lazy::new(|| {
-            reqwest::Client::builder()
+fn ai_http_client() -> Result<reqwest::Client> {
+    static HTTP: crate::net::proxy::SharedClient =
+        crate::net::proxy::SharedClient::new(|builder| {
+            builder
                 .connect_timeout(std::time::Duration::from_secs(15))
                 .redirect(reqwest::redirect::Policy::none())
                 .user_agent(concat!("Flectar-Mail/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .map_err(|error| format!("AI HTTP client configuration failed: {error}"))
         });
-    HTTP.as_ref()
-        .map_err(|message| CoreError::Network(message.clone()))
+    HTTP.get(crate::net::proxy::Owner::App).map_err(|error| {
+        CoreError::Network(format!("AI HTTP client configuration failed: {error}"))
+    })
 }
 
 fn ai_network_error(error: reqwest::Error) -> CoreError {

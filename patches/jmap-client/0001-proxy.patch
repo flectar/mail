@@ -1,0 +1,182 @@
+diff --git a/crates/jmap-client/src/blob/download.rs b/crates/jmap-client/src/blob/download.rs
+index 8ce94e7..f008427 100644
+--- a/crates/jmap-client/src/blob/download.rs
++++ b/crates/jmap-client/src/blob/download.rs
+@@ -13,11 +13,6 @@ use reqwest::header::CONTENT_TYPE;
+ 
+ use crate::{client::Client, core::session::URLPart};
+ 
+-#[cfg(feature = "blocking")]
+-use reqwest::blocking::Client as HttpClient;
+-#[cfg(feature = "async")]
+-use reqwest::Client as HttpClient;
+-
+ impl Client {
+     #[maybe_async::maybe_async]
+     pub async fn download(&self, blob_id: &str) -> crate::Result<Vec<u8>> {
+@@ -52,7 +47,7 @@ impl Client {
+         headers.remove(CONTENT_TYPE);
+ 
+         Client::handle_error(
+-            HttpClient::builder()
++            self.http_builder()
+                 .timeout(self.timeout())
+                 .danger_accept_invalid_certs(self.accept_invalid_certs)
+                 .redirect(self.redirect_policy())
+diff --git a/crates/jmap-client/src/blob/upload.rs b/crates/jmap-client/src/blob/upload.rs
+index 06cf1ed..9d9e9ad 100644
+--- a/crates/jmap-client/src/blob/upload.rs
++++ b/crates/jmap-client/src/blob/upload.rs
+@@ -14,11 +14,6 @@ use serde::Deserialize;
+ 
+ use crate::{client::Client, core::session::URLPart};
+ 
+-#[cfg(feature = "blocking")]
+-use reqwest::blocking::Client as HttpClient;
+-#[cfg(feature = "async")]
+-use reqwest::Client as HttpClient;
+-
+ #[derive(Debug, Deserialize)]
+ pub struct UploadResponse {
+     #[serde(rename = "accountId")]
+@@ -61,7 +56,7 @@ impl Client {
+ 
+         serde_json::from_slice::<UploadResponse>(
+             &Client::handle_error(
+-                HttpClient::builder()
++                self.http_builder()
+                     .timeout(self.timeout())
+                     .danger_accept_invalid_certs(self.accept_invalid_certs)
+                     .redirect(self.redirect_policy())
+diff --git a/crates/jmap-client/src/client.rs b/crates/jmap-client/src/client.rs
+index c63b373..91f3bc9 100644
+--- a/crates/jmap-client/src/client.rs
++++ b/crates/jmap-client/src/client.rs
+@@ -21,13 +21,13 @@ use crate::{
+ use ahash::AHashSet;
+ use base64::{engine::general_purpose, Engine};
+ #[cfg(feature = "blocking")]
+-use reqwest::blocking::{Client as HttpClient, Response};
++use reqwest::blocking::{Client as HttpClient, ClientBuilder as HttpClientBuilder, Response};
+ use reqwest::{
+     header::{self},
+     redirect,
+ };
+ #[cfg(feature = "async")]
+-use reqwest::{Client as HttpClient, Response};
++use reqwest::{Client as HttpClient, ClientBuilder as HttpClientBuilder, Response};
+ use serde::de::DeserializeOwned;
+ use std::{
+     net::IpAddr,
+@@ -63,6 +63,7 @@ pub struct Client {
+     default_account_id: String,
+     timeout: Duration,
+     pub(crate) accept_invalid_certs: bool,
++    proxy: Option<reqwest::Proxy>,
+ 
+     #[cfg(feature = "websockets")]
+     pub(crate) authorization: String,
+@@ -76,6 +77,7 @@ pub struct ClientBuilder {
+     forwarded_for: Option<String>,
+     accept_invalid_certs: bool,
+     timeout: Duration,
++    proxy: Option<reqwest::Proxy>,
+ }
+ 
+ impl Default for ClientBuilder {
+@@ -95,6 +97,7 @@ impl ClientBuilder {
+             timeout: Duration::from_millis(DEFAULT_TIMEOUT_MS),
+             forwarded_for: None,
+             accept_invalid_certs: false,
++            proxy: None,
+         }
+     }
+ 
+@@ -179,6 +182,13 @@ impl ClientBuilder {
+         self
+     }
+ 
++    /// Send every request through this proxy, which replaces the proxies
++    /// reqwest reads from the environment and the system.
++    pub fn proxy(mut self, proxy: reqwest::Proxy) -> Self {
++        self.proxy = Some(proxy);
++        self
++    }
++
+     /// Connects to the JMAP API Session URL.
+     ///
+     /// Setting up [Credentials](struct.ClientBuilder.html#method.credentials) must be done before calling this function.
+@@ -210,7 +220,7 @@ impl ClientBuilder {
+         let session_url = format!("{}/.well-known/jmap", url);
+         let session: Session = serde_json::from_slice(
+             &Client::handle_error(
+-                HttpClient::builder()
++                with_proxy(HttpClient::builder(), &self.proxy)
+                     .timeout(self.timeout)
+                     .danger_accept_invalid_certs(self.accept_invalid_certs)
+                     .redirect(redirect::Policy::custom(move |attempt| {
+@@ -259,6 +269,7 @@ impl ClientBuilder {
+             session_url,
+             session_updated: true.into(),
+             accept_invalid_certs: self.accept_invalid_certs,
++            proxy: self.proxy,
+             trusted_hosts,
+             #[cfg(feature = "websockets")]
+             authorization,
+@@ -306,6 +317,11 @@ impl Client {
+         &self.headers
+     }
+ 
++    /// A builder for an HTTP client of this JMAP client, with its proxy.
++    pub(crate) fn http_builder(&self) -> HttpClientBuilder {
++        with_proxy(HttpClient::builder(), &self.proxy)
++    }
++
+     pub(crate) fn redirect_policy(&self) -> redirect::Policy {
+         let trusted_hosts = self.trusted_hosts.clone();
+         redirect::Policy::custom(move |attempt| {
+@@ -334,7 +350,7 @@ impl Client {
+     {
+         let response: response::Response<R> = serde_json::from_slice(
+             &Client::handle_error(
+-                HttpClient::builder()
++                self.http_builder()
+                     .redirect(self.redirect_policy())
+                     .danger_accept_invalid_certs(self.accept_invalid_certs)
+                     .timeout(self.timeout)
+@@ -361,7 +377,7 @@ impl Client {
+     pub async fn refresh_session(&self) -> crate::Result<()> {
+         let session: Session = serde_json::from_slice(
+             &Client::handle_error(
+-                HttpClient::builder()
++                self.http_builder()
+                     .timeout(Duration::from_millis(DEFAULT_TIMEOUT_MS))
+                     .danger_accept_invalid_certs(self.accept_invalid_certs)
+                     .redirect(self.redirect_policy())
+@@ -462,6 +478,13 @@ impl From<(String, String)> for Credentials {
+     }
+ }
+ 
++fn with_proxy(builder: HttpClientBuilder, proxy: &Option<reqwest::Proxy>) -> HttpClientBuilder {
++    match proxy {
++        Some(proxy) => builder.proxy(proxy.clone()),
++        None => builder,
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use crate::core::response::{Response, TaggedMethodResponse};
+diff --git a/crates/jmap-client/src/event_source/stream.rs b/crates/jmap-client/src/event_source/stream.rs
+index 96bd8af..8e3ca9c 100644
+--- a/crates/jmap-client/src/event_source/stream.rs
++++ b/crates/jmap-client/src/event_source/stream.rs
+@@ -73,7 +73,7 @@ impl Client {
+         }
+ 
+         let mut stream = Client::handle_error(
+-            reqwest::Client::builder()
++            self.http_builder()
+                 .connect_timeout(self.timeout())
+                 .danger_accept_invalid_certs(self.accept_invalid_certs)
+                 .redirect(self.redirect_policy())

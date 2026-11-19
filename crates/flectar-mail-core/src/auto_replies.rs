@@ -110,7 +110,10 @@ impl Core {
                         open_url,
                     )
                     .await?;
-                match graph::GraphReplies::new()?.save(&token, &reply).await {
+                match graph::GraphReplies::new(crate::net::proxy::Owner::Account(account_id))?
+                    .save(&token, &reply)
+                    .await
+                {
                     Err(CoreError::NeedsReauth) => {
                         return Err(CoreError::Auth(
                             "Microsoft didn't let Flectar Mail change this account's settings. \
@@ -245,7 +248,9 @@ pub(crate) async fn read_back_from_graph(ctx: &SyncCtx, account_id: i64) -> Resu
             oauth::providers::MS_MAILBOX_SETTINGS_SCOPE,
         )
         .await?;
-    let reply = graph::GraphReplies::new()?.read(&token).await?;
+    let reply = graph::GraphReplies::new(crate::net::proxy::Owner::Account(account_id))?
+        .read(&token)
+        .await?;
     let changed = ctx
         .db
         .write(move |conn| {

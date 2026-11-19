@@ -19,6 +19,7 @@ use crate::error::{CoreError, Result};
 use crate::events::NewEventInfo;
 use crate::graph;
 use crate::models::now_ms;
+use crate::net::proxy::Owner;
 
 /// Delta windows are fixed at first sync: 90 days back, ~13 months ahead.
 /// Events outside the window arrive when the token eventually expires (410)
@@ -38,7 +39,8 @@ pub async fn sync_connection(
     connection_id: i64,
     pushes: &[PendingPush],
 ) -> Result<Synced> {
-    let pushed = push_routed(db, token, pushes).await?;
+    let owner = Owner::Account(account_id);
+    let pushed = push_routed(db, owner, token, pushes).await?;
 
     let calendars = db
         .read(move |conn| repo::caldav::connection_calendars(conn, connection_id))
@@ -68,10 +70,10 @@ pub async fn sync_connection(
 /// unconditional PATCHes (Graph offers no If-Match on delegated events), so
 /// concurrent remote edits resolve last-writer-wins; the next pull
 /// reconciles the row.
-async fn push_routed(db: &Db, token: &str, pushes: &[PendingPush]) -> Result<bool> {
+async fn push_routed(db: &Db, owner: Owner, token: &str, pushes: &[PendingPush]) -> Result<bool> {
     let mut any = false;
     for push in pushes {
-        match push_row(db, token, push).await {
+        match push_row(db, owner, token, push).await {
             Ok(()) => any = true,
             Err(error @ (CoreError::NeedsReauth | CoreError::Offline)) => return Err(error),
             Err(e) => tracing::warn!("graph push of event {} failed: {e}", push.row.event.id),
@@ -80,12 +82,12 @@ async fn push_routed(db: &Db, token: &str, pushes: &[PendingPush]) -> Result<boo
     Ok(any)
 }
 
-async fn push_row(db: &Db, token: &str, push: &PendingPush) -> Result<()> {
+async fn push_row(db: &Db, owner: Owner, token: &str, push: &PendingPush) -> Result<()> {
     let row = &push.row;
     let event_id = row.event.id;
     if row.deleted {
         if let Some(href) = &row.caldav_href {
-            graph::delete_calendar_event(token, href).await?;
+            graph::delete_calendar_event(owner, token, href).await?;
         }
         db.write(move |conn| repo::calendar::hard_delete(conn, event_id))
             .await?;
@@ -97,11 +99,12 @@ async fn push_row(db: &Db, token: &str, push: &PendingPush) -> Result<()> {
     let calendar_id = push.calendar.id;
     let id = match &row.caldav_href {
         Some(href) => {
-            graph::update_calendar_event(token, href, &ev).await?;
+            graph::update_calendar_event(owner, token, href, &ev).await?;
             href.clone()
         }
         None => {
-            let id = graph::create_calendar_event(token, Some(&push.calendar.url), &ev).await?;
+            let id =
+                graph::create_calendar_event(owner, token, Some(&push.calendar.url), &ev).await?;
             if id.is_empty() {
                 return Err(CoreError::Other("graph create returned no event id".into()));
             }
@@ -187,7 +190,7 @@ async fn sync_calendar(
                 "graph delta repeated a pagination link".into(),
             ));
         }
-        let Some(page) = graph::delta_page(token, &url).await? else {
+        let Some(page) = graph::delta_page(Owner::Account(account_id), token, &url).await? else {
             // 410 Gone: the delta token expired, re-anchor the window once.
             if restarted {
                 return Err(CoreError::CalDav("graph delta restarted twice".into()));

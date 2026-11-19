@@ -40,6 +40,7 @@ fn settings_with_certificate(
         incoming_security: mode,
         smtp_security: mode,
         trusted_certificate_pem: certificate.into(),
+        proxy: Default::default(),
     }
 }
 async fn line<S: tokio::io::AsyncRead + Unpin>(stream: &mut BufReader<S>) -> String {
@@ -1935,4 +1936,151 @@ async fn another_gmail_spelling_does_not_edit_a_password_account() {
     let configs = core.list_account_configs().await.unwrap();
     assert_eq!(configs.len(), 1);
     assert_eq!(configs[0].username, "johndoe@gmail.com");
+}
+
+#[path = "support/proxy.rs"]
+mod proxy_support;
+use proxy_support::{Kind, TestProxy};
+
+/// Give `account_id` a proxy of its own, as Settings → Network saves it. The
+/// proxy settings are the process's, so each test takes an account id no
+/// other test uses.
+fn own_proxy(account_id: i64, kind: net::proxy::ProxyKind, port: u16, password: &str) {
+    let manual = net::proxy::ManualProxy {
+        kind,
+        host: "127.0.0.1".into(),
+        port,
+        user: "proxy-user".into(),
+        bypass: String::new(),
+    };
+    net::proxy::set_account(
+        account_id,
+        Some(net::proxy::AccountOverride::Own(net::proxy::Manual::new(
+            &manual,
+            Some(password.into()),
+        ))),
+    );
+}
+
+#[tokio::test]
+async fn imap_signs_in_through_a_socks5_proxy() {
+    let (port, task) = plaintext_imap_server(false).await;
+    let proxy = TestProxy::start(Kind::Socks5, port, Some(("proxy-user", "proxy-password"))).await;
+    own_proxy(
+        9_001,
+        net::proxy::ProxyKind::Socks5,
+        proxy.port,
+        "proxy-password",
+    );
+    let session = imap::connect_as(
+        net::proxy::Owner::Account(9_001),
+        "imap.example.test",
+        143,
+        credentials(),
+        &settings(ConnectionSecurity::None),
+    )
+    .await
+    .unwrap();
+    imap::logout(session).await;
+    task.await.unwrap();
+    // The proxy got the server's name, not an address looked up here.
+    assert_eq!(proxy.asked(), ["imap.example.test:143"]);
+    net::proxy::set_account(9_001, None);
+}
+
+#[tokio::test]
+async fn smtp_signs_in_through_an_http_proxy() {
+    let (port, task) = plaintext_smtp_server(true).await;
+    let proxy = TestProxy::start(Kind::Http, port, Some(("proxy-user", "proxy-password"))).await;
+    own_proxy(
+        9_002,
+        net::proxy::ProxyKind::Http,
+        proxy.port,
+        "proxy-password",
+    );
+    let mut config = smtp_config(587, ConnectionSecurity::None, CERT);
+    config.id = 9_002;
+    config.smtp_host = "smtp.example.test".into();
+    smtp::test_connection(&config, &smtp::SmtpAuth::Password("bridge-password".into()))
+        .await
+        .unwrap();
+    task.await.unwrap();
+    assert_eq!(proxy.asked(), ["smtp.example.test:587"]);
+    net::proxy::set_account(9_002, None);
+}
+
+#[tokio::test]
+async fn a_proxy_that_turns_the_password_down_is_left_alone_for_a_while() {
+    let proxy = TestProxy::start(Kind::Socks5, 9, Some(("proxy-user", "right"))).await;
+    own_proxy(9_003, net::proxy::ProxyKind::Socks5, proxy.port, "wrong");
+    for _ in 0..3 {
+        let error = imap::connect_as(
+            net::proxy::Owner::Account(9_003),
+            "imap.example.test",
+            993,
+            credentials(),
+            &settings(ConnectionSecurity::Tls),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("did not accept the user name and password"),
+            "{error}"
+        );
+    }
+    // Only the first attempt asked the proxy.
+    assert_eq!(proxy.connections(), 1);
+    // Another password is tried at once.
+    own_proxy(
+        9_003,
+        net::proxy::ProxyKind::Socks5,
+        proxy.port,
+        "still wrong",
+    );
+    let _ = imap::connect_as(
+        net::proxy::Owner::Account(9_003),
+        "imap.example.test",
+        993,
+        credentials(),
+        &settings(ConnectionSecurity::Tls),
+    )
+    .await;
+    assert_eq!(proxy.connections(), 2);
+    net::proxy::set_account(9_003, None);
+}
+
+#[tokio::test]
+async fn a_proxy_that_cannot_be_reached_is_reported_not_bypassed() {
+    let (closed, _reserved) = closed_port().await;
+    own_proxy(
+        9_004,
+        net::proxy::ProxyKind::Socks5,
+        closed,
+        "proxy-password",
+    );
+    let error = imap::connect_as(
+        net::proxy::Owner::Account(9_004),
+        "imap.example.test",
+        143,
+        credentials(),
+        &settings(ConnectionSecurity::None),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("could not connect to the proxy"),
+        "{error}"
+    );
+    net::proxy::set_account(9_004, None);
+}
+
+/// A loopback port nothing listens on, held so no other connection takes it.
+async fn closed_port() -> (u16, impl Sized) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let client = tokio::net::TcpStream::connect(address).await.unwrap();
+    let (server, _) = listener.accept().await.unwrap();
+    (address.port(), (client, server))
 }

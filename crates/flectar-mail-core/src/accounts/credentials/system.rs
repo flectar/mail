@@ -482,6 +482,7 @@ fn system_delete_all(service: &str, account_id: i64) -> Result<()> {
         Slot::AiApiKey,
         Slot::AccountCaldavPassword,
         Slot::CarddavPassword,
+        Slot::ProxyPassword,
     ] {
         system_delete(service, account_id, slot)?;
     }

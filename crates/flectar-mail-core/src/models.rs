@@ -273,6 +273,10 @@ pub struct MailConnectionSettings {
     /// validity checks still apply. Contains public certificates, never keys.
     #[serde(default)]
     pub trusted_certificate_pem: String,
+    /// The proxy the account's connections go through: the app's, none, or
+    /// its own (#250).
+    #[serde(default)]
+    pub proxy: crate::net::proxy::AccountProxy,
 }
 
 impl MailConnectionSettings {
@@ -281,6 +285,7 @@ impl MailConnectionSettings {
             incoming_security,
             smtp_security,
             trusted_certificate_pem: String::new(),
+            proxy: crate::net::proxy::AccountProxy::App,
         }
     }
 }
@@ -647,6 +652,7 @@ pub struct LocalMail {
 /// Full account row including server config; internal to the native application.
 #[derive(Debug, Clone)]
 pub struct AccountConfig {
+    /// 0 while an account is being set up, before it's saved.
     pub id: i64,
     pub email: String,
     pub display_name: Option<String>,
@@ -665,6 +671,18 @@ pub struct AccountConfig {
     pub smtp_host: String,
     pub smtp_port: u16,
     pub settings: AccountSettings,
+}
+
+impl AccountConfig {
+    /// Whose proxy settings the account's connections follow: its own once
+    /// it's saved, the app's while it's being set up.
+    pub fn proxy_owner(&self) -> crate::net::proxy::Owner {
+        if self.id > 0 {
+            crate::net::proxy::Owner::Account(self.id)
+        } else {
+            crate::net::proxy::Owner::App
+        }
+    }
 }
 
 /// Portable account connection metadata used by backup/restore. Credentials,
@@ -701,7 +719,13 @@ impl From<&AccountConfig> for PortableAccountConfig {
             incoming_port: config.incoming_port,
             smtp_host: config.smtp_host.clone(),
             smtp_port: config.smtp_port,
-            settings: config.settings.clone(),
+            settings: {
+                let mut settings = config.settings.clone();
+                // A proxy belongs to the network a device is on, so an
+                // account moving to another device leaves its own behind.
+                settings.connection.proxy = crate::net::proxy::AccountProxy::App;
+                settings
+            },
         }
     }
 }
@@ -2905,6 +2929,9 @@ pub struct Settings {
     /// Translating messages (#240). Off until the user picks a service.
     #[serde(default)]
     pub translation: TranslationSettings,
+    /// The proxy the app's connections go through (#250).
+    #[serde(default)]
+    pub proxy: crate::net::proxy::ProxySettings,
 }
 
 /// The AI server (#241): any server with the OpenAI chat API, on this
@@ -3212,6 +3239,7 @@ impl Default for Settings {
             agent_access: AgentAccess::default(),
             translation: TranslationSettings::default(),
             ai: AiSettings::default(),
+            proxy: crate::net::proxy::ProxySettings::default(),
         }
     }
 }
