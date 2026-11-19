@@ -163,6 +163,12 @@ export global ComposerUi {
     in property <string> translate-detail: "";
     callback translate-opened();
     callback translate(int, string, int, int);
+    // Improve writing (#241): see EmailComposer.
+    in property <bool> improve-shown: false;
+    in property <[string]> ai-prompts: [];
+    in property <bool> improving: false;
+    callback improve(int, string, int, int);
+    callback edit-prompts();
     callback edit-body(string, int, int, string);
     callback update-selection(string, int, int);
     callback history(string);
@@ -230,6 +236,11 @@ export component BoundComposer inherits EmailComposer {
     translate-detail: ComposerUi.translate-detail;
     translate-opened => { ComposerUi.translate-opened(); }
     translate-requested(index, body, anchor, cursor) => { ComposerUi.translate(index, body, anchor, cursor); }
+    improve-shown: ComposerUi.improve-shown;
+    ai-prompts: ComposerUi.ai-prompts;
+    improving: ComposerUi.improving;
+    improve-requested(index, body, anchor, cursor) => { ComposerUi.improve(index, body, anchor, cursor); }
+    edit-prompts => { ComposerUi.edit-prompts(); }
     importance <=> ComposerUi.importance;
     attaching-files: ComposerUi.attaching-files;
     plain-text: ComposerUi.plain-text;
