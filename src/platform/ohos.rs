@@ -16,6 +16,12 @@ static PDFIUM_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
 /// Names this platform to the settings that describe it.
 pub(crate) const NAME: &str = "ohos";
 
+/// The native window is the app while the page is showing; account changes
+/// that request notification permission come from that foreground session.
+pub(crate) fn app_is_active() -> bool {
+    true
+}
+
 /// OpenHarmony has no spell checker for apps.
 pub(crate) const CHECKS_SPELLING: bool = false;
 
