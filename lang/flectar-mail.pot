@@ -459,7 +459,7 @@ msgctxt "month on its own"
 msgid "December"
 msgstr ""
 
-#: ui/app.slint:194 ui/components/calendar.slint:767
+#: ui/app.slint:194 ui/components/calendar.slint:885
 msgid "Mon"
 msgstr ""
 
@@ -467,7 +467,7 @@ msgstr ""
 msgid "Monday"
 msgstr ""
 
-#: ui/app.slint:195 ui/components/calendar.slint:767
+#: ui/app.slint:195 ui/components/calendar.slint:885
 msgid "Tue"
 msgstr ""
 
@@ -475,7 +475,7 @@ msgstr ""
 msgid "Tuesday"
 msgstr ""
 
-#: ui/app.slint:196 ui/components/calendar.slint:767
+#: ui/app.slint:196 ui/components/calendar.slint:885
 msgid "Wed"
 msgstr ""
 
@@ -483,7 +483,7 @@ msgstr ""
 msgid "Wednesday"
 msgstr ""
 
-#: ui/app.slint:197 ui/components/calendar.slint:767
+#: ui/app.slint:197 ui/components/calendar.slint:885
 msgid "Thu"
 msgstr ""
 
@@ -491,7 +491,7 @@ msgstr ""
 msgid "Thursday"
 msgstr ""
 
-#: ui/app.slint:198 ui/components/calendar.slint:767
+#: ui/app.slint:198 ui/components/calendar.slint:885
 msgid "Fri"
 msgstr ""
 
@@ -499,7 +499,7 @@ msgstr ""
 msgid "Friday"
 msgstr ""
 
-#: ui/app.slint:199 ui/components/calendar.slint:767
+#: ui/app.slint:199 ui/components/calendar.slint:885
 msgid "Sat"
 msgstr ""
 
@@ -507,7 +507,7 @@ msgstr ""
 msgid "Saturday"
 msgstr ""
 
-#: ui/app.slint:200 ui/components/calendar.slint:767
+#: ui/app.slint:200 ui/components/calendar.slint:885
 msgid "Sun"
 msgstr ""
 
@@ -608,18 +608,18 @@ msgstr ""
 msgid "All day"
 msgstr ""
 
-#: ui/app.slint:230 ui/components/calendar.slint:544
+#: ui/app.slint:230 ui/components/calendar.slint:603
 msgid "Accepted"
 msgstr ""
 
-#: ui/app.slint:231 ui/components/calendar.slint:545
-#: ui/app.slint:231 ui/components/calendar.slint:545
-#: ui/app.slint:231 ui/components/calendar.slint:545
+#: ui/app.slint:231 ui/components/calendar.slint:604
+#: ui/app.slint:231 ui/components/calendar.slint:604
+#: ui/app.slint:231 ui/components/calendar.slint:604
 msgid "Maybe"
 msgstr ""
 
 #: ui/app.slint:232 ui/components/calendar-agenda.slint:250
-#: ui/app.slint:232 ui/components/calendar-agenda.slint:250 ui/components/calendar.slint:546
+#: ui/app.slint:232 ui/components/calendar-agenda.slint:250 ui/components/calendar.slint:605
 msgid "Declined"
 msgstr ""
 
@@ -648,8 +648,8 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:240 ui/app.slint:1460 ui/components/composer-fields.slint:91
-#: ui/app.slint:240 ui/app.slint:1460 ui/components/composer-fields.slint:91 ui/components/email-composer.slint:60
+#: ui/app.slint:240 ui/app.slint:1465 ui/components/composer-fields.slint:91
+#: ui/app.slint:240 ui/app.slint:1465 ui/components/composer-fields.slint:91 ui/components/email-composer.slint:60
 msgid "No connected account"
 msgstr ""
 
@@ -1872,14 +1872,14 @@ msgstr ""
 msgid "Local calendar"
 msgstr ""
 
-#: ui/app.slint:600 ui/components/calendar.slint:290
-#: ui/app.slint:600 ui/components/calendar.slint:290 ui/components/calendar.slint:338
-#: ui/app.slint:600 ui/components/calendar.slint:290 ui/components/calendar.slint:338 ui/components/calendar.slint:469
-#: ui/app.slint:600 ui/components/calendar.slint:290 ui/components/calendar.slint:338 ui/components/calendar.slint:469
-#: ui/app.slint:600 ui/components/calendar.slint:290 ui/components/calendar.slint:338 ui/components/calendar.slint:469
-#: ui/app.slint:600 ui/components/calendar.slint:290 ui/components/calendar.slint:338 ui/components/calendar.slint:469
-#: ui/app.slint:600 ui/components/calendar.slint:290 ui/components/calendar.slint:338 ui/components/calendar.slint:469
-#: ui/app.slint:600 ui/components/calendar.slint:290 ui/components/calendar.slint:338 ui/components/calendar.slint:469
+#: ui/app.slint:600 ui/components/calendar.slint:325
+#: ui/app.slint:600 ui/components/calendar.slint:325 ui/components/calendar.slint:373
+#: ui/app.slint:600 ui/components/calendar.slint:325 ui/components/calendar.slint:373 ui/components/calendar.slint:528
+#: ui/app.slint:600 ui/components/calendar.slint:325 ui/components/calendar.slint:373 ui/components/calendar.slint:528
+#: ui/app.slint:600 ui/components/calendar.slint:325 ui/components/calendar.slint:373 ui/components/calendar.slint:528
+#: ui/app.slint:600 ui/components/calendar.slint:325 ui/components/calendar.slint:373 ui/components/calendar.slint:528
+#: ui/app.slint:600 ui/components/calendar.slint:325 ui/components/calendar.slint:373 ui/components/calendar.slint:528
+#: ui/app.slint:600 ui/components/calendar.slint:325 ui/components/calendar.slint:373 ui/components/calendar.slint:528
 msgid "Calendar"
 msgstr ""
 
@@ -3064,149 +3064,149 @@ msgstr ""
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1675 ui/app.slint:1688
+#: ui/app.slint:1680 ui/app.slint:1693
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:2594
+#: ui/app.slint:2604
 msgid "Drop to start a new message"
 msgstr ""
 
-#: ui/app.slint:2602 ui/components/email-composer.slint:1235
+#: ui/app.slint:2612 ui/components/email-composer.slint:1235
 msgid "Pictures go in the text, and other files are attached."
 msgstr ""
 
-#: ui/app.slint:2670
+#: ui/app.slint:2680
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2670 ui/views/files-view.slint:578
+#: ui/app.slint:2680 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:2674
+#: ui/app.slint:2684
 msgid "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2675
+#: ui/app.slint:2685
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2677
+#: ui/app.slint:2687
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2678
+#: ui/app.slint:2688
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2679 ui/app.slint:2705 ui/components/calendar.slint:1043
-#: ui/app.slint:2679 ui/app.slint:2705 ui/components/calendar.slint:1043
+#: ui/app.slint:2689 ui/app.slint:2715 ui/components/calendar.slint:1249
+#: ui/app.slint:2689 ui/app.slint:2715 ui/components/calendar.slint:1249
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:2680 ui/dialogs/settings-dialog.slint:2488
+#: ui/app.slint:2690 ui/dialogs/settings-dialog.slint:2488
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2680 ui/views/files-view.slint:660
-#: ui/app.slint:2680 ui/views/files-view.slint:660
+#: ui/app.slint:2690 ui/views/files-view.slint:660
+#: ui/app.slint:2690 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2702
+#: ui/app.slint:2712
 msgid "Mark all as read?"
 msgstr ""
 
-#: ui/app.slint:2704
+#: ui/app.slint:2714
 msgid "All unread messages in {} will be marked as read."
 msgstr ""
 
-#: ui/app.slint:2706
+#: ui/app.slint:2716
 msgid "Mark all as read"
 msgstr ""
 
-#: ui/app.slint:2724
+#: ui/app.slint:2734
 msgid "Run this rule on the Inbox?"
 msgstr ""
 
-#: ui/app.slint:2726
+#: ui/app.slint:2736
 msgid "It matches one message there now."
 msgid_plural "It matches {n} messages there now."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:2728
+#: ui/app.slint:2738
 msgid "One more can only be checked once its body is downloaded."
 msgid_plural "{n} more can only be checked once their bodies are downloaded."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:2729
+#: ui/app.slint:2739
 msgid "Undo takes it back."
 msgstr ""
 
-#: ui/app.slint:2730
+#: ui/app.slint:2740
 msgid "Run rule"
 msgstr ""
 
-#: ui/app.slint:2749
+#: ui/app.slint:2759
 msgid "Replace changes made elsewhere?"
 msgstr ""
 
-#: ui/app.slint:2750
+#: ui/app.slint:2760
 msgid "Run replies before your filters?"
 msgstr ""
 
-#: ui/app.slint:2753
+#: ui/app.slint:2763
 msgid ""
 "The automatic replies script Flectar Mail keeps on your server was changed "
 "outside Flectar Mail."
 msgstr ""
 
-#: ui/app.slint:2754
+#: ui/app.slint:2764
 msgid ""
 "Your server runs this filter script of yours. Flectar Mail would run the "
 "automatic replies first, then your script, unchanged."
 msgstr ""
 
-#: ui/app.slint:2756
+#: ui/app.slint:2766
 msgid "Saving replaces those changes with what you set here."
 msgstr ""
 
-#: ui/app.slint:2757
+#: ui/app.slint:2767
 msgid "Your filters keep running, also once replies are off."
 msgstr ""
 
-#: ui/app.slint:2758
+#: ui/app.slint:2768
 msgid "Replace changes"
 msgstr ""
 
-#: ui/app.slint:2758
+#: ui/app.slint:2768
 msgid "Run both"
 msgstr ""
 
-#: ui/app.slint:2947
+#: ui/app.slint:2957
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:2953
+#: ui/app.slint:2963
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:2966
+#: ui/app.slint:2976
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:2969
+#: ui/app.slint:2979
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:2974
+#: ui/app.slint:2984
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:2982 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2992 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 
@@ -3254,7 +3254,7 @@ msgid_plural "{n} calendars"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/components/account-calendars.slint:71 ui/components/calendar.slint:480
+#: ui/components/account-calendars.slint:71 ui/components/calendar.slint:539
 msgid "Paused"
 msgstr ""
 
@@ -3755,19 +3755,19 @@ msgid "Export decrypted message"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:406
-#: ui/components/account-mail-preferences.slint:406
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036 ui/views/files-view.slint:505
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036 ui/views/files-view.slint:505 ui/views/files-view.slint:695
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
-#: ui/components/account-mail-preferences.slint:406 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036 ui/views/files-view.slint:505
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036 ui/views/files-view.slint:505 ui/views/files-view.slint:695
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:211 ui/dialogs/settings-dialog.slint:4036 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
 msgid "Close"
 msgstr ""
 
@@ -3985,7 +3985,7 @@ msgstr ""
 msgid "Filter calendars"
 msgstr ""
 
-#: ui/components/calendar-agenda.slint:67 ui/components/calendar.slint:632
+#: ui/components/calendar-agenda.slint:67 ui/components/calendar.slint:723
 msgid "Show calendars"
 msgstr ""
 
@@ -3998,25 +3998,25 @@ msgstr ""
 msgid "Filters only affect this agenda."
 msgstr ""
 
-#: ui/components/calendar-agenda.slint:215 ui/components/calendar.slint:652
-#: ui/components/calendar-agenda.slint:215 ui/components/calendar.slint:652 ui/views/mail-list-pane.slint:803
+#: ui/components/calendar-agenda.slint:215 ui/components/calendar.slint:743
+#: ui/components/calendar-agenda.slint:215 ui/components/calendar.slint:743 ui/views/mail-list-pane.slint:803
 msgid "Today"
 msgstr ""
 
-#: ui/components/calendar-agenda.slint:217 ui/components/calendar.slint:666
+#: ui/components/calendar-agenda.slint:217 ui/components/calendar.slint:757
 msgid "{n} event"
 msgid_plural "{n} events"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/components/calendar-agenda.slint:249 ui/components/calendar.slint:538
-#: ui/components/calendar-agenda.slint:249 ui/components/calendar.slint:538
+#: ui/components/calendar-agenda.slint:249 ui/components/calendar.slint:597
+#: ui/components/calendar-agenda.slint:249 ui/components/calendar.slint:597
 msgid "Cancelled"
 msgstr ""
 
-#: ui/components/calendar-agenda.slint:271 ui/components/calendar.slint:80
-#: ui/components/calendar-agenda.slint:271 ui/components/calendar.slint:80 ui/components/calendar.slint:805
-#: ui/components/calendar-agenda.slint:271 ui/components/calendar.slint:80 ui/components/calendar.slint:805
+#: ui/components/calendar-agenda.slint:271 ui/components/calendar.slint:115
+#: ui/components/calendar-agenda.slint:271 ui/components/calendar.slint:115 ui/components/calendar.slint:934
+#: ui/components/calendar-agenda.slint:271 ui/components/calendar.slint:115 ui/components/calendar.slint:934 ui/components/calendar.slint:1179
 msgid "View details for {}"
 msgstr ""
 
@@ -4048,177 +4048,187 @@ msgstr ""
 msgid "Reset filters"
 msgstr ""
 
-#: ui/components/calendar-agenda.slint:304 ui/components/calendar.slint:130
-#: ui/components/calendar-agenda.slint:304 ui/components/calendar.slint:130 ui/components/calendar.slint:838
-#: ui/components/calendar-agenda.slint:304 ui/components/calendar.slint:130 ui/components/calendar.slint:838
+#: ui/components/calendar-agenda.slint:304 ui/components/calendar.slint:165
+#: ui/components/calendar-agenda.slint:304 ui/components/calendar.slint:165 ui/components/calendar.slint:983
+#: ui/components/calendar-agenda.slint:304 ui/components/calendar.slint:165 ui/components/calendar.slint:983
 msgid "New event"
 msgstr ""
 
-#: ui/components/calendar.slint:160 ui/components/calendar.slint:836
+#: ui/components/calendar.slint:31
+msgid "+{n} more"
+msgid_plural "+{n} more"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/components/calendar.slint:40
+msgid "Show all events on {}"
+msgstr ""
+
+#: ui/components/calendar.slint:195 ui/components/calendar.slint:981
 msgid "Previous month"
 msgstr ""
 
-#: ui/components/calendar.slint:174 ui/components/calendar.slint:837
+#: ui/components/calendar.slint:209 ui/components/calendar.slint:982
 msgid "Next month"
 msgstr ""
 
-#: ui/components/calendar.slint:179 ui/components/calendar.slint:881
+#: ui/components/calendar.slint:214 ui/components/calendar.slint:1026
 msgctxt "Monday initial"
 msgid "M"
 msgstr ""
 
-#: ui/components/calendar.slint:180 ui/components/calendar.slint:881
+#: ui/components/calendar.slint:215 ui/components/calendar.slint:1026
 msgctxt "Tuesday initial"
 msgid "T"
 msgstr ""
 
-#: ui/components/calendar.slint:181 ui/components/calendar.slint:881
+#: ui/components/calendar.slint:216 ui/components/calendar.slint:1026
 msgctxt "Wednesday initial"
 msgid "W"
 msgstr ""
 
-#: ui/components/calendar.slint:182 ui/components/calendar.slint:881
+#: ui/components/calendar.slint:217 ui/components/calendar.slint:1026
 msgctxt "Thursday initial"
 msgid "T"
 msgstr ""
 
-#: ui/components/calendar.slint:183 ui/components/calendar.slint:881
+#: ui/components/calendar.slint:218 ui/components/calendar.slint:1026
 msgctxt "Friday initial"
 msgid "F"
 msgstr ""
 
-#: ui/components/calendar.slint:184 ui/components/calendar.slint:881
+#: ui/components/calendar.slint:219 ui/components/calendar.slint:1026
 msgctxt "Saturday initial"
 msgid "S"
 msgstr ""
 
-#: ui/components/calendar.slint:185 ui/components/calendar.slint:881
+#: ui/components/calendar.slint:220 ui/components/calendar.slint:1026
 msgctxt "Sunday initial"
 msgid "S"
 msgstr ""
 
-#: ui/components/calendar.slint:231 ui/components/calendar.slint:694
-#: ui/components/calendar.slint:231 ui/components/calendar.slint:694 ui/components/calendar.slint:911
-#: ui/components/calendar.slint:231 ui/components/calendar.slint:694 ui/components/calendar.slint:911
-#: ui/components/calendar.slint:231 ui/components/calendar.slint:694 ui/components/calendar.slint:911
+#: ui/components/calendar.slint:266 ui/components/calendar.slint:785
+#: ui/components/calendar.slint:266 ui/components/calendar.slint:785 ui/components/calendar.slint:1056
+#: ui/components/calendar.slint:266 ui/components/calendar.slint:785 ui/components/calendar.slint:1056
+#: ui/components/calendar.slint:266 ui/components/calendar.slint:785 ui/components/calendar.slint:1056
 msgid "Select {}"
 msgstr ""
 
-#: ui/components/calendar.slint:251
+#: ui/components/calendar.slint:286
 msgid "MY CALENDARS"
 msgstr ""
 
-#: ui/components/calendar.slint:338
+#: ui/components/calendar.slint:373
 msgid "Hide {}"
 msgstr ""
 
-#: ui/components/calendar.slint:339
+#: ui/components/calendar.slint:374
 msgid "Show {}"
 msgstr ""
 
-#: ui/components/calendar.slint:370
+#: ui/components/calendar.slint:405
 msgid ""
 "No calendars yet. Connect Google Calendar, Outlook or any CalDAV server in "
 "Settings."
 msgstr ""
 
-#: ui/components/calendar.slint:478
+#: ui/components/calendar.slint:537
 msgid "Read only"
 msgstr ""
 
-#: ui/components/calendar.slint:478
+#: ui/components/calendar.slint:537
 msgid "Read and write"
 msgstr ""
 
-#: ui/components/calendar.slint:479
+#: ui/components/calendar.slint:538
 msgid "Last synced {}"
 msgstr ""
 
-#: ui/components/calendar.slint:479
+#: ui/components/calendar.slint:538
 msgid "Not synced yet"
 msgstr ""
 
-#: ui/components/calendar.slint:480
+#: ui/components/calendar.slint:539
 msgid "Enabled"
 msgstr ""
 
-#: ui/components/calendar.slint:481 ui/components/calendar.slint:504
+#: ui/components/calendar.slint:540 ui/components/calendar.slint:563
 msgid "Default calendar"
 msgstr ""
 
-#: ui/components/calendar.slint:501
+#: ui/components/calendar.slint:560
 msgid "Created in Flectar Mail"
 msgstr ""
 
-#: ui/components/calendar.slint:501
+#: ui/components/calendar.slint:560
 msgid "Synced provider event"
 msgstr ""
 
-#: ui/components/calendar.slint:551
+#: ui/components/calendar.slint:610
 msgid "Confirmed"
 msgstr ""
 
-#: ui/components/calendar.slint:552
+#: ui/components/calendar.slint:611
 msgid "Tentative"
 msgstr ""
 
-#: ui/components/calendar.slint:567 ui/components/calendar.slint:687
+#: ui/components/calendar.slint:640 ui/components/calendar.slint:778
 msgid "LOCAL"
 msgstr ""
 
-#: ui/components/calendar.slint:568 ui/components/calendar.slint:703
+#: ui/components/calendar.slint:641 ui/components/calendar.slint:794
 msgid "ALL DAY"
 msgstr ""
 
-#: ui/components/calendar.slint:632
+#: ui/components/calendar.slint:723
 msgid "Hide calendars"
 msgstr ""
 
-#: ui/components/calendar.slint:647
+#: ui/components/calendar.slint:738
 msgid "Previous period"
 msgstr ""
 
-#: ui/components/calendar.slint:648
+#: ui/components/calendar.slint:739
 msgid "Next period"
 msgstr ""
 
-#: ui/components/calendar.slint:649
+#: ui/components/calendar.slint:740
 msgid "Week"
 msgstr ""
 
-#: ui/components/calendar.slint:650 ui/components/calendar.slint:850
+#: ui/components/calendar.slint:741 ui/components/calendar.slint:995
 msgid "Month"
 msgstr ""
 
-#: ui/components/calendar.slint:651 ui/components/calendar.slint:851
+#: ui/components/calendar.slint:742 ui/components/calendar.slint:996
 msgid "Agenda"
 msgstr ""
 
-#: ui/components/calendar.slint:665 ui/components/calendar.slint:863
+#: ui/components/calendar.slint:756 ui/components/calendar.slint:1008
 msgid "Local time · {}"
 msgstr ""
 
-#: ui/components/calendar.slint:922
+#: ui/components/calendar.slint:1067
 msgid "Agenda · {}"
 msgstr ""
 
-#: ui/components/calendar.slint:960
+#: ui/components/calendar.slint:1104
 msgid "No events for this date"
 msgstr ""
 
-#: ui/components/calendar.slint:1041
+#: ui/components/calendar.slint:1247
 msgid "Delete this event?"
 msgstr ""
 
-#: ui/components/calendar.slint:1042
+#: ui/components/calendar.slint:1248
 msgid "This event will be removed from your calendar."
 msgstr ""
 
-#: ui/components/calendar.slint:1044
+#: ui/components/calendar.slint:1250
 msgid "Delete event"
 msgstr ""
 
-#: ui/components/calendar.slint:1045
+#: ui/components/calendar.slint:1251
 msgid "Keep event"
 msgstr ""
 

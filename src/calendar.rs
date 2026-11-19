@@ -1,8 +1,9 @@
 //! Calendar domain state and its projection into Slint models.
 
 use crate::{
-    AppWindow, CalendarAgendaFilterRow, CalendarAgendaRow, CalendarDay, CalendarEventRow,
-    CalendarSourceRow, CalendarWeekDay, I18n,
+    AppWindow, CalendarAgendaFilterRow, CalendarAgendaRow, CalendarBar, CalendarDay,
+    CalendarEventRow, CalendarSourceRow, CalendarTimedBlock, CalendarWeekDay, I18n,
+    calendar_layout::{self, EventSpan},
     date_format::{self, DateFormats, DateStyle},
 };
 use chrono::{
@@ -50,6 +51,23 @@ pub(crate) struct LocalCalendarEvent {
 impl LocalCalendarEvent {
     pub(crate) fn cancelled(&self) -> bool {
         self.status.eq_ignore_ascii_case("cancelled")
+    }
+
+    /// Its time as the day grids place it: local time, or for an all-day
+    /// event its dates.
+    pub(crate) fn span(&self) -> EventSpan {
+        let start = self.date.and_time(
+            NaiveTime::from_num_seconds_from_midnight_opt(
+                self.start_minutes.clamp(0, 24 * 60 - 1) as u32 * 60,
+                0,
+            )
+            .unwrap_or(NaiveTime::MIN),
+        );
+        EventSpan {
+            start,
+            end: self.end,
+            all_day: self.all_day,
+        }
     }
 }
 
@@ -347,57 +365,77 @@ struct AgendaOccurrence {
     end_minutes: i32,
 }
 
+/// The events the grids show, keyed by their place in `state.events`, with
+/// their spans. Events of paused calendars stay out.
+fn shown_spans(state: &LocalCalendarState) -> Vec<(usize, EventSpan)> {
+    let paused: HashSet<i64> = state
+        .sources
+        .iter()
+        .filter(|source| !source.enabled)
+        .map(|source| source.id)
+        .collect();
+    state
+        .events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| !event.calendar_id.is_some_and(|id| paused.contains(&id)))
+        .map(|(index, event)| (index, event.span()))
+        .collect()
+}
+
+/// The part of `date` each event takes, all-day events first, then by
+/// start, the earlier end first.
+fn day_occurrences(
+    state: &LocalCalendarState,
+    spans: &[(usize, EventSpan)],
+    date: NaiveDate,
+) -> Vec<AgendaOccurrence> {
+    let mut occurrences: Vec<_> = spans
+        .iter()
+        .filter(|(_, span)| span.covers(date))
+        .map(|&(event_index, span)| {
+            let (start, end) = span.minutes_on(date);
+            AgendaOccurrence {
+                event_index,
+                date,
+                start_minutes: start as i32,
+                end_minutes: end as i32,
+            }
+        })
+        .collect();
+    occurrences.sort_by_key(|occurrence| {
+        let event = &state.events[occurrence.event_index];
+        (
+            !event.all_day,
+            occurrence.start_minutes,
+            event.end,
+            event.id,
+        )
+    });
+    occurrences
+}
+
 /// Split intervals at local midnight, clipping to the requested month. The
 /// exclusive end prevents an all-day or midnight-ending event gaining a day.
 fn agenda_occurrences(state: &LocalCalendarState) -> BTreeMap<NaiveDate, Vec<AgendaOccurrence>> {
     let start = first_of_month(state.visible_month);
     let end = shift_month(start, 1);
-    let mut days: BTreeMap<_, Vec<_>> = BTreeMap::new();
-    let enabled: HashMap<_, _> = state
-        .sources
-        .iter()
-        .map(|source| (source.id, source.enabled))
+    let spans: Vec<_> = shown_spans(state)
+        .into_iter()
+        .filter(|(index, _)| {
+            !state
+                .agenda_hidden
+                .contains(&state.events[*index].calendar_id.unwrap_or(-1))
+        })
         .collect();
-    for (event_index, event) in state.events.iter().enumerate() {
-        if state
-            .agenda_hidden
-            .contains(&event.calendar_id.unwrap_or(-1))
-            || event
-                .calendar_id
-                .is_some_and(|id| enabled.get(&id) == Some(&false))
-        {
-            continue;
+    let mut days = BTreeMap::new();
+    let mut date = start;
+    while date < end {
+        let occurrences = day_occurrences(state, &spans, date);
+        if !occurrences.is_empty() {
+            days.insert(date, occurrences);
         }
-        let last_day = (event.end - ChronoDuration::nanoseconds(1)).date();
-        let mut date = event.date.max(start);
-        while date <= last_day && date < end {
-            days.entry(date).or_default().push(AgendaOccurrence {
-                event_index,
-                date,
-                start_minutes: if date == event.date {
-                    event.start_minutes
-                } else {
-                    0
-                },
-                end_minutes: if date == event.end.date() {
-                    event.end.hour() as i32 * 60 + event.end.minute() as i32
-                } else {
-                    1440
-                },
-            });
-            date += ChronoDuration::days(1);
-        }
-    }
-    for occurrences in days.values_mut() {
-        occurrences.sort_by_key(|occurrence| {
-            let event = &state.events[occurrence.event_index];
-            (
-                !event.all_day,
-                occurrence.start_minutes,
-                event.end,
-                event.id,
-            )
-        });
+        date += ChronoDuration::days(1);
     }
     days
 }
@@ -590,8 +628,6 @@ fn event_row(
     formats: &DateFormats,
     event: &LocalCalendarEvent,
 ) -> CalendarEventRow {
-    let week_start = start_of_week(state.selected_date);
-    let grid_start = start_of_week(first_of_month(state.visible_month));
     let source = event
         .calendar_id
         .and_then(|calendar_id| state.sources.iter().find(|source| source.id == calendar_id));
@@ -631,10 +667,6 @@ fn event_row(
         },
         iso_date: event.date.format("%Y-%m-%d").to_string().into(),
         date_label: formats.date(DateStyle::WeekdayMedium, event.date).into(),
-        day_index: (event.date - week_start).num_days() as i32,
-        month_index: (event.date - grid_start).num_days() as i32,
-        start_minutes: event.start_minutes,
-        duration_minutes: event.duration_minutes,
         color_index: source
             .map(|source| calendar_color_index(&source.color, source.id))
             .unwrap_or(event.color_index),
@@ -726,33 +758,124 @@ fn guest_list(app: &AppWindow, guests: &[EventAttendee]) -> String {
         .join("\n")
 }
 
+/// The event rows the grids and day lists show, built once per event
+/// however many bars and lists hold it.
+struct GridRows<'a> {
+    app: &'a AppWindow,
+    state: &'a LocalCalendarState,
+    formats: &'a DateFormats,
+    rows: HashMap<usize, CalendarEventRow>,
+}
+
+impl GridRows<'_> {
+    fn event(&mut self, index: usize) -> CalendarEventRow {
+        let Self {
+            app,
+            state,
+            formats,
+            rows,
+        } = self;
+        rows.entry(index)
+            .or_insert_with(|| event_row(app, state, formats, &state.events[index]))
+            .clone()
+    }
+
+    /// Every event on `date`, in agenda order.
+    fn day(&mut self, spans: &[(usize, EventSpan)], date: NaiveDate) -> ModelRc<CalendarEventRow> {
+        let rows: Vec<_> = day_occurrences(self.state, spans, date)
+            .into_iter()
+            .map(|occurrence| self.event(occurrence.event_index))
+            .collect();
+        ModelRc::new(VecModel::from(rows))
+    }
+
+    /// The bars of a week row. A timed event's start time shows on the bar
+    /// where it starts.
+    fn bars(&mut self, layout: &calendar_layout::Row, row: usize) -> Vec<CalendarBar> {
+        layout
+            .bars
+            .iter()
+            .map(|bar| {
+                let event = &self.state.events[bar.event];
+                let time_label = if event.all_day || bar.continues_before {
+                    SharedString::new()
+                } else {
+                    let minutes = event.start_minutes.clamp(0, 24 * 60 - 1) as u32;
+                    self.formats.time(minutes / 60, minutes % 60).into()
+                };
+                CalendarBar {
+                    event: self.event(bar.event),
+                    row: row as i32,
+                    column: bar.column as i32,
+                    span: bar.span as i32,
+                    lane: bar.lane as i32,
+                    continues_before: bar.continues_before,
+                    continues_after: bar.continues_after,
+                    time_label,
+                }
+            })
+            .collect()
+    }
+}
+
+fn int_model(values: &[usize]) -> ModelRc<i32> {
+    ModelRc::new(VecModel::from(
+        values
+            .iter()
+            .map(|&value| i32::try_from(value).unwrap_or(i32::MAX))
+            .collect::<Vec<_>>(),
+    ))
+}
+
 pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today: NaiveDate) {
+    use slint::Model;
     let formats = date_format::current();
-    let selected_date_has_events = state
-        .events
-        .iter()
-        .any(|event| event.date == state.selected_date);
+    let spans = shown_spans(state);
+    let mut grid = GridRows {
+        app,
+        state,
+        formats: &formats,
+        rows: HashMap::new(),
+    };
+
     let month_start = first_of_month(state.visible_month);
     let grid_start = start_of_week(month_start);
-    let month_days = (0..42)
-        .map(|offset| {
-            let date = grid_start + ChronoDuration::days(offset);
-            CalendarDay {
+    let weeks = calendar_layout::lay_out_weeks(&spans, grid_start, 6);
+    let mut month_days = Vec::with_capacity(42);
+    let mut month_bars = Vec::new();
+    for (row, week) in weeks.iter().enumerate() {
+        month_bars.extend(grid.bars(week, row));
+        for (column, more_from) in week.from_lane.iter().enumerate() {
+            let date = grid_start + ChronoDuration::days((row * 7 + column) as i64);
+            month_days.push(CalendarDay {
                 day: date.day().to_string().into(),
                 iso_date: date.format("%Y-%m-%d").to_string().into(),
                 date_label: formats.date(DateStyle::WeekdayMedium, date).into(),
                 outside_month: date.month() != state.visible_month.month(),
                 is_today: date == today,
                 is_selected: date == state.selected_date,
-                has_events: state.events.iter().any(|event| event.date == date),
-            }
-        })
-        .collect::<Vec<_>>();
+                has_events: more_from[0] > 0,
+                more_from: int_model(more_from),
+                events: grid.day(&spans, date),
+            });
+        }
+    }
+    let month_row_lanes: Vec<_> = weeks.iter().map(|week| week.lanes).collect();
 
     let week_start = start_of_week(state.selected_date);
-    let week_days = (0..7)
-        .map(|offset| {
-            let date = week_start + ChronoDuration::days(offset);
+    let strip_spans: Vec<_> = spans
+        .iter()
+        .copied()
+        .filter(|(_, span)| span.in_day_strip())
+        .collect();
+    let strip = calendar_layout::lay_out_row(&strip_spans, week_start);
+    let week_bars = grid.bars(&strip, 0);
+    let week_days = strip
+        .from_lane
+        .iter()
+        .enumerate()
+        .map(|(offset, more_from)| {
+            let date = week_start + ChronoDuration::days(offset as i64);
             CalendarWeekDay {
                 weekday: formats
                     .weekday(date.weekday().num_days_from_monday(), true)
@@ -762,15 +885,24 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
                 iso_date: date.format("%Y-%m-%d").to_string().into(),
                 date_label: formats.date(DateStyle::WeekdayMedium, date).into(),
                 is_today: date == today,
+                more_from: int_model(more_from),
+                events: grid.day(&spans, date),
             }
         })
         .collect::<Vec<_>>();
+    let timed_blocks = calendar_layout::lay_out_hours(&spans, week_start)
+        .into_iter()
+        .map(|block| CalendarTimedBlock {
+            event: grid.event(block.event),
+            column: block.column as i32,
+            start_minutes: block.start_minutes as i32,
+            end_minutes: block.end_minutes as i32,
+            continues_before: block.continues_before,
+            continues_after: block.continues_after,
+        })
+        .collect::<Vec<_>>();
+    let selected_day_events = grid.day(&spans, state.selected_date);
 
-    let (range_start, range_end) = if matches!(state.view_mode.as_str(), "month" | "agenda") {
-        (grid_start, grid_start + ChronoDuration::days(41))
-    } else {
-        (week_start, week_start + ChronoDuration::days(6))
-    };
     let accounts: HashMap<_, _> = state
         .accounts
         .iter()
@@ -813,20 +945,19 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
         })
         .collect::<Vec<_>>();
 
-    let events = state
-        .events
-        .iter()
-        .filter(|event| event.date >= range_start && event.date <= range_end)
-        .map(|event| event_row(app, state, &formats, event))
-        .collect::<Vec<_>>();
-
     apply_agenda(app, state, today, Local::now().time());
     app.set_calendar_month_days(ModelRc::new(VecModel::from(month_days)));
+    app.set_calendar_month_bars(ModelRc::new(VecModel::from(month_bars)));
+    app.set_calendar_month_row_lanes(int_model(&month_row_lanes));
     app.set_calendar_week_days(ModelRc::new(VecModel::from(week_days)));
+    app.set_calendar_week_bars(ModelRc::new(VecModel::from(week_bars)));
+    app.set_calendar_week_lanes(i32::try_from(strip.lanes).unwrap_or(i32::MAX));
+    app.set_calendar_timed_blocks(ModelRc::new(VecModel::from(timed_blocks)));
     state
         .source_rows
         .reconcile_by(source_rows, |row| row.id, PartialEq::eq);
-    app.set_calendar_events(ModelRc::new(VecModel::from(events)));
+    app.set_calendar_selected_date_has_events(selected_day_events.row_count() > 0);
+    app.set_calendar_selected_day_events(selected_day_events);
     app.set_calendar_month_title(
         formats
             .date(DateStyle::MonthYear, state.visible_month)
@@ -841,7 +972,6 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
             .into(),
     );
     apply_hour_labels(app, &formats);
-    app.set_calendar_selected_date_has_events(selected_date_has_events);
     app.set_calendar_view_mode(state.view_mode.clone().into());
 }
 
@@ -1098,9 +1228,98 @@ mod tests {
         assert_eq!(calendar_color_index("not-a-color", 9), 1);
     }
 
+    /// An event over several days shows on each of them in every view, also
+    /// when it began in an earlier week (#394).
+    #[test]
+    fn multi_day_events_reach_every_view() {
+        use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window))).unwrap();
+        let app = AppWindow::new().unwrap();
+        // All day from Monday Oct 5 through Saturday Oct 17, and a timed
+        // event from Tuesday Oct 13, 23:00 to 01:00.
+        let mut state = LocalCalendarState::new(date(14));
+        state.events = vec![
+            event(1, 5, 0, 13 * 24 * 60, true),
+            event(2, 13, 23 * 60, 120, false),
+        ];
+        apply_calendar(&app, &state, date(14));
+
+        let bars: Vec<_> = app.get_calendar_week_bars().iter().collect();
+        assert_eq!(
+            bars.iter()
+                .map(|bar| (
+                    bar.column,
+                    bar.span,
+                    bar.continues_before,
+                    bar.continues_after
+                ))
+                .collect::<Vec<_>>(),
+            [(0, 6, true, false)]
+        );
+        assert_eq!(app.get_calendar_week_lanes(), 1);
+        let blocks: Vec<_> = app
+            .get_calendar_timed_blocks()
+            .iter()
+            .map(|block| (block.column, block.start_minutes, block.end_minutes))
+            .collect();
+        assert_eq!(blocks, [(1, 23 * 60, 1440), (2, 0, 60)]);
+        let week_days: Vec<_> = app.get_calendar_week_days().iter().collect();
+        assert_eq!(week_days[2].events.row_count(), 2);
+        assert_eq!(week_days[6].events.row_count(), 0);
+        assert_eq!(app.get_calendar_selected_day_events().row_count(), 2);
+        assert!(app.get_calendar_selected_date_has_events());
+
+        state.set_view("month");
+        apply_calendar(&app, &state, date(14));
+        // October 2026's grid starts on Monday Sep 28.
+        let bars: Vec<_> = app
+            .get_calendar_month_bars()
+            .iter()
+            .filter(|bar| bar.event.id == 1)
+            .map(|bar| {
+                (
+                    bar.row,
+                    bar.column,
+                    bar.span,
+                    bar.continues_before,
+                    bar.continues_after,
+                )
+            })
+            .collect();
+        assert_eq!(bars, [(1, 0, 7, false, true), (2, 0, 6, true, false)]);
+        let overnight: Vec<_> = app
+            .get_calendar_month_bars()
+            .iter()
+            .filter(|bar| bar.event.id == 2)
+            .map(|bar| (bar.row, bar.column, bar.span, bar.lane, bar.time_label))
+            .collect();
+        assert_eq!(overnight, [(2, 1, 2, 1, "23:00".into())]);
+        assert_eq!(
+            app.get_calendar_month_row_lanes()
+                .iter()
+                .collect::<Vec<_>>(),
+            [0, 1, 2, 0, 0, 0]
+        );
+        let days: Vec<_> = app.get_calendar_month_days().iter().collect();
+        let covered: Vec<_> = days
+            .iter()
+            .filter(|day| day.has_events)
+            .map(|day| day.day.to_string())
+            .collect();
+        assert_eq!(
+            covered,
+            [
+                "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17"
+            ]
+        );
+        // Tuesday Oct 13 holds the bar in lane 0 and the timed one in lane 1.
+        assert_eq!(days[15].more_from.iter().collect::<Vec<_>>(), [2, 1, 0]);
+    }
+
     /// Before Slint 1.19, the software renderer panicked when it painted a
     /// rectangle reaching past ±32767 physical pixels (#35). Synced timed
-    /// events can span weeks.
+    /// events can span weeks, and go in the all-day strip.
     #[test]
     fn week_view_paints_multi_week_timed_events() {
         use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
@@ -1126,6 +1345,8 @@ mod tests {
         state.events = vec![event(1, 8, 540, 28 * 24 * 60, false)];
         apply_calendar(&app, &state, date(8));
         assert_eq!(app.get_calendar_view_mode(), "week");
+        assert_eq!(app.get_calendar_week_bars().row_count(), 1);
+        assert_eq!(app.get_calendar_timed_blocks().row_count(), 0);
         let mut pixels = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
         window.draw_if_needed(|r| {
             r.render(&mut pixels, width as usize);
