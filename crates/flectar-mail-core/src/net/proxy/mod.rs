@@ -18,7 +18,7 @@ pub use config::{
     set_account, set_app, set_system_source, system_changed,
 };
 #[cfg(test)]
-pub(crate) use config::{account_in_force, app_in_force};
+pub(crate) use config::{account_in_force, app_in_force, test_turns};
 pub use settings::{AccountProxy, ManualProxy, ProxyMode, ProxySettings};
 pub use system::{Environment, SystemProxies};
 

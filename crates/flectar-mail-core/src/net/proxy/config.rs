@@ -96,6 +96,8 @@ pub fn generation() -> u64 {
 }
 
 fn update(change: impl FnOnce(&mut Config)) {
+    #[cfg(test)]
+    let _turn = test_turns::wait();
     let mut guard = config()
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -107,6 +109,46 @@ fn update(change: impl FnOnce(&mut Config)) {
     if next.app != guard.app || next.accounts != guard.accounts {
         *guard = Arc::new(next);
         GENERATION.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+/// The proxy settings belong to the process, which the core's tests share,
+/// and every core applies its own as it starts. A test that checks the
+/// settings in force takes the turn, and other tests' changes wait until it's
+/// done. Changes made on the thread that holds the turn, by the test and its
+/// own core, go ahead.
+#[cfg(test)]
+pub(crate) mod test_turns {
+    use std::cell::Cell;
+    use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+    static TURN: RwLock<()> = RwLock::new(());
+
+    thread_local! {
+        static HOLDING: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// The turn, held until it's dropped.
+    pub(crate) struct Turn {
+        _guard: RwLockWriteGuard<'static, ()>,
+    }
+
+    impl Drop for Turn {
+        fn drop(&mut self) {
+            HOLDING.set(false);
+        }
+    }
+
+    /// Take the turn, waiting for another test that holds it.
+    pub(crate) fn take() -> Turn {
+        let guard = TURN.write().unwrap_or_else(PoisonError::into_inner);
+        HOLDING.set(true);
+        Turn { _guard: guard }
+    }
+
+    /// Wait for the turn to be free, unless this thread holds it.
+    pub(super) fn wait() -> Option<RwLockReadGuard<'static, ()>> {
+        (!HOLDING.get()).then(|| TURN.read().unwrap_or_else(PoisonError::into_inner))
     }
 }
 
@@ -327,6 +369,27 @@ mod tests {
             config.http_proxy(Owner::Account(8), &url("https://example.com/")),
             Some(url("http://own.proxy:1080"))
         );
+    }
+
+    #[test]
+    fn other_tests_wait_while_one_holds_the_turn() {
+        let turn = test_turns::take();
+        set_app(AppProxy::Direct);
+        let changed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let other = std::thread::spawn({
+            let changed = Arc::clone(&changed);
+            move || {
+                // Another test's core, applying its settings as it starts.
+                set_app(AppProxy::System);
+                changed.store(true, Ordering::SeqCst);
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(!changed.load(Ordering::SeqCst));
+        assert_eq!(app_in_force(), AppProxy::Direct);
+        drop(turn);
+        other.join().unwrap();
+        assert!(changed.load(Ordering::SeqCst));
     }
 
     #[test]
