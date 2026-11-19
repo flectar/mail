@@ -403,7 +403,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y flatpak ostree
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive -y flathub org.flatpak.Builder
+          flatpak install --user --noninteractive -y flathub \
+            org.flatpak.Builder \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//25.08
       - name: Lint the release manifest
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
@@ -419,7 +423,8 @@ jobs:
         run: |
           python3 scripts/flathub-manifest.py --local target/flathub/local
           cd target/flathub/local
-          flatpak run --command=flathub-build org.flatpak.Builder com.flectar.mail.yml
+          # The builder calls the host's flatpak over the session bus.
+          dbus-run-session -- flatpak run --command=flathub-build org.flatpak.Builder com.flectar.mail.yml
           # Flathub publishes the mirrored screenshots in their own ref.
           ostree commit --repo=repo --canonical-permissions --branch=screenshots/x86_64 \
             builddir/files/share/app-info/media
