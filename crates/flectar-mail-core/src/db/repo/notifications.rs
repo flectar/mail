@@ -683,7 +683,8 @@ fn withdrawal(conn: &Connection, rows: Vec<(i64, ShownNotification, bool)>) -> R
     Ok(out)
 }
 
-/// Record that the host took these notifications back.
+/// Record that the host took these notifications back. Those of an account
+/// that was removed are forgotten as they come down, with what they said.
 pub fn mark_withdrawn(conn: &Connection, ids: &[i64], withdrawn_at: i64) -> Result<usize> {
     let mut stmt = conn.prepare(
         "UPDATE notification_outbox SET state = 'withdrawn', withdrawn_at = ?2
@@ -693,16 +694,34 @@ pub fn mark_withdrawn(conn: &Connection, ids: &[i64], withdrawn_at: i64) -> Resu
     for id in ids {
         changed += stmt.execute(params![id, withdrawn_at])?;
     }
+    conn.execute(
+        "DELETE FROM notification_outbox
+         WHERE state = 'withdrawn' AND account_id NOT IN (SELECT id FROM accounts)",
+        [],
+    )?;
     Ok(changed)
 }
 
-/// Forget rows settled more than [`KEEP_MS`] ago. A shown notification's row
-/// stays until the notification is taken back, which [`stale`] sees to.
+/// Forget an account's notifications as the account goes, all but those on
+/// screen or on their way there, which stay until they're taken back.
+pub fn forget_account(conn: &Connection, account_id: i64) -> Result<usize> {
+    Ok(conn.execute(
+        "DELETE FROM notification_outbox
+         WHERE account_id = ?1 AND state IN ('pending', 'suppressed', 'withdrawn')",
+        params![account_id],
+    )?)
+}
+
+/// Forget rows settled more than [`KEEP_MS`] ago, and what a removed account
+/// left that isn't on screen. A shown notification's row stays until the
+/// notification is taken back, which [`stale`] sees to.
 pub fn prune(conn: &Connection, now: i64) -> Result<usize> {
     Ok(conn.execute(
         "DELETE FROM notification_outbox
          WHERE (state = 'suppressed' AND COALESCE(suppressed_at, created_at) < ?1)
-            OR (state = 'withdrawn' AND COALESCE(withdrawn_at, created_at) < ?1)",
+            OR (state = 'withdrawn' AND COALESCE(withdrawn_at, created_at) < ?1)
+            OR (state IN ('pending', 'suppressed', 'withdrawn')
+                AND account_id NOT IN (SELECT id FROM accounts))",
         params![now.saturating_sub(KEEP_MS)],
     )?)
 }
@@ -1166,6 +1185,45 @@ mod tests {
         assert_eq!(prune(&c, 2 * KEEP_MS + 32).unwrap(), 1);
         assert!(get(&c, shown_id).unwrap().is_none());
         assert!(get(&c, pending_id).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_removed_accounts_notifications_go_with_it() {
+        let c = testutil::conn();
+        c.pragma_update(None, "foreign_keys", "ON").unwrap();
+        testutil::seed_account(&c);
+        let (_, pending) = testutil::seed_message(&c, "a@test.dev", "Pending", false);
+        let pending_id = enqueue_at(&c, pending, false, 10).unwrap();
+        let (shown_id, _) = delivered(&c, "b@test.dev", false);
+        let (_, quiet) = testutil::seed_message(&c, "c@test.dev", "Quiet", false);
+        let quiet_id = enqueue_at(&c, quiet, false, 10).unwrap();
+        mark_suppressed(&c, quiet_id, 10, "notifications are off").unwrap();
+
+        // What isn't on screen goes with the account, sender and subject too.
+        assert_eq!(forget_account(&c, 1).unwrap(), 2);
+        c.execute("DELETE FROM accounts WHERE id = 1", []).unwrap();
+        assert!(get(&c, pending_id).unwrap().is_none());
+        assert!(get(&c, quiet_id).unwrap().is_none());
+        // A shown one is taken back, and forgotten as it comes down.
+        assert_eq!(stale(&c, 40).unwrap().ids, vec![shown_id]);
+        assert_eq!(mark_withdrawn(&c, &[shown_id], 40).unwrap(), 1);
+        assert!(get(&c, shown_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn pruning_forgets_what_a_removed_account_left() {
+        let c = testutil::conn();
+        c.pragma_update(None, "foreign_keys", "ON").unwrap();
+        testutil::seed_account(&c);
+        let (_, pending) = testutil::seed_message(&c, "a@test.dev", "Pending", false);
+        let pending_id = enqueue_at(&c, pending, false, 10).unwrap();
+        let (shown_id, _) = delivered(&c, "b@test.dev", false);
+        c.execute("DELETE FROM accounts WHERE id = 1", []).unwrap();
+
+        assert_eq!(prune(&c, 40).unwrap(), 1);
+        assert!(get(&c, pending_id).unwrap().is_none());
+        // The shown one stays until it is taken back.
+        assert!(get(&c, shown_id).unwrap().is_some());
     }
 
     #[test]

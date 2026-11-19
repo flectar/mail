@@ -308,7 +308,7 @@ export component TranslationPage inherits VerticalLayout {
                 compact: root.compact;
                 title: @tr("Translate with");
                 description: Translation.service-index == 1
-                    ? @tr("DeepL translates with your API key. With a free key, DeepL may keep the text and use it to train its models. With a paid key, it deletes the text once it's translated.")
+                    ? @tr("DeepL translates with your API key. With a free key, DeepL's terms let it keep the text and don't allow personal data, which mail usually holds. With a paid key, DeepL keeps the text only as long as it needs to translate it and doesn't use it to improve its services.")
                     : Translation.service-index == 2
                     ? @tr("Your LibreTranslate server, or libretranslate.com with a key, receives the text you translate.")
                     : Translation.service-index == 3
