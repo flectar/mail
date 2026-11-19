@@ -421,10 +421,12 @@ jobs:
         run: ./scripts/ci-swap.sh on
       - name: Build this checkout the way Flathub does
         run: |
-          python3 scripts/flathub-manifest.py --local target/flathub/local
+          python3 scripts/flathub-manifest.py --local
+          mkdir -p target/flathub/local
           cd target/flathub/local
           # The builder calls the host's flatpak over the session bus.
-          dbus-run-session -- flatpak run --command=flathub-build org.flatpak.Builder com.flectar.mail.yml
+          dbus-run-session -- flatpak run --command=flathub-build org.flatpak.Builder \
+            "$GITHUB_WORKSPACE/.flathub-local.yml"
           # Flathub publishes the mirrored screenshots in their own ref.
           ostree commit --repo=repo --canonical-permissions --branch=screenshots/x86_64 \
             builddir/files/share/app-info/media

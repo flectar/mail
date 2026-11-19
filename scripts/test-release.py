@@ -226,9 +226,12 @@ class ReleaseTests(unittest.TestCase):
         for tag, sha in (("0.1.0", commit), ("v0.1.0-beta", commit), ("v0.1.0", "abc123"), (None, commit)):
             with self.subTest(tag=tag, commit=sha), self.assertRaises(ValueError):
                 flathub.manifest(tag=tag, commit=sha)
-        local = flathub.manifest(local=Path("/work"))
-        self.assertIn("      - type: dir\n        path: /work\n        skip:\n          - .artifacts\n", local)
+        # Flathub's sandboxed builder only reads sources below the manifest.
+        local = flathub.manifest(local=True)
+        self.assertIn("      - type: dir\n        path: .\n        skip:\n          - .artifacts\n", local)
+        self.assertIn("          - .flathub-local.yml\n      - packaging/flatpak/cargo-sources.json\n", local)
         self.assertNotIn("type: git", local)
+        self.assertEqual(flathub.LOCAL_MANIFEST.parent, SCRIPTS.parent)
         with tempfile.TemporaryDirectory() as directory:
             flathub.write(Path(directory), tag="v0.1.0", commit=commit)
             self.assertEqual(

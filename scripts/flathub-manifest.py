@@ -4,7 +4,8 @@
 With --tag and --commit the manifest builds that release from GitHub, which is
 what the com.flectar.mail repository on Flathub holds. With --local it builds
 this checkout instead, so CI can build and lint the Flathub variant of a pull
-request before any tag exists.
+request before any tag exists. Flathub's builder only reads sources inside the
+manifest's directory, so that manifest goes in the checkout's root.
 """
 
 import argparse
@@ -15,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE = ROOT / "packaging/flathub/com.flectar.mail.yml"
 CARGO_SOURCES = ROOT / "packaging/flatpak/cargo-sources.json"
+LOCAL_MANIFEST = ROOT / ".flathub-local.yml"
 GIT_SOURCE = re.compile(
     r"^(?P<indent> +)- type: git\n"
     r"(?P=indent)  url: https://github\.com/flectar/mail\.git\n"
@@ -29,16 +31,21 @@ LOCAL_SKIP = (
 )
 
 
-def manifest(*, tag: str | None = None, commit: str | None = None, local: Path | None = None) -> str:
+def manifest(*, tag: str | None = None, commit: str | None = None, local: bool = False) -> str:
     text = TEMPLATE.read_text(encoding="utf-8")
     match = GIT_SOURCE.search(text)
     if match is None:
         raise ValueError(f"{TEMPLATE} has no release source to fill in")
     indent = match.group("indent")
-    if local is not None:
-        lines = [f"{indent}- type: dir", f"{indent}  path: {local}", f"{indent}  skip:"]
-        lines += [f"{indent}    - {name}" for name in LOCAL_SKIP]
+    if local:
+        lines = [f"{indent}- type: dir", f"{indent}  path: .", f"{indent}  skip:"]
+        lines += [f"{indent}    - {name}" for name in LOCAL_SKIP + (LOCAL_MANIFEST.name,)]
         source = "\n".join(lines) + "\n"
+        cargo = f"{indent}- cargo-sources.json\n"
+        if cargo not in text[match.end():]:
+            raise ValueError(f"{TEMPLATE} has no cargo-sources.json source to point at")
+        text = text[: match.end()] + text[match.end():].replace(
+            cargo, f"{indent}- {CARGO_SOURCES.relative_to(ROOT)}\n", 1)
     else:
         if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?", tag or ""):
             raise ValueError(f"Expected a release tag such as v0.1.0, not {tag!r}")
@@ -56,7 +63,7 @@ def write(destination: Path, **options) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("destination", type=Path, help="directory for the manifest and cargo-sources.json")
+    parser.add_argument("destination", type=Path, nargs="?", help="directory for a release's manifest and cargo-sources.json")
     release = parser.add_argument_group("release")
     release.add_argument("--tag", help="release tag, such as v0.1.0")
     release.add_argument("--commit", help="the tag's full commit hash")
@@ -65,7 +72,12 @@ if __name__ == "__main__":
     if args.local == bool(args.tag or args.commit):
         parser.error("use either --local or --tag with --commit")
     if args.local:
-        write(args.destination, local=ROOT)
+        if args.destination is not None:
+            parser.error(f"--local always writes {LOCAL_MANIFEST.name} in the checkout's root")
+        LOCAL_MANIFEST.write_text(manifest(local=True), encoding="utf-8")
+        print(LOCAL_MANIFEST)
     else:
+        if args.destination is None:
+            parser.error("a release needs a destination directory")
         write(args.destination, tag=args.tag, commit=args.commit)
-    print(args.destination / "com.flectar.mail.yml")
+        print(args.destination / "com.flectar.mail.yml")

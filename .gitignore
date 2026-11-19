@@ -1,6 +1,7 @@
 # Rust build output and locally packaged artifacts
 /target/
 /.flatpak-builder/
+/.flathub-local.yml
 /libs/
 /.artifacts/
 /tmp/
