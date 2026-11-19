@@ -444,8 +444,8 @@ export component FunctionalCalendarView inherits Rectangle {
     in property <string> selected-date;
     in property <string> selected-date-label;
     in property <bool> selected-date-has-events: false;
-    // The week view's ruler labels for 08:00 through 18:00.
-    in property <[string]> hour-labels: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
+    // The week view's ruler labels for each hour of the day.
+    in property <[string]> hour-labels: ["00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"];
     in property <string> view-mode: "week";
     in property <color> background-color;
     in property <color> sidebar-color;
@@ -620,6 +620,8 @@ export component FunctionalCalendarView inherits Rectangle {
     // All-day events show one caption line that grows with the platform font.
     private property <length> all-day-height: max(30px, all-day-line.preferred-height + 12px);
     private property <length> grid-top: 112px + root.all-day-height;
+    // Ten hours fill the window, as with one lane of all-day events; the
+    // rest of the day scrolls.
     private property <length> hour-height: max(36px, (root.height - root.grid-top) / 10);
     // The all-day strip stacks up to three lanes. A busier week shows two
     // and "+N more" on the days with others.
@@ -641,7 +643,8 @@ export component FunctionalCalendarView inherits Rectangle {
     all-day-label-width := Text { visible: false; text: @tr("ALL DAY"); font-size: TypeScale.caption; }
     all-day-line := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; font-weight: 700; }
     month-line := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; font-weight: 600; }
-    hour-label-width := Text { visible: false; text: root.hour-labels[2]; font-size: TypeScale.caption; }
+    // One of the widest hour labels, such as "22:00" or "10 PM".
+    hour-label-width := Text { visible: false; text: root.hour-labels[22]; font-size: TypeScale.caption; }
 
     // Lanes a month week shows: all of them when they fit.
     pure function month-lanes(row: int) -> int {
@@ -837,28 +840,33 @@ export component FunctionalCalendarView inherits Rectangle {
                 }
             }
             Rectangle { y: 47px + root.strip-height; width: parent.width; height: 1px; background: root.ui-border-color; }
-            hour-grid := Rectangle {
+            hour-scroll := ScrollView {
                 x: 0px;
                 y: 48px + root.strip-height;
                 width: parent.width;
                 height: parent.height - self.y;
-                clip: true;
+                content-width: self.visible-width;
+                content-height: 24 * root.hour-height;
+                horizontal-scrollbar-policy: always-off;
+                // Open on the morning, with the 08:00 label in full.
+                init => { self.content-y = -8 * root.hour-height + 12px; }
                 for hour[index] in root.hour-labels : Rectangle {
                     y: index * root.hour-height;
                     width: parent.width;
                     height: 1px;
                     background: root.subtle-border-color;
-                    // Labels center on their line but stay inside the grid.
-                    Text { x: 10px; y: min(max(-self.height / 2, -parent.y), hour-grid.height - parent.y - self.height); width: root.time-gutter - 20px; height: max(16px, self.preferred-height); text: hour; color: root.muted-color; font-size: TypeScale.caption; horizontal-alignment: right; vertical-alignment: center; }
+                    // The day starts at the top edge, so midnight has no label.
+                    // The others center on their line.
+                    Text { visible: index > 0; x: 10px; y: -self.height / 2; width: root.time-gutter - 20px; height: max(16px, self.preferred-height); text: hour; color: root.muted-color; font-size: TypeScale.caption; horizontal-alignment: right; vertical-alignment: center; }
                 }
-                for marker in [0, 1, 2, 3, 4, 5, 6, 7] : Rectangle { x: root.time-gutter + marker * root.column-width; width: 1px; height: parent.height; background: root.subtle-border-color; }
+                for marker in [0, 1, 2, 3, 4, 5, 6, 7] : Rectangle { x: root.time-gutter + marker * root.column-width; width: 1px; height: 24 * root.hour-height; background: root.subtle-border-color; }
                 for block in root.timed-blocks : CalendarEvent {
                     private property <length> lane-width: (root.column-width - 10px) / block.lanes;
                     // The box keeps a readable size, as the layout placed it.
                     private property <int> drawn-end: max(block.end-minutes, min(block.start-minutes + 30, 1440));
                     x: root.time-gutter + block.column * root.column-width + 5px + block.lane * self.lane-width;
                     width: block.lane-span * self.lane-width - (block.lane + block.lane-span < block.lanes ? 2px : 0px);
-                    y: (block.start-minutes - 480) / 60 * root.hour-height - (block.continues-before ? root.overhang : 0px);
+                    y: block.start-minutes / 60 * root.hour-height - (block.continues-before ? root.overhang : 0px);
                     height: (self.drawn-end - block.start-minutes) / 60 * root.hour-height
                         + (block.continues-before ? root.overhang : 0px)
                         + (block.continues-after ? root.overhang : 0px);

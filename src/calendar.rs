@@ -982,7 +982,7 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
 /// change, since a new model recreates every ruler row.
 fn apply_hour_labels(app: &AppWindow, formats: &DateFormats) {
     use slint::Model;
-    let labels = (8..=18)
+    let labels = (0..24)
         .map(|hour| SharedString::from(formats.hour(hour)))
         .collect::<Vec<_>>();
     if !app
