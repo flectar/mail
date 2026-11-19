@@ -19,6 +19,17 @@ pub(crate) const CODE: u8 = 1 << 4;
 pub(crate) const QUOTE_MARKER: &str = "│ ";
 /// Marks HTML the composer copied, which pastes back as it was.
 const COPIED_MARK: &str = "<!--flectar-mail-composer-->";
+
+/// HTML the composer copied, without the mark that says so, for a translation
+/// service, which keeps no comments (#240).
+pub(crate) fn without_copied_mark(html: &str) -> &str {
+    html.strip_prefix(COPIED_MARK).unwrap_or(html)
+}
+
+/// HTML the composer copied, marked so, which pastes back as it was.
+pub(crate) fn marked_as_copied(html: &str) -> String {
+    format!("{COPIED_MARK}{html}")
+}
 /// The line a signature starts under, after a blank line, as mail has long marked them.
 pub(crate) const SIGNATURE_SEPARATOR: &str = "\n\n-- \n";
 /// Holds an image's place in the text, as in other rich text: its style carries the image.
@@ -837,6 +848,102 @@ impl RichComposeDocument {
         let selection = self.update_selection(to_i32(caret), to_i32(caret));
         self.commit_edit(before);
         selection
+    }
+
+    /// Puts `revised` in place of the text in `range` as one undoable edit that changes only
+    /// the words that differ (#241): words that stay keep their formatting, new words take that
+    /// of the words they replace, or else of the text before them, and pictures stay where they
+    /// are. Selects the revised text when `select`, else puts the caret after it. `None` when
+    /// `revised` is the text as it is.
+    pub(crate) fn revise(
+        &mut self,
+        range: Range<usize>,
+        revised: &str,
+        select: bool,
+    ) -> Option<ComposeSelection> {
+        let range = valid_offset(&self.text, to_i32(range.start))
+            ..valid_offset(&self.text, to_i32(range.end));
+        let mut pieces: Vec<(Range<usize>, String)> = Vec::new();
+        for edit in crate::word_diff::word_edits(&self.text[range.clone()], revised) {
+            // A revision can't make pictures, and keeps those the text has.
+            let mut inserted: String = revised[edit.new]
+                .chars()
+                .filter(|character| *character != IMAGE_PLACEHOLDER)
+                .collect();
+            let (start, end) = (range.start + edit.old.start, range.start + edit.old.end);
+            let mut at = start;
+            for (offset, _) in self.text[start..end].match_indices(IMAGE_PLACEHOLDER) {
+                // A picture keeps the line breaks around it too.
+                let picture = start + offset;
+                let mut kept = picture;
+                if kept > at && self.text[..kept].ends_with('\n') {
+                    kept -= 1;
+                }
+                pieces.push((at..kept, std::mem::take(&mut inserted)));
+                at = picture + IMAGE_PLACEHOLDER.len_utf8();
+                if at < end && self.text[at..].starts_with('\n') {
+                    at += 1;
+                }
+            }
+            pieces.push((at..end, inserted));
+        }
+        pieces.retain(|(range, text)| !range.is_empty() || !text.is_empty());
+        if pieces.is_empty() {
+            return None;
+        }
+        let styled: Vec<_> = pieces
+            .into_iter()
+            .map(|(range, text)| {
+                let style = self.revised_style(range.clone());
+                (range, text, style)
+            })
+            .collect();
+        let mut text = self.text.clone();
+        let mut styles = self.styles.clone();
+        let mut end = range.end;
+        for (range, inserted, style) in styled.iter().rev() {
+            let run = ComposeStyleRun {
+                range: 0..inserted.len(),
+                style: style.clone(),
+            };
+            styles = replaced_style_runs(&styles, range.start, range.end, &[run]);
+            text.replace_range(range.clone(), inserted);
+            end = end - range.len() + inserted.len();
+        }
+        let before = self.take_snapshot();
+        self.typing_override = None;
+        self.styles = styles;
+        self.text = text;
+        self.auto_link_urls();
+        self.normalize_alignment(range.start..end);
+        self.bump_revision();
+        let anchor = if select { range.start } else { end };
+        let selection = self.update_selection(to_i32(anchor), to_i32(end));
+        self.commit_edit(before);
+        Some(selection)
+    }
+
+    /// The style of text that takes the place of `range` in a revision: that of the text it
+    /// replaces, or for new text, that of the text before it, outside any link that doesn't
+    /// go on after it.
+    fn revised_style(&self, range: Range<usize>) -> CharacterStyle {
+        if !range.is_empty()
+            && let Some(style) = self.style_at(range.start)
+            && style.image.is_none()
+        {
+            return style.clone();
+        }
+        let mut style = self.typing_style_at(range.start);
+        if style.link.is_some()
+            && self
+                .style_at(range.end)
+                .and_then(|after| after.link.as_ref())
+                != style.link.as_ref()
+        {
+            style.link = None;
+            style.link_is_auto = false;
+        }
+        style
     }
 
     /// Replaces `range` with `text` as one undoable edit and puts the caret
@@ -5097,6 +5204,77 @@ mod tests {
             "[image: Map]See the plan <https://example.org/plan>, write to ana@example.org or \
              go to example.org/a."
         );
+    }
+
+    #[test]
+    fn a_revision_changes_only_the_words_that_differ() {
+        let text = "Hi Ana, teh plan is redy. Thanks";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let at = |needle: &str| text.find(needle).unwrap() as i32;
+        document.format("bold", text, at("plan"), at("plan") + 4);
+        document.set_link("https://example.org/plan", text, at("teh"), at("plan") + 4);
+        let end = text.len();
+        let revised = "Hi Ana, the plan is ready. Thanks!";
+        let selection = document.revise(0..end, revised, false).unwrap();
+        assert_eq!(document.text(), revised);
+        assert_eq!(selection.start, revised.len() as i32);
+        assert_eq!(selection.end, revised.len() as i32);
+        // "the" took the link of "teh", "plan" kept its bold and link, and
+        // the new "!" took no link.
+        let link = Some("https://example.org/plan".to_owned());
+        let runs: Vec<_> = document
+            .styles
+            .iter()
+            .map(|run| {
+                let link = run.style.link.as_deref().map(str::to_owned);
+                (run.range.clone(), run.style.marks, link)
+            })
+            .collect();
+        assert_eq!(
+            runs,
+            [
+                (0..8, 0, None),
+                (8..12, 0, link.clone()),
+                (12..16, BOLD, link),
+                (16..34, 0, None)
+            ]
+        );
+        assert_style_coverage(&document);
+        // One undo takes it all back.
+        document.history("undo").unwrap();
+        assert_eq!(document.text(), text);
+        assert_eq!(document.revise(0..end, text, true), None);
+    }
+
+    #[test]
+    fn a_revision_keeps_pictures_and_selects_what_it_changed() {
+        let mut document = RichComposeDocument::default();
+        document.load("See the mapp below\n", 0, 0);
+        let end = document.text().len() as i32;
+        document.update_selection(end, end);
+        document.insert_image(InlineImage::from_file_bytes(png(4, 4), "Map").unwrap());
+        let text = document.text().to_owned();
+        let range = 4..text.len();
+        // The model dropped the picture and its line: it stays, on its line.
+        let selection = document
+            .revise(range.clone(), "the map below.", true)
+            .unwrap();
+        assert_eq!(document.text(), "See the map below.\n\u{fffc}");
+        assert_eq!(
+            (selection.start, selection.end),
+            (4, document.text().len() as i32)
+        );
+        assert_eq!(document.images().count(), 1);
+        assert_style_coverage(&document);
+        // A placeholder the model made up makes no picture.
+        document.history("undo").unwrap();
+        document
+            .revise(range, "the \u{fffc}map below\n\u{fffc}", false)
+            .unwrap();
+        assert_eq!(document.text(), "See the map below\n\u{fffc}");
+        assert_eq!(document.images().count(), 1);
+        assert_style_coverage(&document);
     }
 
     #[test]

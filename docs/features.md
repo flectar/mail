@@ -24,6 +24,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Importance](#importance)
 - [Read receipts](#read-receipts)
 - [Calendar invitations](#calendar-invitations)
+- [Translation](#translation)
 - [AI agents](#ai-agents)
 - [Storage and backups](#storage-and-backups)
 - [Importing accounts and mail](#importing-accounts-and-mail)
@@ -702,12 +703,73 @@ declined or cancelled events are faded with their title struck through. An
 invitation reminds you of itself only once you accept it or answer **Maybe**,
 so one you haven't answered, such as calendar spam, stays quiet.
 
+## Translation
+
+Flectar Mail translates messages in other languages through a service you
+choose in Settings → Translation. DeepL works with your own API key,
+LibreTranslate with your own server or libretranslate.com, and a model with the
+AI server you set up in Settings → AI. Nothing is sent anywhere until you
+translate a message, or ask for a language to be translated always.
+
+When a message is in a language you don't read, a bar above it offers to
+translate it. Flectar Mail finds the language on your device, and counts the
+app's language and your system's languages as the ones you read. The bar's menu
+translates a language always, or never offers it again. **Translate message**
+in a message's menu works on any message. The translation shows in place of
+the message, links and formatting included, and **Show original** brings the
+message back. Translations stay on your device for 15 days, so a message opened
+again isn't sent again, and search never sees them.
+
+In the composer, **Translate** in the toolbar translates the selected text, or
+the whole message when nothing is selected, into the language you pick. A
+reply starts with the language of the message it answers, and after that the
+language you used last. The translation takes the place of the text as one
+step that Undo takes back. With an AI server set up, Translate is in the
+composer's writing tools menu instead.
+
+With a free DeepL key, DeepL may keep the text it translates and use it to
+train its models. With a paid key, it deletes the text once it's translated. A
+LibreTranslate server or the AI server receives the text of what you
+translate.
+
+## AI
+
+Flectar Mail can summarize conversations, suggest replies and help with what
+you write, with an AI server you set up in Settings → AI. Any server with the
+OpenAI chat API works, such as Ollama or LM Studio on your computer, or a hosted
+one with your API key. Nothing is preset, and nothing is sent until you use one
+of these features.
+
+**Summarize conversation** in a message's menu shows a summary above the
+conversation, with what to do next and a proposed reply. **Reply with this**
+opens a reply with that text to edit, and **Suggest replies** offers short
+replies to pick from. Select text in a message and choose **Ask AI** in its
+menu to have it explained, or to run one of your own prompts on it. The answer
+shows in the same place.
+
+In the composer, the writing tools first in the toolbar proofread the selected
+text, or the whole message above your signature when nothing is selected, or
+run one of your prompts on it. Only the words that change are replaced, so
+formatting, links and pictures stay, and Undo takes the change back in one
+step. You write your prompts in Settings → AI, each a name and what it asks
+for, such as Shorter with "Make it shorter, keeping what matters."
+
+The server gets only what you use a feature on, the conversation you summarize
+or the text you work on. It gets the text a message shows, not text a sender
+hid in it, and messages reach it as data, marked as not being instructions.
+Answers are plain text, without links or pictures, and marked as written by AI.
+A summary also says when a message tries to instruct the AI, and lists links,
+addresses and phone numbers it has that the messages don't, which shouldn't be
+trusted. A long conversation is summarized from its newest messages, and the
+summary says how many older ones it leaves out. A server on your computer or
+local network gets less at a time, as local models read less at once.
+
 ## AI agents
 
 Settings → AI agents lets an AI app on your computer, such as a desktop
 assistant or a local model, read your mail through the Model Context Protocol
-(MCP). Flectar Mail runs no AI itself, and access stays off until you turn it
-on. The agent's app starts `flectar-mail mcp`, which hands each request to
+(MCP). This is separate from the AI features in Settings → AI, and access
+stays off until you turn it on. The agent's app starts `flectar-mail mcp`, which hands each request to
 Flectar Mail while it runs, so mail still syncs in one place.
 
 Agents can list your accounts, folders and labels, list and search messages,

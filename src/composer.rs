@@ -281,6 +281,20 @@ pub(super) fn install(
             }
         }
     });
+    // The AI summary's reply, or a suggested one, goes into a reply to the
+    // shown message, for the user to edit and send or not (#241).
+    let weak = Rc::downgrade(&composers);
+    app.global::<AiSummary>().on_reply_with(move |text| {
+        if let Some(composers) = weak.upgrade()
+            && let Some(app) = composers.app.upgrade()
+            && let Some(session) = composers.open_from_message(&app, "reply")
+        {
+            session.edit(|document| {
+                document.update_selection(0, 0);
+                document.insert_text(&format!("{}\n", text.trim()))
+            });
+        }
+    });
     let weak = Rc::downgrade(&composers);
     app.on_refresh_composer_quotes(move || {
         let Some(composers) = weak.upgrade() else {
@@ -533,6 +547,33 @@ fn new_window(_app: &AppWindow) -> Option<Host> {
     None
 }
 
+/// Where the message's own text is in `text`: above the signature, under its
+/// `-- ` line, which stays as it is when the AI server improves the message.
+fn own_text(text: &str) -> std::ops::Range<usize> {
+    let end = text
+        .rfind("\n-- \n")
+        .filter(|at| !text[..*at].trim().is_empty())
+        .unwrap_or(text.len());
+    0..end
+}
+
+/// Translation's or the AI server's settings changed: composers offer to
+/// translate the message once a service is set up (#240), and to improve it,
+/// with the user's prompts, once an AI server is (#241).
+pub(super) fn services_changed() {
+    with_composers(|composers| {
+        let sessions = composers.sessions.borrow().clone();
+        for session in sessions {
+            if let Some(host) = session.host() {
+                let ui = host.ui();
+                ui.set_improve_shown(crate::ai_features::ready());
+                ui.set_ai_prompts(crate::ai_features::prompt_names());
+                ui.set_translate_shown(crate::translation::ready());
+            }
+        }
+    });
+}
+
 /// Everything a composer shows, for a message moving to another window.
 fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_mode(from.get_mode());
@@ -551,6 +592,12 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_links(from.get_links());
     to.set_link_sharing(from.get_link_sharing());
     to.set_plain_text(from.get_plain_text());
+    to.set_translate_shown(from.get_translate_shown());
+    to.set_translate_choices(from.get_translate_choices());
+    to.set_translate_index(from.get_translate_index());
+    to.set_improve_shown(from.get_improve_shown());
+    to.set_ai_prompts(from.get_ai_prompts());
+    to.set_improving(from.get_improving());
     to.set_request_receipt(from.get_request_receipt());
     to.set_importance(from.get_importance());
     to.set_templates(from.get_templates());
@@ -827,29 +874,35 @@ impl Composers {
     }
 
     /// Reply, reply all, forward, edit as new, or edit the selected draft.
-    fn open_from_message(self: &Rc<Self>, app: &AppWindow, action: &str) {
+    /// Opens the composer to answer, forward or edit the shown message, and
+    /// returns its session.
+    fn open_from_message(
+        self: &Rc<Self>,
+        app: &AppWindow,
+        action: &str,
+    ) -> Option<Rc<ComposeSession>> {
         let (row, conversation_message_id) = self.shown_message();
         let core = self.core();
         let Some(core) = core else {
             app.set_render_status(UiMessage::plain(
                 "Connect an account before replying or forwarding.",
             ));
-            return;
+            return None;
         };
         let Some(row) = row else {
             app.set_render_status(UiMessage::plain("Choose a message first."));
-            return;
+            return None;
         };
 
         if action == "edit_draft" {
             self.open_draft(app, &core, &row);
-            return;
+            return None;
         }
 
         // Local mail is answered from an account.
         if self.state.borrow().connected_accounts.is_empty() {
             app.set_render_status(UiMessage::plain("Add an account to send mail."));
-            return;
+            return None;
         }
         let source = match self
             .runtime
@@ -858,7 +911,7 @@ impl Composers {
             Ok(source) => source,
             Err(error) => {
                 app.set_render_status(UiMessage::detail("Could not open composer: {}", error));
-                return;
+                return None;
             }
         };
         let account_name = self
@@ -883,22 +936,18 @@ impl Composers {
             Ok(prepared) => prepared,
             Err(error) => {
                 app.set_render_status(UiMessage::detail("Could not open composer: {}", error));
-                return;
+                return None;
             }
         };
         let Ok(account_id) = i32::try_from(prepared.account_id) else {
             app.set_render_status(UiMessage::plain(
                 "Could not open composer: invalid account identifier",
             ));
-            return;
+            return None;
         };
 
-        let Some(session) = self.open(app) else {
-            return;
-        };
-        let Some(host) = session.host() else {
-            return;
-        };
+        let session = self.open(app)?;
+        let host = session.host()?;
         let ui = host.ui();
         ui.set_account_id(account_id);
         let display_name = account_name.unwrap_or_else(|| source.account_email.clone());
@@ -954,6 +1003,7 @@ impl Composers {
         if matches!(action, "forward" | "edit_as_new") {
             session.attach_original_files(&core, source.attachments);
         }
+        Some(session)
     }
 
     fn open_draft(self: &Rc<Self>, app: &AppWindow, core: &CoreMailSource, row: &MailMessage) {
@@ -1426,6 +1476,12 @@ impl ComposeSession {
         ui.set_attaching_files(false);
         photos::apply_photos(&ui, &photos::PhotoSummary::default());
         ui.set_plain_text(false);
+        ui.set_translate_shown(crate::translation::ready());
+        ui.set_translate_open(false);
+        ui.set_translating(false);
+        ui.set_improve_shown(crate::ai_features::ready());
+        ui.set_ai_prompts(crate::ai_features::prompt_names());
+        ui.set_improving(false);
         apply_compose_contacts(&ui, &[]);
         ui.set_sending(false);
         ui.set_mode("new".into());
@@ -1799,6 +1855,34 @@ impl ComposeSession {
         ui.on_insert_images(move || {
             if let Some(session) = weak.upgrade() {
                 session.pick_images();
+            }
+        });
+        let weak = self.reference();
+        ui.on_translate_opened(move || {
+            if let Some(session) = weak.upgrade() {
+                session.translate_opened();
+            }
+        });
+        let weak = self.reference();
+        ui.on_translate(move |index, body, anchor, cursor| {
+            if let Some(session) = weak.upgrade() {
+                session.translate(index, &body, anchor, cursor);
+            }
+        });
+        let weak = self.reference();
+        ui.on_improve(move |index, body, anchor, cursor| {
+            if let Some(session) = weak.upgrade() {
+                session.improve(index, &body, anchor, cursor);
+            }
+        });
+        let weak = self.reference();
+        ui.on_edit_prompts(move || {
+            if let Some(app) = weak
+                .upgrade()
+                .and_then(|session| session.composers())
+                .and_then(|composers| composers.app.upgrade())
+            {
+                crate::ai_features::open_settings(&app);
             }
         });
         let weak = self.reference();
@@ -2230,6 +2314,327 @@ impl ComposeSession {
         self.check_spelling_soon();
         self.refresh_photos();
         true
+    }
+
+    /// Fills the Translate dialog (#240) with the service's languages, the one the last message
+    /// was translated into chosen, else the language of the message a reply answers.
+    fn translate_opened(&self) {
+        let (Some(composers), Some(host)) = (self.composers(), self.host()) else {
+            return;
+        };
+        let ui = host.ui();
+        ui.set_translate_failure("".into());
+        ui.set_translate_detail("".into());
+        let Some(core) = composers.core().map(|core| core.file_core()) else {
+            return;
+        };
+        let answered = self.intent.borrow().in_reply_to_message_id;
+        let task = composers.runtime.spawn(async move {
+            let settings = core.translation_settings().await?;
+            let targets = core.translation_targets().await?;
+            let language = match answered {
+                Some(id) => core
+                    .translation_offer(id, Default::default())
+                    .await
+                    .ok()
+                    .and_then(|offer| offer.language),
+                None => None,
+            };
+            Ok::<_, flectar_mail_core::error::CoreError>((
+                settings.compose_target,
+                targets
+                    .into_iter()
+                    .map(|target| (target.code, target.name))
+                    .collect::<Vec<_>>(),
+                language,
+            ))
+        });
+        let weak = self.this.clone();
+        let abort = task.abort_handle();
+        if slint::spawn_local(async move {
+            let result = task.await;
+            let Some(session) = weak.upgrade() else {
+                return;
+            };
+            let Some(host) = session.host() else {
+                return;
+            };
+            let ui = host.ui();
+            match result {
+                Ok(Ok((last, targets, language))) => {
+                    let (names, index) =
+                        crate::translation::draft_choices(targets, &last, language.as_deref());
+                    ui.set_translate_choices(ModelRc::new(VecModel::from(names)));
+                    ui.set_translate_index(index);
+                }
+                Ok(Err(error)) => {
+                    let (kind, detail) = crate::translation::failure(&error);
+                    ui.set_translate_failure(kind.into());
+                    ui.set_translate_detail(detail.into());
+                }
+                Err(_) => {}
+            }
+        })
+        .is_err()
+        {
+            abort.abort();
+        }
+    }
+
+    /// Translates the selection of `body`, or the whole message when nothing is selected, into
+    /// the dialog's choice `index` (#240). The translation takes the place of what was
+    /// translated, as one step undo takes back. Text edited while the service works stays as
+    /// it is.
+    fn translate(&self, index: i32, body: &str, anchor: i32, cursor: i32) {
+        let (Some(composers), Some(host)) = (self.composers(), self.host()) else {
+            return;
+        };
+        let Some(target) = crate::translation::draft_target(index) else {
+            return;
+        };
+        let Some(core) = composers.core().map(|core| core.file_core()) else {
+            return;
+        };
+        let plain = self.plain_text.get();
+        let (revision, range, html, text) = {
+            let mut document = self.document.borrow_mut();
+            if document.text() != body {
+                document.synchronize(body, anchor, cursor);
+            } else {
+                document.update_selection(anchor, cursor);
+            }
+            let selection = document.selection();
+            let (mut start, mut end) = (
+                selection.start.min(selection.end),
+                selection.start.max(selection.end),
+            );
+            if start == end {
+                start = 0;
+                end = i32::try_from(document.text().len()).unwrap_or(i32::MAX);
+                document.update_selection(start, end);
+            }
+            let Some((html, text)) = document.selection_html() else {
+                return;
+            };
+            let (Ok(start), Ok(end)) = (usize::try_from(start), usize::try_from(end)) else {
+                return;
+            };
+            (document.revision(), start..end, html, text)
+        };
+        let ui = host.ui();
+        ui.set_translating(true);
+        ui.set_translate_failure("".into());
+        ui.set_translate_detail("".into());
+        crate::translation::remember_draft_target(&target);
+        let html = crate::rich_compose::without_copied_mark(&html).to_owned();
+        let task = composers.runtime.spawn(async move {
+            if plain {
+                core.translate_draft_text(text, target).await
+            } else {
+                core.translate_draft_html(html, target).await
+            }
+        });
+        let weak = self.this.clone();
+        let abort = task.abort_handle();
+        if slint::spawn_local(async move {
+            let result = task.await;
+            if let Some(session) = weak.upgrade() {
+                session.translated(revision, range, plain, result);
+            }
+        })
+        .is_err()
+        {
+            abort.abort();
+            ui.set_translating(false);
+        }
+    }
+
+    fn translated(
+        &self,
+        revision: u64,
+        range: std::ops::Range<usize>,
+        plain: bool,
+        result: Result<Result<String, flectar_mail_core::error::CoreError>, tokio::task::JoinError>,
+    ) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        ui.set_translating(false);
+        let translation = match result {
+            Ok(Ok(translation)) => translation,
+            Ok(Err(error)) => {
+                let (kind, detail) = crate::translation::failure(&error);
+                ui.set_translate_failure(kind.into());
+                ui.set_translate_detail(detail.into());
+                return;
+            }
+            Err(error) => {
+                ui.set_translate_failure("service".into());
+                ui.set_translate_detail(error.to_string().into());
+                return;
+            }
+        };
+        let followed = self.document.borrow().follow(revision, range);
+        let range = match followed {
+            crate::rich_compose::Followed::Kept(range)
+            | crate::rich_compose::Followed::Bordered(range) => range,
+            crate::rich_compose::Followed::Lost => {
+                ui.set_translate_failure("changed".into());
+                return;
+            }
+        };
+        let (Ok(start), Ok(end)) = (i32::try_from(range.start), i32::try_from(range.end)) else {
+            return;
+        };
+        self.document.borrow_mut().update_selection(start, end);
+        if plain {
+            self.edit(|document| document.insert_text(&translation));
+        } else {
+            self.paste_html(&host, &crate::rich_compose::marked_as_copied(&translation));
+        }
+        ui.set_translate_open(false);
+    }
+
+    /// Runs Proofread, -1, or the user's prompt `index` on the selection of `body`, or on the
+    /// message above its signature when nothing is selected (#241). What the AI server writes
+    /// takes the place of the words it changes, as one step undo takes back, and words it keeps
+    /// keep their formatting. Text edited while the server works stays as it is.
+    fn improve(&self, index: i32, body: &str, anchor: i32, cursor: i32) {
+        let (Some(composers), Some(host)) = (self.composers(), self.host()) else {
+            return;
+        };
+        let Some(instruction) = crate::ai_features::instruction(index) else {
+            return;
+        };
+        let Some(core) = composers.core().map(|core| core.file_core()) else {
+            return;
+        };
+        let ui = host.ui();
+        let (revision, range, text, selected) = {
+            let mut document = self.document.borrow_mut();
+            if document.text() != body {
+                document.synchronize(body, anchor, cursor);
+            } else {
+                document.update_selection(anchor, cursor);
+            }
+            let selection = document.selection();
+            let (Ok(start), Ok(end)) = (
+                usize::try_from(selection.start.min(selection.end)),
+                usize::try_from(selection.start.max(selection.end)),
+            ) else {
+                return;
+            };
+            let selected = start != end;
+            let range = if selected {
+                start..end
+            } else {
+                own_text(document.text())
+            };
+            // White space around the text stays as it is.
+            let text = &document.text()[range.clone()];
+            let lead = text.len() - text.trim_start().len();
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                ui.set_notice(UiMessage::plain("Write something to improve first."), false);
+                return;
+            }
+            let range = range.start + lead..range.start + lead + trimmed.len();
+            (document.revision(), range, trimmed.to_owned(), selected)
+        };
+        ui.set_improving(true);
+        ui.set_notice(UiMessage::plain("Asking the AI server…"), false);
+        let task = composers
+            .runtime
+            .spawn(async move { core.ai_rewrite(text, instruction).await });
+        let weak = self.this.clone();
+        let abort = task.abort_handle();
+        if slint::spawn_local(async move {
+            let result = task.await;
+            if let Some(session) = weak.upgrade() {
+                session.improved(revision, range, selected, result);
+            }
+        })
+        .is_err()
+        {
+            abort.abort();
+            ui.set_improving(false);
+            ui.set_notice(UiMessage::EMPTY, false);
+        }
+    }
+
+    fn improved(
+        &self,
+        revision: u64,
+        range: std::ops::Range<usize>,
+        selected: bool,
+        result: Result<Result<String, flectar_mail_core::error::CoreError>, tokio::task::JoinError>,
+    ) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        ui.set_improving(false);
+        let revised = match result {
+            Ok(Ok(revised)) if !revised.trim().is_empty() => revised,
+            Ok(Ok(_)) => {
+                ui.set_notice(
+                    UiMessage::plain(
+                        "The AI server sent back no text, so the message stays as it is.",
+                    ),
+                    true,
+                );
+                return;
+            }
+            Ok(Err(error)) => {
+                ui.set_notice(crate::ai_features::failure_notice(&error), true);
+                return;
+            }
+            Err(error) => {
+                ui.set_notice(
+                    UiMessage::detail(
+                        "The AI server didn't answer as expected. It said: {}",
+                        error,
+                    ),
+                    true,
+                );
+                return;
+            }
+        };
+        let followed = self.document.borrow().follow(revision, range);
+        let range = match followed {
+            crate::rich_compose::Followed::Kept(range)
+            | crate::rich_compose::Followed::Bordered(range) => range,
+            crate::rich_compose::Followed::Lost => {
+                ui.set_notice(
+                    UiMessage::plain(
+                        "The text changed while the AI server worked, so it stays as it is.",
+                    ),
+                    true,
+                );
+                return;
+            }
+        };
+        let mut changed = false;
+        self.edit(
+            |document| match document.revise(range, &revised, selected) {
+                Some(selection) => {
+                    changed = true;
+                    selection
+                }
+                None => document.selection(),
+            },
+        );
+        ui.set_notice(
+            if changed {
+                UiMessage::plain(
+                    "Changed by AI. Check it before you send it. Undo restores your text.",
+                )
+            } else {
+                UiMessage::plain("The AI server found nothing to change.")
+            },
+            false,
+        );
     }
 
     /// Puts the selection on the clipboard as HTML and plain text, so that it pastes back with

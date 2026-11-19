@@ -5,6 +5,9 @@ import { AttachmentPreviewDialog } from "dialogs/attachment-preview-dialog.slint
 export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
+export { Translation, TranslationLanguage } from "translation.slint";
+export { Ai, AiPromptRow } from "ai.slint";
+export { AiSummary } from "ai-summary.slint";
 export { LinkServices, LinkServiceRow } from "link-services.slint";
 export { RendererSettings } from "renderer-settings.slint";
 export { WindowChrome } from "window-chrome.slint";
@@ -614,6 +617,23 @@ export global I18n {
         if (key == "Read receipt preference saved.") { return @tr("Read receipt preference saved."); }
         if (key == "Could not save the read receipt preference: {}") { return @tr("Could not save the read receipt preference: {}", argument); }
         if (key == "Could not answer the read receipt request: {}") { return @tr("Could not answer the read receipt request: {}", argument); }
+        if (key == "Could not show the message: {}") { return @tr("Could not show the message: {}", argument); }
+        if (key == "Could not save the translation setting: {}") { return @tr("Could not save the translation setting: {}", argument); }
+        if (key == "Could not remove the key: {}") { return @tr("Could not remove the key: {}", argument); }
+        if (key == "Could not save the prompts: {}") { return @tr("Could not save the prompts: {}", argument); }
+        if (key == "Set up an AI server in Settings to use AI features.") { return @tr("Set up an AI server in Settings to use AI features."); }
+        if (key == "The AI server can't be reached. Check its address in Settings and that it's running.") { return @tr("The AI server can't be reached. Check its address in Settings and that it's running."); }
+        if (key == "The AI server's address in Settings has to start with https://, or with http://localhost for a server on this computer.") { return @tr("The AI server's address in Settings has to start with https://, or with http://localhost for a server on this computer."); }
+        if (key == "The AI server didn't accept the key in Settings.") { return @tr("The AI server didn't accept the key in Settings."); }
+        if (key == "The AI server didn't answer as expected. It said: {}") { return @tr("The AI server didn't answer as expected. It said: {}", argument); }
+        if (key == "Write something to improve first.") { return @tr("Write something to improve first."); }
+        if (key == "Asking the AI server…") { return @tr("Asking the AI server…"); }
+        if (key == "The AI server sent back no text, so the message stays as it is.") { return @tr("The AI server sent back no text, so the message stays as it is."); }
+        if (key == "The text changed while the AI server worked, so it stays as it is.") { return @tr("The text changed while the AI server worked, so it stays as it is."); }
+        if (key == "Changed by AI. Check it before you send it. Undo restores your text.") { return @tr("Changed by AI. Check it before you send it. Undo restores your text."); }
+        if (key == "The AI server found nothing to change.") { return @tr("The AI server found nothing to change."); }
+        // Translate into: the language translations go into until one is chosen.
+        if (key == "Automatic ({})") { return @tr("Automatic ({})", argument); }
         if (key == "Could not mark all as read: {}") { return @tr("Could not mark all as read: {}", argument); }
         if (key == "Use YYYY-MM-DD for the date and a time such as {}.") { return @tr("Use YYYY-MM-DD for the date and a time such as {}.", argument); }
         if (key == "Event duration must be a number of minutes.") { return @tr("Event duration must be a number of minutes."); }
