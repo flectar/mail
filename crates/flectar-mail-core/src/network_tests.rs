@@ -4,9 +4,10 @@ use crate::config::Paths;
 use crate::net::proxy::{Credentials, ProxyServer};
 use std::sync::Arc;
 
-/// The proxy in force is the process's, so these tests take turns, and their
-/// proxies skip every server (`*`), so other tests' connections stay direct.
-static TURNS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+// The proxy in force is the process's: these tests take the turn
+// (`proxy::test_turns`), so no other test's core changes it while they check
+// it, and their proxies skip every server (`*`), so other tests' connections
+// stay direct.
 
 async fn core(directory: &tempfile::TempDir) -> Core {
     let credentials = Arc::new(DevelopmentFileCredentialStore::new(
@@ -43,7 +44,7 @@ fn reset() {
 
 #[tokio::test]
 async fn manual_proxy_is_saved_with_its_password_and_used() {
-    let _turn = TURNS.lock().await;
+    let _turn = proxy::test_turns::take();
     let directory = tempfile::tempdir().unwrap();
     let core = core(&directory).await;
     core.set_network_settings(
@@ -120,7 +121,7 @@ async fn manual_proxy_is_saved_with_its_password_and_used() {
 
 #[tokio::test]
 async fn a_manual_proxy_needs_a_server_it_can_use() {
-    let _turn = TURNS.lock().await;
+    let _turn = proxy::test_turns::take();
     let directory = tempfile::tempdir().unwrap();
     let core = core(&directory).await;
     for (manual, wrong) in [
@@ -184,7 +185,7 @@ async fn a_manual_proxy_needs_a_server_it_can_use() {
 
 #[tokio::test]
 async fn an_account_can_have_its_own_proxy_or_none() {
-    let _turn = TURNS.lock().await;
+    let _turn = proxy::test_turns::take();
     let directory = tempfile::tempdir().unwrap();
     let core = core(&directory).await;
     core.set_account_network(
@@ -221,7 +222,7 @@ async fn an_account_can_have_its_own_proxy_or_none() {
 
 #[tokio::test]
 async fn removing_an_account_forgets_its_proxy() {
-    let _turn = TURNS.lock().await;
+    let _turn = proxy::test_turns::take();
     let directory = tempfile::tempdir().unwrap();
     let core = core(&directory).await;
     core.set_account_network(1, AccountProxy::Direct, ProxyPassword::Keep)
@@ -234,7 +235,7 @@ async fn removing_an_account_forgets_its_proxy() {
 
 #[tokio::test]
 async fn deleting_all_local_data_goes_back_to_the_default_proxy() {
-    let _turn = TURNS.lock().await;
+    let _turn = proxy::test_turns::take();
     let directory = tempfile::tempdir().unwrap();
     let core = core(&directory).await;
     core.set_network_settings(
