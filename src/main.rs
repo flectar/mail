@@ -17,6 +17,7 @@ mod block_sender;
 mod browser;
 pub use browser::ExternalUrlOpener;
 mod calendar;
+mod calendar_layout;
 mod compose_controller;
 mod compose_editor;
 mod compose_paste;
@@ -4907,9 +4908,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 calendar.events = Vec::new();
                 calendar.sources = Vec::new();
                 calendar.accounts = Vec::new();
-                app.set_calendar_events(Default::default());
                 app.set_calendar_month_days(Default::default());
+                app.set_calendar_month_bars(Default::default());
                 app.set_calendar_week_days(Default::default());
+                app.set_calendar_week_bars(Default::default());
+                app.set_calendar_timed_blocks(Default::default());
+                app.set_calendar_selected_day_events(Default::default());
                 calendar
                     .source_rows
                     .reconcile_by(Vec::new(), |row| row.id, |_, _| true);

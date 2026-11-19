@@ -354,24 +354,6 @@ export struct EmailTemplateRow {
     body_text: string,
 }
 
-export struct CalendarDay {
-    day: string,
-    iso_date: string,
-    date_label: string,
-    outside_month: bool,
-    is_today: bool,
-    is_selected: bool,
-    has_events: bool,
-}
-
-export struct CalendarWeekDay {
-    weekday: string,
-    day: string,
-    iso_date: string,
-    date_label: string,
-    is_today: bool,
-}
-
 export struct CalendarEventRow {
     id: int,
     editable: bool,
@@ -379,10 +361,6 @@ export struct CalendarEventRow {
     detail: string,
     iso_date: string,
     date_label: string,
-    day_index: int,
-    month_index: int,
-    start_minutes: int,
-    duration_minutes: int,
     color_index: int,
     all_day: bool,
     provider: string,
@@ -406,6 +384,64 @@ export struct CalendarEventRow {
     // For one occurrence of a repeating event, its RECURRENCE-ID (ms since
     // the epoch, as text), else empty.
     recurrence_id: string,
+}
+
+// A day in the month grid, the mini calendar and the phone's month strip.
+export struct CalendarDay {
+    day: string,
+    iso_date: string,
+    date_label: string,
+    outside_month: bool,
+    is_today: bool,
+    is_selected: bool,
+    // Some event runs on this day.
+    has_events: bool,
+    // more_from[k] counts the day's bars in lane k and below it, which a
+    // grid with room for k lanes leaves to "+N more".
+    more_from: [int],
+    // The day's events in agenda order, for its "+N more" list.
+    events: [CalendarEventRow],
+}
+
+// A day column of the week view, with its all-day strip.
+export struct CalendarWeekDay {
+    weekday: string,
+    day: string,
+    iso_date: string,
+    date_label: string,
+    is_today: bool,
+    more_from: [int],
+    events: [CalendarEventRow],
+}
+
+// An event's bar in a row of days: a week of the month grid, or the week
+// view's all-day strip. An event running into later weeks has one bar in
+// each, cut where the row ends.
+export struct CalendarBar {
+    event: CalendarEventRow,
+    row: int,
+    column: int,
+    span: int,
+    lane: int,
+    continues_before: bool,
+    continues_after: bool,
+    // The start time, on the bar where a timed event starts.
+    time_label: string,
+}
+
+// A timed event's box in a day column of the week view's hours. Events
+// crossing midnight have one box each day. Overlapping events split the
+// column into lanes.
+export struct CalendarTimedBlock {
+    event: CalendarEventRow,
+    column: int,
+    start_minutes: int,
+    end_minutes: int,
+    lane: int,
+    lanes: int,
+    lane_span: int,
+    continues_before: bool,
+    continues_after: bool,
 }
 
 // A flat model lets ListView virtualize individual events, including busy days.
