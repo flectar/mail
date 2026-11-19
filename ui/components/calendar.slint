@@ -1,5 +1,5 @@
 import { SidebarRowSurface, SidebarStyle } from "sidebar-row.slint";
-import { CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay } from "../models.slint";
+import { CalendarBar, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarTimedBlock, CalendarWeekDay } from "../models.slint";
 import { Button } from "button.slint";
 import { IconButton, ToolbarIconButton } from "controls.slint";
 import { CalendarDetailsDialog } from "../dialogs/calendar-details-dialog.slint";
@@ -15,6 +15,35 @@ import { WindowControlsClearance } from "../window-chrome.slint";
 import { TabSwitcherButton } from "tab-overview.slint";
 import { TabsUi } from "tabs-ui.slint";
 
+// "+N more" under a day's lanes of bars. It lists all the day's events.
+component DayMoreButton inherits Rectangle {
+    in property <int> count;
+    in property <string> date-label;
+    in property <color> text-color;
+    in property <color> hover-color;
+    callback clicked;
+    border-radius: 4px;
+    background: more-hit.has-hover ? root.hover-color : transparent;
+    Text {
+        x: 6px;
+        width: parent.width - 10px;
+        height: parent.height;
+        text: @tr("+{n} more" | "+{n} more" % root.count);
+        color: root.text-color;
+        font-size: TypeScale.caption;
+        font-weight: 600;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    more-hit := TouchArea {
+        accessible-role: button;
+        accessible-label: @tr("Show all events on {}", root.date-label);
+        accessible-action-default => { root.clicked(); }
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+}
+
 export component CalendarEvent inherits Rectangle {
     in property <string> title;
     in property <string> detail;
@@ -29,6 +58,12 @@ export component CalendarEvent inherits Rectangle {
     in property <bool> faded: false;
     // How the event stands, for screen readers.
     in property <string> state;
+    // Shown before the title, such as where a timed event starts.
+    in property <string> time-label;
+    // An event that goes on past a row or day draws past the clipped edge
+    // there, so its rounded end is hidden. These move its text back in.
+    in property <length> inset-left: 0px;
+    in property <length> inset-top: 0px;
     callback clicked;
 
     border-radius: 7px;
@@ -45,11 +80,11 @@ export component CalendarEvent inherits Rectangle {
         background: root.event-border-color;
     }
     event-title := Text {
-        x: 9px;
-        y: root.compact ? 3px : 7px;
-        width: parent.width - 15px;
-        height: root.compact ? parent.height - 6px : max(18px, self.preferred-height);
-        text: root.title;
+        x: 9px + root.inset-left;
+        y: (root.compact ? 3px : 7px) + root.inset-top;
+        width: parent.width - 15px - root.inset-left;
+        height: root.compact ? parent.height - 6px - root.inset-top : max(18px, self.preferred-height);
+        text: root.time-label == "" ? root.title : root.time-label + "  " + root.title;
         color: root.title-color;
         font-size: root.compact ? TypeScale.caption : TypeScale.secondary;
         font-weight: 700;
@@ -66,9 +101,9 @@ export component CalendarEvent inherits Rectangle {
     Text {
         // A short event shows its title alone when the time doesn't fit.
         visible: !root.compact && self.y + self.height <= root.height - 2px;
-        x: 9px;
+        x: event-title.x;
         y: event-title.y + event-title.height + 2px;
-        width: parent.width - 15px;
+        width: event-title.width;
         height: max(15px, self.preferred-height);
         text: root.detail;
         color: root.detail-color;
@@ -386,7 +421,15 @@ export component FunctionalCalendarView inherits Rectangle {
     in property <bool> dark-mode: false;
     in property <[CalendarDay]> month-days: [];
     in property <[CalendarWeekDay]> week-days: [];
-    in property <[CalendarEventRow]> events: [];
+    // The month grid's bars, and how many lanes each of its six weeks fills.
+    in property <[CalendarBar]> month-bars: [];
+    in property <[int]> month-row-lanes: [];
+    // The week view: bars in its all-day strip and boxes in its hours.
+    in property <[CalendarBar]> week-bars: [];
+    in property <int> week-lanes: 0;
+    in property <[CalendarTimedBlock]> timed-blocks: [];
+    // Every event on the selected date, for the phone's list under its month.
+    in property <[CalendarEventRow]> selected-day-events: [];
     in property <[CalendarAgendaRow]> agenda-rows: [];
     in property <[CalendarAgendaFilterRow]> agenda-filters: [];
     in property <int> agenda-filter-count: 0;
@@ -401,8 +444,8 @@ export component FunctionalCalendarView inherits Rectangle {
     in property <string> selected-date;
     in property <string> selected-date-label;
     in property <bool> selected-date-has-events: false;
-    // The week view's ruler labels for 08:00 through 18:00.
-    in property <[string]> hour-labels: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
+    // The week view's ruler labels for each hour of the day.
+    in property <[string]> hour-labels: ["00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"];
     in property <string> view-mode: "week";
     in property <color> background-color;
     in property <color> sidebar-color;
@@ -463,6 +506,22 @@ export component FunctionalCalendarView inherits Rectangle {
     private property <bool> detail-repeats: false;
     private property <string> detail-recurrence-id: "";
     private property <bool> delete-confirmation-open: false;
+    // The list a "+N more" opens, over its day.
+    private property <string> day-list-title;
+    private property <[CalendarEventRow]> day-list-events;
+    private property <length> day-list-x;
+    private property <length> day-list-y;
+    private property <length> day-list-width: min(320px, root.width - 16px);
+    private property <length> day-list-height: min(root.height - 16px, 58px + root.day-list-events.length * 56px);
+
+    // List every event of a day, in a card over the day's cell at x, y.
+    function show-day(title: string, events: [CalendarEventRow], x: length, y: length) {
+        root.day-list-title = title;
+        root.day-list-events = events;
+        root.day-list-x = max(8px, min(x, root.width - root.day-list-width - 8px));
+        root.day-list-y = max(8px, min(y, root.height - root.day-list-height - 8px));
+        day-list.show();
+    }
 
     function show-source(source: CalendarSourceRow) {
         root.detail-kind = "calendar";
@@ -561,13 +620,48 @@ export component FunctionalCalendarView inherits Rectangle {
     // All-day events show one caption line that grows with the platform font.
     private property <length> all-day-height: max(30px, all-day-line.preferred-height + 12px);
     private property <length> grid-top: 112px + root.all-day-height;
+    // Ten hours fill the window, as with one lane of all-day events; the
+    // rest of the day scrolls.
     private property <length> hour-height: max(36px, (root.height - root.grid-top) / 10);
+    // The all-day strip stacks up to three lanes. A busier week shows two
+    // and "+N more" on the days with others.
+    private property <length> strip-bar-height: root.all-day-height - 6px;
+    private property <length> strip-pitch: root.strip-bar-height + 3px;
+    private property <int> strip-lanes: root.week-lanes <= 3 ? root.week-lanes : 2;
+    private property <length> strip-height: 3px + max(1, min(root.week-lanes, 3)) * root.strip-pitch;
+    // Month cells stack bars under the day number, as many as fit. A week
+    // with more keeps the last lane for "+N more".
+    private property <length> month-cell-height: (root.height - LayoutMetrics.desktop-mail-toolbar-height - 34px) / 6;
+    private property <length> month-bar-height: max(20px, month-line.preferred-height + 4px);
+    private property <length> month-pitch: root.month-bar-height + 2px;
+    private property <int> month-lane-room: max(1, floor((root.month-cell-height - 36px) / root.month-pitch));
+    // How far an event's cut end runs past the clipped edge of its grid.
+    private property <length> overhang: 8px;
     background: root.background-color;
 
     local-label-width := Text { visible: false; text: @tr("LOCAL"); font-size: TypeScale.caption; }
     all-day-label-width := Text { visible: false; text: @tr("ALL DAY"); font-size: TypeScale.caption; }
     all-day-line := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; font-weight: 700; }
-    hour-label-width := Text { visible: false; text: root.hour-labels[2]; font-size: TypeScale.caption; }
+    month-line := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; font-weight: 600; }
+    // One of the widest hour labels, such as "22:00" or "10 PM".
+    hour-label-width := Text { visible: false; text: root.hour-labels[22]; font-size: TypeScale.caption; }
+
+    // Lanes a month week shows: all of them when they fit.
+    pure function month-lanes(row: int) -> int {
+        return root.month-row-lanes[row] <= root.month-lane-room ? root.month-lane-room : root.month-lane-room - 1;
+    }
+
+    pure function event-fill(event: CalendarEventRow) -> color {
+        return root.pending(event) ? root.surface-color
+            : event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff)
+            : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff)
+            : event.color-index == 2 ? (root.dark-mode ? #352518 : #fff1df)
+            : (root.dark-mode ? #173528 : #e7f8ef);
+    }
+
+    pure function event-color(event: CalendarEventRow) -> color {
+        return event.color-index == 0 ? #3478f6 : event.color-index == 1 ? #8b5cf6 : event.color-index == 2 ? #e87924 : #26a269;
+    }
 
     calendar-sidebar := FunctionalCalendarSidebar {
         active: root.active && !root.compact;
@@ -699,61 +793,95 @@ export component FunctionalCalendarView inherits Rectangle {
                 x: 0px;
                 y: 48px;
                 width: parent.width;
-                height: root.all-day-height;
-                Text { x: 12px; width: root.time-gutter - 14px; height: parent.height; text: @tr("ALL DAY"); color: root.muted-color; font-size: TypeScale.caption; vertical-alignment: center; }
-                for event in root.events : CalendarEvent {
-                    visible: event.all-day;
-                    x: root.time-gutter + event.day-index * root.column-width + 4px;
-                    y: 3px;
-                    width: root.column-width - 8px;
-                    height: root.all-day-height - 6px;
-                    title: event.title;
-                    detail: event.detail;
-                    compact: true;
-                    pending: root.pending(event);
-                    faded: root.faded(event);
-                    state: root.state(event);
-                    fill-color: root.pending(event) ? root.surface-color : event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : (root.dark-mode ? #352518 : #fff1df);
-                    event-border-color: event.color-index == 0 ? #3478f6 : event.color-index == 1 ? #8b5cf6 : #e87924;
-                    title-color: root.title-color;
-                    detail-color: root.secondary-color;
-                    clicked => { root.show-event(event); }
+                height: root.strip-height;
+                Text { x: 12px; y: 0px; width: root.time-gutter - 14px; height: root.all-day-height; text: @tr("ALL DAY"); color: root.muted-color; font-size: TypeScale.caption; vertical-alignment: center; }
+                // Bars that go on into another week run past these edges.
+                Rectangle {
+                    x: root.time-gutter;
+                    width: 7 * root.column-width;
+                    height: parent.height;
+                    clip: true;
+                    for bar in root.week-bars : CalendarEvent {
+                        visible: bar.lane < root.strip-lanes;
+                        x: bar.column * root.column-width + (bar.continues-before ? -root.overhang : 4px);
+                        width: (bar.column + bar.span) * root.column-width + (bar.continues-after ? root.overhang : -4px) - self.x;
+                        y: 3px + bar.lane * root.strip-pitch;
+                        height: root.strip-bar-height;
+                        title: bar.event.title;
+                        detail: bar.event.detail;
+                        time-label: bar.time-label;
+                        compact: true;
+                        inset-left: bar.continues-before ? root.overhang + 4px : 0px;
+                        pending: root.pending(bar.event);
+                        faded: root.faded(bar.event);
+                        state: root.state(bar.event);
+                        fill-color: root.event-fill(bar.event);
+                        event-border-color: root.event-color(bar.event);
+                        title-color: root.title-color;
+                        detail-color: root.secondary-color;
+                        clicked => { root.show-event(bar.event); }
+                    }
+                    for day[index] in root.week-days : DayMoreButton {
+                        count: day.more-from[root.strip-lanes];
+                        visible: self.count > 0;
+                        x: index * root.column-width + 4px;
+                        y: 3px + root.strip-lanes * root.strip-pitch;
+                        width: root.column-width - 8px;
+                        height: root.strip-bar-height;
+                        date-label: day.date-label;
+                        text-color: root.secondary-color;
+                        hover-color: root.control-hover-color;
+                        clicked => {
+                            root.show-day(day.date-label, day.events,
+                                root.main-x + root.time-gutter + index * root.column-width,
+                                LayoutMetrics.desktop-mail-toolbar-height + 48px);
+                        }
+                    }
                 }
             }
-            Rectangle { y: 47px + root.all-day-height; width: parent.width; height: 1px; background: root.ui-border-color; }
-            hour-grid := Rectangle {
+            Rectangle { y: 47px + root.strip-height; width: parent.width; height: 1px; background: root.ui-border-color; }
+            hour-scroll := ScrollView {
                 x: 0px;
-                y: 48px + root.all-day-height;
+                y: 48px + root.strip-height;
                 width: parent.width;
                 height: parent.height - self.y;
-                clip: true;
+                content-width: self.visible-width;
+                content-height: 24 * root.hour-height;
+                horizontal-scrollbar-policy: always-off;
+                // Open on the morning, with the 08:00 label in full.
+                init => { self.content-y = -8 * root.hour-height + 12px; }
                 for hour[index] in root.hour-labels : Rectangle {
                     y: index * root.hour-height;
                     width: parent.width;
                     height: 1px;
                     background: root.subtle-border-color;
-                    // Labels center on their line but stay inside the grid.
-                    Text { x: 10px; y: min(max(-self.height / 2, -parent.y), hour-grid.height - parent.y - self.height); width: root.time-gutter - 20px; height: max(16px, self.preferred-height); text: hour; color: root.muted-color; font-size: TypeScale.caption; horizontal-alignment: right; vertical-alignment: center; }
+                    // The day starts at the top edge, so midnight has no label.
+                    // The others center on their line.
+                    Text { visible: index > 0; x: 10px; y: -self.height / 2; width: root.time-gutter - 20px; height: max(16px, self.preferred-height); text: hour; color: root.muted-color; font-size: TypeScale.caption; horizontal-alignment: right; vertical-alignment: center; }
                 }
-                for marker in [0, 1, 2, 3, 4, 5, 6, 7] : Rectangle { x: root.time-gutter + marker * root.column-width; width: 1px; height: parent.height; background: root.subtle-border-color; }
-                for event in root.events : CalendarEvent {
-                    visible: !event.all-day;
-                    x: root.time-gutter + event.day-index * root.column-width + 5px;
-                    y: (event.start-minutes - 480) / 60 * root.hour-height;
-                    width: root.column-width - 10px;
-                    // A timed event ends in its own day column. Synced events can
-                    // span weeks, past what the software renderer can paint (#35).
-                    height: max(44px, min(event.duration-minutes, 1440 - event.start-minutes) / 60 * root.hour-height);
-                    title: event.title;
-                    detail: event.detail;
-                    pending: root.pending(event);
-                    faded: root.faded(event);
-                    state: root.state(event);
-                    fill-color: root.pending(event) ? root.surface-color : event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : event.color-index == 2 ? (root.dark-mode ? #352518 : #fff1df) : (root.dark-mode ? #173528 : #e7f8ef);
-                    event-border-color: event.color-index == 0 ? #3478f6 : event.color-index == 1 ? #8b5cf6 : event.color-index == 2 ? #e87924 : #26a269;
+                for marker in [0, 1, 2, 3, 4, 5, 6, 7] : Rectangle { x: root.time-gutter + marker * root.column-width; width: 1px; height: 24 * root.hour-height; background: root.subtle-border-color; }
+                for block in root.timed-blocks : CalendarEvent {
+                    private property <length> lane-width: (root.column-width - 10px) / block.lanes;
+                    // The box keeps a readable size, as the layout placed it.
+                    private property <int> drawn-end: max(block.end-minutes, min(block.start-minutes + 30, 1440));
+                    x: root.time-gutter + block.column * root.column-width + 5px + block.lane * self.lane-width;
+                    width: block.lane-span * self.lane-width - (block.lane + block.lane-span < block.lanes ? 2px : 0px);
+                    y: block.start-minutes / 60 * root.hour-height - (block.continues-before ? root.overhang : 0px);
+                    height: (self.drawn-end - block.start-minutes) / 60 * root.hour-height
+                        + (block.continues-before ? root.overhang : 0px)
+                        + (block.continues-after ? root.overhang : 0px);
+                    title: block.event.title;
+                    detail: block.event.detail;
+                    compact: self.height < 40px;
+                    inset-top: block.continues-before ? root.overhang : 0px;
+                    pending: root.pending(block.event);
+                    faded: root.faded(block.event);
+                    state: root.state(block.event);
+                    fill-color: root.event-fill(block.event);
+                    event-border-color: root.event-color(block.event);
                     title-color: root.title-color;
                     detail-color: root.secondary-color;
-                    clicked => { root.show-event(event); }
+                    clicked => { root.show-event(block.event); }
                 }
             }
         }
@@ -764,6 +892,8 @@ export component FunctionalCalendarView inherits Rectangle {
             width: parent.width;
             height: parent.height - LayoutMetrics.desktop-mail-toolbar-height;
             background: root.surface-color;
+            // Bars that go on into another week run past the grid's sides.
+            clip: true;
             for name[index] in [@tr("Mon"), @tr("Tue"), @tr("Wed"), @tr("Thu"), @tr("Fri"), @tr("Sat"), @tr("Sun")] : Text {
                 x: index * parent.width / 7;
                 y: 0px;
@@ -778,9 +908,9 @@ export component FunctionalCalendarView inherits Rectangle {
             }
             for day[index] in root.month-days : Rectangle {
                 x: mod(index, 7) * parent.width / 7;
-                y: 34px + floor(index / 7) * (parent.height - 34px) / 6;
+                y: 34px + floor(index / 7) * root.month-cell-height;
                 width: parent.width / 7;
-                height: (parent.height - 34px) / 6;
+                height: root.month-cell-height;
                 border-width: 1px;
                 border-color: root.subtle-border-color;
                 background: day.is-selected ? root.accent-background : root.surface-color;
@@ -788,25 +918,52 @@ export component FunctionalCalendarView inherits Rectangle {
                 Rectangle { visible: day.is-today; x: 7px; y: 5px; width: 25px; height: 25px; border-radius: 13px; border-width: 1px; border-color: root.accent-color; background: transparent; }
                 TouchArea { accessible-role: button; accessible-label: @tr("Select {}", day.date-label); accessible-checked: day.is-selected; accessible-action-default => { root.select-date(day.iso-date); } clicked => { root.select-date(day.iso-date); } mouse-cursor: pointer; }
             }
-            for event in root.events : Rectangle {
-                x: mod(event.month-index, 7) * parent.width / 7 + 7px;
-                y: 34px + floor(event.month-index / 7) * (parent.height - 34px) / 6 + 34px;
-                width: parent.width / 7 - 14px;
-                height: max(20px, chip-title.preferred-height);
+            for bar in root.month-bars : Rectangle {
+                visible: bar.lane < root.month-lanes(bar.row);
+                x: bar.column * parent.width / 7 + (bar.continues-before ? -root.overhang : 4px);
+                width: (bar.column + bar.span) * parent.width / 7 + (bar.continues-after ? root.overhang : -4px) - self.x;
+                y: 34px + bar.row * root.month-cell-height + 34px + bar.lane * root.month-pitch;
+                height: root.month-bar-height;
                 border-radius: 4px;
-                border-width: root.pending(event) ? 1px : 0px;
-                border-color: event.color-index == 0 ? #3478f6 : event.color-index == 1 ? #8b5cf6 : event.color-index == 2 ? #e87924 : #26a269;
-                opacity: root.faded(event) ? 0.55 : 1;
-                background: root.pending(event) ? root.surface-color : event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : event.color-index == 2 ? (root.dark-mode ? #352518 : #fff1df) : (root.dark-mode ? #173528 : #e7f8ef);
-                chip-title := Text { x: 6px; width: parent.width - 10px; height: parent.height; text: event.title; color: root.body-color; font-size: TypeScale.caption; font-weight: 600; overflow: elide; vertical-alignment: center; }
-                if root.faded(event) : Rectangle { x: chip-title.x; y: parent.height / 2; width: min(chip-title.width, chip-title.preferred-width); height: 1px; background: root.body-color; }
-                TouchArea {
+                border-width: root.pending(bar.event) ? 1px : 0px;
+                border-color: root.event-color(bar.event);
+                opacity: root.faded(bar.event) ? 0.55 : 1;
+                background: bar-hit.has-hover ? root.event-fill(bar.event).brighter(8%) : root.event-fill(bar.event);
+                chip-title := Text {
+                    x: 6px + (bar.continues-before ? root.overhang + 4px : 0px);
+                    width: parent.width - self.x - 4px - (bar.continues-after ? root.overhang : 0px);
+                    height: parent.height;
+                    text: bar.time-label == "" ? bar.event.title : bar.time-label + "  " + bar.event.title;
+                    color: root.body-color;
+                    font-size: TypeScale.caption;
+                    font-weight: 600;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                if root.faded(bar.event) : Rectangle { x: chip-title.x; y: parent.height / 2; width: min(chip-title.width, chip-title.preferred-width); height: 1px; background: root.body-color; }
+                bar-hit := TouchArea {
                     accessible-role: button;
-                    accessible-label: @tr("View details for {}", event.title);
-                    accessible-description: root.state(event);
-                    accessible-action-default => { root.show-event(event); }
-                    clicked => { root.show-event(event); }
+                    accessible-label: @tr("View details for {}", bar.event.title);
+                    accessible-description: root.state(bar.event) != "" ? root.state(bar.event) + " · " + bar.event.detail : bar.event.detail;
+                    accessible-action-default => { root.show-event(bar.event); }
+                    clicked => { root.show-event(bar.event); }
                     mouse-cursor: pointer;
+                }
+            }
+            for day[index] in root.month-days : DayMoreButton {
+                count: day.more-from[root.month-lanes(floor(index / 7))];
+                visible: self.count > 0;
+                x: mod(index, 7) * parent.width / 7 + 4px;
+                y: 34px + floor(index / 7) * root.month-cell-height + 34px + root.month-lanes(floor(index / 7)) * root.month-pitch;
+                width: parent.width / 7 - 8px;
+                height: root.month-bar-height;
+                date-label: day.date-label;
+                text-color: root.secondary-color;
+                hover-color: root.control-hover-color;
+                clicked => {
+                    root.show-day(day.date-label, day.events,
+                        root.main-x + mod(index, 7) * root.main-width / 7 - 40px,
+                        LayoutMetrics.desktop-mail-toolbar-height + 34px + floor(index / 7) * root.month-cell-height);
                 }
             }
         }
@@ -933,14 +1090,13 @@ export component FunctionalCalendarView inherits Rectangle {
                 width: agenda-scroll.visible-width;
                 padding-right: 4px;
                 spacing: 7px;
-                for event in root.events : Rectangle {
-                    visible: event.iso-date == root.selected-date;
-                    height: event.iso-date == root.selected-date ? agenda-detail.y + agenda-detail.height + 10px : 0px;
+                for event in root.selected-day-events : Rectangle {
+                    height: agenda-detail.y + agenda-detail.height + 10px;
                     border-radius: 9px;
                     border-width: root.pending(event) ? 1.5px : 1px;
-                    border-color: event.color-index == 0 ? #3478f6 : event.color-index == 1 ? #8b5cf6 : event.color-index == 2 ? #e87924 : #26a269;
+                    border-color: root.event-color(event);
                     opacity: root.faded(event) ? 0.55 : 1;
-                    background: root.pending(event) ? root.surface-color : event.color-index == 0 ? (root.dark-mode ? #1b2e46 : #e9f3ff) : event.color-index == 1 ? (root.dark-mode ? #31234b : #f2eaff) : event.color-index == 2 ? (root.dark-mode ? #352518 : #fff1df) : (root.dark-mode ? #173528 : #e7f8ef);
+                    background: root.event-fill(event);
                     Rectangle { x: 0px; width: 4px; height: parent.height; border-radius: 2px; background: parent.border-color; }
                     agenda-title := Text { x: 14px; y: 8px; width: parent.width - 28px; height: max(24px, self.preferred-height); text: event.title; color: root.title-color; font-size: TypeScale.body-large; font-weight: 700; overflow: elide; vertical-alignment: center; }
                     if root.faded(event) : Rectangle { x: agenda-title.x; y: agenda-title.y + agenda-title.height / 2; width: min(agenda-title.width, agenda-title.preferred-width); height: 1px; background: root.title-color; }
@@ -980,6 +1136,68 @@ export component FunctionalCalendarView inherits Rectangle {
         event-clicked(event) => { root.show-event(event); }
         new-event => { root.new-event(); }
         clear-filters => { root.clear-agenda-filters(); }
+    }
+
+    day-list := PopupWindow {
+        x: root.day-list-x;
+        y: root.day-list-y;
+        width: root.day-list-width;
+        height: root.day-list-height;
+        close-policy: close-on-click-outside;
+        forward-focus: day-list-focus;
+        Rectangle {
+            background: root.surface-color;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: root.ui-border-color;
+            drop-shadow-blur: 18px;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-color: #0003;
+            day-list-focus := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.Escape { day-list.close(); return accept; }
+                    reject
+                }
+                Text { x: 14px; y: 10px; width: parent.width - 56px; height: 32px; text: root.day-list-title; color: root.title-color; font-size: TypeScale.body; font-weight: 700; overflow: elide; vertical-alignment: center; }
+                IconButton {
+                    x: parent.width - 42px;
+                    y: 10px;
+                    icon-size: 14px;
+                    icon: @image-url("../icons/lucide/outline/x.svg");
+                    icon-color: root.secondary-color;
+                    hover-background: root.control-hover-color;
+                    tooltip-text: @tr("Close");
+                    clicked => { day-list.close(); }
+                }
+                day-list-view := ListView {
+                    x: 6px;
+                    y: 48px;
+                    width: parent.width - 12px;
+                    height: parent.height - 54px;
+                    content-width: self.visible-width;
+                    horizontal-scrollbar-policy: always-off;
+                    for event in root.day-list-events : Rectangle {
+                        width: day-list-view.visible-width;
+                        height: max(56px, day-list-detail.y + day-list-detail.height + 8px);
+                        border-radius: 6px;
+                        background: day-list-hit.has-hover ? root.control-hover-color : transparent;
+                        opacity: root.faded(event) ? 0.55 : 1;
+                        Rectangle { x: 8px; y: 10px; width: 4px; height: parent.height - 20px; border-radius: 2px; background: root.event-color(event); }
+                        day-list-name := Text { x: 20px; y: 8px; width: parent.width - 28px; height: max(20px, self.preferred-height); text: event.title; color: root.title-color; font-size: TypeScale.secondary; font-weight: 700; overflow: elide; vertical-alignment: center; }
+                        if root.faded(event) : Rectangle { x: day-list-name.x; y: day-list-name.y + day-list-name.height / 2; width: min(day-list-name.width, day-list-name.preferred-width); height: 1px; background: root.title-color; }
+                        day-list-detail := Text { x: 20px; y: day-list-name.y + day-list-name.height + 2px; width: parent.width - 28px; height: max(16px, self.preferred-height); text: root.state(event) != "" ? root.state(event) + " · " + event.detail : event.detail; color: root.secondary-color; font-size: TypeScale.caption; overflow: elide; vertical-alignment: center; }
+                        day-list-hit := TouchArea {
+                            accessible-role: button;
+                            accessible-label: @tr("View details for {}", event.title);
+                            accessible-description: root.state(event);
+                            accessible-action-default => { day-list.close(); root.show-event(event); }
+                            clicked => { day-list.close(); root.show-event(event); }
+                            mouse-cursor: pointer;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     CalendarDetailsDialog {

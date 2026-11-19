@@ -13,13 +13,13 @@
 // FLECTAR_TEXT_FIT_SNAPSHOTS to a directory to save a render of each state.
 
 use flectar_mail::{
-    AccountImport, AccountRow, AppIcon, AppTheme, AppWindow, CalendarAgendaRow,
-    CalendarConnectionRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay,
-    ComposerUi, ContactAccountRow, ContactRow, ContactSidebarRow, ContactSidebarRowKind,
-    ContactSyncState, ContactValueRow, EmailRow, ImportAccountRow, ImportFailureRow,
-    ImportFindingRow, ImportProfileRow, LocalizedMessage, MailAttachment, MailAttachments,
-    MailLabelRow, MailListEntry, MailProfileRow, MailboxRow, MotionSettings, ProfileMemberRow,
-    SidebarRow, SidebarRowKind, StorageUsageRow, ThreadMessageRow,
+    AccountImport, AccountRow, AppIcon, AppTheme, AppWindow, CalendarAgendaRow, CalendarBar,
+    CalendarConnectionRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarTimedBlock,
+    CalendarWeekDay, ComposerUi, ContactAccountRow, ContactRow, ContactSidebarRow,
+    ContactSidebarRowKind, ContactSyncState, ContactValueRow, EmailRow, ImportAccountRow,
+    ImportFailureRow, ImportFindingRow, ImportProfileRow, LocalizedMessage, MailAttachment,
+    MailAttachments, MailLabelRow, MailListEntry, MailProfileRow, MailboxRow, MotionSettings,
+    ProfileMemberRow, SidebarRow, SidebarRowKind, StorageUsageRow, ThreadMessageRow,
 };
 use i_slint_core::accessibility::{
     AccessibilityAction, AccessibleStringProperty, SupportedAccessibilityAction,
@@ -346,17 +346,13 @@ fn sidebar_rows() -> Vec<SidebarRow> {
     ]
 }
 
-fn calendar_event(id: i32, title: &str, day_index: i32, start_minutes: i32) -> CalendarEventRow {
+fn calendar_event(id: i32, title: &str, day_index: i32) -> CalendarEventRow {
     CalendarEventRow {
         id,
         editable: true,
         title: title.into(),
         detail: "Conference room 2 · Alex Morgan".into(),
         iso_date: format!("2026-10-{:02}", 19 + day_index).into(),
-        day_index,
-        month_index: 22 + day_index,
-        start_minutes,
-        duration_minutes: 60,
         color_index: id % 4,
         provider: "CalDAV".into(),
         account: "alex.morgan@example.com".into(),
@@ -519,15 +515,59 @@ fn apply_fixture(app: &AppWindow) {
             })
             .collect(),
     ));
-    let events = vec![
-        calendar_event(1, "Quarterly planning review", 0, 9 * 60),
-        calendar_event(2, "Design critique", 1, 11 * 60),
-        calendar_event(3, "Customer call with Northwind", 3, 15 * 60),
+    let events = [
+        calendar_event(1, "Quarterly planning review", 0),
+        calendar_event(2, "Design critique", 1),
+        calendar_event(3, "Customer call with Northwind", 3),
         CalendarEventRow {
             all_day: true,
-            ..calendar_event(4, "Company offsite", 2, 0)
+            ..calendar_event(4, "Company offsite", 2)
         },
     ];
+    // Timed events by day column and start, and the offsite on Wednesday
+    // and Thursday. Oct 19 starts the grid's fourth week.
+    let timed = [(0, 9 * 60), (1, 11 * 60), (3, 15 * 60)];
+    app.set_calendar_timed_blocks(model(
+        events
+            .iter()
+            .zip(timed)
+            .map(|(event, (column, start))| CalendarTimedBlock {
+                event: event.clone(),
+                column,
+                start_minutes: start,
+                end_minutes: start + 60,
+                lanes: 1,
+                lane_span: 1,
+                ..Default::default()
+            })
+            .collect(),
+    ));
+    let offsite = CalendarBar {
+        event: events[3].clone(),
+        column: 2,
+        span: 2,
+        ..Default::default()
+    };
+    app.set_calendar_week_bars(model(vec![offsite.clone()]));
+    app.set_calendar_week_lanes(1);
+    app.set_calendar_month_bars(model(
+        events
+            .iter()
+            .zip(timed)
+            .map(|(event, (column, start))| CalendarBar {
+                event: event.clone(),
+                row: 3,
+                column,
+                span: 1,
+                lane: i32::from(column >= 2),
+                time_label: format!("{}:00", start / 60).into(),
+                ..Default::default()
+            })
+            .chain([CalendarBar { row: 3, ..offsite }])
+            .collect(),
+    ));
+    app.set_calendar_month_row_lanes(model(vec![0, 0, 0, 2, 0, 0]));
+    app.set_calendar_selected_day_events(model(vec![events[0].clone()]));
     app.set_calendar_agenda_rows(model(
         events
             .iter()
@@ -559,7 +599,6 @@ fn apply_fixture(app: &AppWindow) {
             .collect(),
     ));
     app.set_calendar_agenda_event_count(events.len() as i32);
-    app.set_calendar_events(model(events));
     app.set_calendar_sources(model(vec![CalendarSourceRow {
         id: 1,
         account_id: 1,
