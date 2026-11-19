@@ -5,11 +5,22 @@ import { fileIo, fileUri, picker, statfs } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
 import { i18n } from '@kit.LocalizationKit';
 import { notificationManager } from '@kit.NotificationKit';
+import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 
 const LOG_TAG = 'FlectarOhos';
+const PRIVACY_STORE = 'flectar_ohos';
+const PRIVACY_KEY = 'privacy_accepted';
+// The system reports "not enabled" both before the first prompt and after a
+// refusal, so the page remembers that the prompt has already been shown.
+const NOTIFICATION_ASKED_KEY = 'notification_asked';
+// Lucide outline paths (ISC), drawn through Shape/Path so the gate uses the
+// default palette in light and dark.
+const CONSENT_SHIELD_PATH = 'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z';
+const CONSENT_X_PATH = 'M18 6 L6 18 M6 6 L18 18';
+const CONSENT_CHECK_PATH = 'M20 6 L9 17 L5 12';
 // The XComponent, as both its native id and its component id.
 const SURFACE_ID = 'flectar_mail_surface';
 // One document is copied for the Files pane, whose transfers stop here.
@@ -30,6 +41,8 @@ interface FlectarBridge {
   hideIme: () => void;
   requestPasteboard: () => void;
   notify: (sender: string, subject: string, threadId: number, messageId: number) => void;
+  withdrawPrivacyConsent: () => void;
+  requestNotificationPermission: () => void;
   setAppPreferredLanguage: (language: string) => void;
 }
 
@@ -58,6 +71,7 @@ interface FlectarNativeModule {
   memoryLevel?: (level: number) => void;
   reduceMotion?: (reduced: boolean) => void;
   setClipboardText?: (text: string) => void;
+  setNotificationAvailability?: (state: number) => void;
 }
 
 @Entry
@@ -90,6 +104,9 @@ struct Index {
   private pendingImeCursor: ImeCursor | undefined = undefined;
   private imeCursorRetries: number = 0;
   private appliedColorMode: number = -2;
+  @State private privacyChecked: boolean = false;
+  @State private privacyAccepted: boolean = false;
+  private notificationAsked: boolean = false;
   private pasteboardPermissionRequested: boolean = false;
   private systemPasteboard: pasteboard.SystemPasteboard | undefined = undefined;
   private clipboardUpdateHandler: () => void = (): void => {
@@ -97,6 +114,7 @@ struct Index {
   };
   aboutToAppear(): void {
     this.probeResources();
+    this.loadPrivacyConsent();
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       AppStorage.setOrCreate('flectarColorMode', context.config.colorMode ?? -1);
@@ -125,6 +143,7 @@ struct Index {
     this.applyReduceMotion();
     this.observeWindow();
     this.refreshClipboard();
+    this.refreshNotificationAvailability();
   }
 
   onPageHide(): void {
@@ -176,29 +195,414 @@ struct Index {
   }
 
   build(): void {
+    if (!this.privacyChecked) {
+      Column() {
+        LoadingProgress()
+          .width(48)
+          .height(48)
+          .color(this.consentAccent())
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor(this.consentPageBackground())
+    } else if (!this.privacyAccepted) {
+      this.privacyConsentView()
+    } else {
+      Column() {
+        XComponent({
+          id: SURFACE_ID,
+          type: XComponentType.SURFACE,
+          libraryname: 'flectar_mail_ohos',
+        })
+          .id(SURFACE_ID)
+          .width('100%')
+          .height('100%')
+          // Maximizing, restoring and split screen lay the surface out again.
+          .onAreaChange((): void => {
+            this.applyImeCursor();
+          })
+          .focusable(true)
+          .defaultFocus(true)
+          .onLoad((context?: object): void => {
+            if (context) {
+              this.installBridge(context);
+            }
+          })
+      }
+      .width('100%')
+      .height('100%')
+    }
+  }
+
+  private consentDarkMode(): boolean {
+    return this.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+  }
+
+  private consentPageBackground(): string {
+    return this.consentDarkMode() ? '#111213' : '#f2f2f0';
+  }
+
+  private consentSurface(): string {
+    return this.consentDarkMode() ? '#18191a' : '#ffffff';
+  }
+
+  private consentTextColor(): string {
+    return this.consentDarkMode() ? '#f3f3f2' : '#202120';
+  }
+
+  private consentSecondaryColor(): string {
+    return this.consentDarkMode() ? '#a0a19e' : '#72736f';
+  }
+
+  private consentBorderColor(): string {
+    return this.consentDarkMode() ? '#292a2b' : '#d9d9d6';
+  }
+
+  private consentBorderSubtleColor(): string {
+    return this.consentDarkMode() ? '#232425' : '#e6e6e2';
+  }
+
+  private consentAccent(): string {
+    return this.consentDarkMode() ? '#5ca3ff' : '#0969da';
+  }
+
+  private consentAccentSoft(): string {
+    return this.consentDarkMode() ? '#26364a' : '#dcecff';
+  }
+
+  private consentPrimary(): string {
+    return '#0969da';
+  }
+
+  @Builder
+  consentShieldIcon(): void {
+    Shape() {
+      Path({ width: 24, height: 24, commands: CONSENT_SHIELD_PATH })
+        .fill(Color.Transparent)
+        .stroke(this.consentAccent())
+        .strokeWidth(2)
+        .strokeLineCap(LineCapStyle.Round)
+        .strokeLineJoin(LineJoinStyle.Round)
+    }
+    .viewPort({ x: 0, y: 0, width: 24, height: 24 })
+    .width(18)
+    .height(18)
+  }
+
+  @Builder
+  consentDeclineIcon(): void {
+    Shape() {
+      Path({ width: 24, height: 24, commands: CONSENT_X_PATH })
+        .fill(Color.Transparent)
+        .stroke(this.consentSecondaryColor())
+        .strokeWidth(2)
+        .strokeLineCap(LineCapStyle.Round)
+        .strokeLineJoin(LineJoinStyle.Round)
+    }
+    .viewPort({ x: 0, y: 0, width: 24, height: 24 })
+    .width(18)
+    .height(18)
+  }
+
+  @Builder
+  consentAgreeIcon(): void {
+    Shape() {
+      Path({ width: 24, height: 24, commands: CONSENT_CHECK_PATH })
+        .fill(Color.Transparent)
+        .stroke('#ffffff')
+        .strokeWidth(2)
+        .strokeLineCap(LineCapStyle.Round)
+        .strokeLineJoin(LineJoinStyle.Round)
+    }
+    .viewPort({ x: 0, y: 0, width: 24, height: 24 })
+    .width(18)
+    .height(18)
+  }
+
+  @Builder
+  consentBulletIcon(): void {
+    Shape() {
+      Path({ width: 24, height: 24, commands: CONSENT_CHECK_PATH })
+        .fill(Color.Transparent)
+        .stroke(this.consentAccent())
+        .strokeWidth(2)
+        .strokeLineCap(LineCapStyle.Round)
+        .strokeLineJoin(LineJoinStyle.Round)
+    }
+    .viewPort({ x: 0, y: 0, width: 24, height: 24 })
+    .width(14)
+    .height(14)
+  }
+
+  @Builder
+  consentBullet(text: ResourceStr): void {
+    Row({ space: 12 }) {
+      Stack() {
+        this.consentBulletIcon()
+      }
+      .width(24)
+      .height(24)
+      .borderRadius(12)
+      .backgroundColor(this.consentAccentSoft())
+
+      Text(text)
+        .fontSize(14)
+        .lineHeight(21)
+        .fontColor(this.consentSecondaryColor())
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Top)
+  }
+
+  @Builder
+  privacyConsentView(): void {
     Column() {
-      XComponent({
-        id: SURFACE_ID,
-        type: XComponentType.SURFACE,
-        libraryname: 'flectar_mail_ohos',
-      })
-        .id(SURFACE_ID)
-        .width('100%')
-        .height('100%')
-        // Maximizing, restoring and split screen lay the surface out again.
-        .onAreaChange((): void => {
-          this.applyImeCursor();
-        })
-        .focusable(true)
-        .defaultFocus(true)
-        .onLoad((context?: object): void => {
-          if (context) {
-            this.installBridge(context);
+      Scroll() {
+        Row() {
+          Column({ space: 0 }) {
+            Image($r('app.media.app_icon'))
+              .width(76)
+              .height(76)
+              .borderRadius(18)
+              .margin({ bottom: 18 })
+
+            Text($r('app.string.privacy_consent_title'))
+              .fontSize(28)
+              .fontWeight(700)
+              .fontColor(this.consentTextColor())
+              .textAlign(TextAlign.Center)
+              .width('100%')
+
+            Text($r('app.string.privacy_consent_intro'))
+              .fontSize(15)
+              .lineHeight(23)
+              .fontColor(this.consentSecondaryColor())
+              .textAlign(TextAlign.Center)
+              .width('100%')
+              .margin({ top: 8, bottom: 24 })
+
+            Column({ space: 14 }) {
+              this.consentBullet($r('app.string.privacy_consent_bullet_local'))
+              this.consentBullet($r('app.string.privacy_consent_bullet_clipboard'))
+              this.consentBullet($r('app.string.privacy_consent_bullet_withdraw'))
+            }
+            .width('100%')
+            .padding(20)
+            .backgroundColor(this.consentSurface())
+            .borderRadius(12)
+            .borderWidth(1)
+            .borderColor(this.consentBorderSubtleColor())
+
+            Button() {
+              Row({ space: 8 }) {
+                this.consentShieldIcon()
+                Text($r('app.string.privacy_consent_view_policy'))
+                  .fontSize(14)
+                  .fontWeight(500)
+                  .fontColor(this.consentAccent())
+                  .textAlign(TextAlign.Center)
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .width('100%')
+              .justifyContent(FlexAlign.Center)
+            }
+            .width('100%')
+            .height(46)
+            .padding({ left: 12, right: 12 })
+            .type(ButtonType.Normal)
+            .backgroundColor(this.consentAccentSoft())
+            .borderRadius(8)
+            .margin({ top: 20 })
+            .onClick((): void => {
+              this.openPrivacyPolicy();
+            })
+
+            Row({ space: 8 }) {
+              Button() {
+                Row({ space: 6 }) {
+                  this.consentDeclineIcon()
+                  Text($r('app.string.privacy_consent_decline'))
+                    .fontSize(14)
+                    .fontWeight(500)
+                    .fontColor(this.consentSecondaryColor())
+                    .textAlign(TextAlign.Center)
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
+                .width('100%')
+                .justifyContent(FlexAlign.Center)
+              }
+              .layoutWeight(1)
+              .height(50)
+              .padding({ left: 8, right: 8 })
+              .type(ButtonType.Normal)
+              .backgroundColor(this.consentSurface())
+              .borderRadius(8)
+              .borderWidth(1)
+              .borderColor(this.consentBorderColor())
+              .onClick((): void => {
+                this.declinePrivacy();
+              })
+
+              Button() {
+                Row({ space: 6 }) {
+                  this.consentAgreeIcon()
+                  Text($r('app.string.privacy_consent_agree'))
+                    .fontSize(14)
+                    .fontWeight(600)
+                    .fontColor('#ffffff')
+                    .textAlign(TextAlign.Center)
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
+                .width('100%')
+                .justifyContent(FlexAlign.Center)
+              }
+              .layoutWeight(1)
+              .height(50)
+              .padding({ left: 8, right: 8 })
+              .type(ButtonType.Normal)
+              .backgroundColor(this.consentPrimary())
+              .borderRadius(8)
+              .onClick((): void => {
+                this.acceptPrivacy();
+              })
+            }
+            .width('100%')
+            .margin({ top: 10 })
           }
-        })
+          .width('100%')
+          .constraintSize({ maxWidth: 560 })
+          .alignItems(HorizontalAlign.Center)
+          .padding({ left: 24, right: 24, top: 36, bottom: 28 })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(this.consentPageBackground())
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  private privacyLanguage(): string {
+    try {
+      // HarmonyOS returns BCP-47 tags ("zh-Hant-HK"); normalize the separator
+      // so the Traditional checks also match plain region tags.
+      const language = i18n.System.getAppPreferredLanguage()
+        .toLowerCase()
+        .split('-')
+        .join('_');
+      // Traditional Chinese falls back to English in the app; keep the policy
+      // link on the same language as the consent text.
+      if (language.includes('hant') || language.startsWith('zh_tw')
+        || language.startsWith('zh_hk') || language.startsWith('zh_mo')) {
+        return 'en';
+      }
+      if (language.startsWith('zh')) {
+        return 'zh_Hans';
+      }
+      if (language.startsWith('tr')) {
+        return 'tr';
+      }
+      if (language.startsWith('es')) {
+        return 'es';
+      }
+      if (language.startsWith('ru')) {
+        return 'ru';
+      }
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'could not read the app language: %{public}s',
+        (error as BusinessError).message);
+    }
+    return 'en';
+  }
+
+  private privacyPolicyUrl(): string {
+    const language = this.privacyLanguage();
+    if (language === 'zh_Hans') {
+      return 'https://flectar.com/zh-hans/mail/privacy/';
+    }
+    if (language === 'tr') {
+      return 'https://flectar.com/tr/mail/privacy/';
+    }
+    if (language === 'es') {
+      return 'https://flectar.com/es/mail/privacy/';
+    }
+    if (language === 'ru') {
+      return 'https://flectar.com/ru/mail/privacy/';
+    }
+    return 'https://flectar.com/mail/privacy/';
+  }
+
+  private openPrivacyPolicy(): void {
+    this.openUrl(this.privacyPolicyUrl());
+  }
+
+  private async loadPrivacyConsent(): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      this.privacyAccepted = (await store.get(PRIVACY_KEY, false)) as boolean;
+      this.notificationAsked = (await store.get(NOTIFICATION_ASKED_KEY, false)) as boolean;
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'privacy preferences unavailable: %{public}s',
+        (error as BusinessError).message);
+      this.privacyAccepted = false;
+    } finally {
+      this.privacyChecked = true;
+    }
+  }
+
+  private async acceptPrivacy(): Promise<void> {
+    let stored = false;
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      await store.put(PRIVACY_KEY, true);
+      await store.flush();
+      stored = true;
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'privacy consent could not be stored: %{public}s',
+        (error as BusinessError).message);
+    }
+    if (stored) {
+      this.privacyAccepted = true;
+    }
+  }
+
+  private async withdrawPrivacy(): Promise<void> {
+    let cleared = false;
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      await store.put(PRIVACY_KEY, false);
+      await store.flush();
+      cleared = true;
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'privacy consent could not be withdrawn: %{public}s',
+        (error as BusinessError).message);
+    }
+    if (!cleared) {
+      return;
+    }
+    this.privacyAccepted = false;
+    this.declinePrivacy();
+  }
+
+  private declinePrivacy(): void {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    context.terminateSelf().catch((error: BusinessError): void => {
+      hilog.error(0x0000, LOG_TAG, 'could not stop after declining privacy: %{public}s',
+        error.message);
+    });
   }
 
   // Diagnostic: resolves the app's own resources once per launch, so a hap
@@ -259,6 +663,12 @@ struct Index {
       notify: (sender: string, subject: string, threadId: number, messageId: number): void => {
         this.notify(sender, subject, threadId, messageId);
       },
+      withdrawPrivacyConsent: (): void => {
+        this.withdrawPrivacy();
+      },
+      requestNotificationPermission: (): void => {
+        this.requestNotificationPermission();
+      },
       setAppPreferredLanguage: (language: string): void => {
         this.updateAppPreferredLanguage(language);
       },
@@ -267,6 +677,7 @@ struct Index {
     this.applyReduceMotion();
     this.observeWindow();
     this.installClipboardListener();
+    this.refreshNotificationAvailability();
   }
 
   private reportBridgeResult(
@@ -702,6 +1113,89 @@ struct Index {
         colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'could not apply the system color mode: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  private setNotificationAvailability(state: number): void {
+    this.nativeModule?.setNotificationAvailability?.(state);
+  }
+
+  // The page owns the system notification state. Rust asks through the host
+  // hook once an account exists; this keeps the cache current so the request
+  // is not repeated after a refusal.
+  private refreshNotificationAvailability(): void {
+    notificationManager.isNotificationEnabled()
+      .then((enabled: boolean): void => {
+        this.setNotificationAvailability(enabled ? 1 : (this.notificationAsked ? 2 : 0));
+      })
+      .catch((error: BusinessError): void => {
+        hilog.error(0x0000, LOG_TAG,
+          'isNotificationEnabled failed: %{public}d %{public}s', error.code, error.message);
+        this.setNotificationAvailability(0);
+      });
+  }
+
+  private async persistNotificationAsked(asked: boolean): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      await store.put(NOTIFICATION_ASKED_KEY, asked);
+      await store.flush();
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'notification state could not be stored: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  // Rust calls this when the accounts change, starting with the first one. A
+  // refusal must not bring the prompt back, so the page records that it asked;
+  // only a failure to show the dialog leaves a retry open.
+  private requestNotificationPermission(): void {
+    if (this.notificationAsked) {
+      this.refreshNotificationAvailability();
+      return;
+    }
+    this.notificationAsked = true;
+    this.persistNotificationAsked(true);
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      notificationManager.isNotificationEnabled()
+        .then((enabled: boolean): void => {
+          if (enabled) {
+            this.setNotificationAvailability(1);
+            return;
+          }
+          notificationManager.requestEnableNotification(context)
+            .then((): void => {
+              this.setNotificationAvailability(1);
+              hilog.info(0x0000, LOG_TAG, 'notification permission granted');
+            })
+            .catch((error: BusinessError): void => {
+              if (error.code === 1600004) {
+                this.setNotificationAvailability(2);
+              } else {
+                this.notificationAsked = false;
+                this.persistNotificationAsked(false);
+                this.setNotificationAvailability(0);
+              }
+              hilog.error(0x0000, LOG_TAG,
+                'notification permission not granted: %{public}d %{public}s',
+                error.code, error.message);
+            });
+        })
+        .catch((error: BusinessError): void => {
+          this.notificationAsked = false;
+          this.persistNotificationAsked(false);
+          this.setNotificationAvailability(0);
+          hilog.error(0x0000, LOG_TAG,
+            'isNotificationEnabled failed: %{public}d %{public}s', error.code, error.message);
+        });
+    } catch (error) {
+      this.notificationAsked = false;
+      this.persistNotificationAsked(false);
+      this.setNotificationAvailability(0);
+      hilog.error(0x0000, LOG_TAG, 'notification permission request failed: %{public}s',
         (error as BusinessError).message);
     }
   }

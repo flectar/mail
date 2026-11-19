@@ -57,6 +57,8 @@ pub enum CoreError {
     #[error("AI is not configured")]
     AiNotConfigured,
     #[error("{0}")]
+    Translation(crate::translate::TranslationError),
+    #[error("{0}")]
     Other(String),
 }
 
@@ -85,6 +87,7 @@ impl CoreError {
             CoreError::NotFound(_) => "not_found",
             CoreError::Offline => "offline",
             CoreError::AiNotConfigured => "ai_not_configured",
+            CoreError::Translation(_) => "translation",
             CoreError::Other(_) => "other",
         }
     }

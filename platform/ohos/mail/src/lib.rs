@@ -213,6 +213,10 @@ unsafe fn register_module_functions(env: napi_env, exports: napi_value) {
                 &b"setClipboardText\0"[..],
                 bridge::set_clipboard_text as ffi::napi_callback,
             ),
+            (
+                &b"setNotificationAvailability\0"[..],
+                bridge::set_notification_availability as ffi::napi_callback,
+            ),
         ] {
             let mut function: napi_value = core::ptr::null_mut();
             let rc = ffi::napi_create_function(
@@ -318,6 +322,7 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
         flectar_mail::PlatformContext::app_private(internal, cache, documents, credentials, oauth);
     platform.external_urls = flectar_mail::ExternalUrlOpener::new(bridge::open_url);
     platform.notifications = Some(Arc::new(PageNotifications));
+    platform.privacy_consent = flectar_mail::PrivacyConsent::new(bridge::withdraw_privacy_consent);
     let app_language = flectar_mail::AppLanguage::new(|mode, selected| {
         let _ = bridge::set_app_language(mode, selected);
     });
@@ -357,7 +362,17 @@ impl flectar_mail::NotificationHost for PageNotifications {
     }
 
     fn availability(&self) -> flectar_mail::HostFuture<flectar_mail::Availability> {
-        Box::pin(std::future::ready(flectar_mail::Availability::Allowed))
+        let availability = match bridge::notification_availability() {
+            1 => flectar_mail::Availability::Allowed,
+            2 => flectar_mail::Availability::Denied,
+            _ => flectar_mail::Availability::NotAsked,
+        };
+        Box::pin(std::future::ready(availability))
+    }
+
+    fn request_permission(&self) -> flectar_mail::HostFuture<flectar_mail::Availability> {
+        let _ = bridge::request_notification_permission();
+        self.availability()
     }
 }
 

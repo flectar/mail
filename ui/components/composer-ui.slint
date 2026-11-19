@@ -153,6 +153,22 @@ export global ComposerUi {
     // out: false when the plain text is left to copy.
     callback copy-formatted(bool, string, int, int) -> bool;
     callback link(string, string, int, int);
+    // Translating the message (#240): see EmailComposer.
+    in property <bool> translate-shown: false;
+    in property <[string]> translate-choices: [];
+    in-out property <int> translate-index: 0;
+    in-out property <bool> translate-open: false;
+    in property <bool> translating: false;
+    in property <string> translate-failure: "";
+    in property <string> translate-detail: "";
+    callback translate-opened();
+    callback translate(int, string, int, int);
+    // Improve writing (#241): see EmailComposer.
+    in property <bool> improve-shown: false;
+    in property <[string]> ai-prompts: [];
+    in property <bool> improving: false;
+    callback improve(int, string, int, int);
+    callback edit-prompts();
     callback edit-body(string, int, int, string);
     callback update-selection(string, int, int);
     callback history(string);
@@ -211,6 +227,20 @@ export component BoundComposer inherits EmailComposer {
     shrink-photos <=> ComposerUi.shrink-photos;
     shrinking-photos: ComposerUi.shrinking-photos;
     request-receipt <=> ComposerUi.request-receipt;
+    translate-shown: ComposerUi.translate-shown;
+    translate-choices: ComposerUi.translate-choices;
+    translate-index <=> ComposerUi.translate-index;
+    translate-open <=> ComposerUi.translate-open;
+    translating: ComposerUi.translating;
+    translate-failure: ComposerUi.translate-failure;
+    translate-detail: ComposerUi.translate-detail;
+    translate-opened => { ComposerUi.translate-opened(); }
+    translate-requested(index, body, anchor, cursor) => { ComposerUi.translate(index, body, anchor, cursor); }
+    improve-shown: ComposerUi.improve-shown;
+    ai-prompts: ComposerUi.ai-prompts;
+    improving: ComposerUi.improving;
+    improve-requested(index, body, anchor, cursor) => { ComposerUi.improve(index, body, anchor, cursor); }
+    edit-prompts => { ComposerUi.edit-prompts(); }
     importance <=> ComposerUi.importance;
     attaching-files: ComposerUi.attaching-files;
     plain-text: ComposerUi.plain-text;

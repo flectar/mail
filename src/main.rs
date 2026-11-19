@@ -3,6 +3,7 @@ mod account_mail_preferences;
 mod account_status;
 #[cfg(desktop)]
 pub mod agents;
+mod ai_features;
 mod app_icon;
 #[cfg(test)]
 mod account_removal_tests;
@@ -111,6 +112,7 @@ mod tabs;
 mod tall_surface_tests;
 mod text_size;
 mod theme;
+mod translation;
 mod ui_dispatch;
 mod ui_message;
 mod undo;
@@ -118,6 +120,7 @@ mod unsubscribe;
 mod updates;
 mod window_chrome;
 mod window_controller;
+mod word_diff;
 
 slint::include_modules!();
 
@@ -1247,6 +1250,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
     app.invoke_app_language_changed(language_mode.into(), selected.into());
     date_format::reload(app);
     notifications::ui::language_changed(app);
+    translation::language_changed(app, selected, language_mode != "system");
 }
 
 impl InboxState {
@@ -4769,6 +4773,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     notifications::ui::core_ready();
                     auto_replies::core_ready(&app, &startup_runtime, core.file_core());
                     mail_rules::core_ready(&startup_runtime, core.file_core());
+                    translation::core_ready(core.file_core());
+                    ai_features::core_ready();
                     if !startup_benchmark_disable_background {
                         core.notify_ui_ready();
                     }
@@ -6430,6 +6436,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
     link_services::install(&app, &state, &runtime, platform.external_urls.clone());
     read_receipts::install(&app, &state, &runtime);
+    translation::install(&app, &state, &runtime);
+    ai_features::install(&app, &state, &runtime);
     block_sender::install(&app, &state, &runtime);
     saved_searches::install(&app, &state, &runtime);
     server_search::install(&app, &state, &runtime);
