@@ -348,9 +348,9 @@ jobs:
           sudo apt-get install -y appstream dbus-x11 desktop-file-utils flatpak flatpak-builder xvfb
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           flatpak install --user --noninteractive -y flathub \
-            org.freedesktop.Platform//25.08 \
-            org.freedesktop.Sdk//25.08 \
-            org.freedesktop.Sdk.Extension.rust-stable//25.08
+            org.freedesktop.Platform//26.08 \
+            org.freedesktop.Sdk//26.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//26.08
       - name: Make room for the release build
         # The app crate's release build peaks near all the memory a hosted
         # runner has; see scripts/ci-swap.sh.
@@ -405,9 +405,9 @@ jobs:
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           flatpak install --user --noninteractive -y flathub \
             org.flatpak.Builder \
-            org.freedesktop.Platform//25.08 \
-            org.freedesktop.Sdk//25.08 \
-            org.freedesktop.Sdk.Extension.rust-stable//25.08
+            org.freedesktop.Platform//26.08 \
+            org.freedesktop.Sdk//26.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//26.08
       - name: Lint the release manifest
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
