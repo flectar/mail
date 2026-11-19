@@ -547,14 +547,28 @@ fn new_window(_app: &AppWindow) -> Option<Host> {
     None
 }
 
+/// Where the message's own text is in `text`: above the signature, under its
+/// `-- ` line, which stays as it is when the AI server improves the message.
+fn own_text(text: &str) -> std::ops::Range<usize> {
+    let end = text
+        .rfind("\n-- \n")
+        .filter(|at| !text[..*at].trim().is_empty())
+        .unwrap_or(text.len());
+    0..end
+}
+
 /// Translation's or the AI server's settings changed: composers offer to
-/// translate the message once a service is set up (#240).
+/// translate the message once a service is set up (#240), and to improve it,
+/// with the user's prompts, once an AI server is (#241).
 pub(super) fn services_changed() {
     with_composers(|composers| {
         let sessions = composers.sessions.borrow().clone();
         for session in sessions {
             if let Some(host) = session.host() {
-                host.ui().set_translate_shown(crate::translation::ready());
+                let ui = host.ui();
+                ui.set_improve_shown(crate::ai_features::ready());
+                ui.set_ai_prompts(crate::ai_features::prompt_names());
+                ui.set_translate_shown(crate::translation::ready());
             }
         }
     });
@@ -581,6 +595,9 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_translate_shown(from.get_translate_shown());
     to.set_translate_choices(from.get_translate_choices());
     to.set_translate_index(from.get_translate_index());
+    to.set_improve_shown(from.get_improve_shown());
+    to.set_ai_prompts(from.get_ai_prompts());
+    to.set_improving(from.get_improving());
     to.set_request_receipt(from.get_request_receipt());
     to.set_importance(from.get_importance());
     to.set_templates(from.get_templates());
@@ -1462,6 +1479,9 @@ impl ComposeSession {
         ui.set_translate_shown(crate::translation::ready());
         ui.set_translate_open(false);
         ui.set_translating(false);
+        ui.set_improve_shown(crate::ai_features::ready());
+        ui.set_ai_prompts(crate::ai_features::prompt_names());
+        ui.set_improving(false);
         apply_compose_contacts(&ui, &[]);
         ui.set_sending(false);
         ui.set_mode("new".into());
@@ -1847,6 +1867,22 @@ impl ComposeSession {
         ui.on_translate(move |index, body, anchor, cursor| {
             if let Some(session) = weak.upgrade() {
                 session.translate(index, &body, anchor, cursor);
+            }
+        });
+        let weak = self.reference();
+        ui.on_improve(move |index, body, anchor, cursor| {
+            if let Some(session) = weak.upgrade() {
+                session.improve(index, &body, anchor, cursor);
+            }
+        });
+        let weak = self.reference();
+        ui.on_edit_prompts(move || {
+            if let Some(app) = weak
+                .upgrade()
+                .and_then(|session| session.composers())
+                .and_then(|composers| composers.app.upgrade())
+            {
+                crate::ai_features::open_settings(&app);
             }
         });
         let weak = self.reference();
@@ -2458,6 +2494,147 @@ impl ComposeSession {
             self.paste_html(&host, &crate::rich_compose::marked_as_copied(&translation));
         }
         ui.set_translate_open(false);
+    }
+
+    /// Runs Proofread, -1, or the user's prompt `index` on the selection of `body`, or on the
+    /// message above its signature when nothing is selected (#241). What the AI server writes
+    /// takes the place of the words it changes, as one step undo takes back, and words it keeps
+    /// keep their formatting. Text edited while the server works stays as it is.
+    fn improve(&self, index: i32, body: &str, anchor: i32, cursor: i32) {
+        let (Some(composers), Some(host)) = (self.composers(), self.host()) else {
+            return;
+        };
+        let Some(instruction) = crate::ai_features::instruction(index) else {
+            return;
+        };
+        let Some(core) = composers.core().map(|core| core.file_core()) else {
+            return;
+        };
+        let ui = host.ui();
+        let (revision, range, text, selected) = {
+            let mut document = self.document.borrow_mut();
+            if document.text() != body {
+                document.synchronize(body, anchor, cursor);
+            } else {
+                document.update_selection(anchor, cursor);
+            }
+            let selection = document.selection();
+            let (Ok(start), Ok(end)) = (
+                usize::try_from(selection.start.min(selection.end)),
+                usize::try_from(selection.start.max(selection.end)),
+            ) else {
+                return;
+            };
+            let selected = start != end;
+            let range = if selected {
+                start..end
+            } else {
+                own_text(document.text())
+            };
+            // White space around the text stays as it is.
+            let text = &document.text()[range.clone()];
+            let lead = text.len() - text.trim_start().len();
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                ui.set_notice(UiMessage::plain("Write something to improve first."), false);
+                return;
+            }
+            let range = range.start + lead..range.start + lead + trimmed.len();
+            (document.revision(), range, trimmed.to_owned(), selected)
+        };
+        ui.set_improving(true);
+        ui.set_notice(UiMessage::plain("Asking the AI server…"), false);
+        let task = composers
+            .runtime
+            .spawn(async move { core.ai_rewrite(text, instruction).await });
+        let weak = self.this.clone();
+        let abort = task.abort_handle();
+        if slint::spawn_local(async move {
+            let result = task.await;
+            if let Some(session) = weak.upgrade() {
+                session.improved(revision, range, selected, result);
+            }
+        })
+        .is_err()
+        {
+            abort.abort();
+            ui.set_improving(false);
+            ui.set_notice(UiMessage::EMPTY, false);
+        }
+    }
+
+    fn improved(
+        &self,
+        revision: u64,
+        range: std::ops::Range<usize>,
+        selected: bool,
+        result: Result<Result<String, flectar_mail_core::error::CoreError>, tokio::task::JoinError>,
+    ) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        ui.set_improving(false);
+        let revised = match result {
+            Ok(Ok(revised)) if !revised.trim().is_empty() => revised,
+            Ok(Ok(_)) => {
+                ui.set_notice(
+                    UiMessage::plain(
+                        "The AI server sent back no text, so the message stays as it is.",
+                    ),
+                    true,
+                );
+                return;
+            }
+            Ok(Err(error)) => {
+                ui.set_notice(crate::ai_features::failure_notice(&error), true);
+                return;
+            }
+            Err(error) => {
+                ui.set_notice(
+                    UiMessage::detail(
+                        "The AI server didn't answer as expected. It said: {}",
+                        error,
+                    ),
+                    true,
+                );
+                return;
+            }
+        };
+        let followed = self.document.borrow().follow(revision, range);
+        let range = match followed {
+            crate::rich_compose::Followed::Kept(range)
+            | crate::rich_compose::Followed::Bordered(range) => range,
+            crate::rich_compose::Followed::Lost => {
+                ui.set_notice(
+                    UiMessage::plain(
+                        "The text changed while the AI server worked, so it stays as it is.",
+                    ),
+                    true,
+                );
+                return;
+            }
+        };
+        let mut changed = false;
+        self.edit(
+            |document| match document.revise(range, &revised, selected) {
+                Some(selection) => {
+                    changed = true;
+                    selection
+                }
+                None => document.selection(),
+            },
+        );
+        ui.set_notice(
+            if changed {
+                UiMessage::plain(
+                    "Changed by AI. Check it before you send it. Undo restores your text.",
+                )
+            } else {
+                UiMessage::plain("The AI server found nothing to change.")
+            },
+            false,
+        );
     }
 
     /// Puts the selection on the clipboard as HTML and plain text, so that it pastes back with

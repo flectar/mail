@@ -118,6 +118,7 @@ mod unsubscribe;
 mod updates;
 mod window_chrome;
 mod window_controller;
+mod word_diff;
 
 slint::include_modules!();
 
