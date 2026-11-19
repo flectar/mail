@@ -561,6 +561,11 @@ pub(super) fn restore_account_backup(
             }) {
                 settings.translation = translation;
             }
+            if let Some(ai) = preferences.get("ai").and_then(|value| {
+                serde_json::from_value::<flectar_mail_core::models::AiSettings>(value.clone()).ok()
+            }) {
+                settings.ai = ai;
+            }
             if let Some(enabled) = preferences
                 .get("notificationsEnabled")
                 .and_then(|value| value.as_bool())
@@ -1412,6 +1417,7 @@ pub(super) fn register_data_management_callbacks(
                     "spellingLanguages": settings.spelling_languages,
                     // The services' keys stay in the system's credential store.
                     "translation": settings.translation,
+                    "ai": settings.ai,
                     "notificationsEnabled": settings.notifications_enabled,
                     "notificationScope": settings.notification_scope,
                     "soundEnabled": settings.sound_enabled,

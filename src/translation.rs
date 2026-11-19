@@ -363,9 +363,14 @@ fn choose(app: &AppWindow, choice: &str) {
 
 // ---- The composer ---------------------------------------------------------
 
-/// A translation service is set up, so the composer offers to translate.
+/// A translation service is set up, so the composer offers to translate: a
+/// model needs the AI server set up too.
 pub(super) fn ready() -> bool {
-    SETTINGS.with_borrow(|settings| !settings.service.is_empty())
+    SETTINGS.with_borrow(|settings| match settings.service.as_str() {
+        "" => false,
+        flectar_mail_core::translate::MODEL => crate::ai_features::ready(),
+        _ => true,
+    })
 }
 
 /// The composer's Translate dialog's choices: the service's languages by name,
@@ -452,8 +457,6 @@ fn project_settings(app: &AppWindow) {
         .map_or(0, |index| index + 1);
     ui.set_service_index(i32::try_from(index).unwrap_or(0));
     ui.set_libretranslate_url(settings.libretranslate_url.as_str().into());
-    ui.set_model_url(settings.model_url.as_str().into());
-    ui.set_model(settings.model.as_str().into());
     ui.set_offer(settings.offer);
     ui.set_always_languages(languages(&settings.always));
     ui.set_never_languages(languages(&settings.never));
@@ -534,6 +537,7 @@ fn refresh() {
                 project_settings(&app);
                 app.global::<Translation>().set_key_saved(key_saved);
                 project_targets(&app, targets);
+                crate::composer::services_changed();
             });
         });
     });
@@ -596,17 +600,13 @@ fn save_settings(change: impl FnOnce(&mut TranslationSettings)) {
     });
 }
 
-/// Saves the service's address, model and a newly typed key, then asks the
+/// Saves the service's address and a newly typed key, then asks the
 /// service for its languages, which tells whether it works.
 fn save_service(app: &AppWindow, key: String) {
     let ui = app.global::<Translation>();
     let url = ui.get_libretranslate_url().trim().to_owned();
-    let model_url = ui.get_model_url().trim().to_owned();
-    let model = ui.get_model().trim().to_owned();
     let mut settings = SETTINGS.with_borrow(Clone::clone);
     settings.libretranslate_url = url;
-    settings.model_url = model_url;
-    settings.model = model;
     SETTINGS.set(settings.clone());
     ui.set_settings_state("saving".into());
     ENV.with_borrow(|env| {

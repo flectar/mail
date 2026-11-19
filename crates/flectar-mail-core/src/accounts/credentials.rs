@@ -45,10 +45,10 @@ pub enum Slot {
     /// kept under account id 0 as the service belongs to no account.
     LinkServicePassword(i64),
     /// The keys of the translation services (#240), under account id 0.
-    /// Each service keeps its own, so switching services keeps them.
+    /// Each service keeps its own, so switching services keeps them. A model
+    /// uses the AI server's key.
     DeeplKey,
     LibreTranslateKey,
-    TranslationModelKey,
 }
 
 impl Slot {
@@ -72,7 +72,6 @@ impl Slot {
             }
             Slot::DeeplKey => "deepl_key".into(),
             Slot::LibreTranslateKey => "libretranslate_key".into(),
-            Slot::TranslationModelKey => "translation_model_key".into(),
         }
     }
 }

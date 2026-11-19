@@ -4,6 +4,7 @@ import { LineEdit, ToolbarIconButton } from "components/controls.slint";
 import { SettingsSelectRow, SettingsSwitchRow } from "components/settings-components.slint";
 import { LayoutMetrics } from "design-system.slint";
 import { TypeScale } from "typography.slint";
+import { Ai } from "ai.slint";
 
 // A language on the Always or Never list, or one to translate into.
 export struct TranslationLanguage {
@@ -43,8 +44,6 @@ export global Translation {
     // 0 for none, 1 DeepL, 2 LibreTranslate, 3 a model on a server.
     in-out property <int> service-index;
     in-out property <string> libretranslate-url;
-    in-out property <string> model-url;
-    in-out property <string> model;
     // The chosen service's key is saved.
     in property <bool> key-saved;
     // "" until saved, "saving", "ready" once the service answered, or
@@ -272,6 +271,8 @@ export component TranslationPage inherits VerticalLayout {
 
     private property <string> key: "";
     private property <bool> needs-key: Translation.service-index == 1;
+    // Opens Settings → AI, where a model's server is set up.
+    callback open-ai();
     private property <bool> service-changed: false;
 
     changed shown => {
@@ -311,7 +312,7 @@ export component TranslationPage inherits VerticalLayout {
                     : Translation.service-index == 2
                     ? @tr("Your LibreTranslate server, or libretranslate.com with a key, receives the text you translate.")
                     : Translation.service-index == 3
-                    ? @tr("A server with the OpenAI chat API receives the text you translate. Ollama or LM Studio on this computer keeps it here.")
+                    ? @tr("The AI server in Settings → AI translates, and receives the text you translate. Ollama or LM Studio on this computer keeps it here.")
                     : @tr("Messages aren't translated.");
                 choices: [@tr("None"), "DeepL", "LibreTranslate", @tr("AI model")];
                 selected-index <=> Translation.service-index;
@@ -330,21 +331,23 @@ export component TranslationPage inherits VerticalLayout {
                 text <=> Translation.libretranslate-url;
                 edited => { root.service-changed = true; }
             }
-            if Translation.service-index == 3 : Field {
-                label: @tr("Server address");
-                placeholder: "http://localhost:11434/v1";
-                label-color: root.secondary-text;
-                text <=> Translation.model-url;
-                edited => { root.service-changed = true; }
+            // A model is the AI server's, set up in its own section.
+            if Translation.service-index == 3 : HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: Ai.ready ? @tr("Translates with {} on {}.", Ai.model, Ai.url)
+                        : @tr("Set up an AI server to translate with a model.");
+                    color: root.body-text;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+                Button {
+                    width: max(96px, self.content-width);
+                    text: @tr("AI settings");
+                    clicked => { root.open-ai(); }
+                }
             }
-            if Translation.service-index == 3 : Field {
-                label: @tr("Model");
-                placeholder: @tr("The model's name on the server");
-                label-color: root.secondary-text;
-                text <=> Translation.model;
-                edited => { root.service-changed = true; }
-            }
-            if Translation.service-index > 0 && Translation.key-saved : HorizontalLayout {
+            if Translation.service-index > 0 && Translation.service-index < 3 && Translation.key-saved : HorizontalLayout {
                 spacing: 12px;
                 Text {
                     text: @tr("A key is saved.");
@@ -358,7 +361,7 @@ export component TranslationPage inherits VerticalLayout {
                     clicked => { Translation.remove-key(); }
                 }
             }
-            if Translation.service-index > 0 && !Translation.key-saved : Field {
+            if Translation.service-index > 0 && Translation.service-index < 3 && !Translation.key-saved : Field {
                 label: root.needs-key ? @tr("API key") : @tr("API key, if the server asks for one");
                 placeholder: "";
                 secret: true;
@@ -366,7 +369,7 @@ export component TranslationPage inherits VerticalLayout {
                 text <=> root.key;
                 edited => { root.service-changed = true; }
             }
-            if Translation.service-index > 0 : HorizontalLayout {
+            if Translation.service-index > 0 && Translation.service-index < 3 : HorizontalLayout {
                 spacing: 12px;
                 alignment: start;
                 Button {
@@ -375,8 +378,7 @@ export component TranslationPage inherits VerticalLayout {
                     text: @tr("Save");
                     enabled: Translation.settings-state != "saving"
                         && (Translation.service-index != 1 || Translation.key-saved || root.key != "")
-                        && (Translation.service-index != 2 || Translation.libretranslate-url != "")
-                        && (Translation.service-index != 3 || (Translation.model-url != "" && Translation.model != ""));
+                        && (Translation.service-index != 2 || Translation.libretranslate-url != "");
                     clicked => {
                         Translation.save(root.key);
                         root.key = "";

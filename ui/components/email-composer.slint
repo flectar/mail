@@ -164,6 +164,13 @@ export component EmailComposer inherits Rectangle {
     in property <string> translate-failure: "";
     in property <string> translate-detail: "";
     callback translate-opened();
+    // Improve writing (#241): Proofread (-1) or one of the user's prompts,
+    // with the body and the selection's offsets.
+    in property <bool> improve-shown: false;
+    in property <[string]> ai-prompts: [];
+    in property <bool> improving: false;
+    callback improve-requested(int, string, int, int);
+    callback edit-prompts();
     // The language chosen, the body, and the selection's offsets.
     callback translate-requested(int, string, int, int);
     callback body-edited(string, int, int, string);
@@ -552,6 +559,11 @@ export component EmailComposer inherits Rectangle {
             insert-image => { root.insert-images(); }
             open-templates => { root.templates-open = true; }
             translate-shown: root.translate-shown && !root.signature-mode;
+            improve-shown: root.improve-shown && !root.signature-mode;
+            ai-prompts: root.ai-prompts;
+            improving: root.improving;
+            improve(index) => { root.improve-requested(index, root.body, root.selection-start, root.selection-end); }
+            edit-prompts => { root.edit-prompts(); }
             open-translate => {
                 root.translate-selection-start = root.selection-start;
                 root.translate-selection-end = root.selection-end;
