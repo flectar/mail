@@ -14,7 +14,7 @@
 use core::ffi::c_void;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -32,6 +32,10 @@ static HIDE_IME: AtomicUsize = AtomicUsize::new(0);
 static IME_UPDATE_CURSOR: AtomicUsize = AtomicUsize::new(0);
 static REQUEST_PASTEBOARD: AtomicUsize = AtomicUsize::new(0);
 static NOTIFY: AtomicUsize = AtomicUsize::new(0);
+static WITHDRAW_PRIVACY: AtomicUsize = AtomicUsize::new(0);
+static REQUEST_NOTIFICATION_PERMISSION: AtomicUsize = AtomicUsize::new(0);
+/// 0 = not asked/unknown, 1 = allowed, 2 = denied, as the page reports it.
+static NOTIFICATION_AVAILABILITY: AtomicI32 = AtomicI32::new(0);
 
 /// Request ids for the callback-based picker flows.
 static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
@@ -130,6 +134,20 @@ pub(super) unsafe extern "C" fn set_bridge(
             call_zero_arg,
         );
         install_property(env, argv[0], b"notify\0", &NOTIFY, call_notify);
+        install_property(
+            env,
+            argv[0],
+            b"withdrawPrivacyConsent\0",
+            &WITHDRAW_PRIVACY,
+            call_withdraw_privacy,
+        );
+        install_property(
+            env,
+            argv[0],
+            b"requestNotificationPermission\0",
+            &REQUEST_NOTIFICATION_PERMISSION,
+            call_notification_permission,
+        );
         undefined(env)
     }
 }
@@ -370,6 +388,53 @@ pub(super) fn notify(alert: &flectar_mail::Alert) -> Result<(), String> {
             message_id,
         },
     )
+}
+
+/// Ask the ArkTS page to clear the stored consent and stop the app.
+pub(super) fn withdraw_privacy_consent() -> Result<(), String> {
+    call_closure(&WITHDRAW_PRIVACY, "withdrawPrivacyConsent", ())
+}
+
+/// Ask the ArkTS page to show the system notification prompt.
+pub(super) fn request_notification_permission() -> Result<(), String> {
+    call_closure(
+        &REQUEST_NOTIFICATION_PERMISSION,
+        "requestNotificationPermission",
+        (),
+    )
+}
+
+/// The notification state last reported by the page: 0 unknown, 1 allowed,
+/// 2 denied.
+pub(super) fn notification_availability() -> i32 {
+    NOTIFICATION_AVAILABILITY.load(Ordering::Relaxed)
+}
+
+/// `setNotificationAvailability(state)` from the ArkTS page.
+pub(super) unsafe extern "C" fn set_notification_availability(
+    env: napi_env,
+    info: ffi::napi_callback_info,
+) -> napi_value {
+    // SAFETY: live `env`/`info` from the NAPI runtime.
+    unsafe {
+        let mut argc: usize = 1;
+        let mut argv: [napi_value; 1] = [core::ptr::null_mut()];
+        let rc = ffi::napi_get_cb_info(
+            env,
+            info,
+            &mut argc,
+            argv.as_mut_ptr(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        );
+        if rc == ffi::NAPI_OK
+            && argc >= 1
+            && let Some(state) = read_int64(env, argv[0])
+        {
+            NOTIFICATION_AVAILABILITY.store(state.clamp(0, 2) as i32, Ordering::Relaxed);
+        }
+        undefined(env)
+    }
 }
 
 /// Arguments of one `imeUpdateCursor` call.
@@ -877,6 +942,34 @@ unsafe extern "C" fn call_zero_arg(
     let _payload = unsafe { Box::from_raw(data.cast::<()>()) };
     // SAFETY: NAPI call on the JS thread.
     unsafe { call_with_args(env, js_callback, &[], "notice") };
+}
+
+/// JS-thread half of [`withdraw_privacy_consent`].
+unsafe extern "C" fn call_withdraw_privacy(
+    env: napi_env,
+    js_callback: napi_value,
+    _context: *mut c_void,
+    data: *mut c_void,
+) {
+    // SAFETY: `data` is the `()` payload boxed by `call_closure`; this callback
+    // owns it.
+    let _payload = unsafe { Box::from_raw(data.cast::<()>()) };
+    // SAFETY: NAPI call on the JS thread.
+    unsafe { call_with_args(env, js_callback, &[], "withdrawPrivacyConsent") };
+}
+
+/// JS-thread half of [`request_notification_permission`].
+unsafe extern "C" fn call_notification_permission(
+    env: napi_env,
+    js_callback: napi_value,
+    _context: *mut c_void,
+    data: *mut c_void,
+) {
+    // SAFETY: `data` is the `()` payload boxed by `call_closure`; this callback
+    // owns it.
+    let _payload = unsafe { Box::from_raw(data.cast::<()>()) };
+    // SAFETY: NAPI call on the JS thread.
+    unsafe { call_with_args(env, js_callback, &[], "requestNotificationPermission") };
 }
 
 unsafe fn string_value(env: napi_env, bytes: &[u8]) -> Option<napi_value> {
