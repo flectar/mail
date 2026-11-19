@@ -10042,9 +10042,10 @@ msgstr ""
 
 #: ui/translation.slint:311
 msgid ""
-"DeepL translates with your API key. With a free key, DeepL may keep the text "
-"and use it to train its models. With a paid key, it deletes the text once "
-"it's translated."
+"DeepL translates with your API key. With a free key, DeepL's terms let it "
+"keep the text and don't allow personal data, which mail usually holds. With "
+"a paid key, DeepL keeps the text only as long as it needs to translate it "
+"and doesn't use it to improve its services."
 msgstr ""
 
 #: ui/translation.slint:313

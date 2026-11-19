@@ -5393,6 +5393,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let updates = ui_task_tx_for_account_delete.clone();
         runtime_for_account_delete.spawn(async move {
             let result = core.remove_account(account_id).await;
+            crate::notifications::accounts_removed();
             let accounts = core.load_account_snapshot().await.ok();
             // Core deletion is journaled across stores. A late cleanup error
             // can occur after the account row was deleted; reflect that fact.

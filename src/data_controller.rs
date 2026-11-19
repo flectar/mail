@@ -1795,6 +1795,7 @@ pub(super) fn register_data_management_callbacks(
         let updates = data_reset_tx.clone();
         runtime_for_data_reset.spawn(async move {
             let result = core.delete_all_local_data().await;
+            crate::notifications::accounts_removed();
             let _ = updates.send(result).await;
         });
     });

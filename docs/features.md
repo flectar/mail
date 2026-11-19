@@ -728,8 +728,10 @@ language you used last. The translation takes the place of the text as one
 step that Undo takes back. With an AI server set up, Translate is in the
 composer's writing tools menu instead.
 
-With a free DeepL key, DeepL may keep the text it translates and use it to
-train its models. With a paid key, it deletes the text once it's translated. A
+With a free DeepL key, DeepL's terms let it keep the text it translates, and
+don't allow personal data, which mail usually holds. With a paid key, DeepL
+keeps the text only as long as it needs to translate it, and doesn't use it to
+improve its services. A
 LibreTranslate server or the AI server receives the text of what you
 translate.
 
