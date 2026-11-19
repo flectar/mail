@@ -1200,12 +1200,9 @@ struct Index {
     }
   }
 
-  // Publish one new-mail notification. Rust sends raw sender/subject fields;
-  // fixed fallback text comes from resources so the notification follows the
-  // application language. Tapping it opens the app; the want carries the
-  // thread id for opening the thread once the app handles it.
   // Keep ArkTS resource loading aligned with the Slint language setting. The
-  // preferred language is applied by the system on the next cold start.
+  // system applies a chosen language at once, and 'default', which follows
+  // the system language, from the next cold start.
   private updateAppPreferredLanguage(language: string): void {
     try {
       i18n.System.setAppPreferredLanguage(language);
@@ -1216,6 +1213,10 @@ struct Index {
     }
   }
 
+  // Publish one new-mail notification. Rust sends raw sender/subject fields;
+  // fixed fallback text comes from resources so the notification follows the
+  // application language. Tapping it opens the app; the want carries the
+  // thread id for opening the thread once the app handles it.
   private async notify(
     sender: string, subject: string, threadId: number, messageId: number): Promise<void> {
     try {

@@ -457,7 +457,8 @@ pub(super) fn install_app_language(language: flectar_mail::AppLanguage) {
 }
 
 /// Set the HarmonyOS app-preferred language so ArkTS resources load in the
-/// same language as the Slint UI on the next cold start.
+/// same language as the Slint UI. The system applies a chosen language at
+/// once, and "default", which follows the system, from the next cold start.
 pub(super) fn set_app_language(mode: &str, selected: &str) -> Result<(), String> {
     let language = if mode == "system" {
         "default"
