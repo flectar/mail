@@ -557,7 +557,7 @@ pub(super) fn apply_connected_account_rows(app: &AppWindow, rows: Vec<AccountRow
     set_compose_account(app, selected);
     app.set_connected_accounts(ModelRc::new(VecModel::from(rows)));
     composer::accounts_changed(app);
-    #[cfg(background_checks)]
+    #[cfg(mobile)]
     crate::notifications::ui::ask_for_permission(app);
 }
 
