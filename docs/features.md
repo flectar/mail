@@ -27,6 +27,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Translation](#translation)
 - [AI agents](#ai-agents)
 - [Storage and backups](#storage-and-backups)
+- [Network and proxies](#network-and-proxies)
 - [Importing accounts and mail](#importing-accounts-and-mail)
 - [HTML rendering](#html-rendering)
 - [Smaller screens](#smaller-screens)
@@ -826,6 +827,29 @@ can import.
   <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-storage-light.png">
   <img src="../resources/screenshots/desktop-storage-light.png" alt="Flectar Mail Storage settings with local usage, mail on this device, database snapshot, and account backup controls">
 </picture>
+
+## Network and proxies
+
+Settings → Network chooses how Flectar Mail reaches its servers. By default it
+follows the system's proxy settings. Mail servers then go through the system's
+SOCKS proxy, if one is set, and everything else through the system's web
+proxy. Web proxies often refuse connections to mail servers, so mail goes
+through one only when you enter it yourself.
+
+You can also turn proxies off, or enter one by hand. A SOCKS5 proxy also looks
+up the servers' names, so the network you're on doesn't see them. An HTTP
+proxy carries every connection through CONNECT tunnels. A proxy's password
+stays in the system keyring. Names and addresses you list skip the proxy, and
+servers on this computer, such as a mail bridge, never use it.
+
+Each account can follow the app's choice, connect without a proxy, or use a
+proxy of its own, which its calendars, contacts and files follow too.
+
+With a proxy in use, every connection goes through it, from mail, calendars,
+contacts, files and signing in to pictures in messages, sender icons,
+translation and the update check. When the proxy can't be reached, or turns a
+connection down, Flectar Mail says so and doesn't connect without it. Proxy
+settings belong to the network a device is on, so backups leave them out.
 
 ## Importing accounts and mail
 

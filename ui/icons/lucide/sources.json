@@ -120,6 +120,9 @@
     "gear.svg": {
       "source": "settings"
     },
+    "globe.svg": {
+      "source": "globe"
+    },
     "highlight.svg": {
       "source": "highlighter"
     },
@@ -466,6 +469,10 @@
     "forward": {
       "path": "sources/forward.svg",
       "sha256": "ea4c6a34e7af10eed97a004a490a347436680a0c41e339c60f6b9baa1bb5a431"
+    },
+    "globe": {
+      "path": "sources/globe.svg",
+      "sha256": "73213c861a1fa5edc0619b20c4cc379ab026f7bdbe05583fdb5dcdfd5af61bdb"
     },
     "highlighter": {
       "path": "sources/highlighter.svg",

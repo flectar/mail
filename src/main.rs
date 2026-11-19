@@ -57,6 +57,7 @@ mod memory;
 mod message_appearance;
 mod motion;
 mod move_picker;
+mod network;
 mod notifications;
 /// What Android asks of the app without its window.
 #[cfg(background_engine)]
@@ -6441,6 +6442,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     read_receipts::install(&app, &state, &runtime);
     translation::install(&app, &state, &runtime);
     ai_features::install(&app, &state, &runtime);
+    network::install(&app, &state, &runtime);
     block_sender::install(&app, &state, &runtime);
     saved_searches::install(&app, &state, &runtime);
     server_search::install(&app, &state, &runtime);

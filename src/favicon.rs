@@ -1,5 +1,6 @@
+use flectar_mail_core::net::proxy::{Owner, SharedClient};
 use image::{DynamicImage, ImageReader, Limits, Rgba, RgbaImage, imageops::FilterType};
-use reqwest::{Client, StatusCode, Url, header::CONTENT_TYPE};
+use reqwest::{StatusCode, Url, header::CONTENT_TYPE};
 use sha2::{Digest, Sha256};
 use std::{
     io::Cursor,
@@ -71,25 +72,34 @@ pub struct ProfileAvatarImages {
 
 #[derive(Clone)]
 pub struct FaviconLoader {
-    client: Client,
     cache_dir: PathBuf,
 }
 
+/// Icons come through the app's proxy, on clients built again when the proxy
+/// settings change.
+static FAVICON_HTTP: SharedClient = SharedClient::new(|builder| {
+    builder
+        .user_agent("Flectar Mail native sender icon/0.1")
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(8))
+        .redirect(service_redirect_policy("twenty-icons.com"))
+});
+
+static AVATAR_HTTP: SharedClient = SharedClient::new(|builder| {
+    builder
+        .user_agent("Flectar Mail native account avatar/0.1")
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(8))
+        .redirect(service_redirect_policy("googleusercontent.com"))
+});
+
 impl FaviconLoader {
     pub fn new(cache_root: &Path) -> Result<Self, String> {
-        let client = Client::builder()
-            .user_agent("Flectar Mail native sender icon/0.1")
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(8))
-            .redirect(service_redirect_policy("twenty-icons.com"))
-            .build()
-            .map_err(|error| format!("could not create favicon client: {error}"))?;
-
         let cache_dir = cache_root.join("sender-icons");
         std::fs::create_dir_all(&cache_dir)
             .map_err(|error| format!("could not create favicon cache: {error}"))?;
 
-        Ok(Self { client, cache_dir })
+        Ok(Self { cache_dir })
     }
 
     /// Fetch a sender brand icon from the Twenty favicon service, using the
@@ -153,8 +163,10 @@ impl FaviconLoader {
 
     async fn fetch_icon_bytes(&self, domain: &str) -> Result<Option<Vec<u8>>, String> {
         let url = format!("https://twenty-icons.com/{domain}/{SERVICE_ICON_SIZE}");
-        let response = self
-            .client
+        let client = FAVICON_HTTP
+            .get(Owner::App)
+            .map_err(|error| format!("could not create favicon client: {error}"))?;
+        let response = client
             .get(url)
             .send()
             .await
@@ -205,23 +217,15 @@ fn classify_icon_status(status: StatusCode) -> Result<bool, String> {
 
 #[derive(Clone)]
 pub struct ProfileAvatarLoader {
-    client: Client,
     cache_dir: PathBuf,
 }
 
 impl ProfileAvatarLoader {
     pub fn new(cache_root: &Path) -> Result<Self, String> {
-        let client = Client::builder()
-            .user_agent("Flectar Mail native account avatar/0.1")
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(8))
-            .redirect(service_redirect_policy("googleusercontent.com"))
-            .build()
-            .map_err(|error| format!("could not create account-avatar client: {error}"))?;
         let cache_dir = cache_root.join("account-avatars");
         std::fs::create_dir_all(&cache_dir)
             .map_err(|error| format!("could not create account-avatar cache: {error}"))?;
-        Ok(Self { client, cache_dir })
+        Ok(Self { cache_dir })
     }
 
     pub async fn load(
@@ -244,7 +248,13 @@ impl ProfileAvatarLoader {
             }
         }
 
-        let response = self.client.get(source_url).send().await.ok()?;
+        let response = AVATAR_HTTP
+            .get(Owner::App)
+            .ok()?
+            .get(source_url)
+            .send()
+            .await
+            .ok()?;
         if !response.status().is_success()
             || response
                 .content_length()
