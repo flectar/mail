@@ -682,6 +682,13 @@ pub(crate) fn preferences_changed() {
     PREFERENCES.notify_one();
 }
 
+/// Accounts were removed: their notifications come down now, which also
+/// forgets what they said, rather than at the next daily pruning.
+pub(crate) fn accounts_removed() {
+    FLUSHES_ASKED.fetch_add(1, Ordering::AcqRel);
+    FLUSH.notify_one();
+}
+
 /// Whether the user wants anything a check in the background brings:
 /// notifications, or the count on the app icon. Kept by the dispatcher.
 static BACKGROUND_CHECKS_WANTED: AtomicBool = AtomicBool::new(false);

@@ -2820,6 +2820,9 @@ impl Core {
                     .signature_list
                     .retain(|signature| signature.account_id != account_id);
                 repo::settings::set(conn, &settings)?;
+                // Notifications keep their sender and subject, so they go
+                // too, all but those on screen, which go as they come down.
+                repo::notifications::forget_account(conn, account_id)?;
                 repo::accounts::delete(conn, account_id)
             })
             .await?;
