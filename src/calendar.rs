@@ -897,6 +897,9 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
             column: block.column as i32,
             start_minutes: block.start_minutes as i32,
             end_minutes: block.end_minutes as i32,
+            lane: block.lane as i32,
+            lanes: block.lanes as i32,
+            lane_span: block.lane_span as i32,
             continues_before: block.continues_before,
             continues_after: block.continues_after,
         })

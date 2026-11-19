@@ -430,12 +430,16 @@ export struct CalendarBar {
 }
 
 // A timed event's box in a day column of the week view's hours. Events
-// crossing midnight have one box each day.
+// crossing midnight have one box each day. Overlapping events split the
+// column into lanes.
 export struct CalendarTimedBlock {
     event: CalendarEventRow,
     column: int,
     start_minutes: int,
     end_minutes: int,
+    lane: int,
+    lanes: int,
+    lane_span: int,
     continues_before: bool,
     continues_after: bool,
 }

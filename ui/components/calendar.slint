@@ -853,14 +853,18 @@ export component FunctionalCalendarView inherits Rectangle {
                 }
                 for marker in [0, 1, 2, 3, 4, 5, 6, 7] : Rectangle { x: root.time-gutter + marker * root.column-width; width: 1px; height: parent.height; background: root.subtle-border-color; }
                 for block in root.timed-blocks : CalendarEvent {
-                    x: root.time-gutter + block.column * root.column-width + 5px;
-                    width: root.column-width - 10px;
+                    private property <length> lane-width: (root.column-width - 10px) / block.lanes;
+                    // The box keeps a readable size, as the layout placed it.
+                    private property <int> drawn-end: max(block.end-minutes, min(block.start-minutes + 30, 1440));
+                    x: root.time-gutter + block.column * root.column-width + 5px + block.lane * self.lane-width;
+                    width: block.lane-span * self.lane-width - (block.lane + block.lane-span < block.lanes ? 2px : 0px);
                     y: (block.start-minutes - 480) / 60 * root.hour-height - (block.continues-before ? root.overhang : 0px);
-                    height: max(44px, (block.end-minutes - block.start-minutes) / 60 * root.hour-height)
+                    height: (self.drawn-end - block.start-minutes) / 60 * root.hour-height
                         + (block.continues-before ? root.overhang : 0px)
                         + (block.continues-after ? root.overhang : 0px);
                     title: block.event.title;
                     detail: block.event.detail;
+                    compact: self.height < 40px;
                     inset-top: block.continues-before ? root.overhang : 0px;
                     pending: root.pending(block.event);
                     faded: root.faded(block.event);

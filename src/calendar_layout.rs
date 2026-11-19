@@ -5,7 +5,8 @@
 //! the row ends. Bars stack in lanes, each taking the first lane that is free
 //! on every day it covers, so an event keeps one lane across its row. Events
 //! running several days go first, then by start, longer first, all-day before
-//! timed.
+//! timed. Timed events that overlap share their day column side by side, and
+//! each widens over the lanes to its right that stay free while it runs.
 //!
 //! Ends are exclusive (RFC 5545 §3.6.1): an event that ends at midnight
 //! stops on the day before.
@@ -15,6 +16,9 @@ use std::cmp::Reverse;
 
 /// Days in a week row.
 pub(crate) const WEEK: usize = 7;
+/// The shortest an event is drawn in the week view's hours, so a brief one
+/// still shows its title and the next one is placed beside it.
+pub(crate) const SHORTEST_BLOCK_MINUTES: u32 = 30;
 const DAY_MINUTES: u32 = 24 * 60;
 
 /// An event's time as the views show it: local wall-clock time, or for an
@@ -179,10 +183,23 @@ pub(crate) struct Block {
     pub(crate) column: usize,
     pub(crate) start_minutes: u32,
     pub(crate) end_minutes: u32,
+    /// Its place, from the left, among the `lanes` that the events
+    /// overlapping it need. It widens over `lane_span` lanes from its own.
+    pub(crate) lane: usize,
+    pub(crate) lanes: usize,
+    pub(crate) lane_span: usize,
     /// The event began on an earlier day.
     pub(crate) continues_before: bool,
     /// The event goes on into the next day.
     pub(crate) continues_after: bool,
+}
+
+impl Block {
+    /// Where the box ends as drawn, at least [`SHORTEST_BLOCK_MINUTES`] down.
+    fn drawn_end(&self) -> u32 {
+        self.end_minutes
+            .max((self.start_minutes + SHORTEST_BLOCK_MINUTES).min(DAY_MINUTES))
+    }
 }
 
 /// Lay out the week's events that go in its hours (see
@@ -202,6 +219,9 @@ pub(crate) fn lay_out_hours(events: &[(usize, EventSpan)], week_start: NaiveDate
                     column,
                     start_minutes,
                     end_minutes,
+                    lane: 0,
+                    lanes: 1,
+                    lane_span: 1,
                     continues_before: span.start < midnight,
                     continues_after: span.end > midnight + Duration::days(1),
                 }
@@ -209,9 +229,59 @@ pub(crate) fn lay_out_hours(events: &[(usize, EventSpan)], week_start: NaiveDate
             .collect();
         pieces.sort_by_key(|block| (block.start_minutes, Reverse(block.end_minutes), block.event));
 
+        // Events that overlap, directly or through others, form a group
+        // whose lanes split the column.
+        let mut group = 0;
+        let mut group_end = 0;
+        let mut lane_ends: Vec<u32> = Vec::new();
+        for index in 0..pieces.len() {
+            let start = pieces[index].start_minutes;
+            if index > group && start >= group_end {
+                settle(&mut pieces[group..index], lane_ends.len());
+                group = index;
+                lane_ends.clear();
+            }
+            let end = pieces[index].drawn_end();
+            let lane = match lane_ends.iter().position(|&lane_end| lane_end <= start) {
+                Some(lane) => lane,
+                None => {
+                    lane_ends.push(0);
+                    lane_ends.len() - 1
+                }
+            };
+            lane_ends[lane] = end;
+            pieces[index].lane = lane;
+            group_end = if index == group {
+                end
+            } else {
+                group_end.max(end)
+            };
+        }
+        settle(&mut pieces[group..], lane_ends.len());
         blocks.extend(pieces);
     }
     blocks
+}
+
+/// Give a group its lane count, and widen each box over the lanes to its
+/// right that nothing in the group uses while it runs.
+fn settle(group: &mut [Block], lanes: usize) {
+    let drawn: Vec<(usize, u32, u32)> = group
+        .iter()
+        .map(|block| (block.lane, block.start_minutes, block.drawn_end()))
+        .collect();
+    for block in group {
+        let (start, end) = (block.start_minutes, block.drawn_end());
+        let free = (block.lane + 1..lanes)
+            .take_while(|&lane| {
+                !drawn.iter().any(|&(other, other_start, other_end)| {
+                    other == lane && other_start < end && start < other_end
+                })
+            })
+            .count();
+        block.lanes = lanes;
+        block.lane_span = 1 + free;
+    }
 }
 
 #[cfg(test)]
@@ -403,5 +473,53 @@ mod tests {
                 (2, 3, 23 * 60, 1440, false, false),
             ]
         );
+    }
+
+    #[test]
+    fn overlapping_events_share_their_column() {
+        let monday = day(11, 2);
+        let events = keyed(&[
+            timed(at(monday, 9, 0), at(monday, 12, 0)),
+            timed(at(monday, 9, 0), at(monday, 10, 0)),
+            timed(at(monday, 9, 0), at(monday, 9, 30)),
+            timed(at(monday, 10, 0), at(monday, 11, 0)),
+            // Starts as the group's last event ends: a group of its own.
+            timed(at(monday, 12, 0), at(monday, 13, 0)),
+        ]);
+        let blocks = lay_out_hours(&events, monday);
+        let lanes: Vec<_> = blocks
+            .iter()
+            .map(|block| (block.event, block.lane, block.lanes, block.lane_span))
+            .collect();
+        assert_eq!(
+            lanes,
+            [
+                (0, 0, 3, 1),
+                (1, 1, 3, 1),
+                (2, 2, 3, 1),
+                // Lane 2 is free again from 09:30, so it widens into it.
+                (3, 1, 3, 2),
+                (4, 0, 1, 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn short_events_are_placed_by_their_drawn_size() {
+        let monday = day(11, 2);
+        let events = keyed(&[
+            timed(at(monday, 9, 0), at(monday, 9, 10)),
+            timed(at(monday, 9, 15), at(monday, 9, 25)),
+            timed(at(monday, 9, 30), at(monday, 9, 40)),
+            timed(at(monday, 23, 50), at(monday, 23, 55)),
+        ]);
+        let blocks = lay_out_hours(&events, monday);
+        let lanes: Vec<_> = blocks
+            .iter()
+            .map(|block| (block.lane, block.lanes))
+            .collect();
+        // 09:30 still meets 09:15 as drawn, so it joins their group.
+        assert_eq!(lanes, [(0, 2), (1, 2), (0, 2), (0, 1)]);
+        assert_eq!(blocks[3].drawn_end(), DAY_MINUTES);
     }
 }

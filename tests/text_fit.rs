@@ -536,6 +536,8 @@ fn apply_fixture(app: &AppWindow) {
                 column,
                 start_minutes: start,
                 end_minutes: start + 60,
+                lanes: 1,
+                lane_span: 1,
                 ..Default::default()
             })
             .collect(),
