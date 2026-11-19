@@ -962,9 +962,10 @@ const SERVER_FOUND_SEARCHES: usize = 8;
 impl Core {
     #[cfg(desktop)]
     pub async fn start(paths: Paths) -> Result<Core> {
+        let credentials = Arc::new(credentials::SystemCredentialStore::for_profile(&paths));
         Self::start_with_platform(
             paths,
-            Arc::new(credentials::SystemCredentialStore),
+            credentials,
             Arc::new(LoopbackRedirectBroker::default()),
             true,
         )
@@ -977,8 +978,8 @@ impl Core {
     /// exposes semantic search asks for it.
     #[cfg(desktop)]
     pub async fn start_mail_ui(paths: Paths) -> Result<Core> {
-        Self::start_mail_ui_with_credentials(paths, Arc::new(credentials::SystemCredentialStore))
-            .await
+        let credentials = Arc::new(credentials::SystemCredentialStore::for_profile(&paths));
+        Self::start_mail_ui_with_credentials(paths, credentials).await
     }
 
     /// Start a mail-only core with a host-provided credential backend. Mobile

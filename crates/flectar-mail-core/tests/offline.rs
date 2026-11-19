@@ -155,7 +155,7 @@ async fn offline_actions_queue_locally_and_survive_restart() {
     let db = Db::open(&paths.db_file()).unwrap();
     let (account_id, thread_id) = seed(&db, port).await;
     credentials::store_async(
-        Arc::new(SystemCredentialStore),
+        Arc::new(SystemCredentialStore::for_profile(&paths)),
         account_id,
         Slot::Password,
         "pass".into(),
