@@ -222,6 +222,9 @@
     "sidebar-expand.svg": {
       "source": "panel-left-open"
     },
+    "sparkles.svg": {
+      "source": "sparkles"
+    },
     "star.svg": {
       "source": "star"
     },
@@ -623,6 +626,10 @@
     "sliders-horizontal": {
       "path": "sources/sliders-horizontal.svg",
       "sha256": "3acbaa175400c6abc1ef34f59333d13b7f7c96ef584362ff9f30f7944d45df70"
+    },
+    "sparkles": {
+      "path": "sources/sparkles.svg",
+      "sha256": "61946c30025875e471afc11f3b209e556992551819ed8dc72edd1d5cf8663886"
     },
     "square-pen": {
       "path": "sources/square-pen.svg",

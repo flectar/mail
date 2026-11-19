@@ -178,7 +178,8 @@ fn key_slot(service: &str) -> Result<KeySlot> {
     match service {
         DEEPL => Ok(KeySlot::DeeplKey),
         LIBRETRANSLATE => Ok(KeySlot::LibreTranslateKey),
-        MODEL => Ok(KeySlot::TranslationModelKey),
+        // A model is the AI server's, with its key.
+        MODEL => Ok(KeySlot::AiApiKey),
         _ => Err(TranslationError::NotSetUp.into()),
     }
 }
@@ -555,7 +556,20 @@ impl Core {
         }
     }
 
-    async fn translation_service(&self, settings: &TranslationSettings) -> Result<Service> {
+    /// The translation settings and the service they set up.
+    async fn translation_setup(&self) -> Result<(TranslationSettings, Service)> {
+        let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
+        let service = self
+            .translation_service(&settings.translation, &settings.ai)
+            .await?;
+        Ok((settings.translation, service))
+    }
+
+    async fn translation_service(
+        &self,
+        settings: &TranslationSettings,
+        ai: &crate::models::AiSettings,
+    ) -> Result<Service> {
         let key = |slot| async move {
             match credentials::load_async(self.credentials.clone(), 0, slot).await {
                 Ok(key) => Ok(key),
@@ -580,21 +594,19 @@ impl Core {
                     key: key(KeySlot::LibreTranslateKey).await?,
                 })
             }
-            MODEL if !settings.model_url.trim().is_empty() && !settings.model.trim().is_empty() => {
-                Ok(Service::Model {
-                    url: settings.model_url.trim().to_owned(),
-                    model: settings.model.trim().to_owned(),
-                    key: key(KeySlot::TranslationModelKey).await?,
-                })
-            }
+            // The AI server set up for the app's AI features (#241).
+            MODEL if ai.ready() => Ok(Service::Model {
+                url: ai.url.trim().to_owned(),
+                model: ai.model.trim().to_owned(),
+                key: key(KeySlot::AiApiKey).await?,
+            }),
             _ => Err(not_set_up()),
         }
     }
 
     /// The languages the set-up service translates into.
     pub async fn translation_targets(&self) -> Result<Vec<TranslationTarget>> {
-        let settings = self.translation_settings().await?;
-        let service = self.translation_service(&settings).await?;
+        let (_, service) = self.translation_setup().await?;
         if matches!(service, Service::Model { .. }) {
             return Ok(languages::model_targets()
                 .into_iter()
@@ -645,8 +657,7 @@ impl Core {
         message_id: i64,
         languages: ReaderLanguages,
     ) -> Result<MessageTranslation> {
-        let settings = self.translation_settings().await?;
-        let service = self.translation_service(&settings).await?;
+        let (settings, service) = self.translation_setup().await?;
         let wanted = wanted_target(&settings, &languages);
         let targets = match &service {
             Service::Model { .. } => Vec::new(),
@@ -746,8 +757,7 @@ impl Core {
     /// Part of a message being written, as HTML from the composer,
     /// translated into `target`. Nothing is kept.
     pub async fn translate_draft_html(&self, html: String, target: String) -> Result<String> {
-        let settings = self.translation_settings().await?;
-        let service = self.translation_service(&settings).await?;
+        let (_, service) = self.translation_setup().await?;
         let targets = match &service {
             Service::Model { .. } => Vec::new(),
             other => targets_of(other).await.unwrap_or_default(),
@@ -758,8 +768,7 @@ impl Core {
 
     /// Plain text being written, translated into `target`.
     pub async fn translate_draft_text(&self, text: String, target: String) -> Result<String> {
-        let settings = self.translation_settings().await?;
-        let service = self.translation_service(&settings).await?;
+        let (_, service) = self.translation_setup().await?;
         let targets = match &service {
             Service::Model { .. } => Vec::new(),
             other => targets_of(other).await.unwrap_or_default(),

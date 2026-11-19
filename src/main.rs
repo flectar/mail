@@ -3,6 +3,7 @@ mod account_mail_preferences;
 mod account_status;
 #[cfg(desktop)]
 pub mod agents;
+mod ai_features;
 mod app_icon;
 #[cfg(test)]
 mod account_removal_tests;
@@ -4761,6 +4762,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     auto_replies::core_ready(&app, &startup_runtime, core.file_core());
                     mail_rules::core_ready(&startup_runtime, core.file_core());
                     translation::core_ready(core.file_core());
+                    ai_features::core_ready();
                     if !startup_benchmark_disable_background {
                         core.notify_ui_ready();
                     }
@@ -6423,6 +6425,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     link_services::install(&app, &state, &runtime, platform.external_urls.clone());
     read_receipts::install(&app, &state, &runtime);
     translation::install(&app, &state, &runtime);
+    ai_features::install(&app, &state, &runtime);
     block_sender::install(&app, &state, &runtime);
     saved_searches::install(&app, &state, &runtime);
     server_search::install(&app, &state, &runtime);

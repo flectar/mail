@@ -1,7 +1,9 @@
-//! AI features over any OpenAI-compatible chat-completions API (OpenRouter
-//! by default). The API key lives in the OS keyring; base URL and model are
-//! user settings. Requests share a pooled reqwest/rustls client and enforce
-//! strict URL, timeout, streaming-idle, and response-size boundaries.
+//! AI features over any OpenAI-compatible chat-completions API, on the
+//! user's device or hosted, as the user sets it up (#241). Nothing is preset.
+//! The API key, which local servers don't need, lives in the OS keyring; the
+//! address and model are user settings. Requests share a pooled
+//! reqwest/rustls client and enforce strict URL, timeout, streaming-idle, and
+//! response-size boundaries.
 
 use crate::error::{CoreError, Result};
 use crate::http_body;
@@ -9,8 +11,6 @@ use futures::StreamExt;
 use serde_json::json;
 use std::sync::Arc;
 
-pub const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
-pub const DEFAULT_MODEL: &str = "openai/gpt-5.6-luna";
 const MAX_AI_RESPONSE_BODY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_AI_ERROR_BODY_BYTES: usize = 1024 * 1024;
 const MAX_AI_URL_BYTES: usize = 16 * 1024;
@@ -1176,6 +1176,25 @@ pub fn proofread_prompt(body: &str) -> Vec<ChatMessage> {
     ]
 }
 
+/// A name for a prompt the user saved without one: its first words, as many
+/// as fit a menu.
+pub fn prompt_name(instruction: &str) -> String {
+    const MOST: usize = 32;
+    let instruction = instruction.split_whitespace().collect::<Vec<_>>().join(" ");
+    if instruction.chars().count() <= MOST {
+        return instruction;
+    }
+    let cut = instruction
+        .char_indices()
+        .nth(MOST)
+        .map_or(instruction.len(), |(at, _)| at);
+    let words = instruction[..cut]
+        .rfind(' ')
+        .filter(|at| *at > 0)
+        .map_or(&instruction[..cut], |at| &instruction[..at]);
+    format!("{}…", words.trim_end_matches([',', '.', ';', ':']))
+}
+
 /// Generate a short, clean email signature block from the account's name and
 /// address. Output is plain text with real line breaks (the caller converts it
 /// to HTML). No invented titles, companies, or phone numbers.
@@ -1316,8 +1335,8 @@ mod tests {
             let language = ui_language_name(code);
             assert_eq!(language, Some("Russian"));
             let cfg = AiConfig {
-                base_url: DEFAULT_BASE_URL.to_owned(),
-                model: DEFAULT_MODEL.to_owned(),
+                base_url: "http://localhost:11434/v1".to_owned(),
+                model: "local".to_owned(),
                 api_key: String::new(),
                 language: language.map(str::to_owned),
                 usage_sink: None,
@@ -1546,6 +1565,16 @@ mod tests {
         let msgs = draft_prompt("", "", "", "write a haiku", "Dana", false);
         assert!(!msgs[0].content.contains("untrusted"));
         assert!(!msgs[1].content.contains("BEGIN EMAIL THREAD"));
+    }
+
+    #[test]
+    fn unnamed_prompts_take_their_first_words() {
+        assert_eq!(prompt_name("  Make it\nshorter. "), "Make it shorter.");
+        assert_eq!(
+            prompt_name("Rewrite this so it sounds friendly, warm and relaxed"),
+            "Rewrite this so it sounds…"
+        );
+        assert_eq!(prompt_name(&"x".repeat(40)), format!("{}…", "x".repeat(32)));
     }
 
     #[test]

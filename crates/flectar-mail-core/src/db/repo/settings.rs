@@ -195,9 +195,7 @@ mod tests {
         assert!(s.active_mail_profile.is_none());
         assert!(!s.show_account_badges);
         assert!(s.download_directory.is_empty());
-        assert!(!s.ai_model_instant.is_empty());
-        assert!(!s.ai_model_cheap.is_empty());
-        assert!(!s.ai_model_intelligent.is_empty());
+        assert!(!s.ai.ready());
     }
 
     #[test]

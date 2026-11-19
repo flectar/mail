@@ -6,6 +6,7 @@ export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
 export { Translation, TranslationLanguage } from "translation.slint";
+export { Ai, AiPromptRow } from "ai.slint";
 export { LinkServices, LinkServiceRow } from "link-services.slint";
 export { RendererSettings } from "renderer-settings.slint";
 export { WindowChrome } from "window-chrome.slint";
@@ -618,6 +619,7 @@ export global I18n {
         if (key == "Could not show the message: {}") { return @tr("Could not show the message: {}", argument); }
         if (key == "Could not save the translation setting: {}") { return @tr("Could not save the translation setting: {}", argument); }
         if (key == "Could not remove the key: {}") { return @tr("Could not remove the key: {}", argument); }
+        if (key == "Could not save the prompts: {}") { return @tr("Could not save the prompts: {}", argument); }
         // Translate into: the language translations go into until one is chosen.
         if (key == "Automatic ({})") { return @tr("Automatic ({})", argument); }
         if (key == "Could not mark all as read: {}") { return @tr("Could not mark all as read: {}", argument); }

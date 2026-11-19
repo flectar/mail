@@ -2730,24 +2730,10 @@ pub struct Settings {
     /// rather than failing.
     #[serde(default)]
     pub download_directory: String,
-    #[serde(default = "default_ai_base_url")]
-    pub ai_base_url: String,
-    /// Per-tier model ids, all sharing `ai_base_url` and the stored API key.
-    #[serde(default = "default_ai_model")]
-    pub ai_model_instant: String,
-    #[serde(default = "default_ai_model")]
-    pub ai_model_cheap: String,
-    #[serde(default = "default_ai_model")]
-    pub ai_model_intelligent: String,
-    /// Which tier each AI scenario uses: "instant" | "cheap" | "intelligent".
-    #[serde(default = "default_tier_intelligent")]
-    pub ai_tier_ask: String,
-    #[serde(default = "default_tier_intelligent")]
-    pub ai_tier_draft: String,
-    #[serde(default = "default_tier_instant")]
-    pub ai_tier_summarize: String,
-    #[serde(default = "default_tier_cheap")]
-    pub ai_tier_voice: String,
+    /// The AI server the app's AI features and translation by a model use
+    /// (#241). Its key is in the system's credential store.
+    #[serde(default)]
+    pub ai: AiSettings,
     /// OAuth app registrations supplied by the user. These intentionally
     /// override the FLECTAR_*_DESKTOP_CLIENT_ID values bundled by a release.
     #[serde(default)]
@@ -2819,9 +2805,6 @@ pub struct Settings {
     /// every mailbox mutation comes from this explicit, user-owned allow-list.
     #[serde(default)]
     pub ai_automation_rules: Vec<AiAutomationRule>,
-    /// Which model tier the AI classifier uses: "instant" | "cheap" | "intelligent".
-    #[serde(default = "default_tier_instant")]
-    pub ai_tier_categorize: String,
     /// Group the thread list under date headers (Today / Yesterday / …).
     #[serde(default = "default_true")]
     pub group_by_date: bool,
@@ -2914,12 +2897,42 @@ pub struct Settings {
     pub translation: TranslationSettings,
 }
 
+/// The AI server (#241): any server with the OpenAI chat API, on this
+/// device, such as Ollama or LM Studio, or hosted. Nothing is preset, and AI
+/// features stay off while the address or the model is empty.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AiSettings {
+    /// The server's address, such as http://localhost:11434/v1.
+    pub url: String,
+    /// The model it runs, as the server names it.
+    pub model: String,
+    /// The user's own instructions, run on selected text or a draft.
+    pub prompts: Vec<AiPrompt>,
+}
+
+/// An instruction the user saved, such as "Make it shorter".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AiPrompt {
+    pub name: String,
+    pub instruction: String,
+}
+
+impl AiSettings {
+    /// A server and a model are set, so AI features can run.
+    pub fn ready(&self) -> bool {
+        !self.url.trim().is_empty() && !self.model.trim().is_empty()
+    }
+}
+
 /// How messages are translated (#240). The services' keys are in the
 /// system's credential store, not here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TranslationSettings {
-    /// "deepl", "libretranslate" or "model", or "" while none is set up.
+    /// "deepl", "libretranslate" or "model", the AI server in `Settings::ai`,
+    /// or "" while none is set up.
     pub service: String,
     /// The language messages are translated into, as a language tag such as
     /// "de" or "pt-BR". "" follows the app's language.
@@ -2933,10 +2946,6 @@ pub struct TranslationSettings {
     pub never: Vec<String>,
     /// The LibreTranslate server's address.
     pub libretranslate_url: String,
-    /// The address of a server that speaks the OpenAI chat API, and the
-    /// model it translates with.
-    pub model_url: String,
-    pub model: String,
     /// The language a message being written was last translated into.
     pub compose_target: String,
 }
@@ -2950,8 +2959,6 @@ impl Default for TranslationSettings {
             always: Vec::new(),
             never: Vec::new(),
             libretranslate_url: String::new(),
-            model_url: String::new(),
-            model: String::new(),
             compose_target: String::new(),
         }
     }
@@ -3043,21 +3050,6 @@ fn default_language() -> String {
 }
 fn default_calendar_week_start() -> String {
     "monday".into()
-}
-fn default_ai_base_url() -> String {
-    crate::ai::DEFAULT_BASE_URL.into()
-}
-fn default_ai_model() -> String {
-    crate::ai::DEFAULT_MODEL.into()
-}
-fn default_tier_intelligent() -> String {
-    "intelligent".into()
-}
-fn default_tier_instant() -> String {
-    "instant".into()
-}
-fn default_tier_cheap() -> String {
-    "cheap".into()
 }
 fn default_notification_scope() -> String {
     "important".into()
@@ -3156,14 +3148,6 @@ impl Default for Settings {
             load_remote_images: false,
             mark_read: MarkRead::Immediately,
             download_directory: String::new(),
-            ai_base_url: default_ai_base_url(),
-            ai_model_instant: default_ai_model(),
-            ai_model_cheap: default_ai_model(),
-            ai_model_intelligent: default_ai_model(),
-            ai_tier_ask: default_tier_intelligent(),
-            ai_tier_draft: default_tier_intelligent(),
-            ai_tier_summarize: default_tier_instant(),
-            ai_tier_voice: default_tier_cheap(),
             google_client_id: String::new(),
             google_client_secret: String::new(),
             ms_client_id: String::new(),
@@ -3185,7 +3169,6 @@ impl Default for Settings {
             ai_categorize: false,
             ai_category_prompt: String::new(),
             ai_automation_rules: Vec::new(),
-            ai_tier_categorize: default_tier_instant(),
             group_by_date: true,
             contact_suggest_all_accounts: false,
             collect_outgoing_contacts: true,
@@ -3208,6 +3191,7 @@ impl Default for Settings {
             active_mail_profile: None,
             agent_access: AgentAccess::default(),
             translation: TranslationSettings::default(),
+            ai: AiSettings::default(),
         }
     }
 }
@@ -3251,11 +3235,12 @@ pub struct AskResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiStatus {
+    /// A server and a model are set.
     pub configured: bool,
-    pub model_instant: String,
-    pub model_cheap: String,
-    pub model_intelligent: String,
-    pub base_url: String,
+    pub url: String,
+    pub model: String,
+    /// A key for the server is saved.
+    pub key_saved: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -3625,7 +3610,9 @@ mod tests {
         assert!(s.auto_advance);
         assert!(s.auto_labels_enabled);
         assert!(s.signature_list.is_empty());
-        assert_eq!(s.ai_base_url, crate::ai::DEFAULT_BASE_URL);
+        // Nothing is preset for AI: no server, no model.
+        assert_eq!(s.ai, AiSettings::default());
+        assert!(!s.ai.ready());
         assert!(s.show_avatars);
         assert_eq!(s.message_appearance, MessageAppearance::System);
         assert_eq!(s.reduce_motion, ReduceMotion::System);

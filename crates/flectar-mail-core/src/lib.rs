@@ -800,26 +800,6 @@ impl Scenario {
     }
 }
 
-/// Resolve the canonical model id for a scenario's configured tier.
-fn resolve_ai_model(settings: &Settings, scenario: Scenario) -> String {
-    let tier = match scenario {
-        Scenario::Ask => settings.ai_tier_ask.as_str(),
-        Scenario::Draft => settings.ai_tier_draft.as_str(),
-        Scenario::Summarize => settings.ai_tier_summarize.as_str(),
-        Scenario::Voice => settings.ai_tier_voice.as_str(),
-        Scenario::Categorize => settings.ai_tier_categorize.as_str(),
-        // Palette parsing and reply chips want the fastest model available.
-        Scenario::Command | Scenario::QuickReply => "instant",
-    };
-    match tier {
-        "instant" => &settings.ai_model_instant,
-        "cheap" => &settings.ai_model_cheap,
-        "intelligent" => &settings.ai_model_intelligent,
-        _ => &settings.ai_model_intelligent,
-    }
-    .clone()
-}
-
 fn oauth_calendar_scopes(provider: Provider, enabled: bool) -> &'static [&'static str] {
     if !enabled {
         return &[];
@@ -8162,25 +8142,32 @@ impl Core {
         self.ai_config_from(&settings, scenario).await
     }
 
-    /// Build an [`ai::AiConfig`] for `scenario` from already-loaded settings,
-    /// picking the model for the scenario's tier (all tiers share the base URL
-    /// and stored API key).
+    /// The AI server's key, or none: servers on the device, such as Ollama
+    /// and LM Studio, need none, and a hosted one that needs it says so.
+    async fn ai_key(&self) -> Result<String> {
+        match credentials::load_async(self.credentials.clone(), 0, Slot::AiApiKey).await {
+            Ok(key) => Ok(key),
+            Err(CoreError::CredentialStoreUnavailable(message)) => {
+                Err(CoreError::CredentialStoreUnavailable(message))
+            }
+            Err(_) => Ok(String::new()),
+        }
+    }
+
+    /// Build an [`ai::AiConfig`] for `scenario` from already-loaded settings.
+    /// Not configured while no server or model is set.
     async fn ai_config_from(
         &self,
         settings: &Settings,
         scenario: Scenario,
     ) -> Result<ai::AiConfig> {
-        let api_key =
-            match credentials::load_async(self.credentials.clone(), 0, Slot::AiApiKey).await {
-                Ok(k) => k,
-                // Local endpoints (LM Studio, Ollama over http://) need no key;
-                // hosted ones do, so fail early with a pointer to Settings.
-                Err(_) if settings.ai_base_url.starts_with("http://") => String::new(),
-                Err(_) => return Err(CoreError::AiNotConfigured),
-            };
+        if !settings.ai.ready() {
+            return Err(CoreError::AiNotConfigured);
+        }
+        let api_key = self.ai_key().await?;
         Ok(ai::AiConfig {
-            base_url: settings.ai_base_url.clone(),
-            model: resolve_ai_model(settings, scenario),
+            base_url: settings.ai.url.trim().to_owned(),
+            model: settings.ai.model.trim().to_owned(),
             api_key,
             language: ai::ui_language_name(&settings.language).map(str::to_string),
             usage_sink: {
@@ -8267,27 +8254,58 @@ impl Core {
 
     pub async fn ai_status(&self) -> Result<AiStatus> {
         let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
-        let configured = credentials::load_async(self.credentials.clone(), 0, Slot::AiApiKey)
-            .await
-            .is_ok()
-            || settings.ai_base_url.starts_with("http://");
+        let key_saved = !self.ai_key().await?.trim().is_empty();
         Ok(AiStatus {
-            configured,
-            model_instant: settings.ai_model_instant,
-            model_cheap: settings.ai_model_cheap,
-            model_intelligent: settings.ai_model_intelligent,
-            base_url: settings.ai_base_url,
+            configured: settings.ai.ready(),
+            url: settings.ai.url,
+            model: settings.ai.model,
+            key_saved,
         })
     }
 
-    /// Model ids from the configured endpoint. Works keyless on OpenRouter,
-    /// so this is available before an API key is saved.
-    pub async fn ai_list_models(&self) -> Result<Vec<String>> {
-        let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
-        let api_key = credentials::load_async(self.credentials.clone(), 0, Slot::AiApiKey)
+    pub async fn ai_settings(&self) -> Result<AiSettings> {
+        self.db.read(|conn| Ok(repo::settings::get(conn)?.ai)).await
+    }
+
+    /// Saves the AI server's address and model and the user's prompts.
+    pub async fn set_ai_settings(&self, ai: AiSettings) -> Result<()> {
+        let ai = AiSettings {
+            url: ai.url.trim().to_owned(),
+            model: ai.model.trim().to_owned(),
+            prompts: ai
+                .prompts
+                .into_iter()
+                .filter_map(|prompt| {
+                    let instruction = prompt.instruction.trim().to_owned();
+                    let name = match prompt.name.trim() {
+                        "" => ai::prompt_name(&instruction),
+                        name => name.to_owned(),
+                    };
+                    (!instruction.is_empty()).then_some(AiPrompt { name, instruction })
+                })
+                .collect(),
+        };
+        self.db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut settings = repo::settings::get(&tx)?;
+                settings.ai = ai;
+                repo::settings::set(&tx, &settings)?;
+                tx.commit()?;
+                Ok(())
+            })
             .await
-            .unwrap_or_default();
-        ai::list_models(&settings.ai_base_url, &api_key).await
+    }
+
+    /// The models the server at `url` offers, before it is saved, so the
+    /// user can pick one. Uses the saved key.
+    pub async fn ai_list_models(&self, url: String) -> Result<Vec<String>> {
+        let url = url.trim().to_owned();
+        if url.is_empty() {
+            return Err(CoreError::AiNotConfigured);
+        }
+        let api_key = self.ai_key().await?;
+        ai::list_models(&url, &api_key).await
     }
 
     /// Parse a natural-language palette query ("meeting tomorrow 8pm ...")
@@ -12487,62 +12505,6 @@ fn revert_action(
     }
     tx.commit()?;
     Ok(thread_id)
-}
-
-#[cfg(test)]
-mod ai_model_routing_tests {
-    use super::*;
-
-    #[test]
-    fn fresh_settings_have_explicit_models_for_every_tier() {
-        let settings = Settings::default();
-        assert!(!settings.ai_model_instant.trim().is_empty());
-        assert!(!settings.ai_model_cheap.trim().is_empty());
-        assert!(!settings.ai_model_intelligent.trim().is_empty());
-        assert_eq!(
-            resolve_ai_model(&settings, Scenario::Ask),
-            settings.ai_model_intelligent
-        );
-        assert_eq!(
-            resolve_ai_model(&settings, Scenario::Summarize),
-            settings.ai_model_instant
-        );
-    }
-
-    #[test]
-    fn each_scenario_uses_its_tier_model() {
-        let s = Settings {
-            ai_model_instant: "fast".into(),
-            ai_model_cheap: "mid".into(),
-            ai_model_intelligent: "smart".into(),
-            ..Settings::default()
-        };
-        // Defaults: ask/draft -> intelligent, summarize -> instant, voice -> cheap.
-        assert_eq!(resolve_ai_model(&s, Scenario::Ask), "smart");
-        assert_eq!(resolve_ai_model(&s, Scenario::Draft), "smart");
-        assert_eq!(resolve_ai_model(&s, Scenario::Summarize), "fast");
-        assert_eq!(resolve_ai_model(&s, Scenario::Voice), "mid");
-    }
-
-    #[test]
-    fn scenario_can_be_repointed_to_another_tier() {
-        let s = Settings {
-            ai_model_instant: "fast".into(),
-            ai_tier_ask: "instant".into(), // route Ask to the instant tier
-            ..Settings::default()
-        };
-        assert_eq!(resolve_ai_model(&s, Scenario::Ask), "fast");
-    }
-
-    #[test]
-    fn unknown_tier_uses_the_intelligent_model() {
-        let s = Settings {
-            ai_model_intelligent: "safe-default".into(),
-            ai_tier_ask: "unknown".into(),
-            ..Settings::default()
-        };
-        assert_eq!(resolve_ai_model(&s, Scenario::Ask), "safe-default");
-    }
 }
 
 #[cfg(test)]
