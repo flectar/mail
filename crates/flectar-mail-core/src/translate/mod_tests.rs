@@ -211,17 +211,17 @@ fn shout(text: &str) -> String {
     out
 }
 
+/// Translation by the AI server at `url`, which the app's AI features share.
 async fn use_model(core: &Core, url: &str) {
-    core.set_translation_settings(TranslationSettings {
-        model_url: url.into(),
+    core.set_ai_settings(crate::models::AiSettings {
+        url: url.into(),
         model: "small".into(),
-        ..set_up(MODEL)
+        ..Default::default()
     })
     .await
     .unwrap();
-    core.set_translation_key(MODEL.into(), "token".into())
-        .await
-        .unwrap();
+    core.set_translation_settings(set_up(MODEL)).await.unwrap();
+    core.set_ai_key("token".into()).await.unwrap();
 }
 
 #[tokio::test]
@@ -353,14 +353,18 @@ async fn without_a_service_nothing_is_offered_or_sent() {
         .await
         .unwrap();
     assert!(!offer.offer);
+    // A model needs the AI server's model as well as its address.
+    core.set_ai_settings(crate::models::AiSettings {
+        url: "http://localhost:1/v1".into(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
     for settings in [
         set_up(""),
         set_up(DEEPL),
         set_up(LIBRETRANSLATE),
-        TranslationSettings {
-            model_url: "http://localhost:1/v1".into(),
-            ..set_up(MODEL)
-        },
+        set_up(MODEL),
     ] {
         core.set_translation_settings(settings).await.unwrap();
         let error = core
