@@ -1,5 +1,8 @@
 def favicon_path(address):
   ($favicon_dir + "/" + (address | split("@") | last | ascii_downcase) + ".png");
+# Event rows leave out what the demo data doesn't use.
+def event_defaults:
+  .answerable = (.answerable // false) | .removable = (.removable // false) | .recurrence_id = (.recurrence_id // "");
 # Settings is a screen of its own, which goes back to the given view.
 (if $settings_tab == "" then $active_view else "settings" end) as $shown_view
 | .theme_mode = $theme
@@ -86,8 +89,13 @@ def favicon_path(address):
     | .checked_day = (.checked_day // -1)
     | .checked_at = (.checked_at // "")
   )
-| .calendar_events |= map(.answerable = (.answerable // false) | .removable = (.removable // false) | .recurrence_id = (.recurrence_id // ""))
-| .calendar_agenda_rows |= map(if .event then .event.answerable = (.event.answerable // false) | .event.removable = (.event.removable // false) | .event.recurrence_id = (.event.recurrence_id // "") else . end)
+| .calendar_month_bars |= map(.event |= event_defaults)
+| .calendar_week_bars |= map(.event |= event_defaults)
+| .calendar_timed_blocks |= map(.event |= event_defaults)
+| .calendar_selected_day_events |= map(event_defaults)
+| .calendar_month_days |= map(.events |= map(event_defaults))
+| .calendar_week_days |= map(.events |= map(event_defaults))
+| .calendar_agenda_rows |= map(if .event then .event |= event_defaults else . end)
 | .mail_profiles = [
     {"id": "work", "name": "Work", "color": "#8b5cf6", "account_count": 1},
     {"id": "support", "name": "Support", "color": "#ea580c", "account_count": 1}
