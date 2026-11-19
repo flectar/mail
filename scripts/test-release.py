@@ -38,6 +38,7 @@ verify_android_signing = android_signing.verify
 android_version_code = load_script("android-version-code").version_code
 linux_metadata = load_script("stage-linux-metadata")
 ios_release = load_script("ios-release")
+flathub = load_script("flathub-manifest")
 stage_linux_metadata = linux_metadata.stage
 
 
@@ -193,6 +194,47 @@ class ReleaseTests(unittest.TestCase):
                     f"          - {arch}\n",
                     manifest,
                 )
+
+    def test_flathub_manifest_follows_the_bundle(self):
+        bundle = (SCRIPTS.parent / "packaging/flatpak/com.flectar.mail.yml").read_text()
+        template = flathub.TEMPLATE.read_text()
+        # Permissions, runtime and cleanup must not drift between the two.
+        self.assertEqual(template.split("\nmodules:\n")[0], bundle.split("\nmodules:\n")[0])
+
+        def commands(text):
+            block = text.split("    build-commands:\n")[1].split("    sources:\n")[0]
+            return [line for line in block.splitlines() if line.startswith("      - ")]
+
+        def environment(text):
+            names = set()
+            for line in text.split("      env:\n")[1].splitlines():
+                if not line.startswith("        "):
+                    return names
+                if not line.lstrip().startswith("#"):
+                    names.add(line.split(":")[0].strip())
+
+        # Flathub builds from source, so it leaves out only the prebuilt PDFium.
+        kept = [line for line in commands(bundle) if "pdf" not in line.lower()]
+        self.assertEqual(commands(template), [line.replace(" /app/lib/flectar-mail", "") for line in kept])
+        self.assertEqual(environment(template), environment(bundle) - {"CARGO_BUILD_JOBS", "FLECTAR_UPDATE_CHECKS"})
+        self.assertNotIn("pdfium", template.split("    sources:\n")[1].lower())
+
+        commit = "0123456789abcdef0123456789abcdef01234567"
+        release = flathub.manifest(tag="v0.1.0-beta.1", commit=commit)
+        self.assertIn("        tag: 'v0.1.0-beta.1'\n        commit: '0123456789abcdef0123456789abcdef01234567'\n", release)
+        self.assertNotIn("@", release)
+        for tag, sha in (("0.1.0", commit), ("v0.1.0-beta", commit), ("v0.1.0", "abc123"), (None, commit)):
+            with self.subTest(tag=tag, commit=sha), self.assertRaises(ValueError):
+                flathub.manifest(tag=tag, commit=sha)
+        local = flathub.manifest(local=Path("/work"))
+        self.assertIn("      - type: dir\n        path: /work\n        skip:\n          - .artifacts\n", local)
+        self.assertNotIn("type: git", local)
+        with tempfile.TemporaryDirectory() as directory:
+            flathub.write(Path(directory), tag="v0.1.0", commit=commit)
+            self.assertEqual(
+                (Path(directory) / "cargo-sources.json").read_bytes(),
+                (SCRIPTS.parent / "packaging/flatpak/cargo-sources.json").read_bytes(),
+            )
 
     def test_flatpak_cargo_sources_match_lockfile(self):
         project = SCRIPTS.parent

@@ -1,0 +1,65 @@
+app-id: com.flectar.mail
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: flectar-mail
+separate-locales: false
+
+# The app already uses portals for browser and file-picker requests. Credential
+# storage uses the freedesktop Secret Service. The Flatpak feature disables the
+# legacy StatusNotifier tray backend so the sandbox needs no unsafe D-Bus name.
+# Docks that show the unread count on the icon own com.canonical.Unity; the
+# count is a broadcast that needs no permission, and the name only tells the app
+# when a dock (re)starts, to send it again.
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --device=dri
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=com.canonical.Unity
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/pkgconfig
+  - /share/man
+  - '*.a'
+  - '*.la'
+
+modules:
+  - name: flectar-mail
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/flectar-mail/cargo
+        CARGO_NET_OFFLINE: 'true'
+    # Flathub builds everything from source, so this build leaves out the
+    # prebuilt PDFium library that the GitHub bundle ships. Attachments that
+    # are PDFs then offer to be downloaded instead of previewed. Flathub also
+    # updates the app itself, so it leaves out the GitHub update check.
+    build-commands:
+      - cargo build --offline --locked --release --no-default-features --features remote-content,gpu-renderer,flatpak --bin flectar-mail
+      - install -Dm0755 target/release/flectar-mail /app/bin/flectar-mail
+      - python3 scripts/linux-elf.py verify /app/bin/flectar-mail
+      - python3 scripts/stage-linux-metadata.py --flatpak _flatpak-stage
+      - install -Dm0644 _flatpak-stage/usr/share/applications/com.flectar.mail.desktop /app/share/applications/com.flectar.mail.desktop
+      - install -Dm0644 _flatpak-stage/usr/share/metainfo/com.flectar.mail.metainfo.xml /app/share/metainfo/com.flectar.mail.metainfo.xml
+      - install -Dm0644 resources/app-icon/flectar-mail-masked-512.png /app/share/icons/hicolor/512x512/apps/com.flectar.mail.png
+      - install -Dm0644 resources/app-icon/flectar-mail-masked.svg /app/share/icons/hicolor/scalable/apps/com.flectar.mail.svg
+      - install -Dm0644 LICENSE /app/share/licenses/flectar-mail/LICENSE
+      - cp -a LICENSES /app/share/licenses/flectar-mail/LICENSES
+      - install -Dm0644 THIRD_PARTY_NOTICES.md /app/share/doc/flectar-mail/THIRD_PARTY_NOTICES.md
+      - install -Dm0644 resources/fonts/google-sans-flex/OFL.txt /app/share/licenses/flectar-mail/google-sans-flex/OFL.txt
+      - install -Dm0644 resources/fonts/google-sans-flex/README.md /app/share/doc/flectar-mail/google-sans-flex/README.md
+    sources:
+      # scripts/flathub-manifest.py pins the release tag and its commit.
+      - type: git
+        url: https://github.com/flectar/mail.git
+        tag: '@TAG@'
+        commit: '@COMMIT@'
+      - cargo-sources.json
