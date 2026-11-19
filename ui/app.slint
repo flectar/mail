@@ -1041,6 +1041,8 @@ export component AppWindow inherits Window {
     callback save_workspace_layout(string);
     callback save_workspace_list_pane_width(length);
     callback save_language(string);
+    // The effective language selection, forwarded to a native host app language.
+    callback app_language_changed(string, string);
     callback save_time_format(string);
     callback save_sidebar_icon_style(bool);
     callback save_notification_settings(bool, bool, string);

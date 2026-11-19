@@ -52,16 +52,17 @@ period is used.
 
 `0004-windows-software-present-through-dxgi.patch` presents the software
 renderer's frames through a two-buffer flip model swap chain, as Chromium's
-software output does. Slint draws into a CPU-readable staging texture of a
-WARP device, which needs no graphics driver. The damage is copied into the
-back buffer, and `Present1` hands DWM the whole frame with its dirty
-rectangles. All windows share one device. Where Direct3D 11 or DXGI isn't
-available, after a present fails, and when `SLINT_SOFTWARE_GDI` is set,
-softbuffer draws with GDI as before. The swap chain's two buffers add two
-window-sized surfaces, and the staging texture takes the place of
-softbuffer's bitmap. The Windows packaging job runs
-`scripts/test-clean-exit.py` with both presenters and prints the app's memory
-for each.
+software output does. Slint draws into a CPU-readable staging texture of a WARP
+device, which needs no graphics driver. The damage is copied into the back
+buffer, and `Present1` hands DWM the whole frame with its dirty rectangles. All
+windows share one device. Where Direct3D 11 or DXGI isn't available, when the
+first present fails, and when `SLINT_SOFTWARE_GDI` is set, softbuffer draws
+with GDI as before. GDI no longer draws into a window once a flip model swap
+chain presented to it, even after the swap chain is gone, so a present that
+fails later gets a new swap chain instead. The swap chain's two buffers add two
+window-sized surfaces, and the staging texture takes the place of softbuffer's
+bitmap. The Windows packaging job runs `scripts/test-clean-exit.py` with both
+presenters and prints the app's memory for each.
 
 `Cargo.toml.orig` is kept unchanged for provenance. The standalone lockfile is
 omitted, and the application lockfiles resolve the patched manifest.

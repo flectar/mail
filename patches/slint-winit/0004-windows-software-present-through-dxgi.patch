@@ -13,7 +13,7 @@ index 705390e..7d629f2 100644
      "Win32_System_Performance",
  ]
 diff --git a/crates/i-slint-backend-winit/renderer/sw.rs b/crates/i-slint-backend-winit/renderer/sw.rs
-index 2648583..693ce6f 100644
+index 2648583..7ed6f92 100644
 --- a/crates/i-slint-backend-winit/renderer/sw.rs
 +++ b/crates/i-slint-backend-winit/renderer/sw.rs
 @@ -23,6 +23,9 @@ pub struct WinitSoftwareRenderer {
@@ -26,7 +26,7 @@ index 2648583..693ce6f 100644
  }
  
  #[repr(transparent)]
-@@ -81,8 +84,51 @@ impl WinitSoftwareRenderer {
+@@ -81,8 +84,67 @@ impl WinitSoftwareRenderer {
              renderer: SoftwareRenderer::new(),
              _context: RefCell::new(None),
              surface: RefCell::new(None),
@@ -53,7 +53,9 @@ index 2648583..693ce6f 100644
 +    }
 +
 +    /// Renders and presents through the swap chain, if there is one. After a failed present,
-+    /// for example when the device was removed, softbuffer draws from then on.
++    /// for example when the device was removed, a new swap chain takes over. GDI no longer
++    /// draws into a window that a flip model swap chain presented to, so softbuffer only takes
++    /// over when no frame was presented yet.
 +    #[cfg(target_os = "windows")]
 +    fn render_to_swap_chain(
 +        &self,
@@ -65,11 +67,25 @@ index 2648583..693ce6f 100644
 +        let Err(error) = presenter.render(&self.renderer, width, height) else {
 +            return Ok(true);
 +        };
++        let winit_window = presenter.window().clone();
++        let presented = presenter.presented();
++        // A window takes one flip model swap chain at a time.
++        *swap_chain = None;
++        if presented {
++            i_slint_core::debug_log!(
++                "Slint: Presenting through DXGI failed, making a new swap chain: {error}"
++            );
++            let mut presenter = dxgi::SwapChainPresenter::new(winit_window)
++                .map_err(|e| format!("Error making a new DXGI swap chain: {e}"))?;
++            presenter
++                .render(&self.renderer, width, height)
++                .map_err(|e| format!("Error presenting through a new DXGI swap chain: {e}"))?;
++            *swap_chain = Some(presenter);
++            return Ok(true);
++        }
 +        i_slint_core::debug_log!(
 +            "Slint: Presenting through DXGI failed, drawing with GDI: {error}"
 +        );
-+        let winit_window = presenter.window().clone();
-+        *swap_chain = None;
 +        drop(swap_chain);
 +        self.create_surface(winit_window)?;
 +        self.renderer.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
@@ -78,7 +94,7 @@ index 2648583..693ce6f 100644
  }
  
  impl super::WinitCompatibleRenderer for WinitSoftwareRenderer {
-@@ -95,6 +141,11 @@ impl super::WinitCompatibleRenderer for WinitSoftwareRenderer {
+@@ -95,6 +157,11 @@ impl super::WinitCompatibleRenderer for WinitSoftwareRenderer {
              return Ok(DrawOutcome::Success);
          };
  
@@ -90,12 +106,16 @@ index 2648583..693ce6f 100644
          let mut borrowed_surface = self.surface.borrow_mut();
          let Some(surface) = borrowed_surface.as_mut() else {
              // Nothing to render
-@@ -196,22 +247,332 @@ impl super::WinitCompatibleRenderer for WinitSoftwareRenderer {
+@@ -196,22 +263,337 @@ impl super::WinitCompatibleRenderer for WinitSoftwareRenderer {
              })?;
          let winit_window = Arc::new(winit_window);
  
 -        let context = softbuffer::Context::new(winit_window.clone())
 -            .map_err(|e| format!("Error creating softbuffer context: {e}"))?;
+-
+-        let surface = softbuffer::Surface::new(&context, winit_window.clone()).map_err(
+-            |softbuffer_error| format!("Error creating softbuffer surface: {softbuffer_error}"),
+-        )?;
 +        // Like Firefox's software WebRender, present through Direct3D 11 where it works and
 +        // fall back to GDI, which SLINT_SOFTWARE_GDI also selects.
 +        #[cfg(target_os = "windows")]
@@ -113,10 +133,6 @@ index 2648583..693ce6f 100644
 +            }
 +        }
  
--        let surface = softbuffer::Surface::new(&context, winit_window.clone()).map_err(
--            |softbuffer_error| format!("Error creating softbuffer surface: {softbuffer_error}"),
--        )?;
--
 -        *self._context.borrow_mut() = Some(context);
 -        *self.surface.borrow_mut() = Some(surface);
 +        self.create_surface(winit_window.clone())?;
@@ -281,6 +297,11 @@ index 2648583..693ce6f 100644
 +
 +        pub fn window(&self) -> &Arc<winit::window::Window> {
 +            &self.window
++        }
++
++        /// Whether a frame was presented, after which GDI no longer draws into the window.
++        pub fn presented(&self) -> bool {
++            self.presented
 +        }
 +
 +        pub fn render(

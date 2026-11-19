@@ -43,6 +43,7 @@ interface FlectarBridge {
   notify: (sender: string, subject: string, threadId: number, messageId: number) => void;
   withdrawPrivacyConsent: () => void;
   requestNotificationPermission: () => void;
+  setAppPreferredLanguage: (language: string) => void;
 }
 
 interface ImeCursor {
@@ -668,6 +669,9 @@ struct Index {
       requestNotificationPermission: (): void => {
         this.requestNotificationPermission();
       },
+      setAppPreferredLanguage: (language: string): void => {
+        this.updateAppPreferredLanguage(language);
+      },
     });
     this.applySystemColorScheme(this.colorMode);
     this.applyReduceMotion();
@@ -1192,6 +1196,19 @@ struct Index {
       this.persistNotificationAsked(false);
       this.setNotificationAvailability(0);
       hilog.error(0x0000, LOG_TAG, 'notification permission request failed: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  // Keep ArkTS resource loading aligned with the Slint language setting. The
+  // system applies a chosen language at once, and 'default', which follows
+  // the system language, from the next cold start.
+  private updateAppPreferredLanguage(language: string): void {
+    try {
+      i18n.System.setAppPreferredLanguage(language);
+      hilog.info(0x0000, LOG_TAG, 'app preferred language set: %{public}s', language);
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'could not set app preferred language: %{public}s',
         (error as BusinessError).message);
     }
   }

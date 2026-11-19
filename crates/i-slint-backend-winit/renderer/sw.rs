@@ -107,7 +107,9 @@ impl WinitSoftwareRenderer {
     }
 
     /// Renders and presents through the swap chain, if there is one. After a failed present,
-    /// for example when the device was removed, softbuffer draws from then on.
+    /// for example when the device was removed, a new swap chain takes over. GDI no longer
+    /// draws into a window that a flip model swap chain presented to, so softbuffer only takes
+    /// over when no frame was presented yet.
     #[cfg(target_os = "windows")]
     fn render_to_swap_chain(
         &self,
@@ -119,11 +121,25 @@ impl WinitSoftwareRenderer {
         let Err(error) = presenter.render(&self.renderer, width, height) else {
             return Ok(true);
         };
+        let winit_window = presenter.window().clone();
+        let presented = presenter.presented();
+        // A window takes one flip model swap chain at a time.
+        *swap_chain = None;
+        if presented {
+            i_slint_core::debug_log!(
+                "Slint: Presenting through DXGI failed, making a new swap chain: {error}"
+            );
+            let mut presenter = dxgi::SwapChainPresenter::new(winit_window)
+                .map_err(|e| format!("Error making a new DXGI swap chain: {e}"))?;
+            presenter
+                .render(&self.renderer, width, height)
+                .map_err(|e| format!("Error presenting through a new DXGI swap chain: {e}"))?;
+            *swap_chain = Some(presenter);
+            return Ok(true);
+        }
         i_slint_core::debug_log!(
             "Slint: Presenting through DXGI failed, drawing with GDI: {error}"
         );
-        let winit_window = presenter.window().clone();
-        *swap_chain = None;
         drop(swap_chain);
         self.create_surface(winit_window)?;
         self.renderer.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
@@ -426,6 +442,11 @@ mod dxgi {
 
         pub fn window(&self) -> &Arc<winit::window::Window> {
             &self.window
+        }
+
+        /// Whether a frame was presented, after which GDI no longer draws into the window.
+        pub fn presented(&self) -> bool {
+            self.presented
         }
 
         pub fn render(
