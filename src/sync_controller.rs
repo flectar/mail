@@ -1124,7 +1124,11 @@ fn show_preferences(
         state.borrow_mut().mail_groups.clear();
         refresh_rows_only(app, state, runtime);
     }
-    apply_mail_grouping(app, state, runtime, settings.mail_grouping());
+    if apply_mail_grouping(app, state, runtime, settings.mail_grouping()) {
+        // The app icon's count counts in the grouping, as after the setting
+        // changes here.
+        crate::notifications::recount();
+    }
     app.set_show_account_markers(settings.show_account_badges);
     app.global::<SyncUi>()
         .set_sync_sign_ins(settings.sync_sign_ins);
