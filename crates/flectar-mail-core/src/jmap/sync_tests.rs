@@ -41,6 +41,7 @@ async fn fixture() -> (tempfile::TempDir, SyncCtx, AccountConfig) {
         paths: Arc::new(Paths::for_tests(dir.path())),
         tokens,
         credentials,
+        pace: Default::default(),
     };
     let mut config = ctx
         .db

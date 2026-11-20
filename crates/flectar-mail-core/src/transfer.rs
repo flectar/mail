@@ -200,10 +200,19 @@ impl crate::Core {
                 run.imap.remove(&transfer.source_account_id);
                 run.jmap.remove(&transfer.source_account_id);
                 if retryable(&error) && transfer.attempts + 1 < ATTEMPTS {
-                    let wait = FIRST_WAIT_MS
+                    let mut wait = FIRST_WAIT_MS
                         .saturating_mul(1 << transfer.attempts.clamp(0, 16))
                         .min(LONGEST_WAIT_MS);
-                    let at = now_ms() + wait;
+                    // A wait the server named is kept.
+                    if let CoreError::RateLimited {
+                        retry_after: Some(named),
+                        ..
+                    } = &error
+                    {
+                        let named = (*named).min(crate::sync::pacing::NAMED_MOST);
+                        wait = wait.max(i64::try_from(named.as_millis()).unwrap_or(i64::MAX));
+                    }
+                    let at = now_ms().saturating_add(wait);
                     let reason = error.to_string();
                     tracing::warn!(id, %error, attempt = transfer.attempts + 1, "a mail transfer failed; trying again");
                     self.db
@@ -751,7 +760,7 @@ fn transfer_sources(conn: &Connection, target: &ActionTarget) -> Result<Vec<NewT
 /// asked to slow down.
 fn retryable(error: &CoreError) -> bool {
     match error {
-        CoreError::Network(_) | CoreError::Offline => true,
+        CoreError::Network(_) | CoreError::Offline | CoreError::RateLimited { .. } => true,
         CoreError::Imap(reason) | CoreError::Jmap(reason) => queue::is_connection_failure(reason),
         _ => false,
     }

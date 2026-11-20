@@ -198,6 +198,7 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
         paths,
         tokens,
         credentials,
+        pace: Default::default(),
     };
     let (mut config, action_id, inbox_id, archived_message_id) = ctx
         .db
@@ -521,6 +522,7 @@ async fn deleted_mail_context(port: u16) -> (tempfile::TempDir, SyncCtx, Account
             Arc::new(crate::oauth::redirect::LoopbackRedirectBroker::default()),
         ),
         credentials,
+        pace: Default::default(),
     };
     let (mut config, folder) = ctx
         .db
@@ -2612,4 +2614,187 @@ async fn subscriptions_come_from_list_subscribed_when_lsub_is_refused() {
 async fn without_subscriptions_on_the_server_every_folder_is_listed() {
     let (paths, _) = listed_without_lsub(false).await;
     assert_eq!(paths, ["Archive2", "INBOX", "Projects", "Shared"]);
+}
+
+/// A server that turns down every sign-in with `reply`, counting them.
+async fn refusing_server(reply: &'static str) -> (u16, Arc<std::sync::atomic::AtomicUsize>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let sign_ins = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = sign_ins.clone();
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = listener.accept().await {
+            let counted = counted.clone();
+            tokio::spawn(async move {
+                let Ok(tls) = tls_acceptor().accept(tcp).await else {
+                    return;
+                };
+                let mut stream = BufReader::new(tls);
+                if stream.write_all(b"* OK fixture ready\r\n").await.is_err() {
+                    return;
+                }
+                loop {
+                    let mut line = String::new();
+                    if !matches!(stream.read_line(&mut line).await, Ok(1..)) {
+                        return;
+                    }
+                    let fields: Vec<_> = line.split_whitespace().collect();
+                    let (Some(tag), Some(command)) = (fields.first(), fields.get(1)) else {
+                        return;
+                    };
+                    let response = match command.to_ascii_uppercase().as_str() {
+                        "CAPABILITY" => {
+                            format!("* CAPABILITY IMAP4rev1\r\n{tag} OK capability\r\n")
+                        }
+                        "LOGIN" => {
+                            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            format!("{tag} {reply}\r\n")
+                        }
+                        "LOGOUT" => format!("* BYE closing\r\n{tag} OK logout\r\n"),
+                        _ => format!("{tag} BAD unexpected\r\n"),
+                    };
+                    if stream.write_all(response.as_bytes()).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    (port, sign_ins)
+}
+
+/// Waits until the account waits for its server, and returns until when.
+async fn throttled(
+    events: &mut tokio::sync::broadcast::Receiver<CoreEvent>,
+    account_id: i64,
+) -> i64 {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if let Ok(CoreEvent::AccountState {
+                account_id: id,
+                sync_state,
+                sync_retry_at: Some(at),
+                ..
+            }) = events.recv().await
+                && id == account_id
+                && sync_state == "throttled"
+            {
+                return at;
+            }
+        }
+    })
+    .await
+    .expect("the account never waited for its server")
+}
+
+/// The sync actor of `config`, with channels to it.
+fn spawn_actor(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+) -> (mpsc::Sender<SyncCmd>, tokio::task::JoinHandle<()>) {
+    let (tx, rx) = mpsc::channel(8);
+    let (pool_tx, _) = mpsc::channel(1);
+    let (hist_tx, _) = mpsc::channel(1);
+    let (_, settings_rx) = watch::channel(config.settings.clone());
+    let actor = tokio::spawn(run_actor(
+        ctx.clone(),
+        config.clone(),
+        rx,
+        pool_tx,
+        hist_tx,
+        settings_rx,
+    ));
+    (tx, actor)
+}
+
+async fn check_now(tx: &mpsc::Sender<SyncCmd>) -> std::result::Result<(), String> {
+    let (done, answer) = oneshot::channel();
+    tx.send(SyncCmd::SyncNow {
+        complete: Some(done),
+    })
+    .await
+    .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), answer)
+        .await
+        .expect("the check was never answered")
+        .unwrap()
+}
+
+#[tokio::test]
+async fn an_account_with_too_many_connections_waits_and_opens_fewer() {
+    // Gmail's words when an account has too many connections open.
+    let (port, sign_ins) =
+        refusing_server("NO [ALERT] Too many simultaneous connections. (Failure)").await;
+    let (_dir, ctx, config, _) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let mut events = ctx.bus.subscribe();
+    let (tx, actor) = spawn_actor(&ctx, &config);
+
+    // The account waits a minute, give or take a quarter, and says so.
+    let retry_at = throttled(&mut events, account_id).await;
+    assert!(
+        (44_000..=76_000).contains(&(retry_at - now_ms())),
+        "{retry_at}"
+    );
+    let account = ctx
+        .db
+        .read(move |conn| repo::accounts::get(conn, account_id))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(account.sync_state, "throttled");
+    assert_eq!(account.sync_retry_at, Some(retry_at));
+    assert!(
+        account
+            .sync_error
+            .is_some_and(|error| error.contains("Too many simultaneous connections"))
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(sign_ins.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    // Sync chose that wait, so a check someone asks for goes ahead. The
+    // server still refuses, and the next wait is twice as long.
+    let answer = check_now(&tx).await.unwrap_err();
+    assert!(
+        answer.contains("Too many simultaneous connections"),
+        "{answer}"
+    );
+    assert_eq!(sign_ins.load(std::sync::atomic::Ordering::SeqCst), 2);
+    let retry_at = throttled(&mut events, account_id).await;
+    assert!(
+        (89_000..=151_000).contains(&(retry_at - now_ms())),
+        "{retry_at}"
+    );
+    // Each refusal leaves the account one fewer connection for work in the
+    // background, down to one.
+    assert_eq!(ctx.pace.account(account_id).bulk_allowed(), 1);
+
+    tx.send(SyncCmd::Shutdown).await.unwrap();
+    actor.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_wait_the_server_named_is_kept_when_someone_asks_for_a_check() {
+    // Exchange Online names its wait.
+    let (port, sign_ins) =
+        refusing_server("NO Request is throttled. Suggested Backoff Time: 600000 milliseconds")
+            .await;
+    let (_dir, ctx, config, _) = deleted_mail_context(port).await;
+    let mut events = ctx.bus.subscribe();
+    let (tx, actor) = spawn_actor(&ctx, &config);
+
+    let retry_at = throttled(&mut events, config.id).await;
+    assert!(
+        (599_000..=631_000).contains(&(retry_at - now_ms())),
+        "{retry_at}"
+    );
+    // The check is answered at once with why the account waits, and the
+    // server isn't asked again.
+    let answer = check_now(&tx).await.unwrap_err();
+    assert!(answer.contains("Suggested Backoff Time"), "{answer}");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(sign_ins.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    tx.send(SyncCmd::Shutdown).await.unwrap();
+    actor.await.unwrap();
 }

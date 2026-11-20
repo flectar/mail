@@ -17,7 +17,7 @@ import { MessageColors } from "../message-colors.slint";
 import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
-import { AccountRow, CalendarConnectionRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
+import { AccountProblem, AccountRow, CalendarConnectionRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
 import { AccountCalendars } from "../components/account-calendars.slint";
 import { AccountStatusText } from "../components/account-status.slint";
 import { ReadReceipts } from "../read-receipts.slint";
@@ -672,6 +672,8 @@ export component SettingsDialog inherits Rectangle {
     callback save_account_sent_copy_policy(int, string);
     callback save_account_keep_on_server(int, string);
     callback save_account_subscribed_folders_only(int, bool);
+    callback save_account_check_interval(int, string);
+    callback save_account_push(int, bool);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -774,6 +776,15 @@ export component SettingsDialog inherits Rectangle {
         @tr("6 months · Recommended"),
         @tr("1 year"),
         @tr("All mail"),
+    ];
+    private property <[string]> check-interval-options: [
+        @tr("Same as all accounts"),
+        @tr("Every minute"),
+        @tr("Every 5 minutes"),
+        @tr("Every 15 minutes"),
+        @tr("Every 30 minutes"),
+        @tr("Every hour"),
+        @tr("Only when I ask"),
     ];
     private property <[string]> keep-on-server-options: [
         @tr("Always"),
@@ -1007,6 +1018,17 @@ export component SettingsDialog inherits Rectangle {
                 : index == 2 ? "sixMonths"
                 : index == 3 ? "oneYear" : "all",
         );
+    }
+
+    pure function check-interval-index(value: string) -> int {
+        return value == "1" ? 1 : value == "5" ? 2 : value == "15" ? 3
+            : value == "30" ? 4 : value == "60" ? 5 : value == "manual" ? 6 : 0;
+    }
+
+    function select-check-interval(account-id: int, index: int) {
+        root.save_account_check_interval(account-id,
+            index == 1 ? "1" : index == 2 ? "5" : index == 3 ? "15"
+            : index == 4 ? "30" : index == 5 ? "60" : index == 6 ? "manual" : "app");
     }
 
     pure function keep-on-server-index(value: string) -> int {
@@ -2759,13 +2781,19 @@ export component SettingsDialog inherits Rectangle {
                                 private property <bool> has-sent-copy: account.provider != "gmail" && account.mail_protocol == "imap";
                                 private property <bool> has-server-copies: account.mail_protocol == "pop3";
                                 private property <bool> has-subscriptions: account.mail_protocol == "imap";
+                                // IMAP IDLE and JMAP's event source; Gmail and POP3 servers don't push.
+                                private property <bool> has-push: account.mail_protocol == "imap" || account.mail_protocol == "jmap";
                                 private property <bool> unencrypted: account.incoming_security == "none" || account.smtp_security == "none";
+                                // Where the rows about checking for mail end.
+                                private property <length> checks-bottom: self.has-push ? push-row.y + push-row.height : check-row.y + check-row.height;
                                 // Preference rows keep their designed gaps below the last select row.
                                 private property <length> profile-y: self.has-subscriptions
                                     ? subscribed-row.y + subscribed-row.height + (root.compact ? 10px : 16px)
                                     : self.has-server-copies
                                         ? server-copies-note.y + server-copies-note.height + (root.compact ? 10px : 8px)
-                                        : history-row.y + history-row.height + (root.compact ? 9px : 1px);
+                                        : self.has-push
+                                            ? self.checks-bottom + (root.compact ? 10px : 16px)
+                                            : self.checks-bottom + (root.compact ? 9px : 1px);
                                 height: calendars.y + calendars.height + (root.compact ? 18px : 16px);
                                 can-drop(event) => root.read_account_transfer(event.data) != "" ? DragAction.move : DragAction.none;
                                 dropped(event) => {
@@ -2829,7 +2857,7 @@ export component SettingsDialog inherits Rectangle {
                                             spacing: 2px;
                                             account-name := Text { height: max(19px, self.preferred-height); text: account.name; color: root.heading; font-size: TypeScale.body-large; font-weight: 700; overflow: elide; }
                                             account-email := Text { height: max(16px, self.preferred-height); text: account.email; color: root.secondary-text; font-size: TypeScale.caption; overflow: elide; }
-                                            account-state := Text { height: max(16px, self.preferred-height); text: account.status == "offline" ? @tr("Couldn't check mail · Retrying automatically") : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Checking for new mail…") : account.status == "idle" ? (account.mail_protocol == "gmail" ? @tr("Connected · Gmail") : account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : account.mail_protocol == "pop3" ? (drop-target.unencrypted ? @tr("Connected without encryption · POP3 + SMTP") : @tr("Connected · POP3 + SMTP")) : drop-target.unencrypted ? @tr("Connected without encryption · IMAP + SMTP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : account.status == "idle" && drop-target.unencrypted ? AppTheme.destructive : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                                            account-state := Text { height: max(16px, self.preferred-height); text: account.status == "offline" ? @tr("Couldn't check mail · Retrying automatically") : account.status == "throttled" ? (account.resume_at == "" ? AccountStatusText.problem(AccountProblem.waiting) : @tr("two parts of a status line" => "{0} · {1}", AccountStatusText.problem(AccountProblem.waiting), AccountStatusText.checks-again(account.resume_day, account.resume_at))) : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Checking for new mail…") : account.status == "idle" ? (account.mail_protocol == "gmail" ? @tr("Connected · Gmail") : account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : account.mail_protocol == "pop3" ? (drop-target.unencrypted ? @tr("Connected without encryption · POP3 + SMTP") : @tr("Connected · POP3 + SMTP")) : drop-target.unencrypted ? @tr("Connected without encryption · IMAP + SMTP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : account.status == "idle" && drop-target.unencrypted ? AppTheme.destructive : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                                             if account.checked_at != "" : Text { height: max(16px, self.preferred-height); text: AccountStatusText.last-checked(account.checked_day, account.checked_at); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                                         }
                                         AccountActions {
@@ -2874,8 +2902,10 @@ export component SettingsDialog inherits Rectangle {
                                         x: root.compact ? 24px : 32px;
                                         y: account-header.height + 2px;
                                         width: parent.width - (root.compact ? 48px : 64px);
-                                        text: account.sync_error == "" ? "" : @tr("Mail synchronization error: {}", account.sync_error);
-                                        text-color: AppTheme.destructive;
+                                        text: account.sync_error == "" ? ""
+                                            : account.status == "throttled" ? account.sync_error
+                                            : @tr("Mail synchronization error: {}", account.sync_error);
+                                        text-color: account.status == "throttled" ? root.faint-text : AppTheme.destructive;
                                         font-size: TypeScale.caption;
                                     }
                                     Rectangle {
@@ -2901,10 +2931,43 @@ export component SettingsDialog inherits Rectangle {
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-mail-history(account.id, index); }
                                     }
+                                    check-row := SettingsSelectRow {
+                                        x: root.compact ? 24px : 32px;
+                                        y: history-row.y + history-row.height + (root.compact ? 7px : 5px);
+                                        width: parent.width - (root.compact ? 48px : 64px);
+                                        compact: root.compact;
+                                        title: @tr("Check for new mail");
+                                        description: account.check_interval == "manual" ? @tr("When the app starts, and when you check for new mail.")
+                                            : account.check_interval == "app" ? @tr("As often as set in General.")
+                                            : @tr("How often this account checks its server.");
+                                        choices: root.check-interval-options;
+                                        selected-index: root.check-interval-index(account.check_interval);
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { root.select-check-interval(account.id, index); }
+                                    }
+                                    push-row := SettingsSwitchRow {
+                                        visible: drop-target.has-push;
+                                        // A compact switch row pads its texts 8px more than a
+                                        // select row; this lines them up.
+                                        x: root.compact ? 16px : 32px;
+                                        y: check-row.y + check-row.height + (root.compact ? 7px : 5px);
+                                        width: parent.width - (root.compact ? 40px : 64px);
+                                        compact: root.compact;
+                                        title: @tr("Instant updates");
+                                        description: account.check_interval == "manual"
+                                            ? @tr("Off while the account checks only when you ask.")
+                                            : @tr("The server tells Flectar Mail of new mail as soon as it arrives.");
+                                        checked: account.push && account.check_interval != "manual";
+                                        enabled: account.check_interval != "manual";
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => { root.save_account_push(account.id, checked); }
+                                    }
                                     sent-copy-row := SettingsSelectRow {
                                         visible: drop-target.has-sent-copy;
                                         x: root.compact ? 24px : 32px;
-                                        y: history-row.y + history-row.height + (root.compact ? 7px : 5px);
+                                        y: drop-target.checks-bottom + (root.compact ? 7px : 5px);
                                         width: parent.width - (root.compact ? 48px : 64px);
                                         compact: root.compact;
                                         title: @tr("Sent copies");
@@ -2923,7 +2986,7 @@ export component SettingsDialog inherits Rectangle {
                                         // A compact switch row pads its texts 8px more than a
                                         // select row; this lines them up.
                                         x: root.compact ? 16px : 32px;
-                                        y: (drop-target.has-sent-copy ? sent-copy-row.y + sent-copy-row.height : history-row.y + history-row.height)
+                                        y: (drop-target.has-sent-copy ? sent-copy-row.y + sent-copy-row.height : drop-target.checks-bottom)
                                             + (root.compact ? 7px : 5px);
                                         width: parent.width - (root.compact ? 40px : 64px);
                                         compact: root.compact;
@@ -2938,7 +3001,7 @@ export component SettingsDialog inherits Rectangle {
                                     server-copies-row := SettingsSelectRow {
                                         visible: drop-target.has-server-copies;
                                         x: root.compact ? 24px : 32px;
-                                        y: history-row.y + history-row.height + (root.compact ? 7px : 5px);
+                                        y: drop-target.checks-bottom + (root.compact ? 7px : 5px);
                                         width: parent.width - (root.compact ? 48px : 64px);
                                         compact: root.compact;
                                         title: @tr("Keep mail on the server");

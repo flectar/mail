@@ -236,6 +236,11 @@ pub(super) fn apply_connected_accounts(
             let profile = presentation.profile(account.id);
             let (checked_day, checked_at) =
                 account_status::last_checked(account.caught_up_at, &now);
+            let (resume_day, resume_at) = if account.sync_state == "throttled" {
+                account_status::checks_again(account.sync_retry_at, &now)
+            } else {
+                (-1, String::new())
+            };
             Some(AccountRow {
                 id: i32::try_from(account.id).ok()?,
                 drag_key: account.id.to_string().into(),
@@ -247,6 +252,8 @@ pub(super) fn apply_connected_accounts(
                 sync_error: account.sync_error.clone().unwrap_or_default().into(),
                 checked_day,
                 checked_at: checked_at.into(),
+                resume_day,
+                resume_at: resume_at.into(),
                 initials: avatar_initials(&name).into(),
                 avatar: avatar
                     .map(|images| slint_image(&images.regular))
@@ -284,6 +291,8 @@ pub(super) fn apply_connected_accounts(
                 sent_copy_policy: config.settings.sent_copy_policy.as_str().into(),
                 keep_on_server: config.settings.keep_on_server.as_str().into(),
                 subscribed_folders_only: config.settings.subscribed_folders_only,
+                check_interval: check_interval_choice(config.settings.check_interval).into(),
+                push: config.settings.push,
                 server_keeps_mail_days: account
                     .server_keeps_mail_days
                     .and_then(|days| i32::try_from(days).ok())
@@ -603,24 +612,48 @@ pub(super) fn prefer_shown_compose_account(app: &AppWindow, state: &InboxState) 
     }
 }
 
+/// How Settings names an account's check interval: "app", the minutes, or
+/// "manual".
+fn check_interval_choice(interval: CheckInterval) -> String {
+    match interval {
+        CheckInterval::App => "app".to_owned(),
+        CheckInterval::Minutes(minutes) => minutes.to_string(),
+        CheckInterval::Manual => "manual".to_owned(),
+    }
+}
+
+/// The interval Settings' choice `value` names.
+pub(super) fn check_interval_from_choice(value: &str) -> Option<CheckInterval> {
+    let interval = match value {
+        "app" => CheckInterval::App,
+        "manual" => CheckInterval::Manual,
+        minutes => CheckInterval::Minutes(minutes.parse().ok()?),
+    };
+    interval.is_offered().then_some(interval)
+}
+
 /// Accounts' checks moved on: their states, and when a check last caught
 /// each Inbox up. Only the status shown for them changes.
 pub(super) fn apply_account_states(
     app: &AppWindow,
     inbox_state: &Rc<RefCell<InboxState>>,
-    states: &HashMap<i64, (String, Option<String>)>,
+    states: &HashMap<i64, crate::startup::AccountSyncState>,
     caught_up: &HashMap<i64, i64>,
 ) {
     let mut state_guard = inbox_state.borrow_mut();
     let mut changed = false;
     for account in &mut state_guard.connected_accounts {
-        if let Some((sync_state, sync_error)) = states.get(&account.id) {
-            if account.sync_state != *sync_state {
-                account.sync_state.clone_from(sync_state);
+        if let Some(synced) = states.get(&account.id) {
+            if account.sync_state != synced.state {
+                account.sync_state.clone_from(&synced.state);
                 changed = true;
             }
-            if account.sync_error != *sync_error {
-                account.sync_error.clone_from(sync_error);
+            if account.sync_error != synced.error {
+                account.sync_error.clone_from(&synced.error);
+                changed = true;
+            }
+            if account.sync_retry_at != synced.retry_at {
+                account.sync_retry_at = synced.retry_at;
                 changed = true;
             }
         }
