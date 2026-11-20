@@ -729,6 +729,7 @@ fn reset(app: &AppWindow) {
     app.set_mail_sidebar_collapsed(false);
     app.set_active_mail_profile(MailProfileRow::default());
     app.invoke_close_settings();
+    app.set_settings_open_account(-1);
     app.set_contact_source("Personal · jamie.rivera@example.com".into());
     app.set_contact_sync(ContactSyncState::Pending);
     app.set_settings_tab("General".into());
@@ -1099,6 +1100,9 @@ fn states() -> Vec<State> {
         state("import error", |app| open_import(app, "error")),
         state("settings profile picker", |app| {
             app.set_settings_tab("Accounts".into());
+            // The second account's card, which has no profile, shows its
+            // settings.
+            app.set_settings_open_account(2);
             app.invoke_open_settings();
             press(app, "No profile");
         }),

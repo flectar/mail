@@ -1426,6 +1426,8 @@ export component AppWindow inherits Window {
     in property <bool> privacy_consent_withdrawable: false;
     // An account the sidebar asked to sign in again, until Settings shows it.
     private property <int> settings-sign-in-account: -1;
+    // The account whose card Settings shows open, or -1 for none.
+    in-out property <int> settings-open-account: -1;
     changed settings_tab => { TabsUi.navigated(); }
     // The active tab saves where the mail view is once it settles.
     changed selected_scope => { TabsUi.navigated(); }
@@ -2020,6 +2022,7 @@ export component AppWindow inherits Window {
                 root.open-settings();
             }
             settings_sign_in_account <=> root.settings-sign-in-account;
+            settings_open_account <=> root.settings-open-account;
             accent: root.accent;
             accent-soft: root.accent-soft;
             avatar-bg: root.avatar-bg;
@@ -2354,6 +2357,7 @@ export component AppWindow inherits Window {
             close-requested => { root.close-settings(); }
             settings_tab <=> root.settings_tab;
             sign-in-account <=> root.settings-sign-in-account;
+            open-account <=> root.settings-open-account;
             theme_mode <=> root.theme_mode;
             show_avatars <=> root.show_avatars;
             compact_rows <=> root.mail_compact_rows;

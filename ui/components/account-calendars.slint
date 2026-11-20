@@ -251,18 +251,30 @@ export component AccountCalendars inherits VerticalLayout {
                 wrap: word-wrap;
             }
         }
-        if !root.compact && root.can-connect-provider : Button {
-            width: self.content-width;
-            height: 34px;
-            text: root.provider-label;
-            enabled: root.provider-actions-enabled;
-            clicked => { root.connect-provider(); }
+        // The buttons sit on the title's line, as a settings row's
+        // control does.
+        if !root.compact && root.can-connect-provider : Rectangle {
+            width: connect.width;
+            height: 20px;
+            connect := Button {
+                y: (parent.height - self.height) / 2;
+                width: self.content-width;
+                height: 34px;
+                text: root.provider-label;
+                enabled: root.provider-actions-enabled;
+                clicked => { root.connect-provider(); }
+            }
         }
-        if !root.compact : Button {
-            width: self.content-width;
-            height: 34px;
-            text: @tr("Add CalDAV calendar");
-            clicked => { root.add-caldav(); }
+        if !root.compact : Rectangle {
+            width: add.width;
+            height: 20px;
+            add := Button {
+                y: (parent.height - self.height) / 2;
+                width: self.content-width;
+                height: 34px;
+                text: @tr("Add CalDAV calendar");
+                clicked => { root.add-caldav(); }
+            }
         }
     }
 
