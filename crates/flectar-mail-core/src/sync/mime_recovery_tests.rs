@@ -213,6 +213,7 @@ async fn fixture(behavior: Behavior) -> (Fixture, Option<Session>) {
         paths,
         tokens,
         credentials,
+        pace: Default::default(),
     };
     let (mut config, folder) = ctx
         .db

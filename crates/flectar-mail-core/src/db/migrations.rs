@@ -68,6 +68,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/049_folder_since.sql")),
     Migration::Plain(include_str!("migrations/050_rule_tabs.sql")),
     Migration::Plain(include_str!("migrations/051_message_translations.sql")),
+    Migration::Plain(include_str!("migrations/052_sync_retry_at.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

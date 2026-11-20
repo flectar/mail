@@ -319,6 +319,7 @@ mod tests {
             mail_protocol: MailProtocol::Imap,
             sync_state: state.into(),
             sync_error: error.map(str::to_owned),
+            sync_retry_at: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
             caught_up_at: None,

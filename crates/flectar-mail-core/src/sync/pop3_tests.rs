@@ -251,6 +251,7 @@ async fn fixture(maildrop: Vec<Stored>) -> Fixture {
             Arc::new(crate::oauth::redirect::LoopbackRedirectBroker::default()),
         ),
         credentials,
+        pace: Default::default(),
     };
     let mut settings = AccountSettings::new(MailConnectionSettings::new(
         ConnectionSecurity::None,
@@ -618,7 +619,7 @@ async fn a_busy_mailbox_and_a_login_delay_are_retried_quietly() {
     for reply in ["-ERR [IN-USE] locked\r\n", "-ERR [LOGIN-DELAY] wait\r\n"] {
         fixture.server.lock().unwrap().pass_reply = Some(reply);
         assert!(
-            matches!(fixture.sync().await, Err(Failure::Busy(_))),
+            matches!(fixture.sync().await, Err(Failure::Busy(..))),
             "{reply}"
         );
     }
@@ -626,6 +627,32 @@ async fn a_busy_mailbox_and_a_login_delay_are_retried_quietly() {
     assert!(matches!(fixture.sync().await, Err(Failure::Credentials(_))));
     fixture.server.lock().unwrap().pass_reply = Some("-ERR no\r\n");
     assert!(matches!(fixture.sync().await, Err(Failure::Unexplained(_))));
+}
+
+#[tokio::test]
+async fn too_many_connections_waits_and_is_never_the_password() {
+    let fixture = fixture(vec![recent("a", "A")]).await;
+    for (reply, kind) in [
+        // Dovecot 2.3, and a server that gives no code at all.
+        (
+            "-ERR [SYS/TEMP] Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)\r\n",
+            LimitKind::Connections,
+        ),
+        (
+            "-ERR Too many connections, try again later\r\n",
+            LimitKind::Connections,
+        ),
+        ("-ERR Rate limit hit\r\n", LimitKind::Requests),
+    ] {
+        fixture.server.lock().unwrap().pass_reply = Some(reply);
+        match fixture.sync().await {
+            Err(Failure::Busy(_, found)) => assert_eq!(found, kind, "{reply}"),
+            other => panic!("{reply}: {other:?}"),
+        }
+    }
+    // A refused password stays one, whatever else it says.
+    fixture.server.lock().unwrap().pass_reply = Some("-ERR [AUTH] Too many connections\r\n");
+    assert!(matches!(fixture.sync().await, Err(Failure::Credentials(_))));
 }
 
 #[tokio::test]
