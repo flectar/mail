@@ -120,6 +120,13 @@ build provenance under `pdfium-licenses` beside the private desktop library,
 Android assets at `licenses/PDFium`, and iOS bundle resources at `Licenses/PDFium`.
 PDFium's third-party components retain their respective licenses.
 
+The Flatpak builds the same PDFium release from source instead, with the
+revisions pinned in
+[`packaging/flatpak/pdfium.yml`](packaging/flatpak/pdfium.yml), and links the
+Flatpak runtime's FreeType, HarfBuzz, ICU, Little CMS, libjpeg-turbo, libpng,
+OpenJPEG and zlib. It installs PDFium's `LICENSE` and the licenses of the
+`third_party` code it compiles in under `share/licenses/flectar-mail/pdfium`.
+
 The OpenHarmony package prefers a source build from the pinned
 `OpenHarmonyPCDeveloper/pdfium` revision in
 [`platform/ohos/scripts/build-pdfium-source.sh`](platform/ohos/scripts/build-pdfium-source.sh).

@@ -171,29 +171,23 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 android_version_code(version)
 
-    def test_flatpak_pdfium_archive_keeps_expected_layout(self):
-        manifest = (
-            SCRIPTS.parent / "packaging/flatpak/com.flectar.mail.yml"
-        ).read_text()
-        self.assertIn(
-            "install -Dm0755 pdfium-runtime/lib/libpdfium.so "
-            "/app/lib/flectar-mail/libpdfium.so",
-            manifest,
-        )
-        # Each Flatpak architecture gets the archive the other packages pin.
+    def test_flatpak_pdfium_builds_the_pinned_release(self):
+        module = (SCRIPTS.parent / "packaging/flatpak/pdfium.yml").read_text()
+        # The Flatpaks build from source the PDFium branch that the other
+        # packages download, so every package previews PDFs the same way.
         pinned = load_script("stage-pdfium")
-        for target, arch in (("linux-x64", "x86_64"), ("linux-arm64", "aarch64")):
-            with self.subTest(target=target):
-                checksum = pinned.ASSETS[target][0]
-                self.assertIn(
-                    f"/{pinned.RELEASE.replace('/', '%2F')}/pdfium-{target}.tgz\n"
-                    f"        sha256: {checksum}\n"
-                    "        dest: pdfium-runtime\n"
-                    "        strip-components: 0\n"
-                    "        only-arches:\n"
-                    f"          - {arch}\n",
-                    manifest,
-                )
+        self.assertIn(
+            "  - type: git\n    url: https://pdfium.googlesource.com/pdfium\n"
+            f"    # branch {pinned.RELEASE}\n    commit: ",
+            module,
+        )
+        self.assertIn(f"DEPS file of\n# the {pinned.RELEASE} branch", module)
+        self.assertIn("install -Dm0755 out/Release/libpdfium.so /app/lib/flectar-mail/libpdfium.so", module)
+        for manifest in ("packaging/flatpak/com.flectar.mail.yml", "packaging/flathub/com.flectar.mail.yml"):
+            text = (SCRIPTS.parent / manifest).read_text()
+            with self.subTest(manifest=manifest):
+                self.assertIn("\nmodules:\n  # PDFium built from source; the app checks the PDF preview against it below.\n  - pdfium.yml\n", text)
+                self.assertIn("      - python3 scripts/test-pdf-preview.py /app/bin/flectar-mail\n", text)
 
     def test_flathub_manifest_follows_the_bundle(self):
         bundle = (SCRIPTS.parent / "packaging/flatpak/com.flectar.mail.yml").read_text()
@@ -213,11 +207,19 @@ class ReleaseTests(unittest.TestCase):
                 if not line.lstrip().startswith("#"):
                     names.add(line.split(":")[0].strip())
 
-        # Flathub builds from source, so it leaves out only the prebuilt PDFium.
-        kept = [line for line in commands(bundle) if "pdf" not in line.lower()]
-        self.assertEqual(commands(template), [line.replace(" /app/lib/flectar-mail", "") for line in kept])
+        # Both build the same modules the same way, PDFium included; Flathub
+        # only leaves out the GitHub update check.
+        def modules(text):
+            return [line for line in text.split("\nmodules:\n")[1].splitlines() if line.startswith("  - ")]
+
+        self.assertEqual(modules(template), ["  - pdfium.yml", "  - name: flectar-mail"])
+        self.assertEqual(modules(template), modules(bundle))
+        self.assertEqual(commands(template), commands(bundle))
         self.assertEqual(environment(template), environment(bundle) - {"FLECTAR_UPDATE_CHECKS"})
-        self.assertNotIn("pdfium", template.split("    sources:\n")[1].lower())
+        # Flathub accepts only software built from source.
+        pdfium = flathub.PDFIUM_MODULE.read_text()
+        self.assertNotIn("type: archive", pdfium + bundle + template)
+        self.assertNotIn("pdfium-binaries", pdfium + bundle + template)
 
         commit = "0123456789abcdef0123456789abcdef01234567"
         release = flathub.manifest(tag="v0.1.0-beta.1", commit=commit)
@@ -230,14 +232,16 @@ class ReleaseTests(unittest.TestCase):
         local = flathub.manifest(local=True)
         self.assertIn("      - type: dir\n        path: .\n        skip:\n          - .artifacts\n", local)
         self.assertIn("          - .flathub-local.yml\n      - packaging/flatpak/cargo-sources.json\n", local)
+        self.assertIn("\nmodules:\n  # PDFium built from source; the app checks the PDF preview against it below.\n  - packaging/flatpak/pdfium.yml\n", local)
         self.assertNotIn("type: git", local)
         self.assertEqual(flathub.LOCAL_MANIFEST.parent, SCRIPTS.parent)
         with tempfile.TemporaryDirectory() as directory:
             flathub.write(Path(directory), tag="v0.1.0", commit=commit)
-            self.assertEqual(
-                (Path(directory) / "cargo-sources.json").read_bytes(),
-                (SCRIPTS.parent / "packaging/flatpak/cargo-sources.json").read_bytes(),
-            )
+            for name in ("cargo-sources.json", "pdfium.yml"):
+                self.assertEqual(
+                    (Path(directory) / name).read_bytes(),
+                    (SCRIPTS.parent / "packaging/flatpak" / name).read_bytes(),
+                )
 
     def test_flatpak_cargo_sources_match_lockfile(self):
         project = SCRIPTS.parent

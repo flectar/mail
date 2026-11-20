@@ -1,0 +1,88 @@
+# PDFium for the PDF preview, built from source the way Flathub's YACReader
+# package and Arch's libpdfium-nojs build it. JavaScript and XFA are left out,
+# and PDFium uses the runtime's freetype, HarfBuzz, ICU, lcms2, libjpeg,
+# libpng, OpenJPEG and zlib. Every revision below comes from the DEPS file of
+# the chromium/8044 branch, the release scripts/stage-pdfium.py downloads for
+# the other Linux packages.
+name: pdfium
+buildsystem: simple
+build-commands:
+  # Link abseil into libpdfium instead of building it as its own library.
+  - sed -i -e 's/component(/static_library(/' -e 's/is_component_build(/false/' third_party/abseil-cpp/BUILD.gn
+  # Use the runtime's ICU.
+  - mkdir -p third_party/icu
+  - ln -sf ../../build/linux/unbundle/icu.gn third_party/icu/BUILD.gn
+  - mkdir -p tools/generate_shim_headers
+  - base64 --decode generate_shim_headers.py.b64 > tools/generate_shim_headers/generate_shim_headers.py
+  # A standalone checkout has no gclient, which normally writes this file.
+  - echo 'build_with_chromium = false' > build/config/gclient_args.gni
+  - sed -i '/"\/\/third_party\/test_fonts",/s/^/#/' testing/BUILD.gn
+  - sed -i '/public_deps +=.*libjpeg_headers/s/^/# /' core/fxcodec/BUILD.gn
+  # GCC builds natively on aarch64, without a cross prefix or clang's flag.
+  - sed -i 's/"aarch64-linux-gnu-"/""/' build/toolchain/linux/BUILD.gn
+  - sed -i 's/"-mno-outline"/"-mno-outline-atomics"/' build/config/compiler/BUILD.gn
+  - >-
+    gn gen out/Release --script-executable=python3 --args='is_clang=false
+    use_sysroot=false is_debug=false symbol_level=0 pdf_enable_v8=false
+    pdf_enable_xfa=false treat_warnings_as_errors=false use_custom_libcxx=false
+    pdf_is_standalone=true is_component_build=true pdf_use_partition_alloc=false
+    pdf_use_libyuv=false pdf_bundle_freetype=false use_system_freetype=true
+    use_system_harfbuzz=true use_system_lcms2=true use_system_libjpeg=true
+    use_system_libopenjpeg2=true use_system_libpng=true use_system_zlib=true'
+  - ninja -C out/Release pdfium
+  - install -Dm0755 out/Release/libpdfium.so /app/lib/flectar-mail/libpdfium.so
+  - install -Dm0644 LICENSE /app/share/licenses/flectar-mail/pdfium/LICENSE
+  # Licenses of the code PDFium compiles in from its own third_party tree.
+  - >-
+    find third_party -maxdepth 3 \( -name 'LICENSE*' -o -name 'COPYING*' \) -type f
+    -exec install -Dm0644 {} /app/share/licenses/flectar-mail/pdfium/{} \;
+sources:
+  - type: git
+    url: https://pdfium.googlesource.com/pdfium
+    # branch chromium/8044
+    commit: f91ca5a72358bb0b00b4da9481b21fe668157614
+  - type: git
+    url: https://chromium.googlesource.com/chromium/src/build.git
+    commit: 2cd94c0abeada712aeea6906d99021913c9fc28d
+    dest: build
+  - type: git
+    url: https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp
+    commit: 435e7d977fb36fb47854a4c552c0706dad0bd7cf
+    dest: third_party/abseil-cpp
+  - type: git
+    url: https://chromium.googlesource.com/chromium/src/third_party/simdutf
+    commit: f7356eed293f8208c40b3c1b344a50bd70971983
+    dest: third_party/simdutf
+  - type: git
+    url: https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git
+    commit: beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44
+    dest: third_party/dragonbox/src
+  - type: git
+    url: https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git
+    commit: 34164f547b7df3f5d794ff67e9f885c36819ebfc
+    dest: third_party/fast_float/src
+  # Chromium's copy at the chromium/8044 branch head; gitiles serves it as base64.
+  - type: file
+    url: https://chromium.googlesource.com/chromium/src/+/f7a30920701e9b5a44c8ab55df9d21fb75e8d2e2/tools/generate_shim_headers/generate_shim_headers.py?format=TEXT
+    dest-filename: generate_shim_headers.py.b64
+    sha256: 0294e322b4ab283861162b4c3fe7c7f2de8b643afd3d9175730b2e91f0337fb9
+modules:
+  # A build tool only, so none of it stays in the app.
+  - name: gn
+    buildsystem: simple
+    cleanup:
+      - '*'
+    build-options:
+      env:
+        CXX: g++
+    build-commands:
+      - ./build/gen.py
+      - ninja -C out gn
+      - install -Dm0755 out/gn /app/bin/gn
+    sources:
+      # The gn_version in the same DEPS file.
+      - type: git
+        url: https://gn.googlesource.com/gn
+        commit: 150a9d6ba0aa7f407aa4feeabc5f03ce9aa7e04b
+        # gen.py names the version after `git describe`.
+        disable-shallow-clone: true

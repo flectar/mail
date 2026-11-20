@@ -16,6 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE = ROOT / "packaging/flathub/com.flectar.mail.yml"
 CARGO_SOURCES = ROOT / "packaging/flatpak/cargo-sources.json"
+# Shared with the bundle manifest, which lists it from the same directory.
+PDFIUM_MODULE = ROOT / "packaging/flatpak/pdfium.yml"
 LOCAL_MANIFEST = ROOT / ".flathub-local.yml"
 GIT_SOURCE = re.compile(
     r"^(?P<indent> +)- type: git\n"
@@ -46,6 +48,11 @@ def manifest(*, tag: str | None = None, commit: str | None = None, local: bool =
             raise ValueError(f"{TEMPLATE} has no cargo-sources.json source to point at")
         text = text[: match.end()] + text[match.end():].replace(
             cargo, f"{indent}- {CARGO_SOURCES.relative_to(ROOT)}\n", 1)
+        module = "\n  - pdfium.yml\n"
+        if module not in text[: match.start()]:
+            raise ValueError(f"{TEMPLATE} has no pdfium.yml module to point at")
+        text = text.replace(module, f"\n  - {PDFIUM_MODULE.relative_to(ROOT)}\n", 1)
+        match = GIT_SOURCE.search(text)
     else:
         if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?", tag or ""):
             raise ValueError(f"Expected a release tag such as v0.1.0, not {tag!r}")
@@ -59,11 +66,12 @@ def write(destination: Path, **options) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "com.flectar.mail.yml").write_text(manifest(**options), encoding="utf-8")
     shutil.copyfile(CARGO_SOURCES, destination / "cargo-sources.json")
+    shutil.copyfile(PDFIUM_MODULE, destination / "pdfium.yml")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("destination", type=Path, nargs="?", help="directory for a release's manifest and cargo-sources.json")
+    parser.add_argument("destination", type=Path, nargs="?", help="directory for a release's manifest and the files it lists")
     release = parser.add_argument_group("release")
     release.add_argument("--tag", help="release tag, such as v0.1.0")
     release.add_argument("--commit", help="the tag's full commit hash")

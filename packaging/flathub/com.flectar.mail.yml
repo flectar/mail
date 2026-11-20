@@ -31,24 +31,25 @@ cleanup:
   - '*.la'
 
 modules:
+  # PDFium built from source; the app checks the PDF preview against it below.
+  - pdfium.yml
   - name: flectar-mail
     buildsystem: simple
     build-options:
       append-path: /usr/lib/sdk/rust-stable/bin
       env:
         # The app crate's release build alone peaks near 15 GB, so crates
-        # build one at a time as in the bundle.
+        # build one at a time.
         CARGO_BUILD_JOBS: '1'
         CARGO_HOME: /run/build/flectar-mail/cargo
         CARGO_NET_OFFLINE: 'true'
-    # Flathub builds everything from source, so this build leaves out the
-    # prebuilt PDFium library that the GitHub bundle ships. Attachments that
-    # are PDFs then offer to be downloaded instead of previewed. Flathub also
-    # updates the app itself, so it leaves out the GitHub update check.
+    # Flathub updates the app itself, so this build leaves out the GitHub
+    # update check that the bundle has.
     build-commands:
       - cargo build --offline --locked --release --no-default-features --features remote-content,gpu-renderer,flatpak --bin flectar-mail
       - install -Dm0755 target/release/flectar-mail /app/bin/flectar-mail
-      - python3 scripts/linux-elf.py verify /app/bin/flectar-mail
+      - python3 scripts/test-pdf-preview.py /app/bin/flectar-mail
+      - python3 scripts/linux-elf.py verify /app/bin/flectar-mail /app/lib/flectar-mail
       - python3 scripts/stage-linux-metadata.py --flatpak _flatpak-stage
       - install -Dm0644 _flatpak-stage/usr/share/applications/com.flectar.mail.desktop /app/share/applications/com.flectar.mail.desktop
       - install -Dm0644 _flatpak-stage/usr/share/metainfo/com.flectar.mail.metainfo.xml /app/share/metainfo/com.flectar.mail.metainfo.xml
