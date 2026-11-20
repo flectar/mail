@@ -398,6 +398,29 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Free runner disk space
+        # flathub-build keeps every module's build directory, so PDFium's and
+        # the app's stay on disk beside the swap file. Some runners have a
+        # 72 GB disk; there, delete preinstalled SDKs, browsers and Docker
+        # images this job never uses, as the quality job does.
+        shell: bash
+        run: |
+          df -h /
+          if (( $(df -k --output=avail / | tail -1) < 50 * 1024 * 1024 )); then
+            sudo rm -rf \
+              /usr/local/lib/android \
+              /usr/share/dotnet \
+              /usr/local/.ghcup \
+              /usr/share/swift \
+              "${RUNNER_TOOL_CACHE:?}/CodeQL" \
+              /usr/local/share/powershell \
+              /opt/microsoft \
+              /usr/local/julia* \
+              /usr/local/share/chromium
+            sudo docker image prune --all --force > /dev/null ||
+              echo "::warning::Could not remove the preinstalled Docker images."
+            df -h /
+          fi
       - name: Install Flathub's builder
         run: |
           sudo apt-get update
@@ -432,6 +455,11 @@ jobs:
             builddir/files/share/app-info/media
           flatpak run --command=flatpak-builder-lint org.flatpak.Builder \
             --exceptions --gha-format repo repo
+      - name: Show disk and memory use
+        if: always()
+        run: |
+          df -h /
+          free -m
 
   windows:
     needs: metadata
