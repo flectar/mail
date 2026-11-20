@@ -76,7 +76,8 @@ modules:
       env:
         CXX: g++
     build-commands:
-      - ./build/gen.py
+      # gn treats warnings as errors, and newer GCC releases warn on its code.
+      - ./build/gen.py --allow-warnings
       - ninja -C out gn
       - install -Dm0755 out/gn /app/bin/gn
     sources:
