@@ -178,9 +178,11 @@ keeps trying a failing account on its own, and the marker goes away with the
 next check that works. When the sidebar is hidden, as on a phone, a red dot on
 the folders button says an account has a problem.
 
-The account's menu also tells when it last checked mail, and so does its card
-in Settings → Accounts, together with the account's state and the server's own
-words about a failure.
+The account's menu also tells when it last checked mail, and so does its card in
+Settings → Accounts, together with the account's state and the server's own
+words about a failure. A card opens to the account's settings with a click, and
+closes the one open before. **Account settings** in the account's menu in the
+sidebar opens Settings on that card.
 
 Each account can check at its own pace. In its card in Settings → Accounts,
 **Check for new mail** keeps the interval from Settings → General, or checks
@@ -336,7 +338,9 @@ CalDAV, and CardDAV. Mailbox and calendar data are stored locally, so synced
 data stays useful without a connection. The Files view browses JMAP and WebDAV
 storage, searches mail attachments, keeps files offline, and previews PDFs,
 images and text. [Contacts and CardDAV](carddav-contacts.md) describes how
-contacts are stored and synced.
+contacts are stored and synced. To sync an account's contacts with a CardDAV
+server, open its card in Settings → Accounts and choose **Connect** under
+Contacts.
 
 ## Signatures and OpenPGP
 
