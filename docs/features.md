@@ -262,7 +262,10 @@ turn it off with **Unread count on the app icon** in Settings → Notifications.
 macOS shows it on the Dock and iOS on the Home Screen icon when badges are
 allowed for Flectar Mail in its notification settings, Windows on the taskbar
 button, and Linux on docks that show counts, such as KDE Plasma's, Ubuntu Dock
-and Dash to Dock, elementary OS's and Plank.
+and Dash to Dock, elementary OS's and Plank. With **Keep running in system
+tray** on, the tray icon shows the count too on Windows and Linux, so it stays
+in sight while the window is closed. Pointing at the tray icon shows the number
+as well, except in GNOME, whose top bar has no tooltips.
 
 ## Profiles and account colors
 
