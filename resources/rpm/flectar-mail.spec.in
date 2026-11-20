@@ -22,19 +22,23 @@ Source10:       google-sans-flex-OFL.txt
 Source11:       google-sans-flex-README.md
 
 # rpmbuild derives linked ELF requirements. Slint and winit load the display
-# and font libraries at runtime, so keep those packages explicit.
-Requires:       fontconfig
+# and font libraries at runtime, so require those by soname. Package names
+# differ between RPM distributions (libX11 on Fedora, libX11-6 on openSUSE),
+# but every one of them provides the sonames. Both supported architectures
+# are 64-bit, so the soname carries the (64bit) marker.
+Requires:       libfontconfig.so.1()(64bit)
+Requires:       libX11.so.6()(64bit)
+Requires:       libX11-xcb.so.1()(64bit)
+Requires:       libXcursor.so.1()(64bit)
+Requires:       libXi.so.6()(64bit)
+Requires:       libwayland-client.so.0()(64bit)
+Requires:       libxkbcommon.so.0()(64bit)
+Requires:       libxkbcommon-x11.so.0()(64bit)
 Requires:       hicolor-icon-theme
-Requires:       libX11
-Requires:       libX11-xcb
-Requires:       libXcursor
-Requires:       libXi
-Requires:       libwayland-client
-Requires:       libxkbcommon
-Requires:       libxkbcommon-x11
 Requires:       xdg-utils
 Recommends:     gnome-keyring
-Recommends:     gnupg2
+# Fedora and Enterprise Linux name GnuPG gnupg2, openSUSE gpg2.
+Recommends:     (gnupg2 or gpg2)
 Recommends:     pinentry
 Recommends:     xdg-desktop-portal
 

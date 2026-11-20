@@ -208,7 +208,7 @@ jobs:
   rpm:
     needs: metadata
     if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
-    name: Fedora RPM build (${{ matrix.arch }}, Fedora 43 baseline)
+    name: RPM build (${{ matrix.arch }}, Fedora 43 baseline)
     strategy:
       fail-fast: false
       matrix:
@@ -287,12 +287,19 @@ jobs:
 
   rpm-test:
     needs: rpm
-    name: RPM runtime (Fedora ${{ matrix.fedora }}, ${{ matrix.arch }})
+    name: RPM runtime (${{ matrix.distro.name }}, ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        fedora: [43, 44]
+        # Every distribution the RPM supports. Enterprise Linux 9 is not one:
+        # its glibc 2.34 predates symbols the executable needs.
+        distro:
+          - { name: Fedora 43, image: 'fedora:43', id: fedora-43 }
+          - { name: Fedora 44, image: 'fedora:44', id: fedora-44 }
+          - { name: openSUSE Tumbleweed, image: 'opensuse/tumbleweed', id: opensuse-tumbleweed }
+          - { name: openSUSE Leap 16.0, image: 'opensuse/leap:16.0', id: opensuse-leap-16.0 }
+          - { name: AlmaLinux 10, image: 'almalinux:10', id: almalinux-10 }
         arch: [x64, arm64]
         include:
           - arch: x64
@@ -305,23 +312,23 @@ jobs:
         with:
           name: flectar-mail-rpm-${{ matrix.arch }}
           path: target/rpm
-      - name: Test published RPM in a clean Fedora container
+      - name: Test published RPM in a clean container
         shell: bash
         env:
-          FEDORA_VERSION: ${{ matrix.fedora }}
+          IMAGE: ${{ matrix.distro.image }}
         run: |
           mkdir -p target/rpm-test
           docker run --rm \
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/work,readonly" \
             --mount "type=bind,source=$GITHUB_WORKSPACE/target/rpm-test,target=/results" \
-            "fedora:$FEDORA_VERSION" \
+            "$IMAGE" \
             bash /work/scripts/test-rpm.sh /work/target/rpm/flectar-mail.rpm /results \
             2>&1 | tee target/rpm-test/transaction.log
       - name: Preserve RPM runtime diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: rpm-test-fedora-${{ matrix.fedora }}-${{ matrix.arch }}
+          name: rpm-test-${{ matrix.distro.id }}-${{ matrix.arch }}
           path: target/rpm-test
           if-no-files-found: error
 

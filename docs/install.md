@@ -54,6 +54,7 @@ way.
 
 ```bash
 sudo dnf install ./flectar-mail-<version>-linux-x64.rpm
+sudo zypper install --allow-unsigned-rpm ./flectar-mail-<version>-linux-x64.rpm
 flatpak install --user ./flectar-mail-<version>-linux-x64.flatpak
 flatpak run com.flectar.mail
 ```
@@ -67,14 +68,19 @@ preview read the system fonts and nothing else. There the preview can't open
 any file, so PDFs that don't embed their fonts are drawn with built-in fonts
 instead.
 
-### Fedora RPM
+### RPM
 
-The RPMs target Fedora 43 and 44 on x86_64 and aarch64. Release builds use
+The RPMs support Fedora 43 and 44, openSUSE Tumbleweed and Leap 16.0, and Red
+Hat Enterprise Linux 10 and its rebuilds, on x86_64 and aarch64. Use `dnf` on
+Fedora and Enterprise Linux, and `zypper` on openSUSE. Release builds use
 Fedora 43 as their compatibility baseline; each RPM must pass installation, PDF
-rendering, X11 and Wayland startup, and removal checks in clean containers for
-both versions before publication. Other RPM-based distributions are not yet
-tested. If Discover reports a generic conflict, run the `dnf install` command
-above and include its dependency error in your bug report.
+rendering, startup, and removal checks in clean containers of every one of
+them before publication, with AlmaLinux 10 standing in for Enterprise Linux.
+Startup is checked on X11 and Wayland, and on Wayland only for Enterprise Linux
+10, which no longer ships an X server. Enterprise Linux 9 is not supported,
+because its C library is older than the one the app needs; use the Flatpak
+there. If Discover reports a generic conflict, run the install command above
+and include its dependency error in your bug report.
 
 The older `0.1.0-alpha.7` RPM was built on Fedora 44 and cannot install on
 Fedora 43 because it requires glibc 2.43. Its Flatpak bundle is an alternative
