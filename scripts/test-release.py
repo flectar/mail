@@ -193,7 +193,19 @@ class ReleaseTests(unittest.TestCase):
         bundle = (SCRIPTS.parent / "packaging/flatpak/com.flectar.mail.yml").read_text()
         template = flathub.TEMPLATE.read_text()
         # Permissions, runtime and cleanup must not drift between the two.
-        self.assertEqual(template.split("\nmodules:\n")[0], bundle.split("\nmodules:\n")[0])
+        # Only the bundle may reach the keyring, to move older credentials.
+        keyring = (
+            "  # Versions before the Secret portal kept credentials in the keyring. This\n"
+            "  # bundle can still reach it, so they move into the sealed file as they are\n"
+            "  # used. Flathub's build leaves it out.\n"
+            "  - --talk-name=org.freedesktop.secrets\n"
+        )
+        self.assertIn(keyring, bundle)
+        self.assertNotIn("org.freedesktop.secrets", template)
+        self.assertEqual(
+            template.split("\nmodules:\n")[0],
+            bundle.split("\nmodules:\n")[0].replace(keyring, ""),
+        )
 
         def commands(text):
             block = text.split("    build-commands:\n")[1].split("    sources:\n")[0]

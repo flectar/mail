@@ -100,11 +100,25 @@ On Linux, passwords, OAuth tokens, and API keys are kept in the system keyring
 through the freedesktop Secret Service, never in Flectar Mail's database. Any
 Secret Service provider works, on any desktop or window manager, sway included:
 GNOME Keyring, KWallet, or KeePassXC with its Secret Service integration turned
-on. The Flatpak uses the same keyring as the rest of your session. If the
-session has no default keyring yet, adding the first account asks the provider
-to create one, and the provider asks you to choose its password. Without a
-provider, adding an account stops with an error that says what is missing,
-because Flectar Mail never stores secrets anywhere less safe.
+on. If the session has no default keyring yet, adding the first account asks
+the provider to create one, and the provider asks you to choose its password.
+Without a provider, adding an account stops with an error that says what is
+missing, because Flectar Mail never stores secrets anywhere less safe.
+
+The Flatpak doesn't reach into your keyring. It asks the desktop's Secret
+portal for a key that the keyring keeps for Flectar Mail alone, and keeps its
+secrets in a file sealed with that key, in
+`~/.var/app/com.flectar.mail/data`. GNOME Keyring and KWallet (KDE Frameworks
+6.2 and later) provide the portal. Desktops without it, such as sway, keep
+using the keyring directly once you allow it:
+
+```bash
+flatpak override --user --talk-name=org.freedesktop.secrets com.flectar.mail
+```
+
+The Flatpak bundle from GitHub can still reach the keyring, so accounts added
+with an earlier bundle move into the sealed file the first time they are used,
+and leave the keyring.
 
 ### Desktop portal
 

@@ -33,6 +33,8 @@ pub mod documents;
 mod email_document;
 pub mod favicon;
 mod files_controller;
+#[cfg(all(linux_desktop, feature = "flatpak"))]
+mod flatpak_secrets;
 mod han_fallback;
 mod import_controller;
 mod invitation;
@@ -1622,6 +1624,9 @@ fn desktop_credential_store(
             flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore::new(path),
         );
     }
+    #[cfg(all(linux_desktop, feature = "flatpak"))]
+    return flatpak_secrets::credential_store(paths);
+    #[cfg(not(all(linux_desktop, feature = "flatpak")))]
     Arc::new(flectar_mail_core::accounts::credentials::SystemCredentialStore::for_profile(paths))
 }
 
