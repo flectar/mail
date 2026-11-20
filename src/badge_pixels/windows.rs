@@ -13,7 +13,9 @@ use windows_sys::Win32::Graphics::Gdi::{
     GetTextMetricsW, HDC, HFONT, OUT_TT_PRECIS, ReleaseDC, SelectObject, SetBkMode, SetTextColor,
     TEXTMETRICW, TRANSPARENT,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::SPI_SETHIGHCONTRAST;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    SPI_SETHIGHCONTRAST, WM_SETTINGCHANGE, WM_SYSCOLORCHANGE,
+};
 
 /// The colours of Windows 11's own badges, which WinUI's InfoBadge shares:
 /// the lighter accent with black text on a dark taskbar, the darker accent
@@ -62,13 +64,29 @@ fn taskbar_is_light() -> bool {
         .is_ok_and(|value| value != 0)
 }
 
+/// Whether a window message tells of new colours for the badges: the Windows
+/// mode or accent, which Windows announces as `ImmersiveColorSet`, high
+/// contrast, or the system colours, which change with the high contrast
+/// theme. Windows sends these to every top-level window.
+///
+/// # Safety
+/// `lparam` is what the message passes: for `WM_SETTINGCHANGE`, null or a
+/// NUL-terminated string.
+pub(crate) unsafe fn recoloured(message: u32, wparam: WPARAM, lparam: LPARAM) -> bool {
+    match message {
+        WM_SYSCOLORCHANGE => true,
+        // SAFETY: forwarded from the caller.
+        WM_SETTINGCHANGE => unsafe { colours_changed(wparam, lparam) },
+        _ => false,
+    }
+}
+
 /// Whether a `WM_SETTINGCHANGE` with these arguments changed the colours of
-/// the badges: the Windows mode or accent, which Windows announces as
-/// `ImmersiveColorSet`, or high contrast.
+/// the badges.
 ///
 /// # Safety
 /// `lparam` is null or a NUL-terminated string, as the message passes.
-pub(crate) unsafe fn colours_changed(wparam: WPARAM, lparam: LPARAM) -> bool {
+unsafe fn colours_changed(wparam: WPARAM, lparam: LPARAM) -> bool {
     if wparam == SPI_SETHIGHCONTRAST as WPARAM {
         return true;
     }

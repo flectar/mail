@@ -273,8 +273,7 @@ unsafe extern "system" fn subclass_proc(
         unsafe { UnhookWindowsHookEx(hook) };
     }
     // SAFETY: the arguments of the message being processed.
-    let recoloured = message == WM_SETTINGCHANGE
-        && unsafe { crate::badge_pixels::windows::colours_changed(wparam, lparam) };
+    let recoloured = unsafe { crate::badge_pixels::windows::recoloured(message, wparam, lparam) };
     if message == super::taskbar_badge::button_created_message()
         || message == WM_DPICHANGED
         || recoloured
