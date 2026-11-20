@@ -702,7 +702,6 @@ struct InboxState {
     sidebar_rows: Rc<SidebarModel>,
     sidebar_animation: Rc<SidebarAnimation>,
     folder_filter: String,
-    sidebar_mailbox_aliases: HashMap<&'static str, String>,
     /// Always visible for `connected_accounts`; write through
     /// [`InboxState::set_scope`] and [`InboxState::set_connected_accounts`].
     scope: Scope,
@@ -1248,6 +1247,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
     if let Err(error) = slint::select_bundled_translation(selected) {
         eprintln!("could not select {selected} translation: {error}");
     }
+    sidebar_model::reload_mailbox_names(app);
     app.global::<TabsUi>().invoke_language_changed();
     app.set_language_mode(language_mode.into());
     app.set_privacy_policy_url(privacy_policy_url(selected).into());
@@ -1289,7 +1289,6 @@ impl InboxState {
             sidebar_rows: Rc::new(SidebarModel::default()),
             sidebar_animation: Rc::new(SidebarAnimation::default()),
             folder_filter: String::new(),
-            sidebar_mailbox_aliases: HashMap::new(),
             inbox_count: 0,
             messages: Vec::new(),
             conversation_owner_id: None,
@@ -2270,14 +2269,22 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     app.set_sidebar_rows(Rc::clone(&initial_state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(initial_state));
     let app_language = platform.app_language.clone();
-    let language_app = app.as_weak();
     let language_state = Rc::downgrade(&state);
-    sidebar_model::set_mailbox_aliases(&app, &state);
     app.on_app_language_changed(move |mode, selected| {
         app_language.set(mode.as_str(), selected.as_str());
-        if let (Some(app), Some(state)) = (language_app.upgrade(), language_state.upgrade()) {
-            sidebar_model::set_mailbox_aliases(&app, &state);
-        }
+        // A folder filter matches standard mailboxes by their names in the
+        // new language too. It runs again on the next event-loop turn,
+        // outside whatever state the caller is holding.
+        let state = language_state.clone();
+        Timer::single_shot(Duration::ZERO, move || {
+            let Some(state) = state.upgrade() else {
+                return;
+            };
+            let filtering = !state.borrow().folder_filter.trim().is_empty();
+            if filtering {
+                refresh_sidebar(&state);
+            }
+        });
     });
     mail_work::register(&app, &state, &runtime);
     move_picker::register(&app, &state, &runtime);

@@ -754,17 +754,17 @@ msgid "An unexpected interface message occurred."
 msgstr ""
 
 #: ui/app.slint:307 ui/components/profile-switcher.slint:126
-#: ui/app.slint:307 ui/components/profile-switcher.slint:126 ui/dialogs/move-dialog.slint:52
-#: ui/app.slint:307 ui/components/profile-switcher.slint:126 ui/dialogs/move-dialog.slint:52 ui/views/files-view.slint:39
+#: ui/app.slint:307 ui/components/profile-switcher.slint:126 ui/dialogs/move-dialog.slint:53
+#: ui/app.slint:307 ui/components/profile-switcher.slint:126 ui/dialogs/move-dialog.slint:53 ui/views/files-view.slint:39
 msgid "All accounts"
 msgstr ""
 
-#: ui/app.slint:308 ui/components/sidebar.slint:465 ui/mailbox-words.slint:13
+#: ui/app.slint:308 ui/mailbox-words.slint:14 ui/mailbox-words.slint:28
 msgid "Important"
 msgstr ""
 
-#: ui/app.slint:309 ui/components/sidebar.slint:488
-#: ui/app.slint:309 ui/components/sidebar.slint:488 ui/mailbox-words.slint:14
+#: ui/app.slint:309 ui/dialogs/settings-dialog.slint:286
+#: ui/app.slint:309 ui/dialogs/settings-dialog.slint:286 ui/mailbox-words.slint:29
 msgid "Other"
 msgstr ""
 
@@ -862,7 +862,7 @@ msgstr ""
 msgid "No folders"
 msgstr ""
 
-#: ui/app.slint:332 ui/dialogs/move-dialog.slint:50
+#: ui/app.slint:332 ui/dialogs/move-dialog.slint:51
 msgid "All folders"
 msgstr ""
 
@@ -3776,14 +3776,14 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349
 #: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349
 #: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349
-#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:212
-#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:212
-#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:212 ui/dialogs/settings-dialog.slint:4138
-#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:212 ui/dialogs/settings-dialog.slint:4138
-#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:212 ui/dialogs/settings-dialog.slint:4138 ui/views/files-view.slint:505
-#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:212 ui/dialogs/settings-dialog.slint:4138 ui/views/files-view.slint:505 ui/views/files-view.slint:695
-#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:212 ui/dialogs/settings-dialog.slint:4138 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
-#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:212 ui/dialogs/settings-dialog.slint:4138 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:213
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:213
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4138
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4138
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4138 ui/views/files-view.slint:505
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4138 ui/views/files-view.slint:505 ui/views/files-view.slint:695
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4138 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
+#: ui/components/account-mail-preferences.slint:406 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4138 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
 msgid "Close"
 msgstr ""
 
@@ -6105,17 +6105,12 @@ msgstr ""
 msgid "All Inboxes"
 msgstr ""
 
-#: ui/components/sidebar.slint:380 ui/dialogs/move-dialog.slint:45
-#: ui/components/sidebar.slint:380 ui/dialogs/move-dialog.slint:45
-msgid "Inbox"
-msgstr ""
-
 #: ui/components/sidebar.slint:447
 msgid "Categories"
 msgstr ""
 
-#: ui/components/sidebar.slint:537 ui/components/sidebar.slint:754
-#: ui/components/sidebar.slint:537 ui/components/sidebar.slint:754
+#: ui/components/sidebar.slint:537 ui/components/sidebar.slint:753
+#: ui/components/sidebar.slint:537 ui/components/sidebar.slint:753
 msgid "Labels"
 msgstr ""
 
@@ -6136,22 +6131,22 @@ msgstr ""
 msgid "ACCOUNTS"
 msgstr ""
 
-#: ui/components/sidebar.slint:774
+#: ui/components/sidebar.slint:773
 msgid "{} label, {} account"
 msgstr ""
 
-#: ui/components/sidebar.slint:819 ui/dialogs/folder-dialog.slint:27
-#: ui/components/sidebar.slint:819 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354
-#: ui/components/sidebar.slint:819 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354 ui/views/files-view.slint:578
+#: ui/components/sidebar.slint:818 ui/dialogs/folder-dialog.slint:27
+#: ui/components/sidebar.slint:818 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354
+#: ui/components/sidebar.slint:818 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354 ui/views/files-view.slint:578
 msgid "New folder"
 msgstr ""
 
-#: ui/components/sidebar.slint:836 ui/dialogs/folder-dialog.slint:26
-#: ui/components/sidebar.slint:836 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:835 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:835 ui/dialogs/folder-dialog.slint:26
 msgid "New label"
 msgstr ""
 
-#: ui/components/sidebar.slint:856
+#: ui/components/sidebar.slint:855
 msgid "No folders found"
 msgstr ""
 
@@ -7186,35 +7181,27 @@ msgstr ""
 msgid "Dismiss"
 msgstr ""
 
-#: ui/dialogs/move-dialog.slint:47 ui/mailbox-words.slint:10
-msgid "Spam"
-msgstr ""
-
-#: ui/dialogs/move-dialog.slint:48 ui/mailbox-words.slint:11
-msgid "Trash"
-msgstr ""
-
-#: ui/dialogs/move-dialog.slint:49
+#: ui/dialogs/move-dialog.slint:50
 msgid "Recent"
 msgstr ""
 
-#: ui/dialogs/move-dialog.slint:75 ui/dialogs/move-dialog.slint:199
+#: ui/dialogs/move-dialog.slint:76 ui/dialogs/move-dialog.slint:200
 msgid "Copy to"
 msgstr ""
 
-#: ui/dialogs/move-dialog.slint:75 ui/dialogs/move-dialog.slint:199
+#: ui/dialogs/move-dialog.slint:76 ui/dialogs/move-dialog.slint:200
 msgid "Move to"
 msgstr ""
 
-#: ui/dialogs/move-dialog.slint:220 ui/dialogs/move-dialog.slint:221
+#: ui/dialogs/move-dialog.slint:221 ui/dialogs/move-dialog.slint:222
 msgid "Search folders"
 msgstr ""
 
-#: ui/dialogs/move-dialog.slint:233 ui/views/files-view.slint:581
+#: ui/dialogs/move-dialog.slint:234 ui/views/files-view.slint:581
 msgid "Folders"
 msgstr ""
 
-#: ui/dialogs/move-dialog.slint:333
+#: ui/dialogs/move-dialog.slint:334
 msgid "No matching folders"
 msgstr ""
 
@@ -8124,7 +8111,7 @@ msgstr ""
 msgid "Inbox behavior"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1561 ui/mailbox-words.slint:20
+#: ui/dialogs/settings-dialog.slint:1561 ui/mailbox-words.slint:35
 msgid "Unified Inbox"
 msgstr ""
 
@@ -9805,45 +9792,58 @@ msgid ""
 "message leaves out for you to pass on another way."
 msgstr ""
 
-#: ui/mailbox-words.slint:7 ui/views/mail-list-pane.slint:851
+#: ui/mailbox-words.slint:7 ui/mailbox-words.slint:21
+msgid "Inbox"
+msgstr ""
+
+#: ui/mailbox-words.slint:8 ui/mailbox-words.slint:22
+#: ui/mailbox-words.slint:8 ui/mailbox-words.slint:22
 msgid "Starred"
 msgstr ""
 
-#: ui/mailbox-words.slint:8
+#: ui/mailbox-words.slint:9 ui/mailbox-words.slint:23
 msgctxt "mailbox"
 msgid "Sent"
 msgstr ""
 
-#: ui/mailbox-words.slint:9
+#: ui/mailbox-words.slint:10 ui/mailbox-words.slint:24
 msgctxt "mailbox"
 msgid "Archive"
 msgstr ""
 
-#: ui/mailbox-words.slint:12
+#: ui/mailbox-words.slint:11 ui/mailbox-words.slint:25
+msgid "Spam"
+msgstr ""
+
+#: ui/mailbox-words.slint:12 ui/mailbox-words.slint:26
+msgid "Trash"
+msgstr ""
+
+#: ui/mailbox-words.slint:13 ui/mailbox-words.slint:27
 msgid "Drafts"
 msgstr ""
 
-#: ui/mailbox-words.slint:21
+#: ui/mailbox-words.slint:36
 msgid "Unified Starred"
 msgstr ""
 
-#: ui/mailbox-words.slint:22
+#: ui/mailbox-words.slint:37
 msgid "Unified Sent"
 msgstr ""
 
-#: ui/mailbox-words.slint:23
+#: ui/mailbox-words.slint:38
 msgid "Unified Archive"
 msgstr ""
 
-#: ui/mailbox-words.slint:24
+#: ui/mailbox-words.slint:39
 msgid "Unified Spam"
 msgstr ""
 
-#: ui/mailbox-words.slint:25
+#: ui/mailbox-words.slint:40
 msgid "Unified Trash"
 msgstr ""
 
-#: ui/mailbox-words.slint:26
+#: ui/mailbox-words.slint:41
 msgid "Unified Drafts"
 msgstr ""
 

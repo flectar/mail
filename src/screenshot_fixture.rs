@@ -158,7 +158,7 @@ fixture_row!(MailboxRow {
     depth,
     has_children,
     expanded,
-    is_standard,
+    role,
     is_selectable,
     can_create_children,
     can_rename,
@@ -292,6 +292,24 @@ fixture_row!(MailProfileRow {
     account_count
 });
 fixture_row!(EmailTile { image, y, height });
+
+impl FixtureValue for MailboxRole {
+    fn read(value: &Value) -> Self {
+        match value.as_str().unwrap() {
+            "none" => Self::None,
+            "inbox" => Self::Inbox,
+            "starred" => Self::Starred,
+            "sent" => Self::Sent,
+            "archive" => Self::Archive,
+            "spam" => Self::Spam,
+            "trash" => Self::Trash,
+            "drafts" => Self::Drafts,
+            "important" => Self::Important,
+            "other" => Self::Other,
+            role => panic!("unknown screenshot mailbox role: {role}"),
+        }
+    }
+}
 
 impl FixtureValue for SidebarRowKind {
     fn read(value: &Value) -> Self {

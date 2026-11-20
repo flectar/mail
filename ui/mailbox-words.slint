@@ -1,6 +1,21 @@
+import { MailboxRole } from "models.slint";
+
 // Standard mailbox names follow the UI language. Other names are supplied by
 // the account, and the navigation keys do not depend on the translation.
 export global MailboxWords {
+    public pure function name(role: MailboxRole) -> string {
+        if role == MailboxRole.inbox { return @tr("Inbox"); }
+        if role == MailboxRole.starred { return @tr("Starred"); }
+        if role == MailboxRole.sent { return @tr("mailbox" => "Sent"); }
+        if role == MailboxRole.archive { return @tr("mailbox" => "Archive"); }
+        if role == MailboxRole.spam { return @tr("Spam"); }
+        if role == MailboxRole.trash { return @tr("Trash"); }
+        if role == MailboxRole.drafts { return @tr("Drafts"); }
+        if role == MailboxRole.important { return @tr("Important"); }
+        if role == MailboxRole.other { return @tr("Other"); }
+        return "";
+    }
+
     public pure function label(name: string, standard: bool) -> string {
         if (!standard) { return name; }
         if name == "Inbox" { return @tr("Inbox"); }

@@ -1700,7 +1700,10 @@ pub(super) fn make_mailbox_rows(
                 depth: i32::try_from(mailbox.depth).unwrap_or(i32::MAX),
                 has_children: mailbox.has_children,
                 expanded: !collapsed_folder_ids.contains(&mailbox.folder_id),
-                is_standard: mailbox.is_standard,
+                role: mailbox
+                    .scope
+                    .filter(|_| mailbox.is_standard)
+                    .map_or(MailboxRole::None, Scope::mailbox_role),
                 is_selectable: mailbox.is_selectable,
                 can_create_children: mailbox.can_create_children,
                 can_rename: mailbox.can_rename,
@@ -2554,6 +2557,51 @@ mod tests {
             mailbox_scope_title(Scope::Folder(7), &mailboxes, &labels),
             "Projects"
         );
+    }
+
+    /// The Sent mailbox of `scope`, in the account named `context`.
+    fn sent_mailbox(scope: Scope, context: &str) -> MailboxEntry {
+        MailboxEntry {
+            account_id: 3,
+            folder_id: -1,
+            parent_folder_id: -1,
+            depth: 0,
+            has_children: false,
+            is_standard: true,
+            is_selectable: true,
+            can_create_children: false,
+            can_rename: false,
+            can_delete: false,
+            label: "Sent".into(),
+            scope: Some(scope),
+            context: context.into(),
+            detail: String::new(),
+            avatar: String::new(),
+            is_account: false,
+            count: 0,
+        }
+    }
+
+    #[test]
+    fn sidebar_rows_name_standard_mailboxes_by_role() {
+        let sent = Scope::Account {
+            account_id: 3,
+            mailbox: StandardMailbox::Sent,
+        };
+        // A folder of the account's own that is called Sent too.
+        let folder = MailboxEntry {
+            is_standard: false,
+            ..sent_mailbox(Scope::Folder(9), "Person")
+        };
+        let rows = make_mailbox_rows(
+            &[sent_mailbox(sent, "Person"), folder],
+            &HashMap::new(),
+            &[],
+            &HashSet::new(),
+        );
+        assert_eq!(rows[0].role, MailboxRole::Sent);
+        assert_eq!(rows[1].role, MailboxRole::None);
+        assert_eq!(rows[1].label, "Sent");
     }
 
     #[test]

@@ -169,7 +169,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         depth,
         has_children,
         expanded,
-        is_standard,
+        role,
         is_selectable,
         can_create_children,
         can_rename,
@@ -201,7 +201,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         && *depth == other.depth
         && *has_children == other.has_children
         && *expanded == other.expanded
-        && *is_standard == other.is_standard
+        && *role == other.role
         && *is_selectable == other.is_selectable
         && *can_create_children == other.can_create_children
         && *can_rename == other.can_rename
@@ -221,23 +221,36 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         && (!has_avatar || *avatar_image == other.avatar_image)
 }
 
-pub(super) fn set_mailbox_aliases(app: &AppWindow, state: &Rc<RefCell<InboxState>>) {
+/// The standard mailboxes' names in the window's language, lowercased, which
+/// the folder filter matches as well as their English labels.
+#[derive(Debug, Default)]
+pub(super) struct MailboxNames(Vec<(MailboxRole, String)>);
+
+impl MailboxNames {
+    fn matches(&self, role: MailboxRole, query: &str) -> bool {
+        self.0
+            .iter()
+            .any(|(named, name)| *named == role && name.contains(query))
+    }
+}
+
+thread_local! {
+    // The UI thread filters the sidebar, so each thread keeps its own names
+    // and tests running in parallel threads stay independent.
+    static MAILBOX_NAMES: RefCell<MailboxNames> = RefCell::default();
+}
+
+/// Loads the names after the window's language changed.
+pub(super) fn reload_mailbox_names(app: &AppWindow) {
     let words = app.global::<MailboxWords>();
-    let aliases = StandardMailbox::ALL
+    let names = StandardMailbox::ALL
         .into_iter()
         .map(|mailbox| {
-            let name = mailbox.label();
-            (name, words.invoke_label(name.into(), true).to_lowercase())
+            let role = mailbox.role();
+            (role, words.invoke_name(role).to_lowercase())
         })
         .collect();
-    let filtering = {
-        let mut state = state.borrow_mut();
-        state.sidebar_mailbox_aliases = aliases;
-        !state.folder_filter.trim().is_empty()
-    };
-    if filtering {
-        refresh_sidebar(state);
-    }
+    MAILBOX_NAMES.set(MailboxNames(names));
 }
 
 pub(super) fn refresh_sidebar(state: &Rc<RefCell<InboxState>>) {
@@ -314,13 +327,9 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
         .filter_map(|account| i32::try_from(account.id).ok())
         .collect::<HashSet<_>>();
     let mut rows = if filtering {
-        make_filtered_sidebar_rows(
-            mailboxes,
-            labels,
-            query,
-            &gmail_account_ids,
-            &state.sidebar_mailbox_aliases,
-        )
+        MAILBOX_NAMES.with_borrow(|names| {
+            make_filtered_sidebar_rows(mailboxes, labels, query, &gmail_account_ids, names)
+        })
     } else {
         make_sidebar_rows(
             SidebarLayout::for_account_count(state.mail_accounts().len()),
@@ -410,7 +419,7 @@ fn make_filtered_sidebar_rows(
     labels: Vec<MailLabelRow>,
     query: &str,
     gmail_account_ids: &HashSet<i32>,
-    mailbox_aliases: &HashMap<&'static str, String>,
+    mailbox_names: &MailboxNames,
 ) -> Vec<SidebarRow> {
     use SidebarRowKind as Kind;
 
@@ -423,10 +432,7 @@ fn make_filtered_sidebar_rows(
             mailbox.count = Default::default();
             accounts.push(mailbox);
         } else if mailbox.label.to_lowercase().contains(&query)
-            || (mailbox.is_standard
-                && mailbox_aliases
-                    .get(mailbox.label.as_str())
-                    .is_some_and(|alias| alias.contains(&query)))
+            || mailbox_names.matches(mailbox.role, &query)
         {
             folders.entry(mailbox.account_id).or_default().push(mailbox);
         }
@@ -953,7 +959,7 @@ mod tests {
             Vec::new(),
             "folder",
             &HashSet::new(),
-            &HashMap::new(),
+            &MailboxNames::default(),
         );
         assert_eq!(filtered[0].kind, Kind::Account);
         assert_eq!(filtered[0].mailbox.count, "");
@@ -1388,7 +1394,7 @@ mod tests {
             labels,
             "travel",
             &HashSet::new(),
-            &HashMap::new(),
+            &MailboxNames::default(),
         );
         assert!(
             rows.iter()
@@ -1476,14 +1482,16 @@ mod tests {
     }
 
     #[test]
-    fn folder_filter_matches_localized_standard_names() {
+    fn folder_filter_matches_standard_mailboxes_by_their_shown_names() {
+        // The account's Archive mailbox, and a folder of its own that is
+        // also called Archive.
         let mut data = accounts(1, 2);
         data[1].label = "Archive".into();
-        data[1].is_standard = true;
+        data[1].role = MailboxRole::Archive;
         data[2].label = "Archive".into();
-        let aliases = HashMap::from([("Archive", "归档".to_owned())]);
+        let names = MailboxNames(vec![(MailboxRole::Archive, "归档".into())]);
         let filter = |query| {
-            make_filtered_sidebar_rows(data.clone(), vec![], query, &HashSet::new(), &aliases)
+            make_filtered_sidebar_rows(data.clone(), vec![], query, &HashSet::new(), &names)
                 .into_iter()
                 .filter(|row| row.kind == Kind::Folder)
                 .map(|row| row.mailbox.folder_id)
@@ -1499,8 +1507,13 @@ mod tests {
         data[2].label = "Receipts".into();
         data[5].label = "RECEIPTS 2025".into();
 
-        let rows =
-            make_filtered_sidebar_rows(data, vec![], "receipts", &HashSet::new(), &HashMap::new());
+        let rows = make_filtered_sidebar_rows(
+            data,
+            vec![],
+            "receipts",
+            &HashSet::new(),
+            &MailboxNames::default(),
+        );
         assert_eq!(
             rows.iter().map(|row| row.kind).collect::<Vec<_>>(),
             vec![Kind::Account, Kind::Folder, Kind::Account, Kind::Folder]

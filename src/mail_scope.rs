@@ -5,6 +5,7 @@
 //! works with [`Scope`], so a selection never depends on display names and
 //! every consumer handles every kind of mailbox exhaustively.
 
+use crate::MailboxRole;
 use flectar_mail_core::models::Account;
 use std::{fmt, str::FromStr};
 
@@ -45,6 +46,19 @@ impl StandardMailbox {
 
     pub(crate) fn from_label(label: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|mailbox| mailbox.label() == label)
+    }
+
+    /// The window names the mailbox by its role, in its own language.
+    pub(crate) const fn role(self) -> MailboxRole {
+        match self {
+            Self::Inbox => MailboxRole::Inbox,
+            Self::Starred => MailboxRole::Starred,
+            Self::Sent => MailboxRole::Sent,
+            Self::Archive => MailboxRole::Archive,
+            Self::Spam => MailboxRole::Spam,
+            Self::Trash => MailboxRole::Trash,
+            Self::Drafts => MailboxRole::Drafts,
+        }
     }
 }
 
@@ -152,6 +166,17 @@ impl Scope {
                     }
                 )
             )
+    }
+
+    /// The standard mailbox this scope shows, which the window names in its
+    /// language. Folders and labels have none: they keep their own names.
+    pub(crate) const fn mailbox_role(self) -> MailboxRole {
+        match self {
+            Self::Unified(mailbox) | Self::Account { mailbox, .. } => mailbox.role(),
+            Self::Important => MailboxRole::Important,
+            Self::Other => MailboxRole::Other,
+            Self::Label { .. } | Self::Folder(_) => MailboxRole::None,
+        }
     }
 
     /// The scope the sidebar can show for these accounts. Unified shortcuts

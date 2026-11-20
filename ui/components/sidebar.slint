@@ -1,6 +1,6 @@
 import { ScrollFade } from "scroll-fade.slint";
 import { ListView, VerticalBox } from "std-widgets.slint";
-import { MailProfileRow, SidebarRow, SidebarRowKind } from "../models.slint";
+import { MailboxRole, MailProfileRow, SidebarRow, SidebarRowKind } from "../models.slint";
 import { MailboxWords } from "../mailbox-words.slint";
 import { SidebarItem, SidebarSectionHeader } from "sidebar-controls.slint";
 import { SidebarStyle } from "sidebar-row.slint";
@@ -336,7 +336,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         : entry.kind == SidebarRowKind.accounts-heading ? 25px
                         : entry.kind == SidebarRowKind.account ? (entry.mailbox.detail == "" ? 35px : root.account-row-height)
                         : entry.kind == SidebarRowKind.unified-section || entry.kind == SidebarRowKind.unified-inbox ? 35px
-                        : entry.kind == SidebarRowKind.folder && entry.mailbox.label == "Inbox" ? 35px
+                        : entry.kind == SidebarRowKind.folder && entry.mailbox.role == MailboxRole.inbox ? 35px
                         : 31px;
                     background: transparent;
                     clip: true;
@@ -377,7 +377,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
-                        label: @tr("Inbox");
+                        label: MailboxWords.name(MailboxRole.inbox);
                         count: root.unified-count;
                         can-mark-all-read: root.unified-count != "" && root.unified-count != "0";
                         scope: "Unified Inbox";
@@ -403,7 +403,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
-                        label: MailboxWords.label(entry.mailbox.label, entry.mailbox.is_standard);
+                        label: entry.mailbox.role == MailboxRole.none ? entry.mailbox.label : MailboxWords.name(entry.mailbox.role);
                         count: entry.mailbox.count;
                         can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0" && entry.mailbox.scope != "Unified Drafts";
                         scope: entry.mailbox.scope;
@@ -462,7 +462,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
-                        label: @tr("Important");
+                        label: MailboxWords.name(MailboxRole.important);
                         count: entry.mailbox.count;
                         can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0";
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
@@ -485,7 +485,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
-                        label: @tr("Other");
+                        label: MailboxWords.name(MailboxRole.other);
                         count: entry.mailbox.count;
                         can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0";
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
@@ -676,62 +676,61 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         y: 0px;
                         width: parent.width;
 
-                        label: MailboxWords.label(entry.mailbox.label, entry.mailbox.is_standard);
+                        label: entry.mailbox.role == MailboxRole.none ? entry.mailbox.label : MailboxWords.name(entry.mailbox.role);
                         label-has-emoji: entry.mailbox.label_has_emoji;
                         count: entry.mailbox.count;
-                        can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0" && entry.mailbox.label != "Drafts";
+                        can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0" && entry.mailbox.role != MailboxRole.drafts;
                         scope: entry.mailbox.scope;
                         account-id: entry.mailbox.account_id;
                         folder-id: entry.mailbox.folder_id;
                         has-children: entry.mailbox.has_children;
                         expanded: entry.mailbox.expanded;
                         folder-menu-enabled: entry.mailbox.folder_id >= 0
-                            && !(entry.mailbox.is_standard && entry.mailbox.label == "Trash")
+                            && entry.mailbox.role != MailboxRole.trash
                             && (entry.mailbox.can_create_children
-                            || (!entry.mailbox.is_standard && entry.mailbox.can_rename)
-                            || (!entry.mailbox.is_standard && entry.mailbox.can_delete));
+                            || (entry.mailbox.role == MailboxRole.none && entry.mailbox.can_rename)
+                            || (entry.mailbox.role == MailboxRole.none && entry.mailbox.can_delete));
                         can-create-child: entry.mailbox.can_create_children;
-                        can-rename: !entry.mailbox.is_standard && entry.mailbox.can_rename;
-                        can-delete: !entry.mailbox.is_standard && entry.mailbox.can_delete;
-                        can-empty-trash: entry.mailbox.is_standard
-                            && entry.mailbox.label == "Trash"
+                        can-rename: entry.mailbox.role == MailboxRole.none && entry.mailbox.can_rename;
+                        can-delete: entry.mailbox.role == MailboxRole.none && entry.mailbox.can_delete;
+                        can-empty-trash: entry.mailbox.role == MailboxRole.trash
                             && entry.mailbox.folder_id >= 0;
                         mail-drop-enabled: entry.mailbox.is_selectable
                             && ((entry.mailbox.folder_id >= 0
-                            && entry.mailbox.label != "Sent"
-                            && entry.mailbox.label != "Drafts")
-                            || entry.mailbox.label == "Starred");
-                        mail-drop-copies: entry.mailbox.label == "Starred";
+                            && entry.mailbox.role != MailboxRole.sent
+                            && entry.mailbox.role != MailboxRole.drafts)
+                            || entry.mailbox.role == MailboxRole.starred);
+                        mail-drop-copies: entry.mailbox.role == MailboxRole.starred;
                         left-padding: SidebarStyle.icon-left + entry.mailbox.depth * SidebarStyle.branch-indent;
-                        icon: entry.mailbox.label == "Inbox" ? @image-url("../icons/lucide/filled/inbox-flectar.svg")
-                            : entry.mailbox.label == "Starred" ? @image-url("../icons/lucide/filled/star.svg")
-                            : entry.mailbox.label == "Sent" ? @image-url("../icons/lucide/filled/paper-airplane.svg")
-                            : entry.mailbox.label == "Archive" ? @image-url("../icons/lucide/filled/archive.svg")
-                            : entry.mailbox.label == "Spam" ? @image-url("../icons/lucide/filled/alert.svg")
-                            : entry.mailbox.label == "Trash" ? @image-url("../icons/lucide/filled/trash.svg")
-                            : entry.mailbox.label == "Drafts" ? @image-url("../icons/lucide/filled/draft.svg")
+                        icon: entry.mailbox.role == MailboxRole.inbox ? @image-url("../icons/lucide/filled/inbox-flectar.svg")
+                            : entry.mailbox.role == MailboxRole.starred ? @image-url("../icons/lucide/filled/star.svg")
+                            : entry.mailbox.role == MailboxRole.sent ? @image-url("../icons/lucide/filled/paper-airplane.svg")
+                            : entry.mailbox.role == MailboxRole.archive ? @image-url("../icons/lucide/filled/archive.svg")
+                            : entry.mailbox.role == MailboxRole.spam ? @image-url("../icons/lucide/filled/alert.svg")
+                            : entry.mailbox.role == MailboxRole.trash ? @image-url("../icons/lucide/filled/trash.svg")
+                            : entry.mailbox.role == MailboxRole.drafts ? @image-url("../icons/lucide/filled/draft.svg")
                             : entry.mailbox.scope == root.selected-scope ? @image-url("../icons/lucide/filled/folder-open.svg")
                             : @image-url("../icons/lucide/filled/file-directory.svg");
                         selected: entry.mailbox.scope == root.selected-scope;
-                        row-height: entry.mailbox.label == "Inbox" ? 32px : 28px;
+                        row-height: entry.mailbox.role == MailboxRole.inbox ? 32px : 28px;
                         sidebar-background: root.background-color;
                         selection-background: root.selection-background;
                         accent-color: root.accent-color;
                         body-color: root.body-color;
                         muted-color: root.muted-color;
                         icon-color: root.monochrome-icons ? (entry.mailbox.scope == root.selected-scope ? root.accent-color : root.muted-color)
-                            : entry.mailbox.label == "Inbox" ? MailIconPalette.inbox
-                            : entry.mailbox.label == "Starred" ? MailIconPalette.starred
-                            : entry.mailbox.label == "Sent" ? MailIconPalette.sent
-                            : entry.mailbox.label == "Archive" ? MailIconPalette.archive
-                            : entry.mailbox.label == "Spam" ? MailIconPalette.spam
-                            : entry.mailbox.label == "Trash" ? MailIconPalette.trash
-                            : entry.mailbox.label == "Drafts" ? MailIconPalette.drafts
+                            : entry.mailbox.role == MailboxRole.inbox ? MailIconPalette.inbox
+                            : entry.mailbox.role == MailboxRole.starred ? MailIconPalette.starred
+                            : entry.mailbox.role == MailboxRole.sent ? MailIconPalette.sent
+                            : entry.mailbox.role == MailboxRole.archive ? MailIconPalette.archive
+                            : entry.mailbox.role == MailboxRole.spam ? MailIconPalette.spam
+                            : entry.mailbox.role == MailboxRole.trash ? MailIconPalette.trash
+                            : entry.mailbox.role == MailboxRole.drafts ? MailIconPalette.drafts
                             : entry.mailbox.has_custom_color ? entry.mailbox.color
                             : MailIconPalette.folders;
                         mark-all-read(scope, name) => { root.request-mark-all-read(scope, name); }
                         clicked(scope) => {
-                            if (entry.mailbox.is_selectable || entry.mailbox.is_standard) {
+                            if (entry.mailbox.is_selectable || entry.mailbox.role != MailboxRole.none) {
                                 root.select-scope(scope);
                             } else if (entry.mailbox.has_children) {
                                 root.toggle-folder(entry.mailbox.folder_id, !entry.mailbox.expanded);
