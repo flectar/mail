@@ -3297,7 +3297,7 @@ msgstr ""
 msgid "Automatic replies are on"
 msgstr ""
 
-#: ui/auto-replies.slint:80 ui/device-sync.slint:933
+#: ui/auto-replies.slint:80 ui/device-sync.slint:925
 msgid "Turn off"
 msgstr ""
 
@@ -3552,19 +3552,19 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:215
 #: ui/components/account-mail-preferences.slint:215
 #: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279 ui/dialogs/settings-dialog.slint:4533
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279 ui/dialogs/settings-dialog.slint:4533 ui/link-services.slint:120
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279 ui/dialogs/settings-dialog.slint:4533 ui/link-services.slint:120 ui/network.slint:421
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279 ui/dialogs/settings-dialog.slint:4533 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279 ui/dialogs/settings-dialog.slint:4533 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472 ui/views/mail-reading-pane.slint:2278
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279 ui/dialogs/settings-dialog.slint:4533
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279 ui/dialogs/settings-dialog.slint:4533 ui/link-services.slint:120
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279 ui/dialogs/settings-dialog.slint:4533 ui/link-services.slint:120 ui/network.slint:421
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279 ui/dialogs/settings-dialog.slint:4533 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/device-sync.slint:1373 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3141 ui/dialogs/settings-dialog.slint:4279 ui/dialogs/settings-dialog.slint:4533 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472 ui/views/mail-reading-pane.slint:2278
 msgid "Cancel"
 msgstr ""
 
@@ -3946,8 +3946,8 @@ msgid "Agents can't read this account."
 msgstr ""
 
 #: ui/components/agent-access-page.slint:134
-#: ui/components/agent-access-page.slint:134 ui/device-sync.slint:1154
-#: ui/components/agent-access-page.slint:134 ui/device-sync.slint:1154
+#: ui/components/agent-access-page.slint:134 ui/device-sync.slint:1146
+#: ui/components/agent-access-page.slint:134 ui/device-sync.slint:1146
 msgid "Done"
 msgstr ""
 
@@ -4022,7 +4022,7 @@ msgid "Setup for the chosen app"
 msgstr ""
 
 #: ui/components/agent-access-page.slint:277
-#: ui/components/agent-access-page.slint:277 ui/device-sync.slint:1212
+#: ui/components/agent-access-page.slint:277 ui/device-sync.slint:1203
 msgid "Copy"
 msgstr ""
 
@@ -5386,8 +5386,8 @@ msgstr[1] ""
 msgid "Accept"
 msgstr ""
 
-#: ui/components/invitation-card.slint:258 ui/device-sync.slint:1369
-#: ui/components/invitation-card.slint:258 ui/device-sync.slint:1369
+#: ui/components/invitation-card.slint:258 ui/device-sync.slint:1360
+#: ui/components/invitation-card.slint:258 ui/device-sync.slint:1360
 msgid "Decline"
 msgstr ""
 
@@ -6553,7 +6553,7 @@ msgstr ""
 msgid "Subscribe"
 msgstr ""
 
-#: ui/device-sync.slint:488 ui/device-sync.slint:780
+#: ui/device-sync.slint:488 ui/device-sync.slint:772
 msgid "Subscription"
 msgstr ""
 
@@ -6589,29 +6589,29 @@ msgstr ""
 msgid "Tax is added where it applies. Cancel any time."
 msgstr ""
 
-#: ui/device-sync.slint:534 ui/device-sync.slint:809 ui/device-sync.slint:1109
+#: ui/device-sync.slint:534 ui/device-sync.slint:801 ui/device-sync.slint:1101
 msgid "Redeem a code"
 msgstr ""
 
-#: ui/device-sync.slint:593
+#: ui/device-sync.slint:591
 msgid "{} a month or {} a year"
 msgstr ""
 
-#: ui/device-sync.slint:594
+#: ui/device-sync.slint:592
 msgid "{} a month"
 msgstr ""
 
-#: ui/device-sync.slint:595
+#: ui/device-sync.slint:593
 msgid "{} a year"
 msgstr ""
 
-#: ui/device-sync.slint:625 ui/dialogs/settings-dialog.slint:85
-#: ui/device-sync.slint:625 ui/dialogs/settings-dialog.slint:85 ui/dialogs/settings-dialog.slint:3883
-#: ui/device-sync.slint:625 ui/dialogs/settings-dialog.slint:85 ui/dialogs/settings-dialog.slint:3883
+#: ui/device-sync.slint:617 ui/dialogs/settings-dialog.slint:85
+#: ui/device-sync.slint:617 ui/dialogs/settings-dialog.slint:85 ui/dialogs/settings-dialog.slint:3883
+#: ui/device-sync.slint:617 ui/dialogs/settings-dialog.slint:85 ui/dialogs/settings-dialog.slint:3883
 msgid "Sync"
 msgstr ""
 
-#: ui/device-sync.slint:634
+#: ui/device-sync.slint:626
 msgid ""
 "Keep your accounts and their sign-ins, preferences, templates, snoozes and "
 "reply reminders the same on all your devices, and let any of them send your "
@@ -6620,374 +6620,374 @@ msgid ""
 "mail provider."
 msgstr ""
 
-#: ui/device-sync.slint:642
+#: ui/device-sync.slint:634
 msgid ""
 "This device was removed from sync on another device. Its accounts and "
 "settings stay here. Set up sync again to reconnect it."
 msgstr ""
 
-#: ui/device-sync.slint:643
+#: ui/device-sync.slint:635
 msgid ""
 "Sync was deleted on another device. This device keeps its accounts and "
 "settings. Turn sync on again to start over."
 msgstr ""
 
-#: ui/device-sync.slint:649
+#: ui/device-sync.slint:641
 msgid "Could not turn on sync: {}"
 msgstr ""
 
-#: ui/device-sync.slint:650 ui/device-sync.slint:1091
+#: ui/device-sync.slint:642 ui/device-sync.slint:1083
 msgid "Enter the sync server's address, such as https://sync.example.com."
 msgstr ""
 
-#: ui/device-sync.slint:651
+#: ui/device-sync.slint:643
 msgid "Could not remove the device: {}"
 msgstr ""
 
-#: ui/device-sync.slint:652
+#: ui/device-sync.slint:644
 msgid "Could not replace the recovery code: {}"
 msgstr ""
 
-#: ui/device-sync.slint:653
+#: ui/device-sync.slint:645
 msgid "Could not turn off sync: {}"
 msgstr ""
 
-#: ui/device-sync.slint:654
+#: ui/device-sync.slint:646
 msgid "Could not delete sync: {}"
 msgstr ""
 
-#: ui/device-sync.slint:655
+#: ui/device-sync.slint:647
 msgid "Could not change password and sign-in sync: {}"
 msgstr ""
 
-#: ui/device-sync.slint:656
+#: ui/device-sync.slint:648
 msgid "Could not open the checkout: {}"
 msgstr ""
 
-#: ui/device-sync.slint:657
+#: ui/device-sync.slint:649
 msgid "Could not open the subscription page: {}"
 msgstr ""
 
-#: ui/device-sync.slint:665
+#: ui/device-sync.slint:657
 msgid "Start syncing"
 msgstr ""
 
-#: ui/device-sync.slint:666
+#: ui/device-sync.slint:658
 msgid "Sync this device's setup to your other devices."
 msgstr ""
 
-#: ui/device-sync.slint:667
+#: ui/device-sync.slint:659
 msgid "Free for {n} day, then {}."
 msgid_plural "Free for {n} days, then {}."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/device-sync.slint:668
+#: ui/device-sync.slint:660
 msgctxt "the price of sync, as a sentence"
 msgid "{}."
 msgstr ""
 
-#: ui/device-sync.slint:669
+#: ui/device-sync.slint:661
 msgid ""
 "You get a recovery code to keep somewhere safe. Your passwords and sign-ins "
 "sync too, so your other devices are ready at once."
 msgstr ""
 
-#: ui/device-sync.slint:678
+#: ui/device-sync.slint:670
 msgid "Turn on sync"
 msgstr ""
 
-#: ui/device-sync.slint:687 ui/device-sync.slint:1409
+#: ui/device-sync.slint:679 ui/device-sync.slint:1400
 msgid "Connect this device"
 msgstr ""
 
-#: ui/device-sync.slint:688
+#: ui/device-sync.slint:680
 msgid "Already syncing on another device? Add this one to it."
 msgstr ""
 
-#: ui/device-sync.slint:690
+#: ui/device-sync.slint:682
 msgid ""
 "Scan the QR code your other device shows, enter its code, or use your "
 "recovery code."
 msgstr ""
 
-#: ui/device-sync.slint:691
+#: ui/device-sync.slint:683
 msgid ""
 "Show a QR code for your phone to scan, enter the code your other device "
 "shows, or use your recovery code."
 msgstr ""
 
-#: ui/device-sync.slint:704 ui/device-sync.slint:709
+#: ui/device-sync.slint:696 ui/device-sync.slint:701
 msgid "Enter code"
 msgstr ""
 
-#: ui/device-sync.slint:705 ui/device-sync.slint:710 ui/device-sync.slint:1351
+#: ui/device-sync.slint:697 ui/device-sync.slint:702 ui/device-sync.slint:1342
 msgid "Scan QR code"
 msgstr ""
 
-#: ui/device-sync.slint:706 ui/device-sync.slint:711
+#: ui/device-sync.slint:698 ui/device-sync.slint:703
 msgid "QR code"
 msgstr ""
 
-#: ui/device-sync.slint:707 ui/device-sync.slint:712 ui/device-sync.slint:881
-#: ui/device-sync.slint:707 ui/device-sync.slint:712 ui/device-sync.slint:881
+#: ui/device-sync.slint:699 ui/device-sync.slint:704 ui/device-sync.slint:873
+#: ui/device-sync.slint:699 ui/device-sync.slint:704 ui/device-sync.slint:873
 msgid "Recovery code"
 msgstr ""
 
-#: ui/device-sync.slint:719 ui/device-sync.slint:732
+#: ui/device-sync.slint:711 ui/device-sync.slint:724
 msgid "Sync server"
 msgstr ""
 
-#: ui/device-sync.slint:720
+#: ui/device-sync.slint:712
 msgid "Leave empty to use Flectar Mail Sync, or enter your own server."
 msgstr ""
 
-#: ui/device-sync.slint:739
+#: ui/device-sync.slint:731
 msgid "Sync is paused"
 msgstr ""
 
-#: ui/device-sync.slint:739
+#: ui/device-sync.slint:731
 msgid "Sync is on"
 msgstr ""
 
-#: ui/device-sync.slint:741
+#: ui/device-sync.slint:733
 msgid "Sync could not finish and will try again."
 msgstr ""
 
-#: ui/device-sync.slint:742
+#: ui/device-sync.slint:734
 msgid "Changes made here wait to upload; nothing is lost."
 msgstr ""
 
-#: ui/device-sync.slint:743
+#: ui/device-sync.slint:735
 msgid "Syncing with {}"
 msgstr ""
 
-#: ui/device-sync.slint:744 ui/dialogs/settings-dialog.slint:1938
+#: ui/device-sync.slint:736 ui/dialogs/settings-dialog.slint:1938
 msgid "Syncing…"
 msgstr ""
 
-#: ui/device-sync.slint:746
+#: ui/device-sync.slint:738
 msgid "Not synced yet."
 msgstr ""
 
-#: ui/device-sync.slint:747
+#: ui/device-sync.slint:739
 msgid "Last synced at {}."
 msgstr ""
 
-#: ui/device-sync.slint:748
+#: ui/device-sync.slint:740
 msgid "Last synced on {}."
 msgstr ""
 
-#: ui/device-sync.slint:757 ui/dialogs/settings-dialog.slint:1938
+#: ui/device-sync.slint:749 ui/dialogs/settings-dialog.slint:1938
 msgid "Sync now"
 msgstr ""
 
-#: ui/device-sync.slint:766 ui/device-sync.slint:781
+#: ui/device-sync.slint:758 ui/device-sync.slint:773
 msgid "Free trial until {}."
 msgstr ""
 
-#: ui/device-sync.slint:767 ui/device-sync.slint:786
+#: ui/device-sync.slint:759 ui/device-sync.slint:778
 msgid "Your free trial has ended."
 msgstr ""
 
-#: ui/device-sync.slint:768 ui/device-sync.slint:788
+#: ui/device-sync.slint:760 ui/device-sync.slint:780
 msgid "Your free period has ended."
 msgstr ""
 
-#: ui/device-sync.slint:769 ui/device-sync.slint:787
+#: ui/device-sync.slint:761 ui/device-sync.slint:779
 msgid "Your subscription has ended."
 msgstr ""
 
-#: ui/device-sync.slint:770
+#: ui/device-sync.slint:762
 msgid "Until you subscribe, changes wait on each device; nothing is lost."
 msgstr ""
 
-#: ui/device-sync.slint:782
+#: ui/device-sync.slint:774
 msgid "Renews on {}."
 msgstr ""
 
-#: ui/device-sync.slint:783
+#: ui/device-sync.slint:775
 msgid "Ends on {}."
 msgstr ""
 
-#: ui/device-sync.slint:784
+#: ui/device-sync.slint:776
 msgid "The last payment didn't go through."
 msgstr ""
 
-#: ui/device-sync.slint:785
+#: ui/device-sync.slint:777
 msgid "Free until {}."
 msgstr ""
 
-#: ui/device-sync.slint:791
+#: ui/device-sync.slint:783
 msgid "Your code makes sync free on all your devices."
 msgstr ""
 
-#: ui/device-sync.slint:792
+#: ui/device-sync.slint:784
 msgid "Changes wait on each device; nothing is lost."
 msgstr ""
 
-#: ui/device-sync.slint:793
+#: ui/device-sync.slint:785
 msgid ""
 "A code makes sync free until {}. Turn off renewal in Manage so you aren't "
 "charged before then."
 msgstr ""
 
-#: ui/device-sync.slint:794
+#: ui/device-sync.slint:786
 msgid "Then free until {}, with your code."
 msgstr ""
 
-#: ui/device-sync.slint:796
+#: ui/device-sync.slint:788
 msgid ""
 "Sync keeps going while the payment is tried again. Update your payment "
 "method to keep it."
 msgstr ""
 
-#: ui/device-sync.slint:796
+#: ui/device-sync.slint:788
 msgid "Sync keeps going while the payment is tried again."
 msgstr ""
 
-#: ui/device-sync.slint:797
+#: ui/device-sync.slint:789
 msgid "Turn renewal back on, or see invoices."
 msgstr ""
 
-#: ui/device-sync.slint:798
+#: ui/device-sync.slint:790
 msgid "Change your plan or payment method, see invoices, or cancel."
 msgstr ""
 
-#: ui/device-sync.slint:814 ui/dialogs/settings-dialog.slint:2902
-#: ui/device-sync.slint:814 ui/dialogs/settings-dialog.slint:2902
+#: ui/device-sync.slint:806 ui/dialogs/settings-dialog.slint:2902
+#: ui/device-sync.slint:806 ui/dialogs/settings-dialog.slint:2902
 msgid "Manage"
 msgstr ""
 
-#: ui/device-sync.slint:825
+#: ui/device-sync.slint:817
 msgid "Devices"
 msgstr ""
 
-#: ui/device-sync.slint:826
+#: ui/device-sync.slint:818
 msgid "Removing a device stops it from reading anything new."
 msgstr ""
 
-#: ui/device-sync.slint:837 ui/device-sync.slint:867 ui/device-sync.slint:1277
+#: ui/device-sync.slint:829 ui/device-sync.slint:859 ui/device-sync.slint:1268
 msgid "Add a device"
 msgstr ""
 
-#: ui/device-sync.slint:882
+#: ui/device-sync.slint:874
 msgid "Brings your sync back if you lose all your devices."
 msgstr ""
 
-#: ui/device-sync.slint:883
+#: ui/device-sync.slint:875
 msgid ""
 "Replace it if someone else may have seen it. The old code stops working at "
 "once."
 msgstr ""
 
-#: ui/device-sync.slint:892
+#: ui/device-sync.slint:884
 msgid "Replace code"
 msgstr ""
 
-#: ui/device-sync.slint:900
+#: ui/device-sync.slint:892
 msgid "Passwords and sign-ins"
 msgstr ""
 
-#: ui/device-sync.slint:901
+#: ui/device-sync.slint:893
 msgid "Your other devices are signed in to your accounts at once."
 msgstr ""
 
-#: ui/device-sync.slint:902
+#: ui/device-sync.slint:894
 msgid ""
 "End-to-end encrypted, for all your devices. Anyone with your recovery code "
 "can sign in to your accounts."
 msgstr ""
 
-#: ui/device-sync.slint:915
+#: ui/device-sync.slint:907
 msgid "Sync passwords and sign-ins"
 msgstr ""
 
-#: ui/device-sync.slint:922
+#: ui/device-sync.slint:914
 msgid "Turn off sync"
 msgstr ""
 
-#: ui/device-sync.slint:923
+#: ui/device-sync.slint:915
 msgid "Stop syncing on this device, or delete sync for every device."
 msgstr ""
 
-#: ui/device-sync.slint:924
+#: ui/device-sync.slint:916
 msgid ""
 "Turning off keeps this device's accounts and settings. Deleting also removes "
 "the encrypted copy from the server; each device keeps its own."
 msgstr ""
 
-#: ui/device-sync.slint:934 ui/dialogs/settings-dialog.slint:3230
-#: ui/device-sync.slint:934 ui/dialogs/settings-dialog.slint:3230
+#: ui/device-sync.slint:926 ui/dialogs/settings-dialog.slint:3230
+#: ui/device-sync.slint:926 ui/dialogs/settings-dialog.slint:3230
 msgid "Delete…"
 msgstr ""
 
-#: ui/device-sync.slint:1109
+#: ui/device-sync.slint:1101
 msgid "Code redeemed"
 msgstr ""
 
-#: ui/device-sync.slint:1119
+#: ui/device-sync.slint:1111
 msgid ""
 "Enter the code you were given. Flectar Mail Sync is then free on all your "
 "devices for the time the code covers."
 msgstr ""
 
-#: ui/device-sync.slint:1120 ui/device-sync.slint:1121
+#: ui/device-sync.slint:1112 ui/device-sync.slint:1113
 msgid "Flectar Mail Sync is free until {} on all your devices."
 msgstr ""
 
-#: ui/device-sync.slint:1122
+#: ui/device-sync.slint:1114
 msgid ""
 "Flectar Mail Sync is free on all your devices for the time the code covers."
 msgstr ""
 
-#: ui/device-sync.slint:1130 ui/device-sync.slint:1427
+#: ui/device-sync.slint:1122 ui/device-sync.slint:1413
 msgid "Code"
 msgstr ""
 
-#: ui/device-sync.slint:1140
+#: ui/device-sync.slint:1132
 msgid "That code doesn't exist. Check it and try again."
 msgstr ""
 
-#: ui/device-sync.slint:1141
+#: ui/device-sync.slint:1133
 msgid "That code was already used."
 msgstr ""
 
-#: ui/device-sync.slint:1142
+#: ui/device-sync.slint:1134
 msgid "That code has expired. Ask whoever gave it to you for a new one."
 msgstr ""
 
-#: ui/device-sync.slint:1143
+#: ui/device-sync.slint:1135
 msgid "Could not redeem the code: {}"
 msgstr ""
 
-#: ui/device-sync.slint:1161
+#: ui/device-sync.slint:1153
 msgid "Redeem"
 msgstr ""
 
 #. paste into another device's recovery code field.
-#: ui/device-sync.slint:1179
+#: ui/device-sync.slint:1171
 msgid "Flectar Mail Sync recovery code"
 msgstr ""
 
-#: ui/device-sync.slint:1181
+#: ui/device-sync.slint:1173
 msgid ""
 "On a new device, open Settings in Flectar Mail, then Sync, choose Recovery "
 "code and enter these 24 words in order."
 msgstr ""
 
-#: ui/device-sync.slint:1182
+#: ui/device-sync.slint:1174
 msgid ""
 "Anyone who has these words can restore your Flectar Mail Sync, with the "
 "accounts, passwords and sign-ins it carries. Keep this file somewhere only "
 "you can reach, such as a password manager or a USB drive."
 msgstr ""
 
-#: ui/device-sync.slint:1185
+#: ui/device-sync.slint:1177
 msgid "Save your recovery code"
 msgstr ""
 
-#: ui/device-sync.slint:1191
+#: ui/device-sync.slint:1182
 msgid ""
 "If you lose all your devices, these 24 words bring everything back, signed "
 "in. Anyone who has them can read your mail and send as you, so write them "
@@ -6995,7 +6995,7 @@ msgid ""
 "Flectar Mail cannot show them again."
 msgstr ""
 
-#: ui/device-sync.slint:1192
+#: ui/device-sync.slint:1183
 msgid ""
 "If you lose all your devices, these 24 words bring your sync back. Anyone "
 "who has them can read your synced setup, so write them down or save them "
@@ -7003,169 +7003,169 @@ msgid ""
 "cannot show them again."
 msgstr ""
 
-#: ui/device-sync.slint:1212
+#: ui/device-sync.slint:1203
 msgid "Copied"
 msgstr ""
 
-#: ui/device-sync.slint:1228
+#: ui/device-sync.slint:1219
 msgid "Save as file"
 msgstr ""
 
-#: ui/device-sync.slint:1246
+#: ui/device-sync.slint:1237
 msgid "Could not save the file: {}"
 msgstr ""
 
-#: ui/device-sync.slint:1255
+#: ui/device-sync.slint:1246
 msgid "I saved it"
 msgstr ""
 
-#: ui/device-sync.slint:1275
+#: ui/device-sync.slint:1266
 msgid "Add this device?"
 msgstr ""
 
-#: ui/device-sync.slint:1276
+#: ui/device-sync.slint:1267
 msgid "Device added"
 msgstr ""
 
-#: ui/device-sync.slint:1281 ui/device-sync.slint:1461
+#: ui/device-sync.slint:1272 ui/device-sync.slint:1447
 msgid "Getting a code…"
 msgstr ""
 
-#: ui/device-sync.slint:1287
+#: ui/device-sync.slint:1278
 msgid ""
 "On your phone or other device, open Flectar Mail, go to Settings → Sync → "
 "Connect this device, and scan this code."
 msgstr ""
 
-#: ui/device-sync.slint:1294
+#: ui/device-sync.slint:1285
 msgid "QR code for adding a device"
 msgstr ""
 
-#: ui/device-sync.slint:1297
+#: ui/device-sync.slint:1288
 msgid ""
 "On your other device, open Flectar Mail, go to Settings → Sync → Connect "
 "this device → Enter code, and type:"
 msgstr ""
 
-#: ui/device-sync.slint:1318
+#: ui/device-sync.slint:1309
 msgid ""
 "Check that the new device shows these same words. Add it only if they match."
 msgstr ""
 
-#: ui/device-sync.slint:1319
+#: ui/device-sync.slint:1310
 msgid "A new device asks to join. Add it if it's yours."
 msgstr ""
 
-#: ui/device-sync.slint:1333
+#: ui/device-sync.slint:1324
 msgid "The device is joining. Your accounts will be ready there in a moment."
 msgstr ""
 
-#: ui/device-sync.slint:1334
+#: ui/device-sync.slint:1325
 msgid "The device is joining. It will ask you to sign in to your accounts once."
 msgstr ""
 
-#: ui/device-sync.slint:1341
+#: ui/device-sync.slint:1332
 msgid "The device was not added."
 msgstr ""
 
-#: ui/device-sync.slint:1342
+#: ui/device-sync.slint:1333
 msgid "The code expired. Start again to get a new one."
 msgstr ""
 
-#: ui/device-sync.slint:1343 ui/device-sync.slint:1458
+#: ui/device-sync.slint:1334 ui/device-sync.slint:1444
 msgid "That QR code isn't for Flectar Mail Sync, or it expired."
 msgstr ""
 
-#: ui/device-sync.slint:1360
+#: ui/device-sync.slint:1351
 msgid "Show QR code"
 msgstr ""
 
-#: ui/device-sync.slint:1360
+#: ui/device-sync.slint:1351
 msgid "Use a code"
 msgstr ""
 
-#: ui/device-sync.slint:1375
+#: ui/device-sync.slint:1366
 msgid "Add device"
 msgstr ""
 
-#: ui/device-sync.slint:1407
+#: ui/device-sync.slint:1398
 msgid "This device is connected"
 msgstr ""
 
-#: ui/device-sync.slint:1408
+#: ui/device-sync.slint:1399
 msgid "Use your recovery code"
 msgstr ""
 
-#: ui/device-sync.slint:1419
+#: ui/device-sync.slint:1405
 msgid ""
 "On your other device, go to Settings → Sync → Add a device → Use a "
 "code. Enter the code it shows:"
 msgstr ""
 
-#: ui/device-sync.slint:1436
+#: ui/device-sync.slint:1422
 msgid ""
 "Type the 24 words of your recovery code, in order. Use this when no other "
 "device is at hand."
 msgstr ""
 
-#: ui/device-sync.slint:1443
+#: ui/device-sync.slint:1429
 msgid "24 words, separated by spaces"
 msgstr ""
 
-#: ui/device-sync.slint:1454
+#: ui/device-sync.slint:1440
 msgid "Your other device did not add this one."
 msgstr ""
 
-#: ui/device-sync.slint:1455
+#: ui/device-sync.slint:1441
 msgid "The code expired. Get a new one on your other device."
 msgstr ""
 
-#: ui/device-sync.slint:1456
+#: ui/device-sync.slint:1442
 msgid ""
 "No sync on this server uses these words. Check each word, and the server "
 "address."
 msgstr ""
 
-#: ui/device-sync.slint:1457
+#: ui/device-sync.slint:1443
 msgid "That code didn't work. Check it, or get a new one on your other device."
 msgstr ""
 
-#: ui/device-sync.slint:1462
+#: ui/device-sync.slint:1448
 msgid "Scan the QR code your other device shows."
 msgstr ""
 
-#: ui/device-sync.slint:1463 ui/dialogs/settings-dialog.slint:4109
-#: ui/device-sync.slint:1463 ui/dialogs/settings-dialog.slint:4109 ui/views/onboarding-view.slint:415
+#: ui/device-sync.slint:1449 ui/dialogs/settings-dialog.slint:4109
+#: ui/device-sync.slint:1449 ui/dialogs/settings-dialog.slint:4109 ui/views/onboarding-view.slint:415
 msgid "Connecting…"
 msgstr ""
 
-#: ui/device-sync.slint:1469
+#: ui/device-sync.slint:1455
 msgid ""
 "On your phone, go to Settings → Sync → Add a device → Scan QR code, "
 "and scan this code."
 msgstr ""
 
-#: ui/device-sync.slint:1476
+#: ui/device-sync.slint:1462
 msgid "QR code for connecting this device"
 msgstr ""
 
-#: ui/device-sync.slint:1480
+#: ui/device-sync.slint:1466
 msgid "Approve this device on your other one. It shows these same words:"
 msgstr ""
 
-#: ui/device-sync.slint:1481
+#: ui/device-sync.slint:1467
 msgid "Approve this device on your other one."
 msgstr ""
 
-#: ui/device-sync.slint:1494
+#: ui/device-sync.slint:1480
 msgid ""
 "Your accounts, signatures and preferences arrive in a moment. Accounts added "
 "on other devices ask you to sign in once."
 msgstr ""
 
-#: ui/device-sync.slint:1512 ui/device-sync.slint:1520
-#: ui/device-sync.slint:1512 ui/device-sync.slint:1520 ui/dialogs/settings-dialog.slint:4109
-#: ui/device-sync.slint:1512 ui/device-sync.slint:1520 ui/dialogs/settings-dialog.slint:4109 ui/views/files-view.slint:711
+#: ui/device-sync.slint:1498 ui/device-sync.slint:1506
+#: ui/device-sync.slint:1498 ui/device-sync.slint:1506 ui/dialogs/settings-dialog.slint:4109
+#: ui/device-sync.slint:1498 ui/device-sync.slint:1506 ui/dialogs/settings-dialog.slint:4109 ui/views/files-view.slint:711
 msgid "Connect"
 msgstr ""
 
@@ -10373,27 +10373,27 @@ msgstr ""
 msgid "Keep calendar"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4697
+#: ui/dialogs/settings-dialog.slint:4699
 msgid "Delete sync for every device?"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4698
+#: ui/dialogs/settings-dialog.slint:4700
 msgid ""
 "Removes your encrypted setup from the sync server and turns sync off on all "
 "your devices."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4699
+#: ui/dialogs/settings-dialog.slint:4701
 msgid ""
 "Each device keeps its own accounts and settings. Mail on your mail servers "
 "is not touched."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4700
+#: ui/dialogs/settings-dialog.slint:4702
 msgid "Delete sync"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4701
+#: ui/dialogs/settings-dialog.slint:4703
 msgid "Keep syncing"
 msgstr ""
 

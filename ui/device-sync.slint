@@ -560,12 +560,10 @@ component Notice inherits Rectangle {
     }
 }
 
-// The settings page. Placed in the settings dialog's content area.
+// The settings page. Placed in the settings dialog's content area, which
+// builds it only while the Sync tab shows.
 export component SyncSettingsPage inherits VerticalBox {
     in property <bool> compact;
-    // The Sync tab is the one shown: only then does the page ask the server
-    // what sync costs or where it stands.
-    in property <bool> shown: true;
     in property <color> surface;
     in property <color> card-border-color;
     in property <color> heading;
@@ -595,15 +593,9 @@ export component SyncSettingsPage inherits VerticalBox {
             : @tr("{} a year", yearly);
     }
 
+    // Opening the page asks the server what sync costs and where it stands.
     init => {
-        if root.shown {
-            SyncUi.opened();
-        }
-    }
-    changed shown => {
-        if root.shown {
-            SyncUi.opened();
-        }
+        SyncUi.opened();
     }
 
     function open-join(method: string) {
@@ -1109,9 +1101,9 @@ export component RedeemCodeDialog inherits SyncModal {
     title: root.redeemed ? @tr("Code redeemed") : @tr("Redeem a code");
     panel-width: 440px;
     dismissed => { root.closed(); }
-    // A typed code doesn't outlive the dialog.
-    changed open => {
-        root.code = "";
+    // Settings builds the dialog each time it opens, so only the last
+    // answer needs clearing.
+    init => {
         SyncUi.redeem-stage = "";
     }
 
@@ -1184,7 +1176,6 @@ export component RecoveryWordsDialog inherits SyncModal {
     open: SyncUi.recovery-words.length > 0;
     title: @tr("Save your recovery code");
     dismissed => { root.done(); }
-    changed open => { root.copied = false; }
 
     Text {
         text: SyncUi.sync-sign-ins
@@ -1409,11 +1400,6 @@ export component JoinDeviceDialog inherits SyncModal {
         : @tr("Connect this device");
     panel-width: 520px;
     dismissed => { root.closed(); }
-    // Typed codes and words don't outlive the dialog.
-    changed open => {
-        root.code = "";
-        root.words = "";
-    }
 
     if root.typing && root.method == "code" : Text {
         text: @tr("On your other device, go to Settings → Sync → Add a device → Use a code. Enter the code it shows:");

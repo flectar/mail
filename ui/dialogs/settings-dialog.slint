@@ -3472,15 +3472,15 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    sync-scroll := ScrollView {
-                        visible: root.settings_tab == "Sync";
+                    // Built only while it shows, as each page always built makes
+                    // the account view's stack frame bigger.
+                    if root.settings_tab == "Sync" : sync-scroll := ScrollView {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
                         content-width: self.visible-width;
 
                         SyncSettingsPage {
-                            shown: root.settings_tab == "Sync";
                             x: root.compact ? 16px : max(24px, (sync-scroll.visible-width - 920px) / 2);
                             width: root.compact ? sync-scroll.visible-width - 32px : min(920px, sync-scroll.visible-width - 48px);
                             compact: root.compact;
@@ -4626,7 +4626,9 @@ export component SettingsDialog inherits Rectangle {
             confirmed => { root.remove_calendar_connection(root.remove-calendar-id); }
         }
 
-        RecoveryWordsDialog {
+        // The Sync dialogs are built only while they're open, as each one
+        // always built makes the account view's stack frame bigger.
+        if SyncUi.recovery-words.length > 0 : RecoveryWordsDialog {
             width: parent.width;
             height: parent.height;
             compact: root.compact;
@@ -4644,7 +4646,7 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
-        InviteDeviceDialog {
+        if SyncUi.dialog == "invite" : InviteDeviceDialog {
             width: parent.width;
             height: parent.height;
             compact: root.compact;
@@ -4662,7 +4664,7 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
-        JoinDeviceDialog {
+        if SyncUi.dialog == "join" : JoinDeviceDialog {
             width: parent.width;
             height: parent.height;
             compact: root.compact;
@@ -4678,7 +4680,7 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
-        RedeemCodeDialog {
+        if SyncUi.dialog == "redeem" : RedeemCodeDialog {
             width: parent.width;
             height: parent.height;
             compact: root.compact;
