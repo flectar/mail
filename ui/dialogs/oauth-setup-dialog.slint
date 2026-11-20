@@ -110,6 +110,10 @@ export component OAuthSetupDialog inherits Rectangle {
                             text: root.google ? @tr("Create a Desktop app client in Google Cloud and enable the Gmail API. To send large files from Google Drive, enable the Google Drive API too.") : @tr("Use a public desktop app registration in Microsoft Entra. No client secret is needed.");
                             color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap;
                         }
+                        if root.google : Text {
+                            text: @tr("Gmail also works without app keys. Close this, choose Connect another provider, and sign in with a Google app password.");
+                            color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap;
+                        }
                         Text {
                             text: @tr("Leave the client ID blank to use default keys, if available. Keys are shared with Settings.");
                             color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap;
