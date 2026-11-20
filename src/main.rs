@@ -13,6 +13,9 @@ mod attachment_reminder;
 mod auto_replies;
 #[cfg(desktop)]
 mod autostart;
+/// The unread count where the app draws it itself.
+#[cfg(any(test, target_os = "windows"))]
+mod badge_pixels;
 mod block_sender;
 mod browser;
 pub use browser::ExternalUrlOpener;
