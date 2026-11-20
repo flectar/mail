@@ -63,9 +63,10 @@ export struct AccountStatus {
 }
 
 // The mailboxes Flectar Mail names itself, in the interface's language: the
-// standard ones every account has, and the two halves of a split inbox.
-// Folders and labels have no role and keep the names their accounts give them.
-export enum MailboxRole { none, inbox, starred, sent, archive, spam, trash, drafts, important, other }
+// standard ones every account has, the two halves of a split inbox, and
+// snoozed and scheduled mail. Folders and labels have no role and keep the
+// names their accounts give them.
+export enum MailboxRole { none, inbox, starred, sent, archive, spam, trash, drafts, important, other, snoozed, scheduled }
 
 // What the list or tab of a standard mailbox is called: the mailbox, after
 // the name of its account unless it shows every account's at once.

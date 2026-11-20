@@ -184,9 +184,9 @@ impl Scope {
             Self::Unified(mailbox) | Self::Account { mailbox, .. } => mailbox.role(),
             Self::Important => MailboxRole::Important,
             Self::Other => MailboxRole::Other,
-            Self::Label { .. } | Self::Folder(_) | Self::Snoozed | Self::Scheduled => {
-                MailboxRole::None
-            }
+            Self::Snoozed => MailboxRole::Snoozed,
+            Self::Scheduled => MailboxRole::Scheduled,
+            Self::Label { .. } | Self::Folder(_) => MailboxRole::None,
         }
     }
 

@@ -307,6 +307,8 @@ impl FixtureValue for MailboxRole {
             "drafts" => Self::Drafts,
             "important" => Self::Important,
             "other" => Self::Other,
+            "snoozed" => Self::Snoozed,
+            "scheduled" => Self::Scheduled,
             role => panic!("unknown screenshot mailbox role: {role}"),
         }
     }

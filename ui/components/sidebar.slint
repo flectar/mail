@@ -446,7 +446,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
-                        label: @tr("Snoozed");
+                        label: MailboxWords.name(MailboxRole.snoozed);
                         scope: "Snoozed";
                         icon: @image-url("../icons/lucide/filled/alarm-clock.svg");
                         selected: root.selected-scope == "Snoozed";
@@ -464,7 +464,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
-                        label: @tr("Scheduled");
+                        label: MailboxWords.name(MailboxRole.scheduled);
                         scope: "Scheduled";
                         icon: @image-url("../icons/lucide/filled/clock.svg");
                         selected: root.selected-scope == "Scheduled";

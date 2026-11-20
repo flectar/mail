@@ -8335,6 +8335,8 @@ mod tests {
         }
         assert_eq!(title(MailboxRole::Inbox, "Person", false), "Person / Inbox");
         assert_eq!(title(MailboxRole::Other, "", false), "Other");
+        assert_eq!(title(MailboxRole::Snoozed, "", false), "Snoozed");
+        assert_eq!(title(MailboxRole::Scheduled, "", false), "Scheduled");
         assert_eq!(title(MailboxRole::None, "Person", true), "Receipts");
 
         // Chosen in Settings, or followed from the system.

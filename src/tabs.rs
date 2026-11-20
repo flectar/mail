@@ -272,14 +272,14 @@ fn english_mailbox_title(location: &Location, title: &str) -> Option<MailTitle> 
         return None;
     };
     let account = match *scope {
-        Scope::Unified(_) | Scope::Important | Scope::Other => {
+        Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
             (title == scope.to_string()).then(String::new)?
         }
         Scope::Account { mailbox, .. } if title == mailbox.label() => String::new(),
         Scope::Account { mailbox, .. } => title
             .strip_suffix(&format!(" / {}", mailbox.label()))?
             .to_owned(),
-        Scope::Folder(_) | Scope::Label { .. } | Scope::Snoozed | Scope::Scheduled => return None,
+        Scope::Folder(_) | Scope::Label { .. } => return None,
     };
     Some(MailTitle::Mailbox {
         scope: *scope,
@@ -2229,6 +2229,7 @@ mod tests {
                 tab(inbox(9), "", None, "Inbox"),
                 tab(unified_archive, "", None, "Unified Archive"),
                 tab(Scope::Important, "", None, "Important"),
+                tab(Scope::Snoozed, "", None, "Snoozed"),
                 // A conversation without a subject and a search were named
                 // after their mailbox too.
                 tab(Scope::UNIFIED_INBOX, "", Some(10), "Unified Inbox"),
@@ -2254,6 +2255,7 @@ mod tests {
                 mailbox(inbox(9), ""),
                 mailbox(unified_archive, ""),
                 mailbox(Scope::Important, ""),
+                mailbox(Scope::Snoozed, ""),
                 mailbox(Scope::UNIFIED_INBOX, ""),
                 mailbox(Scope::UNIFIED_INBOX, ""),
                 text("Lunch"),
@@ -2273,8 +2275,8 @@ mod tests {
                 account: "Work / Personal".into(),
             })
         );
-        assert_eq!(saved.tabs[7].title, "Lunch");
-        assert_eq!(saved.tabs[7].title_mailbox, None);
+        assert_eq!(saved.tabs[8].title, "Lunch");
+        assert_eq!(saved.tabs[8].title_mailbox, None);
         let json = serde_json::to_string(&saved).unwrap();
         assert!(json.contains(r#""title_mailbox":{"scope":"Unified Archive"}"#));
         let reloaded = TabStrip::restore(serde_json::from_str(&json).unwrap());

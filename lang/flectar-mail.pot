@@ -6189,14 +6189,6 @@ msgstr ""
 msgid "All Inboxes"
 msgstr ""
 
-#: ui/components/sidebar.slint:449
-msgid "Snoozed"
-msgstr ""
-
-#: ui/components/sidebar.slint:467
-msgid "Scheduled"
-msgstr ""
-
 #: ui/components/sidebar.slint:485
 msgid "Categories"
 msgstr ""
@@ -8879,7 +8871,7 @@ msgstr ""
 msgid "Inbox behavior"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1576 ui/mailbox-words.slint:24
+#: ui/dialogs/settings-dialog.slint:1576 ui/mailbox-words.slint:26
 msgid "Unified Inbox"
 msgstr ""
 
@@ -10664,27 +10656,35 @@ msgstr ""
 msgid "Drafts"
 msgstr ""
 
-#: ui/mailbox-words.slint:25
-msgid "Unified Starred"
+#: ui/mailbox-words.slint:16
+msgid "Snoozed"
 msgstr ""
 
-#: ui/mailbox-words.slint:26
-msgid "Unified Sent"
+#: ui/mailbox-words.slint:17
+msgid "Scheduled"
 msgstr ""
 
 #: ui/mailbox-words.slint:27
-msgid "Unified Archive"
+msgid "Unified Starred"
 msgstr ""
 
 #: ui/mailbox-words.slint:28
-msgid "Unified Spam"
+msgid "Unified Sent"
 msgstr ""
 
 #: ui/mailbox-words.slint:29
-msgid "Unified Trash"
+msgid "Unified Archive"
 msgstr ""
 
 #: ui/mailbox-words.slint:30
+msgid "Unified Spam"
+msgstr ""
+
+#: ui/mailbox-words.slint:31
+msgid "Unified Trash"
+msgstr ""
+
+#: ui/mailbox-words.slint:32
 msgid "Unified Drafts"
 msgstr ""
 

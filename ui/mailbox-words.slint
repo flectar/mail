@@ -13,6 +13,8 @@ export global MailboxWords {
         if role == MailboxRole.drafts { return @tr("Drafts"); }
         if role == MailboxRole.important { return @tr("Important"); }
         if role == MailboxRole.other { return @tr("Other"); }
+        if role == MailboxRole.snoozed { return @tr("Snoozed"); }
+        if role == MailboxRole.scheduled { return @tr("Scheduled"); }
         return "";
     }
 

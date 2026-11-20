@@ -1848,11 +1848,12 @@ fn scope_title(
 ) -> MailTitle {
     let entry = || mailboxes.iter().find(|entry| entry.scope == Some(scope));
     match scope {
-        Scope::Unified(_) | Scope::Important | Scope::Other => MailTitle::Mailbox {
-            scope,
-            account: String::new(),
-        },
-        Scope::Snoozed | Scope::Scheduled => MailTitle::Text(scope.to_string()),
+        Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
+            MailTitle::Mailbox {
+                scope,
+                account: String::new(),
+            }
+        }
         // Local mail's mailboxes have no account to name.
         Scope::Account { .. } => MailTitle::Mailbox {
             scope,
@@ -2723,6 +2724,7 @@ mod tests {
         let unified = Scope::Unified(StandardMailbox::Drafts);
         assert_eq!(title(unified), mailbox(unified, ""));
         assert_eq!(title(Scope::Other), mailbox(Scope::Other, ""));
+        assert_eq!(title(Scope::Snoozed), mailbox(Scope::Snoozed, ""));
         assert_eq!(title(Scope::Folder(9)), MailTitle::Text("Folder".into()));
 
         let parts = |title: MailTitle| {
@@ -2750,6 +2752,10 @@ mod tests {
         assert_eq!(
             parts(title(Scope::Important)),
             (MailboxRole::Important, String::new(), false, String::new())
+        );
+        assert_eq!(
+            parts(title(Scope::Scheduled)),
+            (MailboxRole::Scheduled, String::new(), false, String::new())
         );
         assert_eq!(
             parts(MailTitle::Text("Receipts".into())),
