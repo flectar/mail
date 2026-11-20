@@ -406,6 +406,23 @@ async fn a_pop3_account_downloads_files_and_sends_mail_on_this_device() {
     assert!(drafts.contains("Subject: Unsent idea\n"), "{drafts}");
     let sent = std::fs::read_to_string(second_export.join("Sent.mbox")).unwrap();
     assert!(sent.contains("Subject: From a POP3 account\n"), "{sent}");
+
+    // An edit keeps the account's own proxy, which Settings sets apart from
+    // the account's form, and checks the servers through it.
+    core.set_account_network(
+        account.id,
+        flectar_mail_core::net::proxy::AccountProxy::Direct,
+        flectar_mail_core::ProxyPassword::Keep,
+    )
+    .await
+    .unwrap();
+    core.add_account_password(pop3_args(pop3_port, smtp_port))
+        .await
+        .unwrap();
+    assert_eq!(
+        core.account_network(account.id).await.unwrap().proxy,
+        flectar_mail_core::net::proxy::AccountProxy::Direct
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

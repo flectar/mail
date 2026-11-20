@@ -384,11 +384,11 @@ fn folder_path_delimiter(protocol: MailProtocol, folder: &repo::folders::Folder)
     }
 }
 
-/// The configuration a password account would have, for checks before it
-/// exists.
-fn password_account_config(args: &AddPasswordAccountArgs) -> AccountConfig {
+/// The account `args` describe, a new one or account `id` being edited,
+/// whose connections go through its own proxy.
+fn password_account_config(args: &AddPasswordAccountArgs, id: i64) -> AccountConfig {
     AccountConfig {
-        id: 0,
+        id,
         email: args.email.clone(),
         display_name: None,
         avatar_url: None,
@@ -406,9 +406,9 @@ fn password_account_config(args: &AddPasswordAccountArgs) -> AccountConfig {
     }
 }
 
-async fn check_smtp(args: &AddPasswordAccountArgs) -> Result<()> {
+async fn check_smtp(args: &AddPasswordAccountArgs, id: i64) -> Result<()> {
     smtp::test_connection(
-        &password_account_config(args),
+        &password_account_config(args, id),
         &smtp::SmtpAuth::Password(args.password.clone()),
     )
     .await
@@ -472,11 +472,15 @@ fn alternative_username(email: &str, username: &str) -> Option<String> {
 
 /// Sign in with the username as given and, when the server rejects it, once
 /// more with its other common form. `args` keeps the username that worked.
-async fn with_username_fallback<T>(
+/// `sign_in` gets what else it needs as `context` and captures nothing, as
+/// a borrow captured by an async closure keeps the account setup future from
+/// being Send.
+async fn with_username_fallback<C: Copy, T>(
     args: &mut AddPasswordAccountArgs,
-    sign_in: impl AsyncFn(&AddPasswordAccountArgs) -> Result<T>,
+    context: C,
+    sign_in: impl AsyncFn(&AddPasswordAccountArgs, C) -> Result<T>,
 ) -> Result<T> {
-    let rejected = match sign_in(args).await {
+    let rejected = match sign_in(args, context).await {
         Err(CoreError::Auth(rejected)) => rejected,
         result => return result,
     };
@@ -484,7 +488,7 @@ async fn with_username_fallback<T>(
         return Err(CoreError::Auth(rejected));
     };
     let given = std::mem::replace(&mut args.username, alternative);
-    match sign_in(args).await {
+    match sign_in(args, context).await {
         Ok(value) => Ok(value),
         Err(error) => {
             let alternative = std::mem::replace(&mut args.username, given);
@@ -582,15 +586,16 @@ mod username_fallback_tests {
     ) -> (Result<()>, String, Vec<String>) {
         let tried = Mutex::new(Vec::new());
         let mut args = args(username);
-        let result = with_username_fallback(&mut args, async |args: &AddPasswordAccountArgs| {
-            tried.lock().unwrap().push(args.username.clone());
-            if Some(args.username.as_str()) == accepted {
-                Ok(())
-            } else {
-                Err(CoreError::Auth(format!("rejected {}", args.username)))
-            }
-        })
-        .await;
+        let result =
+            with_username_fallback(&mut args, (), async |args: &AddPasswordAccountArgs, ()| {
+                tried.lock().unwrap().push(args.username.clone());
+                if Some(args.username.as_str()) == accepted {
+                    Ok(())
+                } else {
+                    Err(CoreError::Auth(format!("rejected {}", args.username)))
+                }
+            })
+            .await;
         (result, args.username, tried.into_inner().unwrap())
     }
 
@@ -624,12 +629,13 @@ mod username_fallback_tests {
     async fn only_a_rejection_tries_the_other_username() {
         let tried = Mutex::new(0);
         let mut args = args("jane@example.com");
-        let error = with_username_fallback(&mut args, async |_: &AddPasswordAccountArgs| {
-            *tried.lock().unwrap() += 1;
-            Err::<(), _>(CoreError::Imap("connection refused".into()))
-        })
-        .await
-        .unwrap_err();
+        let error =
+            with_username_fallback(&mut args, (), async |_: &AddPasswordAccountArgs, ()| {
+                *tried.lock().unwrap() += 1;
+                Err::<(), _>(CoreError::Imap("connection refused".into()))
+            })
+            .await
+            .unwrap_err();
         assert!(matches!(error, CoreError::Imap(_)));
         assert_eq!(*tried.lock().unwrap(), 1);
     }
@@ -2039,11 +2045,11 @@ impl Core {
             .map(|_| ())
             .map_err(|error| error.to_client_json()),
             MailProtocol::Imap => self
-                .check_imap_smtp(&mut args)
+                .check_imap_smtp(&mut args, 0)
                 .await
                 .map_err(|error| error.to_string()),
             MailProtocol::Pop3 => self
-                .check_pop3_smtp(&mut args)
+                .check_pop3_smtp(&mut args, 0)
                 .await
                 .map(drop)
                 .map_err(|error| error.to_string()),
@@ -2062,26 +2068,33 @@ impl Core {
         }
     }
 
-    async fn check_imap_smtp(&self, args: &mut AddPasswordAccountArgs) -> Result<()> {
-        let mut session = with_username_fallback(args, async |args: &AddPasswordAccountArgs| {
-            let creds = imap::ImapCredentials::Password {
-                user: args.username.clone(),
-                password: args.password.clone(),
-            };
-            imap::connect_with_settings(
-                &args.incoming_host,
-                args.incoming_port,
-                creds,
-                &args.connection,
-            )
-            .await
-        })
+    /// Checks the servers of a new account, or of account `id` being edited.
+    async fn check_imap_smtp(&self, args: &mut AddPasswordAccountArgs, id: i64) -> Result<()> {
+        let owner = password_account_config(args, id).proxy_owner();
+        let mut session = with_username_fallback(
+            args,
+            owner,
+            async |args: &AddPasswordAccountArgs, owner: net::proxy::Owner| {
+                let creds = imap::ImapCredentials::Password {
+                    user: args.username.clone(),
+                    password: args.password.clone(),
+                };
+                imap::connect_as(
+                    owner,
+                    &args.incoming_host,
+                    args.incoming_port,
+                    creds,
+                    &args.connection,
+                )
+                .await
+            },
+        )
         .await
         .map_err(|error| explain_imap_sign_in(args, error))?;
         let mailbox_result = imap::select(&mut session, "INBOX").await.map(|_| ());
         imap::logout(session).await;
         mailbox_result?;
-        check_smtp(args).await
+        check_smtp(args, id).await
     }
 
     /// Returns what the POP3 server announced, which the first sync has to
@@ -2089,12 +2102,14 @@ impl Core {
     async fn check_pop3_smtp(
         &self,
         args: &mut AddPasswordAccountArgs,
+        id: i64,
     ) -> Result<sync::pop3::Probe> {
-        let probe = with_username_fallback(args, async |args: &AddPasswordAccountArgs| {
-            sync::pop3::probe(&password_account_config(args), &args.password).await
-        })
-        .await?;
-        check_smtp(args).await?;
+        let probe =
+            with_username_fallback(args, id, async |args: &AddPasswordAccountArgs, id: i64| {
+                sync::pop3::probe(&password_account_config(args, id), &args.password).await
+            })
+            .await?;
+        check_smtp(args, id).await?;
         Ok(probe)
     }
 
@@ -2183,13 +2198,32 @@ impl Core {
             ));
         }
 
+        // An edit keeps the account's own proxy, which the Network page of
+        // Settings sets and the form doesn't show, and checks the servers
+        // through it.
+        let checked_as = match &existing {
+            Some(existing) => {
+                let id = existing.id;
+                if let Some(config) = self
+                    .db
+                    .read(move |conn| repo::accounts::get_config(conn, id))
+                    .await?
+                {
+                    args.connection.proxy = config.settings.connection.proxy;
+                }
+                id
+            }
+            None => 0,
+        };
+
         // Verify credentials before storing anything. For JMAP, also pin the
         // exact Mail account selected from the authenticated Session so a
         // later reconnect can never drift to a different shared account.
         let mut pop3_probe = None;
         let jmap_account_id = match args.mail_protocol {
             MailProtocol::Jmap => Some(
-                crate::jmap::client::connect_with(
+                crate::jmap::client::connect_as(
+                    password_account_config(&args, checked_as).proxy_owner(),
                     &args.email,
                     &args.username,
                     &args.password,
@@ -2200,11 +2234,11 @@ impl Core {
                 .account_id,
             ),
             MailProtocol::Imap => {
-                self.check_imap_smtp(&mut args).await?;
+                self.check_imap_smtp(&mut args, checked_as).await?;
                 None
             }
             MailProtocol::Pop3 => {
-                pop3_probe = Some(self.check_pop3_smtp(&mut args).await?);
+                pop3_probe = Some(self.check_pop3_smtp(&mut args, checked_as).await?);
                 None
             }
             MailProtocol::Gmail => return Err(gmail_needs_google_sign_in()),
@@ -15774,6 +15808,15 @@ mod unsubscribe_offer_tests {
             .unwrap();
         assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), None);
     }
+}
+
+/// The app sets accounts up on its runtime's worker threads, which takes a
+/// Send future. A borrow an async closure captures can quietly lose that.
+#[cfg(test)]
+#[allow(dead_code)]
+fn account_setup_is_send(core: &Core, args: AddPasswordAccountArgs) {
+    fn send<T: Send>(_: T) {}
+    send(core.add_account_password(args));
 }
 
 #[cfg(test)]
