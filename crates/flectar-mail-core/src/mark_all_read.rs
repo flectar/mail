@@ -100,9 +100,10 @@ fn whole_mailboxes(conn: &Connection, args: &ListArgs) -> Result<Option<Vec<Mail
         View::Drafts => Some(crate::models::roles::DRAFTS),
         View::Trash => Some(crate::models::roles::TRASH),
         View::Spam => Some(crate::models::roles::SPAM),
-        // Starred and Snoozed are flags, Archive in a Gmail account is mail
-        // without the Inbox label: parts of mailboxes.
-        View::Starred | View::Snoozed | View::Done | View::All => None,
+        // Starred and Snoozed are flags, Scheduled is the drafts waiting to go
+        // out, Archive in a Gmail account is mail without the Inbox label:
+        // parts of mailboxes.
+        View::Starred | View::Snoozed | View::Scheduled | View::Done | View::All => None,
     };
     let folders: Vec<(i64, i64)> = match (&args.tab, args.folder_id, role) {
         (None, Some(folder_id), _) => conn

@@ -111,6 +111,12 @@ fn app_cache_dir(app: &slint::android::AndroidApp) -> Result<std::path::PathBuf,
 #[unsafe(no_mangle)]
 fn android_main(app: slint::android::AndroidApp) {
     observability::install();
+    // A copy Google Play installed sells nothing through the website. Not
+    // knowing, it does, as the APKs on GitHub do.
+    match store::installed_by_play(&app) {
+        Ok(play) => flectar_mail::platform::installed_by_play(play),
+        Err(error) => tracing::warn!(%error, "could not tell which store installed the app"),
+    }
     // SAFETY: AndroidApp owns these live VM and Activity references.
     unsafe { tls::initialize(app.vm_as_ptr().cast(), app.activity_as_ptr().cast()) }
         .expect("failed to initialize Android TLS certificate verification");
@@ -194,3 +200,5 @@ mod pdf;
 mod proxy;
 #[cfg(target_os = "android")]
 mod spelling;
+#[cfg(target_os = "android")]
+mod store;

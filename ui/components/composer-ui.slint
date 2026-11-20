@@ -93,6 +93,9 @@ export global ComposerUi {
     in property <int> active-image-shown-width: 0;
     // On the desktop a message can move into a window of its own.
     in property <bool> can-pop-out: false;
+    // When the message reminds the user unless someone replies, as shown,
+    // or empty.
+    in property <string> remind-time: "";
     // "reply" or "forward" while the message carries the original below the
     // editor; empty otherwise.
     in property <string> quote: "";
@@ -138,6 +141,9 @@ export global ComposerUi {
     callback pop-out();
     callback save(int, string, string, string, string, string, bool);
     callback pick-attachments();
+    // Pick when the message goes out, or reminds the user, in this window.
+    callback schedule-send();
+    callback remind();
     // Opens a picker for images to put in the text at the caret.
     callback insert-images();
     callback remove-attachment(int);
@@ -278,6 +284,7 @@ export component BoundComposer inherits EmailComposer {
     active-image-width: ComposerUi.active-image-width;
     active-image-shown-width: ComposerUi.active-image-shown-width;
     can-pop-out: ComposerUi.can-pop-out;
+    remind-time: ComposerUi.remind-time;
     quote: ComposerUi.quote;
     quote-left-out: ComposerUi.quote-left-out;
     quote-text: ComposerUi.quote-text;
@@ -320,6 +327,8 @@ export component BoundComposer inherits EmailComposer {
             send-now,
         );
     }
+    schedule-send => { ComposerUi.schedule-send(); }
+    remind => { ComposerUi.remind(); }
     pick-attachments => { ComposerUi.pick-attachments(); }
     insert-images => { ComposerUi.insert-images(); }
     remove-attachment(index) => { ComposerUi.remove-attachment(index); }

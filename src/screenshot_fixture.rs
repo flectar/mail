@@ -206,6 +206,7 @@ fixture_row!(EmailRow {
     starred,
     has_attachments,
     has_replied,
+    reply_due,
     message_count,
     label_summary,
     labels,

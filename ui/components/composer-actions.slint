@@ -384,6 +384,8 @@ export component ComposerToolbar inherits Rectangle {
     in property <bool> can-link: false;
     // Templates are messages to start from, which signatures don't have.
     in property <bool> templates-shown: true;
+    // Reminders wait for replies to a message, which signatures don't get.
+    in property <bool> reminder-shown: true;
     // The message goes out as plain text, with no formatting to apply; signatures always have it.
     in property <bool> plain-text: false;
     in property <bool> format-switch-shown: true;
@@ -391,6 +393,10 @@ export component ComposerToolbar inherits Rectangle {
     callback plain-text-chosen(bool);
     callback insert-image();
     callback open-templates();
+    // When the message reminds the user unless someone replies, as shown,
+    // or empty.
+    in property <string> remind-time;
+    callback remind();
     // A translation service is set up (#240).
     in property <bool> translate-shown: false;
     callback open-translate();
@@ -568,6 +574,18 @@ export component ComposerToolbar inherits Rectangle {
             if root.templates-shown && !root.plain-text : Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
             if root.templates-shown : ToolbarButton { icon: @image-url("../icons/lucide/outline/book.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
+            // "Remind me if no reply", for the message being written.
+            if root.reminder-shown : ToolbarButton {
+                icon: root.remind-time != "" ? @image-url("../icons/lucide/filled/bell.svg") : @image-url("../icons/lucide/outline/bell.svg");
+                icon-color: root.remind-time != "" ? root.accent-color : root.secondary-color;
+                active: root.remind-time != "";
+                hover-background: root.control-hover-color;
+                active-background: root.accent-background;
+                tooltip-text: root.remind-time != ""
+                    ? @tr("Reminds you {} if nobody replies", root.remind-time)
+                    : @tr("Remind me if no reply");
+                clicked => { root.remind(); }
+            }
             if root.translate-shown && !root.improve-shown : ToolbarButton { icon: @image-url("../icons/lucide/outline/languages.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Translate"); clicked => { root.open-translate(); } }
         }
     }
@@ -862,6 +880,8 @@ export component ComposerFooter inherits Rectangle {
     in property <color> secondary-color;
     in property <color> subtle-border-color;
     callback submit(bool);
+    // Pick when the message goes out.
+    callback schedule-send();
     callback pick-attachments();
     // A storage service is there to send files by link from.
     in property <bool> link-sharing: false;
@@ -907,7 +927,8 @@ export component ComposerFooter inherits Rectangle {
                 visible: !root.signature;
                 x: root.compact ? 8px : 12px;
                 y: 10px;
-                width: max(root.compact ? 96px : 106px, self.content-width);
+                // Phones keep room for Schedule send and Attach beside it.
+                width: max(root.compact ? 84px : 106px, self.content-width);
                 height: 34px;
                 text: root.sending ? @tr("Sending…") : @tr("Send");
                 icon: @image-url("../icons/lucide/filled/paper-airplane.svg");
@@ -917,9 +938,24 @@ export component ComposerFooter inherits Rectangle {
                 clicked => { root.submit(true); }
             }
 
+            // Send later: pick when the message goes out.
+            schedule-button := IconButton {
+                visible: !root.signature;
+                x: send-button.x + send-button.width + (root.compact ? 4px : 6px);
+                y: root.compact ? 5px : 11px;
+                width: root.compact ? 44px : 32px;
+                height: root.compact ? 44px : 32px;
+                icon: @image-url("../icons/lucide/outline/clock.svg");
+                icon-color: root.secondary-color;
+                hover-background: root.control-hover-color;
+                interactive: root.can-send && !root.sending;
+                tooltip-text: @tr("Schedule send");
+                clicked => { root.schedule-send(); }
+            }
+
             attach-button := IconButton {
                 visible: root.attachment-picker-supported && !root.signature;
-                x: send-button.x + send-button.width + (root.compact ? 4px : 8px);
+                x: schedule-button.x + schedule-button.width + (root.compact ? 4px : 8px);
                 y: root.compact ? 5px : 11px;
                 width: root.compact ? 44px : 32px;
                 height: root.compact ? 44px : 32px;
@@ -959,7 +995,7 @@ export component ComposerFooter inherits Rectangle {
                 visible: !root.signature;
                 x: more-menu.x - (root.compact ? 6px : 12px) - self.width;
                 y: 11px;
-                width: max(root.compact ? 104px : 112px, self.content-width);
+                width: max(root.compact ? 0px : 112px, self.content-width);
                 height: 32px;
                 text: @tr("Save draft");
                 enabled: root.has-content && !root.shrinking-photos && !root.attaching-files;

@@ -242,9 +242,11 @@ expected = {
 }
 sources = json.loads((root / "packaging/flatpak/cargo-sources.json").read_text())
 archives = {s["dest"]: s["sha256"] for s in sources if s["type"] == "archive"}
+# Crates from git repositories carry no checksum; compare the crates.io ones.
 checksums = {
     s["dest"]: json.loads(s["contents"])["package"]
-    for s in sources if s.get("dest-filename") == ".cargo-checksum.json"
+    for s in sources
+    if s.get("dest-filename") == ".cargo-checksum.json" and s["dest"] in archives
 }
 if archives != expected or checksums != expected:
     raise SystemExit("Flatpak offline sources differ from Cargo.lock")

@@ -25,6 +25,18 @@ const MOBILE_OAUTH_ENV: [(&str, &str, &str); 2] = [
     ),
 ];
 
+/// Which builds can take each other's OAuth sign-ins: those that sign in
+/// with the same kind of registration. OpenHarmony borrows Android's
+/// registrations, but its sign-ins stay among OpenHarmony devices.
+fn sign_in_family(target_os: &str, target_env: &str) -> &'static str {
+    match (target_os, target_env) {
+        (_, "ohos") => "ohos",
+        ("android", _) => "android",
+        ("ios", _) => "ios",
+        _ => "desktop",
+    }
+}
+
 /// The build variable that supplies `name` when building for `target_os`.
 fn mobile_oauth_source(target_os: &str, name: &str) -> Option<&'static str> {
     let &(_, android, ios) = MOBILE_OAUTH_ENV.iter().find(|(core, ..)| *core == name)?;
@@ -66,6 +78,11 @@ fn main() {
     }
 
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    println!(
+        "cargo:rustc-env=FLECTAR_SIGN_IN_FAMILY={}",
+        sign_in_family(&target_os, &target_env)
+    );
     for (name, ..) in MOBILE_OAUTH_ENV {
         let Some(source) = mobile_oauth_source(&target_os, name) else {
             continue;

@@ -24,6 +24,11 @@ impl UiMessage {
         third_argument: String::new(),
     };
 
+    /// Says nothing: the status line keeps what it shows.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.key.is_empty()
+    }
+
     pub(crate) fn plain(key: &'static str) -> Self {
         Self { key, ..Self::EMPTY }
     }

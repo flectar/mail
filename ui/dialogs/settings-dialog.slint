@@ -19,6 +19,7 @@ import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountProblem, AccountRow, CalendarConnectionRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
 import { AccountCalendars } from "../components/account-calendars.slint";
+import { InviteDeviceDialog, JoinDeviceDialog, RecoveryWordsDialog, RedeemCodeDialog, SyncSettingsPage, SyncUi } from "../device-sync.slint";
 import { AccountStatusText } from "../components/account-status.slint";
 import { ReadReceipts } from "../read-receipts.slint";
 import { Avatar } from "../components/avatar.slint";
@@ -351,10 +352,11 @@ component ServiceBadge inherits Rectangle {
     }
 }
 
-// Paid Flectar Base services are previewed before they can be purchased, so
-// each card describes what is planned without implying anything is connected.
+// Paid Flectar services. One that is still planned is previewed without
+// implying anything is connected; one that is `available` opens its settings.
 component ServicePreviewCard inherits Rectangle {
     in property <bool> compact: false;
+    in property <bool> available: false;
     in property <image> icon;
     in property <string> title;
     in property <string> tagline;
@@ -407,7 +409,7 @@ component ServicePreviewCard inherits Rectangle {
                 alignment: end;
                 cross-axis-alignment: center;
                 ServiceBadge { text: @tr("Paid"); foreground: root.secondary-text; fill: root.card-border-color; }
-                ServiceBadge { text: @tr("Coming soon"); foreground: root.accent; fill: root.accent-soft; }
+                if !root.available : ServiceBadge { text: @tr("Coming soon"); foreground: root.accent; fill: root.accent-soft; }
             }
         }
         if root.compact : HorizontalBox {
@@ -415,7 +417,7 @@ component ServicePreviewCard inherits Rectangle {
             spacing: 6px;
             alignment: start;
             ServiceBadge { text: @tr("Paid"); foreground: root.secondary-text; fill: root.card-border-color; }
-            ServiceBadge { text: @tr("Coming soon"); foreground: root.accent; fill: root.accent-soft; }
+            if !root.available : ServiceBadge { text: @tr("Coming soon"); foreground: root.accent; fill: root.accent-soft; }
         }
 
         Text { height: max(root.compact ? 51px : 34px, self.preferred-height); text: root.description; color: root.body-text; font-size: TypeScale.secondary; wrap: word-wrap; }
@@ -442,9 +444,10 @@ component ServicePreviewCard inherits Rectangle {
             if !root.compact : Text { horizontal-stretch: 1; text: root.note; color: root.faint-text; font-size: TypeScale.caption; vertical-alignment: center; overflow: elide; }
             Button {
                 width: root.compact ? parent.width : 140px;
-                text: @tr("Learn more");
-                icon: @image-url("../icons/lucide/outline/link.svg");
+                text: root.available ? @tr("Set up") : @tr("Learn more");
+                icon: root.available ? @image-url("../icons/lucide/filled/cloud-sync.svg") : @image-url("../icons/lucide/outline/link.svg");
                 has-icon: true;
+                primary: root.available;
                 clicked => { root.learn-more(); }
             }
         }
@@ -700,6 +703,9 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> flectar-services-available: false;
     callback start_flectar_sign_in();
 
+    // Flectar Mail Sync's confirmation before deleting it everywhere.
+    private property <bool> sync-delete-confirmation: false;
+
     private property <[string]> density-options: [
         @tr("list density" => "Comfortable"),
         @tr("list density" => "Compact"),
@@ -867,6 +873,7 @@ export component SettingsDialog inherits Rectangle {
         }
         return section == "General" ? SettingsIconPalette.general
             : section == "Accounts" ? SettingsIconPalette.accounts
+            : section == "Sync" ? ServiceIconPalette.sync
             : section == "Contacts" ? SettingsIconPalette.accounts
             : section == "Rules" ? SettingsIconPalette.rules
             : section == "Translation" ? SettingsIconPalette.translation
@@ -894,6 +901,8 @@ export component SettingsDialog inherits Rectangle {
                 + " " + @tr("mark read opened delay receipts")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap pop3 jmap caldav carddav mail history server oauth security signatures")
+            : section == "Sync"
+            ? @tr("sync devices phone computer pair qr code recovery code encrypted backup setup server subscription billing trial plan price redeem passwords sign-ins")
             : section == "Contacts"
             ? @tr("contacts people suggestions autocomplete recipients senders address book privacy clear")
             : section == "Rules"
@@ -921,7 +930,8 @@ export component SettingsDialog inherits Rectangle {
     }
 
     private property <bool> search-has-results: root.settings-section-visible("General")
-        || root.settings-section-visible("Accounts") || root.settings-section-visible("Contacts")
+        || root.settings-section-visible("Accounts") || root.settings-section-visible("Sync")
+        || root.settings-section-visible("Contacts")
         || root.settings-section-visible("Rules") || root.settings-section-visible("Translation")
         || root.settings-section-visible("AI")
         || root.settings-section-visible("Notifications")
@@ -992,6 +1002,7 @@ export component SettingsDialog inherits Rectangle {
         if value != "" && !root.settings-section-visible(root.settings_tab) {
             root.settings_tab = root.settings-section-visible("General") ? "General"
                 : root.settings-section-visible("Accounts") ? "Accounts"
+                : root.settings-section-visible("Sync") ? "Sync"
                 : root.settings-section-visible("Contacts") ? "Contacts"
                 : root.settings-section-visible("Rules") ? "Rules"
                 : root.settings-section-visible("Translation") ? "Translation"
@@ -1248,6 +1259,7 @@ export component SettingsDialog inherits Rectangle {
                         if !root.search-has-results : Text { text: @tr("No settings found"); color: root.muted-text; font-size: TypeScale.secondary; wrap: word-wrap; }
                         if root.settings-section-visible("General") : SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/lucide/filled/sliders.svg"); icon-color: root.settings-icon-color("General"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; } }
                         if root.settings-section-visible("Accounts") : SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; } }
+                        if root.settings-section-visible("Sync") : SettingsNavItem { text: @tr("Sync"); icon: @image-url("../icons/lucide/filled/cloud-sync.svg"); icon-color: root.settings-icon-color("Sync"); selected: root.settings_tab == "Sync"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Sync"; } }
                         if root.settings-section-visible("Contacts") : SettingsNavItem { text: @tr("Contacts"); icon: @image-url("../icons/lucide/filled/contacts.svg"); icon-color: root.settings-icon-color("Contacts"); selected: root.settings_tab == "Contacts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Contacts"; } }
                         if root.settings-section-visible("Rules") : SettingsNavItem { text: @tr("Rules"); icon: @image-url("../icons/lucide/filled/filter.svg"); icon-color: root.settings-icon-color("Rules"); selected: root.settings_tab == "Rules"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Rules"; } }
                         if root.settings-section-visible("Translation") : SettingsNavItem { text: @tr("Translation"); icon: @image-url("../icons/lucide/filled/languages.svg"); icon-color: root.settings-icon-color("Translation"); selected: root.settings_tab == "Translation"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Translation"; } }
@@ -3051,8 +3063,8 @@ export component SettingsDialog inherits Rectangle {
                                             compact: root.compact;
                                             title: @tr("Sent copies");
                                             compact-description-height: 51px;
-                                            description: @tr("Choose who saves sent mail. Use Flectar if your server does not save a copy.");
-                                            choices: [@tr("Provider default"), @tr("Server saves a copy"), @tr("Flectar saves a copy")];
+                                            description: @tr("Choose who saves sent mail. Use Flectar Mail if your server does not save a copy.");
+                                            choices: [@tr("Provider default"), @tr("Server saves a copy"), @tr("Flectar Mail saves a copy")];
                                             selected-index: account.sent_copy_policy == "server" ? 1 : account.sent_copy_policy == "client" ? 2 : 0;
                                             title-color: root.body-text;
                                             description-color: root.faint-text;
@@ -3592,6 +3604,31 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
+                    // Built only while it shows, as each page always built makes
+                    // the account view's stack frame bigger.
+                    if root.settings_tab == "Sync" : sync-scroll := ScrollView {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
+
+                        SyncSettingsPage {
+                            x: root.compact ? 16px : max(24px, (sync-scroll.visible-width - 920px) / 2);
+                            width: root.compact ? sync-scroll.visible-width - 32px : min(920px, sync-scroll.visible-width - 48px);
+                            compact: root.compact;
+                            surface: root.surface;
+                            card-border-color: root.border-subtle;
+                            heading: root.heading;
+                            title-color: root.title-color;
+                            body-text: root.body-text;
+                            secondary-text: root.secondary-text;
+                            faint-text: root.faint-text;
+                            accent: root.accent;
+                            accent-soft: root.accent-soft;
+                            confirm-delete => { root.sync-delete-confirmation = true; }
+                        }
+                    }
+
                     agents-scroll := ScrollView {
                         visible: root.settings_tab == "Agents";
                         width: parent.width;
@@ -3643,7 +3680,7 @@ export component SettingsDialog inherits Rectangle {
                                 vertical-stretch: 0;
                                 account-card := SettingsCard { title: @tr("Flectar account"); description: @tr("Not signed in"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
                                 Image { x: 20px; y: account-note.y + (account-note.height - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/lock.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
-                                account-note := Text { x: 48px; y: account-card.content-y + 14px; width: root.compact ? parent.width - 68px : sign-in-button.x - 70px; height: max(root.compact ? 68px : 42px, self.preferred-height); text: @tr("A Flectar account is only needed for these optional services. Learn more at flectar.com/mail."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
+                                account-note := Text { x: 48px; y: account-card.content-y + 14px; width: root.compact ? parent.width - 68px : sign-in-button.x - 70px; height: max(root.compact ? 68px : 42px, self.preferred-height); text: @tr("A Flectar account is only needed for business email. Flectar Mail Sync works without one. Learn more at flectar.com/mail."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
                                 sign-in-button := Button {
                                     x: root.compact ? 20px : parent.width - self.width - 20px;
                                     y: root.compact ? account-note.y + account-note.height + 18px : account-note.y + (account-note.height - self.height) / 2;
@@ -3659,17 +3696,19 @@ export component SettingsDialog inherits Rectangle {
 
                             ServicePreviewCard {
                                 compact: root.compact;
+                                available: true;
                                 icon: @image-url("../icons/lucide/filled/cloud-sync.svg");
-                                title: @tr("Sync");
+                                title: @tr("Flectar Mail Sync");
                                 tagline: @tr("Your setup on every device");
-                                description: @tr("Sign in on a new phone or computer and your accounts, calendars, contacts, and preferences are ready without setting them up again.");
+                                description: @tr("Connect your phone and computers once. Your accounts, preferences, templates, snoozes and reply reminders stay the same on all of them, and any of them sends your scheduled emails.");
                                 features: [
-                                    @tr("Mail accounts, profiles, and signatures"),
-                                    @tr("Calendar and contact connections"),
-                                    @tr("Themes, layout, and notification preferences"),
-                                    @tr("Account credentials, encrypted on this device before upload"),
+                                    @tr("Scheduled emails go out from any of your devices"),
+                                    @tr("Snoozes, reply reminders and templates everywhere"),
+                                    @tr("Mail accounts, profiles, signatures and preferences"),
+                                    @tr("End-to-end encrypted: not even Flectar Mail can read it"),
+                                    @tr("No account needed: a recovery code restores it"),
                                 ];
-                                note: @tr("Your messages stay with your mail provider. Sync only carries your Flectar Mail setup.");
+                                note: @tr("Your mail stays with your mail provider. Flectar Mail Sync carries your setup and sign-ins, and a scheduled message until it goes out.");
                                 surface: root.surface;
                                 card-border-color: root.border-subtle;
                                 heading: root.heading;
@@ -3678,7 +3717,7 @@ export component SettingsDialog inherits Rectangle {
                                 faint-text: root.faint-text;
                                 accent: ServiceIconPalette.sync;
                                 accent-soft: ServiceIconPalette.sync.with-alpha(AppTheme.dark ? 0.16 : 0.10);
-                                learn-more => { root.open-link("https://flectar.com/mail"); }
+                                learn-more => { root.settings_tab = "Sync"; }
                             }
 
                             ServicePreviewCard {
@@ -3704,7 +3743,7 @@ export component SettingsDialog inherits Rectangle {
                                 learn-more => { root.open-link("https://flectar.com/mail"); }
                             }
 
-                            Text { height: max(root.compact ? 34px : 17px, self.preferred-height); text: @tr("These services are in development. Plans and availability will be announced on flectar.com/mail."); color: root.faint-text; font-size: TypeScale.caption; vertical-alignment: center; wrap: word-wrap; }
+                            Text { height: max(root.compact ? 34px : 17px, self.preferred-height); text: @tr("Plans and prices will be announced on flectar.com/mail."); color: root.faint-text; font-size: TypeScale.caption; vertical-alignment: center; wrap: word-wrap; }
                         }
                     }
 
@@ -3973,6 +4012,7 @@ export component SettingsDialog inherits Rectangle {
                 z: 200;
                 title: root.settings_tab == "General" ? @tr("General")
                     : root.settings_tab == "Accounts" ? @tr("Accounts")
+                    : root.settings_tab == "Sync" ? @tr("Sync")
                     : root.settings_tab == "Contacts" ? @tr("Contacts")
                     : root.settings_tab == "Rules" ? @tr("Rules")
                     : root.settings_tab == "Translation" ? @tr("Translation")
@@ -4049,6 +4089,7 @@ export component SettingsDialog inherits Rectangle {
                     if !root.search-has-results : Text { text: @tr("No settings found"); color: root.muted-text; font-size: TypeScale.secondary; wrap: word-wrap; }
                     if root.settings-section-visible("General") : SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/lucide/filled/sliders.svg"); icon-color: root.settings-icon-color("General"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Accounts") : SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Sync") : SettingsNavItem { text: @tr("Sync"); icon: @image-url("../icons/lucide/filled/cloud-sync.svg"); icon-color: root.settings-icon-color("Sync"); selected: root.settings_tab == "Sync"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Sync"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Contacts") : SettingsNavItem { text: @tr("Contacts"); icon: @image-url("../icons/lucide/filled/contacts.svg"); icon-color: root.settings-icon-color("Contacts"); selected: root.settings_tab == "Contacts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Contacts"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Rules") : SettingsNavItem { text: @tr("Rules"); icon: @image-url("../icons/lucide/filled/filter.svg"); icon-color: root.settings-icon-color("Rules"); selected: root.settings_tab == "Rules"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Rules"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Translation") : SettingsNavItem { text: @tr("Translation"); icon: @image-url("../icons/lucide/filled/languages.svg"); icon-color: root.settings-icon-color("Translation"); selected: root.settings_tab == "Translation"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Translation"; root.compact-nav-open = false; } }
@@ -4715,5 +4756,89 @@ export component SettingsDialog inherits Rectangle {
             body-color: root.body-text;
             muted-color: root.secondary-text;
             confirmed => { root.remove_calendar_connection(root.remove-calendar-id); }
+        }
+
+        // The Sync dialogs are built only while they're open, as each one
+        // always built makes the account view's stack frame bigger.
+        if SyncUi.recovery-words.length > 0 : RecoveryWordsDialog {
+            width: parent.width;
+            height: parent.height;
+            compact: root.compact;
+            surface: root.surface;
+            panel-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-text: root.body-text;
+            secondary-text: root.secondary-text;
+            fill: root.page-bg;
+            done => {
+                SyncUi.recovery-words = [];
+                SyncUi.recovery-text = "";
+                SyncUi.recovery-saved = false;
+                SyncUi.recovery-save-error = "";
+            }
+        }
+
+        if SyncUi.dialog == "invite" : InviteDeviceDialog {
+            width: parent.width;
+            height: parent.height;
+            compact: root.compact;
+            surface: root.surface;
+            panel-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-text: root.body-text;
+            secondary-text: root.secondary-text;
+            fill: root.page-bg;
+            accent: root.accent;
+            closed => {
+                SyncUi.dialog = "";
+                self.with-code = false;
+                SyncUi.cancel-pairing();
+            }
+        }
+
+        if SyncUi.dialog == "join" : JoinDeviceDialog {
+            width: parent.width;
+            height: parent.height;
+            compact: root.compact;
+            surface: root.surface;
+            panel-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-text: root.body-text;
+            secondary-text: root.secondary-text;
+            fill: root.page-bg;
+            closed => {
+                SyncUi.dialog = "";
+                SyncUi.cancel-pairing();
+            }
+        }
+
+        if SyncUi.dialog == "redeem" : RedeemCodeDialog {
+            width: parent.width;
+            height: parent.height;
+            compact: root.compact;
+            surface: root.surface;
+            panel-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-text: root.body-text;
+            secondary-text: root.secondary-text;
+            closed => { SyncUi.dialog = ""; }
+        }
+
+        ConfirmationDialog {
+            width: parent.width;
+            height: parent.height;
+            open <=> root.sync-delete-confirmation;
+            title: @tr("Delete sync for every device?");
+            description: @tr("Removes your encrypted setup from the sync server and turns sync off on all your devices.");
+            detail: @tr("Each device keeps its own accounts and settings. Mail on your mail servers is not touched.");
+            confirm-label: @tr("Delete sync");
+            cancel-label: @tr("Keep syncing");
+            icon: @image-url("../icons/lucide/outline/trash.svg");
+            surface: root.surface;
+            dialog-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-color: root.body-text;
+            muted-color: root.secondary-text;
+            confirmed => { SyncUi.delete-everywhere(); }
         }
 }
