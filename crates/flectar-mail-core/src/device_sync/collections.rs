@@ -224,9 +224,20 @@ fn entry(collection: &str, body: Value) -> Entry {
 }
 
 /// Account settings each device keeps to itself: how much mail it keeps,
-/// for POP3 what it leaves on the server, and its OpenPGP settings, whose
-/// keys only that device has.
-const PER_DEVICE_ACCOUNT_SETTINGS: &[&str] = &["mailHistory", "keepOnServer", "security"];
+/// for POP3 what it leaves on the server, how often it checks for mail and
+/// whether it listens for it, which go with the device's battery and network,
+/// and its OpenPGP settings, whose keys only that device has.
+const PER_DEVICE_ACCOUNT_SETTINGS: &[&str] = &[
+    "mailHistory",
+    "keepOnServer",
+    "checkInterval",
+    "push",
+    "security",
+];
+
+/// Connection settings each device keeps to itself: the proxy, which goes
+/// with the device's network.
+const PER_DEVICE_CONNECTION_SETTINGS: &[&str] = &["proxy"];
 
 /// The account's synced settings: all but the ones each device keeps to
 /// itself. Every field is there, null when empty.
@@ -239,6 +250,14 @@ fn account_body(
     if let Some(account_settings) = body.get_mut("settings").and_then(Value::as_object_mut) {
         for key in PER_DEVICE_ACCOUNT_SETTINGS {
             account_settings.remove(*key);
+        }
+        if let Some(connection) = account_settings
+            .get_mut("connection")
+            .and_then(Value::as_object_mut)
+        {
+            for key in PER_DEVICE_CONNECTION_SETTINGS {
+                connection.remove(*key);
+            }
         }
     }
     let key = config.id.to_string();
@@ -1441,12 +1460,16 @@ fn set_or_remove(
 /// The synced account settings over this device's own mail history, POP3
 /// retention and OpenPGP settings.
 fn merged_account_settings(current: &AccountSettings, synced: &AccountSettings) -> AccountSettings {
-    AccountSettings {
+    let mut merged = AccountSettings {
         mail_history: current.mail_history,
         keep_on_server: current.keep_on_server,
+        check_interval: current.check_interval,
+        push: current.push,
         security: current.security.clone(),
         ..synced.clone()
-    }
+    };
+    merged.connection.proxy = current.connection.proxy.clone();
+    merged
 }
 
 /// Whether the account is POP3 and removes downloaded mail from the
@@ -2725,6 +2748,35 @@ mod tests {
             merged_account_settings(&current, &synced).security,
             current.security
         );
+    }
+
+    #[test]
+    fn checking_and_proxy_settings_stay_on_their_device() {
+        use crate::models::CheckInterval;
+        use crate::net::proxy::AccountProxy;
+        let conn = testutil::conn();
+        let id = account(&conn, "me@example.com", &"b".repeat(32));
+        let mut config = repo::accounts::get_config(&conn, id).unwrap().unwrap();
+        config.settings.check_interval = CheckInterval::Minutes(30);
+        config.settings.push = false;
+        config.settings.connection.proxy = AccountProxy::Direct;
+        let body = account_body(&config, &Settings::default(), 0).unwrap();
+        assert!(body["settings"].get("checkInterval").is_none(), "{body}");
+        assert!(body["settings"].get("push").is_none(), "{body}");
+        assert!(
+            body["settings"]["connection"].get("proxy").is_none(),
+            "{body}"
+        );
+
+        // Another device's choices leave this device's own alone.
+        let mut synced = config.settings.clone();
+        synced.check_interval = CheckInterval::App;
+        synced.push = true;
+        synced.connection.proxy = AccountProxy::App;
+        let merged = merged_account_settings(&config.settings, &synced);
+        assert_eq!(merged.check_interval, CheckInterval::Minutes(30));
+        assert!(!merged.push);
+        assert_eq!(merged.connection.proxy, AccountProxy::Direct);
     }
 
     #[test]
