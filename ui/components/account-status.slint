@@ -7,7 +7,8 @@ export global AccountStatusText {
     // The name of what stops an account's checks; empty when nothing does.
     public pure function problem(problem: AccountProblem) -> string {
         return problem == AccountProblem.sign-in ? @tr("Sign-in required")
-            : problem == AccountProblem.failed ? @tr("Couldn't check mail") : "";
+            : problem == AccountProblem.failed ? @tr("Couldn't check mail")
+            : problem == AccountProblem.waiting ? @tr("Waiting for the server") : "";
     }
 
     // When a check last brought an account's Inbox up to date: `day` is 0
@@ -18,11 +19,21 @@ export global AccountStatusText {
             : day == 1 ? @tr("Last checked yesterday at {}", at)
             : @tr("Last checked {}", at);
     }
+
+    // When an account that waits for its server checks again: `day` is 0
+    // for today and 1 for tomorrow, with `at` the time, or 2 for later,
+    // with `at` the date and time. Empty when it doesn't wait.
+    public pure function checks-again(day: int, at: string) -> string {
+        return at == "" ? ""
+            : day == 0 ? @tr("Checking again at {}", at)
+            : day == 1 ? @tr("Checking again tomorrow at {}", at)
+            : @tr("Checking again {}", at);
+    }
 }
 
 // What stops an account's mail checks, and the action that fits it: trying
-// again after a failure, or signing in again after the server turned the
-// sign-in down.
+// again after a failure or while the server asked to wait, or signing in
+// again after the server turned the sign-in down.
 export component AccountStatusPanel inherits Rectangle {
     in property <AccountStatus> status;
     in property <bool> can-check-mail: true;
@@ -33,7 +44,9 @@ export component AccountStatusPanel inherits Rectangle {
     callback account-settings();
 
     private property <bool> sign-in-problem: root.status.problem == AccountProblem.sign-in;
+    private property <bool> waiting: root.status.problem == AccountProblem.waiting;
     private property <string> last-checked: AccountStatusText.last-checked(root.status.checked_day, root.status.checked_at);
+    private property <string> checks-again: AccountStatusText.checks-again(root.status.resume_day, root.status.resume_at);
 
     border-radius: 10px;
     border-width: 1px;
@@ -59,8 +72,10 @@ export component AccountStatusPanel inherits Rectangle {
                 Image {
                     width: 18px;
                     height: 18px;
-                    source: @image-url("../icons/lucide/outline/alert-circle.svg");
-                    colorize: AppTheme.destructive;
+                    source: root.waiting
+                        ? @image-url("../icons/lucide/outline/history.svg")
+                        : @image-url("../icons/lucide/outline/alert-circle.svg");
+                    colorize: root.waiting ? AppTheme.secondary : AppTheme.destructive;
                     image-fit: contain;
                     accessible-role: none;
                 }
@@ -101,6 +116,9 @@ export component AccountStatusPanel inherits Rectangle {
 
                 Text {
                     text: root.sign-in-problem ? root.last-checked
+                        : root.waiting
+                            ? (root.last-checked == "" ? root.checks-again
+                                : @tr("two parts of a status line" => "{0} · {1}", root.last-checked, root.checks-again))
                         : root.last-checked == "" ? @tr("Retrying automatically")
                         : @tr("{} · Retrying automatically", root.last-checked);
                     visible: self.text != "";
@@ -133,7 +151,8 @@ export component AccountStatusPanel inherits Rectangle {
                 width: actions.inline ? self.content-width : parent.width;
                 height: actions.button-height;
                 primary: true;
-                text: root.sign-in-problem ? @tr("Sign in again") : @tr("Try again");
+                text: root.sign-in-problem ? @tr("Sign in again")
+                    : root.waiting ? @tr("Try now") : @tr("Try again");
                 enabled: root.sign-in-problem || root.can-check-mail;
                 clicked => {
                     if root.sign-in-problem {

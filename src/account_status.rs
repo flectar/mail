@@ -3,9 +3,11 @@
 //! checks show nothing, and a marker when a problem stops its checks: a
 //! sign-in the server turned down at once, any other failure once it has
 //! lasted a minute or at once after a check someone asked for, so a
-//! connection that drops and comes straight back marks nothing. Both clear
-//! with the next successful check. The account's menu, its status panel and
-//! Settings also say when it last checked mail.
+//! connection that drops and comes straight back marks nothing. A server
+//! that asked the app to wait (#251) marks the account the same way, and
+//! says when it checks again. Each clears with the next successful check.
+//! The account's menu, its status panel and Settings also say when it last
+//! checked mail.
 
 use super::*;
 use chrono::{DateTime, Datelike, Timelike};
@@ -25,6 +27,8 @@ enum Phase {
     Checking,
     SignIn,
     Failed,
+    /// The server asked to wait before the next check.
+    Waiting,
 }
 
 impl Phase {
@@ -33,8 +37,14 @@ impl Phase {
             "syncing" => Self::Checking,
             "needs_reauth" => Self::SignIn,
             "offline" => Self::Failed,
+            "throttled" => Self::Waiting,
             _ => Self::Idle,
         }
+    }
+
+    /// A problem that marks the account once it has lasted.
+    fn lasting(self) -> bool {
+        matches!(self, Self::Failed | Self::Waiting)
     }
 }
 
@@ -88,30 +98,39 @@ impl AccountActivity {
         };
         let lasted = now.saturating_duration_since(since);
         let (checked_day, checked_at) = last_checked(account.caught_up_at, clock);
+        let (resume_day, resume_at) = match phase {
+            Phase::Waiting => checks_again(account.sync_retry_at, clock),
+            _ => (-1, String::new()),
+        };
         AccountStatus {
             checking: phase == Phase::Checking && lasted >= CHECKING_DELAY,
             problem: match phase {
                 Phase::SignIn => AccountProblem::SignIn,
                 Phase::Failed => AccountProblem::Failed,
+                Phase::Waiting => AccountProblem::Waiting,
                 Phase::Idle | Phase::Checking => AccountProblem::None,
             },
             marked: match phase {
                 Phase::SignIn => true,
-                Phase::Failed => {
+                phase if phase.lasting() => {
                     lasted >= FAILURE_GRACE
                         || self
                             .asked_until
                             .get(&account.id)
                             .is_some_and(|until| since <= *until)
                 }
-                Phase::Idle | Phase::Checking => false,
+                _ => false,
             },
             reason: match phase {
-                Phase::Failed => account.sync_error.clone().unwrap_or_default().into(),
+                Phase::Failed | Phase::Waiting => {
+                    account.sync_error.clone().unwrap_or_default().into()
+                }
                 _ => SharedString::new(),
             },
             checked_day,
             checked_at: checked_at.into(),
+            resume_day,
+            resume_at: resume_at.into(),
         }
     }
 
@@ -121,11 +140,12 @@ impl AccountActivity {
             .iter()
             .filter_map(|(account_id, (phase, since))| match phase {
                 Phase::Checking => Some(*since + CHECKING_DELAY),
-                Phase::Failed
-                    if !self
-                        .asked_until
-                        .get(account_id)
-                        .is_some_and(|until| since <= until) =>
+                phase
+                    if phase.lasting()
+                        && !self
+                            .asked_until
+                            .get(account_id)
+                            .is_some_and(|until| since <= until) =>
                 {
                     Some(*since + FAILURE_GRACE)
                 }
@@ -154,6 +174,37 @@ pub(super) fn last_checked(caught_up_at: Option<i64>, now: &DateTime<Local>) -> 
         .num_days()
     {
         // A clock set back shows its time as today's.
+        ..=0 => (0, formats.time(at.hour(), at.minute())),
+        1 => (1, formats.time(at.hour(), at.minute())),
+        _ => {
+            let style = if at.year() == now.year() {
+                DateStyle::ShortDayMonth
+            } else {
+                DateStyle::Short
+            };
+            (2, formats.date_time(style, at.naive_local()))
+        }
+    }
+}
+
+/// When an account that waits for its server checks again, for
+/// `AccountStatusText.checks-again`: 0 for today and 1 for tomorrow, with
+/// the time, or 2 for a later day, with the date and time; -1 and nothing
+/// when it doesn't wait.
+pub(super) fn checks_again(retry_at: Option<i64>, now: &DateTime<Local>) -> (i32, String) {
+    let Some(at) = retry_at
+        .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+        .map(|at| at.with_timezone(&Local))
+    else {
+        return (-1, String::new());
+    };
+    let formats = date_format::current();
+    match at
+        .date_naive()
+        .signed_duration_since(now.date_naive())
+        .num_days()
+    {
+        // A time that already passed is about to come.
         ..=0 => (0, formats.time(at.hour(), at.minute())),
         1 => (1, formats.time(at.hour(), at.minute())),
         _ => {
@@ -294,11 +345,15 @@ fn update_account_rows(
             || row.sync_error != sync_error
             || row.checked_day != status.checked_day
             || row.checked_at != status.checked_at
+            || row.resume_day != status.resume_day
+            || row.resume_at != status.resume_at
         {
             row.status = account.sync_state.as_str().into();
             row.sync_error = sync_error;
             row.checked_day = status.checked_day;
             row.checked_at = status.checked_at;
+            row.resume_day = status.resume_day;
+            row.resume_at = status.resume_at;
             model.set_row_data(index, row);
         }
     }
@@ -307,6 +362,16 @@ fn update_account_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn waiting(retry_at: i64) -> Account {
+        Account {
+            sync_retry_at: Some(retry_at),
+            ..account(
+                "throttled",
+                Some("imap.example.com asked to wait: NO [LIMIT] Rate limit hit."),
+            )
+        }
+    }
 
     fn account(state: &str, error: Option<&str>) -> Account {
         Account {
@@ -392,6 +457,57 @@ mod tests {
         activity.observe(&[account("idle", None)], later);
         activity.observe(std::slice::from_ref(&failed), later);
         assert!(!activity.status(&failed, later, &clock).marked);
+    }
+
+    #[test]
+    fn an_account_waiting_for_its_server_says_until_when() {
+        let start = Instant::now();
+        let clock = Local.with_ymd_and_hms(2026, 11, 14, 9, 30, 0).unwrap();
+        let resumes = Local.with_ymd_and_hms(2026, 11, 14, 10, 5, 0).unwrap();
+        let waits = waiting(resumes.timestamp_millis());
+        let activity = observed(&waits, start);
+        let status = activity.status(&waits, start, &clock);
+        assert_eq!(status.problem, AccountProblem::Waiting);
+        assert_eq!(
+            status.reason,
+            "imap.example.com asked to wait: NO [LIMIT] Rate limit hit."
+        );
+        assert_eq!((status.resume_day, status.resume_at.as_str()), (0, "10:05"));
+        // Marked once it has lasted, as a failure is.
+        assert!(!status.marked);
+        assert_eq!(activity.next_change(start), Some(start + FAILURE_GRACE));
+        assert!(
+            activity
+                .status(&waits, start + FAILURE_GRACE, &clock)
+                .marked
+        );
+        // Nothing to say once it checks again.
+        let idle = Account {
+            sync_retry_at: None,
+            ..account("idle", None)
+        };
+        let status = activity.status(&idle, start, &clock);
+        assert_eq!((status.resume_day, status.resume_at.as_str()), (-1, ""));
+    }
+
+    #[test]
+    fn checks_again_names_today_tomorrow_or_the_date() {
+        let now = Local.with_ymd_and_hms(2026, 11, 14, 23, 30, 0).unwrap();
+        let at = |day, hour, minute| {
+            Some(
+                Local
+                    .with_ymd_and_hms(2026, 11, day, hour, minute, 0)
+                    .unwrap()
+                    .timestamp_millis(),
+            )
+        };
+        assert_eq!(checks_again(None, &now), (-1, String::new()));
+        assert_eq!(checks_again(at(14, 23, 45), &now), (0, "23:45".into()));
+        assert_eq!(checks_again(at(15, 0, 15), &now), (1, "00:15".into()));
+        assert_eq!(
+            checks_again(at(16, 9, 0), &now),
+            (2, "Nov 16 at 09:00".into())
+        );
     }
 
     #[test]
