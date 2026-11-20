@@ -29,14 +29,16 @@ const SINGLES: [&str; 8] = [
     "New mail",
     "New mail without sound",
 ];
-const PLURALS: [[&str; 2]; 3] = [
+const PLURALS: [[&str; 2]; 4] = [
     ["{n} new message", "{n} new messages"],
     ["{0} and {n} more", "{0} and {n} more"],
     ["{n} unread message", "{n} unread messages"],
+    ["{n} unread conversation", "{n} unread conversations"],
 ];
 const NEW_MESSAGES: usize = 0;
 const MORE_SENDERS: usize = 1;
 const UNREAD_COUNT: usize = 2;
+const UNREAD_CONVERSATIONS: usize = 3;
 
 /// One language's notification words.
 pub(crate) struct Speech {
@@ -108,6 +110,12 @@ impl Speech {
     /// "3 unread messages", what a screen reader says for the app icon.
     pub(crate) fn unread_count(&self, count: i32) -> String {
         self.plural(UNREAD_COUNT, count, None)
+    }
+
+    /// "3 unread conversations", what it says where the mail list shows
+    /// conversations.
+    pub(crate) fn unread_conversations(&self, count: i32) -> String {
+        self.plural(UNREAD_CONVERSATIONS, count, None)
     }
 }
 
@@ -421,6 +429,12 @@ mod tests {
                 assert_eq!(
                     speech.unread_count(count),
                     i18n.invoke_notification_unread_count(count).as_str(),
+                    "{language} {count}"
+                );
+                assert_eq!(
+                    speech.unread_conversations(count),
+                    i18n.invoke_notification_unread_conversations(count)
+                        .as_str(),
                     "{language} {count}"
                 );
             }

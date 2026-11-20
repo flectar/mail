@@ -29,7 +29,7 @@ use std::{
 use flectar_mail_core::{
     Core,
     events::CoreEvent,
-    models::{ActionKind, ActionTarget, PerformActionArgs, now_ms},
+    models::{ActionKind, ActionTarget, MailGrouping, PerformActionArgs, now_ms},
 };
 use tokio::sync::{
     Notify,
@@ -857,24 +857,28 @@ pub(crate) fn withdraw_before_exit(
 }
 
 /// Put `count` on the app icon, or nothing for none or zero, unless it is
-/// what `shown` says the icon already has.
+/// what `shown` says the icon already has. It counts conversations or
+/// messages, as the grouping with it says.
 async fn update_badge(
     host: &dyn NotificationHost,
     window: &impl Window,
-    count: Option<i64>,
-    shown: &mut Option<Option<u32>>,
+    count: Option<(i64, MailGrouping)>,
+    shown: &mut Option<Option<(u32, MailGrouping)>>,
 ) {
     let count = count
-        .map(|count| u32::try_from(count).unwrap_or(if count < 0 { 0 } else { u32::MAX }))
-        .filter(|&count| count > 0);
+        .map(|(count, grouping)| {
+            let count = u32::try_from(count).unwrap_or(if count < 0 { 0 } else { u32::MAX });
+            (count, grouping)
+        })
+        .filter(|&(count, _)| count > 0);
     if *shown == Some(count) {
         return;
     }
     let badge = match count {
-        Some(count) => Some(Badge {
+        Some((count, grouping)) => Some(Badge {
             count,
             description: window
-                .badge_description(count)
+                .badge_description(count, grouping)
                 .await
                 .unwrap_or_else(|| count.to_string()),
         }),
@@ -1216,9 +1220,13 @@ pub(crate) trait Window {
         &self,
         summaries: Vec<(u32, Vec<String>)>,
     ) -> impl Future<Output = Option<Words>> + Send;
-    /// What a screen reader says for the app icon's count: "3 unread
-    /// messages".
-    fn badge_description(&self, count: u32) -> impl Future<Output = Option<String>> + Send;
+    /// What a screen reader says for the app icon's count, of conversations
+    /// or messages as `grouping` says: "3 unread messages".
+    fn badge_description(
+        &self,
+        count: u32,
+        grouping: MailGrouping,
+    ) -> impl Future<Output = Option<String>> + Send;
 }
 
 /// The translated words of a batch of notifications.
@@ -1549,32 +1557,54 @@ mod tests {
             })
         }
 
-        async fn badge_description(&self, count: u32) -> Option<String> {
+        async fn badge_description(&self, count: u32, grouping: MailGrouping) -> Option<String> {
             self.0.as_ref()?;
-            Some(format!("{count} unread"))
+            let counted = match grouping {
+                MailGrouping::Conversations => "conversations",
+                MailGrouping::Messages => "messages",
+            };
+            Some(format!("{count} unread {counted}"))
         }
     }
 
     #[tokio::test]
     async fn the_app_icon_shows_the_count_only_when_it_changes() {
+        use MailGrouping::{Conversations, Messages};
         let host = FakeHost::new(Ok(()));
         let window = FakeWindow(Some(BTreeSet::new()));
         let mut shown = None;
-        let badge = |count| {
+        let badge = |count, counted| {
             Some(Badge {
                 count,
-                description: format!("{count} unread"),
+                description: format!("{count} unread {counted}"),
             })
         };
-        for count in [Some(3), Some(3), Some(0), None, Some(-1), Some(7)] {
+        for count in [
+            Some((3, Messages)),
+            Some((3, Messages)),
+            Some((0, Messages)),
+            None,
+            Some((-1, Messages)),
+            Some((7, Messages)),
+            // The same number, of conversations now.
+            Some((7, Conversations)),
+        ] {
             update_badge(&host, &window, count, &mut shown).await;
         }
         // Zero, a negative count and the badge turned off all show none.
-        assert_eq!(host.badges(), vec![badge(3), None, badge(7)]);
+        assert_eq!(
+            host.badges(),
+            vec![
+                badge(3, "messages"),
+                None,
+                badge(7, "messages"),
+                badge(7, "conversations"),
+            ]
+        );
 
         // Without a window yet, the number itself is what is said.
         let host = FakeHost::new(Ok(()));
-        update_badge(&host, &FakeWindow(None), Some(12), &mut None).await;
+        update_badge(&host, &FakeWindow(None), Some((12, Messages)), &mut None).await;
         assert_eq!(
             host.badges(),
             vec![Some(Badge {

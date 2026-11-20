@@ -108,11 +108,17 @@ impl super::Window for Live {
         words(summaries).await
     }
 
-    async fn badge_description(&self, count: u32) -> Option<String> {
+    async fn badge_description(&self, count: u32, grouping: MailGrouping) -> Option<String> {
         with_window(move |app, _| {
-            app.global::<I18n>()
-                .invoke_notification_unread_count(i32::try_from(count).unwrap_or(i32::MAX))
-                .to_string()
+            let count = i32::try_from(count).unwrap_or(i32::MAX);
+            let words = app.global::<I18n>();
+            match grouping {
+                MailGrouping::Conversations => {
+                    words.invoke_notification_unread_conversations(count)
+                }
+                MailGrouping::Messages => words.invoke_notification_unread_count(count),
+            }
+            .to_string()
         })
         .await
     }
