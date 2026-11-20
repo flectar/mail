@@ -1,0 +1,31 @@
+// Standard mailbox names follow the UI language. Other names are supplied by
+// the account, and the navigation keys do not depend on the translation.
+export global MailboxWords {
+    public pure function label(name: string, standard: bool) -> string {
+        if (!standard) { return name; }
+        if name == "Inbox" { return @tr("Inbox"); }
+        if name == "Starred" { return @tr("Starred"); }
+        if name == "Sent" { return @tr("mailbox" => "Sent"); }
+        if name == "Archive" { return @tr("mailbox" => "Archive"); }
+        if name == "Spam" { return @tr("Spam"); }
+        if name == "Trash" { return @tr("Trash"); }
+        if name == "Drafts" { return @tr("Drafts"); }
+        if name == "Important" { return @tr("Important"); }
+        if name == "Other" { return @tr("Other"); }
+        return name;
+    }
+
+    public pure function title(name: string, account: string, unified: bool) -> string {
+        if unified {
+            if name == "Inbox" { return @tr("Unified Inbox"); }
+            if name == "Starred" { return @tr("Unified Starred"); }
+            if name == "Sent" { return @tr("Unified Sent"); }
+            if name == "Archive" { return @tr("Unified Archive"); }
+            if name == "Spam" { return @tr("Unified Spam"); }
+            if name == "Trash" { return @tr("Unified Trash"); }
+            if name == "Drafts" { return @tr("Unified Drafts"); }
+        }
+        let label = MailboxWords.label(name, true);
+        return account == "" ? label : account + " / " + label;
+    }
+}

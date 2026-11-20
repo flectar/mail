@@ -46,6 +46,7 @@ export global TabsUi {
     callback command(string);
     // The active tab's place changed through ordinary navigation.
     callback navigated();
+    callback language-changed();
     // The mail list's scroll offset from the top, kept current by the mail
     // view, and the offset a shown tab scrolls back to. Each request makes
     // the list scroll to `list-restore` once its rows are laid out; a

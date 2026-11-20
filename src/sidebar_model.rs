@@ -221,6 +221,25 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         && (!has_avatar || *avatar_image == other.avatar_image)
 }
 
+pub(super) fn set_mailbox_aliases(app: &AppWindow, state: &Rc<RefCell<InboxState>>) {
+    let words = app.global::<MailboxWords>();
+    let aliases = StandardMailbox::ALL
+        .into_iter()
+        .map(|mailbox| {
+            let name = mailbox.label();
+            (name, words.invoke_label(name.into(), true).to_lowercase())
+        })
+        .collect();
+    let filtering = {
+        let mut state = state.borrow_mut();
+        state.sidebar_mailbox_aliases = aliases;
+        !state.folder_filter.trim().is_empty()
+    };
+    if filtering {
+        refresh_sidebar(state);
+    }
+}
+
 pub(super) fn refresh_sidebar(state: &Rc<RefCell<InboxState>>) {
     refresh_sidebar_with_motion(state, false);
 }
@@ -295,7 +314,13 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
         .filter_map(|account| i32::try_from(account.id).ok())
         .collect::<HashSet<_>>();
     let mut rows = if filtering {
-        make_filtered_sidebar_rows(mailboxes, labels, query, &gmail_account_ids)
+        make_filtered_sidebar_rows(
+            mailboxes,
+            labels,
+            query,
+            &gmail_account_ids,
+            &state.sidebar_mailbox_aliases,
+        )
     } else {
         make_sidebar_rows(
             SidebarLayout::for_account_count(state.mail_accounts().len()),
@@ -385,6 +410,7 @@ fn make_filtered_sidebar_rows(
     labels: Vec<MailLabelRow>,
     query: &str,
     gmail_account_ids: &HashSet<i32>,
+    mailbox_aliases: &HashMap<&'static str, String>,
 ) -> Vec<SidebarRow> {
     use SidebarRowKind as Kind;
 
@@ -396,7 +422,12 @@ fn make_filtered_sidebar_rows(
             // Search results show accounts open, with their folders' badges.
             mailbox.count = Default::default();
             accounts.push(mailbox);
-        } else if mailbox.label.to_lowercase().contains(&query) {
+        } else if mailbox.label.to_lowercase().contains(&query)
+            || (mailbox.is_standard
+                && mailbox_aliases
+                    .get(mailbox.label.as_str())
+                    .is_some_and(|alias| alias.contains(&query)))
+        {
             folders.entry(mailbox.account_id).or_default().push(mailbox);
         }
     }
@@ -917,8 +948,13 @@ mod tests {
         assert_eq!(account_count(&HashSet::new()), "");
         assert_eq!(account_count(&HashSet::from(["account:1".into()])), "5");
         // Search results show accounts open.
-        let filtered =
-            make_filtered_sidebar_rows(mailboxes.clone(), Vec::new(), "folder", &HashSet::new());
+        let filtered = make_filtered_sidebar_rows(
+            mailboxes.clone(),
+            Vec::new(),
+            "folder",
+            &HashSet::new(),
+            &HashMap::new(),
+        );
         assert_eq!(filtered[0].kind, Kind::Account);
         assert_eq!(filtered[0].mailbox.count, "");
     }
@@ -1347,7 +1383,13 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let rows = make_filtered_sidebar_rows(accounts(2, 0), labels, "travel", &HashSet::new());
+        let rows = make_filtered_sidebar_rows(
+            accounts(2, 0),
+            labels,
+            "travel",
+            &HashSet::new(),
+            &HashMap::new(),
+        );
         assert!(
             rows.iter()
                 .any(|row| row.kind == Kind::AccountLabel && row.label.id == 11)
@@ -1434,12 +1476,31 @@ mod tests {
     }
 
     #[test]
+    fn folder_filter_matches_localized_standard_names() {
+        let mut data = accounts(1, 2);
+        data[1].label = "Archive".into();
+        data[1].is_standard = true;
+        data[2].label = "Archive".into();
+        let aliases = HashMap::from([("Archive", "归档".to_owned())]);
+        let filter = |query| {
+            make_filtered_sidebar_rows(data.clone(), vec![], query, &HashSet::new(), &aliases)
+                .into_iter()
+                .filter(|row| row.kind == Kind::Folder)
+                .map(|row| row.mailbox.folder_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(filter("归档"), [data[1].folder_id]);
+        assert_eq!(filter("archive"), [data[1].folder_id, data[2].folder_id]);
+    }
+
+    #[test]
     fn folder_filter_is_case_insensitive_and_keeps_account_context() {
         let mut data = accounts(2, 3);
         data[2].label = "Receipts".into();
         data[5].label = "RECEIPTS 2025".into();
 
-        let rows = make_filtered_sidebar_rows(data, vec![], "receipts", &HashSet::new());
+        let rows =
+            make_filtered_sidebar_rows(data, vec![], "receipts", &HashSet::new(), &HashMap::new());
         assert_eq!(
             rows.iter().map(|row| row.kind).collect::<Vec<_>>(),
             vec![Kind::Account, Kind::Folder, Kind::Account, Kind::Folder]

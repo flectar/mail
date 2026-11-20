@@ -1,6 +1,7 @@
 import { ScrollFade } from "scroll-fade.slint";
 import { ListView, VerticalBox } from "std-widgets.slint";
 import { MailProfileRow, SidebarRow, SidebarRowKind } from "../models.slint";
+import { MailboxWords } from "../mailbox-words.slint";
 import { SidebarItem, SidebarSectionHeader } from "sidebar-controls.slint";
 import { SidebarStyle } from "sidebar-row.slint";
 import { Button } from "button.slint";
@@ -402,7 +403,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
-                        label: entry.mailbox.label;
+                        label: MailboxWords.label(entry.mailbox.label, entry.mailbox.is_standard);
                         count: entry.mailbox.count;
                         can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0" && entry.mailbox.scope != "Unified Drafts";
                         scope: entry.mailbox.scope;
@@ -675,7 +676,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         y: 0px;
                         width: parent.width;
 
-                        label: entry.mailbox.label;
+                        label: MailboxWords.label(entry.mailbox.label, entry.mailbox.is_standard);
                         label-has-emoji: entry.mailbox.label_has_emoji;
                         count: entry.mailbox.count;
                         can-mark-all-read: entry.mailbox.count != "" && entry.mailbox.count != "0" && entry.mailbox.label != "Drafts";

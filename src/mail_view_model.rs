@@ -594,7 +594,7 @@ pub(super) fn render_current(
     server_search::show(app, &state.borrow());
     app.set_mail_selection_count(checked_ids.len() as i32);
     refresh_sidebar(state);
-    app.set_selected_scope_title(mailbox_scope_title(scope, &mailboxes, &labels).into());
+    set_mailbox_scope_title(app, scope, &mailboxes, &labels);
     saved_searches::show(app, &state.borrow());
     app.set_trash_view(is_trash_scope(scope));
     app.set_mail_oldest_first(state.borrow().list_order == ListOrder::OldestFirst);
@@ -1433,7 +1433,7 @@ pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxSta
     };
 
     refresh_sidebar(state);
-    app.set_selected_scope_title(mailbox_scope_title(scope, &mailboxes, &labels).into());
+    set_mailbox_scope_title(app, scope, &mailboxes, &labels);
     saved_searches::show(app, &state.borrow());
     app.set_trash_view(is_trash_scope(scope));
     app.set_mail_oldest_first(state.borrow().list_order == ListOrder::OldestFirst);
@@ -1737,6 +1737,38 @@ pub(super) fn make_mailbox_rows(
             }
         })
         .collect()
+}
+
+fn set_mailbox_scope_title(
+    app: &AppWindow,
+    scope: Scope,
+    mailboxes: &[MailboxEntry],
+    labels: &[flectar_mail_core::models::Label],
+) {
+    let (role, account) = mailbox_scope_role(scope, mailboxes).unwrap_or_else(|| match scope {
+        Scope::Account { mailbox, .. } => (mailbox.label(), ""),
+        _ => ("", ""),
+    });
+    app.set_selected_scope_role(role.into());
+    app.set_selected_scope_account(account.into());
+    app.set_selected_scope_unified(matches!(scope, Scope::Unified(_)));
+    app.set_selected_scope_title(mailbox_scope_title(scope, mailboxes, labels).into());
+}
+
+pub(super) fn mailbox_scope_role(
+    scope: Scope,
+    mailboxes: &[MailboxEntry],
+) -> Option<(&'static str, &str)> {
+    match scope {
+        Scope::Unified(mailbox) => Some((mailbox.label(), "")),
+        Scope::Account { mailbox, .. } => mailboxes
+            .iter()
+            .find(|entry| entry.scope == Some(scope))
+            .map(|entry| (mailbox.label(), entry.context.as_str())),
+        Scope::Important => Some(("Important", "")),
+        Scope::Other => Some(("Other", "")),
+        Scope::Folder(_) | Scope::Label { .. } => None,
+    }
 }
 
 fn mailbox_scope_title(

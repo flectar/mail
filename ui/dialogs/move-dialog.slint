@@ -1,6 +1,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { AppTheme, LayoutMetrics, MailIconPalette } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
+import { MailboxWords } from "../mailbox-words.slint";
 import { LineEdit, ToolbarIconButton } from "../components/controls.slint";
 
 // One destination in the Move to picker, or a heading above a group of them.
@@ -42,7 +43,7 @@ export global MovePickerUi {
     // heading's translated name, or the folder's own.
     public pure function display-name(kind: string, label: string) -> string {
         if kind == "inbox" { return @tr("Inbox"); }
-        if kind == "archive" { return @tr("Archive"); }
+        if kind == "archive" { return MailboxWords.label("Archive", true); }
         if kind == "spam" { return @tr("Spam"); }
         if kind == "trash" { return @tr("Trash"); }
         if kind == "recent" { return @tr("Recent"); }
