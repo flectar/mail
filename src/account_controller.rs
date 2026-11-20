@@ -29,7 +29,7 @@ fn same_mail_transport(left: &AccountConfig, right: &AccountConfig) -> bool {
 /// Reuse transport details only when every manual account of the form's
 /// protocol for the domain agrees. Ambiguous configurations deliberately leave
 /// the new form untouched.
-pub(super) fn reusable_mail_transport<'a>(
+fn reusable_mail_transport<'a>(
     configs: &'a [AccountConfig],
     address: &str,
     protocol: MailProtocol,
@@ -45,6 +45,50 @@ pub(super) fn reusable_mail_transport<'a>(
     matches
         .all(|candidate| same_mail_transport(first, candidate))
         .then_some(first)
+}
+
+/// Gmail's IMAP and SMTP servers for a gmail.com address, so an app password
+/// is all the form still needs. Other Google addresses use their own domain
+/// and are left alone.
+fn gmail_mail_transport(address: &str, protocol: MailProtocol) -> Option<AccountConfig> {
+    let domain = mail_domain(address)?;
+    if protocol != MailProtocol::Imap
+        || !["gmail.com", "googlemail.com"]
+            .iter()
+            .any(|gmail| domain.eq_ignore_ascii_case(gmail))
+    {
+        return None;
+    }
+    let servers = &flectar_mail_core::accounts::providers::GMAIL;
+    Some(AccountConfig {
+        id: 0,
+        email: address.trim().into(),
+        display_name: None,
+        avatar_url: None,
+        provider: Provider::Generic,
+        auth_kind: flectar_mail_core::models::AuthKind::Password,
+        mail_protocol: MailProtocol::Imap,
+        username: String::new(),
+        jmap_url: String::new(),
+        jmap_account_id: None,
+        incoming_host: servers.incoming_host.into(),
+        incoming_port: servers.incoming_port,
+        smtp_host: servers.smtp_host.into(),
+        smtp_port: servers.smtp_port,
+        settings: flectar_mail_core::models::AccountSettings::new(servers.connection()),
+    })
+}
+
+/// The servers to fill in for a new manual account. The user's other
+/// accounts on the domain come first, then Gmail's for a Gmail address.
+pub(super) fn suggested_mail_transport(
+    configs: &[AccountConfig],
+    address: &str,
+    protocol: MailProtocol,
+) -> Option<AccountConfig> {
+    reusable_mail_transport(configs, address, protocol)
+        .cloned()
+        .or_else(|| gmail_mail_transport(address, protocol))
 }
 
 pub(super) struct AccountRemovalUpdate {
@@ -844,5 +888,41 @@ mod mail_transport_suggestion_tests {
         assert_eq!(host(MailProtocol::Pop3), Some("pop.example.com"));
         assert_eq!(host(MailProtocol::Imap), Some("imap.example.com"));
         assert_eq!(host(MailProtocol::Jmap), None);
+    }
+
+    #[test]
+    fn gmail_addresses_get_gmails_servers() {
+        let suggestion =
+            suggested_mail_transport(&[], "Someone@GMail.com", MailProtocol::Imap).unwrap();
+        assert_eq!(
+            (suggestion.incoming_host.as_str(), suggestion.incoming_port),
+            ("imap.gmail.com", 993)
+        );
+        assert_eq!(
+            (suggestion.smtp_host.as_str(), suggestion.smtp_port),
+            ("smtp.gmail.com", 465)
+        );
+        assert_eq!(
+            suggestion.settings.connection,
+            MailConnectionSettings::new(ConnectionSecurity::Tls, ConnectionSecurity::Tls)
+        );
+        assert!(
+            suggested_mail_transport(&[], "someone@googlemail.com", MailProtocol::Imap).is_some()
+        );
+        assert!(suggested_mail_transport(&[], "someone@gmail.com", MailProtocol::Pop3).is_none());
+        assert!(suggested_mail_transport(&[], "someone@gmail.co", MailProtocol::Imap).is_none());
+    }
+
+    #[test]
+    fn the_users_own_gmail_settings_win() {
+        let configs = vec![config(
+            1,
+            "first@gmail.com",
+            "imap.proxy.example",
+            "smtp.proxy.example",
+        )];
+        let suggestion =
+            suggested_mail_transport(&configs, "second@gmail.com", MailProtocol::Imap).unwrap();
+        assert_eq!(suggestion.incoming_host, "imap.proxy.example");
     }
 }
