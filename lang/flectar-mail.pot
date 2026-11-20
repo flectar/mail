@@ -1748,7 +1748,7 @@ msgid "Flectar Mail backup"
 msgstr ""
 
 #: ui/app.slint:558 ui/dialogs/import-dialog.slint:407
-#: ui/app.slint:558 ui/dialogs/import-dialog.slint:407 ui/views/onboarding-view.slint:224
+#: ui/app.slint:558 ui/dialogs/import-dialog.slint:407 ui/views/onboarding-view.slint:231
 msgid "Import accounts and mail"
 msgstr ""
 
@@ -3445,8 +3445,8 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:208
 #: ui/components/account-mail-preferences.slint:208 ui/dialogs/settings-dialog.slint:4162
-#: ui/components/account-mail-preferences.slint:208 ui/dialogs/settings-dialog.slint:4162 ui/views/onboarding-view.slint:268
-#: ui/components/account-mail-preferences.slint:208 ui/dialogs/settings-dialog.slint:4162 ui/views/onboarding-view.slint:268
+#: ui/components/account-mail-preferences.slint:208 ui/dialogs/settings-dialog.slint:4162 ui/views/onboarding-view.slint:275
+#: ui/components/account-mail-preferences.slint:208 ui/dialogs/settings-dialog.slint:4162 ui/views/onboarding-view.slint:275
 msgid "Email address"
 msgstr ""
 
@@ -3489,15 +3489,15 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516
 #: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516
 #: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126 ui/dialogs/settings-dialog.slint:3129
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238 ui/dialogs/settings-dialog.slint:4492
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238 ui/dialogs/settings-dialog.slint:4492 ui/link-services.slint:120
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238 ui/dialogs/settings-dialog.slint:4492 ui/link-services.slint:120 ui/network.slint:421
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238 ui/dialogs/settings-dialog.slint:4492 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472
-#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238 ui/dialogs/settings-dialog.slint:4492 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472 ui/views/mail-reading-pane.slint:2169
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3129
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238 ui/dialogs/settings-dialog.slint:4492
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238 ui/dialogs/settings-dialog.slint:4492 ui/link-services.slint:120
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238 ui/dialogs/settings-dialog.slint:4492 ui/link-services.slint:120 ui/network.slint:421
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238 ui/dialogs/settings-dialog.slint:4492 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472
+#: ui/components/account-mail-preferences.slint:215 ui/components/rule-editor.slint:516 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3129 ui/dialogs/settings-dialog.slint:4238 ui/dialogs/settings-dialog.slint:4492 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472 ui/views/mail-reading-pane.slint:2169
 msgid "Cancel"
 msgstr ""
 
@@ -6206,7 +6206,7 @@ msgid "Tabs"
 msgstr ""
 
 #: ui/components/tab-overview.slint:261 ui/dialogs/import-dialog.slint:333
-#: ui/components/tab-overview.slint:261 ui/dialogs/import-dialog.slint:333 ui/views/onboarding-view.slint:428
+#: ui/components/tab-overview.slint:261 ui/dialogs/import-dialog.slint:333 ui/views/onboarding-view.slint:435
 msgid "Back"
 msgstr ""
 
@@ -7219,7 +7219,7 @@ msgid "No matching folders"
 msgstr ""
 
 #: ui/dialogs/oauth-setup-dialog.slint:28
-#: ui/dialogs/oauth-setup-dialog.slint:28 ui/views/onboarding-view.slint:208
+#: ui/dialogs/oauth-setup-dialog.slint:28 ui/views/onboarding-view.slint:215
 msgid "Sign-in settings"
 msgstr ""
 
@@ -7314,11 +7314,17 @@ msgstr ""
 
 #: ui/dialogs/oauth-setup-dialog.slint:114
 msgid ""
+"Gmail also works without app keys. Close this, choose Connect another "
+"provider, and sign in with a Google app password."
+msgstr ""
+
+#: ui/dialogs/oauth-setup-dialog.slint:118
+msgid ""
 "Leave the client ID blank to use default keys, if available. Keys are shared "
 "with Settings."
 msgstr ""
 
-#: ui/dialogs/oauth-setup-dialog.slint:128
+#: ui/dialogs/oauth-setup-dialog.slint:132
 msgid "Save settings"
 msgstr ""
 
@@ -9394,25 +9400,25 @@ msgstr ""
 msgid "name@example.com"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4165 ui/views/onboarding-view.slint:285
-#: ui/dialogs/settings-dialog.slint:4165 ui/views/onboarding-view.slint:285
+#: ui/dialogs/settings-dialog.slint:4165 ui/views/onboarding-view.slint:292
+#: ui/dialogs/settings-dialog.slint:4165 ui/views/onboarding-view.slint:292
 msgid "Password, app password, or API token"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4165 ui/views/onboarding-view.slint:285
-#: ui/dialogs/settings-dialog.slint:4165 ui/views/onboarding-view.slint:285
+#: ui/dialogs/settings-dialog.slint:4165 ui/views/onboarding-view.slint:292
+#: ui/dialogs/settings-dialog.slint:4165 ui/views/onboarding-view.slint:292
 msgid "Password or app password"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4172 ui/views/onboarding-view.slint:298
+#: ui/dialogs/settings-dialog.slint:4172 ui/views/onboarding-view.slint:305
 msgid "IMAP"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4173 ui/views/onboarding-view.slint:306
+#: ui/dialogs/settings-dialog.slint:4173 ui/views/onboarding-view.slint:313
 msgid "POP3"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4174 ui/views/onboarding-view.slint:314
+#: ui/dialogs/settings-dialog.slint:4174 ui/views/onboarding-view.slint:321
 msgid "JMAP"
 msgstr ""
 
@@ -9424,13 +9430,13 @@ msgstr ""
 msgid "Discovered from your email domain"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4187 ui/views/onboarding-view.slint:338
-#: ui/dialogs/settings-dialog.slint:4187 ui/views/onboarding-view.slint:338
+#: ui/dialogs/settings-dialog.slint:4187 ui/views/onboarding-view.slint:345
+#: ui/dialogs/settings-dialog.slint:4187 ui/views/onboarding-view.slint:345
 msgid "POP3 server"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4187 ui/views/onboarding-view.slint:338
-#: ui/dialogs/settings-dialog.slint:4187 ui/views/onboarding-view.slint:338
+#: ui/dialogs/settings-dialog.slint:4187 ui/views/onboarding-view.slint:345
+#: ui/dialogs/settings-dialog.slint:4187 ui/views/onboarding-view.slint:345
 msgid "IMAP server"
 msgstr ""
 
@@ -9443,13 +9449,13 @@ msgid "imap.example.com"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:4188 ui/dialogs/settings-dialog.slint:4195
-#: ui/dialogs/settings-dialog.slint:4188 ui/dialogs/settings-dialog.slint:4195 ui/network.slint:151 ui/views/onboarding-view.slint:346
-#: ui/dialogs/settings-dialog.slint:4188 ui/dialogs/settings-dialog.slint:4195 ui/network.slint:151 ui/views/onboarding-view.slint:346
+#: ui/dialogs/settings-dialog.slint:4188 ui/dialogs/settings-dialog.slint:4195 ui/network.slint:151 ui/views/onboarding-view.slint:353
+#: ui/dialogs/settings-dialog.slint:4188 ui/dialogs/settings-dialog.slint:4195 ui/network.slint:151 ui/views/onboarding-view.slint:353
 msgid "Port"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4194 ui/views/onboarding-view.slint:360
-#: ui/dialogs/settings-dialog.slint:4194 ui/views/onboarding-view.slint:360
+#: ui/dialogs/settings-dialog.slint:4194 ui/views/onboarding-view.slint:367
+#: ui/dialogs/settings-dialog.slint:4194 ui/views/onboarding-view.slint:367
 msgid "SMTP server"
 msgstr ""
 
@@ -9457,7 +9463,7 @@ msgstr ""
 msgid "smtp.example.com"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4198 ui/views/onboarding-view.slint:376
+#: ui/dialogs/settings-dialog.slint:4198 ui/views/onboarding-view.slint:383
 msgid ""
 "Proton Bridge: use the local servers, ports and password shown in Bridge, "
 "and match its encryption settings."
@@ -9467,7 +9473,7 @@ msgstr ""
 msgid "Save account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4244 ui/views/onboarding-view.slint:408
+#: ui/dialogs/settings-dialog.slint:4244 ui/views/onboarding-view.slint:415
 msgid "Connect account"
 msgstr ""
 
@@ -11394,44 +11400,48 @@ msgstr ""
 msgid "Connect another provider"
 msgstr ""
 
-#: ui/views/onboarding-view.slint:198
+#: ui/views/onboarding-view.slint:197
+msgid "For Gmail with an app password, use Connect another provider."
+msgstr ""
+
+#: ui/views/onboarding-view.slint:205
 msgid "Add your own app keys to enable Gmail and Outlook."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:199
+#: ui/views/onboarding-view.slint:206
 msgid "Add your own app keys to enable Gmail."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:200
+#: ui/views/onboarding-view.slint:207
 msgid "Add your own app key to enable Outlook."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:216
+#: ui/views/onboarding-view.slint:223
 msgid "Moving from Thunderbird, K-9 Mail, or another device?"
 msgstr ""
 
-#: ui/views/onboarding-view.slint:256
+#: ui/views/onboarding-view.slint:263
 msgid "Connect using JMAP for mail sync and sending."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:257
+#: ui/views/onboarding-view.slint:264
 msgid ""
 "Connect using POP3 and SMTP. Mail is downloaded to this device and kept here."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:258
+#: ui/views/onboarding-view.slint:265
 msgid "Connect using IMAP and SMTP."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:277 ui/views/onboarding-view.slint:280
+#: ui/views/onboarding-view.slint:284 ui/views/onboarding-view.slint:287
 msgid "Username (defaults to email)"
 msgstr ""
 
-#: ui/views/onboarding-view.slint:323
+#: ui/views/onboarding-view.slint:330
 msgid "Server address (optional)"
 msgstr ""
 
-#: ui/views/onboarding-view.slint:326
+#: ui/views/onboarding-view.slint:333
 msgid "Leave blank to discover /.well-known/jmap from your email domain."
 msgstr ""
 
