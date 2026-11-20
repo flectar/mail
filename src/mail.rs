@@ -1873,6 +1873,24 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_account_check_interval(
+        &self,
+        account_id: i64,
+        interval: flectar_mail_core::models::CheckInterval,
+    ) -> Result<(), String> {
+        self.core
+            .set_account_check_interval(account_id, interval)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_account_push(&self, account_id: i64, push: bool) -> Result<(), String> {
+        self.core
+            .set_account_push(account_id, push)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_account_sent_copy_policy(
         &self,
         account_id: i64,
@@ -4466,6 +4484,7 @@ mod tests {
             mail_protocol: MailProtocol::Imap,
             sync_state: "idle".into(),
             sync_error: None,
+            sync_retry_at: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
             caught_up_at: None,

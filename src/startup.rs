@@ -597,6 +597,16 @@ pub(crate) enum StartupUpdate {
 
 const MAX_PENDING_THREAD_UPDATES: usize = 2_048;
 
+/// An account's latest sync state, as its last `AccountState` event told it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AccountSyncState {
+    pub(crate) state: String,
+    pub(crate) error: Option<String>,
+    /// When a check waiting for the server goes ahead, in milliseconds since
+    /// the Unix epoch.
+    pub(crate) retry_at: Option<i64>,
+}
+
 /// Cross-thread core events are collapsed to the latest meaningful state.
 /// A massive backfill can therefore never grow an unbounded UI queue or make
 /// one Slint callback drain thousands of historical notifications.
@@ -604,7 +614,7 @@ const MAX_PENDING_THREAD_UPDATES: usize = 2_048;
 pub(crate) struct PendingCoreUpdates {
     pub(crate) changed_threads: HashSet<i64>,
     pub(crate) all_mail_changed: bool,
-    pub(crate) account_states: HashMap<i64, (String, Option<String>)>,
+    pub(crate) account_states: HashMap<i64, AccountSyncState>,
     /// When each account's latest check caught its Inbox up.
     pub(crate) caught_up: HashMap<i64, i64>,
     pub(crate) action_error: Option<String>,
@@ -781,12 +791,20 @@ pub(crate) fn spawn_core_event_listener(
                     account_id,
                     sync_state,
                     sync_error,
+                    sync_retry_at,
                 }) => {
                     pending
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .account_states
-                        .insert(account_id, (sync_state, sync_error));
+                        .insert(
+                            account_id,
+                            AccountSyncState {
+                                state: sync_state,
+                                error: sync_error,
+                                retry_at: sync_retry_at,
+                            },
+                        );
                     true
                 }
                 Ok(CoreEvent::AccountCaughtUp { account_id, at }) => {
@@ -1276,6 +1294,7 @@ mod warm_start_tests {
             mail_protocol: MailProtocol::Imap,
             sync_state: "idle".into(),
             sync_error: None,
+            sync_retry_at: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
             caught_up_at: None,

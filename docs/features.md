@@ -182,6 +182,30 @@ The account's menu also tells when it last checked mail, and so does its card
 in Settings → Accounts, together with the account's state and the server's own
 words about a failure.
 
+Each account can check at its own pace. In its card in Settings → Accounts,
+**Check for new mail** keeps the interval from Settings → General, or checks
+every minute, 5, 15 or 30 minutes, or every hour, or only when the app starts
+and when you ask. **Instant updates** lets an IMAP or JMAP server tell Flectar
+Mail of new mail as soon as it arrives. Turned off, the account checks at its
+interval, which saves battery and data, and helps with a server that drops
+waiting connections. An account that checks only when you ask doesn't wait for
+updates either.
+
+A server can ask Flectar Mail to slow down, when an account has too many
+connections open or makes too many requests, or while another app is using a
+POP3 mailbox. Flectar Mail then waits before it asks that server again, for as
+long as the server said, or else for a minute that grows while the server keeps
+asking, up to an hour, and a little longer or shorter for each account so they
+don't all return at once. The account shows **Waiting for the server** with the
+time it checks again, and a marker beside its name explains why. **Try now**
+checks at once, unless the server named its wait, as Gmail and Exchange often
+do. Asking again early would only make that wait longer. Changes you make
+meanwhile wait too and go to the server once it's ready. When an IMAP server
+turns down a connection for having too many open, Flectar Mail opens one fewer
+for downloading in the background from then on. When many accounts start
+together, they take turns connecting, and a few at a time download their older
+mail.
+
 ## New-mail notifications
 
 Flectar Mail lets you know when new mail reaches your Inbox while it's running,

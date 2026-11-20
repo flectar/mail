@@ -3,6 +3,7 @@ pub mod folder_map;
 pub mod gmail;
 pub(crate) mod ingest;
 pub(crate) mod local;
+pub mod pacing;
 pub(crate) mod pop3;
 pub mod threading;
 
