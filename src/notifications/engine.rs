@@ -6,7 +6,7 @@
 
 use super::{NotificationHost, Response, Window, Words, parse_payload, words::Speech};
 use flectar_mail_core::{
-    Core, accounts::credentials::CredentialStoreHandle, config::Paths,
+    Core, accounts::credentials::CredentialStoreHandle, config::Paths, models::MailGrouping,
     oauth::redirect::OAuthRedirectBrokerHandle,
 };
 use std::{
@@ -314,10 +314,11 @@ impl Window for Headless {
         })
     }
 
-    async fn badge_description(&self, count: u32) -> Option<String> {
-        Some(
-            self.0
-                .unread_count(i32::try_from(count).unwrap_or(i32::MAX)),
-        )
+    async fn badge_description(&self, count: u32, grouping: MailGrouping) -> Option<String> {
+        let count = i32::try_from(count).unwrap_or(i32::MAX);
+        Some(match grouping {
+            MailGrouping::Conversations => self.0.unread_conversations(count),
+            MailGrouping::Messages => self.0.unread_count(count),
+        })
     }
 }

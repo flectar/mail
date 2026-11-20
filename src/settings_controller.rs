@@ -844,7 +844,11 @@ pub(super) fn register_settings_preference_callbacks(
             return;
         };
         match runtime_for_grouping.block_on(core.set_conversation_view(enabled)) {
-            Ok(()) => app.set_sync_status(UiMessage::plain("Conversation view preference saved.")),
+            Ok(()) => {
+                // The app icon's count counts in the saved grouping.
+                crate::notifications::recount();
+                app.set_sync_status(UiMessage::plain("Conversation view preference saved."));
+            }
             Err(error) => {
                 let previous = if enabled {
                     MailGrouping::Messages

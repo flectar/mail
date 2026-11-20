@@ -35,8 +35,6 @@ mod windows;
 /// identity, which draws its own.
 #[cfg(target_os = "windows")]
 mod taskbar_badge;
-#[cfg(any(test, target_os = "windows"))]
-mod badge_pixels;
 
 /// Show the unread count on the main window's taskbar button, as a copy
 /// without package identity must: Windows' own badges need one.
