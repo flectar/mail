@@ -101,6 +101,8 @@ export component MailView inherits FocusScope {
     callback open-settings(string);
     // An account Settings signs in again once it shows the account.
     in-out property <int> settings_sign_in_account: -1;
+    // The account whose settings Settings shows open.
+    in-out property <int> settings_open_account: -1;
     in-out property <string> compact-page: "list";
     in-out property <bool> folders-open: false;
     private property <bool> focus-search-after-page-change: false;
@@ -305,6 +307,13 @@ export component MailView inherits FocusScope {
         root.open-settings("Accounts");
     }
 
+    // An account heading's Account settings: Settings opens on Accounts with
+    // that account's settings showing.
+    function show-account-settings(account-id: int) {
+        root.settings_open_account = account-id;
+        root.open-settings("Accounts");
+    }
+
     changed layout-mode => {
         if (root.layout-mode == "minimal") {
             root.compact-page = "list";
@@ -385,6 +394,7 @@ export component MailView inherits FocusScope {
                 manage-accounts => {
                     root.open-settings("Accounts");
                 }
+                account-settings(account-id) => { root.show-account-settings(account-id); }
             }
 
             desktop-list-pane := MailListPane {
@@ -619,6 +629,7 @@ export component MailView inherits FocusScope {
                 manage-accounts => {
                     root.open-settings("Accounts");
                 }
+                account-settings(account-id) => { root.show-account-settings(account-id); }
             }
 
             compact-list-pane := MailListPane {
@@ -895,6 +906,10 @@ export component MailView inherits FocusScope {
                 manage-accounts => {
                     root.folders-open = false;
                     root.open-settings("Accounts");
+                }
+                account-settings(account-id) => {
+                    root.folders-open = false;
+                    root.show-account-settings(account-id);
                 }
             }
         }

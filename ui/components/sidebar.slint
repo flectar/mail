@@ -132,6 +132,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     callback select-scope(string);
     callback compose;
     callback manage-accounts;
+    // An account heading's Account settings: Settings opens on that account.
+    callback account-settings(int);
     callback sync-account(int);
     // Sign the account in again, where its settings are.
     callback sign-in-account(int);
@@ -665,7 +667,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         touch-mode: root.touch-mode;
                         toggled(open) => { root.toggle-section(entry.key, open); }
                         check-mail => { root.sync-account(entry.mailbox.account_id); }
-                        account-settings => { root.manage-accounts(); }
+                        account-settings => { root.account-settings(entry.mailbox.account_id); }
                         sign-in => { root.sign-in-account(entry.mailbox.account_id); }
                     }
 
