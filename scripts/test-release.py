@@ -328,11 +328,26 @@ class ReleaseTests(unittest.TestCase):
                     for path in destination.rglob("*"):
                         if path.is_file():
                             self.assertEqual(path.read_bytes(), (repeated / path.relative_to(destination)).read_bytes())
+                    # A rebuild of the current release keeps its listed date,
+                    # and the history keeps every published release.
+                    releases = ET.parse(destination / "usr/share/metainfo/com.flectar.mail.metainfo.xml").findall("./releases/release")
+                    self.assertEqual(
+                        [r.get("version") for r in releases[1:]],
+                        [r.get("version") for r in ET.parse(SCRIPTS.parent / "resources/com.flectar.mail.metainfo.xml").findall("./releases/release")],
+                    )
                 flatpak = root / f"{version}-flatpak"
                 with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1767225600"}):
                     stage_linux_metadata(root, flatpak, flatpak=True)
                 desktop = (flatpak / "usr/share/applications/com.flectar.mail.desktop").read_text()
                 self.assertNotIn("X-AppImage-", desktop)
+            listed = ET.parse(root / "resources/com.flectar.mail.metainfo.xml").find("./releases/release")
+            (root / "Cargo.toml").write_text(f'[package]\nversion = "{listed.get("version")}"\n')
+            with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1767225600"}):
+                stage_linux_metadata(root, root / "listed", arch="x86_64")
+            releases = ET.parse(root / "listed/usr/share/metainfo/com.flectar.mail.metainfo.xml").findall("./releases/release")
+            self.assertEqual(releases[0].get("version"), listed.get("version"))
+            self.assertEqual(releases[0].get("date"), listed.get("date"))
+            self.assertEqual(len([r for r in releases if r.get("version") == listed.get("version")]), 1)
             # Every other package names the architecture it was built for.
             for arch in (None, "amd64", "arm64"):
                 with self.subTest(arch=arch), self.assertRaisesRegex(ValueError, "architecture"):
@@ -1164,6 +1179,16 @@ for name in ("FlectarMail", "Frameworks/PDFium.framework/PDFium"):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("platform/android/Cargo.lock", result.stderr)
             android_lock.write_text(lock)
+            # A tag must head the AppStream release history, which keeps its date.
+            metainfo = root / "resources/com.flectar.mail.metainfo.xml"
+            metainfo.parent.mkdir()
+            listing = '<component><releases>{}<release version="0.1.0" date="2026-01-01"/></releases></component>'
+            for releases in ("", '<release version="0.2.0-alpha.1" date="2026-02-01"/>'):
+                metainfo.write_text(listing.format(releases))
+                result = subprocess.run(command, cwd=root, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Add a 0.2.0-beta.1 release", result.stderr)
+            metainfo.write_text(listing.format('<release version="0.2.0-beta.1" date="2026-03-01"/>'))
             result = subprocess.run(command, cwd=root, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("prerelease=true", result.stdout)

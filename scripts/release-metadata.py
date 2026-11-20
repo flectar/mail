@@ -5,6 +5,7 @@ import argparse
 import os
 import re
 import tomllib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -44,6 +45,14 @@ def metadata(version: str, tag: str | None = None) -> dict[str, str]:
     }
 
 
+def listed_release(metainfo: Path, version: str) -> None:
+    """Software centres show the AppStream release history, so a tagged
+    release must already head it; packaging keeps the listed date."""
+    release = ET.parse(metainfo).find("./releases/release")
+    if release is None or release.get("version") != version:
+        raise ValueError(f"Add a {version} release to the top of {metainfo} before tagging it")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag")
@@ -57,6 +66,8 @@ def main() -> None:
             raise SystemExit(f"{path} does not match the root Cargo.toml; refresh its workspace lockfile")
     try:
         values = metadata(version, args.tag)
+        if args.tag is not None:
+            listed_release(Path("resources/com.flectar.mail.metainfo.xml"), version)
     except ValueError as error:
         raise SystemExit(str(error)) from error
     output = "".join(f"{key}={value}\n" for key, value in values.items())
