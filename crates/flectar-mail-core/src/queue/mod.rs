@@ -193,6 +193,21 @@ async fn execute_actions(
                 defer_limited(ctx, action_id, &e).await?;
                 return Err(e);
             }
+            Err(e @ CoreError::SendUncertain(_)) => {
+                // The server may have the message: a retry could deliver it
+                // twice, so the user checks Sent and decides.
+                let message = e.to_string();
+                tracing::warn!(account_id, action_id, error = %message, "send outcome unknown");
+                let saved = message.clone();
+                ctx.db
+                    .write(move |conn| repo::actions::fail_uncertain(conn, action_id, &saved))
+                    .await?;
+                ctx.bus.emit(CoreEvent::ActionState {
+                    action_id,
+                    state: "failed".into(),
+                    error: Some(message),
+                });
+            }
             Err(e) => {
                 let msg = e.to_string();
                 if action.kind == "send" && is_connection_failure(&msg) {

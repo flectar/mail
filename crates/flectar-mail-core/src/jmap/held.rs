@@ -134,6 +134,43 @@ pub(super) async fn live_submission(c: &ConnectedClient, email_id: &str) -> Resu
         .map(|(id, _)| id))
 }
 
+/// The account's EmailSubmission state, for a submission that must fail if
+/// another one was made since (RFC 8620 `ifInState`): two of the user's
+/// devices then can't both submit the same Email. `None` where the server
+/// keeps no submissions to compare.
+pub(super) async fn submission_state(c: &ConnectedClient) -> Option<String> {
+    let mut request = c.request();
+    request
+        .get_email_submission()
+        .account_id(&c.account_id)
+        .ids(std::iter::empty::<&str>());
+    c.send_single::<EmailSubmissionGetResponse>(request)
+        .await
+        .ok()
+        .map(|response| response.state().to_owned())
+}
+
+/// Whether the Email left Drafts: a submission's `onSuccessUpdateEmail`
+/// takes its `$draft` keyword away. A server may delete the submission
+/// itself once the message went out (RFC 8621 section 7; Cyrus does by
+/// default), so this is what shows that a sent Email was sent.
+pub(super) async fn left_drafts(c: &ConnectedClient, email_id: &str) -> Result<bool> {
+    let mut request = c.request();
+    request
+        .get_email()
+        .account_id(&c.account_id)
+        .ids([email_id])
+        .properties([jmap_client::email::Property::Keywords]);
+    let mut response = c
+        .send_single::<jmap_client::core::response::EmailGetResponse>(request)
+        .await
+        .map_err(client::map_error)?;
+    Ok(response
+        .take_list()
+        .first()
+        .is_some_and(|email| !email.keywords().contains(&"$draft")))
+}
+
 /// Hand a scheduled message to the server to hold until `send_at`.
 async fn hold(
     ctx: &SyncCtx,

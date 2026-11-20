@@ -368,6 +368,19 @@ pub fn set_state(conn: &Connection, id: i64, state: &str, error: Option<&str>) -
     Ok(())
 }
 
+/// End a send whose message the mail server may have taken although no
+/// confirmation came (RFC 5321 section 4.5.3.2.6). It fails without being
+/// tried again, since a second try could deliver a second copy, and shows as
+/// possibly sent until the user checks.
+pub fn fail_uncertain(conn: &Connection, id: i64, error: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions SET payload = json_set(payload, '$.uncertain', json('true'))
+         WHERE id = ?1",
+        params![id],
+    )?;
+    set_state(conn, id, "failed", Some(error))
+}
+
 pub fn set_payload(conn: &Connection, id: i64, payload: &serde_json::Value) -> Result<()> {
     conn.execute(
         "UPDATE pending_actions SET payload=?2 WHERE id=?1",

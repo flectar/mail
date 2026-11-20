@@ -2129,9 +2129,7 @@ async fn execute_actions(ctx: &SyncCtx, config: &AccountConfig, c: &ConnectedCli
                 let message = error.to_string();
                 let saved = message.clone();
                 ctx.db
-                    .write(move |conn| {
-                        repo::actions::set_state(conn, action_id, "failed", Some(&saved))
-                    })
+                    .write(move |conn| repo::actions::fail_uncertain(conn, action_id, &saved))
                     .await?;
                 ctx.bus.emit(CoreEvent::ActionState {
                     action_id,
@@ -2873,17 +2871,27 @@ pub(super) async fn send_action(
     let sent_mailbox =
         ensure_role_mailbox(ctx, config.id, c, roles::SENT, "Sent", Role::Sent).await?;
 
-    // A lost response must not cause a duplicate submission on retry. A
-    // cancelled one, as when the server's hold was taken back, never went
-    // out.
+    // A lost response must not cause a duplicate submission on retry, and
+    // another of the user's devices may have sent the Email already: as its
+    // live submission shows, or the Email having left Drafts where the
+    // server deleted that submission. A cancelled one, as when the server's
+    // hold was taken back, never went out. The state comes first, so a
+    // submission made after these checks makes the server refuse this one.
+    let state = super::held::submission_state(c).await;
     let already_submitted = submission_accepted
         || super::held::live_submission(c, &remote_email)
             .await?
-            .is_some();
+            .is_some()
+        || super::held::left_drafts(c, &remote_email).await?;
     if !already_submitted {
         let (sender_email, identity_id) = draft_sending_identity(ctx, c, draft_id).await?;
-        let (request, create_id) =
-            submission_request(c, &remote_email, identity_id, sent_mailbox.clone());
+        let (request, create_id) = submission_request(
+            c,
+            &remote_email,
+            identity_id,
+            sent_mailbox.clone(),
+            state.as_deref(),
+        );
         let mut response = c
             .send_single::<EmailSubmissionSetResponse>(request)
             .await
@@ -3203,9 +3211,13 @@ fn submission_request<'a>(
     remote_email: &str,
     identity_id: String,
     sent_mailbox: String,
+    if_in_state: Option<&str>,
 ) -> (jmap_client::core::request::Request<'a>, String) {
     let mut request = c.request();
     let set = request.set_email_submission().account_id(&c.account_id);
+    if let Some(state) = if_in_state {
+        set.if_in_state(state);
+    }
     let create_id = set
         .create()
         .email_id(remote_email)
@@ -3755,8 +3767,13 @@ mod tests {
         .await
         .unwrap();
         server.await.unwrap();
-        let (request, create_id) =
-            submission_request(&connected, "email-1", "identity-1".into(), "sent-1".into());
+        let (request, create_id) = submission_request(
+            &connected,
+            "email-1",
+            "identity-1".into(),
+            "sent-1".into(),
+            None,
+        );
         let json = serde_json::to_value(request).unwrap();
         let updates = json["methodCalls"][0][1]["onSuccessUpdateEmail"]
             .as_object()

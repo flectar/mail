@@ -5,17 +5,23 @@
 use crate::error::{CoreError, Result};
 use crate::models::{AccountConfig, ConnectionSecurity};
 use crate::net::{self, MailStream};
+use lettre::address::Envelope;
 use lettre::transport::smtp::{
     authentication::{Credentials, Mechanism},
     client::{AsyncSmtpConnection, AsyncTokioStream},
-    commands::Noop,
-    extension::ClientId,
+    commands::{Data, Mail, Noop, Rcpt},
+    extension::{ClientId, Extension, MailBodyParameter, MailParameter},
+    response::Severity,
 };
 use std::{
     fmt,
     future::Future,
     net::SocketAddr,
     pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     task::{Context, Poll},
     time::Duration,
 };
@@ -29,6 +35,45 @@ use tokio::time::{Instant, Sleep};
 const SMTP_TIMEOUT: Duration = Duration::from_secs(30);
 /// A connection that moves no bytes for this long has stalled.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long the reply to the end of a message may take. Until it comes the
+/// server may have taken the message or not, so RFC 5321 section 4.5.3.2.6
+/// asks clients to wait this long rather than time out and send it again.
+pub(crate) const MESSAGE_REPLY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// The message goes out in parts of this size, so the end of each part is a
+/// point where the send can still stop without delivering anything.
+const PART_BYTES: usize = 64 * 1024;
+
+/// The send's limits, shared with the stream it writes through.
+#[derive(Debug, Default)]
+struct Gate {
+    /// When the whole message must have gone out by. Past it the stream
+    /// writes nothing more, so a message not yet finished never is, and the
+    /// server discards it (RFC 5321 section 4.1.1.4).
+    deadline: Option<Instant>,
+    /// A write was turned away at the deadline.
+    refused: AtomicBool,
+    /// The whole message went out and only its end-of-data marker follows:
+    /// from here the server may take it, and its reply may take as long as
+    /// [`MESSAGE_REPLY_TIMEOUT`].
+    ended: AtomicBool,
+}
+
+impl Gate {
+    fn until(deadline: Option<Instant>) -> Arc<Self> {
+        Arc::new(Self {
+            deadline,
+            ..Self::default()
+        })
+    }
+
+    fn idle_timeout(&self) -> Duration {
+        if self.ended.load(Ordering::Acquire) {
+            MESSAGE_REPLY_TIMEOUT
+        } else {
+            IDLE_TIMEOUT
+        }
+    }
+}
 
 pub enum SmtpAuth {
     Password(String),
@@ -37,19 +82,23 @@ pub enum SmtpAuth {
 
 /// The stream lettre drives. After STARTTLS the server's greeting has been
 /// consumed, so `greeting` replays one for lettre's post-upgrade EHLO. Reads
-/// and writes fail once the connection has been idle for [`IDLE_TIMEOUT`].
+/// and writes fail once the connection has been idle for [`IDLE_TIMEOUT`],
+/// or for [`MESSAGE_REPLY_TIMEOUT`] while the end of a message waits for its
+/// reply, and writes stop at the [`Gate`]'s deadline.
 struct SmtpStream {
     inner: MailStream,
     greeting: &'static [u8],
     idle: Pin<Box<Sleep>>,
+    gate: Arc<Gate>,
 }
 
 impl SmtpStream {
-    fn new(inner: MailStream, greeting: &'static [u8]) -> Self {
+    fn new(inner: MailStream, greeting: &'static [u8], gate: Arc<Gate>) -> Self {
         Self {
             inner,
             greeting,
             idle: Box::pin(tokio::time::sleep(IDLE_TIMEOUT)),
+            gate,
         }
     }
 
@@ -61,7 +110,9 @@ impl SmtpStream {
     ) -> Poll<std::io::Result<T>> {
         match poll {
             Poll::Ready(result) => {
-                self.idle.as_mut().reset(Instant::now() + IDLE_TIMEOUT);
+                self.idle
+                    .as_mut()
+                    .reset(Instant::now() + self.gate.idle_timeout());
                 Poll::Ready(result)
             }
             Poll::Pending => match self.idle.as_mut().poll(context) {
@@ -69,7 +120,7 @@ impl SmtpStream {
                     std::io::ErrorKind::TimedOut,
                     format!(
                         "SMTP connection timed out after {}s",
-                        IDLE_TIMEOUT.as_secs()
+                        self.gate.idle_timeout().as_secs()
                     ),
                 ))),
                 Poll::Pending => Poll::Pending,
@@ -112,6 +163,16 @@ impl AsyncWrite for SmtpStream {
         buffer: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         let this = self.get_mut();
+        if this
+            .gate
+            .deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            this.gate.refused.store(true, Ordering::Release);
+            return Poll::Ready(Err(std::io::Error::other(
+                "the time to send this message ended before it was complete",
+            )));
+        }
         let poll = Pin::new(&mut this.inner).poll_write(context, buffer);
         this.track(context, poll)
     }
@@ -284,7 +345,11 @@ async fn start_tls(cfg: &AccountConfig, mut tcp: TcpStream) -> Result<MailStream
 }
 
 /// Open an authenticated SMTP session as the account's security requires.
-async fn connect(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<AsyncSmtpConnection> {
+async fn connect(
+    cfg: &AccountConfig,
+    auth: &SmtpAuth,
+    gate: Arc<Gate>,
+) -> Result<AsyncSmtpConnection> {
     let security = cfg.settings.connection.smtp_security;
     if !security.is_encrypted() && matches!(auth, SmtpAuth::XOAuth2(_)) {
         return Err(CoreError::Tls(
@@ -315,7 +380,7 @@ async fn connect(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<AsyncSmtpConnec
         };
         let encrypted = stream.is_encrypted();
         let mut connection = AsyncSmtpConnection::connect_with_transport(
-            Box::new(SmtpStream::new(stream, greeting)),
+            Box::new(SmtpStream::new(stream, greeting, gate)),
             &ClientId::default(),
         )
         .await
@@ -364,6 +429,33 @@ pub async fn send_raw(
     send_raw_from(cfg, auth, Some(from), recipients, raw).await
 }
 
+/// Send a fully built message that must have gone out by `deadline`, in
+/// milliseconds since the epoch on this device's clock. A message not
+/// complete by then is never finished, so it doesn't go out: another of the
+/// user's devices may then send it without delivering a second copy.
+pub async fn send_raw_before(
+    cfg: &AccountConfig,
+    auth: &SmtpAuth,
+    from: &str,
+    recipients: &[String],
+    raw: &[u8],
+    deadline: Option<i64>,
+) -> Result<()> {
+    let deadline = deadline.map(|deadline| {
+        let left = deadline.saturating_sub(crate::models::now_ms()).max(0);
+        Instant::now() + Duration::from_millis(u64::try_from(left).unwrap_or(0))
+    });
+    send_message(
+        cfg,
+        auth,
+        Some(from),
+        recipients,
+        raw,
+        Gate::until(deadline),
+    )
+    .await
+}
+
 /// Send a fully built message with `from` as the envelope sender, or the
 /// null one (`MAIL FROM:<>`) that notifications such as read receipts use,
 /// so nothing answers them in turn.
@@ -374,7 +466,17 @@ pub async fn send_raw_from(
     recipients: &[String],
     raw: &[u8],
 ) -> Result<()> {
-    use lettre::address::Envelope;
+    send_message(cfg, auth, from, recipients, raw, Gate::until(None)).await
+}
+
+async fn send_message(
+    cfg: &AccountConfig,
+    auth: &SmtpAuth,
+    from: Option<&str>,
+    recipients: &[String],
+    raw: &[u8],
+    gate: Arc<Gate>,
+) -> Result<()> {
     let from_addr = from
         .map(|from| {
             from.parse()
@@ -403,19 +505,144 @@ pub async fn send_raw_from(
         "smtp send_raw: connecting to relay",
     );
     let message = crate::mail_security::without_bcc_for_delivery(raw)?;
-    let mut connection = connect(cfg, auth).await?;
-    connection
-        .send(&envelope, &message)
-        .await
-        .map_err(|error| map_smtp_error(cfg, error))?;
+    let mut connection = connect(cfg, auth, Arc::clone(&gate)).await?;
+    submit(cfg, &mut connection, &envelope, &message, &gate).await?;
     // The message is accepted; a failed QUIT changes nothing about that.
     connection.quit().await.ok();
     Ok(())
 }
 
+/// The message in parts, noting when the last one has gone out.
+struct Parts<'a> {
+    rest: &'a [u8],
+    gate: &'a Gate,
+}
+
+impl<'a> Iterator for Parts<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<&'a [u8]> {
+        if self.rest.is_empty() {
+            self.gate.ended.store(true, Ordering::Release);
+            return None;
+        }
+        let (part, rest) = self.rest.split_at(self.rest.len().min(PART_BYTES));
+        self.rest = rest;
+        Some(part)
+    }
+}
+
+/// Hand one message to the server, step by step, so a failure tells whether
+/// the server can have taken it. Up to the end-of-data marker it can't: a
+/// refused command, a dropped connection or a stop at the deadline all leave
+/// the transaction unfinished, which RFC 5321 has the server discard, and so
+/// does a refusing reply at the end. Only a reply that never comes after the
+/// marker leaves it open (RFC 5321 section 4.5.3.2.6); that is
+/// [`CoreError::SendUncertain`], which must not be retried as if nothing went
+/// out.
+async fn submit(
+    cfg: &AccountConfig,
+    connection: &mut AsyncSmtpConnection,
+    envelope: &Envelope,
+    message: &[u8],
+    gate: &Gate,
+) -> Result<()> {
+    let not_sent = |error| map_smtp_error(cfg, error);
+    let mut options = Vec::new();
+    // As lettre's own send: SMTPUTF8 (RFC 6531) for addresses beyond ASCII,
+    // 8BITMIME (RFC 6152) for content beyond it.
+    if envelope
+        .from()
+        .into_iter()
+        .chain(envelope.to())
+        .any(|address| !AsRef::<str>::as_ref(address).is_ascii())
+    {
+        if !connection
+            .server_info()
+            .supports_feature(Extension::SmtpUtfEight)
+        {
+            connection.abort().await;
+            return Err(CoreError::Smtp(format!(
+                "{}:{} doesn't accept addresses beyond ASCII (no SMTPUTF8)",
+                cfg.smtp_host, cfg.smtp_port
+            )));
+        }
+        options.push(MailParameter::SmtpUtfEight);
+    }
+    if !message.is_ascii() {
+        if !connection
+            .server_info()
+            .supports_feature(Extension::EightBitMime)
+        {
+            connection.abort().await;
+            return Err(CoreError::Smtp(format!(
+                "{}:{} doesn't accept 8-bit content (no 8BITMIME)",
+                cfg.smtp_host, cfg.smtp_port
+            )));
+        }
+        options.push(MailParameter::Body(MailBodyParameter::EightBitMime));
+    }
+    if let Err(error) = connection
+        .command(Mail::new(envelope.from().cloned(), options))
+        .await
+    {
+        connection.abort().await;
+        return Err(not_sent(error));
+    }
+    for recipient in envelope.to() {
+        if let Err(error) = connection
+            .command(Rcpt::new(recipient.clone(), vec![]))
+            .await
+        {
+            connection.abort().await;
+            return Err(not_sent(error));
+        }
+    }
+    match connection.command(Data).await {
+        Ok(reply) if reply.code().severity == Severity::PositiveIntermediate => {}
+        Ok(reply) => {
+            connection.abort().await;
+            return Err(CoreError::Smtp(format!(
+                "{}:{} answered DATA with {}",
+                cfg.smtp_host,
+                cfg.smtp_port,
+                reply.code()
+            )));
+        }
+        Err(error) => {
+            connection.abort().await;
+            return Err(not_sent(error));
+        }
+    }
+    let parts = Parts {
+        rest: message,
+        gate,
+    };
+    let uncertain = |what: String| {
+        CoreError::SendUncertain(format!(
+            "{}:{} may have accepted the message, but {what}; check Sent before sending it again",
+            cfg.smtp_host, cfg.smtp_port
+        ))
+    };
+    match connection.message_iter(parts).await {
+        Ok(reply) if reply.code().severity == Severity::PositiveCompletion => Ok(()),
+        Ok(reply) => Err(uncertain(format!("it answered with {}", reply.code()))),
+        // The message never went out whole.
+        Err(error)
+            if !gate.ended.load(Ordering::Acquire) || gate.refused.load(Ordering::Acquire) =>
+        {
+            connection.abort().await;
+            Err(not_sent(error))
+        }
+        // The server refused the finished message.
+        Err(error) if error.is_transient() || error.is_permanent() => Err(not_sent(error)),
+        Err(error) => Err(uncertain(format!("its reply was lost ({error})"))),
+    }
+}
+
 /// Cheap connectivity/auth probe used by test_connection.
 pub async fn test_connection(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<()> {
-    let mut connection = connect(cfg, auth).await?;
+    let mut connection = connect(cfg, auth, Gate::until(None)).await?;
     connection
         .command(Noop)
         .await
@@ -423,3 +650,6 @@ pub async fn test_connection(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<()>
     connection.quit().await.ok();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
