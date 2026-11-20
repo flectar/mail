@@ -193,6 +193,13 @@ export component OnboardingView inherits Rectangle {
                     button-border: root.ui-border;
                     clicked => { root.open-new-mail-account(); }
                 }
+                if !root.google-available : Text {
+                    text: @tr("For Gmail with an app password, use Connect another provider.");
+                    color: root.muted-text;
+                    font-size: TypeScale.caption;
+                    horizontal-alignment: center;
+                    wrap: word-wrap; height: self.preferred-height;
+                }
                 if !root.google-available || !root.microsoft-available : Text {
                     text: !root.google-available && !root.microsoft-available
                         ? @tr("Add your own app keys to enable Gmail and Outlook.")
