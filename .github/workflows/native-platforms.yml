@@ -389,6 +389,50 @@ jobs:
           path: target/flatpak/flectar-mail.flatpak
           if-no-files-found: error
 
+  flathub:
+    needs: metadata
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
+    # Flathub builds both architectures from the manifest in its own
+    # repository; x64 here catches build and lint failures before a release.
+    name: Flathub build and lint (x64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install Flathub's builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak ostree
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive -y flathub \
+            org.flatpak.Builder \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//25.08
+      - name: Lint the release manifest
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          python3 scripts/flathub-manifest.py --tag "v$VERSION" --commit "$GITHUB_SHA" target/flathub/release
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder \
+            --exceptions --gha-format manifest target/flathub/release/com.flectar.mail.yml
+      - name: Make room for the release build
+        # The app crate's release build peaks near all the memory a hosted
+        # runner has; see scripts/ci-swap.sh.
+        run: ./scripts/ci-swap.sh on
+      - name: Build this checkout the way Flathub does
+        run: |
+          python3 scripts/flathub-manifest.py --local
+          mkdir -p target/flathub/local
+          cd target/flathub/local
+          # The builder calls the host's flatpak over the session bus.
+          dbus-run-session -- flatpak run --command=flathub-build org.flatpak.Builder \
+            "$GITHUB_WORKSPACE/.flathub-local.yml"
+          # Flathub publishes the mirrored screenshots in their own ref.
+          ostree commit --repo=repo --canonical-permissions --branch=screenshots/x86_64 \
+            builddir/files/share/app-info/media
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder \
+            --exceptions --gha-format repo repo
+
   windows:
     needs: metadata
     if: github.event_name == 'push' || inputs.include_windows
@@ -811,11 +855,12 @@ jobs:
       needs.metadata.result == 'success' && needs.quality.result == 'success' &&
       needs.linux.result == 'success' && needs.rpm.result == 'success' &&
       needs.rpm-test.result == 'success' &&
-      needs.flatpak.result == 'success' && needs.windows.result == 'success' &&
+      needs.flatpak.result == 'success' && needs.flathub.result == 'success' &&
+      needs.windows.result == 'success' &&
       needs.microsoft-store.result == 'success' &&
       needs.macos.result == 'success' && needs.android.result == 'success' &&
       needs.ios.result == 'success'
-    needs: [metadata, quality, linux, rpm, rpm-test, flatpak, windows, microsoft-store, macos, android, ios]
+    needs: [metadata, quality, linux, rpm, rpm-test, flatpak, flathub, windows, microsoft-store, macos, android, ios]
     runs-on: ubuntu-24.04
     permissions:
       actions: read
