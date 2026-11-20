@@ -216,7 +216,7 @@ class ReleaseTests(unittest.TestCase):
         # Flathub builds from source, so it leaves out only the prebuilt PDFium.
         kept = [line for line in commands(bundle) if "pdf" not in line.lower()]
         self.assertEqual(commands(template), [line.replace(" /app/lib/flectar-mail", "") for line in kept])
-        self.assertEqual(environment(template), environment(bundle) - {"CARGO_BUILD_JOBS", "FLECTAR_UPDATE_CHECKS"})
+        self.assertEqual(environment(template), environment(bundle) - {"FLECTAR_UPDATE_CHECKS"})
         self.assertNotIn("pdfium", template.split("    sources:\n")[1].lower())
 
         commit = "0123456789abcdef0123456789abcdef01234567"

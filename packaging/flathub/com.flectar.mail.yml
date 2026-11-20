@@ -36,6 +36,9 @@ modules:
     build-options:
       append-path: /usr/lib/sdk/rust-stable/bin
       env:
+        # The app crate's release build alone peaks near 15 GB, so crates
+        # build one at a time as in the bundle.
+        CARGO_BUILD_JOBS: '1'
         CARGO_HOME: /run/build/flectar-mail/cargo
         CARGO_NET_OFFLINE: 'true'
     # Flathub builds everything from source, so this build leaves out the
