@@ -608,19 +608,23 @@ pub(super) fn prefer_shown_compose_account(app: &AppWindow, state: &InboxState) 
 pub(super) fn apply_account_states(
     app: &AppWindow,
     inbox_state: &Rc<RefCell<InboxState>>,
-    states: &HashMap<i64, (String, Option<String>)>,
+    states: &HashMap<i64, crate::startup::AccountSyncState>,
     caught_up: &HashMap<i64, i64>,
 ) {
     let mut state_guard = inbox_state.borrow_mut();
     let mut changed = false;
     for account in &mut state_guard.connected_accounts {
-        if let Some((sync_state, sync_error)) = states.get(&account.id) {
-            if account.sync_state != *sync_state {
-                account.sync_state.clone_from(sync_state);
+        if let Some(synced) = states.get(&account.id) {
+            if account.sync_state != synced.state {
+                account.sync_state.clone_from(&synced.state);
                 changed = true;
             }
-            if account.sync_error != *sync_error {
-                account.sync_error.clone_from(sync_error);
+            if account.sync_error != synced.error {
+                account.sync_error.clone_from(&synced.error);
+                changed = true;
+            }
+            if account.sync_retry_at != synced.retry_at {
+                account.sync_retry_at = synced.retry_at;
                 changed = true;
             }
         }

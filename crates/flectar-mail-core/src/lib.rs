@@ -921,6 +921,9 @@ pub struct Core {
     credentials: CredentialStoreHandle,
     oauth_redirects: OAuthRedirectBrokerHandle,
     handles: Arc<RwLock<HashMap<i64, AccountHandle>>>,
+    /// What each account's server asked of sync, kept while the app runs
+    /// and across restarts of an account's worker.
+    pace: Arc<sync::pacing::Pace>,
     cal_handles: Arc<RwLock<HashMap<i64, caldav::task::CalTaskHandle>>>,
     card_handles: Arc<RwLock<HashMap<i64, carddav::task::CardDavTaskHandle>>>,
     /// Per-attachment single-flight locks. Concurrent preview/open/save calls
@@ -1050,6 +1053,7 @@ impl Core {
             credentials,
             oauth_redirects,
             handles: Arc::new(RwLock::new(HashMap::new())),
+            pace: Arc::default(),
             cal_handles: Arc::new(RwLock::new(HashMap::new())),
             card_handles: Arc::new(RwLock::new(HashMap::new())),
             attachment_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -1420,6 +1424,7 @@ impl Core {
             paths: self.paths.clone(),
             tokens: self.tokens.clone(),
             credentials: self.credentials.clone(),
+            pace: self.pace.clone(),
         }
     }
 
@@ -1849,6 +1854,66 @@ impl Core {
         Ok(())
     }
 
+    /// Choose how often an account checks for new mail (#251). The account
+    /// checks once at once, then as chosen.
+    pub async fn set_account_check_interval(
+        &self,
+        account_id: i64,
+        interval: CheckInterval,
+    ) -> Result<()> {
+        if !interval.is_offered() {
+            return Err(CoreError::Other(format!(
+                "accounts check every {} minutes",
+                CheckInterval::MINUTES
+                    .map(|minutes| minutes.to_string())
+                    .join(", ")
+            )));
+        }
+        self.update_sync_settings(account_id, move |settings| {
+            settings.check_interval = interval;
+        })
+        .await
+    }
+
+    /// Choose whether an IMAP or JMAP account's server tells of new mail as
+    /// it arrives (IMAP IDLE, JMAP's event source), or the account checks at
+    /// its interval instead (#251).
+    pub async fn set_account_push(&self, account_id: i64, push: bool) -> Result<()> {
+        self.update_sync_settings(account_id, move |settings| settings.push = push)
+            .await
+    }
+
+    /// Stores a change to how an account syncs and wakes its worker, which
+    /// checks for mail and then waits as the settings now say.
+    async fn update_sync_settings(
+        &self,
+        account_id: i64,
+        change: impl FnOnce(&mut models::AccountSettings) + Send + 'static,
+    ) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                if config.mail_protocol == MailProtocol::Local {
+                    return Err(CoreError::Other(
+                        "mail kept on this device has no server to check".into(),
+                    ));
+                }
+                change(&mut config.settings);
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+            handle.send(SyncCmd::RunActions);
+        }
+        Ok(())
+    }
+
     /// Choose how an account's messages start: formatted or as plain text, and whether
     /// replies and forwards to plain-text messages start in plain text.
     pub async fn set_account_message_format(
@@ -2151,6 +2216,8 @@ impl Core {
             if let Some(handle) = self.handles.write().await.remove(&existing.id) {
                 handle.abort();
             }
+            // What the old server asked of sync doesn't hold for the new one.
+            self.pace.forget(existing.id);
 
             let a = args.clone();
             let remote_account = jmap_account_id.clone();
@@ -2782,6 +2849,7 @@ impl Core {
         if let Some(h) = self.handles.write().await.remove(&account_id) {
             h.abort();
         }
+        self.pace.forget(account_id);
         self.cal_handles.write().await.remove(&account_id);
         if let Some(handle) = self.card_handles.write().await.remove(&account_id) {
             handle.abort();

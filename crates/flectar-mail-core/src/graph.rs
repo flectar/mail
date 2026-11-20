@@ -81,13 +81,37 @@ async fn request_raw(
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         return Err(CoreError::NeedsReauth);
     }
+    let named_wait = crate::net::retry_after::of(resp.headers());
     let text = http_body::text(
         resp,
         MAX_GRAPH_RESPONSE_BODY_BYTES,
         "Microsoft Graph response",
     )
     .await?;
+    if let Some(limit) = throttled(status.as_u16(), named_wait, &text) {
+        return Err(limit);
+    }
     Ok((status.as_u16(), text))
+}
+
+/// Microsoft Graph throttles with 429, and sometimes 503 or 509, naming the
+/// wait in Retry-After. A 503 without a wait is any other server error.
+fn throttled(
+    status: u16,
+    retry_after: Option<std::time::Duration>,
+    body: &str,
+) -> Option<CoreError> {
+    let kind = match (status, retry_after) {
+        (429 | 509, _) => crate::error::LimitKind::Requests,
+        (503, Some(_)) => crate::error::LimitKind::Busy,
+        _ => return None,
+    };
+    Some(CoreError::RateLimited {
+        service: "Microsoft 365".into(),
+        kind,
+        retry_after,
+        detail: format!("HTTP {status}: {}", response_excerpt(body)),
+    })
 }
 
 /// Like `request_raw`, but any non-2xx is an error and the body is parsed.
@@ -795,6 +819,24 @@ mod tests {
         let ev = parse_delta_event(&v).unwrap();
         assert!(ev.removed);
         assert_eq!(ev.id, "gone1");
+    }
+
+    #[test]
+    fn throttling_names_its_wait() {
+        let body = r#"{"error":{"code":"TooManyRequests","message":"Please retry again later."}}"#;
+        match throttled(429, Some(std::time::Duration::from_secs(10)), body) {
+            Some(CoreError::RateLimited {
+                kind: crate::error::LimitKind::Requests,
+                retry_after,
+                ..
+            }) => assert_eq!(retry_after, Some(std::time::Duration::from_secs(10))),
+            other => panic!("{other:?}"),
+        }
+        assert!(throttled(509, None, body).is_some());
+        assert!(throttled(503, Some(std::time::Duration::from_secs(5)), body).is_some());
+        assert!(throttled(503, None, body).is_none());
+        assert!(throttled(500, Some(std::time::Duration::from_secs(5)), body).is_none());
+        assert!(throttled(200, None, "{}").is_none());
     }
 
     #[test]

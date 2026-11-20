@@ -54,6 +54,19 @@ pub enum CoreError {
     NotFound(String),
     #[error("offline")]
     Offline,
+    /// The server asked to slow down or wait: a rate limit or quota for now,
+    /// too many open connections, or a delay between sign-ins. Sync waits
+    /// before it asks again, as long as the server said if it said.
+    #[error("{service} asked to wait: {detail}")]
+    RateLimited {
+        /// Who asked, such as the server's host name or "Gmail".
+        service: String,
+        kind: LimitKind,
+        /// The wait the server named, if it named one.
+        retry_after: Option<std::time::Duration>,
+        /// The server's own words.
+        detail: String,
+    },
     #[error("AI is not configured")]
     AiNotConfigured,
     #[error("{0}")]
@@ -86,6 +99,7 @@ impl CoreError {
             CoreError::CardDav(_) => "carddav",
             CoreError::NotFound(_) => "not_found",
             CoreError::Offline => "offline",
+            CoreError::RateLimited { .. } => "rate_limited",
             CoreError::AiNotConfigured => "ai_not_configured",
             CoreError::Translation(_) => "translation",
             CoreError::Other(_) => "other",
@@ -95,6 +109,50 @@ impl CoreError {
     /// Serialize the stable code and fallback message for a UI-facing result.
     pub fn to_client_json(&self) -> String {
         serde_json::json!({ "code": self.code(), "message": self.to_string() }).to_string()
+    }
+}
+
+/// What a server's request to wait was about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitKind {
+    /// Too many requests, or too much data, for now: a rate limit or a
+    /// quota that refills.
+    Requests,
+    /// Too many connections open at once.
+    Connections,
+    /// Signed in too recently: POP3's LOGIN-DELAY (RFC 2449).
+    LoginDelay,
+    /// Something else holds the mailbox for now, as with RFC 5530's INUSE
+    /// and POP3's IN-USE.
+    Busy,
+}
+
+impl LimitKind {
+    /// Whether a mail server's words ask to slow down, and about what.
+    /// Servers say it in their own words: Gmail's "Too many simultaneous
+    /// connections" and "Account exceeded command or bandwidth limits",
+    /// Dovecot's "Maximum number of connections from user+IP exceeded",
+    /// Yahoo's "Rate limit hit" and Exchange Online's "Request is throttled".
+    pub(crate) fn in_text(text: &str) -> Option<Self> {
+        let text = text.to_ascii_lowercase();
+        let says = |words: &[&str]| words.iter().any(|word| text.contains(word));
+        if says(&[
+            "too many simultaneous connections",
+            "too many connections",
+            "maximum number of connections",
+        ]) {
+            Some(Self::Connections)
+        } else if says(&[
+            "rate limit",
+            "throttled",
+            "exceeded command or bandwidth",
+            "bandwidth limit",
+            "too many requests",
+        ]) {
+            Some(Self::Requests)
+        } else {
+            None
+        }
     }
 }
 

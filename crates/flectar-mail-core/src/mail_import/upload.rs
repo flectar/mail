@@ -528,6 +528,15 @@ impl crate::Core {
             };
             match result {
                 Err(error) if attempt < RETRIES && retryable(&error) => {
+                    // A server that named a wait gets it, and one that asks
+                    // for more than a minute ends the tries.
+                    let named = match &error {
+                        CoreError::RateLimited { retry_after, .. } => *retry_after,
+                        _ => None,
+                    };
+                    if named.is_some_and(|wait| wait > Duration::from_secs(60)) {
+                        return Err(error);
+                    }
                     attempt += 1;
                     tracing::warn!(account_id = config.id, %error, attempt, "uploading a message failed; retrying");
                     match remote {
@@ -540,7 +549,11 @@ impl crate::Core {
                         Remote::Jmap { client } => *client = None,
                         Remote::Gmail { .. } => {}
                     }
-                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt).min(60))).await;
+                    tokio::time::sleep(
+                        Duration::from_secs(2u64.pow(attempt).min(60))
+                            .max(named.unwrap_or_default()),
+                    )
+                    .await;
                 }
                 result => return result,
             }
@@ -806,7 +819,7 @@ async fn gmail_upload(
 /// asked to slow down.
 fn retryable(error: &CoreError) -> bool {
     match error {
-        CoreError::Network(_) | CoreError::Offline => true,
+        CoreError::Network(_) | CoreError::Offline | CoreError::RateLimited { .. } => true,
         CoreError::Imap(reason) | CoreError::Jmap(reason) => queue::is_connection_failure(reason),
         _ => false,
     }
