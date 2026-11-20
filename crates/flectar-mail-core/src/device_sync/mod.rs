@@ -364,7 +364,8 @@ fn sync_error(error: SyncError) -> CoreError {
 
 impl Service {
     pub(crate) fn new() -> Self {
-        let http = reqwest::Client::builder()
+        // Through the app's proxy setting, like the app's other connections.
+        let http = crate::net::proxy::http_builder(crate::net::proxy::Owner::App)
             .user_agent(concat!("flectar-mail/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(15))
             // No overall timeout: event streams stay open and pairing reads
