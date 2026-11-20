@@ -66,6 +66,8 @@ import { SavedSearchDialog } from "dialogs/saved-search-dialog.slint";
 import { SavedSearchUi } from "saved-searches.slint";
 import { MailboxWords } from "mailbox-words.slint";
 export { MailboxWords }
+import { MailboxRole, MailboxTitle } from "models.slint";
+export { MailboxRole, MailboxTitle } from "models.slint";
 export { MovePickerUi, MoveTargetRow } from "dialogs/move-dialog.slint";
 import { MoveDialog, MovePickerUi } from "dialogs/move-dialog.slint";
 import { ConfirmationDialog } from "components/confirmation-dialog.slint";
@@ -1272,13 +1274,12 @@ export component AppWindow inherits Window {
     in-out property <string> calendar_event_duration: "60";
     in-out property <int> calendar_event_color: 0;
     in property <string> selected_scope: "Unified Inbox";
-    in property <string> selected_scope_title: "Unified Inbox";
-    in property <string> selected_scope_role: "Inbox";
-    in property <string> selected_scope_account;
-    in property <bool> selected_scope_unified: true;
-    private property <string> display_scope_title: root.selected_scope_role == "" || SavedSearchUi.selected-id >= 0
-        ? root.selected_scope_title
-        : MailboxWords.title(root.selected_scope_role, root.selected_scope_account, root.selected_scope_unified);
+    // What the mail list is called: the standard mailbox it shows, named in
+    // the interface's language, or else the name of its folder, label or
+    // saved search.
+    in property <MailboxTitle> selected_scope_mailbox: { role: MailboxRole.inbox, account: "", unified: true };
+    in property <string> selected_scope_title;
+    private property <string> display_scope_title: MailboxWords.title(root.selected_scope_mailbox, root.selected_scope_title);
     in property <bool> trash_view: false;
     in-out property <bool> mail_sidebar_collapsed: false;
     in-out property <bool> contacts_sidebar_collapsed: false;

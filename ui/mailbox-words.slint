@@ -1,7 +1,7 @@
-import { MailboxRole } from "models.slint";
+import { MailboxRole, MailboxTitle } from "models.slint";
 
-// Standard mailbox names follow the UI language. Other names are supplied by
-// the account, and the navigation keys do not depend on the translation.
+// Standard mailboxes are named in the interface's language. Folders, labels
+// and saved searches keep the names their accounts and users gave them.
 export global MailboxWords {
     public pure function name(role: MailboxRole) -> string {
         if role == MailboxRole.inbox { return @tr("Inbox"); }
@@ -16,31 +16,20 @@ export global MailboxWords {
         return "";
     }
 
-    public pure function label(name: string, standard: bool) -> string {
-        if (!standard) { return name; }
-        if name == "Inbox" { return @tr("Inbox"); }
-        if name == "Starred" { return @tr("Starred"); }
-        if name == "Sent" { return @tr("mailbox" => "Sent"); }
-        if name == "Archive" { return @tr("mailbox" => "Archive"); }
-        if name == "Spam" { return @tr("Spam"); }
-        if name == "Trash" { return @tr("Trash"); }
-        if name == "Drafts" { return @tr("Drafts"); }
-        if name == "Important" { return @tr("Important"); }
-        if name == "Other" { return @tr("Other"); }
-        return name;
-    }
-
-    public pure function title(name: string, account: string, unified: bool) -> string {
-        if unified {
-            if name == "Inbox" { return @tr("Unified Inbox"); }
-            if name == "Starred" { return @tr("Unified Starred"); }
-            if name == "Sent" { return @tr("Unified Sent"); }
-            if name == "Archive" { return @tr("Unified Archive"); }
-            if name == "Spam" { return @tr("Unified Spam"); }
-            if name == "Trash" { return @tr("Unified Trash"); }
-            if name == "Drafts" { return @tr("Unified Drafts"); }
+    // What a list or tab is called: the standard mailbox `mailbox` names, or
+    // else `text`.
+    public pure function title(mailbox: MailboxTitle, text: string) -> string {
+        if mailbox.role == MailboxRole.none { return text; }
+        if mailbox.unified {
+            if mailbox.role == MailboxRole.inbox { return @tr("Unified Inbox"); }
+            if mailbox.role == MailboxRole.starred { return @tr("Unified Starred"); }
+            if mailbox.role == MailboxRole.sent { return @tr("Unified Sent"); }
+            if mailbox.role == MailboxRole.archive { return @tr("Unified Archive"); }
+            if mailbox.role == MailboxRole.spam { return @tr("Unified Spam"); }
+            if mailbox.role == MailboxRole.trash { return @tr("Unified Trash"); }
+            if mailbox.role == MailboxRole.drafts { return @tr("Unified Drafts"); }
         }
-        let label = MailboxWords.label(name, true);
-        return account == "" ? label : account + " / " + label;
+        let name = MailboxWords.name(mailbox.role);
+        return mailbox.account == "" ? name : mailbox.account + " / " + name;
     }
 }

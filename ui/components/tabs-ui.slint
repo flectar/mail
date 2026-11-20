@@ -1,9 +1,14 @@
+import { MailboxTitle } from "../models.slint";
+
 export struct TabRow {
     id: int,
     // "mail" | "calendar" | "contacts" | "files" | "settings"
     workspace: string,
     // Saved title for inactive tabs; empty uses the workspace name.
     title: string,
+    // The standard mailbox an inactive tab is named after instead of
+    // `title`, in the interface's language.
+    mailbox: MailboxTitle,
     active: bool,
 }
 
@@ -46,7 +51,6 @@ export global TabsUi {
     callback command(string);
     // The active tab's place changed through ordinary navigation.
     callback navigated();
-    callback language-changed();
     // The mail list's scroll offset from the top, kept current by the mail
     // view, and the offset a shown tab scrolls back to. Each request makes
     // the list scroll to `list-restore` once its rows are laid out; a

@@ -301,6 +301,7 @@ fn phones_show_the_tab_overview_over_settings() {
             workspace: "mail".into(),
             title: "Mail tab".into(),
             active: false,
+            ..Default::default()
         },
         TabRow {
             id: 2,

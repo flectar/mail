@@ -1188,7 +1188,13 @@ mod warm_start_tests {
         // which the sidebar lists first, without a unified section.
         assert_eq!(state.borrow().scope, PERSON_INBOX);
         assert_eq!(app.get_selected_scope(), PERSON_INBOX.to_string());
-        assert_eq!(app.get_selected_scope_title(), "Person / Inbox");
+        assert_eq!(
+            app.global::<crate::MailboxWords>().invoke_title(
+                app.get_selected_scope_mailbox(),
+                app.get_selected_scope_title()
+            ),
+            "Person / Inbox"
+        );
         let rows = state.borrow().sidebar_rows.iter().collect::<Vec<_>>();
         assert_eq!(rows[0].kind, crate::SidebarRowKind::Account);
         assert!(!harness.shows_unified_inbox());

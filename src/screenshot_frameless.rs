@@ -54,20 +54,21 @@ fn frameless_screenshots() {
             TabRow {
                 id: 1,
                 workspace: "mail".into(),
-                title: "".into(),
                 active: true,
+                ..Default::default()
             },
             TabRow {
                 id: 2,
                 workspace: "mail".into(),
                 title: subject(1),
                 active: false,
+                ..Default::default()
             },
             TabRow {
                 id: 3,
                 workspace: "calendar".into(),
-                title: "".into(),
                 active: false,
+                ..Default::default()
             },
         ])));
 

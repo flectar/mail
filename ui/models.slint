@@ -67,6 +67,15 @@ export struct AccountStatus {
 // Folders and labels have no role and keep the names their accounts give them.
 export enum MailboxRole { none, inbox, starred, sent, archive, spam, trash, drafts, important, other }
 
+// What the list or tab of a standard mailbox is called: the mailbox, after
+// the name of its account unless it shows every account's at once.
+export struct MailboxTitle {
+    role: MailboxRole,
+    // Empty for unified mailboxes and for mail kept on this device.
+    account: string,
+    unified: bool,
+}
+
 export struct MailboxRow {
     account_id: int,
     folder_id: int,

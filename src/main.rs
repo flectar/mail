@@ -1248,7 +1248,6 @@ fn apply_language(app: &AppWindow, preference: &str) {
         eprintln!("could not select {selected} translation: {error}");
     }
     sidebar_model::reload_mailbox_names(app);
-    app.global::<TabsUi>().invoke_language_changed();
     app.set_language_mode(language_mode.into());
     app.set_privacy_policy_url(privacy_policy_url(selected).into());
     app.invoke_app_language_changed(language_mode.into(), selected.into());
@@ -8291,7 +8290,7 @@ mod tests {
     }
 
     #[test]
-    fn standard_mailbox_display_names_follow_the_selected_language() {
+    fn standard_mailboxes_are_named_in_the_selected_language() {
         use slint::platform::{
             Platform, WindowAdapter,
             software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
@@ -8306,26 +8305,41 @@ mod tests {
         slint::platform::set_platform(Box::new(Headless)).unwrap();
         let app = AppWindow::new().unwrap();
         let words = app.global::<MailboxWords>();
+        let title = |role, account: &str, unified| {
+            words.invoke_title(
+                MailboxTitle {
+                    role,
+                    account: account.into(),
+                    unified,
+                },
+                "Receipts".into(),
+            )
+        };
 
         slint::select_bundled_translation("en").unwrap();
         for mailbox in StandardMailbox::ALL {
+            assert_eq!(words.invoke_name(mailbox.role()), mailbox.label());
             assert_eq!(
-                words.invoke_label(mailbox.label().into(), true),
-                mailbox.label()
+                title(mailbox.role(), "", true),
+                Scope::Unified(mailbox).to_string()
             );
         }
+        assert_eq!(title(MailboxRole::Inbox, "Person", false), "Person / Inbox");
+        assert_eq!(title(MailboxRole::Other, "", false), "Other");
+        assert_eq!(title(MailboxRole::None, "Person", true), "Receipts");
 
-        let explicit = normalized_language_preference("zh_Hans");
+        // Chosen in Settings, or followed from the system.
+        let chosen = normalized_language_preference("zh_Hans");
         let system = bundled_language_for_locale("zh-Hans-CN").unwrap();
-        for language in [explicit, system] {
+        for language in [chosen, system] {
             slint::select_bundled_translation(language).unwrap();
-            let inbox = words.invoke_label("Inbox".into(), true);
+            let inbox = words.invoke_name(MailboxRole::Inbox);
             assert_ne!(inbox, "Inbox");
-            assert_eq!(words.invoke_label("Archive".into(), false), "Archive");
             assert_eq!(
-                words.invoke_title("Inbox".into(), "Person".into(), false),
+                title(MailboxRole::Inbox, "Person", false),
                 format!("Person / {inbox}")
             );
+            assert_eq!(title(MailboxRole::None, "", false), "Receipts");
         }
     }
 
