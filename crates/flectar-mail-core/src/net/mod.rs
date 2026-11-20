@@ -2,6 +2,8 @@
 //! carries a session before and after TLS, and each account's TLS trust.
 
 mod connect;
+pub mod proxy;
+pub mod retry_after;
 pub mod tls;
 
 #[cfg(test)]

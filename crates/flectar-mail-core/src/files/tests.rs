@@ -276,7 +276,8 @@ async fn discovery_follows_only_same_origin_redirects() {
         ),
     ])
     .await;
-    let t = transport::Transport::new(&base, "user", "secret").unwrap();
+    let t =
+        transport::Transport::new(crate::net::proxy::Owner::App, &base, "user", "secret").unwrap();
     assert_eq!(
         t.discover(&format!("{base}/.well-known/jmap"))
             .await
@@ -290,7 +291,8 @@ async fn discovery_follows_only_same_origin_redirects() {
         String::new(),
     )])
     .await;
-    let t = transport::Transport::new(&base, "user", "secret").unwrap();
+    let t =
+        transport::Transport::new(crate::net::proxy::Owner::App, &base, "user", "secret").unwrap();
     assert!(
         t.discover(&format!("{base}/.well-known/jmap"))
             .await
@@ -315,7 +317,8 @@ async fn discovery_resolves_templates_from_final_redirect_location() {
         ),
     ])
     .await;
-    let transport = transport::Transport::new(&base, "user", "secret").unwrap();
+    let transport =
+        transport::Transport::new(crate::net::proxy::Owner::App, &base, "user", "secret").unwrap();
     let session = transport
         .discover(&format!("{base}/.well-known/jmap"))
         .await

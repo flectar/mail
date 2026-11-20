@@ -5,6 +5,8 @@ import { IconButton, Switch } from "controls.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
+import { SettingsSelect } from "settings-components.slint";
+import { TranslationWords } from "../translation.slint";
 
 // A color the composer offers, with its name for screen readers.
 struct ComposerSwatch {
@@ -100,6 +102,12 @@ global ComposerPalette {
 
 // A toolbar button that opens a palette of colors for text or its highlight. `current` is
 // the color the selection shares, as "#rrggbb", "none", or "" when it mixes several.
+// The composer's bars act on the message, which keeps the focus when their buttons are
+// clicked, so its selection and caret stay and a phone keeps its keyboard.
+component ToolbarButton inherits IconButton {
+    focus-on-click: false;
+}
+
 component ColorPicker inherits Rectangle {
     in property <bool> compact: false;
     in property <image> icon;
@@ -156,7 +164,7 @@ component ColorPicker inherits Rectangle {
         }
     }
 
-    trigger := IconButton {
+    trigger := ToolbarButton {
         icon: root.icon;
         icon-color: root.secondary-color;
         hover-background: root.control-hover-color;
@@ -347,7 +355,8 @@ component BarButton inherits Rectangle {
     }
     area := TouchArea {
         mouse-cursor: pointer;
-        clicked => { keyboard.focus(); keyboard.pointer-activated(); root.clicked(); }
+        // Like ToolbarButton, it leaves the focus in the message.
+        clicked => { keyboard.pointer-activated(); root.clicked(); }
     }
 }
 
@@ -388,6 +397,16 @@ export component ComposerToolbar inherits Rectangle {
     // or empty.
     in property <string> remind-time;
     callback remind();
+    // A translation service is set up (#240).
+    in property <bool> translate-shown: false;
+    callback open-translate();
+    // An AI server is set up (#241): the writing tools run Proofread or one
+    // of the user's prompts, by index, -1 for Proofread.
+    in property <bool> improve-shown: false;
+    in property <[string]> ai-prompts: [];
+    in property <bool> improving: false;
+    callback improve(int);
+    callback edit-prompts();
     callback undo();
     callback redo();
 
@@ -413,6 +432,32 @@ export component ComposerToolbar inherits Rectangle {
             height: 32px;
             spacing: 2px;
 
+            // The writing tools come first, where they show however narrow the
+            // composer is (#241). Translating is one of them then, which keeps
+            // the toolbar as wide as without them.
+            if root.improve-shown : improve-menu := ContextMenuArea {
+                width: 32px;
+                height: 32px;
+                ToolbarButton {
+                    width: parent.width;
+                    height: parent.height;
+                    icon: @image-url("../icons/lucide/outline/sparkles.svg");
+                    icon-color: root.improving ? root.accent-color : root.secondary-color;
+                    hover-background: root.control-hover-color;
+                    tooltip-text: root.improving ? @tr("Improving the text…") : @tr("Writing tools");
+                    clicked => { improve-menu.show({ x: 0px, y: parent.height + 4px }); }
+                }
+                Menu {
+                    MenuItem { title: @tr("Proofread"); enabled: !root.improving; activated => { root.improve(-1); } }
+                    for prompt[index] in root.ai-prompts : MenuItem { title: prompt; enabled: !root.improving; activated => { root.improve(index); } }
+                    if root.translate-shown : MenuSeparator {}
+                    if root.translate-shown : MenuItem { title: @tr("Translate…"); activated => { root.open-translate(); } }
+                    MenuSeparator {}
+                    MenuItem { title: @tr("Edit prompts…"); activated => { root.edit-prompts(); } }
+                }
+            }
+            if root.improve-shown : Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
+
             // Plain text has no formatting, lists, links or pictures to offer.
             if !root.plain-text : HorizontalLayout {
                 spacing: 2px;
@@ -421,7 +466,7 @@ export component ComposerToolbar inherits Rectangle {
                     width: 32px;
                     height: 32px;
 
-                    IconButton {
+                    ToolbarButton {
                         icon: @image-url("../icons/lucide/outline/font.svg");
                         icon-color: root.secondary-color;
                         hover-background: root.control-hover-color;
@@ -440,7 +485,7 @@ export component ComposerToolbar inherits Rectangle {
                     width: 32px;
                     height: 32px;
 
-                    IconButton {
+                    ToolbarButton {
                         icon: @image-url("../icons/lucide/outline/text-size.svg");
                         icon-color: root.secondary-color;
                         hover-background: root.control-hover-color;
@@ -458,10 +503,10 @@ export component ComposerToolbar inherits Rectangle {
 
                 Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
-                IconButton { icon: root.bold-active ? @image-url("../icons/lucide/filled/bold.svg") : @image-url("../icons/lucide/outline/bold.svg"); icon-color: root.bold-active ? root.accent-color : root.secondary-color; active: root.bold-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Bold · Ctrl+B"); clicked => { root.apply-format("bold"); } }
-                IconButton { icon: root.italic-active ? @image-url("../icons/lucide/filled/italic.svg") : @image-url("../icons/lucide/outline/italic.svg"); icon-color: root.italic-active ? root.accent-color : root.secondary-color; active: root.italic-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Italic · Ctrl+I"); clicked => { root.apply-format("italic"); } }
-                IconButton { icon: root.underline-active ? @image-url("../icons/lucide/filled/typography.svg") : @image-url("../icons/lucide/outline/typography.svg"); icon-color: root.underline-active ? root.accent-color : root.secondary-color; active: root.underline-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Underline · Ctrl+U"); clicked => { root.apply-format("underline"); } }
-                IconButton { icon: root.strike-active ? @image-url("../icons/lucide/filled/strikethrough.svg") : @image-url("../icons/lucide/outline/strikethrough.svg"); icon-color: root.strike-active ? root.accent-color : root.secondary-color; active: root.strike-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Strikethrough"); clicked => { root.apply-format("strike"); } }
+                ToolbarButton { icon: root.bold-active ? @image-url("../icons/lucide/filled/bold.svg") : @image-url("../icons/lucide/outline/bold.svg"); icon-color: root.bold-active ? root.accent-color : root.secondary-color; active: root.bold-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Bold · Ctrl+B"); clicked => { root.apply-format("bold"); } }
+                ToolbarButton { icon: root.italic-active ? @image-url("../icons/lucide/filled/italic.svg") : @image-url("../icons/lucide/outline/italic.svg"); icon-color: root.italic-active ? root.accent-color : root.secondary-color; active: root.italic-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Italic · Ctrl+I"); clicked => { root.apply-format("italic"); } }
+                ToolbarButton { icon: root.underline-active ? @image-url("../icons/lucide/filled/typography.svg") : @image-url("../icons/lucide/outline/typography.svg"); icon-color: root.underline-active ? root.accent-color : root.secondary-color; active: root.underline-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Underline · Ctrl+U"); clicked => { root.apply-format("underline"); } }
+                ToolbarButton { icon: root.strike-active ? @image-url("../icons/lucide/filled/strikethrough.svg") : @image-url("../icons/lucide/outline/strikethrough.svg"); icon-color: root.strike-active ? root.accent-color : root.secondary-color; active: root.strike-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Strikethrough"); clicked => { root.apply-format("strike"); } }
 
                 ColorPicker {
                     compact: root.compact;
@@ -493,7 +538,7 @@ export component ComposerToolbar inherits Rectangle {
                     chosen(value) => { root.apply-format("highlight:" + value); }
                 }
 
-                IconButton { icon: @image-url("../icons/lucide/outline/remove-formatting.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Remove formatting · Ctrl+\\"); clicked => { root.apply-format("clear"); } }
+                ToolbarButton { icon: @image-url("../icons/lucide/outline/remove-formatting.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Remove formatting · Ctrl+\\"); clicked => { root.apply-format("clear"); } }
 
                 Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
@@ -501,7 +546,7 @@ export component ComposerToolbar inherits Rectangle {
                     width: 32px;
                     height: 32px;
 
-                    IconButton {
+                    ToolbarButton {
                         icon: root.active-align == "center" ? @image-url("../icons/lucide/outline/align-center.svg")
                             : root.active-align == "right" ? @image-url("../icons/lucide/outline/align-right.svg")
                             : @image-url("../icons/lucide/outline/align-left.svg");
@@ -518,19 +563,19 @@ export component ComposerToolbar inherits Rectangle {
                     }
                 }
 
-                IconButton { icon: @image-url("../icons/lucide/outline/list-unordered.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Bulleted list"); clicked => { root.apply-format("bullet"); } }
-                IconButton { icon: @image-url("../icons/lucide/outline/list-ordered.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Numbered list"); clicked => { root.apply-format("number"); } }
-                IconButton { icon: @image-url("../icons/lucide/outline/quote.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Quote"); clicked => { root.apply-format("quote"); } }
-                IconButton { icon: root.code-active ? @image-url("../icons/lucide/filled/code.svg") : @image-url("../icons/lucide/outline/code.svg"); icon-color: root.code-active ? root.accent-color : root.secondary-color; active: root.code-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Inline code"); clicked => { root.apply-format("code"); } }
-                IconButton { icon: root.link-active ? @image-url("../icons/lucide/filled/link.svg") : @image-url("../icons/lucide/outline/link.svg"); icon-color: root.link-active ? root.accent-color : root.secondary-color; active: root.link-active; active-background: root.accent-background; interactive: root.can-link; hover-background: root.control-hover-color; tooltip-text: root.can-link ? @tr("Add or edit link") : @tr("Select text to add a link"); clicked => { root.apply-format("link"); } }
-                IconButton { icon: @image-url("../icons/lucide/outline/insert-image.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Insert image"); clicked => { root.insert-image(); } }
+                ToolbarButton { icon: @image-url("../icons/lucide/outline/list-unordered.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Bulleted list"); clicked => { root.apply-format("bullet"); } }
+                ToolbarButton { icon: @image-url("../icons/lucide/outline/list-ordered.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Numbered list"); clicked => { root.apply-format("number"); } }
+                ToolbarButton { icon: @image-url("../icons/lucide/outline/quote.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Quote"); clicked => { root.apply-format("quote"); } }
+                ToolbarButton { icon: root.code-active ? @image-url("../icons/lucide/filled/code.svg") : @image-url("../icons/lucide/outline/code.svg"); icon-color: root.code-active ? root.accent-color : root.secondary-color; active: root.code-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Inline code"); clicked => { root.apply-format("code"); } }
+                ToolbarButton { icon: root.link-active ? @image-url("../icons/lucide/filled/link.svg") : @image-url("../icons/lucide/outline/link.svg"); icon-color: root.link-active ? root.accent-color : root.secondary-color; active: root.link-active; active-background: root.accent-background; interactive: root.can-link; hover-background: root.control-hover-color; tooltip-text: root.can-link ? @tr("Add or edit link") : @tr("Select text to add a link"); clicked => { root.apply-format("link"); } }
+                ToolbarButton { icon: @image-url("../icons/lucide/outline/insert-image.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Insert image"); clicked => { root.insert-image(); } }
             }
 
             if root.templates-shown && !root.plain-text : Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
-            if root.templates-shown : IconButton { icon: @image-url("../icons/lucide/outline/book.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
+            if root.templates-shown : ToolbarButton { icon: @image-url("../icons/lucide/outline/book.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
             // "Remind me if no reply", for the message being written.
-            if root.reminder-shown : IconButton {
+            if root.reminder-shown : ToolbarButton {
                 icon: root.remind-time != "" ? @image-url("../icons/lucide/filled/bell.svg") : @image-url("../icons/lucide/outline/bell.svg");
                 icon-color: root.remind-time != "" ? root.accent-color : root.secondary-color;
                 active: root.remind-time != "";
@@ -541,7 +586,7 @@ export component ComposerToolbar inherits Rectangle {
                     : @tr("Remind me if no reply");
                 clicked => { root.remind(); }
             }
-
+            if root.translate-shown && !root.improve-shown : ToolbarButton { icon: @image-url("../icons/lucide/outline/languages.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Translate"); clicked => { root.open-translate(); } }
         }
     }
 
@@ -563,8 +608,8 @@ export component ComposerToolbar inherits Rectangle {
             clicked => { root.plain-text-chosen(!root.plain-text); }
         }
 
-        IconButton { icon: @image-url("../icons/lucide/outline/undo.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Undo · Ctrl+Z"); clicked => { root.undo(); } }
-        IconButton { icon: @image-url("../icons/lucide/outline/redo.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Redo · Ctrl+Shift+Z"); clicked => { root.redo(); } }
+        ToolbarButton { icon: @image-url("../icons/lucide/outline/undo.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Undo · Ctrl+Z"); clicked => { root.undo(); } }
+        ToolbarButton { icon: @image-url("../icons/lucide/outline/redo.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Redo · Ctrl+Shift+Z"); clicked => { root.redo(); } }
     }
 }
 
@@ -1086,7 +1131,7 @@ export component ImageBar inherits Rectangle {
             Rectangle { y: (parent.height - self.height) / 2; width: 1px; height: 18px; background: root.subtle-border-color; }
         }
 
-        IconButton {
+        ToolbarButton {
             icon: @image-url("../icons/lucide/outline/trash.svg");
             icon-color: root.secondary-color;
             hover-background: root.control-hover-color;
@@ -1445,6 +1490,117 @@ export component LinkEditor inherits Rectangle {
             primary: true;
             enabled: root.url != "";
             clicked => { root.apply(root.url); }
+        }
+    }
+}
+
+// Translates the selection, or the whole message when nothing is selected,
+// into a language the user picks (#240). The translation takes the place of
+// what was translated, as one step undo takes back.
+export component TranslateEditor inherits Rectangle {
+    in property <bool> compact: false;
+    in property <bool> open: false;
+    // Text is selected, and only that is translated.
+    in property <bool> selection: false;
+    // The languages to translate into, by name, and the one chosen.
+    in property <[string]> choices: [];
+    in-out property <int> choice-index: 0;
+    in property <bool> busy: false;
+    // Why the last try failed, as Translation.failure names it, and what the
+    // service said.
+    in property <string> failure: "";
+    in property <string> detail: "";
+    private property <string> error: root.failure == "" ? "" : TranslationWords.failure(root.failure, root.detail, "", false);
+    in property <color> background-color;
+    in property <color> body-color;
+    in property <color> frame-border-color;
+    in property <color> muted-color;
+    in property <color> title-color;
+    in property <color> error-color: #d04a43;
+    callback cancel();
+    callback apply(int);
+
+    visible: root.open;
+    background: #00000066;
+    z: 6000;
+    TouchArea { }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.compact ? min(380px, parent.width - 32px) : 420px;
+        height: translate-apply.y + translate-apply.height + 20px;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: root.frame-border-color;
+        background: root.background-color;
+
+        translate-heading := Text {
+            x: 20px;
+            y: 18px;
+            width: parent.width - 40px;
+            height: max(24px, self.preferred-height);
+            text: root.selection ? @tr("Translate the selection") : @tr("Translate the message");
+            color: root.title-color;
+            font-size: TypeScale.heading-small;
+            font-weight: 700;
+            wrap: word-wrap;
+        }
+
+        translate-note := Text {
+            x: 20px;
+            y: translate-heading.y + translate-heading.height + 6px;
+            width: parent.width - 40px;
+            height: max(20px, self.preferred-height);
+            text: root.selection
+                ? @tr("The translation takes the place of the selected text. Undo brings the original back.")
+                : @tr("The translation takes the place of what you wrote. Undo brings the original back.");
+            color: root.muted-color;
+            font-size: TypeScale.secondary;
+            wrap: word-wrap;
+        }
+
+        translate-into := SettingsSelect {
+            x: 20px;
+            y: translate-note.y + translate-note.height + 12px;
+            width: parent.width - 40px;
+            height: 36px;
+            choices: root.choices;
+            selected-index <=> root.choice-index;
+            enabled: !root.busy && root.choices.length > 0;
+            accessible-label: @tr("Translate into");
+        }
+
+        translate-error := Text {
+            x: 20px;
+            y: translate-into.y + translate-into.height + 8px;
+            width: parent.width - 40px;
+            height: root.error == "" ? 0px : max(18px, self.preferred-height);
+            visible: root.error != "";
+            text: root.error;
+            color: root.error-color;
+            font-size: TypeScale.caption;
+            wrap: word-wrap;
+        }
+
+        Button {
+            x: translate-apply.x - self.width - 8px;
+            y: translate-apply.y;
+            width: max(78px, self.content-width);
+            height: 34px;
+            text: @tr("Cancel");
+            clicked => { root.cancel(); }
+        }
+
+        translate-apply := Button {
+            x: parent.width - self.width - 20px;
+            y: translate-error.y + translate-error.height + 16px;
+            width: max(96px, self.content-width);
+            height: 34px;
+            text: root.busy ? @tr("Translating…") : @tr("Translate");
+            primary: true;
+            enabled: !root.busy && root.choices.length > 0;
+            clicked => { root.apply(root.choice-index); }
         }
     }
 }

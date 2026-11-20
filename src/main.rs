@@ -3,6 +3,7 @@ mod account_mail_preferences;
 mod account_status;
 #[cfg(desktop)]
 pub mod agents;
+mod ai_features;
 mod app_icon;
 #[cfg(test)]
 mod account_removal_tests;
@@ -16,6 +17,7 @@ mod block_sender;
 mod browser;
 pub use browser::ExternalUrlOpener;
 mod calendar;
+mod calendar_layout;
 mod compose_controller;
 mod compose_editor;
 mod compose_paste;
@@ -55,6 +57,7 @@ mod memory;
 mod message_appearance;
 mod motion;
 mod move_picker;
+mod network;
 mod notifications;
 /// What Android asks of the app without its window.
 #[cfg(background_engine)]
@@ -66,7 +69,11 @@ pub use notifications::{
     Act, Alert, AlertId, Availability, Badge, Controls, Failure, FixedWords, HostFuture,
     NewMailNotification, NotificationHost, Response, Route, parse_payload, payload, respond,
 };
+mod app_language;
+pub use app_language::AppLanguage;
 mod number_format;
+mod privacy_consent;
+pub use privacy_consent::PrivacyConsent;
 mod oauth_browser;
 pub mod pdf_preview;
 mod photo_shrink;
@@ -108,6 +115,7 @@ mod tabs;
 mod tall_surface_tests;
 mod text_size;
 mod theme;
+mod translation;
 mod ui_dispatch;
 mod ui_message;
 mod undo;
@@ -116,6 +124,7 @@ mod updates;
 mod when_picker;
 mod window_chrome;
 mod window_controller;
+mod word_diff;
 
 slint::include_modules!();
 
@@ -145,9 +154,9 @@ use flectar_mail_core::config::Paths;
 use flectar_mail_core::models::ThreadCursor;
 use flectar_mail_core::models::{
     Account, AccountConfig, AddPasswordAccountArgs, CalendarConnection, CardDavConnection,
-    ConnectionSecurity, ContactRecord, ContactRecordCursor, ContactRecordPage, CreateEventArgs,
-    DraftAttachmentIn, Label, ListOrder, MailConnectionSettings, MailGrouping, MailProfile,
-    MailProtocol, Provider, Settings, Snippet, UpdateEventArgs,
+    CheckInterval, ConnectionSecurity, ContactRecord, ContactRecordCursor, ContactRecordPage,
+    CreateEventArgs, DraftAttachmentIn, Label, ListOrder, MailConnectionSettings, MailGrouping,
+    MailProfile, MailProtocol, Provider, Settings, Snippet, UpdateEventArgs,
 };
 #[cfg(test)]
 use mail::fixture_messages;
@@ -1253,8 +1262,10 @@ fn apply_language(app: &AppWindow, preference: &str) {
     }
     app.set_language_mode(language_mode.into());
     app.set_privacy_policy_url(privacy_policy_url(selected).into());
+    app.invoke_app_language_changed(language_mode.into(), selected.into());
     date_format::reload(app);
     notifications::ui::language_changed(app);
+    translation::language_changed(app, selected, language_mode != "system");
 }
 
 impl InboxState {
@@ -1561,6 +1572,11 @@ pub struct PlatformContext {
     /// has none. Desktop builds leave it empty: `run` creates the platform's
     /// own once this process owns the profile.
     pub notifications: Option<Arc<dyn NotificationHost>>,
+    /// Host hook for withdrawing a first-use privacy consent, when the host
+    /// stores one.
+    pub privacy_consent: PrivacyConsent,
+    /// Host hook for a native app language that must follow the shared UI.
+    pub app_language: AppLanguage,
     /// The system's spell checker, where the app has none of its own for the
     /// platform: Android's. `None` elsewhere.
     pub spelling: Option<Arc<dyn SpellingHost>>,
@@ -1579,6 +1595,8 @@ impl PlatformContext {
             paths,
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
+            privacy_consent: PrivacyConsent::default(),
+            app_language: AppLanguage::default(),
             spelling: None,
             documents: documents::default_provider(),
             credentials,
@@ -1601,6 +1619,8 @@ impl PlatformContext {
             paths: Self::app_private_paths(data_root, cache_dir),
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
+            privacy_consent: PrivacyConsent::default(),
+            app_language: AppLanguage::default(),
             spelling: None,
             documents,
             credentials,
@@ -1630,9 +1650,7 @@ fn desktop_credential_store(
             flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore::new(path),
         );
     }
-    #[cfg(not(all(linux_desktop, debug_assertions)))]
-    let _ = paths;
-    Arc::new(flectar_mail_core::accounts::credentials::SystemCredentialStore)
+    Arc::new(flectar_mail_core::accounts::credentials::SystemCredentialStore::for_profile(paths))
 }
 
 #[cfg(all(linux_desktop, debug_assertions))]
@@ -1819,6 +1837,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     normalize_appimage_environment();
     // Overlaps the system's font lookups with the rest of startup.
     han_fallback::warm_up();
+    // Before any connection: those that follow the system's proxy settings
+    // read them through the platform.
+    platform::install_system_proxy();
 
     // Created before the backend: claiming the profile uses its reactor, and
     // a launch that only forwards to a running instance should exit before
@@ -1947,6 +1968,19 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     motion::watch(&app, &runtime);
     app_icon::apply(&app, startup_presentation.app_icon);
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
+    let privacy_consent = platform.privacy_consent.clone();
+    app.set_privacy_consent_withdrawable(privacy_consent.is_supported());
+    app.on_withdraw_privacy_consent(move || {
+        // Withdrawal only fails when the host never wired its hook. Hosts log
+        // `tracing` where stderr is not visible, such as OpenHarmony's hilog.
+        if let Err(error) = privacy_consent.withdraw() {
+            tracing::warn!(%error, "withdrawing privacy consent failed");
+        }
+    });
+    let app_language = platform.app_language.clone();
+    app.on_app_language_changed(move |mode, selected| {
+        app_language.set(mode.as_str(), selected.as_str());
+    });
     app.on_settings_search_matches(|haystack, query| {
         let query = query.to_string().trim().to_lowercase();
         query.is_empty() || haystack.to_string().to_lowercase().contains(&query)
@@ -4796,6 +4830,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     notifications::ui::core_ready();
                     auto_replies::core_ready(&app, &startup_runtime, core.file_core());
                     mail_rules::core_ready(&startup_runtime, core.file_core());
+                    translation::core_ready(core.file_core());
+                    ai_features::core_ready();
                     if !startup_benchmark_disable_background {
                         core.notify_ui_ready();
                     }
@@ -4930,9 +4966,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 calendar.events = Vec::new();
                 calendar.sources = Vec::new();
                 calendar.accounts = Vec::new();
-                app.set_calendar_events(Default::default());
                 app.set_calendar_month_days(Default::default());
+                app.set_calendar_month_bars(Default::default());
                 app.set_calendar_week_days(Default::default());
+                app.set_calendar_week_bars(Default::default());
+                app.set_calendar_timed_blocks(Default::default());
+                app.set_calendar_selected_day_events(Default::default());
                 calendar
                     .source_rows
                     .reconcile_by(Vec::new(), |row| row.id, |_, _| true);
@@ -5392,6 +5431,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let updates = ui_task_tx_for_account_delete.clone();
         runtime_for_account_delete.spawn(async move {
             let result = core.remove_account(account_id).await;
+            crate::notifications::accounts_removed();
             let accounts = core.load_account_snapshot().await.ok();
             // Core deletion is journaled across stores. A late cleanup error
             // can occur after the account row was deleted; reflect that fact.
@@ -5552,6 +5592,89 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             {
                 Ok(()) => UiMessage::plain("Folder settings updated."),
                 Err(error) => UiMessage::detail("Could not update folder settings: {}", error),
+            };
+            // Reload either way so the switch shows the saved choice.
+            let accounts = core.load_account_snapshot().await.ok();
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts,
+                    calendar_connections: None,
+                    carddav_connections: None,
+                    calendar_error: None,
+                    account_removal: None,
+                    clear_account_form: false,
+                    finishes_account_setup: false,
+                    finishes_oauth: false,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_check_interval = Rc::clone(&state);
+    let runtime_for_check_interval = runtime.clone();
+    let ui_task_tx_for_check_interval = ui_task_tx.clone();
+    app.on_save_account_check_interval(move |account_id, value| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_check_interval.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Sync settings require local mail data."));
+            return;
+        };
+        let account_id = i64::from(account_id);
+        let interval = account_controller::check_interval_from_choice(value.as_str());
+        app.set_sync_status(UiMessage::plain("Updating sync settings…"));
+        let updates = ui_task_tx_for_check_interval.clone();
+        runtime_for_check_interval.spawn(async move {
+            let saved = match interval {
+                Some(interval) => core.set_account_check_interval(account_id, interval).await,
+                None => Err(format!("unsupported check interval: {value}")),
+            };
+            let message = match saved {
+                Ok(()) => UiMessage::plain("Sync settings updated."),
+                Err(error) => UiMessage::detail("Could not update sync settings: {}", error),
+            };
+            // Reload either way so the choice shows what was saved.
+            let accounts = core.load_account_snapshot().await.ok();
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts,
+                    calendar_connections: None,
+                    carddav_connections: None,
+                    calendar_error: None,
+                    account_removal: None,
+                    clear_account_form: false,
+                    finishes_account_setup: false,
+                    finishes_oauth: false,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_push = Rc::clone(&state);
+    let runtime_for_push = runtime.clone();
+    let ui_task_tx_for_push = ui_task_tx.clone();
+    app.on_save_account_push(move |account_id, enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_push.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Sync settings require local mail data."));
+            return;
+        };
+        let account_id = i64::from(account_id);
+        app.set_sync_status(UiMessage::plain("Updating sync settings…"));
+        let updates = ui_task_tx_for_push.clone();
+        runtime_for_push.spawn(async move {
+            let message = match core.set_account_push(account_id, enabled).await {
+                Ok(()) => UiMessage::plain("Sync settings updated."),
+                Err(error) => UiMessage::detail("Could not update sync settings: {}", error),
             };
             // Reload either way so the switch shows the saved choice.
             let accounts = core.load_account_snapshot().await.ok();
@@ -6395,6 +6518,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
     link_services::install(&app, &state, &runtime, platform.external_urls.clone());
     read_receipts::install(&app, &state, &runtime);
+    translation::install(&app, &state, &runtime);
+    ai_features::install(&app, &state, &runtime);
+    network::install(&app, &state, &runtime);
     block_sender::install(&app, &state, &runtime);
     saved_searches::install(&app, &state, &runtime);
     server_search::install(&app, &state, &runtime);

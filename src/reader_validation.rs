@@ -787,6 +787,7 @@ fn mailto_links_open_without_losing_the_draft(
         mail_protocol: MailProtocol::Imap,
         sync_state: "idle".into(),
         sync_error: None,
+        sync_retry_at: None,
         can_create_top_level_mailbox: true,
         server_keeps_mail_days: None,
         caught_up_at: None,

@@ -91,30 +91,55 @@ const ONE_CLICK_FORM: &str = "--flectar-one-click\r\nContent-Disposition: form-d
 /// are followed (the endpoint must not require them) and no cookies are sent.
 pub async fn post_one_click(url: &str) -> Result<()> {
     let url = validated_public_https_url(url)?;
-    let (addresses, resolve_host): (Vec<SocketAddr>, Option<String>) = match url.host() {
-        Some(url::Host::Domain(host)) => (
-            tokio::net::lookup_host((host, 443))
-                .await
-                .map_err(|error| CoreError::Network(format!("unsubscribe DNS lookup: {error}")))?
-                .collect(),
-            Some(host.to_owned()),
-        ),
-        Some(url::Host::Ipv4(address)) => (vec![SocketAddr::new(address.into(), 443)], None),
-        Some(url::Host::Ipv6(address)) => (vec![SocketAddr::new(address.into(), 443)], None),
-        None => return Err(CoreError::Network("unsubscribe URL has no host".into())),
-    };
-    if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
-        return Err(CoreError::Network(
-            "unsubscribe endpoint resolved to a non-public address".into(),
-        ));
-    }
     let mut client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(20))
         .user_agent(concat!("flectar-mail/", env!("CARGO_PKG_VERSION")));
-    if let Some(host) = resolve_host {
-        client = client.resolve(&host, addresses[0]);
+    match crate::net::proxy::http_proxy(crate::net::proxy::Owner::App, &url) {
+        // The proxy looks the name up. Looking it up here as well would send
+        // the lookup past the proxy, so only an address in the URL is checked.
+        Some(proxy) => {
+            if let Some(address) = literal_address(&url)
+                && !is_public_ip(address)
+            {
+                return Err(CoreError::Network(
+                    "unsubscribe endpoint resolved to a non-public address".into(),
+                ));
+            }
+            let proxy = reqwest::Proxy::all(proxy.as_str())
+                .map_err(|error| CoreError::Network(error.to_string()))?;
+            client = client.proxy(proxy);
+        }
+        None => {
+            let (addresses, resolve_host): (Vec<SocketAddr>, Option<String>) = match url.host() {
+                Some(url::Host::Domain(host)) => (
+                    tokio::net::lookup_host((host, 443))
+                        .await
+                        .map_err(|error| {
+                            CoreError::Network(format!("unsubscribe DNS lookup: {error}"))
+                        })?
+                        .collect(),
+                    Some(host.to_owned()),
+                ),
+                Some(url::Host::Ipv4(address)) => {
+                    (vec![SocketAddr::new(address.into(), 443)], None)
+                }
+                Some(url::Host::Ipv6(address)) => {
+                    (vec![SocketAddr::new(address.into(), 443)], None)
+                }
+                None => return Err(CoreError::Network("unsubscribe URL has no host".into())),
+            };
+            if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
+                return Err(CoreError::Network(
+                    "unsubscribe endpoint resolved to a non-public address".into(),
+                ));
+            }
+            client = client.no_proxy();
+            if let Some(host) = resolve_host {
+                client = client.resolve(&host, addresses[0]);
+            }
+        }
     }
     let client = client
         .build()
@@ -136,6 +161,15 @@ pub async fn post_one_click(url: &str) -> Result<()> {
         Err(CoreError::Network(format!(
             "one-click unsubscribe endpoint answered {status}"
         )))
+    }
+}
+
+/// The address a URL names in place of a host name.
+fn literal_address(url: &url::Url) -> Option<std::net::IpAddr> {
+    match url.host()? {
+        url::Host::Ipv4(address) => Some(address.into()),
+        url::Host::Ipv6(address) => Some(address.into()),
+        url::Host::Domain(_) => None,
     }
 }
 

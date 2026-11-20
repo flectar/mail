@@ -7,11 +7,13 @@
 //! pending-action queue remain provider-neutral and fully offline-first.
 
 use super::engine::{
-    PriorityFetchCmd, SERVER_SEARCH_PAGES, ServerHits, SyncCmd, SyncCtx, caught_up,
-    configured_sync_interval, emit_sync_status, set_state, set_state_error,
+    PauseEnd, PriorityFetchCmd, SERVER_SEARCH_PAGES, ServerHits, SyncCmd, SyncCtx, caught_up,
+    check_interval, emit_sync_status, note_limit, set_state, set_state_error, wait_for_turn,
+    wait_out_pause,
 };
+use super::pacing;
 use crate::db::repo::{self, messages::NewMessage};
-use crate::error::{CoreError, Result};
+use crate::error::{CoreError, LimitKind, Result};
 use crate::events::{CoreEvent, SyncProgress};
 use crate::http_body;
 use crate::models::{
@@ -124,7 +126,7 @@ struct HistoryPage {
 
 impl GmailApi {
     fn new(ctx: SyncCtx, account: AccountConfig) -> Result<Self> {
-        let http = Client::builder()
+        let http = crate::net::proxy::http_builder(account.proxy_owner())
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(HTTP_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
@@ -912,6 +914,7 @@ fn network_error(error: reqwest::Error) -> CoreError {
 
 async fn google_json(response: reqwest::Response) -> Result<Value> {
     let status = response.status();
+    let named_wait = crate::net::retry_after::of(response.headers());
     let body = http_body::text(response, MAX_GMAIL_JSON_BODY_BYTES, "Gmail JSON response").await?;
     if status.is_success() {
         if status == StatusCode::NO_CONTENT || body.trim().is_empty() {
@@ -929,8 +932,8 @@ async fn google_json(response: reqwest::Response) -> Result<Value> {
         .pointer("/error/message")
         .and_then(Value::as_str)
         .unwrap_or_else(|| status.canonical_reason().unwrap_or("Gmail request failed"));
-    if status == StatusCode::TOO_MANY_REQUESTS || google_quota_reason(reason) {
-        return Err(CoreError::Network(format!("Gmail rate limited: {message}")));
+    if let Some(limit) = google_limit(status, reason, message, named_wait) {
+        return Err(limit);
     }
     if status == StatusCode::UNAUTHORIZED
         || (status == StatusCode::FORBIDDEN
@@ -950,15 +953,51 @@ async fn google_json(response: reqwest::Response) -> Result<Value> {
     Err(CoreError::Other(format!("Gmail {status}: {message}")))
 }
 
+/// Gmail asking to slow down: a 429, or a rate or quota reason, as Google's
+/// "Resolve errors" guide lists them. Its backendError is a server error,
+/// tried again as one. The wait is the Retry-After field's, else the time
+/// some messages name, as in "User-rate limit exceeded.  Retry after
+/// 2024-07-16T05:46:20.345Z".
+fn google_limit(
+    status: StatusCode,
+    reason: &str,
+    message: &str,
+    retry_after: Option<Duration>,
+) -> Option<CoreError> {
+    if status != StatusCode::TOO_MANY_REQUESTS && !google_quota_reason(reason) {
+        return None;
+    }
+    Some(CoreError::RateLimited {
+        service: "Gmail".into(),
+        // "Too many concurrent requests for user".
+        kind: if message.to_ascii_lowercase().contains("concurrent") {
+            LimitKind::Connections
+        } else {
+            LimitKind::Requests
+        },
+        retry_after: retry_after.or_else(|| retry_after_in_message(message)),
+        detail: message.to_owned(),
+    })
+}
+
 fn google_quota_reason(reason: &str) -> bool {
     matches!(
         reason,
-        "rateLimitExceeded"
-            | "userRateLimitExceeded"
-            | "quotaExceeded"
-            | "dailyLimitExceeded"
-            | "backendError"
+        "rateLimitExceeded" | "userRateLimitExceeded" | "quotaExceeded" | "dailyLimitExceeded"
     )
+}
+
+/// The wait until the time a Gmail message names after "Retry after".
+fn retry_after_in_message(message: &str) -> Option<Duration> {
+    const MARKER: &str = "retry after ";
+    // Lowercasing ASCII keeps every byte where it was.
+    let start = message.to_ascii_lowercase().find(MARKER)? + MARKER.len();
+    let stamp = message[start..]
+        .split_whitespace()
+        .next()?
+        .trim_end_matches(['.', ',', ';', ')']);
+    let at = chrono::DateTime::parse_from_rfc3339(stamp).ok()?;
+    crate::net::retry_after::until(at.with_timezone(&chrono::Utc), chrono::Utc::now())
 }
 
 fn required_string<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
@@ -1040,9 +1079,14 @@ fn parse_batch_response(body: &str, boundary: &str, expected_parts: usize) -> Re
                 .and_then(Value::as_str)
                 .map(str::to_owned)
                 .unwrap_or_else(|| status.to_string());
+            let named_wait = headers
+                .lines()
+                .filter_map(|line| line.split_once(':'))
+                .find(|(name, _)| name.trim().eq_ignore_ascii_case("retry-after"))
+                .and_then(|(_, value)| crate::net::retry_after::parse(value, chrono::Utc::now()));
             return Err(
-                if status == StatusCode::TOO_MANY_REQUESTS || google_quota_reason(reason) {
-                    CoreError::Network(format!("Gmail batch rate limited: {message}"))
+                if let Some(limit) = google_limit(status, reason, &message, named_wait) {
+                    limit
                 } else if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
                     CoreError::NeedsReauth
                 } else if status.is_server_error() {
@@ -4394,6 +4438,11 @@ async fn execute_actions(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) 
                 }
                 return Err(CoreError::NeedsReauth);
             }
+            Err(error @ CoreError::RateLimited { .. }) => {
+                // The pass stops, so the account waits as a whole.
+                crate::queue::defer_limited(ctx, action_id, &error).await?;
+                return Err(error);
+            }
             Err(error) => {
                 let message = error.to_string();
                 let attempts = action.attempts + 1;
@@ -4472,11 +4521,24 @@ async fn run_actor(
     };
     let mut waiters = Vec::<oneshot::Sender<std::result::Result<(), String>>>::new();
     let mut refresh_labels = true;
-    let mut backoff = 1u64;
+    // Waits after failures other than Gmail asking to wait. Those the
+    // account's pace keeps.
+    let mut backoff = pacing::Backoff::default();
     // Mail that came in before this worker started is caught up on silently.
     let live_since = crate::sync::ingest::live_since(now_ms());
 
+    // Accounts that start together take turns.
+    if !wait_for_turn(&ctx, account_id, &mut rx, &mut waiters).await {
+        return;
+    }
+
     loop {
+        // Keep a wait Gmail asked for.
+        match wait_out_pause(&ctx, account_id, &mut rx, &mut waiters).await {
+            PauseEnd::Shutdown => return,
+            PauseEnd::Asked => refresh_labels = true,
+            PauseEnd::Over => {}
+        }
         while let Ok(command) = rx.try_recv() {
             match command {
                 SyncCmd::SyncNow { complete } => {
@@ -4491,7 +4553,8 @@ async fn run_actor(
         }
 
         set_state(&ctx, account_id, "syncing").await;
-        let mail_history = settings_rx.borrow_and_update().mail_history;
+        let settings = settings_rx.borrow_and_update().clone();
+        let mail_history = settings.mail_history;
         let result = async {
             // Provider definitions must exist before replaying actions. This is
             // important on a new account where the user can compose before the
@@ -4527,15 +4590,20 @@ async fn run_actor(
         }
         .await;
         // Labels and sender identities refresh on the first pass and on each
-        // explicit sync. A pass that could not reach Google leaves that
-        // refresh to its retry, so starting offline does not skip it.
-        if !matches!(result, Err(CoreError::Offline)) {
+        // explicit sync. A pass that could not reach Google, or that Google
+        // asked to wait, leaves that refresh to its retry, so starting
+        // offline does not skip it.
+        if !matches!(
+            result,
+            Err(CoreError::Offline | CoreError::RateLimited { .. })
+        ) {
             refresh_labels = false;
         }
 
         let (delay, rerun) = match result {
             Ok((actions_remaining, backfill_done)) => {
-                backoff = 1;
+                backoff.reset();
+                ctx.pace.account(account_id).reached();
                 set_state(&ctx, account_id, "idle").await;
                 ctx.bus.emit(CoreEvent::NetworkState { online: true });
                 let (done, total) = ctx
@@ -4559,10 +4627,13 @@ async fn run_actor(
                 for waiter in waiters.drain(..) {
                     let _ = waiter.send(Ok(()));
                 }
+                // Older mail keeps downloading at its own pace; then the
+                // account checks as its settings say, varied a little so
+                // accounts don't check together.
                 let delay = if backfill_done {
-                    configured_sync_interval(&ctx.db).await
+                    check_interval(&ctx.db, &settings).await.map(pacing::varied)
                 } else {
-                    BACKFILL_INTERVAL
+                    Some(BACKFILL_INTERVAL)
                 };
                 (delay, actions_remaining)
             }
@@ -4585,6 +4656,13 @@ async fn run_actor(
                 }
                 continue;
             }
+            Err(error @ CoreError::RateLimited { .. }) => {
+                // The wait at the top answers the checks waiting for this one.
+                tracing::warn!(account_id, %error, "Gmail asked to wait");
+                crate::events::sync_diagnostic("gmail_cycle", Some(account_id), error.code());
+                note_limit(&ctx, account_id, &error);
+                continue;
+            }
             Err(error) => {
                 tracing::warn!(account_id, %error, "Gmail sync cycle failed");
                 crate::events::sync_diagnostic("gmail_cycle", Some(account_id), error.code());
@@ -4594,16 +4672,26 @@ async fn run_actor(
                 for waiter in waiters.drain(..) {
                     let _ = waiter.send(Err(message.clone()));
                 }
-                let delay = Duration::from_secs(backoff);
-                backoff = (backoff * 2).min(300);
-                (delay, false)
+                // Never later than the next check would be.
+                let retry = backoff.after(&error).duration;
+                let delay = check_interval(&ctx.db, &settings)
+                    .await
+                    .map_or(retry, |interval| interval.min(retry));
+                (Some(delay), false)
             }
         };
 
         if rerun {
             continue;
         }
-        match tokio::time::timeout(delay, rx.recv()).await {
+        let next = async {
+            match delay {
+                Some(delay) => tokio::time::timeout(delay, rx.recv()).await,
+                // Only when asked.
+                None => Ok(rx.recv().await),
+            }
+        };
+        match next.await {
             Ok(None) | Ok(Some(SyncCmd::Shutdown)) => return,
             Ok(Some(SyncCmd::SyncNow { complete })) => {
                 refresh_labels = true;
@@ -4887,6 +4975,7 @@ mod tests {
                 std::sync::Arc::new(crate::oauth::redirect::LoopbackRedirectBroker::default()),
             ),
             credentials,
+            pace: Default::default(),
         };
         let config = ctx
             .db
@@ -5167,6 +5256,83 @@ mod tests {
     }
 
     #[test]
+    fn gmail_asking_to_slow_down_names_its_wait() {
+        // Gmail's own words, with the time it names.
+        let at = chrono::Utc::now() + chrono::Duration::seconds(90);
+        let message = format!(
+            "User-rate limit exceeded.  Retry after {}",
+            at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        );
+        match google_limit(StatusCode::TOO_MANY_REQUESTS, "", &message, None) {
+            Some(CoreError::RateLimited {
+                service,
+                kind: LimitKind::Requests,
+                retry_after: Some(wait),
+                detail,
+            }) => {
+                assert_eq!(service, "Gmail");
+                assert!((88..=90).contains(&wait.as_secs()), "{wait:?}");
+                assert_eq!(detail, message);
+            }
+            other => panic!("{other:?}"),
+        }
+        // A Retry-After field wins over the message.
+        assert!(matches!(
+            google_limit(
+                StatusCode::TOO_MANY_REQUESTS,
+                "",
+                &message,
+                Some(Duration::from_secs(5))
+            ),
+            Some(CoreError::RateLimited {
+                retry_after: Some(wait),
+                ..
+            }) if wait == Duration::from_secs(5)
+        ));
+        assert!(matches!(
+            google_limit(
+                StatusCode::TOO_MANY_REQUESTS,
+                "rateLimitExceeded",
+                "Too many concurrent requests for user",
+                None
+            ),
+            Some(CoreError::RateLimited {
+                kind: LimitKind::Connections,
+                retry_after: None,
+                ..
+            })
+        ));
+        // Quota reasons come with 403 too.
+        assert!(
+            google_limit(
+                StatusCode::FORBIDDEN,
+                "userRateLimitExceeded",
+                "User Rate Limit Exceeded",
+                None
+            )
+            .is_some()
+        );
+        // A backend error is a server error, and a forbidden one is not a limit.
+        assert!(
+            google_limit(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "backendError",
+                "Backend Error",
+                None
+            )
+            .is_none()
+        );
+        assert!(google_limit(StatusCode::FORBIDDEN, "forbidden", "Forbidden", None).is_none());
+        // A time that passed is no wait, and nonsense none.
+        assert_eq!(
+            retry_after_in_message("Retry after 2020-01-01T00:00:00Z."),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(retry_after_in_message("Retry after a while"), None);
+        assert_eq!(retry_after_in_message("User-rate limit exceeded"), None);
+    }
+
+    #[test]
     fn single_message_actions_leave_the_rest_of_the_conversation() {
         let thread = || Some("thread-1".to_owned());
         assert_eq!(
@@ -5314,7 +5480,25 @@ mod tests {
         );
         assert!(matches!(
             parse_batch_response(body, "response", 1),
-            Err(CoreError::Network(_))
+            Err(CoreError::RateLimited {
+                kind: LimitKind::Requests,
+                retry_after: None,
+                ..
+            })
+        ));
+        // A part that names its wait.
+        let body = concat!(
+            "--response\r\nContent-Type: application/http\r\n\r\n",
+            "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 30\r\nContent-Type: application/json\r\n\r\n",
+            "{\"error\":{\"message\":\"slow down\",\"errors\":[{\"reason\":\"rateLimitExceeded\"}]}}\r\n",
+            "--response--\r\n"
+        );
+        assert!(matches!(
+            parse_batch_response(body, "response", 1),
+            Err(CoreError::RateLimited {
+                retry_after: Some(wait),
+                ..
+            }) if wait == Duration::from_secs(30)
         ));
     }
 

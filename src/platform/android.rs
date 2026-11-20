@@ -184,6 +184,17 @@ pub(crate) fn app_is_active() -> bool {
     ACTIVE.load(Ordering::Relaxed)
 }
 
+/// How the host reads Android's proxy settings; see [`configure_system_proxy`].
+pub use flectar_mail_core::net::proxy::SystemProxies;
+
+/// Supply the reader of Android's proxy settings, before the first
+/// connection of the window or of a check in the background. The first
+/// reader counts.
+pub fn configure_system_proxy(reader: impl SystemProxies + 'static) {
+    static CONFIGURED: std::sync::Once = std::sync::Once::new();
+    CONFIGURED.call_once(|| flectar_mail_core::net::proxy::set_system_source(reader));
+}
+
 type ReduceMotion = Box<dyn Fn() -> bool + Send + Sync>;
 
 static REDUCE_MOTION: OnceLock<ReduceMotion> = OnceLock::new();

@@ -189,6 +189,8 @@ pub(super) fn apply_email(
     block.set_blocked(email.sender_blocked);
     crate::invitation::project(app, &email);
     crate::read_receipts::project(app, &email);
+    crate::translation::project(app, &email);
+    crate::ai_features::project(app, &email);
     let reader = app.global::<EmailReader>();
     reader.set_body_pending(email.body_pending);
     reader.set_authored_text(email.text.clone().unwrap_or_default().into());
@@ -218,7 +220,12 @@ pub(super) fn apply_email(
         "<html><body style=\"font-family:Arial,sans-serif;padding:32px;line-height:1.6;color:#303348\"><p>{}</p></body></html>",
         preview
     );
-    let html = email.html.as_deref().unwrap_or(&fallback_html);
+    // A message the user translated shows its translation (#240).
+    let translation = crate::translation::shown_html(i64::from(email.id));
+    let html = translation
+        .as_deref()
+        .or(email.html.as_deref())
+        .unwrap_or(&fallback_html);
     email_renderer
         .borrow_mut()
         .set_appearance(crate::message_appearance::EmailAppearance::from_app(app));
@@ -233,7 +240,8 @@ pub(super) fn apply_email(
     if same_message && app.get_remote_images_blocked() != blocked {
         scroll = (scroll + if blocked { -60.0 } else { 60.0 }).min(0.0);
     }
-    app.set_selected_source(html.into());
+    // The source is the message's own, translated or not.
+    app.set_selected_source(email.html.as_deref().unwrap_or(&fallback_html).into());
     app.set_remote_images_blocked(blocked);
     app.set_email_scroll_y(scroll);
     // Store readable recovery content before entering any renderer code.

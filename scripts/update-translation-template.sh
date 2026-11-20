@@ -16,9 +16,11 @@ work_dir=$(mktemp -d)
 trap 'rm -rf -- "$work_dir"' EXIT
 cd "$repo_root"
 
-# Preview and screenshot scripts use temporary hidden .slint files.
+# Preview and screenshot scripts use temporary hidden .slint files. Byte
+# order, as CI sorts, whatever the locale: others put ai.slint before
+# ai-summary.slint.
 find ui -type f -name '*.slint' ! -name '.*' -print0 \
-  | sort -z \
+  | LC_ALL=C sort -z \
   | xargs -0 slint-tr-extractor --no-default-translation-context \
       --package-name flectar-mail --package-version 0.1.0 \
       -o "$work_dir/flectar-mail.pot"

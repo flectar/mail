@@ -57,6 +57,11 @@ impl Paths {
     pub fn files_db_file(&self) -> PathBuf {
         self.data_dir.join("flectar-files.db")
     }
+
+    /// Which keyring service holds this profile's secrets, on desktops.
+    pub fn keyring_file(&self) -> PathBuf {
+        self.data_dir.join("keyring.json")
+    }
     pub fn files_cache_dir(&self, account_id: i64) -> PathBuf {
         self.cache_dir.join("files").join(account_id.to_string())
     }

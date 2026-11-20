@@ -19,12 +19,6 @@ def stage(project: Path, destination: Path, *, arch: str | None = None, flatpak:
         version = tomllib.load(stream)["package"]["version"]
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?", version):
         raise ValueError(f"Unsupported release version: {version}")
-    # Reproducible builds can supply an epoch; otherwise use the UTC build date.
-    epoch = os.environ.get("SOURCE_DATE_EPOCH")
-    release_date = (
-        datetime.fromtimestamp(int(epoch), timezone.utc)
-        if epoch is not None else datetime.now(timezone.utc)
-    ).date().isoformat()
     resources = project / "resources"
     desktop = (resources / "com.flectar.mail.desktop").read_text(encoding="utf-8")
     desktop, count = re.subn(
@@ -45,14 +39,24 @@ def stage(project: Path, destination: Path, *, arch: str | None = None, flatpak:
             raise ValueError("Expected one X-AppImage-Arch field in the desktop template")
     parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
     metainfo = ET.parse(resources / "com.flectar.mail.metainfo.xml", parser=parser)
-    # The first release describes the build being packaged. Retain older entries.
-    release = metainfo.find("./releases/release")
+    releases = metainfo.find("./releases")
+    if releases is None:
+        raise ValueError("Missing releases in the AppStream template")
+    # Published releases keep the date in the template. A build of a version
+    # that is not listed yet, such as a pull request that bumps it, adds its
+    # own entry dated by its source.
+    release = next((r for r in releases.iterfind("release") if r.get("version") == version), None)
     if release is None:
-        raise ValueError("Missing current release in the AppStream template")
-    release.set("version", version)
-    release.set("date", release_date)
+        # Reproducible builds can supply an epoch; otherwise use the UTC build date.
+        epoch = os.environ.get("SOURCE_DATE_EPOCH")
+        release_date = (
+            datetime.fromtimestamp(int(epoch), timezone.utc)
+            if epoch is not None else datetime.now(timezone.utc)
+        ).date().isoformat()
+        release = ET.Element("release", {"version": version, "date": release_date})
+        release.tail = releases.text
+        releases.insert(0, release)
     release.set("type", "development" if "-" in version else "stable")
-    release.attrib.pop("timestamp", None)
     desktop_path = destination / "usr/share/applications/com.flectar.mail.desktop"
     metainfo_path = destination / "usr/share/metainfo/com.flectar.mail.metainfo.xml"
     desktop_path.parent.mkdir(parents=True, exist_ok=True)

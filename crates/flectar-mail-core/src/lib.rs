@@ -36,6 +36,7 @@ pub mod migration;
 pub mod mime;
 pub mod models;
 pub mod net;
+mod network;
 pub mod oauth;
 pub mod pop3;
 pub mod queue;
@@ -51,6 +52,7 @@ pub mod signatures;
 pub mod smtp;
 pub mod sync;
 mod transfer;
+pub mod translate;
 pub mod unsubscribe;
 pub mod verification_code;
 
@@ -267,6 +269,7 @@ pub use crate::db::repo::notifications::{
     NewMailNotification, NotificationBatch, NotificationOutcome, ShownNotification, Withdrawal,
 };
 pub use crate::db::snapshot::DatabaseSnapshotManifest;
+pub use crate::network::{AccountNetwork, NetworkCheck, NetworkSettings, ProxyPassword};
 
 /// Read the presentation state needed to lay out the first application frame.
 ///
@@ -800,24 +803,43 @@ impl Scenario {
     }
 }
 
-/// Resolve the canonical model id for a scenario's configured tier.
-fn resolve_ai_model(settings: &Settings, scenario: Scenario) -> String {
-    let tier = match scenario {
-        Scenario::Ask => settings.ai_tier_ask.as_str(),
-        Scenario::Draft => settings.ai_tier_draft.as_str(),
-        Scenario::Summarize => settings.ai_tier_summarize.as_str(),
-        Scenario::Voice => settings.ai_tier_voice.as_str(),
-        Scenario::Categorize => settings.ai_tier_categorize.as_str(),
-        // Palette parsing and reply chips want the fastest model available.
-        Scenario::Command | Scenario::QuickReply => "instant",
-    };
-    match tier {
-        "instant" => &settings.ai_model_instant,
-        "cheap" => &settings.ai_model_cheap,
-        "intelligent" => &settings.ai_model_intelligent,
-        _ => &settings.ai_model_intelligent,
+/// How much of a thread a model gets, in characters. A server on this
+/// device runs small models with short contexts: Ollama's default is 4,096
+/// tokens, about 12,000 characters with the answer, and it cuts what
+/// doesn't fit without telling. Hosted models take far more.
+fn ai_budget(settings: &Settings) -> usize {
+    let local = url::Url::parse(settings.ai.url.trim())
+        .ok()
+        .and_then(|url| {
+            url.host().map(|host| match host {
+                url::Host::Domain(domain) => domain.eq_ignore_ascii_case("localhost"),
+                url::Host::Ipv4(address) => address.is_loopback() || address.is_private(),
+                url::Host::Ipv6(address) => address.is_loopback(),
+            })
+        })
+        .unwrap_or(false);
+    if local { 9_000 } else { 40_000 }
+}
+
+/// Everything a summary says, to check against the messages.
+fn summary_text(summary: &crate::models::AiThreadSummary) -> String {
+    let mut said: Vec<&str> = Vec::new();
+    said.extend(
+        summary
+            .timeline
+            .iter()
+            .flat_map(|entry| [entry.actor.as_str(), entry.event.as_str()]),
+    );
+    said.extend(summary.key_points.iter().map(String::as_str));
+    said.extend(summary.next_action.as_deref());
+    said.extend(summary.proposed_reply.as_deref());
+    said.extend(summary.warning.as_deref());
+    if let Some(event) = &summary.calendar_suggestion {
+        said.push(&event.title);
+        said.extend(event.location.as_deref());
+        said.extend(event.description.as_deref());
     }
-    .clone()
+    said.join("\n")
 }
 
 fn oauth_calendar_scopes(provider: Provider, enabled: bool) -> &'static [&'static str] {
@@ -900,6 +922,9 @@ pub struct Core {
     credentials: CredentialStoreHandle,
     oauth_redirects: OAuthRedirectBrokerHandle,
     handles: Arc<RwLock<HashMap<i64, AccountHandle>>>,
+    /// What each account's server asked of sync, kept while the app runs
+    /// and across restarts of an account's worker.
+    pace: Arc<sync::pacing::Pace>,
     cal_handles: Arc<RwLock<HashMap<i64, caldav::task::CalTaskHandle>>>,
     card_handles: Arc<RwLock<HashMap<i64, carddav::task::CardDavTaskHandle>>>,
     /// Per-attachment single-flight locks. Concurrent preview/open/save calls
@@ -946,9 +971,10 @@ const SERVER_FOUND_SEARCHES: usize = 8;
 impl Core {
     #[cfg(desktop)]
     pub async fn start(paths: Paths) -> Result<Core> {
+        let credentials = Arc::new(credentials::SystemCredentialStore::for_profile(&paths));
         Self::start_with_platform(
             paths,
-            Arc::new(credentials::SystemCredentialStore),
+            credentials,
             Arc::new(LoopbackRedirectBroker::default()),
             true,
         )
@@ -961,8 +987,8 @@ impl Core {
     /// exposes semantic search asks for it.
     #[cfg(desktop)]
     pub async fn start_mail_ui(paths: Paths) -> Result<Core> {
-        Self::start_mail_ui_with_credentials(paths, Arc::new(credentials::SystemCredentialStore))
-            .await
+        let credentials = Arc::new(credentials::SystemCredentialStore::for_profile(&paths));
+        Self::start_mail_ui_with_credentials(paths, credentials).await
     }
 
     /// Start a mail-only core with a host-provided credential backend. Mobile
@@ -1031,6 +1057,7 @@ impl Core {
             credentials,
             oauth_redirects,
             handles: Arc::new(RwLock::new(HashMap::new())),
+            pace: Arc::default(),
             cal_handles: Arc::new(RwLock::new(HashMap::new())),
             card_handles: Arc::new(RwLock::new(HashMap::new())),
             attachment_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -1081,6 +1108,8 @@ impl Core {
         // needs a token refresh.
         let settings = core.db.read(|conn| repo::settings::get(conn)).await?;
         apply_oauth_settings(&settings);
+        // And the proxy settings before any connection opens.
+        core.load_proxy_settings().await?;
 
         // Recover any actions orphaned mid-flight by a previous crash/kill, so a
         // send that was executing when the app died retries instead of sticking
@@ -1406,6 +1435,7 @@ impl Core {
             paths: self.paths.clone(),
             tokens: self.tokens.clone(),
             credentials: self.credentials.clone(),
+            pace: self.pace.clone(),
         }
     }
 
@@ -1835,6 +1865,66 @@ impl Core {
         Ok(())
     }
 
+    /// Choose how often an account checks for new mail (#251). The account
+    /// checks once at once, then as chosen.
+    pub async fn set_account_check_interval(
+        &self,
+        account_id: i64,
+        interval: CheckInterval,
+    ) -> Result<()> {
+        if !interval.is_offered() {
+            return Err(CoreError::Other(format!(
+                "accounts check every {} minutes",
+                CheckInterval::MINUTES
+                    .map(|minutes| minutes.to_string())
+                    .join(", ")
+            )));
+        }
+        self.update_sync_settings(account_id, move |settings| {
+            settings.check_interval = interval;
+        })
+        .await
+    }
+
+    /// Choose whether an IMAP or JMAP account's server tells of new mail as
+    /// it arrives (IMAP IDLE, JMAP's event source), or the account checks at
+    /// its interval instead (#251).
+    pub async fn set_account_push(&self, account_id: i64, push: bool) -> Result<()> {
+        self.update_sync_settings(account_id, move |settings| settings.push = push)
+            .await
+    }
+
+    /// Stores a change to how an account syncs and wakes its worker, which
+    /// checks for mail and then waits as the settings now say.
+    async fn update_sync_settings(
+        &self,
+        account_id: i64,
+        change: impl FnOnce(&mut models::AccountSettings) + Send + 'static,
+    ) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                if config.mail_protocol == MailProtocol::Local {
+                    return Err(CoreError::Other(
+                        "mail kept on this device has no server to check".into(),
+                    ));
+                }
+                change(&mut config.settings);
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+            handle.send(SyncCmd::RunActions);
+        }
+        Ok(())
+    }
+
     /// Choose how an account's messages start: formatted or as plain text, and whether
     /// replies and forwards to plain-text messages start in plain text.
     pub async fn set_account_message_format(
@@ -2137,6 +2227,8 @@ impl Core {
             if let Some(handle) = self.handles.write().await.remove(&existing.id) {
                 handle.abort();
             }
+            // What the old server asked of sync doesn't hold for the new one.
+            self.pace.forget(existing.id);
 
             let a = args.clone();
             let remote_account = jmap_account_id.clone();
@@ -2788,11 +2880,13 @@ impl Core {
         if let Some(h) = self.handles.write().await.remove(&account_id) {
             h.abort();
         }
+        self.pace.forget(account_id);
         self.cal_handles.write().await.remove(&account_id);
         if let Some(handle) = self.card_handles.write().await.remove(&account_id) {
             handle.abort();
         }
         self.tokens.forget_account(account_id).await;
+        Self::forget_account_proxy(account_id);
         self.delete_calendar_passwords(account_id).await?;
         self.purge_calendar_account(account_id).await?;
         self.files_db
@@ -2830,6 +2924,9 @@ impl Core {
                     .signature_list
                     .retain(|signature| signature.account_id != account_id);
                 repo::settings::set(conn, &settings)?;
+                // Notifications keep their sender and subject, so they go
+                // too, all but those on screen, which go as they come down.
+                repo::notifications::forget_account(conn, account_id)?;
                 repo::accounts::delete(conn, account_id)
             })
             .await?;
@@ -3095,7 +3192,9 @@ impl Core {
         }
 
         // Account cascades remove mail/folders/actions. These tables also hold
-        // profile-level data, so clear them explicitly for a genuine reset.
+        // profile-level data, so clear them explicitly for a genuine reset,
+        // blocked senders, large-file servers not tied to an account (their
+        // passwords go with account 0's below) and what agents did among them.
         self.db
             .write(|conn| {
                 conn.execute_batch(
@@ -3104,6 +3203,9 @@ impl Core {
                      DELETE FROM snippets;
                      DELETE FROM route_cache;
                      DELETE FROM ai_usage_events;
+                     DELETE FROM blocked_senders;
+                     DELETE FROM link_services;
+                     DELETE FROM agent_activity;
                      DELETE FROM app_settings;",
                 )?;
                 Ok(())
@@ -3130,6 +3232,8 @@ impl Core {
             .await?;
         // Account id 0 owns app-level secrets such as the optional AI key.
         credentials::delete_all_async(self.credentials.clone(), 0).await?;
+        // Connections go back to the default proxy setting.
+        self.load_proxy_settings().await?;
         let _ = tokio::fs::remove_dir_all(self.paths.draft_attachments_dir()).await;
         let _ = tokio::fs::remove_dir_all(self.paths.models_dir()).await;
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
@@ -5153,7 +5257,8 @@ impl Core {
                 access_token: self.tokens.access_token(config.id, config.provider).await?,
             },
         };
-        imap::connect_with_settings(
+        imap::connect_as(
+            config.proxy_owner(),
             &config.incoming_host,
             config.incoming_port,
             credentials,
@@ -7368,6 +7473,7 @@ impl Core {
         }
         credentials::check_available_async(self.credentials.clone()).await?;
         let transport = carddav::http::HttpTransport::new(
+            net::proxy::Owner::Account(args.account_id),
             args.username.clone(),
             args.password.clone(),
             &base_url,
@@ -7736,6 +7842,7 @@ impl Core {
             })
             .collect();
         graph::create_calendar_event(
+            net::proxy::Owner::Account(account_id),
             &token,
             None,
             &graph::GraphEvent {
@@ -8202,8 +8309,11 @@ impl Core {
             (None, None) => return Err(CoreError::CalDav("password is required".into())),
         };
 
-        let transport =
-            caldav::HttpTransport::new(caldav::DavAuth::Basic(username.clone(), password), &url)?;
+        let transport = caldav::HttpTransport::new(
+            net::proxy::Owner::Account(args.account_id),
+            caldav::DavAuth::Basic(username.clone(), password),
+            &url,
+        )?;
         // Google answers for one calendar at its own address without always
         // naming it a calendar collection.
         let discovery = if caldav::google_calendar_id(&url).is_some() {
@@ -8340,10 +8450,11 @@ impl Core {
             .tokens
             .access_token(account_id, Provider::Gmail)
             .await?;
+        let owner = net::proxy::Owner::Account(account_id);
         let transport =
-            caldav::HttpTransport::new(caldav::DavAuth::Bearer(token.clone()), &base_url)?;
+            caldav::HttpTransport::new(owner, caldav::DavAuth::Bearer(token.clone()), &base_url)?;
         caldav::discovery::discover_known_collection(&transport, &base_url).await?;
-        let listed = googlecal::list_calendars(&token).await?;
+        let listed = googlecal::list_calendars(owner, &token).await?;
         if listed.is_empty() {
             return Err(CoreError::CalDav("no Google calendars found".into()));
         }
@@ -8503,7 +8614,14 @@ impl Core {
                 open_url,
             )
             .await?;
-        graph::create_online_meeting(&token, subject, start_ms, end_ms).await
+        graph::create_online_meeting(
+            net::proxy::Owner::Account(account_id),
+            &token,
+            subject,
+            start_ms,
+            end_ms,
+        )
+        .await
     }
 
     /// Microsoft calendar connection: Outlook / Microsoft 365 has no CalDAV
@@ -8519,7 +8637,8 @@ impl Core {
         let token = self
             .graph_token_with_consent(account_id, oauth::providers::MS_CALENDARS_SCOPE, open_url)
             .await?;
-        let discovered = graph::list_calendars(&token).await?;
+        let discovered =
+            graph::list_calendars(net::proxy::Owner::Account(account_id), &token).await?;
         if discovered.is_empty() {
             return Err(CoreError::CalDav("no calendars found".into()));
         }
@@ -8802,25 +8921,32 @@ impl Core {
         self.ai_config_from(&settings, scenario).await
     }
 
-    /// Build an [`ai::AiConfig`] for `scenario` from already-loaded settings,
-    /// picking the model for the scenario's tier (all tiers share the base URL
-    /// and stored API key).
+    /// The AI server's key, or none: servers on the device, such as Ollama
+    /// and LM Studio, need none, and a hosted one that needs it says so.
+    async fn ai_key(&self) -> Result<String> {
+        match credentials::load_async(self.credentials.clone(), 0, Slot::AiApiKey).await {
+            Ok(key) => Ok(key),
+            Err(CoreError::CredentialStoreUnavailable(message)) => {
+                Err(CoreError::CredentialStoreUnavailable(message))
+            }
+            Err(_) => Ok(String::new()),
+        }
+    }
+
+    /// Build an [`ai::AiConfig`] for `scenario` from already-loaded settings.
+    /// Not configured while no server or model is set.
     async fn ai_config_from(
         &self,
         settings: &Settings,
         scenario: Scenario,
     ) -> Result<ai::AiConfig> {
-        let api_key =
-            match credentials::load_async(self.credentials.clone(), 0, Slot::AiApiKey).await {
-                Ok(k) => k,
-                // Local endpoints (LM Studio, Ollama over http://) need no key;
-                // hosted ones do, so fail early with a pointer to Settings.
-                Err(_) if settings.ai_base_url.starts_with("http://") => String::new(),
-                Err(_) => return Err(CoreError::AiNotConfigured),
-            };
+        if !settings.ai.ready() {
+            return Err(CoreError::AiNotConfigured);
+        }
+        let api_key = self.ai_key().await?;
         Ok(ai::AiConfig {
-            base_url: settings.ai_base_url.clone(),
-            model: resolve_ai_model(settings, scenario),
+            base_url: settings.ai.url.trim().to_owned(),
+            model: settings.ai.model.trim().to_owned(),
             api_key,
             language: ai::ui_language_name(&settings.language).map(str::to_string),
             usage_sink: {
@@ -8892,10 +9018,10 @@ impl Core {
 
     pub async fn set_ai_key(&self, api_key: String) -> Result<()> {
         if api_key.trim().is_empty() {
-            // Account id 0 also keeps other app-level secrets, such as this
-            // device's Flectar Mail Sync keys.
-            credentials::delete_async(self.credentials.clone(), 0, Slot::AiApiKey).await?;
-            return Ok(());
+            // Only this key: account 0 also holds this device's Flectar Mail Sync
+            // keys, the translation services' keys and the passwords of the
+            // services files go by link from.
+            return credentials::delete_async(self.credentials.clone(), 0, Slot::AiApiKey).await;
         }
         credentials::store_async(
             self.credentials.clone(),
@@ -8908,27 +9034,58 @@ impl Core {
 
     pub async fn ai_status(&self) -> Result<AiStatus> {
         let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
-        let configured = credentials::load_async(self.credentials.clone(), 0, Slot::AiApiKey)
-            .await
-            .is_ok()
-            || settings.ai_base_url.starts_with("http://");
+        let key_saved = !self.ai_key().await?.trim().is_empty();
         Ok(AiStatus {
-            configured,
-            model_instant: settings.ai_model_instant,
-            model_cheap: settings.ai_model_cheap,
-            model_intelligent: settings.ai_model_intelligent,
-            base_url: settings.ai_base_url,
+            configured: settings.ai.ready(),
+            url: settings.ai.url,
+            model: settings.ai.model,
+            key_saved,
         })
     }
 
-    /// Model ids from the configured endpoint. Works keyless on OpenRouter,
-    /// so this is available before an API key is saved.
-    pub async fn ai_list_models(&self) -> Result<Vec<String>> {
-        let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
-        let api_key = credentials::load_async(self.credentials.clone(), 0, Slot::AiApiKey)
+    pub async fn ai_settings(&self) -> Result<AiSettings> {
+        self.db.read(|conn| Ok(repo::settings::get(conn)?.ai)).await
+    }
+
+    /// Saves the AI server's address and model and the user's prompts.
+    pub async fn set_ai_settings(&self, ai: AiSettings) -> Result<()> {
+        let ai = AiSettings {
+            url: ai.url.trim().to_owned(),
+            model: ai.model.trim().to_owned(),
+            prompts: ai
+                .prompts
+                .into_iter()
+                .filter_map(|prompt| {
+                    let instruction = prompt.instruction.trim().to_owned();
+                    let name = match prompt.name.trim() {
+                        "" => ai::prompt_name(&instruction),
+                        name => name.to_owned(),
+                    };
+                    (!instruction.is_empty()).then_some(AiPrompt { name, instruction })
+                })
+                .collect(),
+        };
+        self.db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut settings = repo::settings::get(&tx)?;
+                settings.ai = ai;
+                repo::settings::set(&tx, &settings)?;
+                tx.commit()?;
+                Ok(())
+            })
             .await
-            .unwrap_or_default();
-        ai::list_models(&settings.ai_base_url, &api_key).await
+    }
+
+    /// The models the server at `url` offers, before it is saved, so the
+    /// user can pick one. Uses the saved key.
+    pub async fn ai_list_models(&self, url: String) -> Result<Vec<String>> {
+        let url = url.trim().to_owned();
+        if url.is_empty() {
+            return Err(CoreError::AiNotConfigured);
+        }
+        let api_key = self.ai_key().await?;
+        ai::list_models(&url, &api_key).await
     }
 
     /// Parse a natural-language palette query ("meeting tomorrow 8pm ...")
@@ -8939,17 +9096,35 @@ impl Core {
     }
 
     pub async fn ai_summarize(&self, thread_id: i64) -> Result<crate::models::AiThreadSummary> {
-        let cfg = self.ai_config(Scenario::Summarize).await?;
+        let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
+        let cfg = self.ai_config_from(&settings, Scenario::Summarize).await?;
         let detail = self.get_thread(thread_id).await?;
-        let context = ai::thread_context(&detail.messages, 24_000);
+        let context = ai::thread_context(&detail.messages, ai_budget(&settings));
         let bus = self.bus.clone();
-        ai::summarize_thread_stream(&cfg, &detail.thread.subject, &context, move |delta| {
-            bus.emit(CoreEvent::AiSummaryDelta {
-                thread_id,
-                delta: delta.to_owned(),
-            });
-        })
-        .await
+        let mut summary = ai::summarize_thread_stream(
+            &cfg,
+            &detail.thread.subject,
+            &context.json,
+            move |delta| {
+                bus.emit(CoreEvent::AiSummaryDelta {
+                    thread_id,
+                    delta: delta.to_owned(),
+                });
+            },
+        )
+        .await?;
+        summary.omitted = context.omitted;
+        if summary
+            .warning
+            .as_deref()
+            .is_some_and(|warning| warning.trim().is_empty())
+        {
+            summary.warning = None;
+        }
+        let said = summary_text(&summary);
+        let source = format!("{}\n{}", detail.thread.subject, context.source);
+        summary.unverified = ai::unverified(&said, &source);
+        Ok(summary)
     }
 
     /// Up to 3 short one-tap reply suggestions grounded in the thread, shown
@@ -8959,7 +9134,7 @@ impl Core {
         let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
         let cfg = self.ai_config_from(&settings, Scenario::QuickReply).await?;
         let detail = self.get_thread(thread_id).await?;
-        let context = ai::thread_context(&detail.messages, 12_000);
+        let context = ai::thread_context(&detail.messages, ai_budget(&settings) / 2).json;
         // Match the user's learned voice when voice drafting is enabled, same as
         // full AI drafts; otherwise pass an empty profile for the neutral prompt.
         let profile = if settings.voice_drafting {
@@ -8992,7 +9167,7 @@ impl Core {
                 let detail = self.get_thread(tid).await?;
                 (
                     detail.thread.subject.clone(),
-                    ai::thread_context(&detail.messages, 24_000),
+                    ai::thread_context(&detail.messages, ai_budget(&settings)).json,
                     ai::reply_target_line(&detail.messages, reply_to_message_id),
                 )
             }
@@ -9040,11 +9215,31 @@ impl Core {
         .await
     }
 
-    /// Copy-edit a draft body (plain text or simple HTML) without changing
-    /// meaning, tone, or language. Returns the corrected draft.
-    pub async fn ai_proofread(&self, body: String) -> Result<String> {
+    /// The user's draft, or the part of it they selected, changed as
+    /// `instruction` says, in plain text for the composer to put in its
+    /// place (#241).
+    pub async fn ai_rewrite(&self, text: String, instruction: String) -> Result<String> {
         let cfg = self.ai_config(Scenario::Draft).await?;
-        ai::chat(&cfg, ai::proofread_prompt(&body)).await
+        // The draft keeps its own language, whatever the app's is.
+        let output = ai::chat(&cfg, ai::rewrite_prompt(&text, &instruction)).await?;
+        Ok(ai::strip_reasoning(&output).trim().to_owned())
+    }
+
+    /// The user's `instruction` carried out on text they selected in a
+    /// message, with what the answer adds that the text doesn't have.
+    pub async fn ai_answer(&self, text: String, instruction: String) -> Result<AiAnswer> {
+        let cfg = self.ai_config(Scenario::Ask).await?;
+        let output = ai::chat(
+            &cfg,
+            ai::apply_language(ai::answer_prompt(&text, &instruction), &cfg),
+        )
+        .await?;
+        let answer = ai::strip_reasoning(&output).trim().to_owned();
+        let unverified = ai::unverified(&answer, &text);
+        Ok(AiAnswer {
+            text: answer,
+            unverified,
+        })
     }
 
     /// Generate a clean email signature for an account from its name and
@@ -13402,62 +13597,6 @@ fn revert_action(
 }
 
 #[cfg(test)]
-mod ai_model_routing_tests {
-    use super::*;
-
-    #[test]
-    fn fresh_settings_have_explicit_models_for_every_tier() {
-        let settings = Settings::default();
-        assert!(!settings.ai_model_instant.trim().is_empty());
-        assert!(!settings.ai_model_cheap.trim().is_empty());
-        assert!(!settings.ai_model_intelligent.trim().is_empty());
-        assert_eq!(
-            resolve_ai_model(&settings, Scenario::Ask),
-            settings.ai_model_intelligent
-        );
-        assert_eq!(
-            resolve_ai_model(&settings, Scenario::Summarize),
-            settings.ai_model_instant
-        );
-    }
-
-    #[test]
-    fn each_scenario_uses_its_tier_model() {
-        let s = Settings {
-            ai_model_instant: "fast".into(),
-            ai_model_cheap: "mid".into(),
-            ai_model_intelligent: "smart".into(),
-            ..Settings::default()
-        };
-        // Defaults: ask/draft -> intelligent, summarize -> instant, voice -> cheap.
-        assert_eq!(resolve_ai_model(&s, Scenario::Ask), "smart");
-        assert_eq!(resolve_ai_model(&s, Scenario::Draft), "smart");
-        assert_eq!(resolve_ai_model(&s, Scenario::Summarize), "fast");
-        assert_eq!(resolve_ai_model(&s, Scenario::Voice), "mid");
-    }
-
-    #[test]
-    fn scenario_can_be_repointed_to_another_tier() {
-        let s = Settings {
-            ai_model_instant: "fast".into(),
-            ai_tier_ask: "instant".into(), // route Ask to the instant tier
-            ..Settings::default()
-        };
-        assert_eq!(resolve_ai_model(&s, Scenario::Ask), "fast");
-    }
-
-    #[test]
-    fn unknown_tier_uses_the_intelligent_model() {
-        let s = Settings {
-            ai_model_intelligent: "safe-default".into(),
-            ai_tier_ask: "unknown".into(),
-            ..Settings::default()
-        };
-        assert_eq!(resolve_ai_model(&s, Scenario::Ask), "safe-default");
-    }
-}
-
-#[cfg(test)]
 mod attachment_ext_tests {
     use super::*;
 
@@ -14770,6 +14909,23 @@ mod local_data_reset_tests {
                     "INSERT INTO snippets (name, body_text) VALUES ('Hello', 'Hi')",
                     [],
                 )?;
+                conn.execute(
+                    "INSERT INTO blocked_senders (address, blocked_at) VALUES ('spam@example.com', 1)",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO link_services (server_url, login_name, display_name, created_at)
+                     VALUES ('https://cloud.example.com', 'me', 'Cloud', 1)",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO agent_activity (occurred_at, agent, tool, account_id, items, outcome)
+                     VALUES (1, 'Assistant', 'search_messages', 1, 3, 'done')",
+                    [],
+                )?;
+                let message_id: i64 =
+                    conn.query_row("SELECT id FROM messages LIMIT 1", [], |row| row.get(0))?;
+                repo::notifications::enqueue_at(conn, message_id, false, 1)?;
                 repo::settings::set(
                     conn,
                     &Settings {
@@ -14824,6 +14980,23 @@ mod local_data_reset_tests {
             .await
             .unwrap();
         assert_eq!(counts, (0, 0, 0, 0));
+        // Nothing the profile held is left: who was blocked, the large-file
+        // server, what agents did, or what a notification said.
+        let left = core
+            .db
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT (SELECT COUNT(*) FROM blocked_senders)
+                          + (SELECT COUNT(*) FROM link_services)
+                          + (SELECT COUNT(*) FROM agent_activity)
+                          + (SELECT COUNT(*) FROM notification_outbox)",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
         let calendar_count = core
             .calendar_db
             .read(|conn| {

@@ -24,8 +24,10 @@ A closer look at what the [README](../README.md) summarizes.
 - [Importance](#importance)
 - [Read receipts](#read-receipts)
 - [Calendar invitations](#calendar-invitations)
+- [Translation](#translation)
 - [AI agents](#ai-agents)
 - [Storage and backups](#storage-and-backups)
+- [Network and proxies](#network-and-proxies)
 - [Importing accounts and mail](#importing-accounts-and-mail)
 - [HTML rendering](#html-rendering)
 - [Smaller screens](#smaller-screens)
@@ -179,6 +181,30 @@ the folders button says an account has a problem.
 The account's menu also tells when it last checked mail, and so does its card
 in Settings → Accounts, together with the account's state and the server's own
 words about a failure.
+
+Each account can check at its own pace. In its card in Settings → Accounts,
+**Check for new mail** keeps the interval from Settings → General, or checks
+every minute, 5, 15 or 30 minutes, or every hour, or only when the app starts
+and when you ask. **Instant updates** lets an IMAP or JMAP server tell Flectar
+Mail of new mail as soon as it arrives. Turned off, the account checks at its
+interval, which saves battery and data, and helps with a server that drops
+waiting connections. An account that checks only when you ask doesn't wait for
+updates either.
+
+A server can ask Flectar Mail to slow down, when an account has too many
+connections open or makes too many requests, or while another app is using a
+POP3 mailbox. Flectar Mail then waits before it asks that server again, for as
+long as the server said, or else for a minute that grows while the server keeps
+asking, up to an hour, and a little longer or shorter for each account so they
+don't all return at once. The account shows **Waiting for the server** with the
+time it checks again, and a marker beside its name explains why. **Try now**
+checks at once, unless the server named its wait, as Gmail and Exchange often
+do. Asking again early would only make that wait longer. Changes you make
+meanwhile wait too and go to the server once it's ready. When an IMAP server
+turns down a connection for having too many open, Flectar Mail opens one fewer
+for downloading in the background from then on. When many accounts start
+together, they take turns connecting, and a few at a time download their older
+mail.
 
 ## New-mail notifications
 
@@ -703,12 +729,75 @@ declined or cancelled events are faded with their title struck through. An
 invitation reminds you of itself only once you accept it or answer **Maybe**,
 so one you haven't answered, such as calendar spam, stays quiet.
 
+## Translation
+
+Flectar Mail translates messages in other languages through a service you
+choose in Settings → Translation. DeepL works with your own API key,
+LibreTranslate with your own server or libretranslate.com, and a model with the
+AI server you set up in Settings → AI. Nothing is sent anywhere until you
+translate a message, or ask for a language to be translated always.
+
+When a message is in a language you don't read, a bar above it offers to
+translate it. Flectar Mail finds the language on your device, and counts the
+app's language and your system's languages as the ones you read. The bar's menu
+translates a language always, or never offers it again. **Translate message**
+in a message's menu works on any message. The translation shows in place of
+the message, links and formatting included, and **Show original** brings the
+message back. Translations stay on your device for 15 days, so a message opened
+again isn't sent again, and search never sees them.
+
+In the composer, **Translate** in the toolbar translates the selected text, or
+the whole message when nothing is selected, into the language you pick. A
+reply starts with the language of the message it answers, and after that the
+language you used last. The translation takes the place of the text as one
+step that Undo takes back. With an AI server set up, Translate is in the
+composer's writing tools menu instead.
+
+With a free DeepL key, DeepL's terms let it keep the text it translates, and
+don't allow personal data, which mail usually holds. With a paid key, DeepL
+keeps the text only as long as it needs to translate it, and doesn't use it to
+improve its services. A
+LibreTranslate server or the AI server receives the text of what you
+translate.
+
+## AI
+
+Flectar Mail can summarize conversations, suggest replies and help with what
+you write, with an AI server you set up in Settings → AI. Any server with the
+OpenAI chat API works, such as Ollama or LM Studio on your computer, or a hosted
+one with your API key. Nothing is preset, and nothing is sent until you use one
+of these features.
+
+**Summarize conversation** in a message's menu shows a summary above the
+conversation, with what to do next and a proposed reply. **Reply with this**
+opens a reply with that text to edit, and **Suggest replies** offers short
+replies to pick from. Select text in a message and choose **Ask AI** in its
+menu to have it explained, or to run one of your own prompts on it. The answer
+shows in the same place.
+
+In the composer, the writing tools first in the toolbar proofread the selected
+text, or the whole message above your signature when nothing is selected, or
+run one of your prompts on it. Only the words that change are replaced, so
+formatting, links and pictures stay, and Undo takes the change back in one
+step. You write your prompts in Settings → AI, each a name and what it asks
+for, such as Shorter with "Make it shorter, keeping what matters."
+
+The server gets only what you use a feature on, the conversation you summarize
+or the text you work on. It gets the text a message shows, not text a sender
+hid in it, and messages reach it as data, marked as not being instructions.
+Answers are plain text, without links or pictures, and marked as written by AI.
+A summary also says when a message tries to instruct the AI, and lists links,
+addresses and phone numbers it has that the messages don't, which shouldn't be
+trusted. A long conversation is summarized from its newest messages, and the
+summary says how many older ones it leaves out. A server on your computer or
+local network gets less at a time, as local models read less at once.
+
 ## AI agents
 
 Settings → AI agents lets an AI app on your computer, such as a desktop
 assistant or a local model, read your mail through the Model Context Protocol
-(MCP). Flectar Mail runs no AI itself, and access stays off until you turn it
-on. The agent's app starts `flectar-mail mcp`, which hands each request to
+(MCP). This is separate from the AI features in Settings → AI, and access
+stays off until you turn it on. The agent's app starts `flectar-mail mcp`, which hands each request to
 Flectar Mail while it runs, so mail still syncs in one place.
 
 Agents can list your accounts, folders and labels, list and search messages,
@@ -763,6 +852,36 @@ can import.
   <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-storage-light.png">
   <img src="../resources/screenshots/desktop-storage-light.png" alt="Flectar Mail Storage settings with local usage, mail on this device, database snapshot, and account backup controls">
 </picture>
+
+## Network and proxies
+
+Settings → Network chooses how Flectar Mail reaches its servers. By default it
+follows the system's proxy settings. Mail servers then go through the system's
+SOCKS proxy, if one is set, and everything else through the system's web
+proxy. Web proxies often refuse connections to mail servers, so mail goes
+through one only when you enter it yourself.
+
+The system's settings are Internet Options on Windows, the network settings on
+macOS and iOS, the desktop's own settings on Linux (GNOME's, KDE's and others,
+read through the desktop portal) and the Wi-Fi settings on Android, with
+automatic proxy configuration scripts too. Proxy environment variables such as
+`https_proxy` and `ALL_PROXY` come first when they're set, so a program started
+with a proxy of its own keeps it.
+
+You can also turn proxies off, or enter one by hand. A SOCKS5 proxy also looks
+up the servers' names, so the network you're on doesn't see them. An HTTP
+proxy carries every connection through CONNECT tunnels. A proxy's password
+stays in the system keyring. Names and addresses you list skip the proxy, and
+servers on this computer, such as a mail bridge, never use it.
+
+Each account can follow the app's choice, connect without a proxy, or use a
+proxy of its own, which its calendars, contacts and files follow too.
+
+With a proxy in use, every connection goes through it, from mail, calendars,
+contacts, files and signing in to pictures in messages, sender icons,
+translation and the update check. When the proxy can't be reached, or turns a
+connection down, Flectar Mail says so and doesn't connect without it. Proxy
+settings belong to the network a device is on, so backups leave them out.
 
 ## Importing accounts and mail
 

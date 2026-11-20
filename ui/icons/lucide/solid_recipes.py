@@ -169,6 +169,8 @@ def build(sources):
             "Solid head; original eyes become cutouts; antenna and ears stay lines."),
         "gear": Recipe("settings", cut(solid(p("settings", 0)), solid(p("settings", 1))),
             "Solid gear; central hole."),
+        "globe": Recipe("globe", cut(solid(p("globe", 0)), line(p("globe", 1)), line(p("globe", 2))),
+            "Solid globe; meridians and equator cutouts."),
         "inbox": Recipe("inbox", cut(solid(p("inbox", 1)), line(p("inbox", 0), 1.8)),
             "Solid tray; original lip becomes a cutout."),
         "inbox-flectar": Recipe(None, inbox_flectar,
@@ -202,6 +204,9 @@ def build(sources):
         "stack": Recipe("layers-3", group(solid(p("layers-3", 0)), lines("layers-3", 1, 2, width=2.5)),
             "Solid top layer; original lower layer contours at active weight."),
         "filter": Recipe("filter", solid(p("filter", 0)), "Original closed funnel silhouette."),
+        "sparkles": Recipe("sparkles", group(
+            solid(p("sparkles", 0)), lines("sparkles", 1, 2, width=2.5), solid(p("sparkles", 3))),
+            "Solid star and dot; the small plus at a heavier weight."),
         "star": Recipe("star", solid(p("star", 0)), "Original closed star silhouette."),
         "tag": Recipe("tag", cut(solid(p("tag", 0)), solid(p("tag", 1), width=2)),
             "Solid tag; hole includes the original circle's stroke footprint."),
@@ -211,7 +216,7 @@ def build(sources):
             "Close solid bin; slot cutouts; separate lid and handle."),
     }
     for filename, source in {
-        "bold": "bold", "code": "code-xml", "italic": "italic",
+        "bold": "bold", "code": "code-xml", "italic": "italic", "languages": "languages",
         "link": "link-2", "paperclip": "paperclip", "screen-full": "maximize",
         "search": "search", "strikethrough": "strikethrough", "typography": "underline",
     }.items():

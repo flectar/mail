@@ -1423,9 +1423,9 @@ export component MailListPane inherits FocusScope {
                                                     }
                                                 }
                                                 sender-title := Text {
-                                                    x: 0px;
-                                                    y: 0px;
-                                                    width: root.dense ? min(170px, max(0px, parent.width - 190px))
+                                                    // An unread dot follows the name, so a name too long
+                                                    // for the line ends before the dot.
+                                                    property <length> room: root.dense ? min(170px, max(0px, parent.width - 190px))
                                                         : root.inline-detail && account-label.text != ""
                                                             ? max(0px, account-label.x - 8px)
                                                         : mail-data.message_count > 1
@@ -1433,6 +1433,9 @@ export component MailListPane inherits FocusScope {
                                                         : mail-data.has_attachments || mail-data.has_replied || mail-data.high_importance
                                                             ? max(0px, sender-indicators.x - 8px)
                                                             : max(0px, sender-time.x - 22px);
+                                                    x: 0px;
+                                                    y: 0px;
+                                                    width: mail-data.unread ? max(0px, self.room - 13px) : self.room;
                                                     height: root.dense ? 44px : root.sender-line;
                                                     text: mail-data.sender;
                                                     color: root.heading;
@@ -1443,9 +1446,7 @@ export component MailListPane inherits FocusScope {
                                                 }
                                                 Rectangle {
                                                     visible: mail-data.unread;
-                                                    x: root.dense
-                                                        ? min(sender-title.preferred-width + 6px, sender-title.width - 9px)
-                                                        : min(sender-title.preferred-width + 6px, sender-title.width - 9px);
+                                                    x: min(sender-title.preferred-width, sender-title.width) + 6px;
                                                     y: root.dense ? 18px : 8px + (root.sender-line - 22px) / 2;
                                                     width: 7px;
                                                     height: 7px;

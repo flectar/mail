@@ -409,10 +409,20 @@ async fn consume_http_image(
 /// Resolve and pin public addresses before opening the connection. This
 /// prevents a hostname or redirect from reaching loopback, LAN, link-local, or
 /// metadata services through DNS rebinding.
+///
+/// Through a proxy, the proxy looks the name up and connects, so the request
+/// leaves from the proxy's network, as a browser's would. Looking the name up
+/// here as well would send the lookup past the proxy, so only an address in
+/// the URL is checked.
 #[cfg(feature = "remote-content")]
 async fn pinned_public_client(url: &reqwest::Url) -> Option<reqwest::Client> {
     if !safe_remote_url_shape(url) {
         return None;
+    }
+    if let Some(proxy) =
+        flectar_mail_core::net::proxy::http_proxy(flectar_mail_core::net::proxy::Owner::App, url)
+    {
+        return proxied_client(proxy);
     }
     let port = url.port_or_known_default()?;
     let (mut addresses, resolve_host): (Vec<SocketAddr>, Option<String>) = match url.host()? {
@@ -442,14 +452,7 @@ async fn pinned_public_client(url: &reqwest::Url) -> Option<reqwest::Client> {
     if let Some(client) = cache.lock().ok()?.get(&key) {
         return Some(client.clone());
     }
-    let mut builder = reqwest::Client::builder()
-        .no_proxy()
-        .user_agent("Flectar Mail bounded remote image loader/0.1")
-        .connect_timeout(Duration::from_secs(4))
-        .timeout(Duration::from_secs(12))
-        .pool_max_idle_per_host(2)
-        .pool_idle_timeout(Duration::from_secs(30))
-        .redirect(Policy::none());
+    let mut builder = image_client_builder().no_proxy();
     if let Some(host) = resolve_host {
         builder = builder.resolve_to_addrs(&host, &addresses);
     }
@@ -458,6 +461,39 @@ async fn pinned_public_client(url: &reqwest::Url) -> Option<reqwest::Client> {
     if clients.len() >= 32 {
         clients.clear();
     }
+    clients.insert(key, client.clone());
+    Some(client)
+}
+
+#[cfg(feature = "remote-content")]
+fn image_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .user_agent("Flectar Mail bounded remote image loader/0.1")
+        .connect_timeout(Duration::from_secs(4))
+        .timeout(Duration::from_secs(12))
+        .pool_max_idle_per_host(2)
+        .pool_idle_timeout(Duration::from_secs(30))
+        .redirect(Policy::none())
+}
+
+/// The client for images through `proxy`, one per proxy until the proxy
+/// settings change.
+#[cfg(feature = "remote-content")]
+fn proxied_client(proxy: reqwest::Url) -> Option<reqwest::Client> {
+    static CLIENTS: std::sync::OnceLock<Mutex<HashMap<String, reqwest::Client>>> =
+        std::sync::OnceLock::new();
+    let cache = CLIENTS.get_or_init(Default::default);
+    let key = format!("{}|{proxy}", flectar_mail_core::net::proxy::generation());
+    let mut clients = cache.lock().ok()?;
+    if let Some(client) = clients.get(&key) {
+        return Some(client.clone());
+    }
+    let client = image_client_builder()
+        .proxy(reqwest::Proxy::all(proxy.as_str()).ok()?)
+        .build()
+        .ok()?;
+    // A client of other settings, or another proxy, is done with.
+    clients.clear();
     clients.insert(key, client.clone());
     Some(client)
 }

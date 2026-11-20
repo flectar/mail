@@ -1,5 +1,6 @@
-use crate::error::{CoreError, Result};
+use crate::error::{CoreError, LimitKind, Result};
 use crate::models::AccountConfig;
+use crate::net::{self, proxy::Owner};
 use jmap_client::URI;
 use jmap_client::blob::upload::UploadResponse;
 use jmap_client::client::{Client, Credentials};
@@ -225,7 +226,10 @@ impl ConnectedClient {
             .body(serde_json::to_string(&request)?)
             .send()
             .await?;
-        let body = Client::handle_error(response).await?.bytes().await?;
+        let body = Client::handle_error(asked_to_wait(response)?)
+            .await?
+            .bytes()
+            .await?;
         let response: Response<SingleMethodResponse<T>> = serde_json::from_slice(&body)?;
         if response.session_state() != self.client.session().state() {
             self.session_changed.store(true, Ordering::Relaxed);
@@ -261,7 +265,10 @@ impl ConnectedClient {
             .body(blob)
             .send()
             .await?;
-        let body = Client::handle_error(response).await?.bytes().await?;
+        let body = Client::handle_error(asked_to_wait(response)?)
+            .await?
+            .bytes()
+            .await?;
         Ok(serde_json::from_slice(&body)?)
     }
 
@@ -352,7 +359,8 @@ pub fn normalize_base_url(value: &str, email: &str) -> Result<String> {
 }
 
 pub async fn connect(config: &AccountConfig, secret: &str) -> Result<ConnectedClient> {
-    connect_with(
+    connect_as(
+        config.proxy_owner(),
         &config.email,
         &config.username,
         secret,
@@ -362,7 +370,27 @@ pub async fn connect(config: &AccountConfig, secret: &str) -> Result<ConnectedCl
     .await
 }
 
+/// Connect through the app's proxy settings.
 pub async fn connect_with(
+    email: &str,
+    username: &str,
+    secret: &str,
+    server: &str,
+    preferred_account_id: Option<&str>,
+) -> Result<ConnectedClient> {
+    connect_as(
+        Owner::App,
+        email,
+        username,
+        secret,
+        server,
+        preferred_account_id,
+    )
+    .await
+}
+
+async fn connect_as(
+    owner: Owner,
     email: &str,
     username: &str,
     secret: &str,
@@ -372,7 +400,7 @@ pub async fn connect_with(
     let base_url = normalize_base_url(server, email)?;
     let url = Url::parse(&base_url)
         .map_err(|error| CoreError::Auth(format!("invalid JMAP server address: {error}")))?;
-    let (connect_base, session_url) = discover_connection_base(&url).await?;
+    let (connect_base, session_url) = discover_connection_base(&url, owner).await?;
     let host = connect_base.host_str().unwrap_or_default().to_owned();
     let username = if username.trim().is_empty() {
         email.trim()
@@ -401,36 +429,43 @@ pub async fn connect_with(
         (AuthenticationScheme::Basic, true) => Some(AuthenticationScheme::Bearer),
         (AuthenticationScheme::Basic, false) => None,
     };
-    let mut client =
-        match connect_authenticated(connect_base.as_str(), &host, username, secret, first_scheme)
+    let mut client = match connect_authenticated(
+        owner,
+        connect_base.as_str(),
+        &host,
+        username,
+        secret,
+        first_scheme,
+    )
+    .await
+    {
+        Ok(client) => {
+            remember_authentication_scheme(&cache_key, first_scheme);
+            client
+        }
+        Err(error) if is_unauthorized(&error) => {
+            let Some(second_scheme) = second_scheme else {
+                return Err(map_error(error));
+            };
+            match connect_authenticated(
+                owner,
+                connect_base.as_str(),
+                &host,
+                username,
+                secret,
+                second_scheme,
+            )
             .await
-        {
-            Ok(client) => {
-                remember_authentication_scheme(&cache_key, first_scheme);
-                client
-            }
-            Err(error) if is_unauthorized(&error) => {
-                let Some(second_scheme) = second_scheme else {
-                    return Err(map_error(error));
-                };
-                match connect_authenticated(
-                    connect_base.as_str(),
-                    &host,
-                    username,
-                    secret,
-                    second_scheme,
-                )
-                .await
-                {
-                    Ok(client) => {
-                        remember_authentication_scheme(&cache_key, second_scheme);
-                        client
-                    }
-                    Err(error) => return Err(map_error(error)),
+            {
+                Ok(client) => {
+                    remember_authentication_scheme(&cache_key, second_scheme);
+                    client
                 }
+                Err(error) => return Err(map_error(error)),
             }
-            Err(error) => return Err(map_error(error)),
-        };
+        }
+        Err(error) => return Err(map_error(error)),
+    };
 
     let session = client.session();
     if !session.has_capability(CORE_CAPABILITY) || !session.has_capability(MAIL_CAPABILITY) {
@@ -493,7 +528,7 @@ pub async fn connect_with(
     headers.remove(reqwest::header::CONTENT_TYPE);
     // Like jmap-client, follow a few redirects, and only on the session host.
     let redirect_host = host.clone();
-    let http = reqwest::Client::builder()
+    let http = net::proxy::http_builder(owner)
         .connect_timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
             if attempt.previous().len() > 5 {
@@ -540,8 +575,8 @@ fn remember_authentication_scheme(cache_key: &str, scheme: AuthenticationScheme)
 /// Discover the Session before sending credentials. The upstream client can
 /// follow redirects on one host, so a cross-host redirect is usable only when
 /// the destination also publishes the same Session via its own well-known URL.
-async fn discover_connection_base(base_url: &Url) -> Result<(Url, Url)> {
-    let session_url = discover_session_url(base_url).await?;
+async fn discover_connection_base(base_url: &Url, owner: Owner) -> Result<(Url, Url)> {
+    let session_url = discover_session_url(base_url, owner).await?;
     if session_url.origin() == base_url.origin() {
         return Ok((base_url.clone(), session_url));
     }
@@ -550,7 +585,7 @@ async fn discover_connection_base(base_url: &Url) -> Result<(Url, Url)> {
     target_base.set_path("");
     target_base.set_query(None);
     target_base.set_fragment(None);
-    let target_session_url = discover_session_url(&target_base).await?;
+    let target_session_url = discover_session_url(&target_base, owner).await?;
     if target_session_url != session_url {
         return Err(CoreError::Jmap(
             "redirected JMAP host does not publish the same Session through /.well-known/jmap"
@@ -561,18 +596,22 @@ async fn discover_connection_base(base_url: &Url) -> Result<(Url, Url)> {
 }
 
 /// Resolve the well-known resource without sending credentials.
-async fn discover_session_url(base_url: &Url) -> Result<Url> {
+async fn discover_session_url(base_url: &Url, owner: Owner) -> Result<Url> {
     let start = base_url
         .join(&format!(
             "{}/.well-known/jmap",
             base_url.path().trim_end_matches('/')
         ))
         .map_err(|error| CoreError::Jmap(format!("invalid JMAP discovery URL: {error}")))?;
-    resolve_session_url(start, base_url.scheme() == "http").await
+    resolve_session_url(start, base_url.scheme() == "http", owner).await
 }
 
-async fn resolve_session_url(mut current: Url, allow_local_http: bool) -> Result<Url> {
-    let http = reqwest::Client::builder()
+async fn resolve_session_url(
+    mut current: Url,
+    allow_local_http: bool,
+    owner: Owner,
+) -> Result<Url> {
+    let http = net::proxy::http_builder(owner)
         .timeout(std::time::Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -630,6 +669,7 @@ async fn resolve_session_url(mut current: Url, allow_local_http: bool) -> Result
 }
 
 async fn connect_authenticated(
+    owner: Owner,
     base_url: &str,
     host: &str,
     username: &str,
@@ -641,6 +681,7 @@ async fn connect_authenticated(
         AuthenticationScheme::Basic => Credentials::basic(username, secret),
     };
     Client::new()
+        .proxy(net::proxy::reqwest_proxy(owner))
         .credentials(credentials)
         .timeout(REQUEST_TIMEOUT)
         // Public cross-host redirects are resolved before authentication.
@@ -735,7 +776,80 @@ fn validate_session_endpoint(name: &str, value: &str, discovery: &Url) -> Result
     }
 }
 
+/// jmap-client keeps only the status of an HTTP error that isn't a problem
+/// details object, so the wait a server named rides in the error's message,
+/// after the status.
+const NAMED_WAIT: &str = "; retry after ";
+
+/// A server asks to wait with 429, or with 503 and how long to wait (RFC
+/// 9110 sections 15.6.4 and 10.2.3). Without a time, a 503 is any other
+/// server error.
+fn asked_to_wait(response: reqwest::Response) -> jmap_client::Result<reqwest::Response> {
+    let status = response.status();
+    let wait = net::retry_after::of(response.headers());
+    match (status.as_u16(), wait) {
+        (429, wait) | (503, wait @ Some(_)) => Err(jmap_client::Error::Server(match wait {
+            Some(wait) => format!(
+                "{status}{NAMED_WAIT}{} ms",
+                u64::try_from(wait.as_millis()).unwrap_or(u64::MAX)
+            ),
+            None => status.to_string(),
+        })),
+        _ => Ok(response),
+    }
+}
+
+/// The server asked to wait: an HTTP 429, a 503 that said how long, or too
+/// many requests at once (RFC 8620 section 3.6.1).
+fn limit(error: &jmap_client::Error) -> Option<CoreError> {
+    let limited = |kind, retry_after, detail: &str| CoreError::RateLimited {
+        service: "the JMAP server".into(),
+        kind,
+        retry_after,
+        detail: detail.to_owned(),
+    };
+    match error {
+        jmap_client::Error::Server(message) => {
+            let (status, wait) = match message.split_once(NAMED_WAIT) {
+                Some((status, wait)) => (
+                    status,
+                    wait.strip_suffix(" ms")
+                        .and_then(|millis| millis.parse().ok())
+                        .map(Duration::from_millis),
+                ),
+                None => (message.as_str(), None),
+            };
+            if status.starts_with("429 ") {
+                Some(limited(LimitKind::Requests, wait, status))
+            } else if status.starts_with("503 ") && wait.is_some() {
+                Some(limited(LimitKind::Busy, wait, status))
+            } else {
+                None
+            }
+        }
+        jmap_client::Error::Problem(problem) => {
+            let too_many_at_once = matches!(
+                problem.error(),
+                jmap_client::core::error::ProblemType::JMAP(
+                    jmap_client::core::error::JMAPError::Limit
+                )
+            ) && problem.limit() == Some("maxConcurrentRequests");
+            if too_many_at_once {
+                Some(limited(LimitKind::Connections, None, &problem.to_string()))
+            } else if problem.status() == Some(429) {
+                Some(limited(LimitKind::Requests, None, &problem.to_string()))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 pub fn map_error(error: jmap_client::Error) -> CoreError {
+    if let Some(limited) = limit(&error) {
+        return limited;
+    }
     match &error {
         _ if is_authentication_rejection(&error) => {
             CoreError::Auth("JMAP rejected the password, app password, or API token".into())
@@ -1296,6 +1410,92 @@ pub(crate) mod tests {
             Some(std::io::ErrorKind::ConnectionRefused),
             "{failure}"
         );
+    }
+
+    async fn answer_once(status: &'static str, headers: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/jmap/", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_request_head(&mut stream).await;
+            let response = format!(
+                "HTTP/1.1 {status}\r\n{headers}Content-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+        url
+    }
+
+    async fn status_error(status: &'static str, headers: &'static str) -> CoreError {
+        let url = answer_once(status, headers).await;
+        let response = reqwest::Client::new().get(&url).send().await.unwrap();
+        let error = match asked_to_wait(response) {
+            Ok(response) => Client::handle_error(response).await.unwrap_err(),
+            Err(error) => error,
+        };
+        map_error(error)
+    }
+
+    #[tokio::test]
+    async fn a_server_that_asks_to_wait_is_waited_for() {
+        match status_error("429 Too Many Requests", "Retry-After: 30\r\n").await {
+            CoreError::RateLimited {
+                kind: LimitKind::Requests,
+                retry_after,
+                detail,
+                ..
+            } => {
+                assert_eq!(retry_after, Some(Duration::from_secs(30)));
+                assert_eq!(detail, "429 Too Many Requests");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            status_error("429 Too Many Requests", "").await,
+            CoreError::RateLimited {
+                retry_after: None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            status_error("503 Service Unavailable", "Retry-After: 120\r\n").await,
+            CoreError::RateLimited {
+                kind: LimitKind::Busy,
+                retry_after: Some(wait),
+                ..
+            } if wait == Duration::from_secs(120)
+        ));
+        // Without a time, a 503 is any other server error.
+        assert!(matches!(
+            status_error("503 Service Unavailable", "").await,
+            CoreError::Jmap(_)
+        ));
+    }
+
+    #[test]
+    fn too_many_requests_at_once_is_a_limit_but_too_big_a_request_is_not() {
+        use jmap_client::core::error::{JMAPError, ProblemDetails, ProblemType};
+        let problem = |limit: &str| {
+            jmap_client::Error::Problem(Box::new(ProblemDetails::new(
+                ProblemType::JMAP(JMAPError::Limit),
+                Some(400),
+                None,
+                Some("The request exceeds a limit".into()),
+                Some(limit.into()),
+                None,
+            )))
+        };
+        assert!(matches!(
+            map_error(problem("maxConcurrentRequests")),
+            CoreError::RateLimited {
+                kind: LimitKind::Connections,
+                ..
+            }
+        ));
+        assert!(matches!(
+            map_error(problem("maxSizeRequest")),
+            CoreError::Jmap(_)
+        ));
     }
 
     #[test]

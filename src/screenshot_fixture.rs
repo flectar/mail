@@ -264,6 +264,8 @@ fixture_row!(AccountRow {
     smtp_host,
     smtp_port,
     mail_history,
+    check_interval,
+    push,
     calendar_connections,
     provider_calendar_connected,
     provider_calendar_error,

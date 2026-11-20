@@ -213,6 +213,7 @@ async fn fixture(behavior: Behavior) -> (Fixture, Option<Session>) {
         paths,
         tokens,
         credentials,
+        pace: Default::default(),
     };
     let (mut config, folder) = ctx
         .db
@@ -250,6 +251,7 @@ async fn fixture(behavior: Behavior) -> (Fixture, Option<Session>) {
         incoming_security: ConnectionSecurity::Tls,
         smtp_security: ConnectionSecurity::Tls,
         trusted_certificate_pem: CERT.into(),
+        proxy: Default::default(),
     };
     credentials::store_async(
         ctx.credentials.clone(),

@@ -1,5 +1,8 @@
 def favicon_path(address):
   ($favicon_dir + "/" + (address | split("@") | last | ascii_downcase) + ".png");
+# Event rows leave out what the demo data doesn't use.
+def event_defaults:
+  .answerable = (.answerable // false) | .removable = (.removable // false) | .recurrence_id = (.recurrence_id // "");
 # Settings is a screen of its own, which goes back to the given view.
 (if $settings_tab == "" then $active_view else "settings" end) as $shown_view
 | .theme_mode = $theme
@@ -74,6 +77,8 @@ def favicon_path(address):
     | .mail_history = (.mail_history // "sixMonths")
     | .keep_on_server = (.keep_on_server // "always")
     | .subscribed_folders_only = (.subscribed_folders_only // false)
+    | .check_interval = (.check_interval // "app")
+    | .push = (if .push == null then true else .push end)
     | .server_keeps_mail_days = (.server_keeps_mail_days // -1)
     | .calendar_connections = (.calendar_connections // [])
     | .provider_calendar_connected = (.provider_calendar_connected // false)
@@ -85,9 +90,16 @@ def favicon_path(address):
     | .carddav_username = (.carddav_username // "")
     | .checked_day = (.checked_day // -1)
     | .checked_at = (.checked_at // "")
+    | .resume_day = (.resume_day // -1)
+    | .resume_at = (.resume_at // "")
   )
-| .calendar_events |= map(.answerable = (.answerable // false) | .removable = (.removable // false) | .recurrence_id = (.recurrence_id // ""))
-| .calendar_agenda_rows |= map(if .event then .event.answerable = (.event.answerable // false) | .event.removable = (.event.removable // false) | .event.recurrence_id = (.event.recurrence_id // "") else . end)
+| .calendar_month_bars |= map(.event |= event_defaults)
+| .calendar_week_bars |= map(.event |= event_defaults)
+| .calendar_timed_blocks |= map(.event |= event_defaults)
+| .calendar_selected_day_events |= map(event_defaults)
+| .calendar_month_days |= map(.events |= map(event_defaults))
+| .calendar_week_days |= map(.events |= map(event_defaults))
+| .calendar_agenda_rows |= map(if .event then .event |= event_defaults else . end)
 | .mail_profiles = [
     {"id": "work", "name": "Work", "color": "#8b5cf6", "account_count": 1},
     {"id": "support", "name": "Support", "color": "#ea580c", "account_count": 1}
@@ -99,7 +111,7 @@ def favicon_path(address):
     | .mailbox.can_create_children = (.mailbox.can_create_children // false)
     | .mailbox.can_rename = (.mailbox.can_rename // false)
     | .mailbox.can_delete = (.mailbox.can_delete // false)
-    | .mailbox.status = (.mailbox.status // {checking: false, problem: "none", marked: false, reason: "", checked_day: -1, checked_at: ""})
+    | .mailbox.status = (.mailbox.status // {checking: false, problem: "none", marked: false, reason: "", checked_day: -1, checked_at: "", resume_day: -1, resume_at: ""})
     | .label.account_id = (.label.account_id // -1)
     | .label.account_name = (.label.account_name // "")
     | .label.display_name = (.label.display_name // .label.name // "")

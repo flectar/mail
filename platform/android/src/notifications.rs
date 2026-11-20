@@ -405,6 +405,7 @@ fn background_services(env: &mut JNIEnv, context: &JObject) -> Result<EngineServ
     // valid for this native call; the verifier keeps the Application.
     unsafe { crate::tls::initialize(vm.get_java_vm_pointer().cast(), context.as_raw().cast()) }
         .map_err(|error| format!("Android TLS verification: {error}"))?;
+    crate::proxy::install(vm);
     let directory = |env: &mut JNIEnv, method: &str| -> Result<PathBuf, String> {
         let file = env
             .call_method(context, method, "()Ljava/io/File;", &[])

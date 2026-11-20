@@ -50,6 +50,10 @@ pub(crate) mod windows_install;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_security;
 
+/// The operating system's proxy settings.
+mod system_proxy;
+pub(crate) use system_proxy::install as install_system_proxy;
+
 /// Fonts a host without Fontconfig hands to the email (Blitz/Parley) renderer
 /// and the composer: the platform font directory, and the fallback policy the
 /// host applies to its own UI, so mail content falls back the same way.

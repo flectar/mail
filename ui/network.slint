@@ -1,0 +1,445 @@
+import { VerticalBox } from "std-widgets.slint";
+import { Button } from "components/button.slint";
+import { LineEdit } from "components/controls.slint";
+import { SettingsSelectRow } from "components/settings-components.slint";
+import { TypeScale } from "typography.slint";
+
+// An account on the Network page, with its proxy choice.
+export struct AccountProxyRow {
+    id: int,
+    email: string,
+    // 0 the app's proxy, 1 no proxy, 2 its own.
+    mode-index: int,
+    // Its own proxy, as `host:port`, for the row's summary.
+    own-label: string,
+}
+
+// Settings → Network (#250, src/network.rs): the proxy the app's
+// connections go through, and the accounts that go another way.
+export global Network {
+    // ---- The app's proxy ----
+
+    // 0 the system's settings, 1 no proxy, 2 a proxy typed in.
+    in-out property <int> mode-index;
+    // 0 SOCKS5, 1 HTTP.
+    in-out property <int> kind-index;
+    in-out property <string> host;
+    in-out property <string> port;
+    in-out property <string> user;
+    in-out property <string> bypass;
+    // A password is saved for it.
+    in property <bool> password-saved;
+    // "" until saved, "saving", "checking", "ready" once a mail server
+    // answered through it, "saved" when there was none to try, or "failed"
+    // with `failure` and `failure-detail` saying why, as
+    // `NetworkWords.failure` reads them.
+    in property <string> state;
+    in property <string> failure;
+    in property <string> failure-detail;
+
+    // ---- Accounts ----
+
+    in property <[AccountProxyRow]> accounts;
+    // The account whose own proxy is open to change, or -1.
+    in-out property <int> editing-account: -1;
+    in-out property <int> account-kind-index;
+    in-out property <string> account-host;
+    in-out property <string> account-port;
+    in-out property <string> account-user;
+    in property <bool> account-password-saved;
+    // As `state` and `failure`, for the account being changed.
+    in property <string> account-state;
+    in property <string> account-failure;
+    in property <string> account-failure-detail;
+
+    // The page shows: what it lists comes up to date.
+    callback refresh();
+    // Saves the mode; a manual proxy waits for its Save.
+    callback choose-mode(int);
+    // Saves the manual proxy, with a newly typed password if any.
+    callback save(string);
+    callback remove-password();
+    // An account's choice: the app's proxy or none save at once, its own
+    // opens the editor.
+    callback choose-account-mode(int, int);
+    callback edit-account(int);
+    callback save-account(string);
+    callback remove-account-password();
+    callback cancel-account();
+}
+
+// A field with its name above it, which stays when the field is filled.
+component Field inherits VerticalLayout {
+    in property <string> label;
+    in property <string> placeholder;
+    in property <bool> secret: false;
+    in property <color> label-color;
+    in-out property <string> text;
+    callback edited();
+    spacing: 4px;
+    Text {
+        text: root.label;
+        color: root.label-color;
+        font-size: TypeScale.caption;
+        wrap: word-wrap;
+    }
+    LineEdit {
+        height: 36px;
+        text <=> root.text;
+        input-label: root.label;
+        placeholder-text: root.placeholder;
+        input-type: root.secret ? InputType.password : InputType.text;
+        edited => { root.edited(); }
+    }
+}
+
+// The kind, server and sign-in of a proxy typed in.
+component ProxyFields inherits VerticalLayout {
+    in property <bool> compact;
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> faint-text;
+    in property <bool> password-saved;
+    in-out property <int> kind-index;
+    in-out property <string> host;
+    in-out property <string> port;
+    in-out property <string> user;
+    in-out property <string> password;
+    callback edited();
+    callback remove-password();
+    spacing: 8px;
+
+    SettingsSelectRow {
+        compact: root.compact;
+        title: @tr("Kind of proxy");
+        description: root.kind-index == 0
+            ? @tr("The proxy looks up the servers' names too, so this computer's network doesn't see them.")
+            : @tr("Many HTTP proxies only let web connections through, so mail servers may be refused.");
+        choices: ["SOCKS5", "HTTP"];
+        selected-index <=> root.kind-index;
+        title-color: root.body-text;
+        description-color: root.faint-text;
+        selected(index, value) => { root.edited(); }
+    }
+    if !root.compact : HorizontalLayout {
+        spacing: 12px;
+        Field {
+            horizontal-stretch: 1;
+            label: @tr("Server");
+            placeholder: "proxy.example.com";
+            label-color: root.secondary-text;
+            text <=> root.host;
+            edited => { root.edited(); }
+        }
+        Field {
+            width: 96px;
+            label: @tr("Port");
+            placeholder: root.kind-index == 0 ? "1080" : "3128";
+            label-color: root.secondary-text;
+            text <=> root.port;
+            edited => { root.edited(); }
+        }
+    }
+    if root.compact : Field {
+        label: @tr("Server");
+        placeholder: "proxy.example.com";
+        label-color: root.secondary-text;
+        text <=> root.host;
+        edited => { root.edited(); }
+    }
+    if root.compact : Field {
+        label: @tr("Port");
+        placeholder: root.kind-index == 0 ? "1080" : "3128";
+        label-color: root.secondary-text;
+        text <=> root.port;
+        edited => { root.edited(); }
+    }
+    Field {
+        label: @tr("User name, if the proxy asks for one");
+        placeholder: "";
+        label-color: root.secondary-text;
+        text <=> root.user;
+        edited => { root.edited(); }
+    }
+    if root.password-saved : HorizontalLayout {
+        spacing: 12px;
+        Text {
+            text: @tr("A password is saved.");
+            color: root.body-text;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        Button {
+            width: max(80px, self.content-width);
+            text: @tr("Remove password");
+            clicked => { root.remove-password(); }
+        }
+    }
+    if !root.password-saved : Field {
+        label: @tr("Password");
+        placeholder: "";
+        secret: true;
+        label-color: root.secondary-text;
+        text <=> root.password;
+        edited => { root.edited(); }
+    }
+}
+
+// What a save or a check came to, in a sentence.
+export global NetworkWords {
+    public pure function state(state: string, changed: bool) -> string {
+        return state == "saving" ? @tr("Saving…")
+            : state == "checking" ? @tr("Connecting through the proxy…")
+            : state == "ready" && !changed ? @tr("Your mail server answered through the proxy.")
+            : state == "saved" && !changed ? @tr("Saved.")
+            : "";
+    }
+
+    // Why a save or a check failed. `detail` adds what Flectar Mail or the
+    // proxy said, where a sentence names it.
+    public pure function failure(failure: string, detail: string) -> string {
+        return failure == "port" ? @tr("Enter a port from 1 to 65535.")
+            : failure == "unreachable" ? @tr("The proxy can't be reached. Check its server and port.")
+            : failure == "timeout" ? @tr("The proxy didn't answer in time.")
+            : failure == "credentials-needed" ? @tr("The proxy asks for a user name and password.")
+            : failure == "credentials-rejected" ? @tr("The proxy didn't accept the user name and password.")
+            : failure == "sign-in" && detail != "" ? @tr("The proxy asks for {} sign-in, which Flectar Mail doesn't support.", detail)
+            : failure == "sign-in" ? @tr("The proxy asks for a way of signing in that Flectar Mail doesn't support.")
+            : failure == "refused" ? @tr("The proxy didn't connect to your mail server. Many proxies only let web connections through.")
+            : failure == "protocol" ? @tr("The proxy's answer can't be read. Check that it's the kind of proxy chosen above.")
+            : failure == "server" && detail != "" ? @tr("Your mail server can't be reached through the proxy. {}", detail)
+            : failure == "server" ? @tr("Your mail server can't be reached through the proxy.")
+            : failure == "keyring" ? @tr("The password can't be saved, as the system's password storage isn't available.")
+            : detail != "" ? detail
+            : @tr("The proxy settings can't be saved.");
+    }
+}
+
+// Settings → Network: the app's proxy, then the accounts' own choices.
+export component NetworkPage inherits VerticalLayout {
+    in property <bool> compact: false;
+    in property <color> surface;
+    in property <color> border-subtle;
+    in property <color> heading;
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> faint-text;
+    in property <color> error-color;
+
+    private property <string> password: "";
+    private property <bool> changed: false;
+    private property <string> account-password: "";
+    private property <bool> account-changed: false;
+
+    // The page is made each time it shows, and brings what it lists up to
+    // date.
+    init => {
+        Network.refresh();
+    }
+
+    spacing: 14px;
+
+    Text {
+        text: @tr("How Flectar Mail reaches mail servers and everything else it loads, such as pictures in messages.");
+        color: root.secondary-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+
+    Rectangle {
+        height: max(120px, proxy-box.preferred-height);
+        background: root.surface;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.border-subtle;
+        proxy-box := VerticalBox {
+            padding-top: 15px;
+            padding-right: 20px;
+            padding-bottom: 15px;
+            padding-left: 20px;
+            spacing: 8px;
+
+            Text { text: @tr("Proxy"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+            SettingsSelectRow {
+                compact: root.compact;
+                title: @tr("Connect through");
+                description: Network.mode-index == 0
+                    ? @tr("The proxy your system is set up with. Mail servers go through its SOCKS proxy only, as web proxies often refuse them.")
+                    : Network.mode-index == 1
+                    ? @tr("Every connection goes straight to its server.")
+                    : @tr("Every connection goes through this proxy. If it can't be reached, Flectar Mail doesn't connect without it.");
+                choices: [@tr("System settings"), @tr("No proxy"), @tr("This proxy")];
+                selected-index <=> Network.mode-index;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                selected(index, value) => {
+                    root.changed = false;
+                    Network.choose-mode(index);
+                }
+            }
+            if Network.mode-index == 2 : ProxyFields {
+                compact: root.compact;
+                body-text: root.body-text;
+                secondary-text: root.secondary-text;
+                faint-text: root.faint-text;
+                password-saved: Network.password-saved;
+                kind-index <=> Network.kind-index;
+                host <=> Network.host;
+                port <=> Network.port;
+                user <=> Network.user;
+                password <=> root.password;
+                edited => { root.changed = true; }
+                remove-password => { Network.remove-password(); }
+            }
+            if Network.mode-index == 2 : Field {
+                label: @tr("Don't use the proxy for");
+                placeholder: "intranet.example.com, 10.0.0.0/8";
+                label-color: root.secondary-text;
+                text <=> Network.bypass;
+                edited => { root.changed = true; }
+            }
+            if Network.mode-index == 2 : Text {
+                text: @tr("Separate names and addresses with commas. A name covers its subdomains. Servers on this computer never use the proxy.");
+                color: root.faint-text;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+            if Network.mode-index == 2 : HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                Button {
+                    width: max(96px, self.content-width);
+                    primary: true;
+                    text: @tr("Save");
+                    enabled: Network.state != "saving" && Network.state != "checking"
+                        && Network.host != "" && Network.port != "";
+                    clicked => {
+                        Network.save(root.password);
+                        root.password = "";
+                        root.changed = false;
+                    }
+                }
+                Text {
+                    text: NetworkWords.state(Network.state, root.changed);
+                    color: root.faint-text;
+                    font-size: TypeScale.secondary;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+            if Network.state == "failed" : Text {
+                text: NetworkWords.failure(Network.failure, Network.failure-detail);
+                color: root.error-color;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    if Network.accounts.length > 0 : Rectangle {
+        height: max(120px, accounts-box.preferred-height);
+        background: root.surface;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.border-subtle;
+        accounts-box := VerticalBox {
+            padding-top: 15px;
+            padding-right: 20px;
+            padding-bottom: 15px;
+            padding-left: 20px;
+            spacing: 8px;
+
+            Text { text: @tr("Accounts"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+            Text {
+                text: @tr("An account can connect without a proxy, or through one of its own, along with its calendars, contacts and files.");
+                color: root.faint-text;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+            for account[index] in Network.accounts : VerticalLayout {
+                spacing: 8px;
+                if index > 0 : Rectangle { height: 1px; background: root.border-subtle; }
+                SettingsSelectRow {
+                    compact: root.compact;
+                    title: account.email;
+                    description: account.mode-index == 0 ? @tr("The proxy above.")
+                        : account.mode-index == 1 ? @tr("No proxy.")
+                        : account.own-label != "" ? @tr("Its own proxy, {}.", account.own-label)
+                        : @tr("Its own proxy.");
+                    choices: [@tr("Same as above"), @tr("No proxy"), @tr("Its own proxy")];
+                    // An account's own proxy being entered shows as chosen.
+                    selected-index: Network.editing-account == account.id ? 2 : account.mode-index;
+                    title-color: root.body-text;
+                    description-color: root.faint-text;
+                    selected(choice, value) => {
+                        root.account-changed = false;
+                        Network.choose-account-mode(account.id, choice);
+                    }
+                }
+                if account.mode-index == 2 && Network.editing-account != account.id : HorizontalLayout {
+                    alignment: start;
+                    Button {
+                        width: max(96px, self.content-width);
+                        text: @tr("Change proxy");
+                        clicked => {
+                            root.account-changed = false;
+                            Network.edit-account(account.id);
+                        }
+                    }
+                }
+                if Network.editing-account == account.id : ProxyFields {
+                    compact: root.compact;
+                    body-text: root.body-text;
+                    secondary-text: root.secondary-text;
+                    faint-text: root.faint-text;
+                    password-saved: Network.account-password-saved;
+                    kind-index <=> Network.account-kind-index;
+                    host <=> Network.account-host;
+                    port <=> Network.account-port;
+                    user <=> Network.account-user;
+                    password <=> root.account-password;
+                    edited => { root.account-changed = true; }
+                    remove-password => { Network.remove-account-password(); }
+                }
+                if Network.editing-account == account.id : HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    Button {
+                        width: max(96px, self.content-width);
+                        primary: true;
+                        text: @tr("Save");
+                        enabled: Network.account-state != "saving" && Network.account-state != "checking"
+                            && Network.account-host != "" && Network.account-port != "";
+                        clicked => {
+                            Network.save-account(root.account-password);
+                            root.account-password = "";
+                            root.account-changed = false;
+                        }
+                    }
+                    Button {
+                        width: max(96px, self.content-width);
+                        text: @tr("Cancel");
+                        clicked => {
+                            root.account-password = "";
+                            root.account-changed = false;
+                            Network.cancel-account();
+                        }
+                    }
+                    Text {
+                        text: NetworkWords.state(Network.account-state, root.account-changed);
+                        color: root.faint-text;
+                        font-size: TypeScale.secondary;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+                if Network.editing-account == account.id && Network.account-state == "failed" : Text {
+                    text: NetworkWords.failure(Network.account-failure, Network.account-failure-detail);
+                    color: root.error-color;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}

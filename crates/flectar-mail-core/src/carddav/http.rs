@@ -2,6 +2,7 @@
 
 use crate::error::{CoreError, Result};
 use crate::http_body;
+use crate::net::proxy::Owner;
 
 const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 const MAX_URL_BYTES: usize = 16 * 1024;
@@ -66,11 +67,12 @@ pub struct HttpTransport {
 }
 
 impl HttpTransport {
-    pub fn new(username: String, password: String, base_url: &str) -> Result<Self> {
+    /// Requests go through the proxy of `owner`.
+    pub fn new(owner: Owner, username: String, password: String, base_url: &str) -> Result<Self> {
         let base = validated_url(base_url)?;
         let origin = base.origin();
         let redirect_origin = origin.clone();
-        let client = reqwest::Client::builder()
+        let client = crate::net::proxy::http_builder(owner)
             .user_agent("flectar-mail-carddav/0.1")
             .timeout(std::time::Duration::from_secs(45))
             .redirect(reqwest::redirect::Policy::custom(move |attempt| {

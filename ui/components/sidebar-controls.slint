@@ -369,6 +369,7 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     private property <string> problem-title: AccountStatusText.problem(root.status.problem);
     private property <bool> status-from-keyboard: false;
     private property <string> last-checked: AccountStatusText.last-checked(root.status.checked_day, root.status.checked_at);
+    private property <bool> waiting: root.status.problem == AccountProblem.waiting;
     // The menu's first line.
     private property <string> status-line: root.status.checking ? @tr("Checking for new mail…")
         : root.problem-title != "" ? root.problem-title : root.last-checked;
@@ -453,14 +454,20 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
         width: parent.width;
         height: parent.height;
         Menu {
-            // How the account's checks are going, then its last complete
-            // check when a problem stops them.
+            // How the account's checks are going, then when it checks again
+            // while it waits for the server, or its last complete check when
+            // another problem stops them.
             if root.status-line != "" : MenuItem {
                 title: root.status-line;
                 enabled: false;
             }
 
-            if root.problem-title != "" && !root.status.checking && root.last-checked != "" : MenuItem {
+            if root.waiting && !root.status.checking && root.status.resume_at != "" : MenuItem {
+                title: AccountStatusText.checks-again(root.status.resume_day, root.status.resume_at);
+                enabled: false;
+            }
+
+            if root.problem-title != "" && !root.waiting && !root.status.checking && root.last-checked != "" : MenuItem {
                 title: root.last-checked;
                 enabled: false;
             }
@@ -509,9 +516,11 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
         y: (parent.height - self.height) / 2;
         width: root.status-width;
         height: min(root.status-width, parent.height);
-        icon: @image-url("../icons/lucide/outline/alert-circle.svg");
+        icon: root.waiting
+            ? @image-url("../icons/lucide/outline/history.svg")
+            : @image-url("../icons/lucide/outline/alert-circle.svg");
         icon-size: 16px;
-        icon-color: AppTheme.destructive;
+        icon-color: root.waiting ? root.muted-color : AppTheme.destructive;
         hover-background: AppTheme.muted-control-bg;
         tooltip-text: root.problem-title;
         clicked => {

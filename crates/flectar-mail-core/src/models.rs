@@ -273,6 +273,10 @@ pub struct MailConnectionSettings {
     /// validity checks still apply. Contains public certificates, never keys.
     #[serde(default)]
     pub trusted_certificate_pem: String,
+    /// The proxy the account's connections go through: the app's, none, or
+    /// its own (#250).
+    #[serde(default)]
+    pub proxy: crate::net::proxy::AccountProxy,
 }
 
 impl MailConnectionSettings {
@@ -281,6 +285,7 @@ impl MailConnectionSettings {
             incoming_security,
             smtp_security,
             trusted_certificate_pem: String::new(),
+            proxy: crate::net::proxy::AccountProxy::App,
         }
     }
 }
@@ -405,6 +410,32 @@ impl KeepOnServer {
     }
 }
 
+/// How often an account checks for new mail (#251).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CheckInterval {
+    /// As often as Settings has every account check.
+    #[default]
+    App,
+    /// Every this many minutes, one of [`CheckInterval::MINUTES`].
+    Minutes(u32),
+    /// Only when the user asks, and when the app starts.
+    Manual,
+}
+
+impl CheckInterval {
+    /// The intervals an account can check at.
+    pub const MINUTES: [u32; 5] = [1, 5, 15, 30, 60];
+
+    /// Whether an account can be set to check this way.
+    pub fn is_offered(self) -> bool {
+        match self {
+            Self::App | Self::Manual => true,
+            Self::Minutes(minutes) => Self::MINUTES.contains(&minutes),
+        }
+    }
+}
+
 /// Typed contents of `accounts.settings_json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -442,9 +473,22 @@ pub struct AccountSettings {
     /// Mail files mail into, and the folders rules file into.
     #[serde(default)]
     pub subscribed_folders_only: bool,
+    /// How often the account checks for new mail.
+    #[serde(default)]
+    pub check_interval: CheckInterval,
+    /// IMAP and JMAP accounts: the server tells of new mail as it arrives
+    /// (IMAP IDLE, JMAP's event source). Off, the account checks at its
+    /// interval instead. An account that checks only when asked doesn't
+    /// listen either.
+    #[serde(default = "push_default")]
+    pub push: bool,
 }
 
 const fn plain_text_replies_default() -> bool {
+    true
+}
+
+const fn push_default() -> bool {
     true
 }
 
@@ -463,6 +507,8 @@ impl AccountSettings {
             plain_text_replies: plain_text_replies_default(),
             request_read_receipts: false,
             subscribed_folders_only: false,
+            check_interval: CheckInterval::App,
+            push: push_default(),
         }
     }
 }
@@ -560,6 +606,35 @@ mod account_settings_tests {
     }
 
     #[test]
+    fn accounts_check_as_settings_say_with_push_until_changed() {
+        let mut settings: AccountSettings = serde_json::from_str(MINIMAL_SETTINGS).unwrap();
+        assert_eq!(settings.check_interval, CheckInterval::App);
+        assert!(settings.push);
+        for (interval, stored) in [
+            (
+                CheckInterval::Minutes(30),
+                r#""checkInterval":{"minutes":30}"#,
+            ),
+            (CheckInterval::Manual, r#""checkInterval":"manual""#),
+            (CheckInterval::App, r#""checkInterval":"app""#),
+        ] {
+            settings.check_interval = interval;
+            settings.push = false;
+            let json = serde_json::to_string(&settings).unwrap();
+            assert!(json.contains(stored), "{json}");
+            assert!(json.contains(r#""push":false"#), "{json}");
+            let restored: AccountSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored.check_interval, interval);
+            assert!(!restored.push);
+        }
+        for minutes in CheckInterval::MINUTES {
+            assert!(CheckInterval::Minutes(minutes).is_offered());
+        }
+        assert!(!CheckInterval::Minutes(0).is_offered());
+        assert!(!CheckInterval::Minutes(7).is_offered());
+    }
+
+    #[test]
     fn new_and_partially_stored_settings_share_the_bounded_default() {
         let connection =
             MailConnectionSettings::new(ConnectionSecurity::Tls, ConnectionSecurity::Starttls);
@@ -617,6 +692,10 @@ pub struct Account {
     pub mail_protocol: MailProtocol,
     pub sync_state: String,
     pub sync_error: Option<String>,
+    /// When sync asks the server again, in milliseconds since the epoch,
+    /// while the account waits because the server asked it to (#251).
+    #[serde(default)]
+    pub sync_retry_at: Option<i64>,
     /// Whether the provider currently permits creating a root mailbox.
     #[serde(default = "default_true")]
     pub can_create_top_level_mailbox: bool,
@@ -647,6 +726,7 @@ pub struct LocalMail {
 /// Full account row including server config; internal to the native application.
 #[derive(Debug, Clone)]
 pub struct AccountConfig {
+    /// 0 while an account is being set up, before it's saved.
     pub id: i64,
     pub email: String,
     pub display_name: Option<String>,
@@ -665,6 +745,18 @@ pub struct AccountConfig {
     pub smtp_host: String,
     pub smtp_port: u16,
     pub settings: AccountSettings,
+}
+
+impl AccountConfig {
+    /// Whose proxy settings the account's connections follow: its own once
+    /// it's saved, the app's while it's being set up.
+    pub fn proxy_owner(&self) -> crate::net::proxy::Owner {
+        if self.id > 0 {
+            crate::net::proxy::Owner::Account(self.id)
+        } else {
+            crate::net::proxy::Owner::App
+        }
+    }
 }
 
 /// Portable account connection metadata used by backup/restore. Credentials,
@@ -701,7 +793,13 @@ impl From<&AccountConfig> for PortableAccountConfig {
             incoming_port: config.incoming_port,
             smtp_host: config.smtp_host.clone(),
             smtp_port: config.smtp_port,
-            settings: config.settings.clone(),
+            settings: {
+                let mut settings = config.settings.clone();
+                // A proxy belongs to the network a device is on, so an
+                // account moving to another device leaves its own behind.
+                settings.connection.proxy = crate::net::proxy::AccountProxy::App;
+                settings
+            },
         }
     }
 }
@@ -2150,6 +2248,16 @@ pub struct AiThreadSummary {
     /// A reliable, explicitly dated event/deadline the user may add after review.
     #[serde(default)]
     pub calendar_suggestion: Option<AiCalendarSuggestion>,
+    /// The model saw a message try to instruct it, in its words (#241).
+    #[serde(default)]
+    pub warning: Option<String>,
+    /// Older messages the summary leaves out, as the model's input ran out.
+    #[serde(default)]
+    pub omitted: usize,
+    /// Links, addresses and phone numbers the summary has and the messages
+    /// don't, which the reader should not trust.
+    #[serde(default)]
+    pub unverified: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2759,24 +2867,10 @@ pub struct Settings {
     /// rather than failing.
     #[serde(default)]
     pub download_directory: String,
-    #[serde(default = "default_ai_base_url")]
-    pub ai_base_url: String,
-    /// Per-tier model ids, all sharing `ai_base_url` and the stored API key.
-    #[serde(default = "default_ai_model")]
-    pub ai_model_instant: String,
-    #[serde(default = "default_ai_model")]
-    pub ai_model_cheap: String,
-    #[serde(default = "default_ai_model")]
-    pub ai_model_intelligent: String,
-    /// Which tier each AI scenario uses: "instant" | "cheap" | "intelligent".
-    #[serde(default = "default_tier_intelligent")]
-    pub ai_tier_ask: String,
-    #[serde(default = "default_tier_intelligent")]
-    pub ai_tier_draft: String,
-    #[serde(default = "default_tier_instant")]
-    pub ai_tier_summarize: String,
-    #[serde(default = "default_tier_cheap")]
-    pub ai_tier_voice: String,
+    /// The AI server the app's AI features and translation by a model use
+    /// (#241). Its key is in the system's credential store.
+    #[serde(default)]
+    pub ai: AiSettings,
     /// OAuth app registrations supplied by the user. These intentionally
     /// override the FLECTAR_*_DESKTOP_CLIENT_ID values bundled by a release.
     #[serde(default)]
@@ -2848,9 +2942,6 @@ pub struct Settings {
     /// every mailbox mutation comes from this explicit, user-owned allow-list.
     #[serde(default)]
     pub ai_automation_rules: Vec<AiAutomationRule>,
-    /// Which model tier the AI classifier uses: "instant" | "cheap" | "intelligent".
-    #[serde(default = "default_tier_instant")]
-    pub ai_tier_categorize: String,
     /// Group the thread list under date headers (Today / Yesterday / …).
     #[serde(default = "default_true")]
     pub group_by_date: bool,
@@ -2942,6 +3033,89 @@ pub struct Settings {
     /// MCP server. Off until the user turns it on.
     #[serde(default)]
     pub agent_access: AgentAccess,
+    /// Translating messages (#240). Off until the user picks a service.
+    #[serde(default)]
+    pub translation: TranslationSettings,
+    /// The proxy the app's connections go through (#250).
+    #[serde(default)]
+    pub proxy: crate::net::proxy::ProxySettings,
+}
+
+/// The AI server (#241): any server with the OpenAI chat API, on this
+/// device, such as Ollama or LM Studio, or hosted. Nothing is preset, and AI
+/// features stay off while the address or the model is empty.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AiSettings {
+    /// The server's address, such as http://localhost:11434/v1.
+    pub url: String,
+    /// The model it runs, as the server names it.
+    pub model: String,
+    /// The user's own instructions, run on selected text or a draft.
+    pub prompts: Vec<AiPrompt>,
+}
+
+/// An instruction the user saved, such as "Make it shorter".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AiPrompt {
+    pub name: String,
+    pub instruction: String,
+}
+
+impl AiSettings {
+    /// A server and a model are set, so AI features can run.
+    pub fn ready(&self) -> bool {
+        !self.url.trim().is_empty() && !self.model.trim().is_empty()
+    }
+}
+
+/// What the AI server answered about selected text (#241).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiAnswer {
+    pub text: String,
+    /// Links, addresses and phone numbers the answer has and the selected
+    /// text doesn't.
+    pub unverified: Vec<String>,
+}
+
+/// How messages are translated (#240). The services' keys are in the
+/// system's credential store, not here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TranslationSettings {
+    /// "deepl", "libretranslate" or "model", the AI server in `Settings::ai`,
+    /// or "" while none is set up.
+    pub service: String,
+    /// The language messages are translated into, as a language tag such as
+    /// "de" or "pt-BR". "" follows the app's language.
+    pub target: String,
+    /// Offer to translate a message in a language the user doesn't read.
+    pub offer: bool,
+    /// Languages translated as soon as a message opens, and languages never
+    /// offered, as primary language subtags. A language is on one list at
+    /// most.
+    pub always: Vec<String>,
+    pub never: Vec<String>,
+    /// The LibreTranslate server's address.
+    pub libretranslate_url: String,
+    /// The language a message being written was last translated into.
+    pub compose_target: String,
+}
+
+impl Default for TranslationSettings {
+    fn default() -> Self {
+        TranslationSettings {
+            service: String::new(),
+            target: String::new(),
+            offer: true,
+            always: Vec::new(),
+            never: Vec::new(),
+            libretranslate_url: String::new(),
+            compose_target: String::new(),
+        }
+    }
 }
 
 /// What AI agents may see and do through `flectar-mail mcp`, the same for
@@ -3030,21 +3204,6 @@ fn default_language() -> String {
 }
 fn default_calendar_week_start() -> String {
     "monday".into()
-}
-fn default_ai_base_url() -> String {
-    crate::ai::DEFAULT_BASE_URL.into()
-}
-fn default_ai_model() -> String {
-    crate::ai::DEFAULT_MODEL.into()
-}
-fn default_tier_intelligent() -> String {
-    "intelligent".into()
-}
-fn default_tier_instant() -> String {
-    "instant".into()
-}
-fn default_tier_cheap() -> String {
-    "cheap".into()
 }
 fn default_notification_scope() -> String {
     "important".into()
@@ -3143,14 +3302,6 @@ impl Default for Settings {
             load_remote_images: false,
             mark_read: MarkRead::Immediately,
             download_directory: String::new(),
-            ai_base_url: default_ai_base_url(),
-            ai_model_instant: default_ai_model(),
-            ai_model_cheap: default_ai_model(),
-            ai_model_intelligent: default_ai_model(),
-            ai_tier_ask: default_tier_intelligent(),
-            ai_tier_draft: default_tier_intelligent(),
-            ai_tier_summarize: default_tier_instant(),
-            ai_tier_voice: default_tier_cheap(),
             google_client_id: String::new(),
             google_client_secret: String::new(),
             ms_client_id: String::new(),
@@ -3172,7 +3323,6 @@ impl Default for Settings {
             ai_categorize: false,
             ai_category_prompt: String::new(),
             ai_automation_rules: Vec::new(),
-            ai_tier_categorize: default_tier_instant(),
             group_by_date: true,
             contact_suggest_all_accounts: false,
             collect_outgoing_contacts: true,
@@ -3195,6 +3345,9 @@ impl Default for Settings {
             saved_searches: Vec::new(),
             active_mail_profile: None,
             agent_access: AgentAccess::default(),
+            translation: TranslationSettings::default(),
+            ai: AiSettings::default(),
+            proxy: crate::net::proxy::ProxySettings::default(),
         }
     }
 }
@@ -3238,11 +3391,12 @@ pub struct AskResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiStatus {
+    /// A server and a model are set.
     pub configured: bool,
-    pub model_instant: String,
-    pub model_cheap: String,
-    pub model_intelligent: String,
-    pub base_url: String,
+    pub url: String,
+    pub model: String,
+    /// A key for the server is saved.
+    pub key_saved: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -3614,7 +3768,9 @@ mod tests {
         assert!(s.auto_advance);
         assert!(s.auto_labels_enabled);
         assert!(s.signature_list.is_empty());
-        assert_eq!(s.ai_base_url, crate::ai::DEFAULT_BASE_URL);
+        // Nothing is preset for AI: no server, no model.
+        assert_eq!(s.ai, AiSettings::default());
+        assert!(!s.ai.ready());
         assert!(s.show_avatars);
         assert_eq!(s.message_appearance, MessageAppearance::System);
         assert_eq!(s.reduce_motion, ReduceMotion::System);

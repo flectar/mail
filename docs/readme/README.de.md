@@ -309,8 +309,8 @@ Flectar Mail wird derzeit entwickelt und ist noch nicht stabil. Vorschauversione
 
 | Plattform | Download | Hinweise |
 | --- | --- | --- |
-| Linux x64 und arm64 | AppImage, Debian/Ubuntu `.deb`, Fedora 43/44 `.rpm` oder ein Flatpak-Paket | Benötigt einen Secret-Service-Schlüsselbund. Das Flatpak ist eine Vorschau zur manuellen Installation und noch nicht auf Flathub verfügbar. |
-| Windows x64 und arm64 | `.exe`-Installationsprogramm oder portables ZIP | Unsignierte Vorschauversionen |
+| Linux x64 und arm64 | AppImage, Debian/Ubuntu `.deb`, Fedora/openSUSE/RHEL 10 `.rpm` oder ein Flatpak-Paket | Benötigt einen Secret-Service-Schlüsselbund. Das Flatpak ist eine Vorschau zur manuellen Installation und noch nicht auf Flathub verfügbar. |
+| Windows x64 und arm64 | `.exe`-Installationsprogramm oder ZIP | Unsignierte Vorschauversionen |
 | macOS 14+ (Apple silicon oder Intel) | DMG oder Anwendungs-ZIP | Ad hoc signiert, nicht notarisiert |
 | Android 8.0+ (arm64) | Signiertes APK | Vorschauversionen und stabile Veröffentlichungen teilen dieselbe App-Identität. |
 | iOS 17+ (iPhone und iPad) | Unsigniertes `.ipa` | Installiere es mit AltStore, SideStore oder Sideloadly und deiner Apple-ID. |

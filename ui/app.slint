@@ -5,6 +5,10 @@ import { AttachmentPreviewDialog } from "dialogs/attachment-preview-dialog.slint
 export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
+export { Translation, TranslationLanguage } from "translation.slint";
+export { Ai, AiPromptRow } from "ai.slint";
+export { AiSummary } from "ai-summary.slint";
+export { Network, AccountProxyRow } from "network.slint";
 export { LinkServices, LinkServiceRow } from "link-services.slint";
 export { RendererSettings } from "renderer-settings.slint";
 export { WindowChrome } from "window-chrome.slint";
@@ -34,7 +38,7 @@ export { InterfaceText } from "typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings } from "design-system.slint";
 import { Button } from "components/button.slint";
 import { LoadingSkeletonBlock } from "components/loading-skeleton.slint";
-import { AccountRow, CalendarAgendaRow, CalendarAgendaFilterRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, ContactSyncState, ContactValueRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailListEntry, MailProfileRow, ProfileMemberRow, SidebarRow, MailLabelRow, StorageUsageRow, ThreadMessageRow } from "models.slint";
+import { AccountRow, CalendarAgendaRow, CalendarAgendaFilterRow, CalendarBar, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarTimedBlock, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, ContactSyncState, ContactValueRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailListEntry, MailProfileRow, ProfileMemberRow, SidebarRow, MailLabelRow, StorageUsageRow, ThreadMessageRow } from "models.slint";
 export { EmailReader, ReaderCaret, ReaderImage, ReaderItem, MailDragApi } from "models.slint";
 export { MailListNavigation, MailNavigationTarget } from "models.slint";
 export { ThreadMessageRow, StorageUsageRow } from "models.slint";
@@ -619,6 +623,23 @@ export global I18n {
         if (key == "Read receipt preference saved.") { return @tr("Read receipt preference saved."); }
         if (key == "Could not save the read receipt preference: {}") { return @tr("Could not save the read receipt preference: {}", argument); }
         if (key == "Could not answer the read receipt request: {}") { return @tr("Could not answer the read receipt request: {}", argument); }
+        if (key == "Could not show the message: {}") { return @tr("Could not show the message: {}", argument); }
+        if (key == "Could not save the translation setting: {}") { return @tr("Could not save the translation setting: {}", argument); }
+        if (key == "Could not remove the key: {}") { return @tr("Could not remove the key: {}", argument); }
+        if (key == "Could not save the prompts: {}") { return @tr("Could not save the prompts: {}", argument); }
+        if (key == "Set up an AI server in Settings to use AI features.") { return @tr("Set up an AI server in Settings to use AI features."); }
+        if (key == "The AI server can't be reached. Check its address in Settings and that it's running.") { return @tr("The AI server can't be reached. Check its address in Settings and that it's running."); }
+        if (key == "The AI server's address in Settings has to start with https://, or with http://localhost for a server on this computer.") { return @tr("The AI server's address in Settings has to start with https://, or with http://localhost for a server on this computer."); }
+        if (key == "The AI server didn't accept the key in Settings.") { return @tr("The AI server didn't accept the key in Settings."); }
+        if (key == "The AI server didn't answer as expected. It said: {}") { return @tr("The AI server didn't answer as expected. It said: {}", argument); }
+        if (key == "Write something to improve first.") { return @tr("Write something to improve first."); }
+        if (key == "Asking the AI server…") { return @tr("Asking the AI server…"); }
+        if (key == "The AI server sent back no text, so the message stays as it is.") { return @tr("The AI server sent back no text, so the message stays as it is."); }
+        if (key == "The text changed while the AI server worked, so it stays as it is.") { return @tr("The text changed while the AI server worked, so it stays as it is."); }
+        if (key == "Changed by AI. Check it before you send it. Undo restores your text.") { return @tr("Changed by AI. Check it before you send it. Undo restores your text."); }
+        if (key == "The AI server found nothing to change.") { return @tr("The AI server found nothing to change."); }
+        // Translate into: the language translations go into until one is chosen.
+        if (key == "Automatic ({})") { return @tr("Automatic ({})", argument); }
         if (key == "Could not mark all as read: {}") { return @tr("Could not mark all as read: {}", argument); }
         if (key == "Use YYYY-MM-DD for the date and a time such as {}.") { return @tr("Use YYYY-MM-DD for the date and a time such as {}.", argument); }
         if (key == "Event duration must be a number of minutes.") { return @tr("Event duration must be a number of minutes."); }
@@ -658,6 +679,10 @@ export global I18n {
         if (key == "Updating folder settings…") { return @tr("Updating folder settings…"); }
         if (key == "Folder settings updated.") { return @tr("Folder settings updated."); }
         if (key == "Could not update folder settings: {}") { return @tr("Could not update folder settings: {}", argument); }
+        if (key == "Sync settings require local mail data.") { return @tr("Sync settings require local mail data."); }
+        if (key == "Updating sync settings…") { return @tr("Updating sync settings…"); }
+        if (key == "Sync settings updated.") { return @tr("Sync settings updated."); }
+        if (key == "Could not update sync settings: {}") { return @tr("Could not update sync settings: {}", argument); }
         if (key == "Mail history requires local mail data.") { return @tr("Mail history requires local mail data."); }
         if (key == "Updating mail history…") { return @tr("Updating mail history…"); }
         if (key == "Remote images are unavailable in this minimal build.") { return @tr("Remote images are unavailable in this minimal build."); }
@@ -1046,6 +1071,8 @@ export component AppWindow inherits Window {
     callback save_workspace_layout(string);
     callback save_workspace_list_pane_width(length);
     callback save_language(string);
+    // The effective language selection, forwarded to a native host app language.
+    callback app_language_changed(string, string);
     callback save_time_format(string);
     callback save_sidebar_icon_style(bool);
     callback save_notification_settings(bool, bool, string);
@@ -1076,6 +1103,8 @@ export component AppWindow inherits Window {
     callback save_account_sent_copy_policy(int, string);
     callback save_account_keep_on_server(int, string);
     callback save_account_subscribed_folders_only(int, bool);
+    callback save_account_check_interval(int, string);
+    callback save_account_push(int, bool);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -1089,6 +1118,7 @@ export component AppWindow inherits Window {
     callback export_database_snapshot();
     callback export_device_mail(int);
     callback delete_all_data();
+    callback withdraw_privacy_consent();
     callback load_storage_usage();
     callback cancel_storage_usage();
     callback open_email_link(string);
@@ -1197,7 +1227,12 @@ export component AppWindow inherits Window {
     in property <string> diagnostics_text: "";
     in property <[CalendarDay]> calendar_month_days: [];
     in property <[CalendarWeekDay]> calendar_week_days: [];
-    in property <[CalendarEventRow]> calendar_events: [];
+    in property <[CalendarBar]> calendar_month_bars: [];
+    in property <[int]> calendar_month_row_lanes: [];
+    in property <[CalendarBar]> calendar_week_bars: [];
+    in property <int> calendar_week_lanes: 0;
+    in property <[CalendarTimedBlock]> calendar_timed_blocks: [];
+    in property <[CalendarEventRow]> calendar_selected_day_events: [];
     in property <[CalendarAgendaRow]> calendar_agenda_rows: [];
     in property <[CalendarAgendaFilterRow]> calendar_agenda_filters: [];
     in property <int> calendar_agenda_filter_count: 0;
@@ -1246,7 +1281,7 @@ export component AppWindow inherits Window {
     in property <string> calendar_week_label: "";
     in property <string> calendar_selected_date: "";
     in property <string> calendar_selected_date_label: "";
-    in property <[string]> calendar_hour_labels: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
+    in property <[string]> calendar_hour_labels: ["00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"];
     in property <bool> calendar_selected_date_has_events: false;
     in-out property <bool> calendar_sidebar_collapsed: false;
     in-out property <string> calendar_view_mode: "week";
@@ -1382,6 +1417,8 @@ export component AppWindow inherits Window {
         TabsUi.navigated();
     }
     in-out property <string> settings_tab: "General";
+    // Set by the host when first-use consent can be withdrawn from About.
+    in property <bool> privacy_consent_withdrawable: false;
     // An account the sidebar asked to sign in again, until Settings shows it.
     private property <int> settings-sign-in-account: -1;
     changed settings_tab => { TabsUi.navigated(); }
@@ -2083,7 +2120,12 @@ export component AppWindow inherits Window {
             dark-mode: root.dark-mode;
             month-days: root.calendar_month_days;
             week-days: root.calendar_week_days;
-            events: root.calendar_events;
+            month-bars: root.calendar_month_bars;
+            month-row-lanes: root.calendar_month_row_lanes;
+            week-bars: root.calendar_week_bars;
+            week-lanes: root.calendar_week_lanes;
+            timed-blocks: root.calendar_timed_blocks;
+            selected-day-events: root.calendar_selected_day_events;
             agenda-rows: root.calendar_agenda_rows;
             agenda-filters: root.calendar_agenda_filters;
             agenda-filter-count: root.calendar_agenda_filter_count;
@@ -2262,6 +2304,7 @@ export component AppWindow inherits Window {
             width: parent.width;
             height: parent.height;
             connected_accounts: root.connected_accounts;
+            privacy-consent-withdrawable: root.privacy_consent_withdrawable;
             has_device_mail: root.has_device_mail;
             mail_export_running: root.mail_export_running;
             mail_export_status: I18n.ui-message(root.mail-export-message.key, root.mail-export-message.argument, root.mail-export-message.second_argument, root.mail-export-message.third_argument);
@@ -2468,6 +2511,8 @@ export component AppWindow inherits Window {
             save_account_sent_copy_policy(account-id, value) => { root.save_account_sent_copy_policy(account-id, value); }
             save_account_keep_on_server(account-id, value) => { root.save_account_keep_on_server(account-id, value); }
             save_account_subscribed_folders_only(account-id, enabled) => { root.save_account_subscribed_folders_only(account-id, enabled); }
+            save_account_check_interval(account-id, value) => { root.save_account_check_interval(account-id, value); }
+            save_account_push(account-id, enabled) => { root.save_account_push(account-id, enabled); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
             connect_caldav(account-id, connection-id, url, username, password) => { root.connect_caldav(account-id, connection-id, url, username, password); }
             set_calendar_connection_enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }
@@ -2480,6 +2525,7 @@ export component AppWindow inherits Window {
             export_database_snapshot => { root.export_database_snapshot(); }
             export_device_mail(account-id) => { root.export_device_mail(account-id); }
             delete_all_data => { root.delete_all_data(); }
+            withdraw_privacy_consent => { root.withdraw_privacy_consent(); }
             load_storage_usage => { root.load_storage_usage(); }
             open-link(url) => { root.open_email_link(url); }
         }

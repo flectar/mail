@@ -10,16 +10,17 @@
 //! was.
 
 use super::engine::{
-    PriorityFetchCmd, RestoreRequest, SyncCmd, SyncCtx, caught_up, configured_sync_interval,
-    set_state, set_state_error,
+    PriorityFetchCmd, RestoreRequest, SyncCmd, SyncCtx, caught_up, check_interval, set_state,
+    set_state_error, set_throttled, wait_for_turn,
 };
 use super::ingest::{self, Delivery, Importer};
+use super::pacing::{self, Pause};
 use crate::accounts::credentials::{self, Slot};
 use crate::db::repo::{
     self,
     pop3::{KnownUidl, UidlState},
 };
-use crate::error::{CoreError, Result};
+use crate::error::{CoreError, LimitKind, Result};
 use crate::events::CoreEvent;
 use crate::models::{
     AccountConfig, AccountSettings, ConnectionSecurity, KeepOnServer, now_ms, roles,
@@ -46,7 +47,6 @@ const MAX_HEADER_BYTES: usize = 256 * 1024;
 /// A sign-in refused without a reason is tried once more this much later
 /// before the password is in doubt.
 const UNEXPLAINED_RETRY: Duration = Duration::from_secs(60);
-const MAX_BACKOFF: Duration = Duration::from_secs(300);
 /// A message the server refused to send is tried again after this, doubling
 /// with each refusal up to a day.
 const REFUSED_RETRY_MS: i64 = 15 * 60 * 1000;
@@ -64,40 +64,51 @@ pub(crate) struct Inputs {
 pub(crate) async fn run(ctx: SyncCtx, mut config: AccountConfig, mut inputs: Inputs) {
     let account_id = config.id;
     let mut waiters: Vec<oneshot::Sender<std::result::Result<(), String>>> = Vec::new();
-    // None while the server refuses the password; only a manual check or a
-    // password change tries again.
+    // None while the server refuses the password, when only a manual check
+    // or a password change tries again, and for an account that checks only
+    // when asked.
     let mut next_sync = Some(Instant::now());
-    let mut backoff = Duration::from_secs(1);
+    let mut refused = false;
+    // Waits after failures, and while the server can't be used for now.
+    let mut backoff = pacing::Backoff::default();
     let mut unexplained_refusal = false;
     let mut catch_up = None;
+    // Accounts that start together take turns.
+    if !wait_for_turn(&ctx, account_id, &mut inputs.commands, &mut waiters).await {
+        return;
+    }
     loop {
         if let Err(error) = super::complete_device_actions(&ctx, account_id).await {
             tracing::warn!(account_id, %error, "completing local POP3 actions failed");
         }
         if next_sync.is_some_and(|at| at <= Instant::now()) {
             let started = now_ms();
+            // The next check as the account's settings say, varied a little
+            // so accounts don't check together.
+            let interval = check_interval(&ctx.db, &config.settings).await;
+            let next_check = || interval.map(|interval| Instant::now() + pacing::varied(interval));
             next_sync = match sync(&ctx, &config, &mut catch_up).await {
                 Ok(synced) => {
-                    backoff = Duration::from_secs(1);
+                    backoff.reset();
+                    refused = false;
                     unexplained_refusal = false;
                     set_state(&ctx, account_id, "idle").await;
                     ctx.bus.emit(CoreEvent::NetworkState { online: true });
-                    let next = match synced {
+                    match synced {
                         Synced::Complete => {
                             caught_up(&ctx, account_id, started).await;
                             finish(&mut waiters, Ok(()));
-                            Instant::now() + configured_sync_interval(&ctx.db).await
+                            next_check()
                         }
                         Synced::Partial => {
                             finish(&mut waiters, Ok(()));
-                            Instant::now() + CONTINUE_AFTER
+                            Some(Instant::now() + CONTINUE_AFTER)
                         }
                         Synced::NotBefore(at) => {
                             finish(&mut waiters, Err(wait_message(at)));
-                            instant_at(at)
+                            Some(instant_at(at))
                         }
-                    };
-                    Some(next)
+                    }
                 }
                 Err(Failure::Unexplained(message)) if !unexplained_refusal => {
                     unexplained_refusal = true;
@@ -107,14 +118,25 @@ pub(crate) async fn run(ctx: SyncCtx, mut config: AccountConfig, mut inputs: Inp
                 }
                 Err(Failure::Credentials(message) | Failure::Unexplained(message)) => {
                     tracing::warn!(account_id, %message, "POP3 sign-in refused");
+                    refused = true;
                     set_state(&ctx, account_id, "needs_reauth").await;
                     finish(&mut waiters, Err(message));
                     None
                 }
-                Err(Failure::Busy(message)) => {
-                    set_state_error(&ctx, account_id, "offline", &message).await;
+                Err(Failure::Busy(message, kind)) => {
+                    // The server can't be used for now. The wait grows while
+                    // that lasts, and a check someone asks for still goes at
+                    // once.
+                    let limit = CoreError::RateLimited {
+                        service: config.incoming_host.clone(),
+                        kind,
+                        retry_after: None,
+                        detail: message.clone(),
+                    };
+                    let pause = Pause::after(backoff.after(&limit), message.clone());
+                    set_throttled(&ctx, account_id, &pause).await;
                     finish(&mut waiters, Err(message));
-                    Some(Instant::now() + configured_sync_interval(&ctx.db).await)
+                    Some(pause.until)
                 }
                 Err(Failure::Other(error)) => {
                     tracing::warn!(account_id, %error, "POP3 sync failed");
@@ -122,9 +144,9 @@ pub(crate) async fn run(ctx: SyncCtx, mut config: AccountConfig, mut inputs: Inp
                     set_state_error(&ctx, account_id, "offline", &message).await;
                     ctx.bus.emit(CoreEvent::NetworkState { online: false });
                     finish(&mut waiters, Err(message));
-                    let retry = Instant::now() + backoff;
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
-                    Some(retry)
+                    // Never later than the next check would be.
+                    let retry = Instant::now() + backoff.after(&error).duration;
+                    Some(next_check().map_or(retry, |check| check.min(retry)))
                 }
             };
             next_sync = respect_login_delay(&ctx, account_id, next_sync).await;
@@ -173,7 +195,7 @@ pub(crate) async fn run(ctx: SyncCtx, mut config: AccountConfig, mut inputs: Inp
                     return;
                 }
                 config.settings = inputs.settings.borrow_and_update().clone();
-                if next_sync.is_some() {
+                if !refused {
                     next_sync = Some(Instant::now());
                 }
             },
@@ -232,7 +254,7 @@ enum Failure {
     /// The server refused without saying why, which may be the password.
     Unexplained(String),
     /// The server works but can't be used right now.
-    Busy(String),
+    Busy(String, LimitKind),
     Other(CoreError),
 }
 
@@ -248,7 +270,7 @@ impl Failure {
     fn into_error(self) -> CoreError {
         match self {
             Self::Credentials(message) | Self::Unexplained(message) => CoreError::Auth(message),
-            Self::Busy(message) => CoreError::Pop3(message),
+            Self::Busy(message, _) => CoreError::Pop3(message),
             Self::Other(error) => error,
         }
     }
@@ -258,17 +280,27 @@ fn failure(config: &AccountConfig, error: pop3::Error) -> Failure {
     let host = &config.incoming_host;
     let port = config.incoming_port;
     match error {
-        pop3::Error::SignIn { refusal, .. } => {
+        pop3::Error::SignIn { refusal, ref text } => {
             let message = format!("POP3 sign-in to {host} as {}: {error}", config.username);
+            // Too many connections or requests, such as Dovecot's "Maximum
+            // number of connections from user+IP exceeded", isn't the
+            // password, whatever code comes with it.
+            if let Some(kind) = LimitKind::in_text(text)
+                && !matches!(refusal, SignInRefusal::Credentials)
+            {
+                return Failure::Busy(format!("{message}; checking again later"), kind);
+            }
             match refusal {
                 SignInRefusal::Credentials => Failure::Credentials(message),
                 SignInRefusal::Unspecified => Failure::Unexplained(message),
-                SignInRefusal::InUse => Failure::Busy(format!(
-                    "another app is using the mailbox on {host}; checking again later"
-                )),
-                SignInRefusal::LoginDelay => Failure::Busy(format!(
-                    "{host} limits how often mail can be checked; checking again later"
-                )),
+                SignInRefusal::InUse => Failure::Busy(
+                    format!("another app is using the mailbox on {host}; checking again later"),
+                    LimitKind::Busy,
+                ),
+                SignInRefusal::LoginDelay => Failure::Busy(
+                    format!("{host} limits how often mail can be checked; checking again later"),
+                    LimitKind::LoginDelay,
+                ),
                 SignInRefusal::Temporary => Failure::Other(CoreError::Pop3(message)),
                 SignInRefusal::Permanent => Failure::Other(CoreError::Pop3(format!(
                     "{message}. Contact your mail provider."
@@ -324,6 +356,7 @@ async fn connect(
 ) -> std::result::Result<pop3::Session, Failure> {
     let connection = &config.settings.connection;
     let server = pop3::Server {
+        owner: config.proxy_owner(),
         host: &config.incoming_host,
         port: config.incoming_port,
         security: connection.incoming_security,

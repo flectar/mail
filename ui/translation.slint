@@ -1,0 +1,457 @@
+import { VerticalBox } from "std-widgets.slint";
+import { Button } from "components/button.slint";
+import { LineEdit, ToolbarIconButton } from "components/controls.slint";
+import { SettingsSelectRow, SettingsSwitchRow } from "components/settings-components.slint";
+import { LayoutMetrics } from "design-system.slint";
+import { TypeScale } from "typography.slint";
+import { Ai } from "ai.slint";
+
+// A language on the Always or Never list, or one to translate into.
+export struct TranslationLanguage {
+    // The language tag the service and the lists use.
+    code: string,
+    // Its name in the app's language, capitalized as a list shows it.
+    name: string,
+}
+
+// Translating messages (#240, src/translation.rs): the bar above the open
+// message, and Settings → Translation.
+export global Translation {
+    // ---- The open message ----
+
+    // "" for no bar, "offer", "translating", "shown" or "failed".
+    in property <string> state;
+    // The message's language as a sentence names it, or "" when it wasn't
+    // found.
+    in property <string> language-name;
+    // The language the translation is in, as a sentence names it.
+    in property <string> target-name;
+    // The message's language is on the Always list.
+    in property <bool> always;
+    // Why it failed: "not-set-up", "key", "quota", "busy", "offline",
+    // "address", "long", "same", or "service" with `detail` saying what the
+    // service said.
+    in property <string> failure;
+    in property <string> detail;
+    callback translate();
+    callback show-original();
+    // Put the message's language on a list: "always", "never" or "ask".
+    callback choose(string);
+    callback open-settings();
+
+    // ---- Settings → Translation ----
+
+    // 0 for none, 1 DeepL, 2 LibreTranslate, 3 a model on a server.
+    in-out property <int> service-index;
+    in-out property <string> libretranslate-url;
+    // The chosen service's key is saved.
+    in property <bool> key-saved;
+    // "" until saved, "saving", "ready" once the service answered, or
+    // "failed" with `settings-failure` and `settings-detail`, as `failure`.
+    in property <string> settings-state;
+    in property <string> settings-failure;
+    in property <string> settings-detail;
+    // What to translate into: the app's language first, then the service's.
+    in property <[string]> target-choices;
+    in-out property <int> target-index;
+    in-out property <bool> offer: true;
+    in property <[TranslationLanguage]> always-languages;
+    in property <[TranslationLanguage]> never-languages;
+    // The page shows: what it lists comes up to date.
+    callback refresh();
+    callback choose-service(int);
+    // Saves the address, the model and a newly typed key.
+    callback save(string);
+    callback remove-key();
+    callback choose-target(int);
+    callback offer-toggled(bool);
+    // Takes a language off the Always or Never list.
+    callback forget(string);
+}
+
+// What went wrong, in a sentence. Settings leaves out the way to Settings.
+export global TranslationWords {
+    public pure function failure(failure: string, detail: string, target: string, in-settings: bool) -> string {
+        return failure == "not-set-up" ? @tr("Choose a translation service in Settings to translate messages.")
+            : failure == "key" && in-settings ? @tr("The translation service didn't accept the key.")
+            : failure == "key" ? @tr("The translation service didn't accept the key. Check it in Settings.")
+            : failure == "quota" ? @tr("The translation service's limit for now is used up.")
+            : failure == "busy" ? @tr("The translation service is busy. Try again in a moment.")
+            : failure == "offline" ? @tr("The translation service can't be reached. Check the connection and try again.")
+            : failure == "address" ? @tr("The server address has to start with https://, or with http://localhost for a server on this computer.")
+            : failure == "long" ? @tr("This message is too long to translate.")
+            : failure == "same" ? @tr("This message is already in {}.", target)
+            : failure == "changed" ? @tr("The text changed while it was being translated. Translate it again.")
+            : detail != "" ? @tr("The translation didn't work. The service said: {}", detail)
+            : @tr("The translation didn't work.");
+    }
+}
+
+// Above the message, beside the mailing list's way out: the message's
+// language and the way to translate it, then what it was translated from
+// and the way back, as Gmail and Outlook put theirs.
+export component TranslationBar {
+    in property <bool> compact;
+    in property <color> text-color;
+    in property <color> error-color;
+    private property <string> message: Translation.state == "offer" ? @tr("This message is in {}.", Translation.language-name)
+        : Translation.state == "translating" && Translation.language-name != "" ? @tr("Translating from {}…", Translation.language-name)
+        : Translation.state == "translating" ? @tr("Translating…")
+        : Translation.state == "shown" && Translation.language-name != "" ? @tr("Translated from {}.", Translation.language-name)
+        : Translation.state == "shown" ? @tr("Translated into {}.", Translation.target-name)
+        : TranslationWords.failure(Translation.failure, Translation.detail, Translation.target-name, false);
+    private property <length> button-height: root.compact ? 36px : 26px;
+    private property <bool> has-button: Translation.state != "translating";
+    private property <bool> has-menu: Translation.state == "offer" || Translation.state == "shown";
+    private property <length> buttons-width: (root.has-button ? action.width : 0px) + (root.has-menu ? 8px + more.width : 0px);
+    private property <length> text-left: LayoutMetrics.icon-size + 8px;
+    // One line with the buttons beside it where it fits; otherwise the text
+    // wraps and the buttons go under it.
+    private property <bool> inline: label-probe.preferred-width <= root.width - root.text-left - root.buttons-width - 8px;
+
+    accessible-role: groupbox;
+    accessible-label: root.message;
+    height: root.inline
+        ? (root.compact ? 44px : 32px)
+        : 4px + max(LayoutMetrics.icon-size, label.preferred-height) + 8px + root.button-height + 4px;
+
+    label-probe := Text {
+        visible: false;
+        text: root.message;
+        font-size: TypeScale.body;
+    }
+
+    Image {
+        x: 0px;
+        y: root.inline ? (parent.height - self.height) / 2 : 4px + (min(label.preferred-height, 20px) - self.height) / 2;
+        width: LayoutMetrics.icon-size;
+        height: LayoutMetrics.icon-size;
+        source: Translation.state == "failed" ? @image-url("icons/lucide/outline/alert.svg") : @image-url("icons/lucide/outline/languages.svg");
+        colorize: Translation.state == "failed" ? root.error-color : root.text-color;
+        image-fit: contain;
+        accessible-role: none;
+    }
+
+    label := Text {
+        x: root.text-left;
+        y: root.inline ? 0px : 4px;
+        width: root.inline ? parent.width - self.x - root.buttons-width - 8px : parent.width - self.x;
+        height: root.inline ? parent.height : self.preferred-height;
+        text: root.message;
+        color: root.text-color;
+        font-size: TypeScale.body;
+        vertical-alignment: root.inline ? center : top;
+        wrap: root.inline ? no-wrap : word-wrap;
+        overflow: elide;
+    }
+
+    action := Button {
+        visible: root.has-button;
+        x: root.inline ? parent.width - root.buttons-width : root.text-left;
+        y: root.inline ? (parent.height - self.height) / 2 : label.y + max(LayoutMetrics.icon-size, label.height) + 8px;
+        width: max(96px, self.content-width);
+        height: root.button-height;
+        text: Translation.state == "shown" ? @tr("Show original")
+            : Translation.state == "failed" && (Translation.failure == "not-set-up" || Translation.failure == "key" || Translation.failure == "address") ? @tr("Settings")
+            : Translation.state == "failed" ? @tr("Try again")
+            : @tr("Translate");
+        accessible-id: "message-translate";
+        clicked => {
+            if Translation.state == "shown" {
+                Translation.show-original();
+            } else if Translation.state == "failed" && (Translation.failure == "not-set-up" || Translation.failure == "key" || Translation.failure == "address") {
+                Translation.open-settings();
+            } else {
+                Translation.translate();
+            }
+        }
+    }
+
+    more := ContextMenuArea {
+        visible: root.has-menu;
+        x: action.x + action.width + 8px;
+        y: action.y;
+        width: root.button-height;
+        height: root.button-height;
+        ToolbarIconButton {
+            width: parent.width;
+            height: parent.height;
+            compact: root.compact;
+            icon: @image-url("icons/lucide/outline/kebab-horizontal.svg");
+            icon-color: root.text-color;
+            tooltip-text: @tr("Translation options");
+            clicked => { more.show({ x: 0px, y: self.height }); }
+        }
+        Menu {
+            MenuItem {
+                title: Translation.always ? @tr("Stop always translating {}", Translation.language-name) : @tr("Always translate {}", Translation.language-name);
+                enabled: Translation.language-name != "";
+                activated => { Translation.choose(Translation.always ? "ask" : "always"); }
+            }
+            MenuItem {
+                title: @tr("Never translate {}", Translation.language-name);
+                enabled: Translation.language-name != "" && Translation.state == "offer";
+                activated => { Translation.choose("never"); }
+            }
+            MenuItem {
+                title: @tr("Translation settings…");
+                activated => { Translation.open-settings(); }
+            }
+        }
+    }
+}
+
+// A field with its name above it, which stays when the field is filled.
+component Field inherits VerticalLayout {
+    in property <string> label;
+    in property <string> placeholder;
+    in property <bool> secret: false;
+    in property <color> label-color;
+    in-out property <string> text;
+    callback edited();
+    spacing: 4px;
+    Text {
+        text: root.label;
+        color: root.label-color;
+        font-size: TypeScale.caption;
+        wrap: word-wrap;
+    }
+    LineEdit {
+        height: 36px;
+        text <=> root.text;
+        input-label: root.label;
+        placeholder-text: root.placeholder;
+        input-type: root.secret ? InputType.password : InputType.text;
+        edited => { root.edited(); }
+    }
+}
+
+// The languages on one of the lists, each with a way to take it off.
+component LanguageList inherits VerticalLayout {
+    in property <string> heading;
+    in property <[TranslationLanguage]> languages;
+    in property <color> heading-color;
+    in property <color> text-color;
+    spacing: 6px;
+    Text {
+        text: root.heading;
+        color: root.heading-color;
+        font-weight: 600;
+        wrap: word-wrap;
+    }
+    for language in root.languages : HorizontalLayout {
+        spacing: 12px;
+        Text {
+            text: language.name;
+            color: root.text-color;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Button {
+            width: max(80px, self.content-width);
+            text: @tr("Remove");
+            accessible-label: @tr("Remove {}", language.name);
+            clicked => { Translation.forget(language.code); }
+        }
+    }
+}
+
+// Settings → Translation: the service, then what is translated into what.
+export component TranslationPage inherits VerticalLayout {
+    in property <bool> compact: false;
+    // The page shows, which brings what it lists up to date.
+    in property <bool> shown: false;
+    in property <color> surface;
+    in property <color> border-subtle;
+    in property <color> heading;
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> faint-text;
+    in property <color> error-color;
+
+    private property <string> key: "";
+    private property <bool> needs-key: Translation.service-index == 1;
+    // Opens Settings → AI, where a model's server is set up.
+    callback open-ai();
+    private property <bool> service-changed: false;
+
+    changed shown => {
+        if self.shown {
+            Translation.refresh();
+        }
+    }
+
+    spacing: 14px;
+
+    Text {
+        text: @tr("Translate messages in other languages with a service you choose. Nothing is sent until you translate a message, or ask for a language to be translated always.");
+        color: root.secondary-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+
+    Rectangle {
+        height: max(120px, service-box.preferred-height);
+        background: root.surface;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.border-subtle;
+        service-box := VerticalBox {
+            padding-top: 15px;
+            padding-right: 20px;
+            padding-bottom: 15px;
+            padding-left: 20px;
+            spacing: 8px;
+
+            Text { text: @tr("Service"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+            SettingsSelectRow {
+                compact: root.compact;
+                title: @tr("Translate with");
+                description: Translation.service-index == 1
+                    ? @tr("DeepL translates with your API key. With a free key, DeepL's terms let it keep the text and don't allow personal data, which mail usually holds. With a paid key, DeepL keeps the text only as long as it needs to translate it and doesn't use it to improve its services.")
+                    : Translation.service-index == 2
+                    ? @tr("Your LibreTranslate server, or libretranslate.com with a key, receives the text you translate.")
+                    : Translation.service-index == 3
+                    ? @tr("The AI server in Settings → AI translates, and receives the text you translate. Ollama or LM Studio on this computer keeps it here.")
+                    : @tr("Messages aren't translated.");
+                choices: [@tr("None"), "DeepL", "LibreTranslate", @tr("AI model")];
+                selected-index <=> Translation.service-index;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                selected(index, value) => {
+                    root.key = "";
+                    Translation.choose-service(index);
+                }
+            }
+
+            if Translation.service-index == 2 : Field {
+                label: @tr("Server address");
+                placeholder: "https://libretranslate.com";
+                label-color: root.secondary-text;
+                text <=> Translation.libretranslate-url;
+                edited => { root.service-changed = true; }
+            }
+            // A model is the AI server's, set up in its own section.
+            if Translation.service-index == 3 : HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: Ai.ready ? @tr("Translates with {} on {}.", Ai.model, Ai.url)
+                        : @tr("Set up an AI server to translate with a model.");
+                    color: root.body-text;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+                Button {
+                    width: max(96px, self.content-width);
+                    text: @tr("AI settings");
+                    clicked => { root.open-ai(); }
+                }
+            }
+            if Translation.service-index > 0 && Translation.service-index < 3 && Translation.key-saved : HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: @tr("A key is saved.");
+                    color: root.body-text;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+                Button {
+                    width: max(80px, self.content-width);
+                    text: @tr("Remove key");
+                    clicked => { Translation.remove-key(); }
+                }
+            }
+            if Translation.service-index > 0 && Translation.service-index < 3 && !Translation.key-saved : Field {
+                label: root.needs-key ? @tr("API key") : @tr("API key, if the server asks for one");
+                placeholder: "";
+                secret: true;
+                label-color: root.secondary-text;
+                text <=> root.key;
+                edited => { root.service-changed = true; }
+            }
+            if Translation.service-index > 0 && Translation.service-index < 3 : HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                Button {
+                    width: max(96px, self.content-width);
+                    primary: true;
+                    text: @tr("Save");
+                    enabled: Translation.settings-state != "saving"
+                        && (Translation.service-index != 1 || Translation.key-saved || root.key != "")
+                        && (Translation.service-index != 2 || Translation.libretranslate-url != "");
+                    clicked => {
+                        Translation.save(root.key);
+                        root.key = "";
+                        root.service-changed = false;
+                    }
+                }
+                Text {
+                    text: Translation.settings-state == "saving" ? @tr("Checking the service…")
+                        : Translation.settings-state == "ready" && !root.service-changed ? @tr("The service is ready.")
+                        : "";
+                    color: root.faint-text;
+                    font-size: TypeScale.secondary;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+            if Translation.settings-state == "failed" : Text {
+                text: TranslationWords.failure(Translation.settings-failure, Translation.settings-detail, "", true);
+                color: root.error-color;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    if Translation.service-index > 0 : Rectangle {
+        height: max(120px, messages-box.preferred-height);
+        background: root.surface;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.border-subtle;
+        messages-box := VerticalBox {
+            padding-top: 15px;
+            padding-right: 20px;
+            padding-bottom: 15px;
+            padding-left: 20px;
+            spacing: 8px;
+
+            Text { text: @tr("Messages"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+            SettingsSelectRow {
+                compact: root.compact;
+                title: @tr("Translate into");
+                description: @tr("The language translations are written in.");
+                choices: Translation.target-choices;
+                selected-index <=> Translation.target-index;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                selected(index, value) => { Translation.choose-target(index); }
+            }
+            Rectangle { height: 1px; background: root.border-subtle; }
+            SettingsSwitchRow {
+                compact: root.compact;
+                title: @tr("Offer to translate");
+                description: @tr("Show a bar above messages in languages you don't read. The language is found on this device.");
+                checked <=> Translation.offer;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                toggled(checked) => { Translation.offer-toggled(checked); }
+            }
+            if Translation.always-languages.length > 0 : Rectangle { height: 1px; background: root.border-subtle; }
+            if Translation.always-languages.length > 0 : LanguageList {
+                heading: @tr("Always translated");
+                languages: Translation.always-languages;
+                heading-color: root.body-text;
+                text-color: root.secondary-text;
+            }
+            if Translation.never-languages.length > 0 : Rectangle { height: 1px; background: root.border-subtle; }
+            if Translation.never-languages.length > 0 : LanguageList {
+                heading: @tr("Never translated");
+                languages: Translation.never-languages;
+                heading-color: root.body-text;
+                text-color: root.secondary-text;
+            }
+        }
+    }
+}

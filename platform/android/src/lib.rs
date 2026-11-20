@@ -120,6 +120,11 @@ fn android_main(app: slint::android::AndroidApp) {
     // SAFETY: AndroidApp owns these live VM and Activity references.
     unsafe { tls::initialize(app.vm_as_ptr().cast(), app.activity_as_ptr().cast()) }
         .expect("failed to initialize Android TLS certificate verification");
+    // SAFETY: AndroidApp owns the live process VM.
+    match unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) } {
+        Ok(vm) => proxy::install(vm),
+        Err(error) => tracing::warn!(%error, "the system's proxy settings are unavailable"),
+    }
     let internal = app
         .internal_data_path()
         .expect("Android did not provide an app-private data directory");
@@ -191,6 +196,8 @@ mod memory;
 mod motion;
 #[cfg(target_os = "android")]
 mod pdf;
+#[cfg(target_os = "android")]
+mod proxy;
 #[cfg(target_os = "android")]
 mod spelling;
 #[cfg(target_os = "android")]

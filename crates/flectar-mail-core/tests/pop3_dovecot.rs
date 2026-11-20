@@ -61,6 +61,7 @@ async fn seed(subjects: &[&str]) {
 
 fn server(port: u16, security: ConnectionSecurity) -> pop3::Server<'static> {
     pop3::Server {
+        owner: flectar_mail_core::net::proxy::Owner::App,
         host: "127.0.0.1",
         port,
         security,

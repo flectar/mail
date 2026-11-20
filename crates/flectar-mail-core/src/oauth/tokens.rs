@@ -9,6 +9,7 @@
 use crate::accounts::credentials::{self, CredentialStoreHandle, Slot};
 use crate::error::{CoreError, Result};
 use crate::models::Provider;
+use crate::net::proxy::{Owner, SharedClient};
 use crate::oauth::providers::for_provider;
 use crate::oauth::redirect::OAuthRedirectBrokerHandle;
 use base64::Engine;
@@ -298,7 +299,7 @@ impl TokenProvider {
             form.push(("client_secret".to_string(), cs));
         }
 
-        let body = post_form(cfg.token_url, &form).await?;
+        let body = post_form(Owner::Account(account_id), cfg.token_url, &form).await?;
         let tok: TokenResponse = serde_json::from_str(&body).map_err(|_| {
             // invalid_grant / consent_required => the scope was never granted.
             if token_error_requires_reauth(&body) {
@@ -365,7 +366,7 @@ impl TokenProvider {
             form.push(("client_secret".to_string(), cs));
         }
 
-        let body = post_form(cfg.token_url, &form).await?;
+        let body = post_form(Owner::Account(account_id), cfg.token_url, &form).await?;
         let tok: TokenResponse = serde_json::from_str(&body).map_err(|_| {
             if token_error_requires_reauth(&body) {
                 CoreError::NeedsReauth
@@ -528,22 +529,20 @@ mod platform_marker_tests {
 /// Bounded OAuth form POST. Gmail's REST provider already brings in reqwest;
 /// using it here gives token exchange robust HTTP framing, connection pooling,
 /// proxy support and a hard deadline instead of waiting forever on a silent
-/// identity endpoint.
-pub async fn post_form(url: &str, form: &[(String, String)]) -> Result<String> {
+/// identity endpoint. It goes through the proxy of `owner`: the account whose
+/// token is refreshed, or the app while an account signs in.
+pub async fn post_form(owner: Owner, url: &str, form: &[(String, String)]) -> Result<String> {
     const MAX_OAUTH_RESPONSE_BODY_BYTES: usize = 1024 * 1024;
-    static HTTP: once_cell::sync::Lazy<std::result::Result<reqwest::Client, String>> =
-        once_cell::sync::Lazy::new(|| {
-            reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(15))
-                .timeout(std::time::Duration::from_secs(30))
-                .redirect(reqwest::redirect::Policy::none())
-                .user_agent(concat!("Flectar-Mail/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .map_err(|error| format!("OAuth HTTP client configuration failed: {error}"))
-        });
-    let http = HTTP
-        .as_ref()
-        .map_err(|message| CoreError::Network(message.clone()))?;
+    static HTTP: SharedClient = SharedClient::new(|builder| {
+        builder
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(concat!("Flectar-Mail/", env!("CARGO_PKG_VERSION")))
+    });
+    let http = HTTP.get(owner).map_err(|error| {
+        CoreError::Network(format!("OAuth HTTP client configuration failed: {error}"))
+    })?;
     let response = http.post(url).form(form).send().await.map_err(|error| {
         if error.is_timeout() || error.is_connect() {
             CoreError::Offline

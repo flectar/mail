@@ -5,7 +5,7 @@
 //! sync is done with new-UID fetches, windowed flag polls, and UID-set
 //! reconciliation, which is correct on every server.
 
-use crate::error::{CoreError, Result};
+use crate::error::{CoreError, LimitKind, Result};
 use crate::mime::{self, MimePlan};
 use crate::net::{self, MailStream};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
@@ -182,7 +182,35 @@ pub(crate) fn command_error(error: async_imap::error::Error) -> CoreError {
 }
 
 fn refusal(reply: ServerReply) -> CoreError {
-    CoreError::ImapRefused(reply.to_string())
+    match LimitKind::in_text(&reply.text) {
+        // Only words that clearly ask to slow down count here: a code alone
+        // can be about the command, as LIMIT is about too many flags in RFC
+        // 5530's own example.
+        Some(kind) => CoreError::RateLimited {
+            service: "the server".to_owned(),
+            kind,
+            retry_after: suggested_backoff(&reply.text),
+            detail: reply.to_string(),
+        },
+        None => CoreError::ImapRefused(reply.to_string()),
+    }
+}
+
+/// The wait Exchange Online names when it throttles a connection, as in
+/// "Request is throttled. Suggested Backoff Time: 165839 milliseconds".
+fn suggested_backoff(text: &str) -> Option<std::time::Duration> {
+    let text = text.to_ascii_lowercase();
+    let rest = text.split_once("suggested backoff time:")?.1.trim_start();
+    let digits = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .map_or(rest, |end| &rest[..end]);
+    let amount: u64 = digits.parse().ok()?;
+    let unit = rest[digits.len()..].trim_start();
+    Some(if unit.starts_with("ms") || unit.starts_with("milli") {
+        std::time::Duration::from_millis(amount)
+    } else {
+        std::time::Duration::from_secs(amount)
+    })
 }
 
 /// The response code at the start of a reply's text, such as UNAVAILABLE in
@@ -238,6 +266,10 @@ enum SignInFailure {
     Unavailable(ServerReply),
     /// Another response code: a server problem new credentials won't fix.
     Refused(ServerReply),
+    /// The server asked to wait: too many connections or requests for now,
+    /// or the mailbox in use (LIMIT, INUSE, or words that say so, even in
+    /// an ALERT). Signing in again at once would only count against it.
+    Limited(ServerReply, LimitKind),
     /// The username or password has a line break, so nothing was sent.
     Unsendable,
     /// The connection failed before the server answered. Not a refusal.
@@ -253,12 +285,19 @@ impl SignInFailure {
             Error::Validate(_) => return Self::Unsendable,
             error => return Self::Transport(error.to_string()),
         };
+        if let Some(kind) = LimitKind::in_text(&reply.text) {
+            return Self::Limited(reply, kind);
+        }
         match reply.code.as_deref() {
             _ if reply.bad => Self::Rejected(reply),
             None | Some("AUTHENTICATIONFAILED" | "AUTHORIZATIONFAILED" | "EXPIRED" | "ALERT") => {
                 Self::Rejected(reply)
             }
             Some("UNAVAILABLE") => Self::Unavailable(reply),
+            // At sign-in these are about the account, not a command: Dovecot
+            // 2.4 refuses connections over its limit with LIMIT.
+            Some("LIMIT") => Self::Limited(reply, LimitKind::Requests),
+            Some("INUSE") => Self::Limited(reply, LimitKind::Busy),
             Some(_) => Self::Refused(reply),
         }
     }
@@ -271,7 +310,9 @@ impl SignInFailure {
     /// pointless, and every try counts against the server's lockout limits.
     fn allows_login_after_plain(&self, credentials_sent: bool) -> bool {
         match self {
-            Self::Transport(_) | Self::Unavailable(_) | Self::Unsendable => false,
+            Self::Transport(_) | Self::Unavailable(_) | Self::Limited(..) | Self::Unsendable => {
+                false
+            }
             _ if !credentials_sent => true,
             Self::Rejected(reply) => reply.bad || reply.code.is_none(),
             Self::Refused(_) => false,
@@ -303,6 +344,12 @@ impl SignInFailure {
                 "{host} refused the sign-in for {user}{}",
                 reply.quoted(target.encrypted)
             )),
+            Self::Limited(reply, kind) => CoreError::RateLimited {
+                service: host.to_owned(),
+                kind,
+                retry_after: suggested_backoff(&reply.text),
+                detail: reply.to_string(),
+            },
             Self::Unsendable => CoreError::Auth(format!(
                 "the username or password for {host} has a line break, which can't be sent"
             )),
@@ -501,7 +548,8 @@ where
     }
 }
 
-/// Connect with TLS from the first byte, trusting only the system roots.
+/// Connect with TLS from the first byte, trusting only the system roots,
+/// through the app's proxy.
 pub async fn connect(host: &str, port: u16, creds: ImapCredentials) -> Result<Session> {
     use crate::models::{ConnectionSecurity, MailConnectionSettings};
     connect_with_settings(
@@ -513,7 +561,19 @@ pub async fn connect(host: &str, port: u16, creds: ImapCredentials) -> Result<Se
     .await
 }
 
+/// Connect as `settings` say, through the app's proxy.
 pub async fn connect_with_settings(
+    host: &str,
+    port: u16,
+    creds: ImapCredentials,
+    settings: &crate::models::MailConnectionSettings,
+) -> Result<Session> {
+    connect_as(net::proxy::Owner::App, host, port, creds, settings).await
+}
+
+/// Connect as `settings` say, through the proxy of `owner`.
+pub async fn connect_as(
+    owner: net::proxy::Owner,
     host: &str,
     port: u16,
     creds: ImapCredentials,
@@ -523,15 +583,19 @@ pub async fn connect_with_settings(
     // greeting, or an AUTHENTICATE that never gets a tagged response) surfaces
     // as an error instead of hanging the sync actor forever.
     const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-    tokio::time::timeout(CONNECT_TIMEOUT, connect_inner(host, port, creds, settings))
-        .await
-        .map_err(|_| {
-            tracing::warn!(%host, port, "imap connect: timed out after 30s");
-            CoreError::Imap(format!("connect {host}:{port}: timed out"))
-        })?
+    tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        connect_inner(owner, host, port, creds, settings),
+    )
+    .await
+    .map_err(|_| {
+        tracing::warn!(%host, port, "imap connect: timed out after 30s");
+        CoreError::Imap(format!("connect {host}:{port}: timed out"))
+    })?
 }
 
 async fn connect_inner(
+    owner: net::proxy::Owner,
     host: &str,
     port: u16,
     creds: ImapCredentials,
@@ -545,7 +609,12 @@ async fn connect_inner(
         ));
     }
     let connector = net::tls::connector(&settings.trusted_certificate_pem)?;
-    let tcp = net::connect_tcp(host, port)
+    let scheme = if security == ConnectionSecurity::Tls {
+        "imaps"
+    } else {
+        "imap"
+    };
+    let tcp = net::proxy::connect_for(owner, scheme, host, port)
         .await
         .map_err(|e| CoreError::Imap(format!("connect {host}:{port}: {e}")))?;
     let stream = match security {
@@ -2337,10 +2406,11 @@ mod tests {
     use super::{
         MIME_PLAN_QUERY, PLAIN_UNUSABLE, ServerReply, SignInCapabilities, SignInFailure,
         SignInTarget, command_error, normalized_uid_set, plain_unusable_key, section_fetch_query,
-        section_paths,
+        section_paths, suggested_backoff,
     };
-    use crate::error::CoreError;
+    use crate::error::{CoreError, LimitKind};
     use base64::Engine as _;
+    use std::time::Duration;
 
     #[test]
     fn idle_pushes_name_what_changed() {
@@ -2458,6 +2528,77 @@ mod tests {
                     "[CONTACTADMIN] Account suspended",
                 )),
             ),
+            // Gmail's limits come as an ALERT, which isn't about the password.
+            (
+                "NO [ALERT] Account exceeded command or bandwidth limits. (Failure)",
+                SignInFailure::Limited(
+                    reply(
+                        false,
+                        Some("ALERT"),
+                        "Account exceeded command or bandwidth limits. (Failure)",
+                    ),
+                    LimitKind::Requests,
+                ),
+            ),
+            (
+                "NO [ALERT] Too many simultaneous connections. (Failure)",
+                SignInFailure::Limited(
+                    reply(
+                        false,
+                        Some("ALERT"),
+                        "Too many simultaneous connections. (Failure)",
+                    ),
+                    LimitKind::Connections,
+                ),
+            ),
+            // Dovecot 2.3 and 2.4 over mail_max_userip_connections.
+            (
+                "NO [UNAVAILABLE] Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)",
+                SignInFailure::Limited(
+                    reply(
+                        false,
+                        Some("UNAVAILABLE"),
+                        "[UNAVAILABLE] Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)",
+                    ),
+                    LimitKind::Connections,
+                ),
+            ),
+            (
+                "NO [LIMIT] Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)",
+                SignInFailure::Limited(
+                    reply(
+                        false,
+                        Some("LIMIT"),
+                        "[LIMIT] Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)",
+                    ),
+                    LimitKind::Connections,
+                ),
+            ),
+            (
+                "NO [LIMIT] Rate limit hit.",
+                SignInFailure::Limited(
+                    reply(false, Some("LIMIT"), "[LIMIT] Rate limit hit."),
+                    LimitKind::Requests,
+                ),
+            ),
+            (
+                "NO [LIMIT] Try again in a while",
+                SignInFailure::Limited(
+                    reply(false, Some("LIMIT"), "[LIMIT] Try again in a while"),
+                    LimitKind::Requests,
+                ),
+            ),
+            (
+                "NO [INUSE] Mailbox is locked by another session",
+                SignInFailure::Limited(
+                    reply(
+                        false,
+                        Some("INUSE"),
+                        "[INUSE] Mailbox is locked by another session",
+                    ),
+                    LimitKind::Busy,
+                ),
+            ),
             // UTF-8, quotes and backslashes come back exactly as sent.
             (
                 "NO [AUTHENTICATIONFAILED] Échec de l'authentification – \"réessayez\" \\o/",
@@ -2551,6 +2692,88 @@ mod tests {
             command_error(async_imap::error::Error::ConnectionLost),
             CoreError::Imap(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_command_refused_for_a_limit_asks_to_wait() {
+        // Exchange Online names the wait.
+        let throttled = "BAD Request is throttled. Suggested Backoff Time: 165839 milliseconds";
+        match command_error(refused_select(throttled).await) {
+            CoreError::RateLimited {
+                kind,
+                retry_after,
+                detail,
+                ..
+            } => {
+                assert_eq!(kind, LimitKind::Requests);
+                assert_eq!(retry_after, Some(Duration::from_millis(165_839)));
+                assert_eq!(detail, throttled);
+            }
+            other => panic!("{other:?}"),
+        }
+        // Yahoo turns down a command once it rate-limits the account.
+        assert!(matches!(
+            command_error(refused_select("NO [LIMIT] Rate limit hit.").await),
+            CoreError::RateLimited {
+                kind: LimitKind::Requests,
+                retry_after: None,
+                ..
+            }
+        ));
+        // A code alone is about the command: LIMIT is about too many flags
+        // in RFC 5530's own example.
+        let flags = "NO [LIMIT] At most 32 flags in one mailbox";
+        match command_error(refused_select(flags).await) {
+            CoreError::ImapRefused(reply) => assert_eq!(reply, flags),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn exchange_names_its_backoff_in_milliseconds_or_seconds() {
+        assert_eq!(
+            suggested_backoff("Request is throttled. Suggested Backoff Time: 2500 milliseconds"),
+            Some(Duration::from_millis(2500))
+        );
+        assert_eq!(
+            suggested_backoff("suggested backoff time: 30 s"),
+            Some(Duration::from_secs(30))
+        );
+        assert_eq!(suggested_backoff("Request is throttled."), None);
+        assert_eq!(suggested_backoff("Suggested Backoff Time: soon"), None);
+    }
+
+    #[test]
+    fn a_limit_at_sign_in_is_not_a_wrong_password() {
+        let error = SignInFailure::Limited(
+            reply(
+                false,
+                Some("ALERT"),
+                "Account exceeded command or bandwidth limits. (Failure)",
+            ),
+            LimitKind::Requests,
+        )
+        .into_error(TARGET, "jane@example.com");
+        match error {
+            CoreError::RateLimited {
+                service,
+                kind,
+                retry_after,
+                ..
+            } => {
+                assert_eq!(service, "mail.example.com");
+                assert_eq!(kind, LimitKind::Requests);
+                assert_eq!(retry_after, None);
+            }
+            other => panic!("{other:?}"),
+        }
+        // A limit never goes on to try LOGIN after AUTHENTICATE PLAIN.
+        let limited = SignInFailure::Limited(
+            reply(false, Some("LIMIT"), "[LIMIT] Rate limit hit."),
+            LimitKind::Requests,
+        );
+        assert!(!limited.allows_login_after_plain(true));
+        assert!(!limited.allows_login_after_plain(false));
     }
 
     #[test]

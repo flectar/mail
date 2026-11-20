@@ -87,6 +87,9 @@ pub enum CoreEvent {
         account_id: i64,
         sync_state: String,
         sync_error: Option<String>,
+        /// When sync asks the server again, while it waits because the
+        /// server asked it to (#251).
+        sync_retry_at: Option<i64>,
     },
     /// What the app knows of an account's automatic replies changed, read
     /// from its server or saved to it.

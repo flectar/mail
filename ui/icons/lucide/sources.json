@@ -132,6 +132,9 @@
     "gear.svg": {
       "source": "settings"
     },
+    "globe.svg": {
+      "source": "globe"
+    },
     "highlight.svg": {
       "source": "highlighter"
     },
@@ -152,6 +155,9 @@
     },
     "key.svg": {
       "source": "key-round"
+    },
+    "languages.svg": {
+      "source": "languages"
     },
     "link.svg": {
       "source": "link-2"
@@ -233,6 +239,9 @@
     },
     "sidebar-expand.svg": {
       "source": "panel-left-open"
+    },
+    "sparkles.svg": {
+      "source": "sparkles"
     },
     "star.svg": {
       "source": "star"
@@ -488,6 +497,10 @@
       "path": "sources/forward.svg",
       "sha256": "ea4c6a34e7af10eed97a004a490a347436680a0c41e339c60f6b9baa1bb5a431"
     },
+    "globe": {
+      "path": "sources/globe.svg",
+      "sha256": "73213c861a1fa5edc0619b20c4cc379ab026f7bdbe05583fdb5dcdfd5af61bdb"
+    },
     "highlighter": {
       "path": "sources/highlighter.svg",
       "sha256": "d71e283dc6768893a152fdf2a457cc01494c48e56865cb3efe61550261d2fc0d"
@@ -519,6 +532,10 @@
     "keyboard": {
       "path": "sources/keyboard.svg",
       "sha256": "63884c1187505b19d2ca05c814df18c893395f118c9280e6fdba65216c36f3a7"
+    },
+    "languages": {
+      "path": "sources/languages.svg",
+      "sha256": "1c0d6aa266b7ddf63fbd19b2ea15d8a065c8e16e98d678069ad37df82921d873"
     },
     "layers-3": {
       "path": "sources/layers-3.svg",
@@ -643,6 +660,10 @@
     "sliders-horizontal": {
       "path": "sources/sliders-horizontal.svg",
       "sha256": "3acbaa175400c6abc1ef34f59333d13b7f7c96ef584362ff9f30f7944d45df70"
+    },
+    "sparkles": {
+      "path": "sources/sparkles.svg",
+      "sha256": "61946c30025875e471afc11f3b209e556992551819ed8dc72edd1d5cf8663886"
     },
     "square-pen": {
       "path": "sources/square-pen.svg",

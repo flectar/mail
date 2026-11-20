@@ -36,6 +36,7 @@
 /crates/i-slint-renderer-software/Cargo.lock
 /crates/fontique/Cargo.lock
 /crates/vello/Cargo.lock
+/crates/jmap-client/Cargo.lock
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/

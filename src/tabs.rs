@@ -23,14 +23,17 @@ const SAVE_DELAY: Duration = Duration::from_millis(500);
 const READER_POLL: Duration = Duration::from_millis(50);
 const READER_DEADLINE: Duration = Duration::from_secs(10);
 /// Settings pages a tab can reopen: the `settings_tab` values of the UI.
-const SETTINGS_PAGES: [&str; 9] = [
+const SETTINGS_PAGES: [&str; 12] = [
     "General",
     "Accounts",
     "Contacts",
     "Rules",
+    "Translation",
+    "AI",
     "Notifications",
     "Shortcuts",
     "Data",
+    "Network",
     "Services",
     "About",
 ];
@@ -2556,6 +2559,7 @@ mod tests {
             mail_protocol: MailProtocol::Imap,
             sync_state: "idle".into(),
             sync_error: None,
+            sync_retry_at: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
             caught_up_at: None,

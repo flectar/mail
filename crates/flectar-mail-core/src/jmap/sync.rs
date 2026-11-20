@@ -11,9 +11,10 @@ use crate::models::{
     ServerSearchCursor, now_ms, roles,
 };
 use crate::sync::engine::{
-    PriorityFetchCmd, SERVER_SEARCH_PAGES, ServerHits, SyncCmd, SyncCtx, caught_up,
-    configured_sync_interval, set_state, set_state_error,
+    PauseEnd, PriorityFetchCmd, SERVER_SEARCH_PAGES, ServerHits, SyncCmd, SyncCtx, caught_up,
+    check_interval, note_limit, set_state, set_state_error, wait_for_turn, wait_out_pause,
 };
+use crate::sync::pacing;
 use futures::{FutureExt, Stream, StreamExt};
 use jmap_client::core::error::MethodErrorType;
 use jmap_client::core::query::QueryResponse;
@@ -132,7 +133,9 @@ async fn actor(
     mut settings: watch::Receiver<crate::models::AccountSettings>,
 ) {
     let mut waiters = Vec::new();
-    let mut retry = 1u64;
+    // Waits after failures other than the server asking to wait. Those the
+    // account's pace keeps.
+    let mut backoff = pacing::Backoff::default();
     let mut identities_synced_at: Option<std::time::Instant> = None;
     // Mail that came in before this worker started is caught up on silently.
     let live_since = crate::sync::ingest::live_since(now_ms());
@@ -140,7 +143,15 @@ async fn actor(
     // Kept from one sync to the next, with its connection. A failed sync or a
     // changed Session makes the next one connect again.
     let mut session: Option<ConnectedClient> = None;
+    // Accounts that start together take turns.
+    if !wait_for_turn(&ctx, config.id, &mut rx, &mut waiters).await {
+        return;
+    }
     loop {
+        // Keep a wait the server asked for.
+        if wait_out_pause(&ctx, config.id, &mut rx, &mut waiters).await == PauseEnd::Shutdown {
+            return;
+        }
         while let Ok(cmd) = rx.try_recv() {
             match cmd {
                 SyncCmd::Shutdown => return,
@@ -203,38 +214,49 @@ async fn actor(
             Ok::<ConnectedClient, CoreError>(connected)
         }
         .await;
-        let connected = match outcome {
+        // The next check as the account's settings say, varied a little so
+        // accounts don't check together; none when it checks only when asked.
+        let interval = check_interval(&ctx.db, &config.settings).await;
+        let (connected, delay) = match outcome {
             Ok(connected) => {
-                retry = 1;
+                backoff.reset();
+                ctx.pace.account(config.id).reached();
                 set_state(&ctx, config.id, "idle").await;
                 ctx.bus.emit(CoreEvent::NetworkState { online: true });
                 finish_waiters(&mut waiters, Ok(()));
-                Some(connected)
+                (Some(connected), interval.map(pacing::varied))
             }
             Err(error @ (CoreError::Auth(_) | CoreError::NeedsReauth)) => {
                 set_state(&ctx, config.id, "needs_reauth").await;
                 finish_waiters(&mut waiters, Err(error.to_string()));
-                None
+                (None, interval.map(pacing::varied))
+            }
+            Err(error @ CoreError::RateLimited { .. }) => {
+                // The wait at the top answers the checks waiting for this one.
+                tracing::warn!(account_id = config.id, %error, "JMAP: the server asked to wait");
+                note_limit(&ctx, config.id, &error);
+                continue;
             }
             Err(error) => {
                 let message = error.to_string();
                 set_state_error(&ctx, config.id, "offline", &message).await;
                 ctx.bus.emit(CoreEvent::NetworkState { online: false });
                 finish_waiters(&mut waiters, Err(message));
-                retry = (retry * 2).min(300);
-                None
+                // Never later than the next check would be.
+                let retry = backoff.after(&error).duration;
+                (
+                    None,
+                    Some(interval.map_or(retry, |interval| interval.min(retry))),
+                )
             }
         };
-        let normal = configured_sync_interval(&ctx.db).await;
-        let delay = if retry == 1 {
-            normal
-        } else {
-            std::time::Duration::from_secs(retry)
-        };
-        let deadline = tokio::time::sleep(delay);
+        let deadline = tokio::time::sleep(delay.unwrap_or(std::time::Duration::MAX));
         tokio::pin!(deadline);
         let mut push = None;
-        if let Some(connected) = &connected {
+        // An account set not to use push checks at its interval instead.
+        if let Some(connected) = &connected
+            && pacing::push(&config.settings)
+        {
             // RFC 8620 EventSource gives Stalwart an immediate new-mail path;
             // the selected periodic interval remains the correctness backstop.
             match connected
@@ -2096,6 +2118,11 @@ async fn execute_actions(ctx: &SyncCtx, config: &AccountConfig, c: &ConnectedCli
                         repo::actions::bump_attempt(conn, action_id, now_ms() + 60_000, &message)
                     })
                     .await?;
+                return Err(error);
+            }
+            Err(error @ CoreError::RateLimited { .. }) => {
+                // The pass stops, so the account waits as a whole.
+                crate::queue::defer_limited(ctx, action_id, &error).await?;
                 return Err(error);
             }
             Err(error @ CoreError::SendUncertain(_)) => {

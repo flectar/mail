@@ -1,18 +1,20 @@
-# Fedora RPM support
+# RPM support
 
-The release RPM supports Fedora 43 and 44, x86_64. Build on the oldest
-supported Fedora (43) and validate the exact resulting artifact on every
-supported version. Building on a newer Fedora can introduce unavailable ELF
+The release RPM supports Fedora 43 and 44, openSUSE Tumbleweed and Leap 16.0,
+and Enterprise Linux 10, on x86_64 and aarch64. Build on the oldest supported
+Fedora (43) and validate the exact resulting artifact on every supported
+distribution. Building on a newer Fedora can introduce unavailable ELF
 symbol requirements even when the source and explicit `Requires` do not
 change; alpha.7's Fedora 44 build required `GLIBC_2.43` from libm and failed
 to install on Fedora 43.
 
 `.github/workflows/native-platforms.yml` separates the build from the runtime
-matrix. The latter starts clean Fedora containers without build dependencies,
+matrix. The latter starts clean containers without build dependencies,
 installs the RPM with weak dependencies disabled, checks dynamically loaded
 display libraries before installing desktop test tools, renders PDF fixtures as an
 unprivileged user, checks desktop metadata, renders an application frame on
-X11 and Wayland, and verifies removal. Publication requires the whole matrix
+X11 and Wayland (Wayland only on Enterprise Linux 10, which has no X server),
+and verifies removal. Publication requires the whole matrix
 to pass. Transaction logs, requirements, the installed package list, and
 startup results are retained as CI artifacts. Headless tests cover the default
 CPU renderer; they do not replace manual KDE Discover or hardware GPU checks.
@@ -28,13 +30,27 @@ docker run --rm \
   bash /work/scripts/test-rpm.sh /work/target/rpm/flectar-mail.rpm /results
 ```
 
-Repeat with `fedora:44`. The test script changes system packages and creates a
-test user, so run it only in a disposable container.
+Repeat with `fedora:44`, `opensuse/tumbleweed`, `opensuse/leap:16.0` and
+`almalinux:10`. The test script changes system packages and creates a test
+user, so run it only in a disposable container.
+
+The display and font libraries that Slint and winit load at runtime are
+required by soname, such as `libX11.so.6()(64bit)`, rather than by package
+name. Fedora calls the package `libX11` and openSUSE `libX11-6`, but both
+provide the soname, so one RPM resolves on either. Packages without a library
+to name, such as GnuPG (`gnupg2` on Fedora, `gpg2` on openSUSE), use a rich
+dependency that accepts either name.
+
+The newest glibc symbol version the executable needs decides the oldest
+distribution it can install on. The Fedora 43 build currently needs glibc
+2.39, which Enterprise Linux 10 and Leap 16.0 have; Enterprise Linux 9 ships
+2.34 and cannot install it. `requires.txt` in each runtime artifact lists the
+versions in use.
 
 When changing supported versions, update the runtime matrix, build container,
-Fedora-specific Cargo cache key, README translations, and generated release
-notes together. Add a new Fedora version to the matrix before advertising
-support. Keep the oldest supported version as the build baseline until its
+Fedora-specific Cargo cache key, README translations, `docs/install.md`, and
+generated release notes together. Add a new distribution to the matrix before
+advertising support. Keep the oldest supported version as the build baseline until its
 support is deliberately retired. If native dependencies diverge so that one
 RPM cannot pass the matrix, publish separately labelled per-release builds.
 

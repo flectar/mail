@@ -18,6 +18,33 @@ const MAX_ATTEMPTS: i64 = 8;
 const MAX_ACTIONS_PER_SLICE: i64 = 20;
 const MAX_SLICE_DURATION: Duration = Duration::from_secs(2);
 const OFFLINE_SEND_RETRY_DELAY: Duration = Duration::from_secs(30);
+/// How long an action waits when the server asked to slow down without
+/// saying for how long. The account's own backoff decides when it asks again.
+const RATE_LIMITED_ACTION_DELAY: Duration = Duration::from_secs(60);
+
+/// The server asked to wait before action `action_id` could run, with
+/// `error`. The action keeps its attempts and runs once the wait is over.
+pub(crate) async fn defer_limited(ctx: &SyncCtx, action_id: i64, error: &CoreError) -> Result<()> {
+    let wait = match error {
+        CoreError::RateLimited {
+            retry_after: Some(wait),
+            ..
+        } => (*wait).min(crate::sync::pacing::NAMED_MOST),
+        _ => RATE_LIMITED_ACTION_DELAY,
+    };
+    let retry_at = now_ms().saturating_add(i64::try_from(wait.as_millis()).unwrap_or(i64::MAX));
+    let message = error.to_string();
+    let saved = message.clone();
+    ctx.db
+        .write(move |conn| repo::actions::defer_offline(conn, action_id, retry_at, &saved))
+        .await?;
+    ctx.bus.emit(CoreEvent::ActionState {
+        action_id,
+        state: "retrying".into(),
+        error: Some(message),
+    });
+    Ok(())
+}
 
 /// Outcome of one fair pending-action execution slice.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -160,6 +187,11 @@ async fn execute_actions(
                     })
                     .await?;
                 return Err(CoreError::NeedsReauth);
+            }
+            Err(e @ CoreError::RateLimited { .. }) => {
+                // This slice stops so the account backs off as a whole.
+                defer_limited(ctx, action_id, &e).await?;
+                return Err(e);
             }
             Err(e) => {
                 let msg = e.to_string();

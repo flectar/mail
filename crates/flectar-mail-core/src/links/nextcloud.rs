@@ -4,6 +4,7 @@
 use super::err;
 use crate::error::Result;
 use crate::files::transport::{Transport, validated_url};
+use crate::net::proxy::Owner;
 use serde_json::Value;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -60,8 +61,10 @@ pub(super) struct Grant {
     pub(super) app_password: String,
 }
 
+/// A storage server belongs to no account, so it goes through the app's
+/// proxy.
 fn anonymous_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+    crate::net::proxy::http_builder(Owner::App)
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
         .user_agent(USER_AGENT)
@@ -176,7 +179,7 @@ pub(super) struct Client {
 
 impl Client {
     pub(super) async fn connect(base: &Url, login_name: &str, app_password: &str) -> Result<Self> {
-        let transport = Transport::new(base.as_str(), login_name, app_password)?;
+        let transport = Transport::new(Owner::App, base.as_str(), login_name, app_password)?;
         let mut client = Self {
             transport,
             base: base.clone(),

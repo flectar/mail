@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/flectar-mail-core", "crates/flectar-spell", "crates/renderer-probe"]
-exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/fontique", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/i-slint-renderer-software", "crates/smithay-clipboard", "crates/spellbook", "crates/vello"]
+exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/fontique", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/i-slint-renderer-software", "crates/jmap-client", "crates/smithay-clipboard", "crates/spellbook", "crates/vello"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -29,6 +29,9 @@ i-slint-renderer-software = { path = "crates/i-slint-renderer-software" }
 fontique = { path = "crates/fontique" }
 # Vello drops Calibri's letters on the GPU; see patches/vello/README.md.
 vello = { path = "crates/vello" }
+# jmap-client makes its own HTTP clients, which can't take the app's proxy; see
+# patches/jmap-client/README.md.
+jmap-client = { path = "crates/jmap-client" }
 
 [package]
 name = "flectar-mail"
@@ -152,6 +155,7 @@ webbrowser = "1.2"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Networking_WinHttp",
     "Win32_Security",
     "Win32_Storage_Packaging_Appx",
     "Win32_System_JobObjects",
@@ -201,8 +205,9 @@ libc = "0.2"
 ashpd = { version = "0.11", default-features = false, features = ["async-std"] }
 # The Flatpak serves `org.freedesktop.Application` for notification clicks
 # with zbus's interface macro, which looks the crate up by name. The same
-# version and backend as ashpd's.
-zbus = { version = "5", default-features = false, features = ["async-io"] }
+# version and backend as ashpd's. The blocking API asks the portal for the
+# system's proxy from code that can't await (src/platform/system_proxy).
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 landlock = "0.4.7"
 seccompiler = "0.5"
 slint = { version = "1.19.0", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
@@ -239,8 +244,9 @@ objc2-service-management = { version = "0.3", default-features = false, features
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
 block2 = { version = "0.6", default-features = false, features = ["std"] }
-# Warms CoreText's Han font lookups off the UI thread (src/han_fallback.rs).
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFDictionary", "CFString"] }
+# Warms CoreText's Han font lookups off the UI thread (src/han_fallback.rs),
+# and reads the system's proxy settings (src/platform/system_proxy).
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray", "CFBase", "CFDate", "CFDictionary", "CFError", "CFNumber", "CFRunLoop", "CFStream", "CFString", "CFURL"] }
 objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFont", "CTFontDescriptor"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSError", "NSSet", "NSString"] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNNotification", "UNNotificationAction", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter", "UNError"] }
