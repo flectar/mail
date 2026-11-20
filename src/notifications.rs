@@ -682,6 +682,16 @@ pub(crate) fn preferences_changed() {
     PREFERENCES.notify_one();
 }
 
+/// Wakes the dispatcher for a [`recount`].
+static RECOUNT: Notify = Notify::const_new();
+
+/// The mail list's grouping, which the app icon's count counts in, or the
+/// language that describes it changed: count again and put the count up
+/// anew, even where the number stays.
+pub(crate) fn recount() {
+    RECOUNT.notify_one();
+}
+
 /// Accounts were removed: their notifications come down now, which also
 /// forgets what they said, rather than at the next daily pruning.
 pub(crate) fn accounts_removed() {
@@ -818,6 +828,10 @@ fn dispatch_through(
                     enabled = now_enabled;
                 }
                 () = FLUSH.notified() => {}
+                () = RECOUNT.notified() => {
+                    // Even the same number may need other words.
+                    badge = None;
+                }
                 () = sleep(wait) => {}
                 () = tokio::time::sleep(PRUNE_EVERY) => {}
             }

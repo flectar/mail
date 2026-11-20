@@ -264,7 +264,8 @@ pub(crate) fn ask_for_permission(app: &AppWindow) {
     });
 }
 
-/// The UI's language changed: relabel what the system keeps registered.
+/// The UI's language changed: relabel what the system keeps registered, and
+/// describe the app icon's count again.
 pub(crate) fn language_changed(app: &AppWindow) {
     WINDOW.with(|window| {
         if let Some(host) = window
@@ -273,6 +274,7 @@ pub(crate) fn language_changed(app: &AppWindow) {
             .and_then(|window| window.host.as_ref())
         {
             host.set_words(&fixed_words(app));
+            super::recount();
         }
     });
 }
