@@ -130,6 +130,7 @@ fn generate_notification_words() {
             "{0} and {n} more",
         ),
         ("", "{n} unread message"),
+        ("", "{n} unread conversation"),
     ];
 
     let mut languages = std::fs::read_dir("lang")
