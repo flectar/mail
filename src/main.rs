@@ -118,6 +118,7 @@ mod tall_surface_tests;
 mod text_size;
 mod theme;
 mod translation;
+mod tray;
 mod ui_dispatch;
 mod ui_message;
 mod undo;

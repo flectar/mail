@@ -157,6 +157,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_Storage_Packaging_Appx",
     "Win32_System_JobObjects",
+    "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_Pipes",
     "Win32_System_Registry",

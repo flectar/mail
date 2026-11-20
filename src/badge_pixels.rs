@@ -1,6 +1,6 @@
 //! The pixels of the unread count where the app draws it itself: over the
-//! taskbar button of a Windows copy without package identity. They follow
-//! the badges Windows 11 draws for packaged apps, a
+//! taskbar button of a Windows copy without package identity, and on the
+//! tray icon. They follow the badges Windows 11 draws for packaged apps, a
 //! disc in the accent colour with the number on it, widened into a pill for
 //! longer numbers. The digits come from a text renderer as a coverage mask;
 //! this sizes them, centres them and lays them on the badge.
@@ -92,6 +92,30 @@ pub(crate) fn centre(width: usize, height: usize, text: &[u8]) -> Vec<u8> {
     centred
 }
 
+/// What a tray icon's badge `height` pixels tall says for `count`. As tall
+/// as Windows' own badges, 16 pixels, it says what they say. On smaller ones
+/// two digits blur into each other, so 9+ stands for more; the tooltip has
+/// the number.
+pub(crate) fn tray_label(count: u32, height: usize) -> String {
+    if height >= 16 {
+        label(count)
+    } else if count > 9 {
+        "9+".to_owned()
+    } else {
+        count.to_string()
+    }
+}
+
+/// How tall the count is on a tray icon `size` pixels square: two thirds of
+/// it, the share Windows 11 gives its badge on a taskbar icon, 16 of 24
+/// pixels, but at least 13. Two thirds of a 16 pixel tray icon, at 100 %
+/// scale, would draw a digit 8 pixels tall and 9+ 7, which blur; 13 draws
+/// them at 9 and 8.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn tray_badge_height(size: usize) -> usize {
+    ((size * 2 + 1) / 3).max(13).min(size)
+}
+
 /// The count on an icon.
 pub(crate) struct Badge {
     /// Its width and height in pixels: a disc for one digit, a pill for
@@ -164,10 +188,58 @@ pub(crate) fn draw(icon: &[u8], size: usize, badge: &Badge) -> Vec<u8> {
     pixels
 }
 
+/// `pixels`, `from` pixels square in RGBA with straight alpha, made `to`
+/// pixels square by averaging the area each new pixel covers. Colours are
+/// weighted by their alpha, so transparent edges don't darken.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn scale_down(pixels: &[u8], from: usize, to: usize) -> Vec<u8> {
+    debug_assert_eq!(pixels.len(), from * from * 4);
+    debug_assert!(to > 0 && to <= from);
+    if to == from {
+        return pixels.to_vec();
+    }
+    let ratio = from as f32 / to as f32;
+    // The old pixels under each new row or column, with how much of each.
+    let spans: Vec<Vec<(usize, f32)>> = (0..to)
+        .map(|new| {
+            let (first, last) = (new as f32 * ratio, (new + 1) as f32 * ratio);
+            (first.floor() as usize..(last.ceil() as usize).min(from))
+                .map(|old| (old, ((old + 1) as f32).min(last) - (old as f32).max(first)))
+                .filter(|&(_, share)| share > 0.0)
+                .collect()
+        })
+        .collect();
+    let mut scaled = vec![0_u8; to * to * 4];
+    for (pixel, index) in scaled.as_chunks_mut::<4>().0.iter_mut().zip(0..) {
+        let (rows, columns) = (&spans[index / to], &spans[index % to]);
+        let (mut colour, mut alpha, mut area) = ([0.0_f32; 3], 0.0_f32, 0.0_f32);
+        for &(y, height) in rows {
+            for &(x, width) in columns {
+                let old = &pixels[(y * from + x) * 4..][..4];
+                let weight = width * height;
+                let opacity = f32::from(old[3]) / 255.0 * weight;
+                for (sum, value) in colour.iter_mut().zip(old) {
+                    *sum += f32::from(*value) * opacity;
+                }
+                alpha += opacity;
+                area += weight;
+            }
+        }
+        if alpha > 0.0 {
+            for (channel, sum) in pixel.iter_mut().zip(colour) {
+                *channel = (sum / alpha).round().min(255.0) as u8;
+            }
+        }
+        pixel[3] = (alpha / area * 255.0).round().min(255.0) as u8;
+    }
+    scaled
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         Badge, Palette, badge_width, centre, draw, fits, fits_narrowed, font_height, label,
+        scale_down, tray_badge_height, tray_label,
     };
 
     const DARK_TASKBAR: Palette = Palette {
@@ -287,6 +359,33 @@ mod tests {
     }
 
     #[test]
+    fn small_tray_badges_count_to_9() {
+        // 100 % scale: a 16 pixel icon with a 13 pixel badge.
+        let small: Vec<String> = [1, 9, 10, 42, 120]
+            .into_iter()
+            .map(|count| tray_label(count, 13))
+            .collect();
+        assert_eq!(small, ["1", "9", "9+", "9+", "9+"]);
+        // From 150 %, as big as Windows' own badges.
+        let large: Vec<String> = [1, 9, 10, 99, 100]
+            .into_iter()
+            .map(|count| tray_label(count, 16))
+            .collect();
+        assert_eq!(large, ["1", "9", "10", "99", "99+"]);
+    }
+
+    #[test]
+    fn the_tray_badge_is_two_thirds_of_the_icon_but_at_least_13_pixels() {
+        // The tray's sizes at 100, 125, 150 and 200 % scale, and on Linux.
+        let heights: Vec<usize> = [16, 20, 24, 32, 64]
+            .into_iter()
+            .map(tray_badge_height)
+            .collect();
+        assert_eq!(heights, [13, 13, 16, 21, 43]);
+        assert_eq!(tray_badge_height(10), 10);
+    }
+
+    #[test]
     fn one_digit_sits_on_a_disc_at_the_top_right() {
         let size = 16;
         let mut text = vec![0_u8; 11 * 11];
@@ -361,5 +460,34 @@ mod tests {
         // Further out it stays.
         assert_eq!(&cut[(15 * size + 2) * 4..][..4], RED);
         assert_eq!(&cut[(12 * size + 10) * 4..][..4], RED);
+    }
+
+    #[test]
+    fn scaling_down_averages_without_darkening_edges() {
+        // White and transparent black in a 2 by 2 checkerboard of 2 pixel
+        // squares, in a 4 pixel image.
+        let white = [255_u8, 255, 255, 255];
+        let clear = [0_u8, 0, 0, 0];
+        let mut pixels = Vec::new();
+        for y in 0..4 {
+            for x in 0..4 {
+                pixels.extend_from_slice(if (x / 2 + y / 2) % 2 == 0 {
+                    &white
+                } else {
+                    &clear
+                });
+            }
+        }
+        assert_eq!(scale_down(&pixels, 4, 4), pixels);
+        assert_eq!(
+            scale_down(&pixels, 4, 2),
+            [white, clear, clear, white].concat()
+        );
+        // A pixel straddling both halves is half covered and still white.
+        let one = scale_down(&pixels, 4, 1);
+        assert_eq!(one, [255, 255, 255, 128]);
+        // Shares of uneven sizes still add up: one colour stays that colour.
+        let red = RED.repeat(9);
+        assert_eq!(scale_down(&red, 3, 2), RED.repeat(4));
     }
 }

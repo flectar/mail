@@ -870,9 +870,9 @@ pub(crate) fn withdraw_before_exit(
     }
 }
 
-/// Put `count` on the app icon, or nothing for none or zero, unless it is
-/// what `shown` says the icon already has. It counts conversations or
-/// messages, as the grouping with it says.
+/// Put `count` on the app icon and the tray icon, or nothing for none or
+/// zero, unless it is what `shown` says the icons already have. It counts
+/// conversations or messages, as the grouping with it says.
 async fn update_badge(
     host: &dyn NotificationHost,
     window: &impl Window,
@@ -899,6 +899,7 @@ async fn update_badge(
         None => None,
     };
     host.set_badge(badge).await;
+    window.show_badge(count);
     *shown = Some(count);
 }
 
@@ -1241,6 +1242,9 @@ pub(crate) trait Window {
         count: u32,
         grouping: MailGrouping,
     ) -> impl Future<Output = Option<String>> + Send;
+    /// Show the app icon's count where the app draws it itself, the tray
+    /// icon, or none.
+    fn show_badge(&self, _count: Option<(u32, MailGrouping)>) {}
 }
 
 /// The translated words of a batch of notifications.
@@ -1581,11 +1585,38 @@ mod tests {
         }
     }
 
+    /// A window that keeps the counts it shows in the tray.
+    struct TrayWindow {
+        window: FakeWindow,
+        tray: Mutex<Vec<Option<(u32, MailGrouping)>>>,
+    }
+
+    impl Window for TrayWindow {
+        async fn on_screen(&self, accounts: BTreeSet<i64>) -> Option<BTreeSet<i64>> {
+            self.window.on_screen(accounts).await
+        }
+
+        async fn words(&self, summaries: Vec<(u32, Vec<String>)>) -> Option<Words> {
+            self.window.words(summaries).await
+        }
+
+        async fn badge_description(&self, count: u32, grouping: MailGrouping) -> Option<String> {
+            self.window.badge_description(count, grouping).await
+        }
+
+        fn show_badge(&self, count: Option<(u32, MailGrouping)>) {
+            self.tray.lock().unwrap().push(count);
+        }
+    }
+
     #[tokio::test]
     async fn the_app_icon_shows_the_count_only_when_it_changes() {
         use MailGrouping::{Conversations, Messages};
         let host = FakeHost::new(Ok(()));
-        let window = FakeWindow(Some(BTreeSet::new()));
+        let window = TrayWindow {
+            window: FakeWindow(Some(BTreeSet::new())),
+            tray: Mutex::default(),
+        };
         let mut shown = None;
         let badge = |count, counted| {
             Some(Badge {
@@ -1613,6 +1644,16 @@ mod tests {
                 None,
                 badge(7, "messages"),
                 badge(7, "conversations"),
+            ]
+        );
+        // The tray shows the same count.
+        assert_eq!(
+            *window.tray.lock().unwrap(),
+            [
+                Some((3, Messages)),
+                None,
+                Some((7, Messages)),
+                Some((7, Conversations)),
             ]
         );
 

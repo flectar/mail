@@ -122,6 +122,15 @@ impl super::Window for Live {
         })
         .await
     }
+
+    fn show_badge(&self, count: Option<(u32, MailGrouping)>) {
+        let conversations =
+            count.is_some_and(|(_, grouping)| grouping == MailGrouping::Conversations);
+        let count = count.map(|(count, _)| count);
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::tray::show_unread(count, conversations);
+        });
+    }
 }
 
 /// Which of these accounts' new mail the user sees arrive: the focused

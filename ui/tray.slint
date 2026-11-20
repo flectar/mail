@@ -4,6 +4,12 @@
 // "Slint Window" into Linux task switchers.
 export component FlectarTray inherits SystemTrayIcon {
     in-out property <bool> enabled: false;
+    // The unread mail the app icon counts, which Rust also draws on the icon
+    // where the tray shows the app's own picture; 0 for none.
+    in property <int> unread: 0;
+    // Whether that counts conversations, as the mail list shows them, or
+    // messages.
+    in property <bool> conversations: false;
     visible: root.enabled;
     // Rust sets the chosen icon's tray image from AppIcon.tray-image, which
     // explains the small size; this compilation unit cannot share globals
@@ -11,10 +17,21 @@ export component FlectarTray inherits SystemTrayIcon {
     in property <image> image: @image-url("../resources/app-icon/flectar-mail-tray.png");
     icon: root.image;
     title: @tr("Flectar Mail");
-    tooltip: @tr("Flectar Mail");
+    tooltip: root.unread == 0 ? @tr("Flectar Mail")
+        : root.conversations ? @tr("Flectar Mail") + "\n" + @tr("{n} unread conversation" | "{n} unread conversations" % root.unread)
+        : @tr("Flectar Mail") + "\n" + @tr("{n} unread message" | "{n} unread messages" % root.unread);
 
     callback show_window();
     callback quit_app();
+    // Each time the tray turns on, for Rust to draw it, which it skips while
+    // the tray is off.
+    callback shown();
+
+    changed enabled => {
+        if root.enabled {
+            root.shown();
+        }
+    }
 
     clicked => { root.show_window(); }
 

@@ -694,13 +694,13 @@ msgstr ""
 msgid "Mark as read"
 msgstr ""
 
-#: ui/app.slint:259
+#: ui/app.slint:259 ui/tray.slint:22
 msgid "{n} unread message"
 msgid_plural "{n} unread messages"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:262
+#: ui/app.slint:262 ui/tray.slint:21
 msgid "{n} unread conversation"
 msgid_plural "{n} unread conversations"
 msgstr[0] ""
@@ -3082,8 +3082,8 @@ msgid "Loading message…"
 msgstr ""
 
 #: ui/app.slint:972 ui/components/workspace-navigation.slint:785
-#: ui/app.slint:972 ui/components/workspace-navigation.slint:785 ui/tray.slint:13 ui/tray.slint:14
-#: ui/app.slint:972 ui/components/workspace-navigation.slint:785 ui/tray.slint:13 ui/tray.slint:14
+#: ui/app.slint:972 ui/components/workspace-navigation.slint:785 ui/tray.slint:19 ui/tray.slint:20
+#: ui/app.slint:972 ui/components/workspace-navigation.slint:785 ui/tray.slint:19 ui/tray.slint:20 ui/tray.slint:22 ui/views/onboarding-view.slint:128
 msgid "Flectar Mail"
 msgstr ""
 
@@ -10212,11 +10212,11 @@ msgstr ""
 msgid "Never translated"
 msgstr ""
 
-#: ui/tray.slint:23
+#: ui/tray.slint:40
 msgid "Show Flectar Mail"
 msgstr ""
 
-#: ui/tray.slint:27
+#: ui/tray.slint:44
 msgid "Quit"
 msgstr ""
 
