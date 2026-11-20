@@ -6593,7 +6593,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         let suggestion = {
             let state = suggestion_state.borrow();
-            reusable_mail_transport(&state.account_configs, email.as_str(), protocol).cloned()
+            suggested_mail_transport(&state.account_configs, email.as_str(), protocol)
         };
         let Some(config) = suggestion else {
             if transport_matches_last_suggestion {
