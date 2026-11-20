@@ -35,6 +35,17 @@ pub(crate) const ORIGIN_LEAD_MS: i64 = 2 * 60_000;
 pub(crate) const HELPER_LEAD_MS: i64 = 60_000;
 /// A claim holds this long past the send time, or past when it was made.
 pub(crate) const CLAIM_MS: i64 = 15 * 60_000;
+/// The device holding the claim says it is sending this long before the
+/// time, so a device that goes quiet before then leaves nothing in doubt.
+pub(crate) const FENCE_LEAD_MS: i64 = 60_000;
+/// How long another device waits past a claim's end before it takes over a
+/// send the claim's device may have handed over: longer than any submission
+/// can still finish (an SMTP reply may take [`crate::smtp::MESSAGE_REPLY_TIMEOUT`]),
+/// with room for clocks that differ. Chubby's lock-delay, for a mail server
+/// that can't check whose turn it is.
+pub(crate) const TAKEOVER_DELAY_MS: i64 = 15 * 60_000;
+/// The error a send fails with on every device when it may have gone out.
+pub(crate) const MAYBE_SENT: &str = "maybe-sent";
 /// A claim whose send still waits, for example to retry, is renewed when
 /// this little of it is left.
 const RENEW_LEFT_MS: i64 = 5 * 60_000;
@@ -68,6 +79,8 @@ pub(super) struct Record<'a> {
     pub state: &'a str,
     pub error: Option<&'a str>,
     pub claim: Option<(&'a str, i64)>,
+    /// The device that may have handed the message to the mail server.
+    pub sending: Option<&'a str>,
     /// An IMAP or POP3 message, in base64.
     pub mime: Option<&'a str>,
     /// The file a message too large for the record went into.
@@ -179,6 +192,7 @@ pub(super) fn parse(body: &Value) -> Option<Record<'_>> {
         state,
         error: body.get("error").and_then(Value::as_str),
         claim,
+        sending: body.get("sending").and_then(Value::as_str),
         mime: body.get("mime").and_then(Value::as_str),
         file: body.get("file").filter(|file| file.is_object()),
         preview: body.get("preview").and_then(Value::as_str),
@@ -202,6 +216,7 @@ pub(super) fn body(send: &SyncedSend, account: &str, carried: Carried) -> Value 
             (Some(device), Some(until)) => json!({"device": device, "until": until}),
             _ => Value::Null,
         },
+        "sending": send.sending,
         "mime": carried.mime.map(|mime| base64.encode(mime)),
         "file": carried
             .file
@@ -213,18 +228,29 @@ pub(super) fn body(send: &SyncedSend, account: &str, carried: Carried) -> Value 
 /// Settle a merge of this device's change to a shared send with another
 /// device's that reached the server first. A claim is never merged: the one
 /// the server took stands, so two devices never both think they may send.
-/// A send that went out stays sent.
+/// Who may be sending goes with the claim, so a device never keeps its
+/// fence for a claim it lost. A send that went out stays sent.
 pub(super) fn settle(base: Option<&Value>, local: &Value, remote: &Value, merged: &mut Value) {
     let Some(fields) = merged.as_object_mut() else {
         return;
     };
-    let claim_of = |body: Option<&Value>| body.and_then(|body| body.get("claim")).cloned();
-    let remote_claim = claim_of(Some(remote));
-    if remote_claim != claim_of(base) {
-        fields.insert("claim".into(), remote_claim.unwrap_or(Value::Null));
-    } else if let Some(local_claim) = claim_of(Some(local)) {
-        fields.insert("claim".into(), local_claim);
+    let turn_of = |body: Option<&Value>| {
+        body.map(|body| {
+            (
+                body.get("claim").cloned().unwrap_or(Value::Null),
+                body.get("sending").cloned().unwrap_or(Value::Null),
+            )
+        })
+    };
+    let remote_turn = turn_of(Some(remote));
+    let (claim, sending) = if remote_turn != turn_of(base) {
+        remote_turn
+    } else {
+        turn_of(Some(local))
     }
+    .unwrap_or((Value::Null, Value::Null));
+    fields.insert("claim".into(), claim);
+    fields.insert("sending".into(), sending);
     let sent = [local, remote]
         .iter()
         .any(|body| body.get("state").and_then(Value::as_str) == Some(SENT));
@@ -446,11 +472,15 @@ pub(super) fn put(
             synced_sends::set_may_send_until(conn, sync_id, None)?;
             synced_sends::drop_shadow(conn, sync_id)?;
         }
+        // A send that may have gone out shows so here too.
         FAILED => {
             conn.execute(
-                "UPDATE pending_actions SET state = 'failed', last_error = ?2, finished_at = ?3
+                "UPDATE pending_actions SET state = 'failed', last_error = ?2, finished_at = ?3,
+                        payload = CASE WHEN ?2 = ?4
+                                       THEN json_set(payload, '$.uncertain', json('true'))
+                                       ELSE payload END
                  WHERE id = ?1 AND state = 'pending'",
-                params![action, shared.error, now],
+                params![action, shared.error, now, MAYBE_SENT],
             )?;
         }
         _ => {
@@ -565,47 +595,84 @@ impl Driven {
     }
 }
 
-/// The claim the server holds for a shared send, unless this device has a
+/// Whose turn the server holds for a shared send: its claim, and the device
+/// that may be sending it.
+#[derive(Debug, Default)]
+struct Turn {
+    claim: Option<(String, i64)>,
+    sending: Option<String>,
+}
+
+/// The turn the server holds for a shared send, unless this device has a
 /// change to it on the way: it then waits for the server's answer.
-fn committed_claim(conn: &Connection, id: &RecordId) -> Result<Option<Option<(String, i64)>>> {
+fn committed_turn(conn: &Connection, id: &RecordId) -> Result<Option<Turn>> {
     if store::has_pending(conn, id)? {
         return Ok(None);
     }
     let entry: Option<Entry> = store::mirrored_entry(conn, id)?;
-    Ok(Some(
-        entry
+    let record = entry
+        .as_ref()
+        .filter(|entry| entry.collection == super::collections::SCHEDULED)
+        .and_then(|entry| parse(&entry.body));
+    Ok(Some(Turn {
+        claim: record
             .as_ref()
-            .filter(|entry| entry.collection == super::collections::SCHEDULED)
-            .and_then(|entry| parse(&entry.body))
             .and_then(|record| record.claim)
             .map(|(device, until)| (device.to_owned(), until)),
-    ))
+        sending: record.and_then(|record| record.sending).map(str::to_owned),
+    }))
 }
 
-/// Whether a device other than the one that scheduled `send` may send it,
-/// for an account of `protocol`, in a group of `members` (hex ids). Gmail
-/// sends a draft only once, so two devices can never both send it. Other
-/// messages go out from the device that scheduled them, unless it left the
-/// group: no device can yet tell for sure that another one already sent
-/// them.
-pub(crate) fn others_may_send(
-    send: &SyncedSend,
-    protocol: Option<&str>,
-    members: &std::collections::HashSet<String>,
-) -> bool {
-    protocol == Some("gmail") || !members.contains(&send.origin)
+/// Before this device sends the message, it checks that it didn't go out
+/// already: another device may have handed it over (see [`TAKEOVER_DELAY_MS`]).
+fn check_first(conn: &Connection, action: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions SET payload = json_set(payload, '$.checkFirst', json('true'))
+         WHERE id = ?1",
+        params![action],
+    )?;
+    Ok(())
+}
+
+/// Whether this device's send ended without knowing if it went out.
+fn uncertain(conn: &Connection, action: i64) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT json_extract(payload, '$.uncertain') = 1 FROM pending_actions WHERE id = ?1",
+            params![action],
+            |row| row.get::<_, Option<bool>>(0),
+        )
+        .optional()?
+        .flatten()
+        .unwrap_or(false))
+}
+
+/// This device is no longer sending: what it tried is known not to have
+/// gone out, so the next device sends without checking first.
+fn stop_sending(conn: &Connection, send: &SyncedSend, me: &str, now: i64) -> Result<bool> {
+    if send.sending.as_deref() != Some(me) {
+        return Ok(false);
+    }
+    synced_sends::set_sending(conn, &send.sync_id, None, now)?;
+    Ok(true)
 }
 
 /// Move the shared sends along on this device, as device `me` (hex): hold
 /// or create its sends, claim the ones due, release the ones it claimed,
-/// and report how its own sends went. `others_send` says whether a device
-/// besides the one that scheduled a send may send it.
+/// and report how its own sends went. `others` says whether the group has
+/// other devices, which may have sent a send this device can't reach the
+/// server to ask about.
+///
+/// Any device that can send a message may send it, but only in its turn:
+/// with a claim the server took, and only once the server also took its word
+/// that it is sending (`sending`), the fence another device reads before it
+/// takes over. A send that may have gone out is never sent again by itself.
 pub(crate) fn drive(
     conn: &Connection,
     me: &str,
     now: i64,
     reach: Reach,
-    others_send: &dyn Fn(&SyncedSend, Option<&str>) -> bool,
+    others: bool,
 ) -> Result<Driven> {
     let mut driven = Driven::default();
     for mut send in synced_sends::all(conn)? {
@@ -630,7 +697,6 @@ pub(crate) fn drive(
             continue;
         }
         let origin = send.origin == me;
-        let helpers = others_send(&send, protocol(conn, send.account_id)?.as_deref());
 
         // How this device's own send went.
         if let Some(action) = send.action_id {
@@ -638,6 +704,20 @@ pub(crate) fn drive(
                 Some((state, error))
                     if matches!(state.as_str(), "done" | "failed" | "cancelled") =>
                 {
+                    // It may have gone out: no device sends it again by
+                    // itself, and every device says so.
+                    if state == "failed" && uncertain(conn, action)? {
+                        synced_sends::set_state(
+                            conn,
+                            &send.sync_id,
+                            FAILED,
+                            Some(MAYBE_SENT),
+                            now,
+                        )?;
+                        driven.upload = true;
+                        driven.thread(thread_of_action(conn, action)?);
+                        continue;
+                    }
                     // Another device's send that failed here may still go
                     // out from the device that scheduled it: this one leaves
                     // it to the others, rather than failing it everywhere.
@@ -661,6 +741,7 @@ pub(crate) fn drive(
                         // kept for another device is this device's own now.
                         synced_sends::set_shadow(conn, &send.sync_id, None)?;
                     }
+                    stop_sending(conn, &send, me, now)?;
                     driven.upload = true;
                     driven.thread(thread_of_action(conn, action)?);
                     continue;
@@ -768,22 +849,30 @@ pub(crate) fn drive(
 
         if reach != Reach::Usable {
             // Without Flectar Mail Sync, only the device that scheduled it
-            // sends it, and then without a claim: late, when another device
-            // may have claimed and sent it meanwhile.
-            let late = if reach == Reach::PaymentRequired || !helpers {
-                0
-            } else {
+            // sends it, and then without a claim. Where no other device can
+            // have claimed it (the group waits for a payment, or has no
+            // other device) it sends on time. Otherwise another device may
+            // have sent it meanwhile: it waits for that send to finish, and
+            // checks first that it didn't go out.
+            let others_may_have_sent = others && reach != Reach::PaymentRequired;
+            let late = if others_may_have_sent {
                 UNREACHABLE_DELAY_MS
+            } else {
+                0
             };
             if origin
                 && now >= send.send_at.saturating_add(late)
                 && send.may_send_until != Some(HELD)
             {
+                if others_may_have_sent {
+                    check_first(conn, action)?;
+                }
                 synced_sends::set_may_send_until(conn, &send.sync_id, Some(HELD))?;
                 // The other devices hear of it once the server answers; a
                 // claim that never ended would keep them from ever
                 // stepping in.
                 synced_sends::set_claim(conn, &send.sync_id, Some(me), Some(now + CLAIM_MS), now)?;
+                synced_sends::set_sending(conn, &send.sync_id, Some(me), now)?;
                 if release(conn, action, now)? {
                     driven.nudge(send.account_id);
                 }
@@ -793,48 +882,73 @@ pub(crate) fn drive(
         let Some(record_id) = super::collections::sync_id_bytes(&send.sync_id) else {
             continue;
         };
-        let Some(claim) = committed_claim(conn, &record_id)? else {
+        let Some(turn) = committed_turn(conn, &record_id)? else {
             // This device's change waits to reach the server: upload it,
             // then act on the answer.
             driven.upload = true;
             continue;
         };
-        match claim {
+        match turn.claim {
             // The send moved past this device's claim: it gives the claim
             // up, and the devices claim it again nearer the new time.
             Some((device, until)) if device == me && until > now && until <= send.send_at => {
                 synced_sends::set_may_send_until(conn, &send.sync_id, None)?;
                 hold(conn, action)?;
                 synced_sends::set_claim(conn, &send.sync_id, None, None, now)?;
+                if !under_way(conn, action)? {
+                    stop_sending(conn, &send, me, now)?;
+                }
                 driven.upload = true;
             }
             Some((device, until)) if device == me && until > now => {
-                if send.may_send_until != Some(until) {
-                    synced_sends::set_may_send_until(conn, &send.sync_id, Some(until))?;
-                }
-                // Another device's message in a file is fetched before its
-                // send may start.
+                // Another device's message in a file is fetched first: this
+                // device says it is sending only once it is ready to.
                 if !origin && waits_for_file(conn, &send.sync_id)? {
                     driven.fetch.push(send.sync_id.clone());
-                } else if send_at(conn, action, send.send_at)? {
-                    driven.nudge(send.account_id);
-                    driven.thread(thread_of_action(conn, action)?);
+                } else if turn.sending.as_deref() == Some(me) {
+                    if send.may_send_until != Some(until) {
+                        synced_sends::set_may_send_until(conn, &send.sync_id, Some(until))?;
+                    }
+                    if send_at(conn, action, send.send_at)? {
+                        driven.nudge(send.account_id);
+                        driven.thread(thread_of_action(conn, action)?);
+                    }
+                } else {
+                    // The send waits until the server took this device's
+                    // word that it is sending, which it gives near the time.
+                    if send.may_send_until.is_some() {
+                        synced_sends::set_may_send_until(conn, &send.sync_id, None)?;
+                    }
+                    hold(conn, action)?;
+                    if now >= send.send_at - FENCE_LEAD_MS {
+                        // Another device may have handed it over before.
+                        if turn.sending.is_some() {
+                            check_first(conn, action)?;
+                        }
+                        synced_sends::set_sending(conn, &send.sync_id, Some(me), now)?;
+                        driven.upload = true;
+                    }
                 }
                 // A send that still waits, say to retry, keeps its claim
-                // while it gets anywhere. One that keeps failing lets it run
-                // out when another device may do better.
-                if until != HELD
-                    && until - now < RENEW_LEFT_MS
-                    && !((!origin || helpers) && struggling(conn, action)?)
-                {
-                    synced_sends::set_claim(
-                        conn,
-                        &send.sync_id,
-                        Some(me),
-                        Some(now + CLAIM_MS),
-                        now,
-                    )?;
-                    driven.upload = true;
+                // while it gets anywhere. One that keeps failing stops, so
+                // the claim runs out for a device that may do better: what
+                // it tried is known not to have gone out (an outcome nobody
+                // knows fails the send), so that device sends without doubt.
+                if until != HELD && until - now < RENEW_LEFT_MS {
+                    if !struggling(conn, action)? {
+                        synced_sends::set_claim(
+                            conn,
+                            &send.sync_id,
+                            Some(me),
+                            Some(now + CLAIM_MS),
+                            now,
+                        )?;
+                        driven.upload = true;
+                    } else if !under_way(conn, action)? && stop_sending(conn, &send, me, now)? {
+                        synced_sends::set_may_send_until(conn, &send.sync_id, None)?;
+                        hold(conn, action)?;
+                        driven.upload = true;
+                    }
                 }
             }
             Some((_, until)) if until > now => {
@@ -849,17 +963,41 @@ pub(crate) fn drive(
                     synced_sends::set_may_send_until(conn, &send.sync_id, None)?;
                 }
                 hold(conn, action)?;
+                // This device's own word, from a claim that ran out: it
+                // isn't sending, and what it tried didn't go out.
+                if turn.sending.as_deref() == Some(me)
+                    && !under_way(conn, action)?
+                    && stop_sending(conn, &send, me, now)?
+                {
+                    driven.upload = true;
+                }
+                // Another device may have handed it over and gone quiet: no
+                // device takes over until that submission can have ended,
+                // and the one that does checks first that it didn't go out.
+                let elsewhere = turn.sending.as_deref().is_some_and(|device| device != me);
+                let settled = !elsewhere
+                    || now
+                        >= lapsed
+                            .as_ref()
+                            .map_or(send.send_at + CLAIM_MS, |(_, until)| *until)
+                            .saturating_add(TAKEOVER_DELAY_MS);
                 let lead = if origin {
                     ORIGIN_LEAD_MS
                 } else {
                     HELPER_LEAD_MS
                 };
-                if now >= send.send_at - lead
-                    && (origin || helpers)
-                    && takes_turn(conn, &send, me, (origin, helpers), lapsed, action, now)?
+                if settled
+                    && now >= send.send_at - lead
+                    && takes_turn(conn, &send, me, origin, lapsed, action, now)?
                 {
                     let until = send.send_at.max(now) + CLAIM_MS;
                     synced_sends::set_claim(conn, &send.sync_id, Some(me), Some(until), now)?;
+                    if now >= send.send_at - FENCE_LEAD_MS {
+                        if elsewhere {
+                            check_first(conn, action)?;
+                        }
+                        synced_sends::set_sending(conn, &send.sync_id, Some(me), now)?;
+                    }
                     driven.upload = true;
                 }
             }
@@ -881,14 +1019,11 @@ fn takes_turn(
     conn: &Connection,
     send: &SyncedSend,
     me: &str,
-    (origin, helpers): (bool, bool),
+    origin: bool,
     lapsed: Option<(String, i64)>,
     action: i64,
     now: i64,
 ) -> Result<bool> {
-    if origin && !helpers {
-        return Ok(true);
-    }
     let gave_up = lapsed.is_some_and(|(device, until)| device == me && now < until + CLAIM_MS)
         && struggling(conn, action)?;
     if gave_up {
@@ -965,6 +1100,8 @@ fn leave_to_others(
     if send.claimed_by.as_deref() == Some(me) {
         synced_sends::set_claim(conn, &send.sync_id, None, None, now)?;
     }
+    // It failed for sure here, so nothing went out.
+    stop_sending(conn, send, me, now)?;
     Ok(())
 }
 
@@ -1182,9 +1319,9 @@ mod tests {
 
     const AT: i64 = 10_000_000;
 
-    /// Claims between devices that may all send each other's messages.
+    /// Claims in a group of more than one device.
     fn drive(conn: &Connection, me: &str, now: i64, reach: Reach) -> Result<Driven> {
-        super::drive(conn, me, now, reach, &|_, _| true)
+        super::drive(conn, me, now, reach, true)
     }
     const ORIGIN: &str = "aa";
     const HELPER: &str = "bb";
@@ -1246,11 +1383,24 @@ mod tests {
             error: None,
             claimed_by: claim.map(|(device, _)| device),
             claim_until: claim.map(|(_, until)| until),
+            sending: None,
         }
     }
 
-    /// The server took the record with `claim`.
+    /// The server took the record with `claim`, and with this device's word
+    /// on who is sending it, as an upload of this device's change does.
     fn server_has(conn: &Connection, sync_id: &str, claim: Option<(&str, i64)>) {
+        let sending = synced_sends::get(conn, sync_id).unwrap().unwrap().sending;
+        server_has_turn(conn, sync_id, claim, sending.as_deref());
+    }
+
+    /// The server took the record with `claim` and `sending`.
+    fn server_has_turn(
+        conn: &Connection,
+        sync_id: &str,
+        claim: Option<(&str, i64)>,
+        sending: Option<&str>,
+    ) {
         let send = synced_sends::get(conn, sync_id).unwrap().unwrap();
         let mut body = body(
             &send,
@@ -1261,6 +1411,7 @@ mod tests {
             Some((device, until)) => json!({"device": device, "until": until}),
             None => Value::Null,
         };
+        body["sending"] = json!(sending);
         let id = super::super::collections::sync_id_bytes(sync_id).unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO device_sync_mirror
@@ -1274,6 +1425,7 @@ mod tests {
             send_at: send.send_at,
             claimed_by: claim.map(|(device, _)| device),
             claim_until: claim.map(|(_, until)| until),
+            sending,
             ..shared(send.draft_ref.as_deref(), None)
         };
         synced_sends::put_shared(conn, sync_id, &shared, 0).unwrap();
@@ -1286,6 +1438,17 @@ mod tests {
             |row| row.get(0),
         )
         .unwrap()
+    }
+
+    fn payload_of(conn: &Connection, action: i64) -> Value {
+        let payload: String = conn
+            .query_row(
+                "SELECT payload FROM pending_actions WHERE id = ?1",
+                params![action],
+                |row| row.get(0),
+            )
+            .unwrap();
+        serde_json::from_str(&payload).unwrap()
     }
 
     fn action_state(conn: &Connection, action: i64) -> String {
@@ -1321,9 +1484,21 @@ mod tests {
             "it holds the send until the server answers"
         );
 
-        // The server took it: the send goes out at its time.
+        // The server took it. Near the time it says it is sending, and its
+        // send waits for the server to take that too.
         server_has(&conn, &sync_id, Some((ORIGIN, AT + CLAIM_MS)));
         let driven = drive(&conn, ORIGIN, now + 1_000, Reach::Usable).unwrap();
+        assert!(driven.nudge.is_empty());
+        assert_eq!(not_before(&conn, action), HELD);
+        let near = AT - FENCE_LEAD_MS;
+        assert!(drive(&conn, ORIGIN, near, Reach::Usable).unwrap().upload);
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.sending.as_deref(), Some(ORIGIN));
+        assert_eq!(not_before(&conn, action), HELD);
+
+        // Once it did, the send goes out at its time.
+        server_has(&conn, &sync_id, Some((ORIGIN, AT + CLAIM_MS)));
+        let driven = drive(&conn, ORIGIN, near + 1_000, Reach::Usable).unwrap();
         assert_eq!(driven.nudge, vec![1]);
         assert_eq!(not_before(&conn, action), AT);
         assert_eq!(
@@ -1349,7 +1524,9 @@ mod tests {
     fn the_device_holding_the_claim_follows_the_send_when_it_moves() {
         let conn = setup("E1");
         let (sync_id, action) = scheduled_here(&conn);
-        let now = AT - ORIGIN_LEAD_MS;
+        let now = AT - FENCE_LEAD_MS;
+        drive(&conn, ORIGIN, now, Reach::Usable).unwrap();
+        server_has(&conn, &sync_id, Some((ORIGIN, AT + CLAIM_MS)));
         drive(&conn, ORIGIN, now, Reach::Usable).unwrap();
         server_has(&conn, &sync_id, Some((ORIGIN, AT + CLAIM_MS)));
         drive(&conn, ORIGIN, now, Reach::Usable).unwrap();
@@ -1376,6 +1553,7 @@ mod tests {
         assert_eq!(not_before(&conn, action), HELD);
         let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
         assert_eq!((send.claimed_by, send.may_send_until), (None, None));
+        assert_eq!(send.sending, None, "nothing went out");
     }
 
     #[test]
@@ -1413,12 +1591,61 @@ mod tests {
         assert!(!repo::actions::try_claim(&conn, action).unwrap());
         assert_eq!(not_before(&conn, action), HELD);
 
-        // That claim ran out with nothing sent: this device steps in.
+        // That claim ran out, and that device never said it was sending:
+        // this device steps in at once, sending without a check.
         let later = AT + CLAIM_MS + 1;
         assert!(drive(&conn, HELPER, later, Reach::Usable).unwrap().upload);
         let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
         assert_eq!(send.claimed_by.as_deref(), Some(HELPER));
         assert_eq!(send.claim_until, Some(later + CLAIM_MS));
+        assert_eq!(send.sending.as_deref(), Some(HELPER));
+        assert_eq!(payload_of(&conn, action).get("checkFirst"), None);
+    }
+
+    #[test]
+    fn no_device_sends_over_one_that_may_have_sent_it() {
+        let conn = setup("E1");
+        let sync_id = scheduled_elsewhere(&conn, Some("E1"));
+        drive(&conn, HELPER, AT - 10 * 60_000, Reach::Usable).unwrap();
+        let action = synced_sends::get(&conn, &sync_id)
+            .unwrap()
+            .unwrap()
+            .action_id
+            .unwrap();
+
+        // The device that scheduled it said it was sending, then went quiet.
+        server_has_turn(&conn, &sync_id, Some((ORIGIN, AT + CLAIM_MS)), Some(ORIGIN));
+        // Its claim ran out, but its submission may still end: no takeover.
+        for now in [AT + CLAIM_MS + 1, AT + CLAIM_MS + TAKEOVER_DELAY_MS - 1] {
+            assert!(!drive(&conn, HELPER, now, Reach::Usable).unwrap().upload);
+            assert_eq!(not_before(&conn, action), HELD);
+        }
+
+        // Once it can't, this device takes over, and checks first.
+        let later = AT + CLAIM_MS + TAKEOVER_DELAY_MS;
+        assert!(drive(&conn, HELPER, later, Reach::Usable).unwrap().upload);
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.claimed_by.as_deref(), Some(HELPER));
+        assert_eq!(send.sending.as_deref(), Some(HELPER));
+        assert_eq!(payload_of(&conn, action)["checkFirst"], json!(true));
+        server_has(&conn, &sync_id, Some((HELPER, later + CLAIM_MS)));
+        drive(&conn, HELPER, later + 1, Reach::Usable).unwrap();
+        assert_eq!(not_before(&conn, action), AT);
+
+        // Claimed by this device while the other one's word stood, it checks
+        // first too.
+        let conn = setup("E1");
+        let sync_id = scheduled_elsewhere(&conn, Some("E1"));
+        drive(&conn, HELPER, AT - 10 * 60_000, Reach::Usable).unwrap();
+        let action = synced_sends::get(&conn, &sync_id)
+            .unwrap()
+            .unwrap()
+            .action_id
+            .unwrap();
+        server_has_turn(&conn, &sync_id, Some((HELPER, AT + CLAIM_MS)), Some(ORIGIN));
+        assert!(drive(&conn, HELPER, AT, Reach::Usable).unwrap().upload);
+        assert_eq!(payload_of(&conn, action)["checkFirst"], json!(true));
+        assert_eq!(not_before(&conn, action), HELD);
     }
 
     /// Another device's send, claimed and released here.
@@ -1477,6 +1704,7 @@ mod tests {
         let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
         assert_eq!(send.state, SCHEDULED, "still the other devices' to send");
         assert_eq!(send.claimed_by, None);
+        assert_eq!(send.sending, None, "nothing went out");
         assert!(send.failed_here.is_some());
         assert_eq!(action_state(&conn, action), "cancelled");
 
@@ -1502,9 +1730,18 @@ mod tests {
         )
         .unwrap();
         let near_end = AT + CLAIM_MS - 1_000;
-        drive(&conn, HELPER, near_end, Reach::Usable).unwrap();
+        assert!(
+            drive(&conn, HELPER, near_end, Reach::Usable)
+                .unwrap()
+                .upload
+        );
         let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
         assert_eq!(send.claim_until, Some(AT + CLAIM_MS), "not renewed");
+        // It stops sending: none of its tries went out, so the next device
+        // needs no check.
+        assert_eq!(send.sending, None);
+        assert_eq!(not_before(&conn, action), HELD);
+        server_has(&conn, &sync_id, Some((HELPER, AT + CLAIM_MS)));
 
         // Run out, it gives the others a claim's time first.
         let lapsed = AT + CLAIM_MS + 1;
@@ -1657,6 +1894,61 @@ mod tests {
     }
 
     #[test]
+    fn a_send_that_may_have_gone_out_fails_on_every_device() {
+        // Here, whether this device scheduled it or not: never left to the
+        // others, who would send it again.
+        for device in [ORIGIN, HELPER] {
+            let conn = setup("E1");
+            let (sync_id, action) = if device == ORIGIN {
+                scheduled_here(&conn)
+            } else {
+                sending_for_the_origin(&conn)
+            };
+            repo::actions::fail_uncertain(&conn, action, "its reply was lost").unwrap();
+            assert!(drive(&conn, device, AT + 1, Reach::Usable).unwrap().upload);
+            let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+            assert_eq!(
+                (send.state.as_str(), send.error.as_deref()),
+                (FAILED, Some(MAYBE_SENT))
+            );
+            assert_eq!(send.failed_here, None);
+        }
+
+        // Elsewhere: the send here shows it may have gone out too.
+        let conn = setup("E1");
+        let sync_id = scheduled_elsewhere(&conn, Some("E1"));
+        drive(&conn, HELPER, AT - 10 * 60_000, Reach::Usable).unwrap();
+        let action = synced_sends::get(&conn, &sync_id)
+            .unwrap()
+            .unwrap()
+            .action_id
+            .unwrap();
+        let failed = Shared {
+            state: FAILED,
+            error: Some(MAYBE_SENT),
+            ..shared(Some("E1"), None)
+        };
+        put(&conn, &sync_id, &failed, 1).unwrap();
+        assert_eq!(action_state(&conn, action), "failed");
+        assert_eq!(payload_of(&conn, action)["uncertain"], json!(true));
+
+        // Sent again by the user, who checked: no device holds it up.
+        let failed = Shared {
+            sending: Some(ORIGIN),
+            ..failed
+        };
+        put(&conn, &sync_id, &failed, 2).unwrap();
+        synced_sends::reschedule(&conn, &sync_id, AT + 5, 3).unwrap();
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!((send.state.as_str(), send.sending), (SCHEDULED, None));
+        // A send still under way keeps who is sending it.
+        synced_sends::set_sending(&conn, &sync_id, Some(ORIGIN), 4).unwrap();
+        synced_sends::reschedule(&conn, &sync_id, AT + 10, 5).unwrap();
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.sending.as_deref(), Some(ORIGIN));
+    }
+
+    #[test]
     fn a_draft_deleted_where_it_was_scheduled_cancels_it_everywhere() {
         let conn = setup("E1");
         let (sync_id, action) = scheduled_here(&conn);
@@ -1772,7 +2064,25 @@ mod tests {
             vec![1]
         );
         assert_eq!(not_before(&conn, action), now);
+        // Another device may have sent it meanwhile: it checks first.
+        assert_eq!(payload_of(&conn, action)["checkFirst"], json!(true));
+        assert_eq!(
+            synced_sends::get(&conn, &sync_id)
+                .unwrap()
+                .unwrap()
+                .sending
+                .as_deref(),
+            Some(ORIGIN)
+        );
         assert!(repo::actions::try_claim(&conn, action).unwrap());
+
+        // The only device in its group: no other one can have sent it, so it
+        // goes out on time.
+        let conn = setup("E1");
+        let (_, action) = scheduled_here(&conn);
+        super::drive(&conn, ORIGIN, AT, Reach::Unreachable, false).unwrap();
+        assert_eq!(not_before(&conn, action), AT);
+        assert_eq!(payload_of(&conn, action).get("checkFirst"), None);
 
         // Uploads refused until the group pays: no device can claim, so it
         // goes out on time.
@@ -1780,6 +2090,7 @@ mod tests {
         let (_, action) = scheduled_here(&conn);
         drive(&conn, ORIGIN, AT, Reach::PaymentRequired).unwrap();
         assert_eq!(not_before(&conn, action), AT);
+        assert_eq!(payload_of(&conn, action).get("checkFirst"), None);
 
         // Another device never sends without a claim.
         let conn = setup("E1");
@@ -1796,55 +2107,40 @@ mod tests {
     }
 
     #[test]
-    fn only_gmail_messages_go_out_from_another_device() {
-        let both: std::collections::HashSet<String> = [ORIGIN.to_owned(), HELPER.to_owned()].into();
-        let policy = |members: std::collections::HashSet<String>| {
-            move |send: &SyncedSend, protocol: Option<&str>| {
-                others_may_send(send, protocol, &members)
-            }
-        };
-
-        // A JMAP message waits for the device that scheduled it, even once
-        // its claim ran out: that device may have sent it.
-        let conn = setup("E1");
-        let sync_id = scheduled_elsewhere(&conn, Some("E1"));
-        let helper = policy(both.clone());
-        super::drive(&conn, HELPER, AT - 10 * 60_000, Reach::Usable, &helper).unwrap();
-        server_has(&conn, &sync_id, Some((ORIGIN, AT + CLAIM_MS)));
-        let later = AT + CLAIM_MS + 1;
-        assert!(
-            !super::drive(&conn, HELPER, later, Reach::Usable, &helper)
-                .unwrap()
-                .upload
-        );
-        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
-        assert_eq!(send.claimed_by.as_deref(), Some(ORIGIN));
-
-        // Once that device left the group, another one sends it.
-        let helper = policy([HELPER.to_owned()].into());
-        assert!(
-            super::drive(&conn, HELPER, later, Reach::Usable, &helper)
-                .unwrap()
-                .upload
-        );
-        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
-        assert_eq!(send.claimed_by.as_deref(), Some(HELPER));
-
-        // A Gmail message goes from whichever device can.
-        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
-        assert!(others_may_send(&send, Some("gmail"), &both));
-        assert!(!others_may_send(&send, Some("imap"), &both));
-
-        // Without Flectar Mail Sync, the device that scheduled a message no
-        // other one sends sends it on time.
-        let conn = setup("E1");
-        let (sync_id, action) = scheduled_here(&conn);
-        let origin = policy(both);
-        super::drive(&conn, ORIGIN, AT, Reach::Unreachable, &origin).unwrap();
-        assert_eq!(not_before(&conn, action), AT);
-        // The claim it tells the others of ends.
-        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
-        assert_eq!(send.claim_until, Some(AT + CLAIM_MS));
+    fn any_account_type_goes_out_from_another_device() {
+        // An IMAP message, carried in its record, and a JMAP one, from the
+        // server's draft: either goes out from this device when the device
+        // that scheduled it is off.
+        for imap in [true, false] {
+            let conn = if imap { imap_helper() } else { setup("E1") };
+            let sync_id = if imap {
+                // A device claims only what it can send as itself.
+                conn.execute(
+                    "INSERT INTO sender_identities (account_id, email, is_primary,
+                                                    is_provider_default, verification_status)
+                     VALUES (1, 'me@test.dev', 1, 1, 'accepted')",
+                    [],
+                )
+                .unwrap();
+                let id = scheduled_elsewhere(&conn, Some("v1"));
+                synced_sends::put_mime(&conn, &id, Some(MESSAGE)).unwrap();
+                id
+            } else {
+                scheduled_elsewhere(&conn, Some("E1"))
+            };
+            drive(&conn, HELPER, AT - 10 * 60_000, Reach::Usable).unwrap();
+            server_has(&conn, &sync_id, None);
+            assert!(
+                drive(&conn, HELPER, AT - HELPER_LEAD_MS, Reach::Usable)
+                    .unwrap()
+                    .upload
+            );
+            server_has(&conn, &sync_id, Some((HELPER, AT + CLAIM_MS)));
+            let driven = drive(&conn, HELPER, AT - HELPER_LEAD_MS + 1, Reach::Usable).unwrap();
+            assert_eq!(driven.nudge, vec![1], "imap: {imap}");
+            let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+            assert_eq!(not_before(&conn, send.action_id.unwrap()), AT);
+        }
     }
 
     #[test]
@@ -1975,6 +2271,24 @@ mod tests {
         let mut merged = crate::device_sync::merge::merge(Some(&base), &local, &remote, false);
         settle(Some(&base), &local, &remote, &mut merged);
         assert_eq!(merged["claim"], json!({"device": "bb", "until": 7}));
+
+        // Who is sending goes with the claim: a device that lost its claim
+        // loses its word too, and one whose claim stands keeps it.
+        let local = json!({"sendAt": 1, "state": "scheduled",
+                           "claim": {"device": "aa", "until": 9}, "sending": "aa"});
+        let remote = json!({"sendAt": 1, "state": "scheduled",
+                            "claim": {"device": "bb", "until": 7}, "sending": "bb"});
+        let mut merged = crate::device_sync::merge::merge(Some(&base), &local, &remote, false);
+        settle(Some(&base), &local, &remote, &mut merged);
+        assert_eq!(merged["sending"], json!("bb"));
+        let claimed = json!({"sendAt": 1, "state": "scheduled",
+                             "claim": {"device": "aa", "until": 9}, "sending": null});
+        let remote = json!({"sendAt": 2, "state": "scheduled",
+                            "claim": {"device": "aa", "until": 9}, "sending": null});
+        let mut merged = crate::device_sync::merge::merge(Some(&claimed), &local, &remote, false);
+        settle(Some(&claimed), &local, &remote, &mut merged);
+        assert_eq!(merged["sending"], json!("aa"));
+        assert_eq!(merged["sendAt"], json!(2));
 
         // A send that went out stays sent.
         let local = json!({"sendAt": 1, "state": "sent", "error": null, "claim": null});
@@ -2168,10 +2482,14 @@ mod tests {
         assert_eq!(driven.fetch, vec![sync_id.clone()]);
         assert_eq!(not_before(&conn, action), HELD);
 
-        // Fetched: it goes out at its time.
+        // Fetched: it says it is sending, and goes out at its time.
         synced_sends::put_mime(&conn, &sync_id, Some(MESSAGE)).unwrap();
         let driven = drive(&conn, HELPER, now, Reach::Usable).unwrap();
         assert!(driven.fetch.is_empty());
+        assert!(driven.upload);
+        assert_eq!(not_before(&conn, action), HELD);
+        server_has(&conn, &sync_id, Some((HELPER, AT + CLAIM_MS)));
+        drive(&conn, HELPER, now, Reach::Usable).unwrap();
         assert_eq!(not_before(&conn, action), AT);
     }
 

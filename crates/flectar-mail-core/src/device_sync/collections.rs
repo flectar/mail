@@ -1404,6 +1404,7 @@ fn apply_scheduled(
         error: record.error,
         claimed_by: record.claim.map(|(device, _)| device),
         claim_until: record.claim.map(|(_, until)| until),
+        sending: record.sending,
     };
     let sync_id = sync_id_hex(id);
     if let Some(thread) = super::scheduled::put(conn, &sync_id, &shared, crate::models::now_ms())? {

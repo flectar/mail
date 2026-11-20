@@ -34,6 +34,9 @@ pub struct SyncedSend {
     /// Why this device could not send another device's send: it leaves it
     /// to the others.
     pub failed_here: Option<String>,
+    /// The device that may have handed the message to the mail server, its
+    /// result not known yet (see [`set_sending`]).
+    pub sending: Option<String>,
 }
 
 /// What another device says about a shared send.
@@ -48,6 +51,7 @@ pub struct Shared<'a> {
     pub error: Option<&'a str>,
     pub claimed_by: Option<&'a str>,
     pub claim_until: Option<i64>,
+    pub sending: Option<&'a str>,
 }
 
 pub const SCHEDULED: &str = "scheduled";
@@ -57,7 +61,7 @@ pub const FAILED: &str = "failed";
 
 const COLUMNS: &str = "sync_id, account_id, message_id, send_at, origin, draft_ref, state, error,
                        claimed_by, claim_until, action_id, may_send_until, shadow_id,
-                       failed_here";
+                       failed_here, sending";
 
 fn from_row(row: &Row) -> rusqlite::Result<SyncedSend> {
     Ok(SyncedSend {
@@ -75,6 +79,7 @@ fn from_row(row: &Row) -> rusqlite::Result<SyncedSend> {
         may_send_until: row.get(11)?,
         shadow_id: row.get(12)?,
         failed_here: row.get(13)?,
+        sending: row.get(14)?,
     })
 }
 
@@ -307,14 +312,14 @@ pub fn put_shared(conn: &Connection, sync_id: &str, shared: &Shared, now_ms: i64
     conn.execute(
         "INSERT INTO synced_sends
            (sync_id, account_id, message_id, send_at, origin, draft_ref, state, error,
-            claimed_by, claim_until, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            claimed_by, claim_until, sending, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(sync_id) DO UPDATE SET
            account_id = excluded.account_id, message_id = excluded.message_id,
            send_at = excluded.send_at, origin = excluded.origin,
            draft_ref = excluded.draft_ref, state = excluded.state, error = excluded.error,
            claimed_by = excluded.claimed_by, claim_until = excluded.claim_until,
-           updated_at = excluded.updated_at",
+           sending = excluded.sending, updated_at = excluded.updated_at",
         params![
             sync_id,
             shared.account_id,
@@ -326,8 +331,27 @@ pub fn put_shared(conn: &Connection, sync_id: &str, shared: &Shared, now_ms: i64
             shared.error,
             shared.claimed_by,
             shared.claim_until,
+            shared.sending,
             now_ms
         ],
+    )?;
+    Ok(())
+}
+
+/// Say whether this device may be handing the message to the mail server.
+/// The device holding the claim sets itself before it sends, and clears it
+/// once it knows nothing went out; a send that went out, or might have,
+/// keeps it. While another device is set, a device sends the message only
+/// after checking that it didn't go out already.
+pub fn set_sending(
+    conn: &Connection,
+    sync_id: &str,
+    device: Option<&str>,
+    now_ms: i64,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE synced_sends SET sending = ?2, updated_at = ?3 WHERE sync_id = ?1",
+        params![sync_id, device, now_ms],
     )?;
     Ok(())
 }
@@ -350,9 +374,13 @@ pub fn set_claim(
 /// Move a shared send to `send_at`. A claim stays: only the device that
 /// holds it may give it up, since it may be sending under it right now. It
 /// sends at the new time, or gives the claim up when the new time is past it.
+/// A send that ended, maybe having gone out, is the user's to send again:
+/// they checked, so which device may have sent it no longer holds anyone up.
 pub fn reschedule(conn: &Connection, sync_id: &str, send_at: i64, now_ms: i64) -> Result<()> {
     conn.execute(
-        "UPDATE synced_sends SET send_at = ?2, state = 'scheduled', error = NULL, updated_at = ?3
+        "UPDATE synced_sends SET send_at = ?2, state = 'scheduled', error = NULL,
+                sending = CASE WHEN state = 'failed' THEN NULL ELSE sending END,
+                updated_at = ?3
          WHERE sync_id = ?1",
         params![sync_id, send_at, now_ms],
     )?;
@@ -492,6 +520,7 @@ mod tests {
                 error: None,
                 claimed_by: Some("bb"),
                 claim_until: Some(2_000),
+                sending: None,
             },
             1,
         )

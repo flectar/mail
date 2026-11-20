@@ -960,6 +960,16 @@ async fn a_scheduled_send_goes_out_from_one_device() {
     phone.device_sync_run().await.unwrap();
     let laptop_account = laptop.list_accounts().await.unwrap()[0].id;
     let phone_account = phone.list_accounts().await.unwrap()[0].id;
+    // Both are signed in: a device waiting for a sign-in leaves its sends to
+    // the others.
+    for (core, account) in [(&laptop, laptop_account), (&phone, phone_account)] {
+        core.db
+            .write(move |conn| {
+                flectar_mail_core::db::repo::accounts::set_sync_state(conn, account, "idle")
+            })
+            .await
+            .unwrap();
+    }
 
     // The laptop schedules a draft, which reaches the mail server as Email
     // "E1" (the JMAP server here is a stand-in: nothing is ever sent).
@@ -986,7 +996,9 @@ async fn a_scheduled_send_goes_out_from_one_device() {
         })
         .await
         .unwrap();
-    let send_at = now_ms() + 100_000;
+    // Within a minute: the device that claims it then also says it is
+    // sending it, which a send waits for.
+    let send_at = now_ms() + 50_000;
     laptop
         .queue_send(QueueSendArgs {
             draft_id: draft,
@@ -1014,8 +1026,8 @@ async fn a_scheduled_send_goes_out_from_one_device() {
         })
         .await
         .unwrap();
-    // It claims the send, the server takes the claim, and it lets the send
-    // go out at its time.
+    // It claims the send and says it is sending it, the server takes both,
+    // and it lets the send go out at its time.
     laptop.device_sync_run().await.unwrap();
     assert_eq!(
         send_of(&laptop).await,
