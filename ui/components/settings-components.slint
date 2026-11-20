@@ -111,6 +111,9 @@ export component SettingsSwitchRow inherits Rectangle {
     in property <bool> enabled: true;
     in property <color> title-color;
     in property <color> description-color;
+    // Lowers the switch, as onto the title's line where select rows put
+    // their selects.
+    in property <length> control-shift: 0px;
     callback toggled(bool);
 
     // Both texts grow past their designed heights with larger platform fonts.
@@ -142,11 +145,15 @@ export component SettingsSwitchRow inherits Rectangle {
                 wrap: word-wrap;
             }
         }
-        Switch {
-            checked <=> root.checked;
-            enabled: root.enabled;
-            control-label: root.title;
-            toggled => { root.toggled(self.checked); }
+        VerticalLayout {
+            padding-top: root.control-shift;
+            alignment: start;
+            Switch {
+                checked <=> root.checked;
+                enabled: root.enabled;
+                control-label: root.title;
+                toggled => { root.toggled(self.checked); }
+            }
         }
     }
 }

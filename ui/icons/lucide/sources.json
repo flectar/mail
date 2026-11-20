@@ -123,6 +123,9 @@
     "globe.svg": {
       "source": "globe"
     },
+    "grip-vertical.svg": {
+      "source": "grip-vertical"
+    },
     "highlight.svg": {
       "source": "highlighter"
     },
@@ -473,6 +476,10 @@
     "globe": {
       "path": "sources/globe.svg",
       "sha256": "73213c861a1fa5edc0619b20c4cc379ab026f7bdbe05583fdb5dcdfd5af61bdb"
+    },
+    "grip-vertical": {
+      "path": "sources/grip-vertical.svg",
+      "sha256": "4d677b409de9b5bb06084bfabb8da6ab04d8e1799f0eb5bac033588de6a66cdc"
     },
     "highlighter": {
       "path": "sources/highlighter.svg",
