@@ -18,6 +18,8 @@ use std::cell::{Cell, RefCell};
 
 #[cfg(all(linux_desktop, not(feature = "flatpak")))]
 mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -56,6 +58,9 @@ pub(crate) fn attach(app: &AppWindow, tray: &FlectarTray, runtime: &tokio::runti
     });
     #[cfg(not(all(linux_desktop, not(feature = "flatpak"))))]
     let _ = runtime;
+    // macOS shows a menu bar item's name as text beside its icon, so the item
+    // goes without one there, and VoiceOver gets the name from macos.rs.
+    tray.set_named(!cfg!(target_os = "macos"));
     tray.on_shown(shown);
     if tray.get_enabled() {
         shown();
@@ -93,6 +98,9 @@ fn shown() {
             }
         });
     }
+    // Its item may only now exist.
+    #[cfg(target_os = "macos")]
+    macos::name_the_item();
     refresh();
 }
 

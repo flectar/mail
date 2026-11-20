@@ -1,7 +1,8 @@
 //! The tray's tooltip says how many unread messages there are, or
 //! conversations where the mail list shows those, under the app's name, and
-//! only the name while there are none. Turning the tray on tells Rust, which
-//! draws it then.
+//! only the name while there are none. The name beside the icon can be left
+//! out, as the macOS menu bar needs, and turning the tray on tells Rust,
+//! which draws it then and names the macOS item.
 
 use slint::platform::{
     Platform, WindowAdapter,
@@ -16,13 +17,16 @@ slint::slint! {
     export component TrayHarness inherits FlectarTray {
         in property <int> count;
         in property <bool> grouped;
+        in property <bool> name-shown: true;
         in property <bool> on;
         out property <int> times-shown;
         out property <string> shown-tooltip: self.tooltip;
+        out property <string> shown-title: self.title;
         // No picture, so no platform tray icon is made.
         image: @image-url("");
         unread: root.count;
         conversations: root.grouped;
+        named: root.name-shown;
         enabled: root.on;
         shown => {
             root.times-shown += 1;
@@ -61,6 +65,17 @@ fn the_tooltip_says_the_count_under_the_name() {
         tray.get_shown_tooltip(),
         "Flectar Mail\n1 unread conversation"
     );
+}
+
+#[test]
+fn the_name_beside_the_icon_can_be_left_out() {
+    slint::platform::set_platform(Box::new(Headless)).unwrap();
+    let tray = TrayHarness::new().unwrap();
+    assert_eq!(tray.get_shown_title(), "Flectar Mail");
+    tray.set_name_shown(false);
+    assert_eq!(tray.get_shown_title(), "");
+    // The tooltip keeps the name.
+    assert_eq!(tray.get_shown_tooltip(), "Flectar Mail");
 }
 
 #[test]

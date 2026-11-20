@@ -10,13 +10,17 @@ export component FlectarTray inherits SystemTrayIcon {
     // Whether that counts conversations, as the mail list shows them, or
     // messages.
     in property <bool> conversations: false;
+    // Linux trays list the item by its name, but macOS shows it as text
+    // beside the menu bar icon, so Rust turns it off there and names the
+    // item for VoiceOver itself.
+    in property <bool> named: true;
     visible: root.enabled;
     // Rust sets the chosen icon's tray image from AppIcon.tray-image, which
     // explains the small size; this compilation unit cannot share globals
     // with app.slint.
     in property <image> image: @image-url("../resources/app-icon/flectar-mail-tray.png");
     icon: root.image;
-    title: @tr("Flectar Mail");
+    title: root.named ? @tr("Flectar Mail") : "";
     tooltip: root.unread == 0 ? @tr("Flectar Mail")
         : root.conversations ? @tr("Flectar Mail") + "\n" + @tr("{n} unread conversation" | "{n} unread conversations" % root.unread)
         : @tr("Flectar Mail") + "\n" + @tr("{n} unread message" | "{n} unread messages" % root.unread);
@@ -24,7 +28,7 @@ export component FlectarTray inherits SystemTrayIcon {
     callback show_window();
     callback quit_app();
     // Each time the tray turns on, for Rust to draw it, which it skips while
-    // the tray is off.
+    // the tray is off, and to name the macOS menu bar item.
     callback shown();
 
     changed enabled => {
