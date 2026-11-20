@@ -1,6 +1,6 @@
 app-id: com.flectar.mail
 runtime: org.freedesktop.Platform
-runtime-version: '25.08'
+runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
@@ -31,11 +31,15 @@ cleanup:
   - '*.la'
 
 modules:
+  # PDFium built from source; the app checks the PDF preview against it below.
+  - pdfium.yml
   - name: flectar-mail
     buildsystem: simple
     build-options:
       append-path: /usr/lib/sdk/rust-stable/bin
       env:
+        # The app crate's release build alone peaks near 15 GB, so crates
+        # build one at a time.
         CARGO_BUILD_JOBS: '1'
         CARGO_HOME: /run/build/flectar-mail/cargo
         CARGO_NET_OFFLINE: 'true'
@@ -45,7 +49,6 @@ modules:
     build-commands:
       - cargo build --offline --locked --release --no-default-features --features remote-content,gpu-renderer,flatpak --bin flectar-mail
       - install -Dm0755 target/release/flectar-mail /app/bin/flectar-mail
-      - install -Dm0755 pdfium-runtime/lib/libpdfium.so /app/lib/flectar-mail/libpdfium.so
       - python3 scripts/test-pdf-preview.py /app/bin/flectar-mail
       - python3 scripts/linux-elf.py verify /app/bin/flectar-mail /app/lib/flectar-mail
       - python3 scripts/stage-linux-metadata.py --flatpak _flatpak-stage
@@ -58,8 +61,6 @@ modules:
       - install -Dm0644 THIRD_PARTY_NOTICES.md /app/share/doc/flectar-mail/THIRD_PARTY_NOTICES.md
       - install -Dm0644 resources/fonts/google-sans-flex/OFL.txt /app/share/licenses/flectar-mail/google-sans-flex/OFL.txt
       - install -Dm0644 resources/fonts/google-sans-flex/README.md /app/share/doc/flectar-mail/google-sans-flex/README.md
-      - mkdir -p /app/share/licenses/flectar-mail/pdfium
-      - cp -a pdfium-runtime/LICENSE pdfium-runtime/licenses /app/share/licenses/flectar-mail/pdfium/
     sources:
       # Package the exact checkout selected by the release workflow.
       - type: dir
@@ -77,19 +78,3 @@ modules:
           - target
           - tmp
       - cargo-sources.json
-      # Include PDF preview in the standalone alpha bundle. These are the
-      # archives scripts/stage-pdfium.py pins for linux-x64 and linux-arm64.
-      - type: archive
-        url: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8044/pdfium-linux-x64.tgz
-        sha256: eb142f416aed3a72fc5a02dbd5884868a16cb99dc0cf53e6bdd64afbf67b05f4
-        dest: pdfium-runtime
-        strip-components: 0
-        only-arches:
-          - x86_64
-      - type: archive
-        url: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8044/pdfium-linux-arm64.tgz
-        sha256: e98400ef5f005f27cfba5c14f72d464e25187298f04950de46646033cf24cef0
-        dest: pdfium-runtime
-        strip-components: 0
-        only-arches:
-          - aarch64

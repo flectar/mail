@@ -9797,8 +9797,9 @@ impl Core {
     /// The number for the badge on the app icon, or `None` while the user
     /// keeps it off: the unread mail in the Inboxes that new-mail
     /// notifications cover, counted as the sidebar counts it (see
-    /// [`repo::counts::notified_unread`]).
-    pub async fn unread_badge(&self) -> Result<Option<i64>> {
+    /// [`repo::counts::notified_unread`]). It comes with the grouping it
+    /// counts in, conversations or messages, as the mail list shows them.
+    pub async fn unread_badge(&self) -> Result<Option<(i64, MailGrouping)>> {
         let settings = self.get_settings().await?;
         if !settings.unread_badge_enabled {
             return Ok(None);
@@ -9807,7 +9808,10 @@ impl Core {
         self.db
             .read(move |conn| {
                 let badges = repo::counts::mailbox_badge_counts(conn, grouping)?;
-                Ok(Some(repo::counts::notified_unread(&badges, &settings)))
+                Ok(Some((
+                    repo::counts::notified_unread(&badges, &settings),
+                    grouping,
+                )))
             })
             .await
     }

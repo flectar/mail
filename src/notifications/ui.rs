@@ -108,13 +108,28 @@ impl super::Window for Live {
         words(summaries).await
     }
 
-    async fn badge_description(&self, count: u32) -> Option<String> {
+    async fn badge_description(&self, count: u32, grouping: MailGrouping) -> Option<String> {
         with_window(move |app, _| {
-            app.global::<I18n>()
-                .invoke_notification_unread_count(i32::try_from(count).unwrap_or(i32::MAX))
-                .to_string()
+            let count = i32::try_from(count).unwrap_or(i32::MAX);
+            let words = app.global::<I18n>();
+            match grouping {
+                MailGrouping::Conversations => {
+                    words.invoke_notification_unread_conversations(count)
+                }
+                MailGrouping::Messages => words.invoke_notification_unread_count(count),
+            }
+            .to_string()
         })
         .await
+    }
+
+    fn show_badge(&self, count: Option<(u32, MailGrouping)>) {
+        let conversations =
+            count.is_some_and(|(_, grouping)| grouping == MailGrouping::Conversations);
+        let count = count.map(|(count, _)| count);
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::tray::show_unread(count, conversations);
+        });
     }
 }
 
@@ -258,7 +273,8 @@ pub(crate) fn ask_for_permission(app: &AppWindow) {
     });
 }
 
-/// The UI's language changed: relabel what the system keeps registered.
+/// The UI's language changed: relabel what the system keeps registered, and
+/// describe the app icon's count again.
 pub(crate) fn language_changed(app: &AppWindow) {
     WINDOW.with(|window| {
         if let Some(host) = window
@@ -267,6 +283,7 @@ pub(crate) fn language_changed(app: &AppWindow) {
             .and_then(|window| window.host.as_ref())
         {
             host.set_words(&fixed_words(app));
+            super::recount();
         }
     });
 }

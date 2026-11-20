@@ -127,8 +127,10 @@ export global I18n {
     pure callback notification-delete() -> string;
     pure callback notification-new-mail-channel() -> string;
     pure callback notification-quiet-mail-channel() -> string;
-    // What a screen reader says for the count on the app icon.
+    // What a screen reader says for the count on the app icon: of messages,
+    // or of conversations where the mail list shows those.
     pure callback notification-unread-count(int) -> string;
+    pure callback notification-unread-conversations(int) -> string;
     // The line a desktop shows for the app while it runs with its window
     // closed (GNOME's Background Apps).
     pure callback background-status() -> string;
@@ -259,6 +261,9 @@ export global I18n {
     notification-mark-read() => { return @tr("Mark as read"); }
     notification-unread-count(count) => {
         return @tr("{n} unread message" | "{n} unread messages" % count);
+    }
+    notification-unread-conversations(count) => {
+        return @tr("{n} unread conversation" | "{n} unread conversations" % count);
     }
     notification-archive() => { return @tr("Archive"); }
     notification-delete() => { return @tr("Delete"); }
