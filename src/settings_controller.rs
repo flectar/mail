@@ -8,7 +8,8 @@
 use super::*;
 use flectar_mail_core::models::CustomTheme;
 
-fn apply_account_presentation_settings(
+/// Account colors, short names, profiles and mail-list markers.
+pub(super) fn apply_account_presentation_settings(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,

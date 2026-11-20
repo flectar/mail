@@ -482,7 +482,7 @@ impl CredentialStore for OhosFileCredentialStore {
 /// (see `slint_ohos_backend::asset`). No per-app permission is required.
 struct OhosAssetCredentialStore;
 
-const ALL_SLOTS: [Slot; 10] = [
+const ALL_SLOTS: [Slot; 12] = [
     Slot::Password,
     Slot::RefreshToken,
     Slot::AccessToken,
@@ -492,6 +492,8 @@ const ALL_SLOTS: [Slot; 10] = [
     Slot::AiApiKey,
     Slot::AccountCaldavPassword,
     Slot::CarddavPassword,
+    Slot::DeviceSync,
+    Slot::SyncTrial,
     Slot::ProxyPassword,
 ];
 

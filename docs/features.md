@@ -601,8 +601,9 @@ unsubscribe, since answering spam tells its sender that the address is read.
 **Block sender…** in a message's menu asks first, then sends that address's
 mail to Spam in every account. What is in an inbox now moves there, with Undo,
 and Flectar Mail moves their new mail there as it receives it, without a
-notification. The list is kept on this device, so other apps can show their new
-mail in the inbox until Flectar Mail checks for mail.
+notification. The list is kept in Flectar Mail, not by your mail provider, so
+other apps can show their new mail in the inbox until Flectar Mail checks for
+mail. Flectar Mail Sync keeps the list the same on all your devices.
 
 **Unblock sender** in the same menu, or **Unblock** in Settings → Contacts →
 Blocked senders, stops it. Mail already in Spam stays there.

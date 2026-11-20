@@ -279,7 +279,7 @@ fn english_mailbox_title(location: &Location, title: &str) -> Option<MailTitle> 
         Scope::Account { mailbox, .. } => title
             .strip_suffix(&format!(" / {}", mailbox.label()))?
             .to_owned(),
-        Scope::Folder(_) | Scope::Label { .. } => return None,
+        Scope::Folder(_) | Scope::Label { .. } | Scope::Snoozed | Scope::Scheduled => return None,
     };
     Some(MailTitle::Mailbox {
         scope: *scope,
@@ -1813,7 +1813,9 @@ fn sync_rows(model: &VecModel<TabRow>, rows: impl Iterator<Item = TabRow>) {
 /// profile leaves out is not shown either.
 fn available_scope(scope: Scope, state: &InboxState) -> Option<Scope> {
     match scope {
-        Scope::Unified(_) | Scope::Important | Scope::Other => Some(scope),
+        Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
+            Some(scope)
+        }
         // A label can move between sections, e.g. when it becomes automatic.
         Scope::Label { id, .. } => state
             .labels

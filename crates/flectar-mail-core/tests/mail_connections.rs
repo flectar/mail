@@ -1419,6 +1419,7 @@ async fn smtp_sent_policy(provider: Provider, policy: SentCopyPolicy, expected_a
         .queue_send(QueueSendArgs {
             draft_id,
             send_at: Some(now_ms()),
+            remind_at: None,
         })
         .await
         .unwrap();
