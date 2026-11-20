@@ -14,7 +14,11 @@ mod auto_replies;
 #[cfg(desktop)]
 mod autostart;
 /// The unread count where the app draws it itself.
-#[cfg(any(test, target_os = "windows"))]
+#[cfg(any(
+    test,
+    target_os = "windows",
+    all(linux_desktop, not(feature = "flatpak"))
+))]
 mod badge_pixels;
 mod block_sender;
 mod browser;

@@ -1883,6 +1883,7 @@ dependencies = [
  "slint-build",
  "stylo",
  "stylo_traits",
+ "swash",
  "sys-locale",
  "tempfile",
  "tokio",

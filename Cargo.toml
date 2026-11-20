@@ -214,6 +214,9 @@ slint = { version = "1.19.0", default-features = false, features = ["backend-win
 # stream and ask X11 window managers for their window menu. Both crates are
 # already part of the Linux build through ashpd and winit.
 futures-util = { version = "0.3", default-features = false }
+# Draws the tray's unread count in the app's typeface. Slint and cosmic-text
+# already build this version.
+swash = "0.2.10"
 x11rb = { version = "0.13", default-features = false }
 # A forwarded launch hands its activation token to the running window through
 # winit's own Wayland connection. Winit already builds these crates with the

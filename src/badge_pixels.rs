@@ -5,6 +5,8 @@
 //! longer numbers. The digits come from a text renderer as a coverage mask;
 //! this sizes them, centres them and lays them on the badge.
 
+#[cfg(all(linux_desktop, not(feature = "flatpak")))]
+pub(crate) mod linux;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows;
 
@@ -90,6 +92,34 @@ pub(crate) fn centre(width: usize, height: usize, text: &[u8]) -> Vec<u8> {
         }
     }
     centred
+}
+
+/// A badge in `accent`, with whichever of black and white text stands out
+/// more on it, by the contrast ratio of the Web Content Accessibility
+/// Guidelines. Windows 11's own badges pair their accents the same way.
+#[cfg_attr(not(linux_desktop), allow(dead_code))]
+pub(crate) fn on_accent(accent: [u8; 3]) -> Palette {
+    // Relative luminance, from sRGB.
+    let linear = |channel: u8| {
+        let value = f32::from(channel) / 255.0;
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let [red, green, blue] = accent.map(linear);
+    let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    let on_white = 1.05 / (luminance + 0.05);
+    let on_black = (luminance + 0.05) / 0.05;
+    Palette {
+        disc: accent,
+        text: if on_white > on_black {
+            [0xff; 3]
+        } else {
+            [0; 3]
+        },
+    }
 }
 
 /// What a tray icon's badge `height` pixels tall says for `count`. As tall
@@ -239,7 +269,7 @@ pub(crate) fn scale_down(pixels: &[u8], from: usize, to: usize) -> Vec<u8> {
 mod tests {
     use super::{
         Badge, Palette, badge_width, centre, draw, fits, fits_narrowed, font_height, label,
-        scale_down, tray_badge_height, tray_label,
+        on_accent, scale_down, tray_badge_height, tray_label,
     };
 
     const DARK_TASKBAR: Palette = Palette {
@@ -330,6 +360,21 @@ mod tests {
             .collect();
         assert_eq!(inked.first(), Some(&(7, 2)));
         assert_eq!(inked.last(), Some(&(8, 8)));
+    }
+
+    #[test]
+    fn accents_get_the_text_colour_that_stands_out_more() {
+        // Windows 11's own pairs: its light accent with black, its dark one
+        // with white.
+        assert_eq!(on_accent([0x4c, 0xc2, 0xff]).text, [0; 3]);
+        assert_eq!(on_accent([0x00, 0x67, 0xc0]).text, [0xff; 3]);
+        // GNOME's default blue and KDE Plasma's Breeze blue.
+        assert_eq!(on_accent([0x35, 0x84, 0xe4]).text, [0; 3]);
+        assert_eq!(on_accent([0x3d, 0xae, 0xe9]).text, [0; 3]);
+        // Purple and deep red read better in white.
+        assert_eq!(on_accent([0x91, 0x41, 0xac]).text, [0xff; 3]);
+        assert_eq!(on_accent([0xc0, 0x1c, 0x28]).text, [0xff; 3]);
+        assert_eq!(on_accent([0x35, 0x84, 0xe4]).disc, [0x35, 0x84, 0xe4]);
     }
 
     const RED: [u8; 4] = [0xd0, 0x30, 0x20, 255];
