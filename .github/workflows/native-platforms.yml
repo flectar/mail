@@ -171,7 +171,7 @@ jobs:
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
           # Release files tell of newer releases; stores update the app themselves.
           FLECTAR_UPDATE_CHECKS: github
-        run: cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
+        run: ./scripts/ci-build-scope.sh cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
 
       # The startup benchmark below must not measure swapped memory.
       - name: Take the build's swap away again
@@ -222,7 +222,9 @@ jobs:
     container:
       image: fedora:43
       # Turning on swap for the release build needs it (scripts/ci-swap.sh).
-      options: --privileged
+      # The memory cap keeps the build from swapping out the runner's agent
+      # on the 16 GiB host, as scripts/ci-build-scope.sh does elsewhere.
+      options: --privileged --memory=14g --memory-swap=-1
     env:
       SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
@@ -363,7 +365,7 @@ jobs:
         # runner has; see scripts/ci-swap.sh.
         run: ./scripts/ci-swap.sh on
       - name: Build Flatpak bundle from locked sources
-        run: ./scripts/build-flatpak.sh
+        run: ./scripts/ci-build-scope.sh ./scripts/build-flatpak.sh
       - name: Test Flatpak installation and packaged runtime
         env:
           EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
@@ -455,7 +457,8 @@ jobs:
           mkdir -p target/flathub/local
           cd target/flathub/local
           # The builder calls the host's flatpak over the session bus.
-          dbus-run-session -- flatpak run --command=flathub-build org.flatpak.Builder \
+          "$GITHUB_WORKSPACE/scripts/ci-build-scope.sh" \
+            dbus-run-session -- flatpak run --command=flathub-build org.flatpak.Builder \
             "$GITHUB_WORKSPACE/.flathub-local.yml"
           # Flathub publishes the mirrored screenshots in their own ref.
           ostree commit --repo=repo --canonical-permissions --branch=screenshots/x86_64 \
@@ -797,7 +800,7 @@ jobs:
         run: |
           args=()
           if [[ "$RELEASE_PRERELEASE" == true ]]; then args+=(--preview); fi
-          bash scripts/build-android-release.sh "${args[@]}"
+          ./scripts/ci-build-scope.sh bash scripts/build-android-release.sh "${args[@]}"
 
       - name: Verify release APK manifest, ABI, and signature
         env:

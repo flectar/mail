@@ -74,7 +74,7 @@ jobs:
           FLECTAR_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.FLECTAR_ANDROID_KEYSTORE_PASSWORD }}
           FLECTAR_ANDROID_KEY_ALIAS: ${{ secrets.FLECTAR_ANDROID_KEY_ALIAS }}
           FLECTAR_ANDROID_KEY_PASSWORD: ${{ secrets.FLECTAR_ANDROID_KEY_PASSWORD }}
-        run: ./scripts/build-android-release.sh
+        run: ./scripts/ci-build-scope.sh ./scripts/build-android-release.sh
 
       - name: Record public signing identities
         run: |
