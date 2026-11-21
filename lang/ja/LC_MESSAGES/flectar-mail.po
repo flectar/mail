@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-06 13:10+0000\n"
+"PO-Revision-Date: 2026-11-06 17:13+0000\n"
 "Last-Translator: miyaji255 <miyaji255@users.noreply.translate.flectar.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
@@ -2703,16 +2703,12 @@ msgid "Select"
 msgstr ""
 
 #: ui/components/controls.slint:487
-#, fuzzy
-#| msgid "App password"
 msgid "Hide password"
-msgstr "アプリパスワード"
+msgstr "パスワードを非表示にする"
 
 #: ui/components/controls.slint:487
-#, fuzzy
-#| msgid "App password"
 msgid "Show password"
-msgstr "アプリパスワード"
+msgstr "パスワードを表示する"
 
 #: ui/components/document-preview.slint:17
 msgid "Previous page"
@@ -4789,11 +4785,11 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1497 ui/dialogs/settings-dialog.slint:2076
 msgid "Syncing…"
-msgstr ""
+msgstr "同期中…"
 
 #: ui/dialogs/settings-dialog.slint:1497
 msgid "Sync now"
-msgstr ""
+msgstr "今すぐ同期"
 
 #: ui/dialogs/settings-dialog.slint:1516
 msgid "Renderer"
@@ -4849,43 +4845,51 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1667
 msgid "Remember people I email"
-msgstr ""
+msgstr "メール送信相手を記憶する"
 
 #: ui/dialogs/settings-dialog.slint:1668
 msgid ""
 "While enabled, remember To, Cc, and Bcc recipients from new sends and synced "
 "Sent mail."
 msgstr ""
+"有効にすると、新しく送信したメールおよび同期された送信済みメールの「宛先」「"
+"CC」「BCC」の受信者を記憶します。"
 
 #: ui/dialogs/settings-dialog.slint:1683
 msgid "Remember incoming senders"
-msgstr ""
+msgstr "受信メールの差出人を記憶する"
 
 #: ui/dialogs/settings-dialog.slint:1684
 msgid ""
 "Remember human senders from new mail. Automated, spam, trash, and existing "
 "mail are excluded."
 msgstr ""
+"新着メールから送信者を記憶します。自動送信メール、スパム、ゴミ箱内のメール、"
+"および既存のメールは除外されます。"
 
 #: ui/dialogs/settings-dialog.slint:1699
 msgid "Use suggestions from all accounts"
-msgstr ""
+msgstr "すべてのアカウントの候補を使用する"
 
 #: ui/dialogs/settings-dialog.slint:1700
 msgid ""
 "Include people emailed from any connected account. Turn off to keep learned "
 "recipients account-specific."
 msgstr ""
+"接続しているすべてのアカウントでメールを送信した相手を対象にします。学習した"
+"送信相手をアカウントごとに分けたい場合は、オフにしてください。"
 
 #: ui/dialogs/settings-dialog.slint:1715
 msgid "Use suggestions when composing"
-msgstr ""
+msgstr "メール作成時に候補を使用する"
 
 #: ui/dialogs/settings-dialog.slint:1716
 msgid ""
 "Include learned people in recipient autocomplete. Saved and CardDAV contacts "
 "are always available."
 msgstr ""
+"学習した相手を宛先の自動補完候補に含めます。保存済みの連絡先および CardDAV の"
+"連絡先は常に利用可能です。"
 
 #: ui/dialogs/settings-dialog.slint:1737
 msgid "Suggested people"
