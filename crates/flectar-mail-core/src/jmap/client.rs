@@ -359,13 +359,18 @@ pub fn normalize_base_url(value: &str, email: &str) -> Result<String> {
 }
 
 pub async fn connect(config: &AccountConfig, secret: &str) -> Result<ConnectedClient> {
-    connect_as(
-        config.proxy_owner(),
-        &config.email,
-        &config.username,
-        secret,
-        &config.jmap_url,
-        config.jmap_account_id.as_deref(),
+    // Every request waits as long as the account's server timeout says
+    // (#252), wherever the client is used.
+    net::timeouts::scope(
+        config.settings.connection.server_timeout(),
+        connect_as(
+            config.proxy_owner(),
+            &config.email,
+            &config.username,
+            secret,
+            &config.jmap_url,
+            config.jmap_account_id.as_deref(),
+        ),
     )
     .await
 }
@@ -529,7 +534,7 @@ pub(crate) async fn connect_as(
     // Like jmap-client, follow a few redirects, and only on the session host.
     let redirect_host = host.clone();
     let http = net::proxy::http_builder(owner)
-        .connect_timeout(Duration::from_secs(10))
+        .connect_timeout(net::timeouts::scaled(Duration::from_secs(10)))
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
             if attempt.previous().len() > 5 {
                 attempt.error("too many redirects")
@@ -546,7 +551,7 @@ pub(crate) async fn connect_as(
     Ok(ConnectedClient {
         client,
         http,
-        timeout: REQUEST_TIMEOUT,
+        timeout: net::timeouts::scaled(REQUEST_TIMEOUT),
         session_changed: AtomicBool::new(false),
         account_id,
         base_url,
@@ -612,7 +617,7 @@ async fn resolve_session_url(
     owner: Owner,
 ) -> Result<Url> {
     let http = net::proxy::http_builder(owner)
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(net::timeouts::scaled(std::time::Duration::from_secs(30)))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|error| CoreError::Network(format!("JMAP discovery client failed: {error}")))?;
@@ -683,7 +688,7 @@ async fn connect_authenticated(
     Client::new()
         .proxy(net::proxy::reqwest_proxy(owner))
         .credentials(credentials)
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(net::timeouts::scaled(REQUEST_TIMEOUT))
         // Public cross-host redirects are resolved before authentication.
         // The library may follow same-host redirects from this well-known URL.
         .follow_redirects([host])
