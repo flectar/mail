@@ -1,0 +1,43 @@
+[package]
+name = "secret-e2e"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+flectar-mail-core = { path = "../../../crates/flectar-mail-core" }
+ashpd = { version = "0.11", default-features = false, features = ["async-std"] }
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+tokio = { version = "1", features = ["rt", "time"] }
+tracing = "0.1"
+
+# The store comes in through a #[path] module from src/, which cargo-machete
+# doesn't read, so it can't see these used.
+[package.metadata.cargo-machete]
+ignored = ["ashpd", "tokio", "tracing", "zbus"]
+
+# Built on its own; quality.yml copies the app's Cargo.lock in first, so it
+# resolves the same versions and patched crates as the app.
+[workspace]
+
+[patch.crates-io]
+blitz-dom = { path = "../../../crates/blitz-dom" }
+blitz-paint = { path = "../../../crates/blitz-paint" }
+# winit 0.30 doesn't report files dropped on a Wayland window, so they come
+# through the clipboard's data device, as patches/slint-winit/README.md and
+# patches/smithay-clipboard/README.md explain.
+i-slint-backend-winit = { path = "../../../crates/i-slint-backend-winit" }
+smithay-clipboard = { path = "../../../crates/smithay-clipboard" }
+# Slint 1.19's software renderer panics on a rounded clip far out of view; see
+# patches/slint-renderer-software/README.md.
+i-slint-renderer-software = { path = "../../../crates/i-slint-renderer-software" }
+# Fontique 0.12 slants italics from a font's `slnt` axis the wrong way, so
+# variable fonts without an italic face, such as the bundled Google Sans Flex,
+# stay upright; see patches/fontique/README.md.
+fontique = { path = "../../../crates/fontique" }
+# Vello drops Calibri's letters on the GPU; see patches/vello/README.md.
+vello = { path = "../../../crates/vello" }
+# jmap-client makes its own HTTP clients, which can't take the app's proxy; see
+# patches/jmap-client/README.md.
+jmap-client = { path = "../../../crates/jmap-client" }
+
