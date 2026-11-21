@@ -279,6 +279,17 @@ pub(super) fn searchable(document: &BaseDocument) -> Vec<Searchable> {
     runs
 }
 
+/// The laid out runs of text in document order.
+pub(super) fn inline_roots(document: &BaseDocument) -> Vec<NodeId> {
+    searchable(document)
+        .into_iter()
+        .filter_map(|run| match run {
+            Searchable::Shown(id) => Some(id),
+            Searchable::Hidden { .. } => None,
+        })
+        .collect()
+}
+
 /// The text under `root` that a closed section hides, one string per block.
 /// Nothing inside it has styles yet, so blocks are told by their elements.
 fn hidden_blocks(document: &BaseDocument, root: NodeId) -> Vec<String> {

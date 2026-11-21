@@ -812,18 +812,20 @@ impl GpuEmailRenderer {
             return false;
         };
 
-        let mut inline_roots = Vec::new();
-        email.document.visit(|node_id, node| {
-            let Some(element) = node.element_data() else {
-                return;
-            };
-            let Some(layout) = element.inline_layout_data.as_deref() else {
-                return;
-            };
-            if !layout.text.is_empty() {
-                inline_roots.push((node_id, layout.text.len()));
-            }
-        });
+        // In layout order, which includes the anonymous blocks that hold text
+        // next to a block.
+        let inline_roots: Vec<_> = details::inline_roots(&email.document)
+            .into_iter()
+            .filter_map(|node_id| {
+                let layout = email
+                    .document
+                    .get_node(node_id)?
+                    .element_data()?
+                    .inline_layout_data
+                    .as_deref()?;
+                (!layout.text.is_empty()).then_some((node_id, layout.text.len()))
+            })
+            .collect();
 
         let Some(&(first_node, _)) = inline_roots.first() else {
             return false;
@@ -2865,6 +2867,25 @@ mod tests {
                 .selected_text()
                 .is_some_and(|text| !text.is_empty())
         );
+    }
+
+    #[test]
+    fn select_all_and_find_reach_text_beside_a_block() {
+        let prepared = prepare_email_html(
+            r#"<html><body><div>Loose words<p>Paragraph</p>Tail</div></body></html>"#,
+        )
+        .expect("email should parse");
+        let mut renderer = GpuEmailRenderer::default();
+        renderer.set_email(prepared);
+
+        assert!(renderer.select_all());
+        let text = renderer.selected_text().expect("all text selected");
+        assert!(
+            text.contains("Loose words") && text.contains("Paragraph") && text.contains("Tail"),
+            "{text:?}"
+        );
+        assert_eq!(renderer.find("loose", 0).1, 1);
+        assert_eq!(renderer.selected_text().as_deref(), Some("Loose"));
     }
 
     #[test]
