@@ -132,6 +132,7 @@ impl From<WarmStartMessage> for mail::MailMessage {
             snoozed_until: None,
             send_at: None,
             send_error: None,
+            send_uncertain: false,
             reply_reminder_at: None,
             reply_reminder_due: false,
             to: String::new(),
@@ -624,6 +625,8 @@ pub(crate) struct PendingCoreUpdates {
     /// When each account's latest check caught its Inbox up.
     pub(crate) caught_up: HashMap<i64, i64>,
     pub(crate) action_error: Option<String>,
+    /// A send ended without the mail server confirming it.
+    pub(crate) send_uncertain: bool,
     /// What became of the latest mail copied or moved to other accounts.
     pub(crate) transfers: Option<TransferReport>,
     /// A sync counted older unread mail only on the server again.
@@ -852,6 +855,14 @@ pub(crate) fn spawn_core_event_listener(
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .action_error = Some(error);
+                    true
+                }
+                // A send the mail server may have taken without saying so.
+                Ok(CoreEvent::ActionState { state, .. }) if state == "uncertain" => {
+                    pending
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .send_uncertain = true;
                     true
                 }
                 Ok(CoreEvent::TransfersFinished(report)) => {
@@ -1418,6 +1429,7 @@ mod warm_start_tests {
             snoozed_until: None,
             send_at: None,
             send_error: None,
+            send_uncertain: false,
             reply_reminder_at: None,
             reply_reminder_due: false,
             to: "secret-recipient@example.com".into(),

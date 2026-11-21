@@ -40,6 +40,8 @@ pub mod documents;
 mod email_document;
 pub mod favicon;
 mod files_controller;
+#[cfg(all(linux_desktop, feature = "flatpak"))]
+mod flatpak_secrets;
 mod han_fallback;
 mod import_controller;
 mod invitation;
@@ -1659,6 +1661,9 @@ fn desktop_credential_store(
             flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore::new(path),
         );
     }
+    #[cfg(all(linux_desktop, feature = "flatpak"))]
+    return flatpak_secrets::credential_store(paths);
+    #[cfg(not(all(linux_desktop, feature = "flatpak")))]
     Arc::new(flectar_mail_core::accounts::credentials::SystemCredentialStore::for_profile(paths))
 }
 
@@ -4277,6 +4282,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             && let Some(app) = mail_update_app.upgrade()
         {
             let message = UiMessage::detail("Message action failed: {}", error);
+            app.set_render_status(message.clone());
+            app.set_sync_status(message);
+        }
+        if pending.send_uncertain
+            && let Some(app) = mail_update_app.upgrade()
+        {
+            let message = UiMessage::plain(
+                "Your message may have gone out, but the mail server didn't confirm it. Check Sent before you send it again.",
+            );
             app.set_render_status(message.clone());
             app.set_sync_status(message);
         }

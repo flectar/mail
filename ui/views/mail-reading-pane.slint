@@ -331,7 +331,9 @@ export component MailReadingPane inherits FocusScope {
     // What the open scheduled draft or reply reminder is waiting for. Beside
     // the message actions on wide layouts; on phones, on a line above them.
     private property <string> waiting-text: root.scheduled
-        ? (SendLaterUi.open-send-error != ""
+        ? (SendLaterUi.open-send-uncertain
+            ? @tr("May have gone out. Check Sent first.")
+            : SendLaterUi.open-send-error != ""
             ? @tr("Not sent: {}", SendLaterUi.open-send-error)
             : @tr("Sends {}", SendLaterUi.open-send-time))
         : root.reminding

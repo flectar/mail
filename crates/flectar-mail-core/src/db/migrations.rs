@@ -80,6 +80,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/061_sign_in_sync.sql")),
     Migration::Plain(include_str!("migrations/062_synced_send_turns.sql")),
     Migration::Plain(include_str!("migrations/063_send_indexes.sql")),
+    Migration::Plain(include_str!("migrations/064_synced_send_fences.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

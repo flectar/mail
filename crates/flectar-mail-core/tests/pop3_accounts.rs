@@ -532,6 +532,7 @@ async fn a_message_another_device_scheduled_goes_out_from_here_as_it_is() {
                     error: None,
                     claimed_by: Some("bb"),
                     claim_until: Some(now_ms() + 15 * 60_000),
+                    sending: Some("bb"),
                 },
                 now_ms(),
             )?;
