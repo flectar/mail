@@ -109,7 +109,9 @@ pub(super) fn register_renderer_input_callbacks(
             return;
         };
         if url.starts_with('#') {
-            if let Some(y) = r.borrow().fragment_y(&url) {
+            // The scroll below asks the renderer again, so let it go first.
+            let target = r.borrow().fragment_y(&url);
+            if let Some(y) = target {
                 let y = y + banner_height(&app);
                 app.set_email_scroll_y(-y);
                 app.invoke_email_scroll(y, app.get_email_viewport_height());
