@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-12 09:41+0000\n"
+"PO-Revision-Date: 2026-11-13 10:24+0000\n"
 "Last-Translator: miyaji255 <miyaji255@users.noreply.translate.flectar.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
@@ -372,26 +372,24 @@ msgstr "終日"
 
 #: ui/app.slint:214 ui/components/calendar.slint:542
 msgid "Accepted"
-msgstr ""
+msgstr "参加"
 
 #: ui/app.slint:215 ui/components/calendar.slint:543
 msgid "Maybe"
-msgstr ""
+msgstr "未定"
 
 #: ui/app.slint:216 ui/components/calendar-agenda.slint:250
 #: ui/components/calendar.slint:544
 msgid "Declined"
-msgstr ""
+msgstr "不参加"
 
 #: ui/app.slint:217
-#, fuzzy
-#| msgid "Delete"
 msgid "Delegated"
-msgstr "削除"
+msgstr "委任"
 
 #: ui/app.slint:218 ui/components/calendar-agenda.slint:251
 msgid "Not answered yet"
-msgstr ""
+msgstr "未回答"
 
 #: ui/app.slint:220
 msgid "(untitled event)"
@@ -2266,7 +2264,7 @@ msgstr[0] ""
 
 #: ui/components/account-calendars.slint:71 ui/components/calendar.slint:478
 msgid "Paused"
-msgstr ""
+msgstr "一時停止中"
 
 #: ui/components/account-calendars.slint:73
 msgid "Sign-in required"
@@ -2640,7 +2638,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:248
 msgid "Working…"
-msgstr ""
+msgstr "処理中…"
 
 #: ui/components/account-mail-preferences.slint:260
 msgid "OpenPGP message"
@@ -2661,7 +2659,7 @@ msgstr ""
 #: ui/dialogs/settings-dialog.slint:3516 ui/views/files-view.slint:505
 #: ui/views/files-view.slint:695 ui/window-chrome.slint:201
 msgid "Close"
-msgstr ""
+msgstr "閉じる"
 
 #: ui/components/app-icon-picker.slint:97
 msgid "App icon"
@@ -2708,7 +2706,7 @@ msgstr ""
 #: ui/components/calendar-agenda.slint:68 ui/components/theme-editor.slint:782
 #: ui/dialogs/settings-dialog.slint:1861
 msgid "Reset"
-msgstr ""
+msgstr "リセット"
 
 #: ui/components/calendar-agenda.slint:70
 msgid "Filters only affect this agenda."
@@ -2726,7 +2724,7 @@ msgstr[0] "{n}個の予定"
 
 #: ui/components/calendar-agenda.slint:249 ui/components/calendar.slint:536
 msgid "Cancelled"
-msgstr ""
+msgstr "中止"
 
 #: ui/components/calendar-agenda.slint:271 ui/components/calendar.slint:79
 #: ui/components/calendar.slint:803
@@ -2850,7 +2848,7 @@ msgstr ""
 
 #: ui/components/calendar.slint:478
 msgid "Enabled"
-msgstr ""
+msgstr "有効"
 
 #: ui/components/calendar.slint:479 ui/components/calendar.slint:502
 msgid "Default calendar"
@@ -2902,7 +2900,7 @@ msgstr "月"
 
 #: ui/components/calendar.slint:649 ui/components/calendar.slint:849
 msgid "Agenda"
-msgstr ""
+msgstr "予定一覧"
 
 #: ui/components/calendar.slint:663 ui/components/calendar.slint:861
 msgid "Local time · {}"
@@ -3049,7 +3047,7 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:395
 msgid "Strikethrough"
-msgstr ""
+msgstr "取り消し線"
 
 #: ui/components/composer-actions.slint:400
 msgid "Text color"
@@ -3100,7 +3098,7 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:454
 msgid "Quote"
-msgstr ""
+msgstr "引用"
 
 #: ui/components/composer-actions.slint:455
 msgid "Inline code"
@@ -3138,7 +3136,7 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:623
 msgid "Sending…"
-msgstr ""
+msgstr "送信中…"
 
 #: ui/components/composer-actions.slint:623
 msgid "Send"
@@ -3354,7 +3352,7 @@ msgstr ""
 
 #: ui/components/email-composer.slint:395
 msgid "Signature"
-msgstr ""
+msgstr "署名"
 
 #: ui/components/email-composer.slint:498
 msgid "Write your message…"
@@ -3494,7 +3492,7 @@ msgstr ""
 
 #: ui/components/email-templates.slint:249
 msgid "Insert"
-msgstr ""
+msgstr "挿入"
 
 #: ui/components/email-templates.slint:261
 msgid "Edit template"
@@ -4291,7 +4289,7 @@ msgstr ""
 
 #: ui/components/theme-editor.slint:688 ui/components/theme-editor.slint:695
 msgid "Saved"
-msgstr ""
+msgstr "保存済み"
 
 #: ui/components/theme-editor.slint:704 ui/components/theme-editor.slint:718
 msgid "Primary"
@@ -4333,7 +4331,7 @@ msgstr ""
 
 #: ui/components/theme-editor.slint:784
 msgid "Revert"
-msgstr ""
+msgstr "元に戻す"
 
 #: ui/components/theme-editor.slint:785 ui/dialogs/folder-dialog.slint:135
 #: ui/views/mail-reading-pane.slint:2121
@@ -4379,7 +4377,7 @@ msgstr ""
 #: ui/dialogs/attachment-preview-dialog.slint:39
 #: ui/dialogs/settings-dialog.slint:3131 ui/views/mail-reading-pane.slint:1862
 msgid "Download"
-msgstr ""
+msgstr "ダウンロード"
 
 #: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:514
 msgid "Loading preview…"
