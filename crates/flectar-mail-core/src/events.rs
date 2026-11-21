@@ -87,6 +87,9 @@ pub enum CoreEvent {
         account_id: i64,
         sync_state: String,
         sync_error: Option<String>,
+        /// When sync asks the server again, while it waits because the
+        /// server asked it to (#251).
+        sync_retry_at: Option<i64>,
     },
     /// What the app knows of an account's automatic replies changed, read
     /// from its server or saved to it.
@@ -151,6 +154,26 @@ pub enum CoreEvent {
     /// CardDAV pull or push changed the unified contact directory.
     ContactsUpdated {
         account_id: i64,
+    },
+    /// Settings changed outside the settings screens, such as by another
+    /// device through Flectar Mail Sync.
+    SettingsChanged,
+    /// Accounts were added, changed or removed outside the account screens,
+    /// such as by another device through Flectar Mail Sync. `removed` lists the
+    /// accounts whose removal was attempted; one may remain if it failed.
+    AccountsChanged {
+        removed: Vec<i64>,
+    },
+    /// Another device blocked a sender, or stopped blocking one, through
+    /// Flectar Mail Sync.
+    BlockedSendersChanged,
+    /// Where Flectar Mail Sync stands on this device.
+    DeviceSync(crate::device_sync::DeviceSyncStatus),
+    /// Progress of adding a device to Flectar Mail Sync, in the pairing the call
+    /// that started it returned.
+    DeviceSyncPairing {
+        pairing: u64,
+        event: crate::device_sync::PairingEvent,
     },
 }
 

@@ -4,7 +4,8 @@
 //! which is all Windows and X11 window managers need. The other places that
 //! show the icon are outside Slint's reach:
 //!
-//! - the tray is a separate Slint compilation unit and gets its image here;
+//! - the tray is a separate Slint compilation unit, whose picture
+//!   src/tray.rs draws from the chosen icon's;
 //! - macOS draws the Dock and app switcher icon from the application, not the
 //!   window;
 //! - Linux launchers, and Wayland taskbars, look the icon up in the icon
@@ -17,10 +18,9 @@
 //! some mobile platforms reserve switching the home screen icon for system
 //! apps, so the choice is not offered there.
 
-use crate::{AppIconVariant, AppWindow, tray_ui::FlectarTray};
+use crate::{AppIconVariant, AppWindow};
 use flectar_mail_core::models;
 use slint::ComponentHandle;
-use std::cell::RefCell;
 
 #[cfg(desktop)]
 pub(crate) const AVAILABLE: bool = cfg!(not(feature = "flatpak"));
@@ -32,10 +32,6 @@ pub(crate) const AVAILABLE: bool = crate::platform::SWITCHES_APP_ICON;
 const PLATFORM: &str = crate::window_chrome::PLATFORM;
 #[cfg(mobile)]
 const PLATFORM: &str = crate::platform::NAME;
-
-thread_local! {
-    static TRAY: RefCell<Option<slint::Weak<FlectarTray>>> = const { RefCell::new(None) };
-}
 
 pub(crate) fn variant(icon: models::AppIcon) -> AppIconVariant {
     match icon {
@@ -71,24 +67,13 @@ pub(crate) fn apply(app: &AppWindow, icon: models::AppIcon) {
     global.set_available(AVAILABLE);
     global.set_platform(PLATFORM.into());
     global.set_variant(variant(icon));
-    TRAY.with(|tray| {
-        if let Some(tray) = tray.borrow().as_ref().and_then(slint::Weak::upgrade) {
-            tray.set_image(global.invoke_tray_image(variant(icon)));
-        }
-    });
+    crate::tray::set_icon(global.invoke_tray_image(variant(icon)));
     #[cfg(target_os = "macos")]
     dock::show(icon);
     #[cfg(all(linux_desktop, not(feature = "flatpak")))]
     launcher::request(icon);
     #[cfg(mobile)]
     crate::platform::show_app_icon(icon);
-}
-
-/// Keep the tray's image in step with the chosen icon.
-pub(crate) fn attach_tray(app: &AppWindow, tray: &FlectarTray) {
-    let global = app.global::<crate::AppIcon>();
-    tray.set_image(global.invoke_tray_image(global.get_variant()));
-    TRAY.with(|slot| *slot.borrow_mut() = Some(tray.as_weak()));
 }
 
 /// The 512 px rendering of a non-default icon, for the Linux icon theme. The

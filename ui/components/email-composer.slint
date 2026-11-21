@@ -88,6 +88,9 @@ export component EmailComposer inherits Rectangle {
     in property <int> active-image-width: 0;
     in property <int> active-image-shown-width: 0;
     in property <bool> can-pop-out: false;
+    // When the message reminds the user unless someone replies, as shown,
+    // or empty.
+    in property <string> remind-time: "";
     // "reply" or "forward" when the original goes below the editor.
     in property <string> quote: "";
     in property <string> quote-left-out: "";
@@ -143,6 +146,9 @@ export component EmailComposer inherits Rectangle {
     callback answer-send-check(string);
     callback save-signature();
     callback pick-attachments;
+    // Pick when the message goes out, or reminds the user.
+    callback schedule-send;
+    callback remind;
     callback insert-images;
     callback remove-attachment(int);
     callback remove-link(int);
@@ -532,6 +538,7 @@ export component EmailComposer inherits Rectangle {
         ComposerToolbar {
             compact: root.compact;
             templates-shown: !root.signature-mode;
+            reminder-shown: !root.signature-mode;
             plain-text: root.plain-text;
             format-switch-shown: !root.signature-mode;
             plain-text-chosen(plain) => { root.plain-text-chosen(plain); }
@@ -558,6 +565,8 @@ export component EmailComposer inherits Rectangle {
             apply-format(kind) => { root.apply-format(kind); }
             insert-image => { root.insert-images(); }
             open-templates => { root.templates-open = true; }
+            remind-time: root.remind-time;
+            remind => { root.remind(); }
             translate-shown: root.translate-shown && !root.signature-mode;
             improve-shown: root.improve-shown && !root.signature-mode;
             ai-prompts: root.ai-prompts;
@@ -1132,6 +1141,7 @@ export component EmailComposer inherits Rectangle {
             subtle-border-color: root.subtle-border-color;
             signature: root.signature-mode;
             submit(send-now) => { root.submit(send-now); }
+            schedule-send => { root.schedule-send(); }
             save-signature => { root.save-signature(); }
             pick-attachments => { root.pick-attachments(); }
             link-sharing: root.link-sharing;

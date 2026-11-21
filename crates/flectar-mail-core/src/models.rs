@@ -410,6 +410,32 @@ impl KeepOnServer {
     }
 }
 
+/// How often an account checks for new mail (#251).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CheckInterval {
+    /// As often as Settings has every account check.
+    #[default]
+    App,
+    /// Every this many minutes, one of [`CheckInterval::MINUTES`].
+    Minutes(u32),
+    /// Only when the user asks, and when the app starts.
+    Manual,
+}
+
+impl CheckInterval {
+    /// The intervals an account can check at.
+    pub const MINUTES: [u32; 5] = [1, 5, 15, 30, 60];
+
+    /// Whether an account can be set to check this way.
+    pub fn is_offered(self) -> bool {
+        match self {
+            Self::App | Self::Manual => true,
+            Self::Minutes(minutes) => Self::MINUTES.contains(&minutes),
+        }
+    }
+}
+
 /// Typed contents of `accounts.settings_json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -447,9 +473,22 @@ pub struct AccountSettings {
     /// Mail files mail into, and the folders rules file into.
     #[serde(default)]
     pub subscribed_folders_only: bool,
+    /// How often the account checks for new mail.
+    #[serde(default)]
+    pub check_interval: CheckInterval,
+    /// IMAP and JMAP accounts: the server tells of new mail as it arrives
+    /// (IMAP IDLE, JMAP's event source). Off, the account checks at its
+    /// interval instead. An account that checks only when asked doesn't
+    /// listen either.
+    #[serde(default = "push_default")]
+    pub push: bool,
 }
 
 const fn plain_text_replies_default() -> bool {
+    true
+}
+
+const fn push_default() -> bool {
     true
 }
 
@@ -468,6 +507,8 @@ impl AccountSettings {
             plain_text_replies: plain_text_replies_default(),
             request_read_receipts: false,
             subscribed_folders_only: false,
+            check_interval: CheckInterval::App,
+            push: push_default(),
         }
     }
 }
@@ -565,6 +606,35 @@ mod account_settings_tests {
     }
 
     #[test]
+    fn accounts_check_as_settings_say_with_push_until_changed() {
+        let mut settings: AccountSettings = serde_json::from_str(MINIMAL_SETTINGS).unwrap();
+        assert_eq!(settings.check_interval, CheckInterval::App);
+        assert!(settings.push);
+        for (interval, stored) in [
+            (
+                CheckInterval::Minutes(30),
+                r#""checkInterval":{"minutes":30}"#,
+            ),
+            (CheckInterval::Manual, r#""checkInterval":"manual""#),
+            (CheckInterval::App, r#""checkInterval":"app""#),
+        ] {
+            settings.check_interval = interval;
+            settings.push = false;
+            let json = serde_json::to_string(&settings).unwrap();
+            assert!(json.contains(stored), "{json}");
+            assert!(json.contains(r#""push":false"#), "{json}");
+            let restored: AccountSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored.check_interval, interval);
+            assert!(!restored.push);
+        }
+        for minutes in CheckInterval::MINUTES {
+            assert!(CheckInterval::Minutes(minutes).is_offered());
+        }
+        assert!(!CheckInterval::Minutes(0).is_offered());
+        assert!(!CheckInterval::Minutes(7).is_offered());
+    }
+
+    #[test]
     fn new_and_partially_stored_settings_share_the_bounded_default() {
         let connection =
             MailConnectionSettings::new(ConnectionSecurity::Tls, ConnectionSecurity::Starttls);
@@ -622,6 +692,10 @@ pub struct Account {
     pub mail_protocol: MailProtocol,
     pub sync_state: String,
     pub sync_error: Option<String>,
+    /// When sync asks the server again, in milliseconds since the epoch,
+    /// while the account waits because the server asked it to (#251).
+    #[serde(default)]
+    pub sync_retry_at: Option<i64>,
     /// Whether the provider currently permits creating a root mailbox.
     #[serde(default = "default_true")]
     pub can_create_top_level_mailbox: bool,
@@ -1049,6 +1123,8 @@ pub enum View {
     Starred,
     Snoozed,
     Sent,
+    /// Drafts waiting to be sent at a time the user chose.
+    Scheduled,
     Drafts,
     Done,
     Trash,
@@ -1077,6 +1153,10 @@ pub struct ThreadSummary {
     /// A message of the conversation was sent with high importance.
     pub high_importance: bool,
     pub snoozed_until: Option<i64>,
+    /// When the user asked to be reminded unless someone replies.
+    pub reply_reminder_at: Option<i64>,
+    /// That time came with no reply: the conversation waits for one.
+    pub reply_reminder_due: bool,
     /// Ids of labels present on any message in the thread.
     pub labels: Vec<i64>,
     /// The one-time code the newest message asks its reader to enter.
@@ -1126,6 +1206,10 @@ pub struct MessageSummary {
     pub high_importance: bool,
     /// When the message's conversation is snoozed until.
     pub snoozed_until: Option<i64>,
+    /// When the user asked to be reminded unless someone replies.
+    pub reply_reminder_at: Option<i64>,
+    /// That time came with no reply: the conversation waits for one.
+    pub reply_reminder_due: bool,
     pub labels: Vec<i64>,
     pub verification_code: Option<String>,
     /// The message's first file. Inline images are not files.
@@ -2011,6 +2095,25 @@ impl Importance {
 pub struct QueueSendArgs {
     pub draft_id: i64,
     pub send_at: Option<i64>,
+    /// Remind the user at this time unless someone replies by then.
+    #[serde(default)]
+    pub remind_at: Option<i64>,
+}
+
+/// A draft waiting to be sent at a time the user chose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledSend {
+    pub action_id: i64,
+    pub draft_id: i64,
+    /// The draft's conversation.
+    pub thread_id: Option<i64>,
+    pub account_id: i64,
+    /// When it goes out, in ms since the epoch.
+    pub send_at: i64,
+    /// `pending`, `inflight`, or `failed` and waiting for the user.
+    pub state: String,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2903,6 +3006,10 @@ pub struct Settings {
     /// Show which account each mail-list row belongs to with a color marker.
     #[serde(default)]
     pub show_account_badges: bool,
+    /// Flectar Mail Sync carries passwords and sign-ins between the user's
+    /// devices too, end-to-end encrypted, so accounts arrive signed in.
+    #[serde(default = "default_true")]
+    pub sync_sign_ins: bool,
     /// Per-account marker color (hex), keyed by stringified account id.
     /// Missing = the UI derives a stable hue from the address.
     #[serde(default)]
@@ -3231,6 +3338,7 @@ impl Default for Settings {
             signature_defaults: std::collections::HashMap::new(),
             account_themes: std::collections::HashMap::new(),
             show_account_badges: false,
+            sync_sign_ins: true,
             account_colors: std::collections::HashMap::new(),
             account_short_names: std::collections::HashMap::new(),
             mail_profiles: Vec::new(),
@@ -3561,6 +3669,8 @@ pub mod roles {
     pub const SPAM: &str = "spam";
     pub const ALL: &str = "all";
     pub const SNOOZED: &str = "snoozed";
+    /// Where a JMAP server keeps a message it holds to send later.
+    pub const SCHEDULED: &str = "scheduled";
 }
 
 pub fn now_ms() -> i64 {

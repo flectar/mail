@@ -49,6 +49,13 @@ pub enum Slot {
     /// CardDAV app password. Kept separate because a user may configure
     /// different DAV providers for calendars and contacts.
     CarddavPassword,
+    /// This device's Flectar Mail Sync keys (stored under account id 0).
+    DeviceSync,
+    /// The Flectar Mail Sync servers this device had a free trial on, so a
+    /// group it starts there again begins without one (stored under account
+    /// id 0). Not a secret: the credential store keeps it because it outlives
+    /// the app's own data where the platform allows.
+    SyncTrial,
     /// The app password of the storage service with this id that files go by link from,
     /// kept under account id 0 as the service belongs to no account.
     LinkServicePassword(i64),
@@ -78,6 +85,8 @@ impl Slot {
                 format!("caldav_password:{connection_id}").into()
             }
             Slot::CarddavPassword => "carddav_password".into(),
+            Slot::DeviceSync => "device_sync".into(),
+            Slot::SyncTrial => "sync_trial".into(),
             Slot::LinkServicePassword(service_id) => {
                 format!("link_service_password:{service_id}").into()
             }
@@ -164,6 +173,12 @@ impl CredentialStore for UnavailableCredentialStore {
     fn delete_all(&self, _: i64) -> Result<()> {
         Err(Self::error())
     }
+}
+
+/// Whether `error` says the store holds nothing for that slot, as opposed to
+/// a store that is locked or can't be reached right now.
+pub(crate) fn is_missing(error: &CoreError) -> bool {
+    matches!(error, CoreError::Auth(message) if message == "no stored credential")
 }
 
 pub async fn store_async(

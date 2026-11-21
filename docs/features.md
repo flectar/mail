@@ -178,9 +178,35 @@ keeps trying a failing account on its own, and the marker goes away with the
 next check that works. When the sidebar is hidden, as on a phone, a red dot on
 the folders button says an account has a problem.
 
-The account's menu also tells when it last checked mail, and so does its card
-in Settings → Accounts, together with the account's state and the server's own
-words about a failure.
+The account's menu also tells when it last checked mail, and so does its card in
+Settings → Accounts, together with the account's state and the server's own
+words about a failure. A card opens to the account's settings with a click, and
+closes the one open before. **Account settings** in the account's menu in the
+sidebar opens Settings on that card.
+
+Each account can check at its own pace. In its card in Settings → Accounts,
+**Check for new mail** keeps the interval from Settings → General, or checks
+every minute, 5, 15 or 30 minutes, or every hour, or only when the app starts
+and when you ask. **Instant updates** lets an IMAP or JMAP server tell Flectar
+Mail of new mail as soon as it arrives. Turned off, the account checks at its
+interval, which saves battery and data, and helps with a server that drops
+waiting connections. An account that checks only when you ask doesn't wait for
+updates either.
+
+A server can ask Flectar Mail to slow down, when an account has too many
+connections open or makes too many requests, or while another app is using a
+POP3 mailbox. Flectar Mail then waits before it asks that server again, for as
+long as the server said, or else for a minute that grows while the server keeps
+asking, up to an hour, and a little longer or shorter for each account so they
+don't all return at once. The account shows **Waiting for the server** with the
+time it checks again, and a marker beside its name explains why. **Try now**
+checks at once, unless the server named its wait, as Gmail and Exchange often
+do. Asking again early would only make that wait longer. Changes you make
+meanwhile wait too and go to the server once it's ready. When an IMAP server
+turns down a connection for having too many open, Flectar Mail opens one fewer
+for downloading in the background from then on. When many accounts start
+together, they take turns connecting, and a few at a time download their older
+mail.
 
 ## New-mail notifications
 
@@ -236,7 +262,10 @@ turn it off with **Unread count on the app icon** in Settings → Notifications.
 macOS shows it on the Dock and iOS on the Home Screen icon when badges are
 allowed for Flectar Mail in its notification settings, Windows on the taskbar
 button, and Linux on docks that show counts, such as KDE Plasma's, Ubuntu Dock
-and Dash to Dock, elementary OS's and Plank.
+and Dash to Dock, elementary OS's and Plank. With **Keep running in system
+tray** on, the tray icon shows the count too on Windows and Linux, so it stays
+in sight while the window is closed. Pointing at the tray icon shows the number
+as well, except in GNOME, whose top bar has no tooltips.
 
 ## Profiles and account colors
 
@@ -309,7 +338,9 @@ CalDAV, and CardDAV. Mailbox and calendar data are stored locally, so synced
 data stays useful without a connection. The Files view browses JMAP and WebDAV
 storage, searches mail attachments, keeps files offline, and previews PDFs,
 images and text. [Contacts and CardDAV](carddav-contacts.md) describes how
-contacts are stored and synced.
+contacts are stored and synced. To sync an account's contacts with a CardDAV
+server, open its card in Settings → Accounts and choose **Connect** under
+Contacts.
 
 ## Signatures and OpenPGP
 
@@ -570,8 +601,9 @@ unsubscribe, since answering spam tells its sender that the address is read.
 **Block sender…** in a message's menu asks first, then sends that address's
 mail to Spam in every account. What is in an inbox now moves there, with Undo,
 and Flectar Mail moves their new mail there as it receives it, without a
-notification. The list is kept on this device, so other apps can show their new
-mail in the inbox until Flectar Mail checks for mail.
+notification. The list is kept in Flectar Mail, not by your mail provider, so
+other apps can show their new mail in the inbox until Flectar Mail checks for
+mail. Flectar Mail Sync keeps the list the same on all your devices.
 
 **Unblock sender** in the same menu, or **Unblock** in Settings → Contacts →
 Blocked senders, stops it. Mail already in Spam stays there.

@@ -29,7 +29,7 @@ fn same_mail_transport(left: &AccountConfig, right: &AccountConfig) -> bool {
 /// Reuse transport details only when every manual account of the form's
 /// protocol for the domain agrees. Ambiguous configurations deliberately leave
 /// the new form untouched.
-pub(super) fn reusable_mail_transport<'a>(
+fn reusable_mail_transport<'a>(
     configs: &'a [AccountConfig],
     address: &str,
     protocol: MailProtocol,
@@ -47,6 +47,50 @@ pub(super) fn reusable_mail_transport<'a>(
         .then_some(first)
 }
 
+/// Gmail's IMAP and SMTP servers for a gmail.com address, so an app password
+/// is all the form still needs. Other Google addresses use their own domain
+/// and are left alone.
+fn gmail_mail_transport(address: &str, protocol: MailProtocol) -> Option<AccountConfig> {
+    let domain = mail_domain(address)?;
+    if protocol != MailProtocol::Imap
+        || !["gmail.com", "googlemail.com"]
+            .iter()
+            .any(|gmail| domain.eq_ignore_ascii_case(gmail))
+    {
+        return None;
+    }
+    let servers = &flectar_mail_core::accounts::providers::GMAIL;
+    Some(AccountConfig {
+        id: 0,
+        email: address.trim().into(),
+        display_name: None,
+        avatar_url: None,
+        provider: Provider::Generic,
+        auth_kind: flectar_mail_core::models::AuthKind::Password,
+        mail_protocol: MailProtocol::Imap,
+        username: String::new(),
+        jmap_url: String::new(),
+        jmap_account_id: None,
+        incoming_host: servers.incoming_host.into(),
+        incoming_port: servers.incoming_port,
+        smtp_host: servers.smtp_host.into(),
+        smtp_port: servers.smtp_port,
+        settings: flectar_mail_core::models::AccountSettings::new(servers.connection()),
+    })
+}
+
+/// The servers to fill in for a new manual account. The user's other
+/// accounts on the domain come first, then Gmail's for a Gmail address.
+pub(super) fn suggested_mail_transport(
+    configs: &[AccountConfig],
+    address: &str,
+    protocol: MailProtocol,
+) -> Option<AccountConfig> {
+    reusable_mail_transport(configs, address, protocol)
+        .cloned()
+        .or_else(|| gmail_mail_transport(address, protocol))
+}
+
 pub(super) struct AccountRemovalUpdate {
     pub account_id: i64,
     pub removed: bool,
@@ -57,6 +101,97 @@ pub(super) struct AccountRemovalUpdate {
     pub calendar_month: NaiveDate,
     pub calendar_events: Option<Vec<calendar::LocalCalendarEvent>>,
     pub calendar_sources: Option<Vec<calendar::LocalCalendarSource>>,
+}
+
+/// What the window showed as an account went away, read on the UI thread.
+pub(super) struct RemovalView {
+    scope: Scope,
+    query: String,
+    limit: i64,
+    profile: Option<Vec<i64>>,
+    calendar_month: NaiveDate,
+}
+
+impl RemovalView {
+    /// The view of `state` as `account_id` goes. A selection inside the
+    /// account falls back to the unified inbox.
+    pub(super) fn of(state: &InboxState, account_id: i64, calendar_month: NaiveDate) -> Self {
+        Self {
+            scope: if account_owns_scope(state, account_id) {
+                Scope::UNIFIED_INBOX
+            } else {
+                state.scope
+            },
+            query: state.query.clone(),
+            // Keep a surviving selection reachable after browsing past the
+            // first page, including when deleting from a unified scope.
+            limit: state.messages.len().max(PAGE_SIZE) as i64,
+            profile: state.profile_accounts.clone(),
+            calendar_month,
+        }
+    }
+}
+
+/// Reads what the window shows once `account_id` is gone: the mail page and
+/// counts without it, and the calendars that remain. `accounts` are the ones
+/// left, read after the removal.
+pub(super) async fn read_account_removal(
+    core: &CoreMailSource,
+    account_id: i64,
+    removed: bool,
+    accounts: Option<&mail::AccountSnapshot>,
+    view: RemovalView,
+) -> AccountRemovalUpdate {
+    // Match the selection `reconcile_removed_account` will leave.
+    let scope = accounts.map_or(view.scope, |snapshot| {
+        let shown = snapshot
+            .accounts
+            .iter()
+            .filter(|account| {
+                view.profile
+                    .as_ref()
+                    .is_none_or(|accounts| accounts.binary_search(&account.id).is_ok())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        view.scope.visible_for(&shown)
+    });
+    let (metadata, page) = if removed {
+        let (metadata, page) = tokio::join!(
+            core.load_mail_metadata(scope),
+            core.load_page(scope, &view.query, None, view.limit, false)
+        );
+        (metadata.ok(), page.ok())
+    } else {
+        (None, None)
+    };
+    let calendar_sources = core
+        .load_calendars(None)
+        .await
+        .ok()
+        .map(calendar::calendar_sources);
+    let calendar_events =
+        if let Ok((start, end)) = calendar::calendar_range_millis(view.calendar_month) {
+            core.load_events(start, end).await.ok().map(|events| {
+                events
+                    .into_iter()
+                    .map(calendar::core_calendar_event)
+                    .collect()
+            })
+        } else {
+            None
+        };
+    AccountRemovalUpdate {
+        account_id,
+        removed,
+        scope,
+        query: view.query,
+        metadata,
+        page,
+        calendar_month: view.calendar_month,
+        calendar_events,
+        calendar_sources,
+    }
 }
 
 pub(super) fn account_was_removed(
@@ -100,7 +235,9 @@ pub(super) fn scope_owned_by(state: &InboxState, scope: Scope, account_id: i64) 
             .labels
             .iter()
             .any(|label| label.id == id && label.owner_account_id == Some(account_id)),
-        Scope::Unified(_) | Scope::Important | Scope::Other => false,
+        Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
+            false
+        }
     }
 }
 
@@ -236,6 +373,11 @@ pub(super) fn apply_connected_accounts(
             let profile = presentation.profile(account.id);
             let (checked_day, checked_at) =
                 account_status::last_checked(account.caught_up_at, &now);
+            let (resume_day, resume_at) = if account.sync_state == "throttled" {
+                account_status::checks_again(account.sync_retry_at, &now)
+            } else {
+                (-1, String::new())
+            };
             Some(AccountRow {
                 id: i32::try_from(account.id).ok()?,
                 drag_key: account.id.to_string().into(),
@@ -247,6 +389,8 @@ pub(super) fn apply_connected_accounts(
                 sync_error: account.sync_error.clone().unwrap_or_default().into(),
                 checked_day,
                 checked_at: checked_at.into(),
+                resume_day,
+                resume_at: resume_at.into(),
                 initials: avatar_initials(&name).into(),
                 avatar: avatar
                     .map(|images| slint_image(&images.regular))
@@ -284,6 +428,8 @@ pub(super) fn apply_connected_accounts(
                 sent_copy_policy: config.settings.sent_copy_policy.as_str().into(),
                 keep_on_server: config.settings.keep_on_server.as_str().into(),
                 subscribed_folders_only: config.settings.subscribed_folders_only,
+                check_interval: check_interval_choice(config.settings.check_interval).into(),
+                push: config.settings.push,
                 server_keeps_mail_days: account
                     .server_keeps_mail_days
                     .and_then(|days| i32::try_from(days).ok())
@@ -603,24 +749,48 @@ pub(super) fn prefer_shown_compose_account(app: &AppWindow, state: &InboxState) 
     }
 }
 
+/// How Settings names an account's check interval: "app", the minutes, or
+/// "manual".
+fn check_interval_choice(interval: CheckInterval) -> String {
+    match interval {
+        CheckInterval::App => "app".to_owned(),
+        CheckInterval::Minutes(minutes) => minutes.to_string(),
+        CheckInterval::Manual => "manual".to_owned(),
+    }
+}
+
+/// The interval Settings' choice `value` names.
+pub(super) fn check_interval_from_choice(value: &str) -> Option<CheckInterval> {
+    let interval = match value {
+        "app" => CheckInterval::App,
+        "manual" => CheckInterval::Manual,
+        minutes => CheckInterval::Minutes(minutes.parse().ok()?),
+    };
+    interval.is_offered().then_some(interval)
+}
+
 /// Accounts' checks moved on: their states, and when a check last caught
 /// each Inbox up. Only the status shown for them changes.
 pub(super) fn apply_account_states(
     app: &AppWindow,
     inbox_state: &Rc<RefCell<InboxState>>,
-    states: &HashMap<i64, (String, Option<String>)>,
+    states: &HashMap<i64, crate::startup::AccountSyncState>,
     caught_up: &HashMap<i64, i64>,
 ) {
     let mut state_guard = inbox_state.borrow_mut();
     let mut changed = false;
     for account in &mut state_guard.connected_accounts {
-        if let Some((sync_state, sync_error)) = states.get(&account.id) {
-            if account.sync_state != *sync_state {
-                account.sync_state.clone_from(sync_state);
+        if let Some(synced) = states.get(&account.id) {
+            if account.sync_state != synced.state {
+                account.sync_state.clone_from(&synced.state);
                 changed = true;
             }
-            if account.sync_error != *sync_error {
-                account.sync_error.clone_from(sync_error);
+            if account.sync_error != synced.error {
+                account.sync_error.clone_from(&synced.error);
+                changed = true;
+            }
+            if account.sync_retry_at != synced.retry_at {
+                account.sync_retry_at = synced.retry_at;
                 changed = true;
             }
         }
@@ -844,5 +1014,41 @@ mod mail_transport_suggestion_tests {
         assert_eq!(host(MailProtocol::Pop3), Some("pop.example.com"));
         assert_eq!(host(MailProtocol::Imap), Some("imap.example.com"));
         assert_eq!(host(MailProtocol::Jmap), None);
+    }
+
+    #[test]
+    fn gmail_addresses_get_gmails_servers() {
+        let suggestion =
+            suggested_mail_transport(&[], "Someone@GMail.com", MailProtocol::Imap).unwrap();
+        assert_eq!(
+            (suggestion.incoming_host.as_str(), suggestion.incoming_port),
+            ("imap.gmail.com", 993)
+        );
+        assert_eq!(
+            (suggestion.smtp_host.as_str(), suggestion.smtp_port),
+            ("smtp.gmail.com", 465)
+        );
+        assert_eq!(
+            suggestion.settings.connection,
+            MailConnectionSettings::new(ConnectionSecurity::Tls, ConnectionSecurity::Tls)
+        );
+        assert!(
+            suggested_mail_transport(&[], "someone@googlemail.com", MailProtocol::Imap).is_some()
+        );
+        assert!(suggested_mail_transport(&[], "someone@gmail.com", MailProtocol::Pop3).is_none());
+        assert!(suggested_mail_transport(&[], "someone@gmail.co", MailProtocol::Imap).is_none());
+    }
+
+    #[test]
+    fn the_users_own_gmail_settings_win() {
+        let configs = vec![config(
+            1,
+            "first@gmail.com",
+            "imap.proxy.example",
+            "smtp.proxy.example",
+        )];
+        let suggestion =
+            suggested_mail_transport(&configs, "second@gmail.com", MailProtocol::Imap).unwrap();
+        assert_eq!(suggestion.incoming_host, "imap.proxy.example");
     }
 }

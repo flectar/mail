@@ -124,6 +124,8 @@ image = { version = "0.25", default-features = false, features = ["gif", "ico", 
 # them in the composer (src/photo_shrink.rs).
 jpeg-decoder = { version = "0.3.2", default-features = false }
 keyboard-types = "0.8"
+# Flectar Mail Sync's pairing QR codes, drawn by the app itself.
+qrcode = { version = "0.14", default-features = false }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
 # Compares release versions for update notices (src/updates.rs).
 semver = "1"
@@ -157,6 +159,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_Storage_Packaging_Appx",
     "Win32_System_JobObjects",
+    "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_Pipes",
     "Win32_System_Registry",
@@ -213,6 +216,9 @@ slint = { version = "1.19.0", default-features = false, features = ["backend-win
 # stream and ask X11 window managers for their window menu. Both crates are
 # already part of the Linux build through ashpd and winit.
 futures-util = { version = "0.3", default-features = false }
+# Draws the tray's unread count in the app's typeface. Slint and cosmic-text
+# already build this version.
+swash = "0.2.10"
 x11rb = { version = "0.13", default-features = false }
 # A forwarded launch hands its activation token to the running window through
 # winit's own Wayland connection. Winit already builds these crates with the

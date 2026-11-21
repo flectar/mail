@@ -54,6 +54,12 @@ pub(super) fn unblocked(address: &str) {
     with_controller(|controller| controller.changed(address, false));
 }
 
+/// Another device changed the list through Flectar Mail Sync: Settings, the
+/// open message's menu and the loaded rows follow.
+pub(super) fn reload() {
+    with_controller(|controller| controller.reload());
+}
+
 impl Controller {
     fn core(&self) -> Option<CoreMailSource> {
         self.state.borrow().core.clone()
@@ -178,6 +184,39 @@ impl Controller {
             }
         }
         self.refresh_list();
+    }
+
+    fn reload(&self) {
+        let Some(core) = self.core() else {
+            return;
+        };
+        self.spawn(
+            async move { core.blocked_addresses().await },
+            |app, result| {
+                let Ok(addresses) = result else {
+                    return;
+                };
+                // Kept lowercase, as the list compares them.
+                let blocked = |address: &str| addresses.contains(&address.to_ascii_lowercase());
+                let selected = app.get_selected_address();
+                if !selected.is_empty() {
+                    app.global::<BlockSender>()
+                        .set_blocked(blocked(selected.as_str()));
+                }
+                with_controller(|controller| {
+                    for message in controller.state.borrow_mut().messages.iter_mut() {
+                        message.sender_blocked = blocked(&message.address);
+                    }
+                });
+                app.global::<BlockSender>()
+                    .set_addresses(ModelRc::new(VecModel::from(
+                        addresses
+                            .iter()
+                            .map(slint::SharedString::from)
+                            .collect::<Vec<_>>(),
+                    )));
+            },
+        );
     }
 
     fn refresh_list(&self) {

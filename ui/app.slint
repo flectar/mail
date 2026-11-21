@@ -66,10 +66,13 @@ import { SavedSearchDialog } from "dialogs/saved-search-dialog.slint";
 import { SavedSearchUi } from "saved-searches.slint";
 export { MovePickerUi, MoveTargetRow } from "dialogs/move-dialog.slint";
 import { MoveDialog, MovePickerUi } from "dialogs/move-dialog.slint";
+export { ReminderUi, SendLaterUi, SnoozeUi, WhenChoice, WhenUi } from "dialogs/when-dialog.slint";
+import { WhenDialog, WhenUi } from "dialogs/when-dialog.slint";
 import { ConfirmationDialog } from "components/confirmation-dialog.slint";
 import { SettingsDialog } from "dialogs/settings-dialog.slint";
 import { AccountImport, ImportDialog } from "dialogs/import-dialog.slint";
 export { LocalMailUi } from "local-mail.slint";
+export { SyncUi, SyncDeviceRow } from "device-sync.slint";
 export { SavedSearchUi } from "saved-searches.slint";
 export { ServerSearchUi } from "server-search.slint";
 export { Numbers } from "numbers.slint";
@@ -123,8 +126,10 @@ export global I18n {
     pure callback notification-delete() -> string;
     pure callback notification-new-mail-channel() -> string;
     pure callback notification-quiet-mail-channel() -> string;
-    // What a screen reader says for the count on the app icon.
+    // What a screen reader says for the count on the app icon: of messages,
+    // or of conversations where the mail list shows those.
     pure callback notification-unread-count(int) -> string;
+    pure callback notification-unread-conversations(int) -> string;
     // The line a desktop shows for the app while it runs with its window
     // closed (GNOME's Background Apps).
     pure callback background-status() -> string;
@@ -255,6 +260,9 @@ export global I18n {
     notification-mark-read() => { return @tr("Mark as read"); }
     notification-unread-count(count) => {
         return @tr("{n} unread message" | "{n} unread messages" % count);
+    }
+    notification-unread-conversations(count) => {
+        return @tr("{n} unread conversation" | "{n} unread conversations" % count);
     }
     notification-archive() => { return @tr("Archive"); }
     notification-delete() => { return @tr("Delete"); }
@@ -516,6 +524,8 @@ export global I18n {
         if (key == "Could not save account order: {}") { return @tr("Could not save account order: {}", argument); }
         if (key == "Mail history updated. Background sync is adjusting now.") { return @tr("Mail history updated. Background sync is adjusting now."); }
         if (key == "Account removed from this device.") { return @tr("Account removed from this device."); }
+        if (key == "Account removed on another device.") { return @tr("Account removed on another device."); }
+        if (key == "Accounts updated from your other devices.") { return @tr("Accounts updated from your other devices."); }
         if (key == "Account removed. Mail refresh will retry.") { return @tr("Account removed. Mail refresh will retry."); }
         if (key == "Account removed; local cleanup needs a retry: {}") { return @tr("Account removed; local cleanup needs a retry: {}", argument); }
         if (key == "Could not remove account: {}") { return @tr("Could not remove account: {}", argument); }
@@ -674,6 +684,10 @@ export global I18n {
         if (key == "Updating folder settings…") { return @tr("Updating folder settings…"); }
         if (key == "Folder settings updated.") { return @tr("Folder settings updated."); }
         if (key == "Could not update folder settings: {}") { return @tr("Could not update folder settings: {}", argument); }
+        if (key == "Sync settings require local mail data.") { return @tr("Sync settings require local mail data."); }
+        if (key == "Updating sync settings…") { return @tr("Updating sync settings…"); }
+        if (key == "Sync settings updated.") { return @tr("Sync settings updated."); }
+        if (key == "Could not update sync settings: {}") { return @tr("Could not update sync settings: {}", argument); }
         if (key == "Mail history requires local mail data.") { return @tr("Mail history requires local mail data."); }
         if (key == "Updating mail history…") { return @tr("Updating mail history…"); }
         if (key == "Remote images are unavailable in this minimal build.") { return @tr("Remote images are unavailable in this minimal build."); }
@@ -706,6 +720,20 @@ export global I18n {
         if (key == "Label deleted.") { return @tr("Label deleted."); }
         if (key == "No other folder to move this mail to.") { return @tr("No other folder to move this mail to."); }
         if (key == "Could not move mail: {}") { return @tr("Could not move mail: {}", argument); }
+        if (key == "Snoozed until {}") { return @tr("Snoozed until {}", argument); }
+        if (key == "Could not snooze mail: {}") { return @tr("Could not snooze mail: {}", argument); }
+        if (key == "Scheduled to send {}") { return @tr("Scheduled to send {}", argument); }
+        if (key == "Could not schedule the message: {}") { return @tr("Could not schedule the message: {}", argument); }
+        if (key == "Could not send the message: {}") { return @tr("Could not send the message: {}", argument); }
+        if (key == "Could not cancel the send: {}") { return @tr("Could not cancel the send: {}", argument); }
+        if (key == "Send cancelled. The message is a draft again.") { return @tr("Send cancelled. The message is a draft again."); }
+        if (key == "This message is no longer scheduled.") { return @tr("This message is no longer scheduled."); }
+        if (key == "Choose a reminder after the time the message goes out.") { return @tr("Choose a reminder after the time the message goes out."); }
+        if (key == "Reminds you {} if nobody replies") { return @tr("Reminds you {} if nobody replies", argument); }
+        if (key == "Could not set the reminder: {}") { return @tr("Could not set the reminder: {}", argument); }
+        if (key == "Reminder removed.") { return @tr("Reminder removed."); }
+        if (key == "Save recovery code") { return @tr("Save recovery code"); }
+        if (key == "Text files") { return @tr("Text files"); }
         if (key == "No folder to copy this mail to.") { return @tr("No folder to copy this mail to."); }
         if (key == "Attaching the original's files…") { return @tr("Attaching the original's files…"); }
         if (key == "Could not attach the original's files: {}") { return @tr("Could not attach the original's files: {}", argument); }
@@ -957,6 +985,13 @@ export component ComposerWindow inherits Window {
         attachment-picker-supported: root.attachment-picker-supported;
         notice: I18n.ui-message(ComposerUi.message.key, ComposerUi.message.argument, ComposerUi.message.second_argument, ComposerUi.message.third_argument);
     }
+
+    // Schedule send and the reply reminder ask over the message they are for.
+    if WhenUi.open : WhenDialog {
+        width: parent.width;
+        height: parent.height;
+        z: 15000;
+    }
 }
 
 export component AppWindow inherits Window {
@@ -1073,6 +1108,8 @@ export component AppWindow inherits Window {
     callback save_account_sent_copy_policy(int, string);
     callback save_account_keep_on_server(int, string);
     callback save_account_subscribed_folders_only(int, bool);
+    callback save_account_check_interval(int, string);
+    callback save_account_push(int, bool);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -1389,6 +1426,8 @@ export component AppWindow inherits Window {
     in property <bool> privacy_consent_withdrawable: false;
     // An account the sidebar asked to sign in again, until Settings shows it.
     private property <int> settings-sign-in-account: -1;
+    // The account whose card Settings shows open, or -1 for none.
+    in-out property <int> settings-open-account: -1;
     changed settings_tab => { TabsUi.navigated(); }
     // The active tab saves where the mail view is once it settles.
     changed selected_scope => { TabsUi.navigated(); }
@@ -1983,6 +2022,7 @@ export component AppWindow inherits Window {
                 root.open-settings();
             }
             settings_sign_in_account <=> root.settings-sign-in-account;
+            settings_open_account <=> root.settings-open-account;
             accent: root.accent;
             accent-soft: root.accent-soft;
             avatar-bg: root.avatar-bg;
@@ -2317,6 +2357,7 @@ export component AppWindow inherits Window {
             close-requested => { root.close-settings(); }
             settings_tab <=> root.settings_tab;
             sign-in-account <=> root.settings-sign-in-account;
+            open-account <=> root.settings-open-account;
             theme_mode <=> root.theme_mode;
             show_avatars <=> root.show_avatars;
             compact_rows <=> root.mail_compact_rows;
@@ -2479,6 +2520,8 @@ export component AppWindow inherits Window {
             save_account_sent_copy_policy(account-id, value) => { root.save_account_sent_copy_policy(account-id, value); }
             save_account_keep_on_server(account-id, value) => { root.save_account_keep_on_server(account-id, value); }
             save_account_subscribed_folders_only(account-id, enabled) => { root.save_account_subscribed_folders_only(account-id, enabled); }
+            save_account_check_interval(account-id, value) => { root.save_account_check_interval(account-id, value); }
+            save_account_push(account-id, enabled) => { root.save_account_push(account-id, enabled); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
             connect_caldav(account-id, connection-id, url, username, password) => { root.connect_caldav(account-id, connection-id, url, username, password); }
             set_calendar_connection_enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }
@@ -2795,6 +2838,15 @@ export component AppWindow inherits Window {
     }
 
     if MovePickerUi.open : MoveDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        z: 15000;
+        compact: root.compact-layout;
+    }
+
+    if WhenUi.open : WhenDialog {
         x: root.content-x;
         y: root.content-y;
         width: root.content-width;

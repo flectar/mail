@@ -19,6 +19,7 @@ fn account_from_row(row: &Row) -> rusqlite::Result<Account> {
         mail_protocol: row.get("mail_protocol")?,
         sync_state: row.get("sync_state")?,
         sync_error: row.get("sync_error")?,
+        sync_retry_at: row.get("sync_retry_at")?,
         can_create_top_level_mailbox: row.get::<_, i64>("can_create_top_level_mailbox")? != 0,
         server_keeps_mail_days: row.get::<_, Option<String>>("expire")?.and_then(|value| {
             match super::pop3::parse_expire(&value)? {
@@ -55,7 +56,8 @@ fn config_from_row(row: &Row) -> rusqlite::Result<AccountConfig> {
 pub fn list(conn: &Connection) -> Result<Vec<Account>> {
     let mut stmt = conn.prepare(
         "SELECT a.id, a.email, a.display_name, a.avatar_url, a.provider, a.auth_kind,
-                a.mail_protocol, a.sync_state, a.sync_error, a.can_create_top_level_mailbox,
+                a.mail_protocol, a.sync_state, a.sync_error, a.sync_retry_at,
+                a.can_create_top_level_mailbox,
                 a.caught_up_at, s.expire
          FROM accounts a LEFT JOIN pop3_sync_state s ON s.account_id = a.id
          WHERE a.sync_state <> ?1 AND a.mail_protocol <> 'local'
@@ -95,7 +97,8 @@ pub fn get_config(conn: &Connection, id: i64) -> Result<Option<AccountConfig>> {
 pub fn get(conn: &Connection, id: i64) -> Result<Option<Account>> {
     let mut stmt = conn.prepare(
         "SELECT a.id, a.email, a.display_name, a.avatar_url, a.provider, a.auth_kind,
-                a.mail_protocol, a.sync_state, a.sync_error, a.can_create_top_level_mailbox,
+                a.mail_protocol, a.sync_state, a.sync_error, a.sync_retry_at,
+                a.can_create_top_level_mailbox,
                 a.caught_up_at, s.expire
          FROM accounts a LEFT JOIN pop3_sync_state s ON s.account_id = a.id
          WHERE a.id = ?1 AND a.mail_protocol <> 'local'",
@@ -536,7 +539,7 @@ pub fn set_sync_state_with_error(
     state: &str,
     error: Option<&str>,
 ) -> Result<()> {
-    update_sync_state_with_error(conn, id, state, error)?;
+    update_sync_state_with_error(conn, id, state, error, None)?;
     Ok(())
 }
 
@@ -548,11 +551,13 @@ pub fn update_sync_state_with_error(
     id: i64,
     state: &str,
     error: Option<&str>,
+    retry_at: Option<i64>,
 ) -> Result<bool> {
     Ok(conn.execute(
-        "UPDATE accounts SET sync_state = ?2, sync_error = ?3
-         WHERE id = ?1 AND (sync_state IS NOT ?2 OR sync_error IS NOT ?3)",
-        params![id, state, error],
+        "UPDATE accounts SET sync_state = ?2, sync_error = ?3, sync_retry_at = ?4
+         WHERE id = ?1
+           AND (sync_state IS NOT ?2 OR sync_error IS NOT ?3 OR sync_retry_at IS NOT ?4)",
+        params![id, state, error, retry_at],
     )? != 0)
 }
 
@@ -1047,15 +1052,28 @@ mod tests {
         let conn = crate::db::testutil::conn();
         crate::db::testutil::seed_account(&conn);
 
-        assert!(update_sync_state_with_error(&conn, 1, "syncing", None).unwrap());
-        assert!(!update_sync_state_with_error(&conn, 1, "syncing", None).unwrap());
+        assert!(update_sync_state_with_error(&conn, 1, "syncing", None, None).unwrap());
+        assert!(!update_sync_state_with_error(&conn, 1, "syncing", None, None).unwrap());
         assert!(
-            update_sync_state_with_error(&conn, 1, "retrying", Some("connection lost")).unwrap()
+            update_sync_state_with_error(&conn, 1, "retrying", Some("connection lost"), None)
+                .unwrap()
         );
         assert!(
-            !update_sync_state_with_error(&conn, 1, "retrying", Some("connection lost")).unwrap()
+            !update_sync_state_with_error(&conn, 1, "retrying", Some("connection lost"), None)
+                .unwrap()
         );
-        assert!(update_sync_state_with_error(&conn, 1, "idle", None).unwrap());
+        // A new time to try again is a change, and leaving the wait clears it.
+        assert!(
+            update_sync_state_with_error(&conn, 1, "throttled", Some("rate limit"), Some(1_000))
+                .unwrap()
+        );
+        assert!(
+            update_sync_state_with_error(&conn, 1, "throttled", Some("rate limit"), Some(2_000))
+                .unwrap()
+        );
+        assert_eq!(get(&conn, 1).unwrap().unwrap().sync_retry_at, Some(2_000));
+        assert!(update_sync_state_with_error(&conn, 1, "idle", None, None).unwrap());
+        assert_eq!(get(&conn, 1).unwrap().unwrap().sync_retry_at, None);
     }
 
     #[test]

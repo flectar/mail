@@ -18,6 +18,33 @@ const MAX_ATTEMPTS: i64 = 8;
 const MAX_ACTIONS_PER_SLICE: i64 = 20;
 const MAX_SLICE_DURATION: Duration = Duration::from_secs(2);
 const OFFLINE_SEND_RETRY_DELAY: Duration = Duration::from_secs(30);
+/// How long an action waits when the server asked to slow down without
+/// saying for how long. The account's own backoff decides when it asks again.
+const RATE_LIMITED_ACTION_DELAY: Duration = Duration::from_secs(60);
+
+/// The server asked to wait before action `action_id` could run, with
+/// `error`. The action keeps its attempts and runs once the wait is over.
+pub(crate) async fn defer_limited(ctx: &SyncCtx, action_id: i64, error: &CoreError) -> Result<()> {
+    let wait = match error {
+        CoreError::RateLimited {
+            retry_after: Some(wait),
+            ..
+        } => (*wait).min(crate::sync::pacing::NAMED_MOST),
+        _ => RATE_LIMITED_ACTION_DELAY,
+    };
+    let retry_at = now_ms().saturating_add(i64::try_from(wait.as_millis()).unwrap_or(i64::MAX));
+    let message = error.to_string();
+    let saved = message.clone();
+    ctx.db
+        .write(move |conn| repo::actions::defer_offline(conn, action_id, retry_at, &saved))
+        .await?;
+    ctx.bus.emit(CoreEvent::ActionState {
+        action_id,
+        state: "retrying".into(),
+        error: Some(message),
+    });
+    Ok(())
+}
 
 /// Outcome of one fair pending-action execution slice.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -160,6 +187,11 @@ async fn execute_actions(
                     })
                     .await?;
                 return Err(CoreError::NeedsReauth);
+            }
+            Err(e @ CoreError::RateLimited { .. }) => {
+                // This slice stops so the account backs off as a whole.
+                defer_limited(ctx, action_id, &e).await?;
+                return Err(e);
             }
             Err(e) => {
                 let msg = e.to_string();
@@ -1067,18 +1099,27 @@ fn finish_sent_filing_in_db(
     Ok(())
 }
 
-async fn send_action(
-    ctx: &SyncCtx,
-    config: &AccountConfig,
-    action: &repo::actions::PendingAction,
-) -> Result<()> {
-    let Some(draft_id) = action.payload["draftId"].as_i64() else {
-        return Err(CoreError::Other("send action without draftId".into()));
-    };
-    tracing::info!(account_id = config.id, draft_id, "smtp send: starting");
+/// A draft's message as it goes out: its Message-ID, the message with its
+/// Bcc header, which delivery strips, and its envelope.
+pub(crate) struct Outgoing {
+    /// With angle brackets.
+    pub message_id: String,
+    pub raw: Vec<u8>,
+    pub from: String,
+    pub recipients: Vec<String>,
+    /// Whom mail security encrypts for.
+    pub security_recipients: Vec<Address>,
+    attachment_count: usize,
+}
 
-    let (detail, references) = ctx
-        .db
+/// Build a draft's message as it goes out, before its mail security.
+pub(crate) async fn build_outgoing(
+    db: &crate::db::Db,
+    paths: &crate::config::Paths,
+    account_id: i64,
+    draft_id: i64,
+) -> Result<Outgoing> {
+    let (detail, references) = db
         .read(move |conn| {
             let detail = repo::messages::detail(conn, draft_id)?;
             Ok((detail, repo::messages::draft_reply_headers(conn, draft_id)?))
@@ -1086,9 +1127,7 @@ async fn send_action(
         .await?;
 
     let (refs, in_reply_to) = references;
-    let account_id = config.id;
-    let identity = ctx
-        .db
+    let identity = db
         .read({
             let requested = detail.from.email.clone();
             move |conn| {
@@ -1110,8 +1149,7 @@ async fn send_action(
         .unwrap_or("localhost")
         .to_string();
 
-    let (bcc, stored_message_id) = ctx
-        .db
+    let (bcc, stored_message_id) = db
         .read(move |conn| {
             let (json, message_id): (String, Option<String>) = conn.query_row(
                 "SELECT bcc_json, message_id FROM messages WHERE id = ?1",
@@ -1122,8 +1160,7 @@ async fn send_action(
         })
         .await?;
 
-    let att_rows: Vec<(String, String, Option<String>)> = ctx
-        .db
+    let att_rows: Vec<(String, String, Option<String>)> = db
         .read(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT file_path, filename, mime_type FROM draft_attachments WHERE draft_id = ?1",
@@ -1139,7 +1176,7 @@ async fn send_action(
     // Defense in depth: only ever read files inside our own staging root, so a
     // stale/crafted `draft_attachments` row can't turn dispatch into an
     // arbitrary local-file read. `save_draft` copies picked files in here.
-    let staging_root = tokio::fs::canonicalize(ctx.paths.draft_attachments_dir())
+    let staging_root = tokio::fs::canonicalize(paths.draft_attachments_dir())
         .await
         .ok();
     let mut attachments = Vec::new();
@@ -1167,8 +1204,7 @@ async fn send_action(
         });
     }
 
-    let (receipt_to, importance) = ctx
-        .db
+    let (receipt_to, importance) = db
         .read(move |conn| {
             Ok((
                 repo::messages::receipt_to(conn, draft_id)?,
@@ -1201,10 +1237,105 @@ async fn send_action(
         .chain(out.bcc)
         .cloned()
         .collect();
-    let (msg_id, raw) = crate::mime::build_message_owned(out)?;
-    let raw =
+    let (message_id, raw) = crate::mime::build_message_owned(out)?;
+    let recipients = detail
+        .to
+        .iter()
+        .chain(detail.cc.iter())
+        .chain(bcc.iter())
+        .map(|address| address.email.clone())
+        .collect();
+    Ok(Outgoing {
+        message_id,
+        raw,
+        from: from.email,
+        recipients,
+        security_recipients,
+        attachment_count,
+    })
+}
+
+/// Another device's IMAP or POP3 message, as its shared record carries it,
+/// dated now: it goes out from this device as it would have from that one.
+async fn shared_outgoing(db: &crate::db::Db, account_id: i64, sync_id: &str) -> Result<Outgoing> {
+    let sync_id = sync_id.to_owned();
+    let mime = db
+        .read(move |conn| repo::synced_sends::mime(conn, &sync_id))
+        .await?
+        .ok_or_else(|| CoreError::NotFound("the scheduled message from another device".into()))?;
+    let raw = crate::mime::with_date(&mime, &chrono::Local::now().to_rfc2822());
+    let parsed = crate::mime::parse_message(&raw)?;
+    let headers = parsed.headers;
+    let from = headers
+        .from
+        .map(|address| address.email)
+        .ok_or_else(|| CoreError::Other("the scheduled message has no sender".into()))?;
+    let requested = from.clone();
+    db.read(move |conn| {
+        repo::sender_identities::get_verified(conn, account_id, &requested)?.ok_or_else(|| {
+            CoreError::Other(format!(
+                "{requested} is not an authorized sender identity for this account"
+            ))
+        })
+    })
+    .await?;
+    let message_id = headers
+        .message_id
+        .map(|id| format!("<{id}>"))
+        .ok_or_else(|| CoreError::Other("the scheduled message has no Message-ID".into()))?;
+    let attachment_count = parsed
+        .attachments
+        .iter()
+        .filter(|file| !file.is_inline)
+        .count();
+    let recipients = headers
+        .to
+        .iter()
+        .chain(headers.cc.iter())
+        .chain(headers.bcc.iter())
+        .map(|address| address.email.clone())
+        .collect();
+    Ok(Outgoing {
+        message_id,
+        raw,
+        from,
+        recipients,
+        security_recipients: Vec::new(),
+        attachment_count,
+    })
+}
+
+async fn send_action(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    action: &repo::actions::PendingAction,
+) -> Result<()> {
+    let Some(draft_id) = action.payload["draftId"].as_i64() else {
+        return Err(CoreError::Other("send action without draftId".into()));
+    };
+    tracing::info!(account_id = config.id, draft_id, "smtp send: starting");
+    let account_id = config.id;
+    // Another device's message, kept here as a draft: it goes out as that
+    // device built it, protected there if at all.
+    let shared = action.payload["asIs"].as_bool() == Some(true);
+    let outgoing = match action.payload["syncedSend"].as_str().filter(|_| shared) {
+        Some(sync_id) => shared_outgoing(&ctx.db, account_id, sync_id).await?,
+        None => build_outgoing(&ctx.db, &ctx.paths, account_id, draft_id).await?,
+    };
+    let Outgoing {
+        message_id: msg_id,
+        raw,
+        from,
+        recipients,
+        security_recipients,
+        attachment_count,
+    } = outgoing;
+    let raw = if shared {
+        raw
+    } else {
         crate::mail_security::protect_draft(&ctx.db, config.id, draft_id, raw, security_recipients)
-            .await?;
+            .await?
+    };
     // Persist the exact protected MIME before SMTP. It gives retries a stable
     // Message-ID and lets Sent filing run independently after delivery without
     // retaining composer attachments or rebuilding encrypted content.
@@ -1230,9 +1361,7 @@ async fn send_action(
         message_id = %msg_id,
         bytes = raw.len(),
         attachments = attachment_count,
-        to = detail.to.len(),
-        cc = detail.cc.len(),
-        bcc = bcc.len(),
+        recipients = recipients.len(),
         "smtp send: message built",
     );
 
@@ -1245,13 +1374,6 @@ async fn send_action(
         }
     };
 
-    let recipients: Vec<String> = detail
-        .to
-        .iter()
-        .chain(detail.cc.iter())
-        .chain(bcc.iter())
-        .map(|a| a.email.clone())
-        .collect();
     if recipients.is_empty() {
         return Err(CoreError::Smtp("no recipients".into()));
     }
@@ -1263,7 +1385,7 @@ async fn send_action(
         recipients = recipients.len(),
         "smtp send: dispatching",
     );
-    let submitted = match smtp::send_raw(config, &auth, &from.email, &recipients, &raw).await {
+    let submitted = match smtp::send_raw(config, &auth, &from, &recipients, &raw).await {
         Err(CoreError::Auth(_)) if config.auth_kind == AuthKind::Oauth2 => {
             // AUTH rejection happens before MAIL FROM/DATA, so it is safe to
             // invalidate an unexpectedly stale provider token and retry the
@@ -1276,7 +1398,7 @@ async fn send_action(
             ctx.tokens.invalidate(config.id).await;
             let retry_auth =
                 smtp::SmtpAuth::XOAuth2(ctx.tokens.access_token(config.id, config.provider).await?);
-            smtp::send_raw(config, &retry_auth, &from.email, &recipients, &raw).await
+            smtp::send_raw(config, &retry_auth, &from, &recipients, &raw).await
         }
         result => result,
     };
@@ -1292,13 +1414,13 @@ async fn send_action(
         {
             let error = CoreError::Smtp(format!(
                 "the server refused to send as {}; ask your provider to allow this address or choose another sender ({message})",
-                from.email
+                from
             ));
             (SenderDeliveryStatus::Rejected, Some((message, error)))
         }
         Err(error) => return Err(error),
     };
-    let sender_email = from.email.clone();
+    let sender_email = from.clone();
     let server_reply = error.as_ref().map(|(message, _)| message.clone());
     // Best effort: after an accepted submission, failing here must not make
     // the durable action retry and deliver the message twice.

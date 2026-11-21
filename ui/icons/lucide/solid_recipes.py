@@ -94,6 +94,10 @@ def build(sources):
         "alert": Recipe("triangle-alert", cut(
             solid(p("triangle-alert", 0)), lines("triangle-alert", 1, 2)),
             "Solid warning triangle; exclamation cutout."),
+        "alarm-clock": Recipe("alarm-clock", group(
+            cut(solid(p("alarm-clock", 0)), line(p("alarm-clock", 1))),
+            lines("alarm-clock", 2, 3, 4, 5)),
+            "Solid alarm-clock face with a hands cutout; original bell and foot strokes."),
         "archive": Recipe("archive", over(
             cut(solid(p("archive", 1, append="Z")), line(p("archive", 2))),
             solid(p("archive", 0)), gap=1),
@@ -110,6 +114,8 @@ def build(sources):
             "Solid calendar; header seam and date cutouts; binding strokes."),
         "calendar-add": Recipe("calendar-plus", over(calendar(), lines("calendar-plus", 0, 2)),
             "Complete calendar body with separated exterior plus badge."),
+        "clock": Recipe("clock", cut(solid(p("clock", 0)), line(p("clock", 1))),
+            "Solid clock face with a hands cutout."),
         "cloud": Recipe("cloud", solid(p("cloud", 0)),
             "Original closed cloud silhouette for hosted services."),
         "cloud-sync": Recipe("cloud-sync", over(

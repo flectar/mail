@@ -132,6 +132,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     callback select-scope(string);
     callback compose;
     callback manage-accounts;
+    // An account heading's Account settings: Settings opens on that account.
+    callback account-settings(int);
     callback sync-account(int);
     // Sign the account in again, where its settings are.
     callback sign-in-account(int);
@@ -438,6 +440,42 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         empty-trash(account-id) => { root.request-empty-trash(account-id); }
                     }
 
+                    if entry.kind == SidebarRowKind.snoozed: SidebarItem {
+                        x: 0px;
+                        interactive: entry.show_row;
+                        y: 0px;
+                        width: parent.width;
+                        label: @tr("Snoozed");
+                        scope: "Snoozed";
+                        icon: @image-url("../icons/lucide/filled/alarm-clock.svg");
+                        selected: root.selected-scope == "Snoozed";
+                        sidebar-background: root.background-color;
+                        selection-background: root.selection-background;
+                        accent-color: root.accent-color;
+                        body-color: root.body-color;
+                        muted-color: root.muted-color;
+                        icon-color: root.monochrome-icons ? (root.selected-scope == "Snoozed" ? root.accent-color : root.muted-color) : MailIconPalette.snoozed;
+                        clicked(scope) => { root.select-scope(scope); }
+                    }
+
+                    if entry.kind == SidebarRowKind.scheduled: SidebarItem {
+                        x: 0px;
+                        interactive: entry.show_row;
+                        y: 0px;
+                        width: parent.width;
+                        label: @tr("Scheduled");
+                        scope: "Scheduled";
+                        icon: @image-url("../icons/lucide/filled/clock.svg");
+                        selected: root.selected-scope == "Scheduled";
+                        sidebar-background: root.background-color;
+                        selection-background: root.selection-background;
+                        accent-color: root.accent-color;
+                        body-color: root.body-color;
+                        muted-color: root.muted-color;
+                        icon-color: root.monochrome-icons ? (root.selected-scope == "Scheduled" ? root.accent-color : root.muted-color) : MailIconPalette.scheduled;
+                        clicked(scope) => { root.select-scope(scope); }
+                    }
+
                     if entry.kind == SidebarRowKind.categories-section: SidebarSectionHeader {
                         x: 0px;
                         interactive: entry.show_row;
@@ -665,7 +703,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         touch-mode: root.touch-mode;
                         toggled(open) => { root.toggle-section(entry.key, open); }
                         check-mail => { root.sync-account(entry.mailbox.account_id); }
-                        account-settings => { root.manage-accounts(); }
+                        account-settings => { root.account-settings(entry.mailbox.account_id); }
                         sign-in => { root.sign-in-account(entry.mailbox.account_id); }
                     }
 

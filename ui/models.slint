@@ -36,6 +36,9 @@ export enum AccountProblem {
     sign-in,
     // A check failed, and the app keeps trying again on its own.
     failed,
+    // The server asked the app to wait before it checks again, such as
+    // after too many connections or requests.
+    waiting,
 }
 
 // How an account's mail checks are going, as its sidebar heading shows it.
@@ -53,6 +56,10 @@ export struct AccountStatus {
     // AccountStatusText.last-checked.
     checked_day: int,
     checked_at: string,
+    // When an account that waits for its server checks again, for
+    // AccountStatusText.checks-again.
+    resume_day: int,
+    resume_at: string,
 }
 
 export struct MailboxRow {
@@ -108,7 +115,7 @@ export struct MailLabelRow {
 // One visible navigation entry per list row; stable keys also identify sections.
 export enum SidebarRowKind {
     unified-heading, unified-section, unified-inbox, unified-mailbox,
-    categories-section, important, other, category,
+    categories-section, important, other, category, snoozed, scheduled,
     global-labels-section, global-label,
     saved-searches-section, saved-search,
     accounts-heading, account, folder, account-labels-section, account-label,
@@ -157,6 +164,8 @@ export struct EmailRow {
     starred: bool,
     has_attachments: bool,
     has_replied: bool,
+    // Nobody replied in time to mail the user asked to be reminded about.
+    reply_due: bool,
     // Sent with high importance (#236), for a marker in the list.
     high_importance: bool,
     message_count: int,
@@ -274,6 +283,10 @@ export struct AccountRow {
     // AccountStatusText.last-checked.
     checked_day: int,
     checked_at: string,
+    // When an account that waits for its server checks again, for
+    // AccountStatusText.checks-again.
+    resume_day: int,
+    resume_at: string,
     initials: string,
     avatar: image,
     avatar_small: image,
@@ -297,6 +310,12 @@ export struct AccountRow {
     keep_on_server: string,
     // IMAP: the account lists only the folders the user subscribed to.
     subscribed_folders_only: bool,
+    // How often the account checks for new mail: "app" as Settings has
+    // every account check, "1", "5", "15", "30" or "60" minutes, or
+    // "manual" only when asked.
+    check_interval: string,
+    // IMAP and JMAP: the server tells of new mail as it arrives.
+    push: bool,
     // Days a POP3 server keeps downloaded mail on its own; -1 when it
     // keeps it or hasn't said.
     server_keeps_mail_days: int,

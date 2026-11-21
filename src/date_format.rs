@@ -194,6 +194,11 @@ impl DateFormats {
         }
     }
 
+    /// A day named another way, such as a weekday, at a time: "Sun at 08:00".
+    pub(crate) fn day_at_time(&self, day: &str, time: &str) -> String {
+        self.date_at_time.apply(day, time)
+    }
+
     pub(crate) fn date_time(&self, style: DateStyle, value: NaiveDateTime) -> String {
         self.date_at_time.apply(
             &self.date(style, value.date()),

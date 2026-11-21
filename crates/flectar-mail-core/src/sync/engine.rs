@@ -38,6 +38,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, watch};
 
+use super::pacing::{self, Pause};
+
 const HEADER_CHUNK: usize = 200;
 /// Priority reads stay small so opening one thread never monopolizes the
 /// dedicated reader connection.
@@ -85,9 +87,14 @@ const CYCLE_SECS: u64 = 60;
 const FOLDER_LIST_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 /// Short retry used only while a new account does not have an Inbox row yet.
 const IDLE_FALLBACK_SECS: u64 = 20;
+/// A connection that waited this long between checks is tried with NOOP
+/// before a check uses it.
+const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(60);
+/// Checks further apart than this close the connection between them.
+const KEEP_OPEN_MOST: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 /// Re-issue IDLE at least this often (RFC 2177 recommends < 29 min) to keep the
 /// connection alive through NAT/firewall idle timeouts.
-const IDLE_MAX_SECS: u64 = 25 * 60;
+const IDLE_MAX: std::time::Duration = std::time::Duration::from_secs(25 * 60);
 const FLAG_WINDOW: i64 = 1000; // most recent N UIDs get flag reconciliation
 const SYNC_COMMAND_QUEUE_CAPACITY: usize = 64;
 const PRIORITY_FETCH_QUEUE_CAPACITY: usize = 128;
@@ -391,10 +398,16 @@ pub struct SyncCtx {
     pub paths: Arc<Paths>,
     pub tokens: TokenProvider,
     pub credentials: CredentialStoreHandle,
+    /// When each account's server asked to be left alone until, and how
+    /// many connections it takes (#251).
+    pub pace: Arc<super::pacing::Pace>,
 }
 
 pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
     let account_id = config.id;
+    if config.mail_protocol != MailProtocol::Local {
+        ctx.pace.starting(account_id);
+    }
     let (tx, rx) = mpsc::channel(SYNC_COMMAND_QUEUE_CAPACITY);
     let (body_tx, body_rx) = mpsc::channel(PRIORITY_FETCH_QUEUE_CAPACITY);
     let (settings_tx, settings_rx) = watch::channel(config.settings.clone());
@@ -633,6 +646,7 @@ async fn run_body_fetcher(
                         match connect(&ctx, &config).await {
                             Ok(value) => session = Some(value),
                             Err(error) => {
+                                note_limit(&ctx, account_id, &error);
                                 result = Err(error);
                                 break;
                             }
@@ -672,6 +686,7 @@ async fn run_body_fetcher(
                         match connect(&ctx, &config).await {
                             Ok(value) => session = Some(value),
                             Err(error) => {
+                                note_limit(&ctx, account_id, &error);
                                 result = Err(error);
                                 break;
                             }
@@ -731,6 +746,7 @@ async fn run_body_fetcher(
                     Ok(s) => session = Some(s),
                     Err(e) => {
                         tracing::warn!(account_id, error = %e, "body fetcher: connect failed");
+                        note_limit(&ctx, account_id, &e);
                         break;
                     }
                 }
@@ -738,6 +754,13 @@ async fn run_body_fetcher(
             match fetch_bodies_batch(&ctx, &config, &mut session, &ids).await {
                 Ok(()) => {
                     fetched = true;
+                    break;
+                }
+                // Asking again at once would only count against the account.
+                Err(e @ CoreError::RateLimited { .. }) => {
+                    tracing::warn!(account_id, error = %e, "body fetcher: the server asked to wait");
+                    note_limit(&ctx, account_id, &e);
+                    drop(session.take());
                     break;
                 }
                 Err(e) => {
@@ -1009,17 +1032,38 @@ async fn run_actor(
     // every reconnect; `None` until the first successful connect.
     let mut capabilities: Option<imap::ServerCapabilities> = None;
     let mut inbox_pushed = PushedChanges::default();
-    let mut backoff_secs: u64 = 1;
+    // Waits after failures other than the server asking to wait. Those the
+    // account's pace keeps, for every connection of the account.
+    let mut backoff = pacing::Backoff::default();
     let mut cycle: u64 = 0;
     let mut immediate_follow_up = false;
     let mut inbox_baseline: Option<InboxBaseline> = None;
     let mut listing = FolderListing::default();
     let mut sync_waiters: Vec<oneshot::Sender<std::result::Result<(), String>>> = Vec::new();
-    // When the next cycle is due; only read by the waits below (any wake-up
-    // from a wait runs a cycle immediately).
-    let mut cycle_due;
+    // When the next cycle is due, or `None` when the account checks only
+    // when asked; only read by the waits below (any wake-up from a wait runs
+    // a cycle immediately).
+    let mut cycle_due: Option<tokio::time::Instant>;
+
+    // Accounts that start together take turns.
+    if !wait_for_turn(&ctx, account_id, &mut rx, &mut sync_waiters).await {
+        return;
+    }
 
     loop {
+        // 0. Keep a wait the server asked for, here or on another of the
+        // account's connections.
+        if ctx.pace.account(account_id).paused().is_some() {
+            if let Some(s) = session.take() {
+                imap::logout(s).await;
+            }
+            capabilities = None;
+            if wait_out_pause(&ctx, account_id, &mut rx, &mut sync_waiters).await
+                == PauseEnd::Shutdown
+            {
+                return;
+            }
+        }
         // 1. Ensure a connection.
         if session.is_none() {
             match connect(&ctx, &config).await {
@@ -1040,7 +1084,6 @@ async fn run_actor(
                         },
                     );
                     session = Some(s);
-                    backoff_secs = 1;
                     ctx.bus.emit(CoreEvent::NetworkState { online: true });
                     set_state(&ctx, account_id, "syncing").await;
                 }
@@ -1065,6 +1108,12 @@ async fn run_actor(
                         Some(_) => continue,
                     }
                 }
+                Err(e @ CoreError::RateLimited { .. }) => {
+                    crate::events::sync_diagnostic("imap_connect", Some(account_id), e.code());
+                    tracing::warn!(account_id, error = %e, "receive: the server asked to wait");
+                    note_limit(&ctx, account_id, &e);
+                    continue;
+                }
                 Err(e) => {
                     crate::events::sync_diagnostic("imap_connect", Some(account_id), e.code());
                     tracing::warn!(account_id, "imap connect failed: {e}");
@@ -1072,8 +1121,7 @@ async fn run_actor(
                     let message = e.to_string();
                     set_state_error(&ctx, account_id, "offline", &message).await;
                     // Backoff, but wake early on commands.
-                    let wait = std::time::Duration::from_secs(backoff_secs);
-                    backoff_secs = (backoff_secs * 2).min(300);
+                    let wait = backoff.after(&e).duration;
                     match tokio::time::timeout(wait, rx.recv()).await {
                         Ok(None) | Ok(Some(SyncCmd::Shutdown)) => return,
                         Ok(Some(SyncCmd::SyncNow { complete })) => {
@@ -1122,7 +1170,8 @@ async fn run_actor(
         // cycle is only folder/header/flag/action work and stays short.
         tracing::debug!(account_id, cycle, "sync cycle start");
         set_state(&ctx, account_id, "syncing").await;
-        listing.subscribed_only(settings_rx.borrow().subscribed_folders_only);
+        let settings = settings_rx.borrow().clone();
+        listing.subscribed_only(settings.subscribed_folders_only);
         let foreground_only = !sync_waiters.is_empty();
         let cycle_result = run_cycle(
             &ctx,
@@ -1146,12 +1195,17 @@ async fn run_actor(
             ok = cycle_result.is_ok(),
             "sync cycle end"
         );
-        // Pacing for the next cycle; also applies after errors so a flaky
-        // server isn't hammered.
-        cycle_due = tokio::time::Instant::now() + configured_sync_interval(&ctx.db).await;
+        // When the next check is due, varied a little so accounts on one
+        // server don't check together.
+        let interval = check_interval(&ctx.db, &settings).await;
+        let next_check =
+            || interval.map(|interval| tokio::time::Instant::now() + pacing::varied(interval));
         let mut rerun_immediately = false;
         match cycle_result {
             Ok(work_remaining) => {
+                backoff.reset();
+                ctx.pace.account(account_id).reached();
+                cycle_due = next_check();
                 session = Some(s);
                 cycle += 1;
                 inbox_pushed = PushedChanges::default();
@@ -1190,11 +1244,19 @@ async fn run_actor(
                 }
             }
             Err(CoreError::NeedsReauth) | Err(CoreError::Auth(_)) => {
+                cycle_due = next_check();
                 imap::logout(s).await;
                 set_state(&ctx, account_id, "needs_reauth").await;
                 for waiter in sync_waiters.drain(..) {
                     let _ = waiter.send(Err("authentication required".into()));
                 }
+            }
+            Err(e @ CoreError::RateLimited { .. }) => {
+                // Step 0 waits, and answers the checks that waited for this one.
+                tracing::warn!(account_id, error = %e, "receive: the server asked to wait");
+                imap::logout(s).await;
+                note_limit(&ctx, account_id, &e);
+                continue;
             }
             Err(e) => {
                 tracing::warn!(account_id, "sync cycle error: {e}");
@@ -1205,6 +1267,11 @@ async fn run_actor(
                 for waiter in sync_waiters.drain(..) {
                     let _ = waiter.send(Err(message.clone()));
                 }
+                // Try again soon, sooner the first times, as a dropped
+                // connection is usually the network; never later than the
+                // next check would be.
+                let retry = tokio::time::Instant::now() + backoff.after(&e).duration;
+                cycle_due = Some(next_check().map_or(retry, |check| check.min(retry)));
             }
         }
 
@@ -1215,7 +1282,10 @@ async fn run_actor(
         // 3. Wait for new mail (IDLE), the next cycle, or an immediate command.
         // The backfill pool drains bodies on its own connections, so the actor
         // is free to IDLE even while thousands of bodies are still downloading.
-        let use_idle = capabilities.is_some_and(|offered| offered.idle) && session.is_some();
+        // An account set not to use push checks at its interval instead.
+        let use_idle = pacing::push(&settings)
+            && capabilities.is_some_and(|offered| offered.idle)
+            && session.is_some();
 
         if use_idle {
             // After a cycle the selected mailbox may be sent/drafts/etc, and
@@ -1237,17 +1307,33 @@ async fn run_actor(
                             // correctness backstop is preserved (a message that
                             // slipped in just before IDLE started is still
                             // caught by the timed-out cycle), clamped to
-                            // IDLE_MAX_SECS as an upper safety bound.
-                            let max = cycle_due
-                                .saturating_duration_since(tokio::time::Instant::now())
-                                .min(std::time::Duration::from_secs(IDLE_MAX_SECS))
-                                .max(std::time::Duration::from_secs(1));
-                            tracing::info!(
-                                account_id,
-                                max_secs = max.as_secs(),
-                                "receive: waiting in IDLE for new mail",
-                            );
-                            match imap::idle_wait(s, &mut rx, max).await {
+                            // IDLE_MAX as an upper safety bound. Checks
+                            // further apart than that IDLE again until due.
+                            let waited = loop {
+                                let max = cycle_due
+                                    .map_or(IDLE_MAX, |due| {
+                                        due.saturating_duration_since(tokio::time::Instant::now())
+                                    })
+                                    .min(IDLE_MAX)
+                                    .max(std::time::Duration::from_secs(1));
+                                tracing::info!(
+                                    account_id,
+                                    max_secs = max.as_secs(),
+                                    "receive: waiting in IDLE for new mail",
+                                );
+                                match imap::idle_wait(s, &mut rx, max).await {
+                                    Ok((again, imap::IdleOutcome::Timeout))
+                                        if cycle_due.is_none_or(|due| {
+                                            due > tokio::time::Instant::now()
+                                                + std::time::Duration::from_secs(1)
+                                        }) =>
+                                    {
+                                        s = again;
+                                    }
+                                    waited => break waited,
+                                }
+                            };
+                            match waited {
                                 Ok((s, outcome)) => {
                                     session = Some(s);
                                     match outcome {
@@ -1331,11 +1417,28 @@ async fn run_actor(
                 }
             }
         } else {
-            // Poll path: servers without IDLE use the same user-selected
-            // cadence as every other periodic provider refresh.
+            // Poll path: servers without IDLE, and accounts set not to use
+            // push, check at the account's interval. A connection that would
+            // wait long is closed: servers drop idle ones, after 30 minutes
+            // or sooner, and an open one takes one of the account's
+            // connections.
+            if cycle_due.is_none_or(|due| {
+                due.saturating_duration_since(tokio::time::Instant::now()) > KEEP_OPEN_MOST
+            }) && let Some(s) = session.take()
+            {
+                imap::logout(s).await;
+                capabilities = None;
+            }
+            let waiting_since = tokio::time::Instant::now();
             let mut deadline = cycle_due;
             loop {
-                match tokio::time::timeout_at(deadline, rx.recv()).await {
+                let next = async {
+                    match deadline {
+                        Some(deadline) => tokio::time::timeout_at(deadline, rx.recv()).await,
+                        None => Ok(rx.recv().await),
+                    }
+                };
+                match next.await {
                     Err(_) => {
                         // Timer fired: next iteration runs a full cycle.
                         break;
@@ -1362,7 +1465,7 @@ async fn run_actor(
                                 fetch_one_body(&ctx, &config, &mut session, message_id).await
                             {
                                 tracing::warn!("priority body fetch failed: {e}");
-                                deadline = tokio::time::Instant::now();
+                                deadline = Some(tokio::time::Instant::now());
                             }
                         } else {
                             break;
@@ -1370,16 +1473,128 @@ async fn run_actor(
                     }
                 }
             }
+            // The server may have dropped a connection that waited a while.
+            // Finding out now replaces it quietly instead of failing the
+            // check.
+            if waiting_since.elapsed() >= STALE_AFTER
+                && let Some(s) = session.as_mut()
+                && let Err(error) = imap::noop(s).await
+            {
+                tracing::info!(account_id, %error, "receive: the connection closed while waiting");
+                session = None;
+                capabilities = None;
+            }
         }
     }
 }
 
 pub(crate) async fn set_state(ctx: &SyncCtx, account_id: i64, state: &str) {
-    set_state_inner(ctx, account_id, state, None).await;
+    set_state_inner(ctx, account_id, state, None, None).await;
 }
 
 pub(crate) async fn set_state_error(ctx: &SyncCtx, account_id: i64, state: &str, error: &str) {
-    set_state_inner(ctx, account_id, state, Some(error)).await;
+    set_state_inner(ctx, account_id, state, Some(error), None).await;
+}
+
+/// The account waits because its server asked to: the state says why and
+/// until when.
+pub(crate) async fn set_throttled(ctx: &SyncCtx, account_id: i64, pause: &Pause) {
+    set_state_inner(
+        ctx,
+        account_id,
+        "throttled",
+        Some(&pause.reason),
+        Some(pause.until_ms),
+    )
+    .await;
+}
+
+/// How long the account waits between checks for new mail, as its settings
+/// say, or `None` when it checks only when asked.
+pub(crate) async fn check_interval(
+    db: &Db,
+    settings: &crate::models::AccountSettings,
+) -> Option<std::time::Duration> {
+    super::pacing::check_interval(settings, configured_sync_interval(db).await)
+}
+
+/// How a wait the server asked for ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PauseEnd {
+    /// The wait is over.
+    Over,
+    /// Someone asked for a check, and sync had chosen the wait itself.
+    Asked,
+    Shutdown,
+}
+
+/// Waits out the wait the account's server asked for, which the account's
+/// state shows meanwhile. A check someone asks for ends a wait sync chose
+/// itself. During one the server named, it's answered at once with why the
+/// account waits, as are the checks that waited for this sync.
+pub(crate) async fn wait_out_pause(
+    ctx: &SyncCtx,
+    account_id: i64,
+    rx: &mut mpsc::Receiver<SyncCmd>,
+    waiters: &mut Vec<oneshot::Sender<std::result::Result<(), String>>>,
+) -> PauseEnd {
+    let pace = ctx.pace.account(account_id);
+    loop {
+        let Some(pause) = pace.paused() else {
+            return PauseEnd::Over;
+        };
+        set_throttled(ctx, account_id, &pause).await;
+        for waiter in waiters.drain(..) {
+            let _ = waiter.send(Err(pause.reason.clone()));
+        }
+        match tokio::time::timeout_at(pause.until, rx.recv()).await {
+            // Another connection may have made the wait longer.
+            Err(_) => {}
+            Ok(None | Some(SyncCmd::Shutdown)) => return PauseEnd::Shutdown,
+            Ok(Some(SyncCmd::SyncNow { complete })) => match pace.asked() {
+                None => {
+                    waiters.extend(complete);
+                    return PauseEnd::Asked;
+                }
+                Some(pause) => {
+                    if let Some(complete) = complete {
+                        let _ = complete.send(Err(pause.reason));
+                    }
+                }
+            },
+            // Queued actions keep until the wait is over.
+            Ok(Some(SyncCmd::RunActions | SyncCmd::FetchBody { .. })) => {}
+        }
+    }
+}
+
+/// Waits for the account's turn to connect when many accounts start
+/// together. Anything asked of the account goes at once. Returns false when
+/// the account shuts down.
+pub(crate) async fn wait_for_turn(
+    ctx: &SyncCtx,
+    account_id: i64,
+    rx: &mut mpsc::Receiver<SyncCmd>,
+    waiters: &mut Vec<oneshot::Sender<std::result::Result<(), String>>>,
+) -> bool {
+    let Some(start) = ctx.pace.account(account_id).take_start() else {
+        return true;
+    };
+    match tokio::time::timeout_at(start, rx.recv()).await {
+        Err(_) | Ok(Some(SyncCmd::RunActions | SyncCmd::FetchBody { .. })) => true,
+        Ok(None | Some(SyncCmd::Shutdown)) => false,
+        Ok(Some(SyncCmd::SyncNow { complete })) => {
+            waiters.extend(complete);
+            true
+        }
+    }
+}
+
+/// Notes a server's request to wait, which every connection of the account
+/// then keeps, and returns the wait. Other errors return `None`.
+pub(crate) fn note_limit(ctx: &SyncCtx, account_id: i64, error: &CoreError) -> Option<Pause> {
+    matches!(error, CoreError::RateLimited { .. })
+        .then(|| ctx.pace.account(account_id).limited(error))
 }
 
 /// Note that a sync of the account that started at `started` stored all the
@@ -1444,14 +1659,26 @@ pub(crate) async fn caught_up(ctx: &SyncCtx, account_id: i64, started: i64) {
     }
 }
 
-async fn set_state_inner(ctx: &SyncCtx, account_id: i64, state: &str, error: Option<&str>) {
+async fn set_state_inner(
+    ctx: &SyncCtx,
+    account_id: i64,
+    state: &str,
+    error: Option<&str>,
+    retry_at: Option<i64>,
+) {
     let st = state.to_string();
     let error = error.map(str::to_owned);
     let event_error = error.clone();
     let changed = ctx
         .db
         .write(move |conn| {
-            repo::accounts::update_sync_state_with_error(conn, account_id, &st, error.as_deref())
+            repo::accounts::update_sync_state_with_error(
+                conn,
+                account_id,
+                &st,
+                error.as_deref(),
+                retry_at,
+            )
         })
         .await
         .unwrap_or(false);
@@ -1462,6 +1689,7 @@ async fn set_state_inner(ctx: &SyncCtx, account_id: i64, state: &str, error: Opt
         account_id,
         sync_state: state.to_string(),
         sync_error: event_error,
+        sync_retry_at: retry_at,
     });
     emit_sync_status(ctx, account_id).await;
 }
@@ -2477,6 +2705,15 @@ async fn run_history_backfill(
             }
         }
 
+        // While the server asks to wait, older mail waits too.
+        let pace = ctx.pace.account(account_id);
+        if pace.paused().is_some() {
+            continue;
+        }
+        // Accounts take turns downloading older mail, on one of the
+        // account's background connections.
+        let turn = pace.history().await;
+
         // Work passes: each pass advances every folder that still needs
         // headers by one step - a full (resumable) initial backfill, or one
         // HISTORY_CHUNK extension - until nothing is left or the connection
@@ -2491,6 +2728,7 @@ async fn run_history_backfill(
                 Ok(progressed) => progressed,
                 Err(e) => {
                     tracing::warn!(account_id, error = %e, "header retry failed; reconnecting");
+                    note_limit(&ctx, account_id, &e);
                     if let Some(s) = session.take() {
                         imap::logout(s).await;
                     }
@@ -2527,6 +2765,7 @@ async fn run_history_backfill(
                         Ok(s) => session = Some(s),
                         Err(e) => {
                             tracing::warn!(account_id, error = %e, "history backfill: connect failed");
+                            note_limit(&ctx, account_id, &e);
                             break 'work; // retry on the next nudge/tick
                         }
                     }
@@ -2585,6 +2824,7 @@ async fn run_history_backfill(
                             error = %e,
                             "history backfill: step failed; dropping session",
                         );
+                        note_limit(&ctx, account_id, &e);
                         if let Some(s) = session.take() {
                             imap::logout(s).await;
                         }
@@ -2600,13 +2840,16 @@ async fn run_history_backfill(
                 // ticks - servers reap them and the next step would fail.
                 if let Err(e) = settle_unlinked_mail(&ctx, &config, &mut session).await {
                     tracing::warn!(account_id, error = %e, "could not settle mail without a UID; retrying later");
-                }
-                if let Some(s) = session.take() {
-                    imap::logout(s).await;
+                    note_limit(&ctx, account_id, &e);
                 }
                 break;
             }
         }
+        // The connection goes with the turn, so other accounts get theirs.
+        if let Some(s) = session.take() {
+            imap::logout(s).await;
+        }
+        drop(turn);
     }
 }
 
@@ -3611,7 +3854,8 @@ fn classify_body_chunk_error(error: CoreError) -> BodyChunkError {
         | CoreError::ImapParse(_)
         | CoreError::Network(_)
         | CoreError::ResponseTooLarge { .. }
-        | CoreError::Offline) => BodyChunkError::Reconnect(error),
+        | CoreError::Offline
+        | CoreError::RateLimited { .. }) => BodyChunkError::Reconnect(error),
         error => BodyChunkError::Fatal(error),
     }
 }
@@ -4030,6 +4274,10 @@ async fn run_backfill_pool(
         }
         // Coalesce nudges that piled up while the previous drain ran.
         while rx.try_recv().is_ok() {}
+        // While the server asks to wait, downloads wait too.
+        if ctx.pace.account(account_id).paused().is_some() {
+            continue;
+        }
         if let Err(e) = drain_missing_bodies(&ctx, &config, &mut settings_rx).await {
             tracing::warn!(account_id, error = %e, "body backfill: drain failed");
         }
@@ -4222,10 +4470,21 @@ async fn body_worker(
     settings_rx: watch::Receiver<crate::models::AccountSettings>,
 ) -> Result<()> {
     let account_id = config.id;
+    let pace = ctx.pace.account(account_id);
+    let _connection = pace.bulk().await;
+    if let Some(pause) = pace.paused() {
+        return Err(CoreError::RateLimited {
+            service: config.incoming_host.clone(),
+            kind: crate::error::LimitKind::Requests,
+            retry_after: None,
+            detail: pause.reason,
+        });
+    }
     let mut session = match connect(&ctx, &config).await {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(account_id, error = %e, "body worker: connect failed");
+            note_limit(&ctx, account_id, &e);
             return Err(e);
         }
     };
@@ -4268,6 +4527,14 @@ async fn body_worker(
                     total,
                 }));
                 emit_sync_status(&ctx, account_id).await;
+            }
+            Err(BodyChunkError::Reconnect(error @ CoreError::RateLimited { .. })) => {
+                // The chunk waits with the account; asking again now would
+                // only count against it.
+                tracing::warn!(account_id, error = %error, "body worker: the server asked to wait");
+                note_limit(&ctx, account_id, &error);
+                queue.lock().await.push_front(chunk);
+                return Err(error);
             }
             Err(BodyChunkError::Reconnect(error)) => {
                 tracing::warn!(account_id, error = %error, "body worker: IMAP chunk failed");

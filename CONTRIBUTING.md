@@ -3,6 +3,17 @@
 Thank you for helping improve Flectar Mail. Keep changes focused, reviewable,
 and safe for a mail client that handles private user data.
 
+## Flectar Mail Sync, free for contributors
+
+Anyone with a non-trivial contribution in the past 12 months gets a year of
+Flectar Mail Sync for free: a merged pull request, a meaningful translation
+on Weblate, or a valid security report. The maintainers decide what counts
+as non-trivial. Email [hello@flectar.com](mailto:hello@flectar.com) with a
+link to your contribution, and you'll get a code to enter in Flectar Mail
+under Settings → Sync → Redeem a code. The year covers all your devices and
+starts after any trial or paid time you have left. Contribute again for
+another year.
+
 ## Before starting
 
 - Search existing issues and pull requests before opening a duplicate.
@@ -73,6 +84,8 @@ contributing.
 - Preserve third-party copyright and license notices.
 - Do not add dependencies or copied assets without documenting their source,
   version, license, and required notices.
+- After a dependency change, run `scripts/update-flatpak-cargo-sources.py`:
+  the Flatpak builds offline from the crates that file lists.
 
 ## Local validation
 

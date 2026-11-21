@@ -171,7 +171,7 @@ jobs:
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
           # Release files tell of newer releases; stores update the app themselves.
           FLECTAR_UPDATE_CHECKS: github
-        run: cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
+        run: ./scripts/ci-build-scope.sh cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
 
       # The startup benchmark below must not measure swapped memory.
       - name: Take the build's swap away again
@@ -208,7 +208,7 @@ jobs:
   rpm:
     needs: metadata
     if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
-    name: Fedora RPM build (${{ matrix.arch }}, Fedora 43 baseline)
+    name: RPM build (${{ matrix.arch }}, Fedora 43 baseline)
     strategy:
       fail-fast: false
       matrix:
@@ -222,7 +222,9 @@ jobs:
     container:
       image: fedora:43
       # Turning on swap for the release build needs it (scripts/ci-swap.sh).
-      options: --privileged
+      # The memory cap keeps the build from swapping out the runner's agent
+      # on the 16 GiB host, as scripts/ci-build-scope.sh does elsewhere.
+      options: --privileged --memory=14g --memory-swap=-1
     env:
       SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
@@ -287,12 +289,19 @@ jobs:
 
   rpm-test:
     needs: rpm
-    name: RPM runtime (Fedora ${{ matrix.fedora }}, ${{ matrix.arch }})
+    name: RPM runtime (${{ matrix.distro.name }}, ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        fedora: [43, 44]
+        # Every distribution the RPM supports. Enterprise Linux 9 is not one:
+        # its glibc 2.34 predates symbols the executable needs.
+        distro:
+          - { name: Fedora 43, image: 'fedora:43', id: fedora-43 }
+          - { name: Fedora 44, image: 'fedora:44', id: fedora-44 }
+          - { name: openSUSE Tumbleweed, image: 'opensuse/tumbleweed', id: opensuse-tumbleweed }
+          - { name: openSUSE Leap 16.0, image: 'opensuse/leap:16.0', id: opensuse-leap-16.0 }
+          - { name: AlmaLinux 10, image: 'almalinux:10', id: almalinux-10 }
         arch: [x64, arm64]
         include:
           - arch: x64
@@ -305,23 +314,23 @@ jobs:
         with:
           name: flectar-mail-rpm-${{ matrix.arch }}
           path: target/rpm
-      - name: Test published RPM in a clean Fedora container
+      - name: Test published RPM in a clean container
         shell: bash
         env:
-          FEDORA_VERSION: ${{ matrix.fedora }}
+          IMAGE: ${{ matrix.distro.image }}
         run: |
           mkdir -p target/rpm-test
           docker run --rm \
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/work,readonly" \
             --mount "type=bind,source=$GITHUB_WORKSPACE/target/rpm-test,target=/results" \
-            "fedora:$FEDORA_VERSION" \
+            "$IMAGE" \
             bash /work/scripts/test-rpm.sh /work/target/rpm/flectar-mail.rpm /results \
             2>&1 | tee target/rpm-test/transaction.log
       - name: Preserve RPM runtime diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: rpm-test-fedora-${{ matrix.fedora }}-${{ matrix.arch }}
+          name: rpm-test-${{ matrix.distro.id }}-${{ matrix.arch }}
           path: target/rpm-test
           if-no-files-found: error
 
@@ -356,7 +365,7 @@ jobs:
         # runner has; see scripts/ci-swap.sh.
         run: ./scripts/ci-swap.sh on
       - name: Build Flatpak bundle from locked sources
-        run: ./scripts/build-flatpak.sh
+        run: ./scripts/ci-build-scope.sh ./scripts/build-flatpak.sh
       - name: Test Flatpak installation and packaged runtime
         env:
           EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
@@ -448,7 +457,8 @@ jobs:
           mkdir -p target/flathub/local
           cd target/flathub/local
           # The builder calls the host's flatpak over the session bus.
-          dbus-run-session -- flatpak run --command=flathub-build org.flatpak.Builder \
+          "$GITHUB_WORKSPACE/scripts/ci-build-scope.sh" \
+            dbus-run-session -- flatpak run --command=flathub-build org.flatpak.Builder \
             "$GITHUB_WORKSPACE/.flathub-local.yml"
           # Flathub publishes the mirrored screenshots in their own ref.
           ostree commit --repo=repo --canonical-permissions --branch=screenshots/x86_64 \
@@ -790,7 +800,7 @@ jobs:
         run: |
           args=()
           if [[ "$RELEASE_PRERELEASE" == true ]]; then args+=(--preview); fi
-          bash scripts/build-android-release.sh "${args[@]}"
+          ./scripts/ci-build-scope.sh bash scripts/build-android-release.sh "${args[@]}"
 
       - name: Verify release APK manifest, ABI, and signature
         env:

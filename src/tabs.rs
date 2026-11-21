@@ -1736,7 +1736,9 @@ fn sync_rows(model: &VecModel<TabRow>, rows: impl Iterator<Item = TabRow>) {
 /// profile leaves out is not shown either.
 fn available_scope(scope: Scope, state: &InboxState) -> Option<Scope> {
     match scope {
-        Scope::Unified(_) | Scope::Important | Scope::Other => Some(scope),
+        Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
+            Some(scope)
+        }
         // A label can move between sections, e.g. when it becomes automatic.
         Scope::Label { id, .. } => state
             .labels
@@ -2557,6 +2559,7 @@ mod tests {
             mail_protocol: MailProtocol::Imap,
             sync_state: "idle".into(),
             sync_error: None,
+            sync_retry_at: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
             caught_up_at: None,

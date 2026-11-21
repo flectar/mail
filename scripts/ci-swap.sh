@@ -3,9 +3,10 @@
 #
 # A release build of the app crate peaks near 15 GiB, about all the memory a
 # hosted Linux runner has, and the kernel then kills rustc. A swap file gives
-# it room. "on" adds one of GIB gibibytes (8 by default) when the disk can
-# spare it with plenty left for the build. "off" removes it again, for steps
-# that measure memory and must not use swap.
+# it room, and scripts/ci-build-scope.sh keeps the build from swapping out
+# the runner's agent. "on" adds one of GIB gibibytes (8 by default) when the
+# disk can spare it with plenty left for the build. "off" removes it again,
+# for steps that measure memory and must not use swap.
 #
 # The file goes in the runner's temporary directory, which is on the
 # runner's own disk in container jobs too: swap can't live on a container's
