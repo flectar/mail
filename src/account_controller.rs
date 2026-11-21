@@ -424,6 +424,16 @@ pub(super) fn apply_connected_accounts(
                 incoming_port: config.incoming_port.to_string().into(),
                 smtp_host: config.smtp_host.clone().into(),
                 smtp_port: config.smtp_port.to_string().into(),
+                receive_only: !config.sends_mail(),
+                incoming_login: config.settings.connection.incoming_login.as_str().into(),
+                smtp_login: config.settings.connection.smtp_login.as_str().into(),
+                smtp_username: config
+                    .settings
+                    .connection
+                    .smtp_username
+                    .clone()
+                    .unwrap_or_default()
+                    .into(),
                 mail_history: config.settings.mail_history.as_str().into(),
                 sent_copy_policy: config.settings.sent_copy_policy.as_str().into(),
                 keep_on_server: config.settings.keep_on_server.as_str().into(),
@@ -695,12 +705,28 @@ pub(super) fn connected_account_rows(app: &AppWindow) -> Vec<AccountRow> {
         .collect()
 }
 
+/// The accounts mail can be written from, leaving out those that only
+/// receive mail (#252).
+pub(super) fn sending_accounts(app: &AppWindow) -> ModelRc<AccountRow> {
+    ModelRc::new(VecModel::from(
+        connected_account_rows(app)
+            .into_iter()
+            .filter(|account| !account.receive_only)
+            .collect::<Vec<_>>(),
+    ))
+}
+
 pub(super) fn apply_connected_account_rows(app: &AppWindow, rows: Vec<AccountRow>) {
     let selected = rows
         .iter()
-        .find(|account| account.id == app.get_compose_account_id())
-        .or_else(|| rows.first());
-    set_compose_account(app, selected);
+        .find(|account| account.id == app.get_compose_account_id() && !account.receive_only)
+        .or_else(|| rows.iter().find(|account| !account.receive_only));
+    if selected.is_none() && !rows.is_empty() {
+        app.set_compose_account_id(-1);
+        app.set_compose_from_label(app.global::<I18n>().invoke_no_sending_account());
+    } else {
+        set_compose_account(app, selected);
+    }
     app.set_connected_accounts(ModelRc::new(VecModel::from(rows)));
     composer::accounts_changed(app);
     #[cfg(mobile)]
@@ -714,7 +740,7 @@ pub(super) fn remember_compose_account(app: &AppWindow, account_id: i32) {
     }
     if let Some(account) = connected_account_rows(app)
         .iter()
-        .find(|account| account.id == account_id)
+        .find(|account| account.id == account_id && !account.receive_only)
     {
         set_compose_account(app, Some(account));
     }
@@ -743,7 +769,7 @@ pub(super) fn prefer_shown_compose_account(app: &AppWindow, state: &InboxState) 
     let rows = connected_account_rows(app);
     if let Some(account) = rows
         .iter()
-        .find(|account| state.shows_account(i64::from(account.id)))
+        .find(|account| state.shows_account(i64::from(account.id)) && !account.receive_only)
     {
         set_compose_account(app, Some(account));
     }

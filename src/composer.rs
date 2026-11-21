@@ -422,8 +422,9 @@ pub(super) fn open_windows() -> usize {
     .unwrap_or_default()
 }
 
-/// Composers list the accounts the main window lists. A message whose
-/// account was removed moves to the one new mail starts from.
+/// Composers list the accounts the main window lists that send mail. A
+/// message whose account was removed, or stopped sending, moves to the one
+/// new mail starts from.
 pub(super) fn accounts_changed(app: &AppWindow) {
     with_composers(|composers| {
         let sessions = composers.sessions.borrow().clone();
@@ -432,7 +433,7 @@ pub(super) fn accounts_changed(app: &AppWindow) {
                 continue;
             };
             let ui = host.ui();
-            let accounts = app.get_connected_accounts();
+            let accounts = account_controller::sending_accounts(app);
             let kept = (0..accounts.row_count())
                 .filter_map(|index| accounts.row_data(index))
                 .any(|account| account.id == ui.get_account_id());
@@ -808,7 +809,7 @@ impl Composers {
         let host = session.host()?;
         let ui = host.ui();
         ui.set_can_pop_out(self.pop_out && matches!(host, HostRef::Main(_)));
-        ui.set_accounts(app.get_connected_accounts());
+        ui.set_accounts(account_controller::sending_accounts(app));
         ui.set_account_id(app.get_compose_account_id());
         ui.set_from_label(app.get_compose_from_label());
         apply_email_templates(&ui, &self.templates.borrow());

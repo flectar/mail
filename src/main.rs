@@ -165,8 +165,8 @@ use flectar_mail_core::models::ThreadCursor;
 use flectar_mail_core::models::{
     Account, AccountConfig, AddPasswordAccountArgs, CalendarConnection, CardDavConnection,
     CheckInterval, ConnectionSecurity, ContactRecord, ContactRecordCursor, ContactRecordPage,
-    CreateEventArgs, DraftAttachmentIn, Label, ListOrder, MailConnectionSettings, MailGrouping,
-    MailProfile, MailProtocol, Provider, Settings, Snippet, UpdateEventArgs,
+    CreateEventArgs, DraftAttachmentIn, Label, ListOrder, LoginMethod, MailConnectionSettings,
+    MailGrouping, MailProfile, MailProtocol, Provider, Settings, Snippet, UpdateEventArgs,
 };
 #[cfg(test)]
 use mail::fixture_messages;
@@ -5280,6 +5280,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 app.set_incoming_port("993".into());
                 app.set_smtp_host("".into());
                 app.set_smtp_port("465".into());
+                app.set_account_sends_mail(true);
+                app.set_incoming_login("automatic".into());
+                app.set_smtp_login("automatic".into());
+                app.set_smtp_username("".into());
+                app.set_smtp_password("".into());
             }
             if let Some(removal) = update.account_removal.as_mut().filter(|removal| removal.removed) {
                 let current_page = {
@@ -6676,14 +6681,25 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     "Choose a supported account type and connection security.",
                 ))
             };
-            let (Some(mail_protocol), Some(incoming_security), Some(smtp_security)) = (
+            let (
+                Some(mail_protocol),
+                Some(incoming_security),
+                Some(smtp_security),
+                Some(incoming_login),
+                Some(smtp_login),
+            ) = (
                 MailProtocol::parse(protocol.as_str()),
                 ConnectionSecurity::parse(app.get_incoming_security().as_str()),
                 ConnectionSecurity::parse(app.get_smtp_security().as_str()),
-            ) else {
+                LoginMethod::parse(app.get_incoming_login().as_str()),
+                LoginMethod::parse(app.get_smtp_login().as_str()),
+            )
+            else {
                 unsupported();
                 return;
             };
+            // An account without an SMTP server only receives mail (#252).
+            let sends_mail = mail_protocol == MailProtocol::Jmap || app.get_account_sends_mail();
             let port = |value: &str| value.trim().parse::<u16>().ok().filter(|port| *port > 0);
             let (incoming_port, smtp_port, progress) = match mail_protocol {
                 // JMAP discovers its endpoints; the server ports are unused.
@@ -6702,20 +6718,29 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         });
                         return;
                     };
-                    let Some(smtp_port) = port(&smtp_port) else {
-                        app.set_sync_status(UiMessage::plain(
-                            "SMTP port must be between 1 and 65535.",
-                        ));
-                        return;
+                    let smtp_port = if sends_mail {
+                        let Some(smtp_port) = port(&smtp_port) else {
+                            app.set_sync_status(UiMessage::plain(
+                                "SMTP port must be between 1 and 65535.",
+                            ));
+                            return;
+                        };
+                        smtp_port
+                    } else {
+                        0
                     };
                     (
                         incoming_port,
                         smtp_port,
-                        match mail_protocol {
-                            MailProtocol::Pop3 => {
+                        match (mail_protocol, sends_mail) {
+                            (MailProtocol::Pop3, true) => {
                                 UiMessage::plain("Testing POP3 and SMTP connections…")
                             }
-                            _ => UiMessage::plain("Testing IMAP and SMTP connections…"),
+                            (MailProtocol::Pop3, false) => {
+                                UiMessage::plain("Testing the POP3 connection…")
+                            }
+                            (_, true) => UiMessage::plain("Testing IMAP and SMTP connections…"),
+                            (_, false) => UiMessage::plain("Testing the IMAP connection…"),
                         },
                     )
                 }
@@ -6740,11 +6765,21 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 jmap_url: jmap_url.to_string(),
                 incoming_host: incoming_host.to_string(),
                 incoming_port,
-                smtp_host: smtp_host.to_string(),
+                smtp_host: if sends_mail {
+                    smtp_host.to_string()
+                } else {
+                    String::new()
+                },
                 smtp_port,
-                smtp_password: None,
+                // Empty keeps the saved one, or the account's password.
+                smtp_password: Some(app.get_smtp_password().to_string())
+                    .filter(|password| !password.is_empty()),
                 connection: MailConnectionSettings {
                     trusted_certificate_pem: app.get_trusted_certificate_pem().to_string(),
+                    incoming_login,
+                    smtp_login,
+                    smtp_username: Some(app.get_smtp_username().trim().to_owned())
+                        .filter(|username| !username.is_empty()),
                     ..MailConnectionSettings::new(incoming_security, smtp_security)
                 },
             };

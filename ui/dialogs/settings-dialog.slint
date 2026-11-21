@@ -14,7 +14,7 @@ import { AgentAccess } from "../agent-access.slint";
 import { AgentAccessPage } from "../components/agent-access-page.slint";
 import { AppIconPicker } from "../components/app-icon-picker.slint";
 import { MessageColors } from "../message-colors.slint";
-import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
+import { MailAdvancedFields, MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountProblem, AccountRow, CalendarConnectionRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
@@ -572,6 +572,14 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> incoming_security: "tls";
     in-out property <string> smtp_security: "tls";
     in-out property <string> trusted_certificate_pem;
+    // The account form's advanced settings (#252).
+    in-out property <bool> account_sends_mail: true;
+    in-out property <string> incoming_login: "automatic";
+    in-out property <string> smtp_login: "automatic";
+    in-out property <string> smtp_username;
+    in-out property <string> smtp_password;
+    private property <bool> account_advanced_open: false;
+    private property <bool> keeps_smtp_password: false;
     in property <string> oauth_authorization_url;
     in property <bool> oauth_browser_error;
     callback retry_oauth_browser();
@@ -1080,8 +1088,7 @@ export component SettingsDialog inherits Rectangle {
         && (root.account_protocol == "jmap" || (
             root.incoming_host != ""
             && root.incoming_port != ""
-            && root.smtp_host != ""
-            && root.smtp_port != ""));
+            && (!root.account_sends_mail || (root.smtp_host != "" && root.smtp_port != ""))));
 
     function edit-account(account: AccountRow) {
         if account.provider == "generic" {
@@ -1095,7 +1102,20 @@ export component SettingsDialog inherits Rectangle {
             root.incoming_host = account.incoming_host;
             root.incoming_port = account.incoming_port;
             root.smtp_host = account.smtp_host;
-            root.smtp_port = account.smtp_port;
+            // An account that only receives keeps no SMTP port. Sending
+            // turned back on starts from the standard one.
+            root.smtp_port = account.receive_only ? MailPorts.smtp(account.smtp_security) : account.smtp_port;
+            root.account_sends_mail = !account.receive_only;
+            root.incoming_login = account.incoming_login;
+            root.smtp_login = account.smtp_login;
+            root.smtp_username = account.smtp_username;
+            root.smtp_password = "";
+            root.keeps_smtp_password = account.smtp_username != "";
+            // Advanced settings show when the account uses any of them.
+            root.account_advanced_open = account.receive_only
+                || account.incoming_login != "automatic"
+                || account.smtp_login != "automatic"
+                || account.smtp_username != "";
             root.account_password = "";
             root.account_editing = true;
             root.show_account_status = false;
@@ -1142,6 +1162,13 @@ export component SettingsDialog inherits Rectangle {
         root.incoming_port = "993";
         root.smtp_host = "";
         root.smtp_port = "465";
+        root.account_sends_mail = true;
+        root.incoming_login = "automatic";
+        root.smtp_login = "automatic";
+        root.smtp_username = "";
+        root.smtp_password = "";
+        root.keeps_smtp_password = false;
+        root.account_advanced_open = false;
         root.show_account_status = false;
         root.account_form_open = true;
     }
@@ -2792,12 +2819,12 @@ export component SettingsDialog inherits Rectangle {
                                         root.edit-account(account);
                                     }
                                 }
-                                private property <bool> has-sent-copy: account.provider != "gmail" && account.mail_protocol == "imap";
+                                private property <bool> has-sent-copy: account.provider != "gmail" && account.mail_protocol == "imap" && !account.receive_only;
                                 private property <bool> has-server-copies: account.mail_protocol == "pop3";
                                 private property <bool> has-subscriptions: account.mail_protocol == "imap";
                                 // IMAP IDLE and JMAP's event source; Gmail and POP3 servers don't push.
                                 private property <bool> has-push: account.mail_protocol == "imap" || account.mail_protocol == "jmap";
-                                private property <bool> unencrypted: account.incoming_security == "none" || account.smtp_security == "none";
+                                private property <bool> unencrypted: account.incoming_security == "none" || (!account.receive_only && account.smtp_security == "none");
                                 // A card shows the account's settings while it's the open one,
                                 // and always when it's the only account.
                                 private property <bool> single: root.connected_accounts.length == 1;
@@ -2930,7 +2957,7 @@ export component SettingsDialog inherits Rectangle {
                                             spacing: 2px;
                                             account-name := Text { height: max(19px, self.preferred-height); text: account.name; color: root.heading; font-size: TypeScale.body-large; font-weight: 700; overflow: elide; }
                                             account-email := Text { height: max(16px, self.preferred-height); text: account.email; color: root.secondary-text; font-size: TypeScale.caption; overflow: elide; }
-                                            account-state := Text { height: max(16px, self.preferred-height); text: account.status == "offline" ? @tr("Couldn't check mail · Retrying automatically") : account.status == "throttled" ? (account.resume_at == "" ? AccountStatusText.problem(AccountProblem.waiting) : @tr("two parts of a status line" => "{0} · {1}", AccountStatusText.problem(AccountProblem.waiting), AccountStatusText.checks-again(account.resume_day, account.resume_at))) : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Checking for new mail…") : account.status == "idle" ? (account.mail_protocol == "gmail" ? @tr("Connected · Gmail") : account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : account.mail_protocol == "pop3" ? (drop-target.unencrypted ? @tr("Connected without encryption · POP3 + SMTP") : @tr("Connected · POP3 + SMTP")) : drop-target.unencrypted ? @tr("Connected without encryption · IMAP + SMTP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : account.status == "idle" && drop-target.unencrypted ? AppTheme.destructive : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                                            account-state := Text { height: max(16px, self.preferred-height); text: account.status == "offline" ? @tr("Couldn't check mail · Retrying automatically") : account.status == "throttled" ? (account.resume_at == "" ? AccountStatusText.problem(AccountProblem.waiting) : @tr("two parts of a status line" => "{0} · {1}", AccountStatusText.problem(AccountProblem.waiting), AccountStatusText.checks-again(account.resume_day, account.resume_at))) : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Checking for new mail…") : account.status == "idle" ? (account.mail_protocol == "gmail" ? @tr("Connected · Gmail") : account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : account.mail_protocol == "pop3" ? (account.receive_only ? (drop-target.unencrypted ? @tr("Connected without encryption · POP3") : @tr("Connected · POP3")) : drop-target.unencrypted ? @tr("Connected without encryption · POP3 + SMTP") : @tr("Connected · POP3 + SMTP")) : account.receive_only ? (drop-target.unencrypted ? @tr("Connected without encryption · IMAP") : @tr("Connected · IMAP")) : drop-target.unencrypted ? @tr("Connected without encryption · IMAP + SMTP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : account.status == "idle" && drop-target.unencrypted ? AppTheme.destructive : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                                             if account.checked_at != "" : Text { height: max(16px, self.preferred-height); text: AccountStatusText.last-checked(account.checked_day, account.checked_at); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                                         }
                                         // Same-sized ghost buttons, the opening one last. On a phone
@@ -4360,7 +4387,7 @@ export component SettingsDialog inherits Rectangle {
                                     FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: root.account_protocol == "pop3" ? @tr("POP3 server") : @tr("IMAP server"); value <=> root.incoming_host; placeholder: root.account_protocol == "pop3" ? @tr("pop.example.com") : @tr("imap.example.com"); label-color: root.secondary-text; }
                                     FormField { enabled: !root.account_setup_in_progress; width: 88px; label: @tr("Port"); value <=> root.incoming_port; placeholder: MailPorts.incoming(root.account_protocol, root.incoming_security); label-color: root.secondary-text; }
                                 }
-                                if root.account_protocol != "jmap" : HorizontalBox {
+                                if root.account_protocol != "jmap" && root.account_sends_mail : HorizontalBox {
                                     padding: 0px;
                                     height: 57px;
                                     spacing: 10px;
@@ -4378,8 +4405,20 @@ export component SettingsDialog inherits Rectangle {
                                     incoming-port <=> root.incoming_port;
                                     smtp-port <=> root.smtp_port;
                                     enabled: !root.account_setup_in_progress;
+                                    sends-mail: root.account_sends_mail;
                                     certificate-pem <=> root.trusted_certificate_pem;
                                     import-certificate => { root.import_mail_certificate(); }
+                                }
+                                if root.account_protocol != "jmap" : MailAdvancedFields {
+                                    incoming-protocol: root.account_protocol;
+                                    expanded <=> root.account_advanced_open;
+                                    sends-mail <=> root.account_sends_mail;
+                                    incoming-login <=> root.incoming_login;
+                                    smtp-login <=> root.smtp_login;
+                                    smtp-username <=> root.smtp_username;
+                                    smtp-password <=> root.smtp_password;
+                                    keeps-smtp-password: root.keeps_smtp_password;
+                                    enabled: !root.account_setup_in_progress;
                                 }
                             }
                         }
