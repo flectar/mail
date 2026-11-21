@@ -1,3 +1,4 @@
+use super::details::{self, FindMatch, Searchable};
 use super::*;
 use parley::layout::{Affinity, Cursor, Selection};
 use unicode_segmentation::UnicodeSegmentation;
@@ -18,10 +19,15 @@ impl GpuEmailRenderer {
             return false;
         };
         let before = email.document.get_text_selection_ranges();
+        let mut toggled = None;
         match kind {
             "down" | "long-press" => {
                 self.pointer_down = true;
                 self.press_link = link.map(|url| (x, y, url));
+                self.press_section = (kind == "down")
+                    .then(|| details::clicked_section(&email.document, x, y))
+                    .flatten()
+                    .map(|section| (x, y, section));
                 let now = Instant::now();
                 self.click_count = if self.last_pointer_down.is_some_and(|(time, px, py)| {
                     now.duration_since(time) < Duration::from_millis(500)
@@ -77,6 +83,12 @@ impl GpuEmailRenderer {
                 {
                     self.press_link = None;
                 }
+                if self
+                    .press_section
+                    .is_some_and(|(px, py, _)| (px - x).abs() > 3.0 || (py - y).abs() > 3.0)
+                {
+                    self.press_section = None;
+                }
                 if let Some(pos) = email.document.find_text_position(x, y) {
                     self.selection_focus = Some(pos);
                 }
@@ -89,6 +101,12 @@ impl GpuEmailRenderer {
                     && !mods.shift
                 {
                     self.activation = Some(url);
+                }
+                if let Some((_, _, section)) = self.press_section.take()
+                    && !mods.shift
+                    && details::clicked_section(&email.document, x, y) == Some(section)
+                {
+                    toggled = Some(section);
                 }
             }
             "extend-start" | "extend-end" => {
@@ -103,6 +121,7 @@ impl GpuEmailRenderer {
             "cancel" => {
                 self.pointer_down = false;
                 self.press_link = None;
+                self.press_section = None;
             }
             _ => {}
         }
@@ -111,7 +130,34 @@ impl GpuEmailRenderer {
         }
         let changed = before != email.document.get_text_selection_ranges();
         self.paint_dirty |= changed;
+        if let Some(section) = toggled {
+            self.toggle_section_node(section);
+            return true;
+        }
         changed
+    }
+    /// Open or close the message's `index`th section, as reader mode's button
+    /// for its summary does.
+    pub fn toggle_section(&mut self, index: usize) -> bool {
+        let Some(email) = self.email.as_mut() else {
+            return false;
+        };
+        let Some(&section) = details::sections(&email.document).get(index) else {
+            return false;
+        };
+        self.toggle_section_node(section);
+        true
+    }
+    fn toggle_section_node(&mut self, section: NodeId) {
+        let Some(email) = self.email.as_mut() else {
+            return;
+        };
+        // The selection could lie in what closes, and a click selects nothing.
+        email.document.clear_text_selection();
+        self.selection_anchor = None;
+        self.selection_focus = None;
+        details::toggle(&mut email.document, section);
+        self.relayout_now();
     }
     pub fn take_activation(&mut self) -> Option<String> {
         self.activation.take()
@@ -238,52 +284,41 @@ impl GpuEmailRenderer {
         self.paint_dirty = true;
     }
     pub fn find(&mut self, query: &str, direction: i32) -> (usize, usize, Option<f32>) {
+        if self.email.is_none() {
+            return (0, 0, None);
+        }
+        if query != self.find_query {
+            self.find_query = query.into();
+            self.find_index = 0;
+            self.collect_find_matches();
+        } else {
+            if self.find_revision != self.metadata_revision {
+                self.collect_find_matches();
+            }
+            if !self.find_matches.is_empty() {
+                self.find_index = (self.find_index as i32 + direction)
+                    .rem_euclid(self.find_matches.len() as i32)
+                    as usize;
+            }
+        }
+        // A match in a closed section opens it, and then any closed section
+        // that the match is still in (HTML, "Interaction with details").
+        for _ in 0..16 {
+            let Some(&FindMatch::Hidden(section)) = self.find_matches.get(self.find_index) else {
+                break;
+            };
+            let Some(email) = self.email.as_mut() else {
+                break;
+            };
+            details::open_section(&mut email.document, section);
+            if !self.relayout_now() {
+                break;
+            }
+            self.collect_find_matches();
+        }
         let Some(email) = self.email.as_mut() else {
             return (0, 0, None);
         };
-        if query != self.find_query || self.find_revision != self.metadata_revision {
-            self.find_revision = self.metadata_revision;
-            self.find_query = query.into();
-            self.find_matches.clear();
-            self.find_index = 0;
-            if !query.is_empty() {
-                email.document.visit(|id, node| {
-                    if !visible(node) || self.find_matches.len() >= 2000 {
-                        return;
-                    }
-                    let Some(inline) = node
-                        .element_data()
-                        .and_then(|e| e.inline_layout_data.as_ref())
-                    else {
-                        return;
-                    };
-                    // Map folded characters back to original UTF-8 offsets.
-                    let mut folded = String::new();
-                    let mut offsets = Vec::new();
-                    for (i, c) in inline.text.char_indices() {
-                        for lower in c.to_lowercase() {
-                            for _ in 0..lower.len_utf8() {
-                                offsets.push(i);
-                            }
-                            folded.push(lower);
-                        }
-                    }
-                    offsets.push(inline.text.len());
-                    for (i, m) in folded.match_indices(&query.to_lowercase()) {
-                        let start = offsets[i];
-                        let last = offsets[i + m.len() - 1];
-                        let end = last + inline.text[last..].chars().next().unwrap().len_utf8();
-                        self.find_matches.push((id, start, end));
-                        if self.find_matches.len() >= 2000 {
-                            break;
-                        }
-                    }
-                });
-            }
-        } else if !self.find_matches.is_empty() {
-            self.find_index = (self.find_index as i32 + direction)
-                .rem_euclid(self.find_matches.len() as i32) as usize;
-        }
         if query.is_empty() {
             email.document.clear_text_selection();
             self.selection_anchor = None;
@@ -291,7 +326,9 @@ impl GpuEmailRenderer {
             self.paint_dirty = true;
         }
         let count = self.find_matches.len();
-        let y = if let Some(&(id, start, end)) = self.find_matches.get(self.find_index) {
+        let y = if let Some(&FindMatch::Shown(id, start, end)) =
+            self.find_matches.get(self.find_index)
+        {
             email.document.set_text_selection(id, start, id, end);
             self.selection_anchor = Some((id, start));
             self.selection_focus = Some((id, end));
@@ -309,6 +346,69 @@ impl GpuEmailRenderer {
             None
         };
         (if count == 0 { 0 } else { self.find_index + 1 }, count, y)
+    }
+
+    /// Find the current query in the message as it is laid out now, keeping
+    /// the current match's place in the list.
+    fn collect_find_matches(&mut self) {
+        self.find_revision = self.metadata_revision;
+        self.find_matches.clear();
+        let Some(email) = self.email.as_ref() else {
+            return;
+        };
+        let query = self.find_query.to_lowercase();
+        if query.is_empty() {
+            return;
+        }
+        for run in details::searchable(&email.document) {
+            if self.find_matches.len() >= 2000 {
+                break;
+            }
+            match run {
+                Searchable::Shown(id) => {
+                    let Some(inline) = email
+                        .document
+                        .get_node(id)
+                        .and_then(|node| node.element_data())
+                        .and_then(|element| element.inline_layout_data.as_ref())
+                    else {
+                        continue;
+                    };
+                    // Map folded characters back to original UTF-8 offsets.
+                    let mut folded = String::new();
+                    let mut offsets = Vec::new();
+                    for (i, c) in inline.text.char_indices() {
+                        for lower in c.to_lowercase() {
+                            for _ in 0..lower.len_utf8() {
+                                offsets.push(i);
+                            }
+                            folded.push(lower);
+                        }
+                    }
+                    offsets.push(inline.text.len());
+                    for (i, m) in folded.match_indices(&query) {
+                        let start = offsets[i];
+                        let last = offsets[i + m.len() - 1];
+                        let end = last + inline.text[last..].chars().next().unwrap().len_utf8();
+                        self.find_matches.push(FindMatch::Shown(id, start, end));
+                        if self.find_matches.len() >= 2000 {
+                            break;
+                        }
+                    }
+                }
+                Searchable::Hidden { details, blocks } => {
+                    for block in blocks {
+                        let found = block.to_lowercase().matches(&query).count();
+                        self.find_matches
+                            .extend(std::iter::repeat_n(FindMatch::Hidden(details), found));
+                    }
+                    self.find_matches.truncate(2000);
+                }
+            }
+        }
+        self.find_index = self
+            .find_index
+            .min(self.find_matches.len().saturating_sub(1));
     }
 }
 
