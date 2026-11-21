@@ -6742,6 +6742,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 incoming_port,
                 smtp_host: smtp_host.to_string(),
                 smtp_port,
+                smtp_password: None,
                 connection: MailConnectionSettings {
                     trusted_certificate_pem: app.get_trusted_certificate_pem().to_string(),
                     ..MailConnectionSettings::new(incoming_security, smtp_security)

@@ -474,16 +474,20 @@ fn plain_unusable_key(target: SignInTarget<'_>) -> String {
 
 /// Sign in with a password: SASL PLAIN when the server offers it and LOGIN
 /// only as the last resort (RFC 9051 6.2.3), like Thunderbird and K-9 Mail.
+/// An account set to one `method` (#252) signs in that way only, even
+/// unannounced, but over an unencrypted connection only as the server offers.
 async fn sign_in_with_password<T>(
     client: async_imap::Client<T>,
     target: SignInTarget<'_>,
     user: &str,
     password: &str,
     capabilities: SignInCapabilities,
+    method: crate::models::LoginMethod,
 ) -> Result<async_imap::Session<T>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
 {
+    use crate::models::LoginMethod;
     let key = plain_unusable_key(target);
     let plain_unusable = PLAIN_UNUSABLE
         .lock()
@@ -491,7 +495,24 @@ where
         .contains(&key);
     let mut client = client;
     let mut plain_failure = None;
-    if capabilities.plain && !plain_unusable {
+    let host = target.host;
+    let try_plain = match method {
+        LoginMethod::Plain => capabilities.plain || target.encrypted,
+        LoginMethod::Login => false,
+        LoginMethod::Automatic | LoginMethod::None => capabilities.plain && !plain_unusable,
+    };
+    if method == LoginMethod::Plain && !try_plain {
+        return Err(CoreError::Imap(if capabilities.login_disabled {
+            format!(
+                "{host} accepts passwords only over an encrypted connection. Choose STARTTLS or SSL/TLS."
+            )
+        } else {
+            format!(
+                "{host} doesn't offer PLAIN sign-in without encryption. Choose STARTTLS or SSL/TLS, or another sign-in method."
+            )
+        }));
+    }
+    if try_plain {
         let challenged = Arc::new(AtomicBool::new(false));
         let authenticator = PlainAuthenticator {
             message: format!("\0{user}\0{password}"),
@@ -501,7 +522,8 @@ where
             Ok(session) => return Ok(session),
             Err((error, returned)) => {
                 let failure = SignInFailure::from_imap(error);
-                if capabilities.login_disabled
+                if method == LoginMethod::Plain
+                    || capabilities.login_disabled
                     || !failure.allows_login_after_plain(challenged.load(Ordering::Relaxed))
                 {
                     return Err(failure.into_error(target, user));
@@ -516,13 +538,17 @@ where
         }
     }
     if capabilities.login_disabled {
-        let host = target.host;
-        return Err(CoreError::Imap(if target.encrypted {
-            format!("{host} offers no sign-in with a password")
-        } else {
-            format!(
+        return Err(CoreError::Imap(match (method, target.encrypted) {
+            (LoginMethod::Login, true) => {
+                format!("{host} doesn't offer LOGIN sign-in. Choose another sign-in method.")
+            }
+            (LoginMethod::Login, false) if capabilities.plain => format!(
+                "{host} doesn't offer LOGIN sign-in without encryption. Choose STARTTLS or SSL/TLS, or another sign-in method."
+            ),
+            (_, true) => format!("{host} offers no sign-in with a password"),
+            (_, false) => format!(
                 "{host} accepts passwords only over an encrypted connection. Choose STARTTLS or SSL/TLS."
-            )
+            ),
         }));
     }
     match client.login(user, password).await {
@@ -656,7 +682,15 @@ async fn connect_inner(
                 Some(capabilities) => capabilities,
                 None => request_capabilities(&mut client).await?,
             };
-            sign_in_with_password(client, target, &user, &password, capabilities).await?
+            sign_in_with_password(
+                client,
+                target,
+                &user,
+                &password,
+                capabilities,
+                settings.incoming_login,
+            )
+            .await?
         }
         ImapCredentials::XOAuth2 { user, access_token } => {
             let auth = XOAuth2Authenticator {
@@ -2886,14 +2920,140 @@ mod tests {
         target: SignInTarget<'static>,
         capabilities: SignInCapabilities,
     ) -> crate::error::Result<async_imap::Session<tokio::io::DuplexStream>> {
+        sign_in_with(
+            client,
+            target,
+            capabilities,
+            crate::models::LoginMethod::Automatic,
+        )
+        .await
+    }
+
+    async fn sign_in_with(
+        client: tokio::io::DuplexStream,
+        target: SignInTarget<'static>,
+        capabilities: SignInCapabilities,
+        method: crate::models::LoginMethod,
+    ) -> crate::error::Result<async_imap::Session<tokio::io::DuplexStream>> {
         super::sign_in_with_password(
             async_imap::Client::new(client),
             target,
             "jane@example.com",
             "pässwörd",
             capabilities,
+            method,
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn an_account_set_to_login_never_tries_plain() {
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            let tag = server.expect("LOGIN \"jane@example.com\"").await;
+            server.send(&format!("{tag} OK signed in")).await;
+        });
+        sign_in_with(
+            client,
+            target("login-only.example"),
+            PLAIN,
+            crate::models::LoginMethod::Login,
+        )
+        .await
+        .unwrap();
+        script.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_account_set_to_plain_tries_it_unannounced_and_never_falls_back() {
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            let tag = server.expect("AUTHENTICATE PLAIN").await;
+            server
+                .send(&format!("{tag} NO AUTHENTICATE mechanism not supported"))
+                .await;
+        });
+        let error = sign_in_with(
+            client,
+            target("plain-only.example"),
+            SignInCapabilities::default(),
+            crate::models::LoginMethod::Plain,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, CoreError::Auth(_)), "{error:?}");
+        script.await.unwrap();
+    }
+
+    /// Unencrypted, a password goes out only as the server offers, whatever
+    /// the account is set to.
+    #[tokio::test]
+    async fn a_chosen_method_sends_no_password_unannounced_without_encryption() {
+        let unencrypted = SignInTarget {
+            encrypted: false,
+            ..target("cleartext.example")
+        };
+        for (method, capabilities, expected) in [
+            (
+                crate::models::LoginMethod::Plain,
+                SignInCapabilities::default(),
+                "doesn't offer PLAIN sign-in without encryption",
+            ),
+            (
+                crate::models::LoginMethod::Plain,
+                SignInCapabilities {
+                    plain: false,
+                    login_disabled: true,
+                },
+                "accepts passwords only over an encrypted connection",
+            ),
+            (
+                crate::models::LoginMethod::Login,
+                SignInCapabilities {
+                    plain: true,
+                    login_disabled: true,
+                },
+                "doesn't offer LOGIN sign-in without encryption",
+            ),
+        ] {
+            let (client, mut server) = ScriptedServer::start();
+            let script = tokio::spawn(async move {
+                assert_eq!(server.next_line().await, None, "a password was sent");
+            });
+            let error = sign_in_with(client, unencrypted, capabilities, method)
+                .await
+                .err()
+                .unwrap();
+            assert!(error.to_string().contains(expected), "{method:?}: {error}");
+            script.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn an_account_set_to_login_says_when_the_server_refuses_it() {
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            assert_eq!(server.next_line().await, None, "a password was sent");
+        });
+        let error = sign_in_with(
+            client,
+            target("plain-only.example"),
+            SignInCapabilities {
+                plain: true,
+                login_disabled: true,
+            },
+            crate::models::LoginMethod::Login,
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("doesn't offer LOGIN sign-in. Choose another sign-in method."),
+            "{error}"
+        );
+        script.await.unwrap();
     }
 
     #[tokio::test]

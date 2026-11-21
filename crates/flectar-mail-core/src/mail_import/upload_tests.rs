@@ -309,6 +309,9 @@ async fn account(
                 smtp_security: ConnectionSecurity::Tls,
                 trusted_certificate_pem: CERT.into(),
                 proxy: Default::default(),
+                incoming_login: Default::default(),
+                smtp_login: Default::default(),
+                smtp_username: None,
             };
             let (provider, auth_kind) = match protocol {
                 MailProtocol::Gmail => (Provider::Gmail, AuthKind::Oauth2),

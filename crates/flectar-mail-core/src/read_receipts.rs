@@ -3,7 +3,6 @@
 //! action worker records the answer on the server where it keeps one
 //! ($MDNSent, RFC 3503) and sends the receipt this module builds.
 
-use crate::accounts::credentials::{self, Slot};
 use crate::db::repo;
 use crate::error::{CoreError, Result};
 use crate::mime::{ReadReceipt, build_read_receipt};
@@ -116,7 +115,7 @@ pub(crate) async fn send_by_smtp(
     receipt: &OutgoingReceipt,
 ) -> Result<()> {
     let recipients: Vec<String> = receipt.to.iter().map(|to| to.email.clone()).collect();
-    let mut auth = smtp_auth(ctx, config).await?;
+    let mut auth = smtp::account_auth(ctx, config).await?;
     for attempt in 0..2 {
         let result = match smtp::send_raw_from(config, &auth, None, &recipients, &receipt.raw).await
         {
@@ -141,21 +140,10 @@ pub(crate) async fn send_by_smtp(
             // fresh one can't deliver the receipt twice.
             Err(CoreError::Auth(_)) if attempt == 0 && config.auth_kind == AuthKind::Oauth2 => {
                 ctx.tokens.invalidate(config.id).await;
-                auth = smtp_auth(ctx, config).await?;
+                auth = smtp::account_auth(ctx, config).await?;
             }
             result => return result,
         }
     }
     unreachable!("the second attempt returns")
-}
-
-async fn smtp_auth(ctx: &SyncCtx, config: &AccountConfig) -> Result<smtp::SmtpAuth> {
-    Ok(match config.auth_kind {
-        AuthKind::Password => smtp::SmtpAuth::Password(
-            credentials::load_async(ctx.credentials.clone(), config.id, Slot::Password).await?,
-        ),
-        AuthKind::Oauth2 => {
-            smtp::SmtpAuth::XOAuth2(ctx.tokens.access_token(config.id, config.provider).await?)
-        }
-    })
 }

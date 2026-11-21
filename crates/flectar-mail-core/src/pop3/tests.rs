@@ -127,6 +127,7 @@ fn server_at(port: u16, security: ConnectionSecurity) -> Server<'static> {
         port,
         security,
         trusted_certificate_pem: CERT,
+        login: crate::models::LoginMethod::Automatic,
     }
 }
 
@@ -214,6 +215,76 @@ async fn short_sasl_plain_credentials_travel_with_the_command() {
     connect(port).await;
     task.await.unwrap();
     assert_eq!(received.lock().unwrap()[1], format!("AUTH PLAIN {encoded}"));
+}
+
+#[tokio::test]
+async fn an_account_set_to_a_login_method_signs_in_only_that_way() {
+    // USER and PASS, though the server offers PLAIN.
+    let (port, received, task) = server(false, signed_in(&["SASL PLAIN", "USER"])).await;
+    let login = Server {
+        login: crate::models::LoginMethod::Login,
+        ..server_at(port, ConnectionSecurity::None)
+    };
+    Session::connect(&login, "me", "pw").await.unwrap();
+    task.await.unwrap();
+    assert_eq!(received.lock().unwrap()[1], "USER me");
+
+    // PLAIN, though the server doesn't announce it, over TLS.
+    let encoded = base64::engine::general_purpose::STANDARD.encode("\0me\0pw");
+    let (port, received, task) = server(
+        true,
+        vec![
+            send("+OK ready\r\n"),
+            reply("CAPA", capa(&["USER"])),
+            reply("AUTH PLAIN ", "+OK\r\n"),
+            reply("CAPA", "-ERR\r\n"),
+        ],
+    )
+    .await;
+    let plain = Server {
+        login: crate::models::LoginMethod::Plain,
+        ..server_at(port, ConnectionSecurity::Tls)
+    };
+    Session::connect(&plain, "me", "pw").await.unwrap();
+    task.await.unwrap();
+    assert_eq!(received.lock().unwrap()[1], format!("AUTH PLAIN {encoded}"));
+}
+
+/// Unencrypted, a password goes out only as the server offers, whatever
+/// the account is set to.
+#[tokio::test]
+async fn a_chosen_method_sends_no_password_unannounced_without_encryption() {
+    for (login, capabilities, expected) in [
+        (
+            crate::models::LoginMethod::Plain,
+            vec!["USER"],
+            "doesn't offer this sign-in",
+        ),
+        (
+            crate::models::LoginMethod::Login,
+            vec!["SASL PLAIN"],
+            "doesn't offer this sign-in",
+        ),
+        (
+            crate::models::LoginMethod::Login,
+            vec!["STLS", "SASL"],
+            "accepts no password",
+        ),
+    ] {
+        let (port, received, task) = server(
+            false,
+            vec![send("+OK ready\r\n"), reply("CAPA", capa(&capabilities))],
+        )
+        .await;
+        let chosen = Server {
+            login,
+            ..server_at(port, ConnectionSecurity::None)
+        };
+        let error = Session::connect(&chosen, "me", "pw").await.err().unwrap();
+        assert!(error.to_string().contains(expected), "{login:?}: {error}");
+        task.await.unwrap();
+        assert_eq!(received.lock().unwrap().as_slice(), ["CAPA"]);
+    }
 }
 
 #[tokio::test]

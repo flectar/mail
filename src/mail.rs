@@ -4453,7 +4453,9 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
             && !message.is_outgoing
             && !message.in_spam
             && message.list_unsubscribe.as_deref().is_some_and(|header| {
-                flectar_mail_core::unsubscribe::plan(header, false).is_some()
+                // The core says when an account that only receives can't
+                // send the request.
+                flectar_mail_core::unsubscribe::plan(header, false, true).is_some()
             }),
         can_block: !message.is_draft && !message.is_outgoing && message.from.email.contains('@'),
         sender_blocked: message.sender_blocked,

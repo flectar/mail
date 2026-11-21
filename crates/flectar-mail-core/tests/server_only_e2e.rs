@@ -115,6 +115,7 @@ async fn older_unread_mail_is_counted_as_only_on_the_server() {
         .unwrap();
     let account_id = core
         .add_account_password(AddPasswordAccountArgs {
+            smtp_password: None,
             connection: MailConnectionSettings::new(
                 ConnectionSecurity::Tls,
                 ConnectionSecurity::Starttls,

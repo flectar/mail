@@ -72,13 +72,26 @@ async fn pop3_server(maildrop: Vec<(String, String)>) -> (u16, Arc<Mutex<Vec<Str
 /// An SMTP server that accepts every sign-in and message, handing each
 /// delivered message to the returned channel.
 async fn smtp_server() -> (u16, tokio::sync::mpsc::UnboundedReceiver<String>) {
+    let (port, delivered, _sign_ins) = recording_smtp_server().await;
+    (port, delivered)
+}
+
+/// `smtp_server`, also recording every AUTH command it receives.
+async fn recording_smtp_server() -> (
+    u16,
+    tokio::sync::mpsc::UnboundedReceiver<String>,
+    Arc<Mutex<Vec<String>>>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (delivered, received) = tokio::sync::mpsc::unbounded_channel();
+    let sign_ins = Arc::new(Mutex::new(Vec::new()));
+    let log = sign_ins.clone();
     tokio::spawn(async move {
         loop {
             let (tcp, _) = listener.accept().await.unwrap();
             let delivered = delivered.clone();
+            let log = log.clone();
             tokio::spawn(async move {
                 let mut stream = BufReader::new(tcp);
                 stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
@@ -90,7 +103,10 @@ async fn smtp_server() -> (u16, tokio::sync::mpsc::UnboundedReceiver<String>) {
                     let verb = line.split([' ', '\r']).next().unwrap_or_default();
                     let reply: &[u8] = match verb.to_ascii_uppercase().as_str() {
                         "EHLO" => b"250-localhost\r\n250 AUTH PLAIN\r\n",
-                        "AUTH" => b"235 Authenticated\r\n",
+                        "AUTH" => {
+                            log.lock().unwrap().push(line.trim_end().to_owned());
+                            b"235 Authenticated\r\n"
+                        }
                         "DATA" => {
                             stream.write_all(b"354 Continue\r\n").await.unwrap();
                             let mut message = String::new();
@@ -116,7 +132,7 @@ async fn smtp_server() -> (u16, tokio::sync::mpsc::UnboundedReceiver<String>) {
             });
         }
     });
-    (port, received)
+    (port, received, sign_ins)
 }
 
 fn incoming(id: &str, subject: &str) -> (String, String) {
@@ -142,6 +158,7 @@ fn pop3_args(pop3_port: u16, smtp_port: u16) -> AddPasswordAccountArgs {
         incoming_port: pop3_port,
         smtp_host: "127.0.0.1".into(),
         smtp_port,
+        smtp_password: None,
         connection: MailConnectionSettings::new(ConnectionSecurity::None, ConnectionSecurity::None),
     }
 }
@@ -423,6 +440,148 @@ async fn a_pop3_account_downloads_files_and_sends_mail_on_this_device() {
         core.account_network(account.id).await.unwrap().proxy,
         flectar_mail_core::net::proxy::AccountProxy::Direct
     );
+}
+
+/// Queue a message from `account_id` and wait until it went out.
+async fn send(core: &Core, account_id: i64, subject: &str) -> flectar_mail_core::error::Result<()> {
+    let draft_id = core
+        .save_draft(SaveDraftArgs {
+            draft_id: None,
+            account_id,
+            from: None,
+            to: vec![Address {
+                name: None,
+                email: "friend@example.com".into(),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: subject.into(),
+            body_text: "Hello.".into(),
+            body_html: None,
+            mode: "new".into(),
+            in_reply_to_message_id: None,
+            in_reply_to_header: None,
+            attachments: Vec::new(),
+            request_read_receipt: false,
+            importance: Default::default(),
+        })
+        .await?;
+    let queued = core
+        .queue_send(QueueSendArgs {
+            draft_id,
+            send_at: Some(now_ms()),
+            remind_at: None,
+        })
+        .await?;
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        core.wait_for_send(queued.action_id),
+    )
+    .await
+    .expect("the send finishes")
+}
+
+fn auth_plain(user: &str, password: &str) -> String {
+    use base64::Engine;
+    format!(
+        "AUTH PLAIN {}",
+        base64::engine::general_purpose::STANDARD.encode(format!("\0{user}\0{password}"))
+    )
+}
+
+/// An SMTP server can sign in with its own username and password, kept
+/// through edits that don't repeat the password, or take mail with no
+/// sign-in, and an account without one only receives mail (#252).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_smtp_server_signs_in_on_its_own_or_not_at_all() {
+    let (pop3_port, _) = pop3_server(Vec::new()).await;
+    let (smtp_port, mut delivered, sign_ins) = recording_smtp_server().await;
+    let temp = tempfile::tempdir().unwrap();
+    let credentials = Arc::new(DevelopmentFileCredentialStore::new(
+        temp.path().join("credentials.json"),
+    ));
+    let core = Core::start_mail_ui_with_credentials(Paths::for_tests(temp.path()), credentials)
+        .await
+        .unwrap();
+    let last_sign_in = || sign_ins.lock().unwrap().last().cloned().unwrap_or_default();
+    let relay = auth_plain("relay-user", "relay-pass");
+
+    let mut args = pop3_args(pop3_port, smtp_port);
+    args.connection.smtp_username = Some(" relay-user ".into());
+    args.smtp_password = Some("relay-pass".into());
+    let account = core.add_account_password(args.clone()).await.unwrap();
+    // The setup check signed in as the relay user.
+    assert_eq!(
+        sign_ins.lock().unwrap().as_slice(),
+        std::slice::from_ref(&relay)
+    );
+    send(&core, account.id, "Through the relay").await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), delivered.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .contains("Subject: Through the relay")
+    );
+    assert_eq!(last_sign_in(), relay);
+
+    // An edit without the SMTP password keeps the one saved.
+    args.smtp_password = None;
+    core.add_account_password(args.clone()).await.unwrap();
+    assert_eq!(last_sign_in(), relay);
+
+    // Without its own username the SMTP server takes the account's sign-in,
+    // and its own password is forgotten.
+    args.connection.smtp_username = None;
+    core.add_account_password(args.clone()).await.unwrap();
+    assert_eq!(last_sign_in(), auth_plain("me", "secret"));
+    args.connection.smtp_username = Some("relay-user".into());
+    core.add_account_password(args.clone()).await.unwrap();
+    assert_eq!(last_sign_in(), auth_plain("relay-user", "secret"));
+
+    // A server that takes mail without a sign-in gets none, and the SMTP
+    // login of its own goes.
+    args.connection.smtp_login = LoginMethod::None;
+    core.add_account_password(args.clone()).await.unwrap();
+    let config = core
+        .list_account_configs()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|config| config.id == account.id)
+        .unwrap();
+    assert_eq!(config.settings.connection.smtp_username, None);
+    let signed_in = sign_ins.lock().unwrap().len();
+    send(&core, account.id, "No sign-in").await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), delivered.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .contains("Subject: No sign-in")
+    );
+    assert_eq!(sign_ins.lock().unwrap().len(), signed_in);
+
+    // Without an SMTP server the account only receives mail.
+    args.smtp_host = String::new();
+    core.add_account_password(args.clone()).await.unwrap();
+    let config = core
+        .list_account_configs()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|config| config.id == account.id)
+        .unwrap();
+    assert!(!config.sends_mail());
+    assert_eq!(config.smtp_port, 0);
+    assert_eq!(config.settings.connection.smtp_username, None);
+    assert_eq!(
+        config.settings.connection.smtp_login,
+        LoginMethod::Automatic
+    );
+    let error = send(&core, account.id, "Nowhere to go").await.unwrap_err();
+    assert!(error.to_string().contains("only receives mail"), "{error}");
+    assert_eq!(sign_ins.lock().unwrap().len(), signed_in);
 }
 
 #[tokio::test(flavor = "multi_thread")]

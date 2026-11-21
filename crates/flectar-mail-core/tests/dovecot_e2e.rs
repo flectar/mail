@@ -200,6 +200,7 @@ async fn full_sync_triage_and_search() {
     // 1. Add the account (verifies IMAP login on the way in).
     let account = core
         .add_account_password(AddPasswordAccountArgs {
+            smtp_password: None,
             connection: flectar_mail_core::models::MailConnectionSettings::new(
                 flectar_mail_core::models::ConnectionSecurity::Tls,
                 flectar_mail_core::models::ConnectionSecurity::Starttls,
@@ -648,6 +649,7 @@ async fn a_folder_deleted_on_the_server_goes_away_and_the_account_stays_online()
     core.notify_ui_ready();
     let account = core
         .add_account_password(AddPasswordAccountArgs {
+            smtp_password: None,
             connection: MailConnectionSettings::new(
                 ConnectionSecurity::Tls,
                 ConnectionSecurity::Starttls,

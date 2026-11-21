@@ -4,7 +4,6 @@
 //! that exists only on this device, the queued change is already the result,
 //! and only deletions have work left to finish.
 
-use crate::accounts::credentials::{self, Slot};
 use crate::db::repo;
 use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
@@ -803,6 +802,15 @@ async fn send_read_receipt(
     let Some(message_id) = action.message_id else {
         return Ok(());
     };
+    // An account that stopped sending after the answer sends no receipt.
+    if !config.sends_mail() {
+        tracing::info!(
+            account_id = config.id,
+            message_id,
+            "read receipt not sent: the account only receives mail"
+        );
+        return Ok(());
+    }
     let user_agreed = action.payload["userAgreed"].as_bool().unwrap_or(false);
     match crate::read_receipts::prepare(ctx, config.id, message_id, user_agreed).await? {
         Some(receipt) => crate::read_receipts::send_by_smtp(ctx, config, &receipt).await,
@@ -1378,6 +1386,13 @@ async fn send_action(
     let Some(draft_id) = action.payload["draftId"].as_i64() else {
         return Err(CoreError::Other("send action without draftId".into()));
     };
+    // A send queued before the account stopped sending fails for good.
+    if !config.sends_mail() {
+        return Err(CoreError::NotFound(format!(
+            "an SMTP server for {}",
+            config.email
+        )));
+    }
     tracing::info!(account_id = config.id, draft_id, "smtp send: starting");
     let account_id = config.id;
     // Another device's message, kept here as a draft: it goes out as that
@@ -1430,14 +1445,7 @@ async fn send_action(
         "smtp send: message built",
     );
 
-    let auth = match config.auth_kind {
-        AuthKind::Password => smtp::SmtpAuth::Password(
-            credentials::load_async(ctx.credentials.clone(), config.id, Slot::Password).await?,
-        ),
-        AuthKind::Oauth2 => {
-            smtp::SmtpAuth::XOAuth2(ctx.tokens.access_token(config.id, config.provider).await?)
-        }
-    };
+    let auth = smtp::account_auth(ctx, config).await?;
 
     if recipients.is_empty() {
         return Err(CoreError::Smtp("no recipients".into()));
