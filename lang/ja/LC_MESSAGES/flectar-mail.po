@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-13 10:24+0000\n"
+"PO-Revision-Date: 2026-11-17 12:53+0000\n"
 "Last-Translator: miyaji255 <miyaji255@users.noreply.translate.flectar.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
@@ -432,13 +432,10 @@ msgid_plural "{n} new messages"
 msgstr[0] "{n} 件の新しいメール"
 
 #: ui/app.slint:247
-#, fuzzy
-#| msgctxt "date and time"
-#| msgid "{0} at {1}"
 msgctxt "the first senders of new mail, then how many others"
 msgid "{0} and {n} more"
 msgid_plural "{0} and {n} more"
-msgstr[0] "{0} {1}"
+msgstr[0] "{0}と他{n}人"
 
 #: ui/app.slint:250
 msgid "Open"
@@ -554,33 +551,25 @@ msgid ""
 msgstr ""
 
 #: ui/app.slint:312
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Could not save the rule: {}"
-msgstr "前後のメールに移動"
+msgstr "ルールを保存できませんでした：{}"
 
 #: ui/app.slint:313
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Could not delete the rule: {}"
-msgstr "前後のメールに移動"
+msgstr "ルールを削除できませんでした：{}"
 
 #: ui/app.slint:314
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Could not run the rule: {}"
-msgstr "前後のメールに移動"
+msgstr "ルールを実行できませんでした：{}"
 
 #: ui/app.slint:315
 msgid "This rule matches no mail in the Inbox now."
 msgstr ""
 
 #: ui/app.slint:316
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Rule applied to one message."
 msgid_plural "Rule applied to {0} messages."
-msgstr[0] "前後のメールに移動"
+msgstr[0] "{0}件のメールにルールを適用しました。"
 
 #: ui/app.slint:317
 #, fuzzy
