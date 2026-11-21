@@ -277,6 +277,66 @@ fn platform_dictates_window_size() -> bool {
     cfg!(ios_and_friends)
 }
 
+/// The inner size and outer position that keep a window inside the work area of its monitor,
+/// or `None` when it already fits.
+///
+/// Windows cascades a new window off the top left of a monitor without checking that it fits,
+/// so a window whose size suits a larger screen opens partly beyond the screen edge or behind
+/// the taskbar. Microsoft's guidance for window placement is to move such a window until all
+/// of it is visible on its monitor, and to reduce a resizable window that is larger than the
+/// monitor until it fits.
+/// <https://learn.microsoft.com/en-us/windows/win32/uxguide/win-window-mgt#window-location>
+///
+/// With `only_if_lost`, a window that is on a monitor at all keeps its place. A window shown
+/// again was placed by the user, who may let it span monitors.
+#[cfg(target_os = "windows")]
+fn fit_into_work_area(
+    winit_window: &winit::window::Window,
+    only_if_lost: bool,
+) -> Option<(winit::dpi::PhysicalSize<u32>, winit::dpi::PhysicalPosition<i32>)> {
+    use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL, MONITORINFO,
+        MonitorFromWindow,
+    };
+
+    let RawWindowHandle::Win32(handle) = winit_window.window_handle().ok()?.as_raw() else {
+        return None;
+    };
+    let hwnd = HWND(handle.hwnd.get() as *mut _);
+    // SAFETY: `hwnd` is the live window handle that winit owns.
+    if only_if_lost && !unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL) }.is_invalid() {
+        return None;
+    }
+    let mut monitor =
+        MONITORINFO { cbSize: core::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+    // SAFETY: the monitor handle comes from the system, and `monitor` is a MONITORINFO whose
+    // `cbSize` is set as GetMonitorInfoW requires.
+    if !unsafe { GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor) }
+        .as_bool()
+    {
+        return None;
+    }
+    let work = monitor.rcWork;
+    let outer = winit_window.outer_size();
+    let inner = winit_window.inner_size();
+    let origin = winit_window.outer_position().ok()?;
+    let width = outer.width.min(work.right.saturating_sub(work.left).max(0) as u32);
+    let height = outer.height.min(work.bottom.saturating_sub(work.top).max(0) as u32);
+    let x = origin.x.min(work.right - width as i32).max(work.left);
+    let y = origin.y.min(work.bottom - height as i32).max(work.top);
+    if (width, height, x, y) == (outer.width, outer.height, origin.x, origin.y) {
+        return None;
+    }
+    // The frame keeps its size, so the client area shrinks by what the window loses.
+    let inner = winit::dpi::PhysicalSize::new(
+        inner.width.saturating_sub(outer.width - width),
+        inner.height.saturating_sub(outer.height - height),
+    );
+    Some((inner, winit::dpi::PhysicalPosition::new(x, y)))
+}
+
 fn apply_scale_factor_to_logical_sizes_in_attributes(
     attributes: &mut WindowAttributes,
     scale_factor: f64,
@@ -1916,6 +1976,17 @@ impl WinitWindowAdapter {
                 let size = preferred_size.to_physical::<u32>(scale_factor);
                 self.resize_window(size.into())?;
             };
+
+            // Before the first frame, so that it is drawn at the size the window gets.
+            #[cfg(target_os = "windows")]
+            if !platform_dictates_window_size()
+                && winit_window.fullscreen().is_none()
+                && !winit_window.is_maximized()
+                && let Some((size, position)) = fit_into_work_area(&winit_window, recreating_window)
+            {
+                winit_window.set_outer_position(position);
+                self.resize_window(size.into())?;
+            }
 
             // Pre-render the first frame before mapping the window to avoid a flash of
             // uninitialized VRAM on X11 (no background_pixmap). Skipped on Wayland, where
