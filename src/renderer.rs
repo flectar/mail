@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod appearance_tests;
 mod cpu_scene;
+mod details;
+#[cfg(test)]
+mod details_tests;
 mod interaction;
 #[cfg(test)]
 mod regression;
@@ -16,6 +19,8 @@ use blitz_paint::paint_scene;
 use blitz_paint::{PaintCache, paint_scene_cached};
 use blitz_traits::net::NetWaker;
 use blitz_traits::{SmolStr, net::NetProvider, node_id::NodeId, shell::Viewport};
+use details::FindMatch;
+pub(crate) use details::set_default_summary;
 use keyboard_types::{Key, NamedKey};
 use parley::layout::PositionedLayoutItem;
 use semantics::*;
@@ -46,6 +51,8 @@ const EMAIL_SURFACE_BOTTOM_PAD: f32 = 12.0;
 const EMAIL_TILE_HEIGHT: f32 = 512.0;
 const EMAIL_TILE_OVERSCAN: u32 = 1;
 const MAX_EMAIL_SURFACE_HEIGHT: f32 = 100_000.0;
+const LIMITED_SURFACE: &str =
+    "Large message surface limited. Reader or plain text view contains the complete text.";
 const MIN_EMAIL_ZOOM: f32 = 0.5;
 // Building a Vello scene for highly fragmented email markup can exhaust or
 // reset some graphics drivers before wgpu can return a recoverable error.
@@ -196,11 +203,13 @@ pub struct GpuEmailRenderer {
     resource_priorities: crate::remote::ResourcePriorities,
     image_priority_window: Option<(usize, u64, u32, u32)>,
     pub(crate) press_link: Option<(f32, f32, String)>,
+    /// Where a press on a section's summary began, and that section.
+    pub(crate) press_section: Option<(f32, f32, NodeId)>,
     pub(crate) activation: Option<String>,
     pub(crate) selection_anchor: Option<(NodeId, usize)>,
     pub(crate) selection_focus: Option<(NodeId, usize)>,
     pub(crate) click_count: u8,
-    pub(crate) find_matches: Vec<(NodeId, usize, usize)>,
+    pub(crate) find_matches: Vec<FindMatch>,
     pub(crate) find_index: usize,
     pub(crate) find_query: String,
     pub(crate) find_revision: u64,
@@ -261,6 +270,7 @@ impl Default for GpuEmailRenderer {
             resource_priorities: Arc::default(),
             image_priority_window: None,
             press_link: None,
+            press_section: None,
             activation: None,
             selection_anchor: None,
             selection_focus: None,
@@ -446,7 +456,7 @@ impl GpuEmailRenderer {
         if self.content_height >= MAX_EMAIL_SURFACE_HEIGHT
             || self.layout_width / self.zoom >= 4096.0
         {
-            self.notice = Some("Large message surface limited. Reader or plain text view contains the complete text.".into());
+            self.notice = Some(LIMITED_SURFACE.into());
         }
         self.email = Some(email);
         self.layout_count += 1;
@@ -466,10 +476,32 @@ impl GpuEmailRenderer {
         self.tiles.clear();
         self.pointer_down = false;
         self.press_link = None;
+        self.press_section = None;
         self.activation = None;
         self.click_count = 0;
         self.last_pointer_down = None;
         self.update_image_priorities();
+    }
+
+    /// Lay the message out now, at the size it was last drawn at, after the
+    /// reader changed its content. Returns false before it was first laid out.
+    fn relayout_now(&mut self) -> bool {
+        let (Some(size), Some(email)) = (self.last_size, self.email.as_mut()) else {
+            self.dirty = true;
+            return false;
+        };
+        let layout = lay_out_email(email, size, self.zoom);
+        self.layout_count += 1;
+        self.metadata_revision += 1;
+        self.content_height = layout.content_height;
+        self.layout_width = layout.width;
+        if layout.limited {
+            self.notice = Some(LIMITED_SURFACE.into());
+        }
+        self.tiles.clear();
+        self.dirty = false;
+        self.region_dirty = true;
+        true
     }
 
     /// Change presentation without reparsing the message or refetching images.
@@ -538,6 +570,7 @@ impl GpuEmailRenderer {
         self.tiles.clear();
         self.pointer_down = false;
         self.press_link = None;
+        self.press_section = None;
         self.activation = None;
         self.click_count = 0;
         self.last_pointer_down = None;
@@ -997,25 +1030,13 @@ impl GpuEmailRenderer {
         }
         if needs_layout {
             let start = render_timings_enabled().then(Instant::now);
+            let layout = lay_out_email(email, size, self.zoom);
             self.layout_count += 1;
             self.metadata_revision += 1;
-            email.document.set_viewport(Viewport::new(
-                physical_width,
-                physical_height,
-                scale_factor,
-                email.appearance.colors.scheme(),
-            ));
-            email.appearance.resolve(&mut email.document);
-            email.paint_cache.clear();
-            email.links = collect_email_links(&email.document, logical_width.max(1) as f32);
-            email.plain_text = collect_plain_text(&email.document);
-            self.content_height = content_surface_height(&email.document);
-            self.layout_width =
-                content_surface_width(&email.document, logical_width as f32) * self.zoom;
-            if self.content_height >= MAX_EMAIL_SURFACE_HEIGHT
-                || self.layout_width / self.zoom >= 4096.0
-            {
-                self.notice = Some("Large message surface limited. Reader or plain text view contains the complete text.".into());
+            self.content_height = layout.content_height;
+            self.layout_width = layout.width;
+            if layout.limited {
+                self.notice = Some(LIMITED_SURFACE.into());
             }
             self.tiles.clear();
             if let Some(start) = start {
@@ -1187,24 +1208,13 @@ impl GpuEmailRenderer {
             );
         }
         if needs_layout {
+            let layout = lay_out_email(email, size, self.zoom);
             self.layout_count += 1;
             self.metadata_revision += 1;
-            email.document.set_viewport(Viewport::new(
-                physical_width,
-                physical_height,
-                scale_factor,
-                email.appearance.colors.scheme(),
-            ));
-            email.appearance.resolve(&mut email.document);
-            email.paint_cache.clear();
-            email.links = collect_email_links(&email.document, logical_width);
-            email.plain_text = collect_plain_text(&email.document);
-            self.content_height = content_surface_height(&email.document);
-            self.layout_width = content_surface_width(&email.document, logical_width) * self.zoom;
-            if self.content_height >= MAX_EMAIL_SURFACE_HEIGHT
-                || self.layout_width / self.zoom >= 4096.0
-            {
-                self.notice = Some("Large message surface limited. Reader or plain text view contains the complete text.".into());
+            self.content_height = layout.content_height;
+            self.layout_width = layout.width;
+            if layout.limited {
+                self.notice = Some(LIMITED_SURFACE.into());
             }
             self.tiles.clear();
         }
@@ -1647,6 +1657,38 @@ fn desired_tile_range(
 /// extent; that extent determines the scroll range and tile count. Remote
 /// resources invalidate the layout and recalculate this bound when their
 /// intrinsic dimensions arrive.
+/// What laying a message out again tells the renderer.
+struct LaidOut {
+    content_height: f32,
+    width: f32,
+    /// The message is larger than its surface may be.
+    limited: bool,
+}
+
+/// Lay a message out again at `size`, the renderer's `last_size`, after the
+/// viewport, the appearance or the message's own content changed.
+fn lay_out_email(email: &mut PreparedEmail, size: (u32, u32, u32, u32, u32), zoom: f32) -> LaidOut {
+    let (physical_width, physical_height, scale_factor, logical_width, _) = size;
+    let logical_width = f32::from_bits(logical_width);
+    email.document.set_viewport(Viewport::new(
+        physical_width,
+        physical_height,
+        f32::from_bits(scale_factor),
+        email.appearance.colors.scheme(),
+    ));
+    email.appearance.resolve(&mut email.document);
+    email.paint_cache.clear();
+    email.links = collect_email_links(&email.document, logical_width.max(1.0));
+    email.plain_text = collect_plain_text(&email.document);
+    let content_height = content_surface_height(&email.document);
+    let width = content_surface_width(&email.document, logical_width) * zoom;
+    LaidOut {
+        content_height,
+        width,
+        limited: content_height >= MAX_EMAIL_SURFACE_HEIGHT || width / zoom >= 4096.0,
+    }
+}
+
 fn content_surface_width(document: &HtmlDocument, viewport: f32) -> f32 {
     let mut width = viewport;
     document.visit(|_, node| {
@@ -2014,6 +2056,7 @@ fn prepare_email_html_at_with_font_ctx(
             stack.extend(node.children.iter().map(|id| (*id, depth + 1)));
         }
     }
+    details::prepare(&mut document);
     let mut appearance = AppearanceDocument::new(appearance);
     appearance.resolve(&mut document);
     let links = collect_email_links(&document, width as f32 / scale);

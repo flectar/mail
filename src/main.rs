@@ -1271,6 +1271,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
         eprintln!("could not select {selected} translation: {error}");
     }
     sidebar_model::reload_mailbox_names(app);
+    renderer::set_default_summary(&app.global::<I18n>().invoke_details_summary());
     app.set_language_mode(language_mode.into());
     app.set_privacy_policy_url(privacy_policy_url(selected).into());
     app.invoke_app_language_changed(language_mode.into(), selected.into());
