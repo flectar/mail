@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Run only in a disposable container of a supported RPM distribution (Fedora,
 # openSUSE or an Enterprise Linux rebuild): installs packages and a test user.
-# Usage: bash scripts/test-rpm.sh /absolute/path/package.rpm /results
+# Installs Flectar Mail from the signed repository scripts/build-rpm-repo.sh
+# builds, through its published .repo file pointed at the local copy, with
+# package and metadata signature checks on.
+# Usage: bash scripts/test-rpm.sh /absolute/path/rpm-repo /results
 set -euo pipefail
 
 # shellcheck disable=SC1091
@@ -17,7 +20,7 @@ esac
 # Weak dependencies stay off so they cannot hide missing requirements.
 install_packages() {
   if [[ "$family" == suse ]]; then
-    zypper --non-interactive install --no-recommends --allow-unsigned-rpm "$@"
+    zypper --non-interactive install --no-recommends "$@"
   else
     dnf install -y --setopt=install_weak_deps=False "$@"
   fi
@@ -32,20 +35,42 @@ remove_packages() {
 printf 'Testing on %s\n' "${PRETTY_NAME:-$ID}"
 
 project_dir="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
-package="$(realpath "${1:?RPM path is required}")"
+repo="$(realpath "${1:?Repository directory is required}")"
 results="$(realpath "${2:?Results directory is required}")"
 mkdir -p "$results"
 if rpm -q flectar-mail; then
   printf 'Expected a clean container without Flectar Mail installed.\n' >&2
   exit 1
 fi
+package=$(find "$repo" -maxdepth 1 -name "flectar-mail-*.$(uname -m).rpm" -print -quit)
+test -n "$package"
 
 rpm -qip "$package"
 rpm -qp --requires "$package" | tee "$results/requires.txt"
+# The published .repo file, served from the local copy instead.
+sed -e "s|^baseurl=.*|baseurl=file://$repo|" \
+  -e "s|^gpgkey=.*|gpgkey=file://$repo/RPM-GPG-KEY-flectar-mail|" \
+  "$repo/flectar-mail.repo" >"$results/flectar-mail.repo"
+grep -qx 'gpgcheck=1' "$results/flectar-mail.repo"
+grep -qx 'repo_gpgcheck=1' "$results/flectar-mail.repo"
+if [[ "$family" == suse ]]; then
+  cp "$results/flectar-mail.repo" /etc/zypp/repos.d/flectar-mail.repo
+  zypper --non-interactive --gpg-auto-import-keys refresh flectar-mail
+else
+  cp "$results/flectar-mail.repo" /etc/yum.repos.d/flectar-mail.repo
+fi
 # Resolve dependencies before adding any test tools. Build packages and weak
 # dependencies must not hide missing runtime requirements.
-install_packages "$package"
+install_packages flectar-mail
 rpm -V flectar-mail
+# Installed through signature checks, by the repository's key.
+# rpmsign signs the header alone on current rpm, the whole package on older.
+rpm -q --queryformat '%|RSAHEADER?{%{RSAHEADER:pgpsig}}:{%|SIGPGP?{%{SIGPGP:pgpsig}}:{(none)}|}|\n' \
+  flectar-mail | tee "$results/signature.txt"
+if grep -q '(none)' "$results/signature.txt"; then
+  printf 'Installed an unsigned package.\n' >&2
+  exit 1
+fi
 test -x /usr/bin/flectar-mail
 test -f /usr/lib64/flectar-mail/libpdfium.so
 rpm -qa | sort > "$results/installed-packages.txt"
@@ -124,6 +149,11 @@ runuser -u flectar-rpm-test -- env -u DISPLAY \
   dbus-run-session -- "${startup[@]}" --output "$results/wayland.json"
 
 remove_packages flectar-mail
+if [[ "$family" == suse ]]; then
+  rm /etc/zypp/repos.d/flectar-mail.repo
+else
+  rm /etc/yum.repos.d/flectar-mail.repo
+fi
 if rpm -q flectar-mail; then exit 1; fi
 test ! -e /usr/bin/flectar-mail
 test ! -e /usr/lib64/flectar-mail
