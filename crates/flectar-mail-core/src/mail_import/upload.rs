@@ -130,16 +130,19 @@ impl crate::Core {
             // Folders are made over connections of their own, so this one
             // ends first: some servers allow few at a time.
             Remote::Imap { .. } => {
-                let mut session = sync::engine::connect(&self.sync_ctx(), &config).await?;
-                let listed = sync::engine::discover_folders(
-                    &self.sync_ctx(),
-                    &config,
-                    &mut session,
-                    config.settings.subscribed_folders_only,
-                )
-                .await;
-                imap::logout(session).await;
-                listed?;
+                crate::net::timeouts::scope(config.settings.connection.server_timeout(), async {
+                    let mut session = sync::engine::connect(&self.sync_ctx(), &config).await?;
+                    let listed = sync::engine::discover_folders(
+                        &self.sync_ctx(),
+                        &config,
+                        &mut session,
+                        config.settings.subscribed_folders_only,
+                    )
+                    .await;
+                    imap::logout(session).await;
+                    listed
+                })
+                .await?;
             }
             Remote::Jmap { client } => {
                 let client = self.jmap_client(&config, client).await?;
@@ -562,6 +565,28 @@ impl crate::Core {
 
     #[allow(clippy::too_many_arguments)]
     async fn imap_upload(
+        &self,
+        config: &AccountConfig,
+        session: &mut Option<imap::Session>,
+        selected: &mut Option<i64>,
+        first_uids: &mut HashMap<i64, i64>,
+        message: &Incoming,
+        target: &Target,
+        message_id: Option<&str>,
+        options: imap::AppendOptions,
+    ) -> Result<Outcome> {
+        // As long as the account's server timeout says (#252).
+        crate::net::timeouts::scope(
+            config.settings.connection.server_timeout(),
+            self.imap_upload_steps(
+                config, session, selected, first_uids, message, target, message_id, options,
+            ),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn imap_upload_steps(
         &self,
         config: &AccountConfig,
         session: &mut Option<imap::Session>,

@@ -35,12 +35,21 @@ const LONGEST_WAIT_MS: i64 = 30 * 60_000;
 #[derive(Default)]
 struct Run {
     uploads: Uploads,
-    /// IMAP sessions fetching from source accounts, with the folder they
-    /// have selected and whether its UIDs are those this app knows.
-    imap: HashMap<i64, (imap::Session, Option<(i64, bool)>)>,
+    /// IMAP sessions fetching from source accounts.
+    imap: HashMap<i64, ImapSource>,
     jmap: HashMap<i64, jmap::client::ConnectedClient>,
     gmail: HashMap<i64, sync::gmail::Uploader>,
     report: TransferReport,
+}
+
+/// An IMAP session fetching from a source account.
+struct ImapSource {
+    session: imap::Session,
+    /// The folder it has selected, and whether its UIDs are those this app
+    /// knows.
+    selected: Option<(i64, bool)>,
+    /// The account's server timeout (#252).
+    timeout: std::time::Duration,
 }
 
 /// What a stage leads to.
@@ -252,8 +261,8 @@ impl crate::Core {
             report,
             ..
         } = run;
-        for (session, _) in imap.into_values() {
-            imap::logout(session).await;
+        for source in imap.into_values() {
+            imap::logout(source.session).await;
         }
         if let Err(error) = self.finish_uploads(uploads).await {
             tracing::warn!(%error, "finishing the uploads of mail transfers failed");
@@ -287,8 +296,8 @@ impl crate::Core {
                 self.forwarded_original(&mut run, message_id).await,
             ));
         }
-        for (session, _) in run.imap.into_values() {
-            imap::logout(session).await;
+        for source in run.imap.into_values() {
+            imap::logout(source.session).await;
         }
         originals
     }
@@ -380,37 +389,49 @@ impl crate::Core {
             .read(move |conn| repo::folders::get(conn, folder_id))
             .await?
             .ok_or_else(|| CoreError::NotFound("the message's folder".into()))?;
-        let (session, selected) = match run.imap.entry(source.account_id) {
+        let ImapSource {
+            session,
+            selected,
+            timeout,
+        } = match run.imap.entry(source.account_id) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => {
                 let config = self.folder_account_config(source.account_id).await?;
                 let session = sync::engine::connect(&self.sync_ctx(), &config).await?;
-                entry.insert((session, None))
+                entry.insert(ImapSource {
+                    session,
+                    selected: None,
+                    timeout: config.settings.connection.server_timeout(),
+                })
             }
         };
-        let current = match *selected {
-            Some((selected_id, current)) if selected_id == folder_id => current,
-            _ => {
-                let mailbox = imap::select(session, &folder.path).await?;
-                let current =
-                    folder.uidvalidity.is_some() && folder.uidvalidity == mailbox.uid_validity;
-                *selected = Some((folder_id, current));
-                current
-            }
-        };
-        let uid = match source
-            .uid
-            .filter(|_| current)
-            .and_then(|uid| u32::try_from(uid).ok())
-            .filter(|uid| *uid > 0)
-        {
-            Some(uid) => Some(uid),
-            None => queue::uid_by_message_id(session, source.message_id.as_deref()).await?,
-        };
-        let uid = uid.ok_or_else(|| CoreError::NotFound("the message on the server".into()))?;
-        imap::fetch_full(session, uid)
-            .await?
-            .ok_or_else(|| CoreError::NotFound("the message on the server".into()))
+        // As long as the source account's server timeout says (#252).
+        crate::net::timeouts::scope(*timeout, async {
+            let current = match *selected {
+                Some((selected_id, current)) if selected_id == folder_id => current,
+                _ => {
+                    let mailbox = imap::select(session, &folder.path).await?;
+                    let current =
+                        folder.uidvalidity.is_some() && folder.uidvalidity == mailbox.uid_validity;
+                    *selected = Some((folder_id, current));
+                    current
+                }
+            };
+            let uid = match source
+                .uid
+                .filter(|_| current)
+                .and_then(|uid| u32::try_from(uid).ok())
+                .filter(|uid| *uid > 0)
+            {
+                Some(uid) => Some(uid),
+                None => queue::uid_by_message_id(session, source.message_id.as_deref()).await?,
+            };
+            let uid = uid.ok_or_else(|| CoreError::NotFound("the message on the server".into()))?;
+            imap::fetch_full(session, uid)
+                .await?
+                .ok_or_else(|| CoreError::NotFound("the message on the server".into()))
+        })
+        .await
     }
 
     async fn fetch_from_jmap(&self, run: &mut Run, source: &Source) -> Result<Vec<u8>> {

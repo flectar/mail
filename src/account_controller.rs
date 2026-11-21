@@ -440,6 +440,13 @@ pub(super) fn apply_connected_accounts(
                 subscribed_folders_only: config.settings.subscribed_folders_only,
                 check_interval: check_interval_choice(config.settings.check_interval).into(),
                 push: config.settings.push,
+                server_timeout: config
+                    .settings
+                    .connection
+                    .server_timeout()
+                    .as_secs()
+                    .to_string()
+                    .into(),
                 server_keeps_mail_days: account
                     .server_keeps_mail_days
                     .and_then(|days| i32::try_from(days).ok())

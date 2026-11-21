@@ -312,6 +312,7 @@ async fn account(
                 incoming_login: Default::default(),
                 smtp_login: Default::default(),
                 smtp_username: None,
+                server_timeout_secs: None,
             };
             let (provider, auth_kind) = match protocol {
                 MailProtocol::Gmail => (Provider::Gmail, AuthKind::Oauth2),

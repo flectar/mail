@@ -1120,6 +1120,7 @@ export component AppWindow inherits Window {
     callback save_account_subscribed_folders_only(int, bool);
     callback save_account_check_interval(int, string);
     callback save_account_push(int, bool);
+    callback save_account_server_timeout(int, int);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -2547,6 +2548,7 @@ export component AppWindow inherits Window {
             save_account_subscribed_folders_only(account-id, enabled) => { root.save_account_subscribed_folders_only(account-id, enabled); }
             save_account_check_interval(account-id, value) => { root.save_account_check_interval(account-id, value); }
             save_account_push(account-id, enabled) => { root.save_account_push(account-id, enabled); }
+            save_account_server_timeout(account-id, seconds) => { root.save_account_server_timeout(account-id, seconds); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
             connect_caldav(account-id, connection-id, url, username, password) => { root.connect_caldav(account-id, connection-id, url, username, password); }
             set_calendar_connection_enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }

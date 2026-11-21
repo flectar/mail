@@ -287,6 +287,10 @@ pub struct MailConnectionSettings {
     /// password is saved apart, or is the account's when none is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub smtp_username: Option<String>,
+    /// How long to wait for the account's servers, in seconds, when it isn't
+    /// the standard [`crate::net::timeouts::STANDARD`] (#252).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_timeout_secs: Option<u32>,
 }
 
 impl MailConnectionSettings {
@@ -299,7 +303,16 @@ impl MailConnectionSettings {
             incoming_login: LoginMethod::Automatic,
             smtp_login: LoginMethod::Automatic,
             smtp_username: None,
+            server_timeout_secs: None,
         }
+    }
+
+    /// How long to wait for the account's servers before giving up (#252).
+    pub fn server_timeout(&self) -> std::time::Duration {
+        self.server_timeout_secs
+            .map_or(crate::net::timeouts::STANDARD, |seconds| {
+                std::time::Duration::from_secs(u64::from(seconds))
+            })
     }
 }
 
