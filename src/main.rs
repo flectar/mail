@@ -4270,6 +4270,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             app.set_render_status(message.clone());
             app.set_sync_status(message);
         }
+        if pending.send_uncertain
+            && let Some(app) = mail_update_app.upgrade()
+        {
+            let message = UiMessage::plain(
+                "Your message may have gone out, but the mail server didn't confirm it. Check Sent before you send it again.",
+            );
+            app.set_render_status(message.clone());
+            app.set_sync_status(message);
+        }
         if let Some(report) = pending.transfers
             && let Some(app) = mail_update_app.upgrade()
         {

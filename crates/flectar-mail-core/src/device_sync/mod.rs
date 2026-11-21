@@ -605,13 +605,13 @@ impl Core {
         let me = hex(&client.identity().device_id());
         self.share_scheduled_messages(&me, &client).await;
         self.remove_unneeded_files(&me, &client).await;
-        let members: std::collections::HashSet<String> = client
+        // Whether another device may send a send this one can't ask about.
+        let others = client
             .state()
             .await
             .devices
             .keys()
-            .map(|device| hex(device))
-            .collect();
+            .any(|device| hex(device) != me);
         for _ in 0..3 {
             let reach = match lock(&self.sync_service().status).state {
                 DeviceSyncState::PaymentRequired => scheduled::Reach::PaymentRequired,
@@ -621,19 +621,13 @@ impl Core {
             let driven = {
                 let _run = self.sync_service().run_lock.lock().await;
                 let me = me.clone();
-                let members = members.clone();
                 self.db
                     .write(move |conn| {
                         if !crate::db::repo::synced_sends::any(conn)? {
                             return Ok(scheduled::Driven::default());
                         }
                         let tx = conn.transaction()?;
-                        let others_send =
-                            |send: &crate::db::repo::synced_sends::SyncedSend,
-                             protocol: Option<&str>| {
-                                scheduled::others_may_send(send, protocol, &members)
-                            };
-                        let driven = scheduled::drive(&tx, &me, now_ms(), reach, &others_send)?;
+                        let driven = scheduled::drive(&tx, &me, now_ms(), reach, others)?;
                         tx.commit()?;
                         Ok(driven)
                     })

@@ -227,7 +227,9 @@ pub fn scheduled_sends(conn: &Connection) -> Result<Vec<crate::models::Scheduled
     let mut statement = conn.prepare(
         "SELECT pa.id, pa.message_id, m.thread_id, pa.account_id,
                 COALESCE(json_extract(pa.payload, '$.sendAt'), pa.not_before) AS send_at,
-                pa.state, pa.last_error
+                CASE WHEN pa.state = 'failed' AND json_extract(pa.payload, '$.uncertain') = 1
+                     THEN 'uncertain' ELSE pa.state END,
+                pa.last_error
          FROM pending_actions pa LEFT JOIN messages m ON m.id = pa.message_id
          WHERE pa.kind = 'send' AND pa.message_id IS NOT NULL
            AND pa.state IN ('pending', 'inflight', 'failed')
@@ -366,6 +368,19 @@ pub fn set_state(conn: &Connection, id: i64, state: &str, error: Option<&str>) -
         params![id, state, error, now_ms()],
     )?;
     Ok(())
+}
+
+/// End a send whose message the mail server may have taken although no
+/// confirmation came (RFC 5321 section 4.5.3.2.6). It fails without being
+/// tried again, since a second try could deliver a second copy, and shows as
+/// possibly sent until the user checks.
+pub fn fail_uncertain(conn: &Connection, id: i64, error: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions SET payload = json_set(payload, '$.uncertain', json('true'))
+         WHERE id = ?1",
+        params![id],
+    )?;
+    set_state(conn, id, "failed", Some(error))
 }
 
 pub fn set_payload(conn: &Connection, id: i64, payload: &serde_json::Value) -> Result<()> {
