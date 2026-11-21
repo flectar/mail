@@ -1645,17 +1645,36 @@ impl CoreMailSource {
             .list_accounts()
             .await
             .map_err(|error| error.to_string())?;
-        let account = match accounts
+        let configs = self
+            .core
+            .list_account_configs()
+            .await
+            .map_err(|error| error.to_string())?;
+        let sending: Vec<Account> = accounts
+            .iter()
+            .filter(|account| {
+                configs
+                    .iter()
+                    .any(|config| config.id == account.id && config.sends_mail())
+            })
+            .cloned()
+            .collect();
+        let account = match sending
             .iter()
             .find(|account| account.id == message.account_id)
         {
             Some(account) => account.clone(),
-            // Local mail is answered from an account.
+            // Local mail, and mail of an account that only receives (#252),
+            // is answered from an account that sends.
             None => {
-                if self.load_local_mail_account().await? != Some(message.account_id) {
+                if !accounts
+                    .iter()
+                    .any(|account| account.id == message.account_id)
+                    && self.load_local_mail_account().await? != Some(message.account_id)
+                {
                     return Err("message account is no longer connected".to_owned());
                 }
-                self.reply_account(&accounts, message).await?
+                self.reply_account(&sending, message).await?
             }
         };
         let sender_identities = self
@@ -1700,9 +1719,9 @@ impl CoreMailSource {
         Ok((account, sender))
     }
 
-    /// The account that answers local mail, which is never sent from: the
-    /// one with an address the message was sent to or from, or else the
-    /// first.
+    /// The account of `accounts` that answers mail whose own account doesn't
+    /// send, such as local mail. It's the one with an address the message
+    /// was sent to or from, or else the first.
     async fn reply_account(
         &self,
         accounts: &[Account],
@@ -4453,7 +4472,9 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
             && !message.is_outgoing
             && !message.in_spam
             && message.list_unsubscribe.as_deref().is_some_and(|header| {
-                flectar_mail_core::unsubscribe::plan(header, false).is_some()
+                // The core says when an account that only receives can't
+                // send the request.
+                flectar_mail_core::unsubscribe::plan(header, false, true).is_some()
             }),
         can_block: !message.is_draft && !message.is_outgoing && message.from.email.contains('@'),
         sender_blocked: message.sender_blocked,

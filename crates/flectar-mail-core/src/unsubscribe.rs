@@ -35,9 +35,10 @@ pub enum UnsubscribePlan {
 
 /// Decide how to unsubscribe from the raw List-Unsubscribe value. `one_click`
 /// says the sender signed a one-click request
-/// ([`crate::mime::one_click_signed`]). None when the header contains no
-/// usable URI.
-pub fn plan(list_unsubscribe: &str, one_click: bool) -> Option<UnsubscribePlan> {
+/// ([`crate::mime::one_click_signed`]). An account that only receives mail
+/// (`can_email` false) can't send the request by mail. None when the header
+/// contains no usable URI.
+pub fn plan(list_unsubscribe: &str, one_click: bool, can_email: bool) -> Option<UnsubscribePlan> {
     let mut uris = unsubscribe_uris(list_unsubscribe);
     let web = uris
         .clone()
@@ -50,7 +51,8 @@ pub fn plan(list_unsubscribe: &str, one_click: bool) -> Option<UnsubscribePlan> 
         });
     }
 
-    if let Some(m) = uris.find(|u| crate::mailto::is_mailto(u))
+    if can_email
+        && let Some(m) = uris.find(|u| crate::mailto::is_mailto(u))
         && let Some(p) = parse_mailto(m)
     {
         return Some(p);
@@ -241,7 +243,11 @@ mod tests {
 
     #[test]
     fn one_click_needs_a_signed_request_and_https() {
-        let p = plan("<https://x.example/u?t=1>, <mailto:u@x.example>", true);
+        let p = plan(
+            "<https://x.example/u?t=1>, <mailto:u@x.example>",
+            true,
+            true,
+        );
         assert_eq!(
             p,
             Some(UnsubscribePlan::OneClick {
@@ -250,11 +256,15 @@ mod tests {
         );
 
         // The same header without a signed request: mailto wins over browser.
-        let p = plan("<https://x.example/u?t=1>, <mailto:u@x.example>", false);
+        let p = plan(
+            "<https://x.example/u?t=1>, <mailto:u@x.example>",
+            false,
+            true,
+        );
         assert!(matches!(p, Some(UnsubscribePlan::Mailto { .. })));
 
         // One-click marker on a plain http URL is ignored.
-        let p = plan("<http://x.example/u>", true);
+        let p = plan("<http://x.example/u>", true, true);
         assert_eq!(
             p,
             Some(UnsubscribePlan::Browser {
@@ -284,6 +294,7 @@ mod tests {
         let p = plan(
             "<mailto:leave@list.example?subject=unsub%20me&body=please%20go>",
             false,
+            true,
         );
         assert_eq!(
             p,
@@ -297,7 +308,17 @@ mod tests {
 
     #[test]
     fn mailto_defaults() {
-        let p = plan("<mailto:leave@list.example>", false);
+        let p = plan("<mailto:leave@list.example>", false, true);
+        // An account that only receives mail can't send the request.
+        assert_eq!(plan("<mailto:leave@list.example>", false, false), None);
+        assert!(matches!(
+            plan(
+                "<mailto:leave@list.example>, <https://x.example/u>",
+                false,
+                false
+            ),
+            Some(UnsubscribePlan::Browser { .. })
+        ));
         assert_eq!(
             p,
             Some(UnsubscribePlan::Mailto {
@@ -313,6 +334,7 @@ mod tests {
         let p = plan(
             "<mailto:googlegroups-manage+123+unsubscribe@googlegroups.com?subject=Unsubscribe+me>",
             false,
+            true,
         );
         assert_eq!(
             p,
@@ -326,9 +348,9 @@ mod tests {
 
     #[test]
     fn mailto_without_an_address_is_not_usable() {
-        assert_eq!(plan("<mailto:?subject=unsubscribe>", false), None);
+        assert_eq!(plan("<mailto:?subject=unsubscribe>", false, true), None);
         assert_eq!(
-            plan("<mailto:?subject=x>, <https://x.example/u>", false),
+            plan("<mailto:?subject=x>, <https://x.example/u>", false, true),
             Some(UnsubscribePlan::Browser {
                 url: "https://x.example/u".into()
             })
@@ -338,15 +360,15 @@ mod tests {
     #[test]
     fn browser_fallback_and_empty() {
         assert_eq!(
-            plan("<https://x.example/u>", false),
+            plan("<https://x.example/u>", false, true),
             Some(UnsubscribePlan::Browser {
                 url: "https://x.example/u".into()
             })
         );
-        assert_eq!(plan("nothing useful", false), None);
+        assert_eq!(plan("nothing useful", false, true), None);
         // Bare (unbracketed) value from a sloppy sender still parses.
         assert!(matches!(
-            plan("https://x.example/u", true),
+            plan("https://x.example/u", true, true),
             Some(UnsubscribePlan::OneClick { .. })
         ));
     }

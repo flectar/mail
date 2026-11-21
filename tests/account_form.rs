@@ -2,8 +2,11 @@
 //! after the user typed reach the fields, and closing Settings closes the form.
 
 use flectar_mail::AppWindow;
-use i_slint_core::accessibility::{AccessibilityAction, AccessibleStringProperty};
-use i_slint_core::item_tree::ItemRc;
+use i_slint_core::accessibility::{
+    AccessibilityAction, AccessibleStringProperty, SupportedAccessibilityAction,
+};
+use i_slint_core::item_tree::{ItemRc, ParentItemTraversalMode};
+use i_slint_core::items::Clip;
 use i_slint_core::window::WindowInner;
 use slint::ComponentHandle;
 use slint::platform::{
@@ -34,6 +37,28 @@ slint::slint! {
             account_protocol: "jmap";
             add_password_account(protocol, email, username, password, jmap-url, incoming-host, incoming-port, smtp-host, smtp-port) => {
                 root.connect(protocol, email, password);
+            }
+        }
+    }
+
+    export component ImapFormHarness inherits Window {
+        preferred-width: 1320px;
+        preferred-height: 800px;
+        in-out property <bool> sends-mail: true;
+        callback connect(string, string);
+
+        SettingsDialog {
+            width: parent.width;
+            height: parent.height;
+            settings_tab: "Accounts";
+            account_form_open: true;
+            account_email: "me@example.com";
+            account_password: "secret";
+            account_protocol: "imap";
+            incoming_host: "imap.example.com";
+            account_sends_mail <=> root.sends-mail;
+            add_password_account(protocol, email, username, password, jmap-url, incoming-host, incoming-port, smtp-host, smtp-port) => {
+                root.connect(smtp-host, smtp-port);
             }
         }
     }
@@ -109,6 +134,65 @@ fn press_connect(ui: &AccountFormHarness) {
     .accessible_action(&AccessibilityAction::Default);
 }
 
+/// Whether nothing hides `item` with `visible: false`. Scrolling the form
+/// brings it into view, so lying past the scroll view's edge doesn't count.
+fn reachable(item: &ItemRc) -> bool {
+    let mut current = Some(item.clone());
+    while let Some(ancestor) = current {
+        if let Some(clip) = ancestor.downcast::<Clip>() {
+            let clip = clip.as_pin_ref();
+            if clip.is_visibility_clip() && clip.clip() {
+                return false;
+            }
+        }
+        current = ancestor.parent_item(ParentItemTraversalMode::StopAtPopups);
+    }
+    true
+}
+
+/// Activates the reachable control labelled `label`, as assistive
+/// technology does, passing over texts with the same words.
+fn press(window: &slint::Window, label: &str) {
+    let inner = WindowInner::from_pub(window);
+    ItemRc::new_root(inner.component())
+        .visit_descendants(|item| {
+            if reachable(item)
+                && item
+                    .supported_accessibility_actions()
+                    .contains(SupportedAccessibilityAction::Default)
+                && item
+                    .accessible_string_property(AccessibleStringProperty::Label)
+                    .as_deref()
+                    == Some(label)
+            {
+                ControlFlow::Break(item.clone())
+            } else {
+                ControlFlow::Continue(())
+            }
+        })
+        .unwrap_or_else(|| panic!("no reachable control labelled {label:?}"))
+        .accessible_action(&AccessibilityAction::Default);
+}
+
+/// Whether any reachable element reads `label`.
+fn shows_label(window: &slint::Window, label: &str) -> bool {
+    let inner = WindowInner::from_pub(window);
+    ItemRc::new_root(inner.component())
+        .visit_descendants(|item| {
+            if reachable(item)
+                && item
+                    .accessible_string_property(AccessibleStringProperty::Label)
+                    .as_deref()
+                    == Some(label)
+            {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        })
+        .is_some()
+}
+
 const EMAIL: &str = "name@example.com";
 const PASSWORD: &str = "Stored securely in your system keyring";
 
@@ -170,6 +254,7 @@ fn account_form_fields_follow_their_values() {
     slint::platform::update_timers_and_animations();
     app.set_account_form_open(true);
     app.set_account_password("typed".into());
+    app.set_smtp_password("relay".into());
     app.set_caldav_account_id(3);
     app.set_caldav_connection_id(5);
     app.set_caldav_password("calendar".into());
@@ -180,10 +265,42 @@ fn account_form_fields_follow_their_values() {
     slint::platform::update_timers_and_animations();
     assert!(!app.get_account_form_open());
     assert_eq!(app.get_account_password(), "");
+    assert_eq!(app.get_smtp_password(), "");
     assert_eq!(app.get_caldav_account_id(), -1);
     assert_eq!(app.get_caldav_connection_id(), -1);
     assert_eq!(app.get_caldav_password(), "");
     assert_eq!(app.get_carddav_account_id(), -1);
     assert_eq!(app.get_carddav_password(), "");
     assert!(!app.get_carddav_manage_existing());
+}
+
+/// An account that only receives mail needs no SMTP server, and connects
+/// without one (#252).
+#[test]
+fn an_account_that_only_receives_needs_no_smtp_server() {
+    slint::platform::set_platform(Box::new(Headless)).unwrap();
+    let ui = ImapFormHarness::new().unwrap();
+    ui.window().set_size(slint::PhysicalSize::new(1320, 800));
+    ui.show().unwrap();
+    let submitted = Rc::new(RefCell::new(Vec::new()));
+    let recorded = submitted.clone();
+    ui.on_connect(move |host, port| {
+        recorded
+            .borrow_mut()
+            .push((host.to_string(), port.to_string()));
+    });
+
+    // Sending needs an SMTP server first.
+    assert!(shows_label(ui.window(), "smtp.example.com"));
+    press(ui.window(), "Connect account");
+    assert!(submitted.borrow().is_empty());
+
+    press(ui.window(), "Advanced settings");
+    slint::platform::update_timers_and_animations();
+    press(ui.window(), "Send mail");
+    assert!(!ui.get_sends_mail());
+    assert!(!shows_label(ui.window(), "smtp.example.com"));
+    assert!(!shows_label(ui.window(), "SMTP sign-in"));
+    press(ui.window(), "Connect account");
+    assert_eq!(submitted.borrow().len(), 1);
 }

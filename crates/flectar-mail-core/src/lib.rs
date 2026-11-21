@@ -309,11 +309,23 @@ pub(crate) fn validate_portable_account(config: &PortableAccountConfig) -> Resul
         )));
     }
     if config.username.len() > 512
+        || config
+            .settings
+            .connection
+            .smtp_username
+            .as_ref()
+            .is_some_and(|username| username.len() > 512)
         || config.jmap_url.len() > 2048
         || config.incoming_host.len() > 253
         || config.smtp_host.len() > 253
     {
         return Err(CoreError::Other("an account field is too long".into()));
+    }
+    // Only an SMTP server may take mail without a sign-in (#252).
+    if config.settings.connection.incoming_login == LoginMethod::None {
+        return Err(CoreError::Other(format!(
+            "the incoming server of {email} needs a sign-in"
+        )));
     }
     let account_kind = (config.provider, config.auth_kind);
     let supported = match config.mail_protocol {
@@ -352,12 +364,12 @@ pub(crate) fn validate_portable_account(config: &PortableAccountConfig) -> Resul
         // Provider presets own the server settings of OAuth accounts.
         MailProtocol::Gmail => true,
         MailProtocol::Imap if config.provider == Provider::Microsoft => true,
+        // An account without an SMTP server only receives mail (#252).
         MailProtocol::Imap | MailProtocol::Pop3 => {
             !config.username.trim().is_empty()
                 && !config.incoming_host.trim().is_empty()
-                && !config.smtp_host.trim().is_empty()
                 && config.incoming_port != 0
-                && config.smtp_port != 0
+                && (config.smtp_host.trim().is_empty() || config.smtp_port != 0)
         }
         MailProtocol::Jmap => !config.username.trim().is_empty(),
         MailProtocol::Local => false,
@@ -384,11 +396,19 @@ fn folder_path_delimiter(protocol: MailProtocol, folder: &repo::folders::Folder)
     }
 }
 
-/// The configuration a password account would have, for checks before it
-/// exists.
-fn password_account_config(args: &AddPasswordAccountArgs) -> AccountConfig {
+/// Why account `config` doesn't send mail (#252).
+pub(crate) fn receive_only_error(config: &AccountConfig) -> CoreError {
+    CoreError::Other(format!(
+        "{} only receives mail. Add an SMTP server to its settings to send from it.",
+        config.email
+    ))
+}
+
+/// The account `args` describe, a new one or account `id` being edited,
+/// whose connections go through its own proxy.
+fn password_account_config(args: &AddPasswordAccountArgs, id: i64) -> AccountConfig {
     AccountConfig {
-        id: 0,
+        id,
         email: args.email.clone(),
         display_name: None,
         avatar_url: None,
@@ -406,12 +426,21 @@ fn password_account_config(args: &AddPasswordAccountArgs) -> AccountConfig {
     }
 }
 
-async fn check_smtp(args: &AddPasswordAccountArgs) -> Result<()> {
-    smtp::test_connection(
-        &password_account_config(args),
-        &smtp::SmtpAuth::Password(args.password.clone()),
-    )
-    .await
+async fn check_smtp(args: &AddPasswordAccountArgs, id: i64) -> Result<()> {
+    // An account that only receives mail has no SMTP server to try.
+    if args.smtp_host.is_empty() {
+        return Ok(());
+    }
+    let auth = if args.connection.smtp_login == LoginMethod::None {
+        smtp::SmtpAuth::None
+    } else {
+        smtp::SmtpAuth::Password(
+            args.smtp_password
+                .clone()
+                .unwrap_or_else(|| args.password.clone()),
+        )
+    };
+    smtp::test_connection(&password_account_config(args, id), &auth).await
 }
 
 /// The setup check signed in, so the first sync respects the server's
@@ -472,11 +501,15 @@ fn alternative_username(email: &str, username: &str) -> Option<String> {
 
 /// Sign in with the username as given and, when the server rejects it, once
 /// more with its other common form. `args` keeps the username that worked.
-async fn with_username_fallback<T>(
+/// `sign_in` gets what else it needs as `context` and captures nothing, as
+/// a borrow captured by an async closure keeps the account setup future from
+/// being Send.
+async fn with_username_fallback<C: Copy, T>(
     args: &mut AddPasswordAccountArgs,
-    sign_in: impl AsyncFn(&AddPasswordAccountArgs) -> Result<T>,
+    context: C,
+    sign_in: impl AsyncFn(&AddPasswordAccountArgs, C) -> Result<T>,
 ) -> Result<T> {
-    let rejected = match sign_in(args).await {
+    let rejected = match sign_in(args, context).await {
         Err(CoreError::Auth(rejected)) => rejected,
         result => return result,
     };
@@ -484,7 +517,7 @@ async fn with_username_fallback<T>(
         return Err(CoreError::Auth(rejected));
     };
     let given = std::mem::replace(&mut args.username, alternative);
-    match sign_in(args).await {
+    match sign_in(args, context).await {
         Ok(value) => Ok(value),
         Err(error) => {
             let alternative = std::mem::replace(&mut args.username, given);
@@ -559,6 +592,7 @@ mod username_fallback_tests {
             incoming_port: 993,
             smtp_host: "mail.example.com".into(),
             smtp_port: 465,
+            smtp_password: None,
             connection: MailConnectionSettings::new(
                 ConnectionSecurity::Tls,
                 ConnectionSecurity::Tls,
@@ -582,15 +616,16 @@ mod username_fallback_tests {
     ) -> (Result<()>, String, Vec<String>) {
         let tried = Mutex::new(Vec::new());
         let mut args = args(username);
-        let result = with_username_fallback(&mut args, async |args: &AddPasswordAccountArgs| {
-            tried.lock().unwrap().push(args.username.clone());
-            if Some(args.username.as_str()) == accepted {
-                Ok(())
-            } else {
-                Err(CoreError::Auth(format!("rejected {}", args.username)))
-            }
-        })
-        .await;
+        let result =
+            with_username_fallback(&mut args, (), async |args: &AddPasswordAccountArgs, ()| {
+                tried.lock().unwrap().push(args.username.clone());
+                if Some(args.username.as_str()) == accepted {
+                    Ok(())
+                } else {
+                    Err(CoreError::Auth(format!("rejected {}", args.username)))
+                }
+            })
+            .await;
         (result, args.username, tried.into_inner().unwrap())
     }
 
@@ -624,12 +659,13 @@ mod username_fallback_tests {
     async fn only_a_rejection_tries_the_other_username() {
         let tried = Mutex::new(0);
         let mut args = args("jane@example.com");
-        let error = with_username_fallback(&mut args, async |_: &AddPasswordAccountArgs| {
-            *tried.lock().unwrap() += 1;
-            Err::<(), _>(CoreError::Imap("connection refused".into()))
-        })
-        .await
-        .unwrap_err();
+        let error =
+            with_username_fallback(&mut args, (), async |_: &AddPasswordAccountArgs, ()| {
+                *tried.lock().unwrap() += 1;
+                Err::<(), _>(CoreError::Imap("connection refused".into()))
+            })
+            .await
+            .unwrap_err();
         assert!(matches!(error, CoreError::Imap(_)));
         assert_eq!(*tried.lock().unwrap(), 1);
     }
@@ -711,6 +747,7 @@ mod apple_sign_in_guidance_tests {
             incoming_port: 993,
             smtp_host: "smtp.mail.me.com".into(),
             smtp_port: 587,
+            smtp_password: None,
             connection: MailConnectionSettings::new(
                 ConnectionSecurity::Tls,
                 ConnectionSecurity::Starttls,
@@ -2039,11 +2076,11 @@ impl Core {
             .map(|_| ())
             .map_err(|error| error.to_client_json()),
             MailProtocol::Imap => self
-                .check_imap_smtp(&mut args)
+                .check_imap_smtp(&mut args, 0)
                 .await
                 .map_err(|error| error.to_string()),
             MailProtocol::Pop3 => self
-                .check_pop3_smtp(&mut args)
+                .check_pop3_smtp(&mut args, 0)
                 .await
                 .map(drop)
                 .map_err(|error| error.to_string()),
@@ -2062,26 +2099,33 @@ impl Core {
         }
     }
 
-    async fn check_imap_smtp(&self, args: &mut AddPasswordAccountArgs) -> Result<()> {
-        let mut session = with_username_fallback(args, async |args: &AddPasswordAccountArgs| {
-            let creds = imap::ImapCredentials::Password {
-                user: args.username.clone(),
-                password: args.password.clone(),
-            };
-            imap::connect_with_settings(
-                &args.incoming_host,
-                args.incoming_port,
-                creds,
-                &args.connection,
-            )
-            .await
-        })
+    /// Checks the servers of a new account, or of account `id` being edited.
+    async fn check_imap_smtp(&self, args: &mut AddPasswordAccountArgs, id: i64) -> Result<()> {
+        let owner = password_account_config(args, id).proxy_owner();
+        let mut session = with_username_fallback(
+            args,
+            owner,
+            async |args: &AddPasswordAccountArgs, owner: net::proxy::Owner| {
+                let creds = imap::ImapCredentials::Password {
+                    user: args.username.clone(),
+                    password: args.password.clone(),
+                };
+                imap::connect_as(
+                    owner,
+                    &args.incoming_host,
+                    args.incoming_port,
+                    creds,
+                    &args.connection,
+                )
+                .await
+            },
+        )
         .await
         .map_err(|error| explain_imap_sign_in(args, error))?;
         let mailbox_result = imap::select(&mut session, "INBOX").await.map(|_| ());
         imap::logout(session).await;
         mailbox_result?;
-        check_smtp(args).await
+        check_smtp(args, id).await
     }
 
     /// Returns what the POP3 server announced, which the first sync has to
@@ -2089,12 +2133,14 @@ impl Core {
     async fn check_pop3_smtp(
         &self,
         args: &mut AddPasswordAccountArgs,
+        id: i64,
     ) -> Result<sync::pop3::Probe> {
-        let probe = with_username_fallback(args, async |args: &AddPasswordAccountArgs| {
-            sync::pop3::probe(&password_account_config(args), &args.password).await
-        })
-        .await?;
-        check_smtp(args).await?;
+        let probe =
+            with_username_fallback(args, id, async |args: &AddPasswordAccountArgs, id: i64| {
+                sync::pop3::probe(&password_account_config(args, id), &args.password).await
+            })
+            .await?;
+        check_smtp(args, id).await?;
         Ok(probe)
     }
 
@@ -2116,15 +2162,48 @@ impl Core {
             incoming_port: args.incoming_port,
             smtp_host: args.smtp_host.trim().to_owned(),
             smtp_port: args.smtp_port,
+            smtp_password: args
+                .smtp_password
+                .map(normalize_account_password)
+                .filter(|password| !password.is_empty()),
             connection: args.connection,
         };
         if args.username.is_empty() {
             args.username = args.email.clone();
         }
+        args.connection.smtp_username = args
+            .connection
+            .smtp_username
+            .take()
+            .map(|username| username.trim().to_owned())
+            .filter(|username| !username.is_empty());
+        // Without an SMTP server the account only receives mail (#252), and
+        // has nothing to sign in to for sending.
+        if args.smtp_host.is_empty() {
+            args.smtp_port = 0;
+            args.connection.smtp_username = None;
+            args.connection.smtp_login = LoginMethod::Automatic;
+        }
+        // An SMTP server without a sign-in keeps no login of its own.
+        if args.connection.smtp_login == LoginMethod::None {
+            args.connection.smtp_username = None;
+        }
+        if args.connection.smtp_username.is_none() {
+            args.smtp_password = None;
+        }
+        // Only an SMTP server may take mail without a sign-in.
+        if args.connection.incoming_login == LoginMethod::None {
+            args.connection.incoming_login = LoginMethod::Automatic;
+        }
         if args.password.is_empty() {
             return Err(CoreError::Auth("email and password are required".into()));
         }
         if args.username.len() > 512
+            || args
+                .connection
+                .smtp_username
+                .as_ref()
+                .is_some_and(|username| username.len() > 512)
             || args.jmap_url.len() > 2048
             || args.incoming_host.len() > 253
             || args.smtp_host.len() > 253
@@ -2133,15 +2212,14 @@ impl Core {
         }
         match args.mail_protocol {
             MailProtocol::Imap | MailProtocol::Pop3 => {
-                if args.incoming_host.is_empty()
-                    || args.smtp_host.is_empty()
-                    || args.incoming_port == 0
-                    || args.smtp_port == 0
-                {
+                if args.incoming_host.is_empty() || args.incoming_port == 0 {
                     return Err(CoreError::Auth(format!(
-                        "{} and SMTP server hosts and ports are required",
+                        "the {} server's host and port are required",
                         args.mail_protocol.as_str().to_ascii_uppercase()
                     )));
+                }
+                if !args.smtp_host.is_empty() && args.smtp_port == 0 {
+                    return Err(CoreError::Auth("the SMTP server's port is required".into()));
                 }
             }
             MailProtocol::Jmap => {
@@ -2183,13 +2261,49 @@ impl Core {
             ));
         }
 
+        // An edit keeps the account's own proxy, which the Network page of
+        // Settings sets and the form doesn't show, and checks the servers
+        // through it.
+        let checked_as = match &existing {
+            Some(existing) => {
+                let id = existing.id;
+                if let Some(config) = self
+                    .db
+                    .read(move |conn| repo::accounts::get_config(conn, id))
+                    .await?
+                {
+                    args.connection.proxy = config.settings.connection.proxy;
+                }
+                // The SMTP server's own password, as saved, unless a new one
+                // came with the edit.
+                if args.connection.smtp_username.is_some() && args.smtp_password.is_none() {
+                    args.smtp_password = match credentials::load_async(
+                        self.credentials.clone(),
+                        id,
+                        Slot::SmtpPassword,
+                    )
+                    .await
+                    {
+                        Ok(saved) if !saved.is_empty() => Some(saved),
+                        Err(error @ CoreError::CredentialStoreUnavailable(_)) => {
+                            return Err(error);
+                        }
+                        _ => None,
+                    };
+                }
+                id
+            }
+            None => 0,
+        };
+
         // Verify credentials before storing anything. For JMAP, also pin the
         // exact Mail account selected from the authenticated Session so a
         // later reconnect can never drift to a different shared account.
         let mut pop3_probe = None;
         let jmap_account_id = match args.mail_protocol {
             MailProtocol::Jmap => Some(
-                crate::jmap::client::connect_with(
+                crate::jmap::client::connect_as(
+                    password_account_config(&args, checked_as).proxy_owner(),
                     &args.email,
                     &args.username,
                     &args.password,
@@ -2200,11 +2314,11 @@ impl Core {
                 .account_id,
             ),
             MailProtocol::Imap => {
-                self.check_imap_smtp(&mut args).await?;
+                self.check_imap_smtp(&mut args, checked_as).await?;
                 None
             }
             MailProtocol::Pop3 => {
-                pop3_probe = Some(self.check_pop3_smtp(&mut args).await?);
+                pop3_probe = Some(self.check_pop3_smtp(&mut args, checked_as).await?);
                 None
             }
             MailProtocol::Gmail => return Err(gmail_needs_google_sign_in()),
@@ -2315,14 +2429,40 @@ impl Core {
                 .await?
         };
 
-        if let Err(error) = credentials::store_async(
-            self.credentials.clone(),
-            id,
-            Slot::Password,
-            args.password.clone(),
-        )
-        .await
-        {
+        let stored = async {
+            credentials::store_async(
+                self.credentials.clone(),
+                id,
+                Slot::Password,
+                args.password.clone(),
+            )
+            .await?;
+            // The SMTP server's own password is kept only while it signs in
+            // with its own username (#252).
+            match (&args.connection.smtp_username, &args.smtp_password) {
+                (Some(_), Some(password)) => {
+                    credentials::store_async(
+                        self.credentials.clone(),
+                        id,
+                        Slot::SmtpPassword,
+                        password.clone(),
+                    )
+                    .await
+                }
+                (Some(_), None) => Ok(()),
+                (None, _) => {
+                    if let Err(error) =
+                        credentials::delete_async(self.credentials.clone(), id, Slot::SmtpPassword)
+                            .await
+                    {
+                        tracing::warn!(account_id = id, %error, "could not forget an SMTP password");
+                    }
+                    Ok(())
+                }
+            }
+        }
+        .await;
+        if let Err(error) = stored {
             // A newly inserted account without its password can never sync.
             // Roll it back atomically from the user's point of view.
             if is_new_account {
@@ -4179,15 +4319,19 @@ impl Core {
         &self,
         message_id: i64,
     ) -> Result<Option<(MessageDetail, unsubscribe::UnsubscribePlan)>> {
-        let (detail, raw_path, local) = self
+        let (detail, raw_path, local, receive_only) = self
             .db
             .read(move |conn| {
                 let detail = repo::messages::detail(conn, message_id)?;
                 let raw_path =
                     repo::messages::get_row(conn, message_id)?.and_then(|row| row.raw_path);
-                let local = repo::accounts::get_config(conn, detail.account_id)?
+                let config = repo::accounts::get_config(conn, detail.account_id)?;
+                let local = config
+                    .as_ref()
                     .is_some_and(|account| account.mail_protocol == MailProtocol::Local);
-                Ok((detail, raw_path, local))
+                // An account that only receives can't send a request by mail.
+                let receive_only = config.filter(|config| !local && !config.sends_mail());
+                Ok((detail, raw_path, local, receive_only))
             })
             .await?;
         // Answering spam only tells its sender the address is read, and
@@ -4206,7 +4350,16 @@ impl Core {
             }
             None => false,
         };
-        Ok(unsubscribe::plan(&list_unsubscribe, one_click).map(|plan| (detail, plan)))
+        match unsubscribe::plan(&list_unsubscribe, one_click, receive_only.is_none()) {
+            Some(plan) => Ok(Some((detail, plan))),
+            // Only a request by mail would do, and the account can't send it.
+            None if let Some(config) = &receive_only
+                && unsubscribe::plan(&list_unsubscribe, one_click, true).is_some() =>
+            {
+                Err(receive_only_error(config))
+            }
+            None => Ok(None),
+        }
     }
 
     /// The address an emailed unsubscribe request goes from: the one the
@@ -6869,6 +7022,9 @@ impl Core {
                 let detail = repo::messages::detail(conn, draft_id)?;
                 let config = repo::accounts::get_config(conn, detail.account_id)?
                     .ok_or_else(|| CoreError::NotFound("account".into()))?;
+                if !config.sends_mail() {
+                    return Err(receive_only_error(&config));
+                }
                 let bcc: String = conn.query_row(
                     "SELECT bcc_json FROM messages WHERE id=?1 AND is_draft=1",
                     [draft_id],
@@ -7687,6 +7843,17 @@ impl Core {
             return Err(CoreError::Other(
                 "connect a mail account before inviting attendees".into(),
             ));
+        }
+        // Invitations go by mail, so an account that only receives can't
+        // invite anyone, and nothing is saved for them (#252).
+        if !args.attendees.is_empty()
+            && let Some(config) = self
+                .db
+                .read(move |conn| repo::accounts::get_config(conn, account_id))
+                .await?
+            && !config.sends_mail()
+        {
+            return Err(receive_only_error(&config));
         }
 
         if let Some(calendar_id) = args.calendar_id {
@@ -8872,6 +9039,15 @@ impl Core {
             method,
             in_reply_to,
         } = mail;
+        // No draft is left behind for an account that can't send it (#252).
+        if let Some(config) = self
+            .db
+            .read(move |conn| repo::accounts::get_config(conn, account_id))
+            .await?
+            && !config.sends_mail()
+        {
+            return Err(receive_only_error(&config));
+        }
         let tmp_dir = self.paths.temp_dir();
         tokio::fs::create_dir_all(&tmp_dir).await?;
         let tmp_path = tmp_dir.join(format!("invite-{}.ics", crate::mime::rand_token()));
@@ -14620,6 +14796,40 @@ mod read_receipt_answer_tests {
             .unwrap();
         assert!(request.needs_confirmation);
     }
+
+    /// An account that only receives mail can't send a receipt, so nothing
+    /// asks for one, and an answer sends nothing (#252).
+    #[tokio::test]
+    async fn an_account_that_only_receives_is_asked_for_no_receipt() {
+        let (_temp, core) = core_with_identity().await;
+        let message_id = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "UPDATE accounts SET smtp_host = '', smtp_port = 0 WHERE id = 1",
+                    [],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        let detail = core
+            .db
+            .read(move |conn| repo::messages::detail(conn, message_id))
+            .await
+            .unwrap();
+        assert!(detail.receipt_request.is_none());
+        core.answer_read_receipt(message_id, ReceiptAnswer::Send { user_agreed: true })
+            .await
+            .unwrap();
+        let actions = core
+            .db
+            .read(|conn| repo::actions::due(conn, 1, i64::MAX, 10))
+            .await
+            .unwrap();
+        assert!(actions.is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -15773,6 +15983,115 @@ mod unsubscribe_offer_tests {
             .await
             .unwrap();
         assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), None);
+    }
+
+    /// An account that only receives mail never emails the request, and
+    /// says so when that's the only way (#252).
+    #[tokio::test]
+    async fn an_account_that_only_receives_never_emails_the_request() {
+        let (core, _temp, message_id) = list_message(None).await;
+        core.db
+            .write(|conn| {
+                conn.execute(
+                    "UPDATE accounts SET smtp_host = '', smtp_port = 0 WHERE id = 1",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            core.unsubscribe_offer(message_id).await.unwrap(),
+            Some(UnsubscribeOffer::Website {
+                url: "https://news.example/u/1".into()
+            })
+        );
+
+        core.db
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE messages SET list_unsubscribe = '<mailto:leave@news.example>'
+                     WHERE id = ?1",
+                    [message_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let error = core.unsubscribe_offer(message_id).await.unwrap_err();
+        assert!(
+            error.to_string().contains("me@test.dev only receives mail"),
+            "{error}"
+        );
+    }
+}
+
+/// The app sets accounts up on its runtime's worker threads, which takes a
+/// Send future. A borrow an async closure captures can quietly lose that.
+#[cfg(test)]
+#[allow(dead_code)]
+fn account_setup_is_send(core: &Core, args: AddPasswordAccountArgs) {
+    fn send<T: Send>(_: T) {}
+    send(core.add_account_password(args));
+}
+
+#[cfg(test)]
+mod receive_only_tests {
+    use super::*;
+
+    /// Invitations go by mail, so an account that only receives invites no
+    /// one and leaves no draft behind (#252).
+    #[tokio::test]
+    async fn an_account_that_only_receives_invites_no_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                conn.execute(
+                    "UPDATE accounts SET smtp_host = '', smtp_port = 0 WHERE id = 1",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let error = core
+            .create_event(CreateEventArgs {
+                account_id: 1,
+                calendar_id: None,
+                summary: "Planning".into(),
+                description: None,
+                location: None,
+                join_url: None,
+                starts_at: 1_800_000_000_000,
+                ends_at: 1_800_003_600_000,
+                all_day: false,
+                attendees: vec![Address {
+                    name: None,
+                    email: "ana@example.com".into(),
+                }],
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("me@test.dev only receives mail"),
+            "{error}"
+        );
+        let drafts: i64 = core
+            .db
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT COUNT(*) FROM messages WHERE is_draft = 1",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(drafts, 0);
     }
 }
 

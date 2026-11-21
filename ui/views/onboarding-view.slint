@@ -1,6 +1,6 @@
 import { FormField } from "../components/settings-components.slint";
 import { AppIcon } from "../app-icon.slint";
-import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
+import { MailAdvancedFields, MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
@@ -35,6 +35,13 @@ export component OnboardingView inherits Rectangle {
     in-out property <string> incoming-security: "tls";
     in-out property <string> smtp-security: "tls";
     in-out property <string> trusted-certificate-pem;
+    // The account form's advanced settings (#252).
+    in-out property <bool> account-sends-mail: true;
+    in-out property <string> incoming-login: "automatic";
+    in-out property <string> smtp-login: "automatic";
+    in-out property <string> smtp-username;
+    in-out property <string> smtp-password;
+    private property <bool> advanced-open: false;
     in-out property <string> account-username;
     in property <string> status: "";
     in property <color> page-bg;
@@ -67,8 +74,7 @@ export component OnboardingView inherits Rectangle {
         && (root.account-protocol == "jmap" || (
             root.incoming-host != ""
             && root.incoming-port != ""
-            && root.smtp-host != ""
-            && root.smtp-port != ""));
+            && (!root.account-sends-mail || (root.smtp-host != "" && root.smtp-port != ""))));
 
     function open-new-mail-account() {
         root.account-email = "";
@@ -83,6 +89,12 @@ export component OnboardingView inherits Rectangle {
         root.incoming-port = "993";
         root.smtp-host = "";
         root.smtp-port = "465";
+        root.account-sends-mail = true;
+        root.incoming-login = "automatic";
+        root.smtp-login = "automatic";
+        root.smtp-username = "";
+        root.smtp-password = "";
+        root.advanced-open = false;
         root.show-account-status = false;
         root.account-form-open = true;
     }
@@ -357,7 +369,7 @@ export component OnboardingView inherits Rectangle {
                         placeholder: MailPorts.incoming(root.account-protocol, root.incoming-security);
                     }
                 }
-                if root.account-protocol != "jmap" : HorizontalBox {
+                if root.account-protocol != "jmap" && root.account-sends-mail : HorizontalBox {
                     height: 60px;
                     padding: 0px;
                     spacing: 8px;
@@ -390,8 +402,19 @@ export component OnboardingView inherits Rectangle {
                     incoming-port <=> root.incoming-port;
                     smtp-port <=> root.smtp-port;
                     enabled: !root.account-setup-in-progress;
+                    sends-mail: root.account-sends-mail;
                     certificate-pem <=> root.trusted-certificate-pem;
                     import-certificate => { root.import-mail-certificate(); }
+                }
+                if root.account-protocol != "jmap" : MailAdvancedFields {
+                    incoming-protocol: root.account-protocol;
+                    expanded <=> root.advanced-open;
+                    sends-mail <=> root.account-sends-mail;
+                    incoming-login <=> root.incoming-login;
+                    smtp-login <=> root.smtp-login;
+                    smtp-username <=> root.smtp-username;
+                    smtp-password <=> root.smtp-password;
+                    enabled: !root.account-setup-in-progress;
                 }
                 Rectangle { height: 2px; }
                 if root.show-account-status && root.status != "" : Rectangle {

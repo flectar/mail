@@ -66,6 +66,7 @@ fn server(port: u16, security: ConnectionSecurity) -> pop3::Server<'static> {
         port,
         security,
         trusted_certificate_pem: "",
+        login: flectar_mail_core::models::LoginMethod::Automatic,
     }
 }
 
@@ -167,6 +168,7 @@ async fn account_against_dovecot() {
             incoming_port: 10995,
             smtp_host: "127.0.0.1".into(),
             smtp_port: 10587,
+            smtp_password: None,
             connection: MailConnectionSettings::new(
                 ConnectionSecurity::Tls,
                 ConnectionSecurity::Starttls,

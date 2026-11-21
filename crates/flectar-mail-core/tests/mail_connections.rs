@@ -37,10 +37,8 @@ fn settings_with_certificate(
     certificate: &str,
 ) -> MailConnectionSettings {
     MailConnectionSettings {
-        incoming_security: mode,
-        smtp_security: mode,
         trusted_certificate_pem: certificate.into(),
-        proxy: Default::default(),
+        ..MailConnectionSettings::new(mode, mode)
     }
 }
 async fn line<S: tokio::io::AsyncRead + Unpin>(stream: &mut BufReader<S>) -> String {
@@ -580,6 +578,152 @@ async fn smtp_never_sends_a_password_the_server_does_not_accept_unencrypted() {
         flectar_mail_core::error::CoreError::Auth(_)
     ));
     task.await.unwrap();
+}
+
+/// An SMTP server offering `offer` after EHLO, over TLS when `tls`, that
+/// signs in anyone with PLAIN or LOGIN. The task returns every line it
+/// received.
+async fn smtp_offering(
+    tls: bool,
+    offer: &'static str,
+) -> (u16, tokio::task::JoinHandle<Vec<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        if tls {
+            serve_smtp(acceptor_for(CERT).accept(tcp).await.unwrap(), offer).await
+        } else {
+            serve_smtp(tcp, offer).await
+        }
+    });
+    (port, task)
+}
+
+async fn serve_smtp<S>(stream: S, offer: &str) -> Vec<String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let mut stream = BufReader::new(stream);
+    let mut received = Vec::new();
+    stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+    loop {
+        let command = line_or_eof(&mut stream).await.trim_end().to_owned();
+        if command.is_empty() {
+            return received;
+        }
+        received.push(command.clone());
+        let reply = match command.split(' ').next().unwrap_or_default() {
+            "EHLO" if offer.is_empty() => "250 localhost".to_owned(),
+            "EHLO" => format!("250-localhost\r\n250 {offer}"),
+            "AUTH" if command == "AUTH LOGIN" => {
+                for challenge in ["VXNlcm5hbWU6", "UGFzc3dvcmQ6"] {
+                    stream
+                        .write_all(format!("334 {challenge}\r\n").as_bytes())
+                        .await
+                        .unwrap();
+                    received.push(line(&mut stream).await.trim_end().to_owned());
+                }
+                "235 Authenticated".to_owned()
+            }
+            "AUTH" => "235 Authenticated".to_owned(),
+            "QUIT" => "221 Goodbye".to_owned(),
+            _ => "250 OK".to_owned(),
+        };
+        stream
+            .write_all(format!("{reply}\r\n").as_bytes())
+            .await
+            .unwrap();
+    }
+}
+
+/// An account set to one sign-in method tries only that one, with the SMTP
+/// server's own username where it has one (#252).
+#[tokio::test]
+async fn smtp_signs_in_with_the_chosen_method_and_username() {
+    use base64::Engine;
+    let encode = |text: &str| base64::engine::general_purpose::STANDARD.encode(text);
+    for (login, username, expected) in [
+        (
+            LoginMethod::Automatic,
+            None,
+            vec![format!("AUTH PLAIN {}", encode("\0bridge-user\0secret"))],
+        ),
+        (
+            LoginMethod::Plain,
+            Some("relay"),
+            vec![format!("AUTH PLAIN {}", encode("\0relay\0secret"))],
+        ),
+        (
+            LoginMethod::Login,
+            Some("relay"),
+            vec!["AUTH LOGIN".to_owned(), encode("relay"), encode("secret")],
+        ),
+    ] {
+        let (port, task) = smtp_offering(false, "AUTH PLAIN LOGIN").await;
+        let mut config = smtp_config(port, ConnectionSecurity::None, CERT);
+        config.settings.connection.smtp_login = login;
+        config.settings.connection.smtp_username = username.map(str::to_owned);
+        smtp::test_connection(&config, &smtp::SmtpAuth::Password("secret".into()))
+            .await
+            .unwrap();
+        let received = task.await.unwrap();
+        assert_eq!(received[1..received.len() - 2], expected, "{login:?}");
+    }
+}
+
+/// A server without the chosen method, or without any password sign-in,
+/// gets no password, and the error says which it is (#252).
+#[tokio::test]
+async fn smtp_says_why_it_cant_sign_in_as_the_account_is_set() {
+    for (tls, offer, login, expected) in [
+        (
+            false,
+            "AUTH LOGIN",
+            LoginMethod::Plain,
+            "doesn't offer PLAIN sign-in. Choose another sign-in method.",
+        ),
+        (
+            true,
+            "AUTH PLAIN",
+            LoginMethod::Login,
+            "doesn't offer LOGIN sign-in. Choose another sign-in method.",
+        ),
+        (
+            true,
+            "",
+            LoginMethod::Automatic,
+            "offers no sign-in with a password. If it sends mail without one, choose No sign-in.",
+        ),
+    ] {
+        let (port, task) = smtp_offering(tls, offer).await;
+        let mode = if tls {
+            ConnectionSecurity::Tls
+        } else {
+            ConnectionSecurity::None
+        };
+        let mut config = smtp_config(port, mode, CERT);
+        config.settings.connection.smtp_login = login;
+        let error = smtp::test_connection(&config, &smtp::SmtpAuth::Password("secret".into()))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains(expected), "{login:?}: {error}");
+        let received = task.await.unwrap();
+        assert!(
+            received.iter().all(|command| !command.starts_with("AUTH")),
+            "{received:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn smtp_without_a_sign_in_sends_no_credentials() {
+    let (port, task) = smtp_offering(false, "AUTH PLAIN").await;
+    let config = smtp_config(port, ConnectionSecurity::None, CERT);
+    smtp::test_connection(&config, &smtp::SmtpAuth::None)
+        .await
+        .unwrap();
+    assert_eq!(task.await.unwrap()[1..], ["NOOP", "QUIT"]);
 }
 
 #[tokio::test]
@@ -1372,6 +1516,7 @@ async fn smtp_sent_policy(provider: Provider, policy: SentCopyPolicy, expected_a
             incoming_port,
             smtp_host: "127.0.0.1".into(),
             smtp_port,
+            smtp_password: None,
             connection: settings(ConnectionSecurity::Tls),
         })
         .await
@@ -1653,6 +1798,7 @@ async fn smtp_failure_prevents_saving_account() {
             incoming_port,
             smtp_host: "127.0.0.1".into(),
             smtp_port,
+            smtp_password: None,
             connection: settings(ConnectionSecurity::Starttls),
         })
         .await
@@ -1765,6 +1911,7 @@ async fn account_setup_tries_the_part_before_the_at_as_username() {
         incoming_port,
         smtp_host: "127.0.0.1".into(),
         smtp_port,
+        smtp_password: None,
         connection: settings(ConnectionSecurity::Tls),
     })
     .await
@@ -1844,6 +1991,7 @@ async fn imap_mailbox_failure_prevents_saving_account() {
             incoming_port,
             smtp_host: "127.0.0.1".into(),
             smtp_port: 1,
+            smtp_password: None,
             connection: settings(ConnectionSecurity::Tls),
         })
         .await
@@ -1931,6 +2079,7 @@ async fn another_gmail_spelling_does_not_edit_a_password_account() {
             incoming_port: 993,
             smtp_host: "smtp.gmail.com".into(),
             smtp_port: 465,
+            smtp_password: None,
             connection: settings(ConnectionSecurity::Tls),
         })
         .await

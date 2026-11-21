@@ -67,6 +67,9 @@ pub enum Slot {
     /// The password of a proxy (#250): the app's under account id 0, and an
     /// account's own proxy under the account.
     ProxyPassword,
+    /// The password of an account's SMTP server, when it signs in with its
+    /// own username (#252).
+    SmtpPassword,
 }
 
 impl Slot {
@@ -93,6 +96,7 @@ impl Slot {
             Slot::DeeplKey => "deepl_key".into(),
             Slot::LibreTranslateKey => "libretranslate_key".into(),
             Slot::ProxyPassword => "proxy_password".into(),
+            Slot::SmtpPassword => "smtp_password".into(),
         }
     }
 }
