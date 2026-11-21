@@ -41,3 +41,9 @@
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# The Secret portal test program's build, lockfile copy and Flatpak state.
+/packaging/flatpak/secret-portal-test/target/
+/packaging/flatpak/secret-portal-test/build/
+/packaging/flatpak/secret-portal-test/.flatpak-builder/
+/packaging/flatpak/secret-portal-test/Cargo.lock
