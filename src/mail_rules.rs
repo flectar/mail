@@ -485,10 +485,9 @@ impl Controller {
         let tabs = editor.choices.tabs();
         ui.set_tabs(ModelRc::new(VecModel::from(
             tabs.iter()
-                .map(|(key, name)| match name {
-                    Some(name) => SharedString::from(name.as_str()),
-                    None if key == "important" => translated(app, &UiMessage::plain("Important")),
-                    None => translated(app, &UiMessage::plain("Other")),
+                .map(|(_, name)| match name {
+                    TabName::Message(key) => translated(app, &UiMessage::plain(key)),
+                    TabName::Text(name) => SharedString::from(name.as_str()),
                 })
                 .collect::<Vec<_>>(),
         )));

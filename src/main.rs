@@ -8352,6 +8352,17 @@ mod tests {
         assert_eq!(title(MailboxRole::Snoozed, "", false), "Snoozed");
         assert_eq!(title(MailboxRole::Scheduled, "", false), "Scheduled");
         assert_eq!(title(MailboxRole::None, "Person", true), "Receipts");
+        // The automatic categories are named by their roles as well, and the
+        // rule editor asks for the same names by their English ones.
+        for category in flectar_mail_core::autolabel::Category::ALL {
+            let role = mail_scope::category_role(category);
+            assert_eq!(words.invoke_name(role), category.default_name());
+            assert_eq!(title(role, "", false), category.default_name());
+            assert_eq!(
+                translated(&app, &UiMessage::plain(category.default_name())),
+                category.default_name()
+            );
+        }
 
         // Chosen in Settings, or followed from the system.
         let chosen = normalized_language_preference("zh_Hans");
@@ -8365,6 +8376,17 @@ mod tests {
                 format!("Person / {inbox}")
             );
             assert_eq!(title(MailboxRole::None, "", false), "Receipts");
+            // Whatever a catalog calls the categories, every place that
+            // names one asks the same words.
+            for category in flectar_mail_core::autolabel::Category::ALL {
+                let role = mail_scope::category_role(category);
+                let name = words.invoke_name(role);
+                assert_eq!(title(role, "", false), name);
+                assert_eq!(
+                    translated(&app, &UiMessage::plain(category.default_name())),
+                    name
+                );
+            }
         }
     }
 

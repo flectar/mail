@@ -9,7 +9,9 @@
 //! stays stale. Rendered email documents are never kept per tab.
 
 use super::*;
+use crate::mail_scope::{LabelKind, category_named};
 use chrono::NaiveDate;
+use flectar_mail_core::autolabel::Category;
 use std::path::Path;
 use std::rc::Weak;
 
@@ -179,6 +181,11 @@ struct SavedTab {
     /// the window names in its language.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     title_mailbox: Option<SavedMailboxTitle>,
+    /// The keyword of the automatic category the tab is named after, which
+    /// the window names in its language. `title` keeps its English name for
+    /// versions that don't know the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title_category: Option<String>,
     /// Settings page shown instead of the location, which closing it shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     settings: Option<String>,
@@ -210,20 +217,27 @@ struct SavedMailboxTitle {
 
 impl SavedTab {
     fn new(place: &Place, title: &MailTitle) -> Self {
-        let (title, title_mailbox) = match title {
-            MailTitle::Text(text) => (text.clone(), None),
+        let (title, title_mailbox, title_category) = match title {
+            MailTitle::Text(text) => (text.clone(), None, None),
             MailTitle::Mailbox { scope, account } => (
                 String::new(),
                 Some(SavedMailboxTitle {
                     scope: scope.to_string(),
                     account: account.clone(),
                 }),
+                None,
+            ),
+            MailTitle::Category(category) => (
+                category.default_name().to_owned(),
+                None,
+                Some(category.keyword().to_owned()),
             ),
         };
         Self {
             location: place.location.clone(),
             title,
             title_mailbox,
+            title_category,
             settings: place.settings.clone(),
             thread_message: place.thread_message,
             account: place.account,
@@ -243,7 +257,12 @@ impl SavedTab {
                     account: saved.account,
                 })
                 .unwrap_or_default(),
-            None => english_mailbox_title(&self.location, &self.title)
+            None => self
+                .title_category
+                .as_deref()
+                .and_then(Category::from_keyword)
+                .map(MailTitle::Category)
+                .or_else(|| english_mailbox_title(&self.location, &self.title))
                 .unwrap_or(MailTitle::Text(self.title)),
         };
         let settings = self
@@ -265,12 +284,20 @@ impl SavedTab {
 
 /// Tabs saved before titles named standard mailboxes kept their mailbox's
 /// English title as text: the mailbox, after its account's name unless it
-/// spans every account. Such a title names its mailbox again, so the window
-/// shows it in its own language.
+/// spans every account, or an automatic category's built-in name. Such a
+/// title names its mailbox or category again, so the window shows it in its
+/// own language.
 fn english_mailbox_title(location: &Location, title: &str) -> Option<MailTitle> {
     let Location::Mail { scope, .. } = location else {
         return None;
     };
+    if let Scope::Label {
+        kind: LabelKind::Category,
+        ..
+    } = scope
+    {
+        return category_named(title).map(MailTitle::Category);
+    }
     let account = match *scope {
         Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
             (title == scope.to_string()).then(String::new)?
@@ -2317,6 +2344,10 @@ mod tests {
             scope: inbox,
             account: "Person".into(),
         };
+        let social = Scope::Label {
+            kind: LabelKind::Category,
+            id: 8,
+        };
         write_file(
             &context.path,
             &SavedTabs {
@@ -2324,6 +2355,7 @@ mod tests {
                     SavedTab::default(),
                     search,
                     SavedTab::new(&mail(inbox), &mailbox),
+                    SavedTab::new(&mail(social), &MailTitle::Category(Category::Social)),
                 ],
                 active: 0,
             },
@@ -2345,6 +2377,15 @@ mod tests {
             }
         );
         assert_eq!(row(2).title, "");
+        assert_eq!(
+            row(3).mailbox,
+            MailboxTitle {
+                role: MailboxRole::Social,
+                account: "".into(),
+                unified: false,
+            }
+        );
+        assert_eq!(row(3).title, "");
 
         // The window names the mailbox in its language as it shows it.
         let words = app.global::<MailboxWords>();
@@ -2352,12 +2393,110 @@ mod tests {
             let row = row(index);
             words.invoke_title(row.mailbox, row.title)
         };
+        // Whatever language the host starts the window in.
+        slint::select_bundled_translation("en").unwrap();
         assert_eq!(shown(2), "Person / Inbox");
         slint::select_bundled_translation("zh_Hans").unwrap();
         let inbox_name = words.invoke_name(MailboxRole::Inbox);
         assert_ne!(inbox_name, "Inbox");
         assert_eq!(shown(2), format!("Person / {inbox_name}"));
         assert_eq!(shown(1), "Bob");
+        // A category is named as its role is, whatever the catalog holds.
+        assert_eq!(shown(3), words.invoke_name(MailboxRole::Social));
+        slint::select_bundled_translation("en").unwrap();
+        assert_eq!(shown(3), "Social");
+    }
+
+    #[test]
+    fn category_titles_are_saved_by_category_and_old_english_ones_upgrade() {
+        let category = |id| Scope::Label {
+            kind: LabelKind::Category,
+            id,
+        };
+        let tab = |scope, title: &str| SavedTab {
+            location: Location::Mail {
+                scope,
+                query: String::new(),
+                filter: default_filter(),
+                conversation: None,
+            },
+            title: title.into(),
+            ..SavedTab::default()
+        };
+        let titles = |strip: &TabStrip| {
+            strip
+                .tabs
+                .iter()
+                .map(|tab| tab.title.clone())
+                .collect::<Vec<_>>()
+        };
+        // Files from before kept the label's name as text: a category with
+        // the name the app gave it is named by the app again, while a name
+        // of the user's, a manual label's and a folder's stay.
+        let strip = TabStrip::restore(SavedTabs {
+            tabs: vec![
+                tab(category(5), "Marketing"),
+                tab(category(6), "Offers"),
+                tab(
+                    Scope::Label {
+                        kind: LabelKind::Global,
+                        id: 7,
+                    },
+                    "Social",
+                ),
+                tab(Scope::Folder(7), "News"),
+                tab(Scope::UNIFIED_INBOX, "Pitch"),
+            ],
+            active: 0,
+        });
+        assert_eq!(
+            titles(&strip),
+            [
+                MailTitle::Category(Category::Marketing),
+                MailTitle::Text("Offers".into()),
+                MailTitle::Text("Social".into()),
+                MailTitle::Text("News".into()),
+                MailTitle::Text("Pitch".into()),
+            ]
+        );
+
+        // It is saved by the category's keyword, and by its name too, which
+        // earlier versions read.
+        let saved = strip.saved();
+        assert_eq!(saved.tabs[0].title, "Marketing");
+        assert_eq!(
+            saved.tabs[0].title_category.as_deref(),
+            Some("FlectarMailAutoMarketing")
+        );
+        assert_eq!(saved.tabs[0].title_mailbox, None);
+        assert_eq!(saved.tabs[1].title_category, None);
+        let json = serde_json::to_string(&saved).unwrap();
+        assert!(json.contains(r#""title_category":"FlectarMailAutoMarketing""#));
+        assert_eq!(json.matches("title_category").count(), 1);
+        let reloaded = TabStrip::restore(serde_json::from_str(&json).unwrap());
+        assert_eq!(titles(&reloaded), titles(&strip));
+        assert_eq!(reloaded.saved(), saved);
+
+        // The keyword counts, not the text beside it; one this version
+        // doesn't know leaves the text.
+        let read = |json: &str| {
+            let strip = TabStrip::restore(serde_json::from_str(json).unwrap());
+            strip.tabs[0].title.clone()
+        };
+        assert_eq!(
+            read(
+                r#"{"tabs":[{"location":{"workspace":"mail","scope":"Category:5"},
+                    "title":"","title_category":"FlectarMailAutoNews"}]}"#
+            ),
+            MailTitle::Category(Category::News)
+        );
+        assert_eq!(
+            read(
+                r#"{"tabs":[{"location":{"workspace":"mail","scope":"Category:5"},
+                    "title":"Offers","title_category":"FlectarMailAutoOutreach"}]}"#
+            ),
+            MailTitle::Text("Offers".into())
+        );
     }
 
     #[test]

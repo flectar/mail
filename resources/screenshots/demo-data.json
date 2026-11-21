@@ -68,12 +68,12 @@
   "selected_mail_label_count": 2,
   "mail_labels": [
     { "id": 1, "name": "Reports", "name_has_emoji": false, "color": "#4a86e8", "applied": true, "is_auto": false },
-    { "id": 2, "name": "Marketing", "name_has_emoji": false, "color": "#e0708a", "applied": true, "is_auto": true },
+    { "id": 2, "name": "Marketing", "name_has_emoji": false, "color": "#e0708a", "applied": true, "is_auto": true, "role": "marketing" },
     { "id": 3, "name": "Follow up", "name_has_emoji": false, "color": "#8b5cf6", "applied": false, "is_auto": false }
   ],
   "mail_label_results": [
     { "id": 1, "name": "Reports", "name_has_emoji": false, "color": "#4a86e8", "applied": true, "is_auto": false },
-    { "id": 2, "name": "Marketing", "name_has_emoji": false, "color": "#e0708a", "applied": true, "is_auto": true },
+    { "id": 2, "name": "Marketing", "name_has_emoji": false, "color": "#e0708a", "applied": true, "is_auto": true, "role": "marketing" },
     { "id": 3, "name": "Follow up", "name_has_emoji": false, "color": "#8b5cf6", "applied": false, "is_auto": false }
   ],
   "calendar_agenda_rows": [
@@ -823,10 +823,11 @@
       "starred": true,
       "has_attachments": false,
       "has_replied": true,
-      "label_summary": "Reports · Marketing",
+      "label_summary": "Reports",
+      "label_categories": ["marketing"],
       "labels": [
         { "id": 1, "name": "Reports", "name_has_emoji": false, "color": "#4a86e8", "applied": true, "is_auto": false },
-        { "id": 2, "name": "Marketing", "name_has_emoji": false, "color": "#e0708a", "applied": true, "is_auto": true }
+        { "id": 2, "name": "Marketing", "name_has_emoji": false, "color": "#e0708a", "applied": true, "is_auto": true, "role": "marketing" }
       ],
       "selected": true
     },

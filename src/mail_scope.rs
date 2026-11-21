@@ -6,7 +6,8 @@
 //! every consumer handles every kind of mailbox exhaustively.
 
 use crate::MailboxRole;
-use flectar_mail_core::models::Account;
+use flectar_mail_core::autolabel::Category;
+use flectar_mail_core::models::{Account, Label};
 use std::{fmt, str::FromStr};
 
 /// Mailboxes every account presents, in sidebar order.
@@ -93,6 +94,41 @@ impl LabelKind {
             Self::Global
         }
     }
+}
+
+/// The automatic category a label still is: one of the four the app seeds,
+/// found by the keyword it keeps, under the name the app gave it. The window
+/// names such a category in its own language; a label with a name of its own
+/// keeps that name.
+pub(crate) fn label_category(label: &Label) -> Option<Category> {
+    automatic_category(label.is_auto, &label.keyword, &label.name)
+}
+
+/// [`label_category`] for a label's own properties.
+pub(crate) fn automatic_category(is_auto: bool, keyword: &str, name: &str) -> Option<Category> {
+    Category::from_keyword(keyword).filter(|category| is_auto && name == category.default_name())
+}
+
+/// The automatic category with this built-in name, whichever label it is.
+pub(crate) fn category_named(name: &str) -> Option<Category> {
+    Category::ALL
+        .into_iter()
+        .find(|category| category.default_name() == name)
+}
+
+/// The window names an automatic category by its role, in its own language.
+pub(crate) const fn category_role(category: Category) -> MailboxRole {
+    match category {
+        Category::Marketing => MailboxRole::Marketing,
+        Category::News => MailboxRole::News,
+        Category::Social => MailboxRole::Social,
+        Category::Pitch => MailboxRole::Pitch,
+    }
+}
+
+/// The role the window names a label by: its automatic category's, or none.
+pub(crate) fn label_role(label: &Label) -> MailboxRole {
+    label_category(label).map_or(MailboxRole::None, category_role)
 }
 
 /// A selectable mail view.
@@ -438,6 +474,72 @@ mod tests {
             }
             .to_string(),
             "AccountLabel:3"
+        );
+    }
+
+    #[test]
+    fn only_an_unrenamed_automatic_category_is_named_by_its_role() {
+        let label = |is_auto, keyword: &str, name: &str| Label {
+            id: 1,
+            name: name.into(),
+            color: String::new(),
+            keyword: keyword.into(),
+            position: 0,
+            owner_account_id: None,
+            is_auto,
+        };
+        for (category, role) in [
+            (Category::Marketing, MailboxRole::Marketing),
+            (Category::News, MailboxRole::News),
+            (Category::Social, MailboxRole::Social),
+            (Category::Pitch, MailboxRole::Pitch),
+        ] {
+            let seeded = label(true, category.keyword(), category.default_name());
+            assert_eq!(label_category(&seeded), Some(category));
+            assert_eq!(label_role(&seeded), role);
+            assert_eq!(category_role(category), role);
+            assert_eq!(category_named(category.default_name()), Some(category));
+            assert_eq!(Category::from_keyword(category.keyword()), Some(category));
+            // The user's own name, a manual label, and a name with no
+            // keyword behind it keep what they have.
+            for other in [
+                label(true, category.keyword(), "Mine"),
+                label(
+                    true,
+                    category.keyword(),
+                    &category.default_name().to_lowercase(),
+                ),
+                label(false, category.keyword(), category.default_name()),
+                label(true, "", category.default_name()),
+                label(true, "FlectarMailAutoOther", category.default_name()),
+            ] {
+                assert_eq!(label_category(&other), None, "{other:?}");
+                assert_eq!(label_role(&other), MailboxRole::None);
+            }
+        }
+        // A category is not told by its name for another's keyword.
+        assert_eq!(
+            label_category(&label(true, Category::News.keyword(), "Social")),
+            None
+        );
+        assert_eq!(category_named("Inbox"), None);
+        // Every category is a standard role of its own.
+        let roles = Category::ALL.map(category_role);
+        assert!(roles.iter().all(|role| *role != MailboxRole::None));
+        assert!(
+            roles
+                .iter()
+                .enumerate()
+                .all(|(index, role)| !roles[..index].contains(role))
+        );
+        // Scopes name mailboxes, not labels, so a label scope has no role.
+        assert_eq!(
+            Scope::Label {
+                kind: LabelKind::Category,
+                id: 1
+            }
+            .mailbox_role(),
+            MailboxRole::None
         );
     }
 

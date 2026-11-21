@@ -317,6 +317,10 @@ export global I18n {
         if (key == "All accounts") { return @tr("All accounts"); }
         if (key == "Important") { return @tr("Important"); }
         if (key == "Other") { return @tr("Other"); }
+        if (key == "Marketing") { return MailboxWords.name(MailboxRole.marketing); }
+        if (key == "News") { return MailboxWords.name(MailboxRole.news); }
+        if (key == "Social") { return MailboxWords.name(MailboxRole.social); }
+        if (key == "Pitch") { return MailboxWords.name(MailboxRole.pitch); }
         if (key == "Name this rule.") { return @tr("Name this rule."); }
         if (key == "Condition {}: give a size in KB.") { return @tr("Condition {}: give a size in KB.", argument); }
         if (key == "Condition {}: this isn't a valid regular expression.") { return @tr("Condition {}: this isn't a valid regular expression.", argument); }

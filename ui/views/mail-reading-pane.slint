@@ -2,7 +2,7 @@ import { AccountMailPreferences } from "../components/account-mail-preferences.s
 import { ActionMenu, ActionMenuEntry } from "../components/action-menu.slint";
 import { ZoomControls } from "../components/zoom-controls.slint";
 import { CheckBox, HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
-import { MailAttachments, EmailReader, EmailLink, EmailTile, MailLabelRow, ThreadMessageRow } from "../models.slint";
+import { MailAttachments, EmailReader, EmailLink, EmailTile, MailLabelRow, MailboxRole, ThreadMessageRow } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { IconButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
@@ -11,6 +11,7 @@ import { EmailLinkContextArea } from "../components/email-link-context-area.slin
 import { FileTypeIcon } from "../components/file-type-icon.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { LabelChip } from "../components/label-chip.slint";
+import { MailboxWords } from "../mailbox-words.slint";
 import { LoadingSkeletonBlock } from "../components/loading-skeleton.slint";
 import { RenderingInfoDialog } from "../dialogs/rendering-info-dialog.slint";
 import { MovePickerUi } from "../dialogs/move-dialog.slint";
@@ -743,6 +744,8 @@ export component MailReadingPane inherits FocusScope {
     private property <string> label-search-query: "";
     private property <int> label-editor-id: -1;
     private property <bool> label-editor-is-auto: false;
+    // The category the editor shows, which it names in the window's language.
+    private property <MailboxRole> label-editor-role: MailboxRole.none;
     private property <bool> label-editor-is-global: false;
     private property <string> new-label-name: "";
     private property <color> new-label-color: #4a86e8;
@@ -1002,7 +1005,7 @@ export component MailReadingPane inherits FocusScope {
                                                             width: parent.width - 88px;
                                                             y: 3px;
                                                             height: max(20px, self.preferred-height);
-                                                            text: label.name;
+                                                            text: MailboxWords.label-name(label);
                                                             color: root.heading;
                                                             font-size: TypeScale.body;
                                                             font-weight: label.applied ? 600 : 500;
@@ -1033,7 +1036,7 @@ export component MailReadingPane inherits FocusScope {
                                                         }
                                                         label-hit := TouchArea {
                                                             accessible-role: checkbox;
-                                                            accessible-label: label.name + (label.account_name == "" ? "" : ", " + label.account_name);
+                                                            accessible-label: MailboxWords.label-name(label) + (label.account_name == "" ? "" : ", " + label.account_name);
                                                             accessible-checked: label.applied;
                                                             accessible-item-index: index;
                                                             accessible-action-default => {
@@ -1060,6 +1063,7 @@ export component MailReadingPane inherits FocusScope {
                                                             clicked => {
                                                                 root.label-editor-id = label.id;
                                                                 root.label-editor-is-auto = label.is_auto;
+                                                                root.label-editor-role = label.role;
                                                                 root.label-editor-is-global = label.is_global;
                                                                 root.new-label-name = label.name;
                                                                 root.new-label-color = label.color;
@@ -1091,6 +1095,7 @@ export component MailReadingPane inherits FocusScope {
                                                 clicked => {
                                                     root.label-editor-id = -1;
                                                     root.label-editor-is-auto = false;
+                                                    root.label-editor-role = MailboxRole.none;
                                                     root.label-editor-is-global = false;
                                                     root.new-label-name = root.label-search-query;
                                                     root.new-label-color = #4a86e8;
@@ -1226,7 +1231,7 @@ export component MailReadingPane inherits FocusScope {
                             alignment: start;
                             for label in root.mail_labels : LabelChip {
                                 visible: label.applied;
-                                name: label.name;
+                                name: MailboxWords.label-name(label);
                                 name-has-emoji: label.name_has_emoji;
                                 use-label-icon: root.selected-account-uses-labels;
                                 label-color: label.color;
@@ -2236,7 +2241,14 @@ export component MailReadingPane inherits FocusScope {
                                 font-size: TypeScale.heading;
                                 font-weight: 700;
                             }
-                            LineEdit {
+                            // A category's name can't be changed here, so the name the
+                            // window shows for it stays out of what Save sends.
+                            if root.label-editor-role != MailboxRole.none : LineEdit {
+                                text: MailboxWords.name(root.label-editor-role);
+                                placeholder-text: @tr("Label name");
+                                enabled: false;
+                            }
+                            if root.label-editor-role == MailboxRole.none : LineEdit {
                                 text <=> root.new-label-name;
                                 placeholder-text: @tr("Label name");
                                 enabled: !root.label-editor-is-auto;

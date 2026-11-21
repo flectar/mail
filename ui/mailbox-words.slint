@@ -1,4 +1,4 @@
-import { MailboxRole, MailboxTitle } from "models.slint";
+import { MailboxRole, MailboxTitle, MailLabelRow } from "models.slint";
 
 // Standard mailboxes are named in the interface's language. Folders, labels
 // and saved searches keep the names their accounts and users gave them.
@@ -15,7 +15,30 @@ export global MailboxWords {
         if role == MailboxRole.other { return @tr("Other"); }
         if role == MailboxRole.snoozed { return @tr("Snoozed"); }
         if role == MailboxRole.scheduled { return @tr("Scheduled"); }
+        if role == MailboxRole.marketing { return @tr("category" => "Marketing"); }
+        if role == MailboxRole.news { return @tr("category" => "News"); }
+        if role == MailboxRole.social { return @tr("category" => "Social"); }
+        if role == MailboxRole.pitch { return @tr("category" => "Pitch"); }
         return "";
+    }
+
+    // What a label is called: an automatic category by its role's name, as
+    // the window names it, and every other label by the name it was given.
+    public pure function label-name(label: MailLabelRow) -> string {
+        return label.role == MailboxRole.none ? label.name : MailboxWords.name(label.role);
+    }
+
+    // The labels of a conversation, for a screen reader, after a comma, or
+    // nothing when it has none: `text` has the names of the labels that are
+    // not automatic categories, and `categories` the categories, which at most
+    // four can be.
+    public pure function label-note(categories: [MailboxRole], text: string) -> string {
+        let names = (categories.length > 0 ? MailboxWords.name(categories[0]) : "")
+            + (categories.length > 1 ? " · " + MailboxWords.name(categories[1]) : "")
+            + (categories.length > 2 ? " · " + MailboxWords.name(categories[2]) : "")
+            + (categories.length > 3 ? " · " + MailboxWords.name(categories[3]) : "");
+        if text == "" { return names == "" ? "" : ", " + names; }
+        return ", " + text + (names == "" ? "" : " · " + names);
     }
 
     // What a list or tab is called: the standard mailbox `mailbox` names, or

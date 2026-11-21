@@ -1,5 +1,7 @@
 //! Visible sidebar projection and batched, retained Slint model updates.
 use super::*;
+use crate::mail_scope::category_role;
+use flectar_mail_core::autolabel::Category;
 
 pub(super) type SidebarModel = crate::retained_model::RetainedModel<SidebarRow>;
 const MAX_ANIMATED_SIDEBAR_ROWS: usize = 256;
@@ -221,8 +223,9 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         && (!has_avatar || *avatar_image == other.avatar_image)
 }
 
-/// The standard mailboxes' names in the window's language, lowercased, which
-/// the folder filter matches as well as their English labels.
+/// The names the window gives the standard mailboxes and the automatic
+/// categories in its language, lowercased, which the sidebar filter and the
+/// label picker's search match as well as the names they are stored under.
 #[derive(Debug, Default)]
 pub(super) struct MailboxNames(Vec<(MailboxRole, String)>);
 
@@ -240,15 +243,30 @@ thread_local! {
     static MAILBOX_NAMES: RefCell<MailboxNames> = RefCell::default();
 }
 
+/// Whether the window's name for `role` has `query`, which is lowercased.
+pub(super) fn mailbox_name_matches(role: MailboxRole, query: &str) -> bool {
+    MAILBOX_NAMES.with_borrow(|names| names.matches(role, query))
+}
+
+/// Gives this thread names in place of the window's, for tests.
+#[cfg(test)]
+pub(super) fn set_mailbox_names_for_test(names: &[(MailboxRole, &str)]) {
+    MAILBOX_NAMES.set(MailboxNames(
+        names
+            .iter()
+            .map(|(role, name)| (*role, name.to_lowercase()))
+            .collect(),
+    ));
+}
+
 /// Loads the names after the window's language changed.
 pub(super) fn reload_mailbox_names(app: &AppWindow) {
     let words = app.global::<MailboxWords>();
     let names = StandardMailbox::ALL
         .into_iter()
-        .map(|mailbox| {
-            let role = mailbox.role();
-            (role, words.invoke_name(role).to_lowercase())
-        })
+        .map(StandardMailbox::role)
+        .chain(Category::ALL.into_iter().map(category_role))
+        .map(|role| (role, words.invoke_name(role).to_lowercase()))
         .collect();
     MAILBOX_NAMES.set(MailboxNames(names));
 }
@@ -441,10 +459,9 @@ fn make_filtered_sidebar_rows(
     let mut account_labels: HashMap<i32, Vec<MailLabelRow>> = HashMap::new();
     let mut global_labels = Vec::new();
     let mut categories = Vec::new();
-    for mut label in labels
-        .into_iter()
-        .filter(|label| label.name.to_lowercase().contains(&query))
-    {
+    for mut label in labels.into_iter().filter(|label| {
+        label.name.to_lowercase().contains(&query) || mailbox_names.matches(label.role, &query)
+    }) {
         label.display_name = label.name.clone();
         label.depth = 0;
         label.has_children = false;
@@ -1466,6 +1483,99 @@ mod tests {
             rows.iter()
                 .any(|row| row.kind == Kind::GlobalLabel && row.label.id == 22)
         );
+    }
+
+    fn category_rows() -> Vec<MailLabelRow> {
+        vec![
+            MailLabelRow {
+                id: 1,
+                name: "Marketing".into(),
+                is_auto: true,
+                role: MailboxRole::Marketing,
+                ..Default::default()
+            },
+            // A category with a name of its own has no role to be named by.
+            MailLabelRow {
+                id: 2,
+                name: "Offers".into(),
+                is_auto: true,
+                ..Default::default()
+            },
+            MailLabelRow {
+                id: 3,
+                name: "Social".into(),
+                is_auto: true,
+                role: MailboxRole::Social,
+                ..Default::default()
+            },
+            MailLabelRow {
+                id: 4,
+                name: "Marketing plans".into(),
+                is_global: true,
+                ..Default::default()
+            },
+        ]
+    }
+
+    #[test]
+    fn category_rows_keep_their_roles_and_stored_names() {
+        let rows = shared_navigation_rows(&category_rows(), &HashSet::new());
+        let categories = rows
+            .iter()
+            .filter(|row| row.kind == Kind::Category)
+            .map(|row| (row.label.id, row.label.role, row.label.name.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            categories,
+            [
+                (1, MailboxRole::Marketing, "Marketing".into()),
+                (2, MailboxRole::None, "Offers".into()),
+                (3, MailboxRole::Social, "Social".into()),
+            ]
+        );
+
+        let filtered = make_filtered_sidebar_rows(
+            accounts(1, 0),
+            category_rows(),
+            "marketing",
+            &HashSet::new(),
+            &MailboxNames::default(),
+        );
+        let roles = filtered
+            .iter()
+            .filter(|row| row.kind == Kind::Category)
+            .map(|row| (row.label.id, row.label.role))
+            .collect::<Vec<_>>();
+        assert_eq!(roles, [(1, MailboxRole::Marketing)]);
+    }
+
+    #[test]
+    fn category_filter_matches_the_names_the_window_shows() {
+        // The window's names stand for the roles, not for the names stored.
+        let names = MailboxNames(vec![
+            (MailboxRole::Marketing, "营销".into()),
+            (MailboxRole::Social, "社交".into()),
+        ]);
+        let found = |query| {
+            make_filtered_sidebar_rows(
+                accounts(1, 0),
+                category_rows(),
+                query,
+                &HashSet::new(),
+                &names,
+            )
+            .into_iter()
+            .filter(|row| matches!(row.kind, Kind::Category | Kind::GlobalLabel))
+            .map(|row| row.label.id)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(found("营销"), [1]);
+        assert_eq!(found("社交"), [3]);
+        // The stored English names still find them, as folders' do, and a
+        // renamed category is found by its own name only.
+        assert_eq!(found("marketing"), [1, 4]);
+        assert_eq!(found("offers"), [2]);
+        assert!(found("推销").is_empty());
     }
 
     #[test]
