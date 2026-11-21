@@ -42,8 +42,10 @@ if rpm -q flectar-mail; then
   printf 'Expected a clean container without Flectar Mail installed.\n' >&2
   exit 1
 fi
-package=$(find "$repo" -maxdepth 1 -name "flectar-mail-*.$(uname -m).rpm" -print -quit)
-test -n "$package"
+# openSUSE's base image has no find, so pick the package with a glob.
+packages=("$repo"/flectar-mail-*."$(uname -m)".rpm)
+package=${packages[0]}
+test -f "$package"
 
 rpm -qip "$package"
 rpm -qp --requires "$package" | tee "$results/requires.txt"
