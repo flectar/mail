@@ -443,7 +443,6 @@ pub(super) fn render_current(
         visible_ids,
         visible_count,
         total_count,
-        mailboxes,
         next_cursor,
         using_core,
         favicon_icons,
@@ -481,7 +480,6 @@ pub(super) fn render_current(
             visible.iter().map(|email| email.id).collect::<HashSet<_>>(),
             visible_count,
             messages.len(),
-            state.mailboxes.clone(),
             state.next_cursor,
             state.using_core,
             state.favicon_icons.clone(),
@@ -594,8 +592,9 @@ pub(super) fn render_current(
     server_search::show(app, &state.borrow());
     app.set_mail_selection_count(checked_ids.len() as i32);
     refresh_sidebar(state);
-    app.set_selected_scope_title(mailbox_scope_title(scope, &mailboxes, &labels).into());
     saved_searches::show(app, &state.borrow());
+    let title = list_title(&state.borrow());
+    show_list_title(app, &title);
     app.set_trash_view(is_trash_scope(scope));
     app.global::<SnoozeUi>().set_view(scope == Scope::Snoozed);
     app.set_mail_oldest_first(state.borrow().list_order == ListOrder::OldestFirst);
@@ -1456,15 +1455,7 @@ pub(super) fn refresh_message_dates(
 }
 
 pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxState>>) {
-    let (
-        can_load_more,
-        query,
-        scope,
-        mailboxes,
-        search_filter,
-        inbox_count,
-        labels,
-    ) = {
+    let (can_load_more, query, scope, search_filter, inbox_count) = {
         let state = state.borrow();
         let can_load_more = if state.using_core {
             state.next_cursor.is_some()
@@ -1483,16 +1474,15 @@ pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxSta
             can_load_more,
             state.query.clone(),
             state.scope,
-            state.mailboxes.clone(),
             state.search_filter.clone(),
             state.inbox_count,
-            state.labels.clone(),
         )
     };
 
     refresh_sidebar(state);
-    app.set_selected_scope_title(mailbox_scope_title(scope, &mailboxes, &labels).into());
     saved_searches::show(app, &state.borrow());
+    let title = list_title(&state.borrow());
+    show_list_title(app, &title);
     app.set_trash_view(is_trash_scope(scope));
     app.global::<SnoozeUi>().set_view(scope == Scope::Snoozed);
     app.set_mail_oldest_first(state.borrow().list_order == ListOrder::OldestFirst);
@@ -1759,7 +1749,10 @@ pub(super) fn make_mailbox_rows(
                 depth: i32::try_from(mailbox.depth).unwrap_or(i32::MAX),
                 has_children: mailbox.has_children,
                 expanded: !collapsed_folder_ids.contains(&mailbox.folder_id),
-                is_standard: mailbox.is_standard,
+                role: mailbox
+                    .scope
+                    .filter(|_| mailbox.is_standard)
+                    .map_or(MailboxRole::None, Scope::mailbox_role),
                 is_selectable: mailbox.is_selectable,
                 can_create_children: mailbox.can_create_children,
                 can_rename: mailbox.can_rename,
@@ -1798,32 +1791,85 @@ pub(super) fn make_mailbox_rows(
         .collect()
 }
 
-fn mailbox_scope_title(
+/// What a mail list, or a tab, is called.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum MailTitle {
+    /// A standard mailbox. The window names it in its own language, after
+    /// the name of its account unless the mailbox spans every account or the
+    /// account has no name, as with mail kept on this device.
+    Mailbox { scope: Scope, account: String },
+    /// A name from the mail itself: a folder's, label's or saved search's, or
+    /// a conversation's subject. An empty one names the workspace instead.
+    Text(String),
+}
+
+impl Default for MailTitle {
+    fn default() -> Self {
+        Self::Text(String::new())
+    }
+}
+
+impl MailTitle {
+    /// The parts the window shows: the standard mailbox, or else the text.
+    pub(crate) fn ui(&self) -> (MailboxTitle, slint::SharedString) {
+        match self {
+            Self::Mailbox { scope, account } => (
+                MailboxTitle {
+                    role: scope.mailbox_role(),
+                    account: account.as_str().into(),
+                    unified: matches!(scope, Scope::Unified(_)),
+                },
+                slint::SharedString::default(),
+            ),
+            Self::Text(text) => (MailboxTitle::default(), text.as_str().into()),
+        }
+    }
+}
+
+/// What the mail list is called: the saved search it shows, or else its
+/// mailbox, folder or label.
+pub(super) fn list_title(state: &InboxState) -> MailTitle {
+    match saved_searches::selected(state) {
+        Some(saved) => MailTitle::Text(saved.name.clone()),
+        None => scope_title(state.scope, &state.mailboxes, &state.labels),
+    }
+}
+
+fn show_list_title(app: &AppWindow, title: &MailTitle) {
+    let (mailbox, text) = title.ui();
+    app.set_selected_scope_mailbox(mailbox);
+    app.set_selected_scope_title(text);
+}
+
+fn scope_title(
     scope: Scope,
     mailboxes: &[MailboxEntry],
     labels: &[flectar_mail_core::models::Label],
-) -> String {
-    let mailbox = || {
-        mailboxes
-            .iter()
-            .find(|mailbox| mailbox.scope == Some(scope))
-    };
+) -> MailTitle {
+    let entry = || mailboxes.iter().find(|entry| entry.scope == Some(scope));
     match scope {
         Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
-            scope.to_string()
+            MailTitle::Mailbox {
+                scope,
+                account: String::new(),
+            }
         }
-        Scope::Folder(_) => mailbox().map_or_else(|| "Folder".into(), |mailbox| mailbox.label.clone()),
-        Scope::Label { id, .. } => labels
-            .iter()
-            .find(|label| label.id == id)
-            .map_or_else(|| "Label".into(), |label| label.name.clone()),
         // Local mail's mailboxes have no account to name.
-        Scope::Account { mailbox: label, .. } => mailbox()
-            .filter(|mailbox| !mailbox.context.is_empty())
-            .map_or_else(
-                || label.label().to_owned(),
-                |mailbox| format!("{} / {}", mailbox.context, label.label()),
-            ),
+        Scope::Account { .. } => MailTitle::Mailbox {
+            scope,
+            account: entry()
+                .map(|entry| entry.context.clone())
+                .unwrap_or_default(),
+        },
+        Scope::Folder(_) => {
+            MailTitle::Text(entry().map_or_else(|| "Folder".into(), |entry| entry.label.clone()))
+        }
+        Scope::Label { id, .. } => MailTitle::Text(
+            labels
+                .iter()
+                .find(|label| label.id == id)
+                .map_or_else(|| "Label".into(), |label| label.name.clone()),
+        ),
     }
 }
 
@@ -2606,8 +2652,115 @@ mod tests {
         assert!(rows[0].has_custom_color);
         assert_eq!(rows[0].color, slint::Color::from_rgb_u8(0x22, 0xc5, 0x5e));
         assert_eq!(
-            mailbox_scope_title(Scope::Folder(7), &mailboxes, &labels),
-            "Projects"
+            scope_title(Scope::Folder(7), &mailboxes, &labels),
+            MailTitle::Text("Projects".into())
+        );
+    }
+
+    /// The Sent mailbox of `scope`, in the account named `context`.
+    fn sent_mailbox(scope: Scope, context: &str) -> MailboxEntry {
+        MailboxEntry {
+            account_id: 3,
+            folder_id: -1,
+            parent_folder_id: -1,
+            depth: 0,
+            has_children: false,
+            is_standard: true,
+            is_selectable: true,
+            can_create_children: false,
+            can_rename: false,
+            can_delete: false,
+            label: "Sent".into(),
+            scope: Some(scope),
+            context: context.into(),
+            detail: String::new(),
+            avatar: String::new(),
+            is_account: false,
+            count: 0,
+        }
+    }
+
+    #[test]
+    fn sidebar_rows_name_standard_mailboxes_by_role() {
+        let sent = Scope::Account {
+            account_id: 3,
+            mailbox: StandardMailbox::Sent,
+        };
+        // A folder of the account's own that is called Sent too.
+        let folder = MailboxEntry {
+            is_standard: false,
+            ..sent_mailbox(Scope::Folder(9), "Person")
+        };
+        let rows = make_mailbox_rows(
+            &[sent_mailbox(sent, "Person"), folder],
+            &HashMap::new(),
+            &[],
+            &HashSet::new(),
+        );
+        assert_eq!(rows[0].role, MailboxRole::Sent);
+        assert_eq!(rows[1].role, MailboxRole::None);
+        assert_eq!(rows[1].label, "Sent");
+    }
+
+    #[test]
+    fn standard_mailboxes_are_titled_by_role_and_folders_by_name() {
+        let sent = |account_id| Scope::Account {
+            account_id,
+            mailbox: StandardMailbox::Sent,
+        };
+        // Account 4 is mail kept on this device, which names no account.
+        let mailboxes = [
+            sent_mailbox(sent(3), "Work / Personal"),
+            sent_mailbox(sent(4), ""),
+        ];
+        let title = |scope| scope_title(scope, &mailboxes, &[]);
+        let mailbox = |scope, account: &str| MailTitle::Mailbox {
+            scope,
+            account: account.into(),
+        };
+        assert_eq!(title(sent(3)), mailbox(sent(3), "Work / Personal"));
+        assert_eq!(title(sent(4)), mailbox(sent(4), ""));
+        // Not loaded yet: the mailbox alone.
+        assert_eq!(title(sent(5)), mailbox(sent(5), ""));
+        let unified = Scope::Unified(StandardMailbox::Drafts);
+        assert_eq!(title(unified), mailbox(unified, ""));
+        assert_eq!(title(Scope::Other), mailbox(Scope::Other, ""));
+        assert_eq!(title(Scope::Snoozed), mailbox(Scope::Snoozed, ""));
+        assert_eq!(title(Scope::Folder(9)), MailTitle::Text("Folder".into()));
+
+        let parts = |title: MailTitle| {
+            let (mailbox, text) = title.ui();
+            (
+                mailbox.role,
+                mailbox.account.to_string(),
+                mailbox.unified,
+                text.to_string(),
+            )
+        };
+        assert_eq!(
+            parts(title(sent(3))),
+            (
+                MailboxRole::Sent,
+                "Work / Personal".into(),
+                false,
+                String::new()
+            )
+        );
+        assert_eq!(
+            parts(title(unified)),
+            (MailboxRole::Drafts, String::new(), true, String::new())
+        );
+        assert_eq!(
+            parts(title(Scope::Important)),
+            (MailboxRole::Important, String::new(), false, String::new())
+        );
+        assert_eq!(
+            parts(title(Scope::Scheduled)),
+            (MailboxRole::Scheduled, String::new(), false, String::new())
+        );
+        assert_eq!(
+            parts(MailTitle::Text("Receipts".into())),
+            (MailboxRole::None, String::new(), false, "Receipts".into())
         );
     }
 

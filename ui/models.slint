@@ -62,6 +62,21 @@ export struct AccountStatus {
     resume_at: string,
 }
 
+// The mailboxes Flectar Mail names itself, in the interface's language: the
+// standard ones every account has, the two halves of a split inbox, and
+// snoozed and scheduled mail. Folders and labels have no role and keep the
+// names their accounts give them.
+export enum MailboxRole { none, inbox, starred, sent, archive, spam, trash, drafts, important, other, snoozed, scheduled }
+
+// What the list or tab of a standard mailbox is called: the mailbox, after
+// the name of its account unless it shows every account's at once.
+export struct MailboxTitle {
+    role: MailboxRole,
+    // Empty for unified mailboxes and for mail kept on this device.
+    account: string,
+    unified: bool,
+}
+
 export struct MailboxRow {
     account_id: int,
     folder_id: int,
@@ -69,7 +84,8 @@ export struct MailboxRow {
     depth: int,
     has_children: bool,
     expanded: bool,
-    is_standard: bool,
+    // The standard mailbox this row is, or none for a folder.
+    role: MailboxRole,
     is_selectable: bool,
     can_create_children: bool,
     can_rename: bool,

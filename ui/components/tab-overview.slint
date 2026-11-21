@@ -6,6 +6,7 @@ import { AppTheme, LayoutMetrics, MotionSettings } from "../design-system.slint"
 import { IconButton, ToolbarIconButton } from "controls.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TabRow, TabsUi, WorkspaceIcon } from "tabs-ui.slint";
+import { MailboxWords } from "../mailbox-words.slint";
 
 // Opens the tab overview. The number of open tabs sits in a rounded square,
 // as in mobile browsers.
@@ -69,7 +70,8 @@ component TabCard inherits Rectangle {
         : root.workspace == "contacts" ? @tr("Contacts")
         : root.workspace == "settings" ? @tr("Settings")
         : @tr("Mail");
-    private property <string> title: root.entry.active ? root.live-title : root.entry.title;
+    private property <string> title: root.entry.active ? root.live-title
+        : MailboxWords.title(root.entry.mailbox, root.entry.title);
     // How far the card has been swiped, and how far it must go to close.
     private property <length> travel: swipe.swiping ? swipe.current-position.x - swipe.pressed-position.x : 0px;
     private property <length> threshold: root.width * 0.35;

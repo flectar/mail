@@ -64,6 +64,10 @@ export { ComposerUi } from "components/composer-ui.slint";
 import { FolderDialog } from "dialogs/folder-dialog.slint";
 import { SavedSearchDialog } from "dialogs/saved-search-dialog.slint";
 import { SavedSearchUi } from "saved-searches.slint";
+import { MailboxWords } from "mailbox-words.slint";
+export { MailboxWords }
+import { MailboxRole, MailboxTitle } from "models.slint";
+export { MailboxRole, MailboxTitle } from "models.slint";
 export { MovePickerUi, MoveTargetRow } from "dialogs/move-dialog.slint";
 import { MoveDialog, MovePickerUi } from "dialogs/move-dialog.slint";
 export { ReminderUi, SendLaterUi, SnoozeUi, WhenChoice, WhenUi } from "dialogs/when-dialog.slint";
@@ -1302,7 +1306,12 @@ export component AppWindow inherits Window {
     in-out property <string> calendar_event_duration: "60";
     in-out property <int> calendar_event_color: 0;
     in property <string> selected_scope: "Unified Inbox";
-    in property <string> selected_scope_title: "Unified Inbox";
+    // What the mail list is called: the standard mailbox it shows, named in
+    // the interface's language, or else the name of its folder, label or
+    // saved search.
+    in property <MailboxTitle> selected_scope_mailbox: { role: MailboxRole.inbox, account: "", unified: true };
+    in property <string> selected_scope_title;
+    private property <string> display_scope_title: MailboxWords.title(root.selected_scope_mailbox, root.selected_scope_title);
     in property <bool> trash_view: false;
     in-out property <bool> mail_sidebar_collapsed: false;
     in-out property <bool> contacts_sidebar_collapsed: false;
@@ -1973,7 +1982,7 @@ export component AppWindow inherits Window {
             email_links: root.email_links;
             active_view: root.active_view;
             selected_scope: root.selected_scope;
-            selected_scope_title: root.selected_scope_title;
+            selected_scope_title: root.display_scope_title;
             trash_view: root.trash_view;
             unified_count: root.unified_count;
             search_query <=> root.search_query;
@@ -2575,7 +2584,7 @@ export component AppWindow inherits Window {
             live-workspace: root.active_view;
             live-title: root.active_view != "mail" ? ""
                 : root.has_selected && root.selected_subject != "" ? root.selected_subject
-                : root.selected_scope_title;
+                : root.display_scope_title;
         }
 
         if root.calendar-editor-shown : CalendarEventDialog {
@@ -3096,7 +3105,7 @@ export component AppWindow inherits Window {
         live-workspace: root.active_view;
         live-title: root.active_view != "mail" ? ""
             : root.has_selected && root.selected_subject != "" ? root.selected_subject
-            : root.selected_scope_title;
+            : root.display_scope_title;
         background-color: root.tab-strip-bg;
         // The active tab opens into what lies under the strip: the raised
         // surface across Settings, the plain one across every workspace.

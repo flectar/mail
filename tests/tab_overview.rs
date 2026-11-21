@@ -71,6 +71,7 @@ impl Harness {
             workspace: workspace.into(),
             title: title.into(),
             active: id == 1,
+            ..Default::default()
         };
         let rows = Rc::new(VecModel::from(vec![
             tab(1, "mail", "Saved subject"),

@@ -1,9 +1,14 @@
+import { MailboxTitle } from "../models.slint";
+
 export struct TabRow {
     id: int,
     // "mail" | "calendar" | "contacts" | "files" | "settings"
     workspace: string,
     // Saved title for inactive tabs; empty uses the workspace name.
     title: string,
+    // The standard mailbox an inactive tab is named after instead of
+    // `title`, in the interface's language.
+    mailbox: MailboxTitle,
     active: bool,
 }
 
