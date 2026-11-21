@@ -18,6 +18,8 @@ TEMPLATE = ROOT / "packaging/flathub/com.flectar.mail.yml"
 CARGO_SOURCES = ROOT / "packaging/flatpak/cargo-sources.json"
 # Shared with the bundle manifest, which lists it from the same directory.
 PDFIUM_MODULE = ROOT / "packaging/flatpak/pdfium.yml"
+# A file the PDFium module lists from beside it.
+PDFIUM_FILES = (ROOT / "packaging/flatpak/generate_shim_headers.py",)
 LOCAL_MANIFEST = ROOT / ".flathub-local.yml"
 GIT_SOURCE = re.compile(
     r"^(?P<indent> +)- type: git\n"
@@ -67,6 +69,8 @@ def write(destination: Path, **options) -> None:
     (destination / "com.flectar.mail.yml").write_text(manifest(**options), encoding="utf-8")
     shutil.copyfile(CARGO_SOURCES, destination / "cargo-sources.json")
     shutil.copyfile(PDFIUM_MODULE, destination / "pdfium.yml")
+    for path in PDFIUM_FILES:
+        shutil.copyfile(path, destination / path.name)
 
 
 if __name__ == "__main__":
