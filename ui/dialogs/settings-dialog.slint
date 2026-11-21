@@ -688,6 +688,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_account_subscribed_folders_only(int, bool);
     callback save_account_check_interval(int, string);
     callback save_account_push(int, bool);
+    callback save_account_server_timeout(int, int);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -793,6 +794,12 @@ export component SettingsDialog inherits Rectangle {
         @tr("6 months · Recommended"),
         @tr("1 year"),
         @tr("All mail"),
+    ];
+    private property <[string]> server-timeout-options: [
+        @tr("30 seconds"),
+        @tr("1 minute"),
+        @tr("2 minutes"),
+        @tr("5 minutes"),
     ];
     private property <[string]> check-interval-options: [
         @tr("Same as all accounts"),
@@ -1051,6 +1058,15 @@ export component SettingsDialog inherits Rectangle {
         root.save_account_check_interval(account-id,
             index == 1 ? "1" : index == 2 ? "5" : index == 3 ? "15"
             : index == 4 ? "30" : index == 5 ? "60" : index == 6 ? "manual" : "app");
+    }
+
+    pure function server-timeout-index(value: string) -> int {
+        return value == "60" ? 1 : value == "120" ? 2 : value == "300" ? 3 : 0;
+    }
+
+    function select-server-timeout(account-id: int, index: int) {
+        root.save_account_server_timeout(account-id,
+            index == 1 ? 60 : index == 2 ? 120 : index == 3 ? 300 : 30);
     }
 
     pure function keep-on-server-index(value: string) -> int {
@@ -2824,6 +2840,8 @@ export component SettingsDialog inherits Rectangle {
                                 private property <bool> has-subscriptions: account.mail_protocol == "imap";
                                 // IMAP IDLE and JMAP's event source; Gmail and POP3 servers don't push.
                                 private property <bool> has-push: account.mail_protocol == "imap" || account.mail_protocol == "jmap";
+                                // Gmail's servers keep the standard wait.
+                                private property <bool> has-timeout: account.mail_protocol == "imap" || account.mail_protocol == "pop3" || account.mail_protocol == "jmap";
                                 private property <bool> unencrypted: account.incoming_security == "none" || (!account.receive_only && account.smtp_security == "none");
                                 // A card shows the account's settings while it's the open one,
                                 // and always when it's the only account.
@@ -2863,13 +2881,14 @@ export component SettingsDialog inherits Rectangle {
                                 private property <length> history-end: history-row.y + history-row.height - self.select-end;
                                 private property <length> check-end: check-row.y + check-row.height - self.select-end;
                                 private property <length> checks-end: self.has-push ? push-row.y + push-row.height - self.switch-end : self.check-end;
-                                private property <length> sent-copy-end: self.has-sent-copy ? sent-copy-row.y + sent-copy-row.height - self.select-end : self.checks-end;
+                                private property <length> timeout-end: self.has-timeout ? timeout-row.y + timeout-row.height - self.select-end : self.checks-end;
+                                private property <length> sent-copy-end: self.has-sent-copy ? sent-copy-row.y + sent-copy-row.height - self.select-end : self.timeout-end;
                                 // Where the settings of the account's kind end.
                                 private property <length> kind-end: self.has-subscriptions
                                     ? subscribed-row.y + subscribed-row.height - self.switch-end
                                     : self.has-server-copies
                                         ? server-copies-note.y + server-copies-note.height
-                                        : self.checks-end;
+                                        : self.timeout-end;
                                 private property <length> contacts-end: root.compact ? self.kind-end : contacts-row.y + contacts-row.height - self.plain-end;
                                 private property <length> expanded-height: calendars.y + calendars.height + (root.compact ? 18px : 16px);
                                 height: self.expanded ? self.expanded-height : self.collapsed-height;
@@ -3082,10 +3101,24 @@ export component SettingsDialog inherits Rectangle {
                                             description-color: root.faint-text;
                                             toggled(checked) => { root.save_account_push(account.id, checked); }
                                         }
+                                        timeout-row := SettingsSelectRow {
+                                            visible: drop-target.has-timeout;
+                                            x: history-row.x;
+                                            y: drop-target.checks-end + drop-target.gap - drop-target.select-top;
+                                            width: history-row.width;
+                                            compact: root.compact;
+                                            title: @tr("Server timeout");
+                                            description: @tr("How long to wait for a slow server before giving up.");
+                                            choices: root.server-timeout-options;
+                                            selected-index: root.server-timeout-index(account.server_timeout);
+                                            title-color: root.body-text;
+                                            description-color: root.faint-text;
+                                            selected(index, value) => { root.select-server-timeout(account.id, index); }
+                                        }
                                         sent-copy-row := SettingsSelectRow {
                                             visible: drop-target.has-sent-copy;
                                             x: history-row.x;
-                                            y: drop-target.checks-end + drop-target.gap - drop-target.select-top;
+                                            y: drop-target.timeout-end + drop-target.gap - drop-target.select-top;
                                             width: history-row.width;
                                             compact: root.compact;
                                             title: @tr("Sent copies");
@@ -3117,7 +3150,7 @@ export component SettingsDialog inherits Rectangle {
                                         server-copies-row := SettingsSelectRow {
                                             visible: drop-target.has-server-copies;
                                             x: history-row.x;
-                                            y: drop-target.checks-end + drop-target.gap - drop-target.select-top;
+                                            y: drop-target.timeout-end + drop-target.gap - drop-target.select-top;
                                             width: history-row.width;
                                             compact: root.compact;
                                             title: @tr("Keep mail on the server");
