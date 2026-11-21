@@ -54,7 +54,7 @@ way.
 
 ```bash
 sudo dnf install ./flectar-mail-<version>-linux-x64.rpm
-sudo zypper install --allow-unsigned-rpm ./flectar-mail-<version>-linux-x64.rpm
+sudo zypper install ./flectar-mail-<version>-linux-x64.rpm
 flatpak install --user ./flectar-mail-<version>-linux-x64.flatpak
 flatpak run com.flectar.mail
 ```
@@ -69,6 +69,25 @@ any file, so PDFs that don't embed their fonts are drawn with built-in fonts
 instead.
 
 ### RPM
+
+The RPM repository keeps Flectar Mail up to date with the rest of the
+system. On Fedora and Enterprise Linux:
+
+```bash
+sudo curl -fsSLo /etc/yum.repos.d/flectar-mail.repo https://flectar.github.io/mail/rpm/flectar-mail.repo
+sudo dnf install flectar-mail
+```
+
+On openSUSE:
+
+```bash
+sudo zypper addrepo https://flectar.github.io/mail/rpm/flectar-mail.repo
+sudo zypper install flectar-mail
+```
+
+The first install asks you to trust the repository's signing key. Its
+packages and metadata are signed, and the RPM on each GitHub release is the
+same signed file.
 
 The RPMs support Fedora 43 and 44, openSUSE Tumbleweed and Leap 16.0, and Red
 Hat Enterprise Linux 10 and its rebuilds, on x86_64 and aarch64. Use `dnf` on
