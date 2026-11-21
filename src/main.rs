@@ -5739,6 +5739,49 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let app_weak = app.as_weak();
+    let state_for_server_timeout = Rc::clone(&state);
+    let runtime_for_server_timeout = runtime.clone();
+    let ui_task_tx_for_server_timeout = ui_task_tx.clone();
+    app.on_save_account_server_timeout(move |account_id, seconds| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_server_timeout.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Sync settings require local mail data."));
+            return;
+        };
+        let account_id = i64::from(account_id);
+        app.set_sync_status(UiMessage::plain("Updating sync settings…"));
+        let updates = ui_task_tx_for_server_timeout.clone();
+        runtime_for_server_timeout.spawn(async move {
+            let saved = match u32::try_from(seconds) {
+                Ok(seconds) => core.set_account_server_timeout(account_id, seconds).await,
+                Err(_) => Err(format!("unsupported server timeout: {seconds}")),
+            };
+            let message = match saved {
+                Ok(()) => UiMessage::plain("Sync settings updated."),
+                Err(error) => UiMessage::detail("Could not update sync settings: {}", error),
+            };
+            // Reload either way so the choice shows what was saved.
+            let accounts = core.load_account_snapshot().await.ok();
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts,
+                    calendar_connections: None,
+                    carddav_connections: None,
+                    calendar_error: None,
+                    account_removal: None,
+                    clear_account_form: false,
+                    finishes_account_setup: false,
+                    finishes_oauth: false,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
+    let app_weak = app.as_weak();
     let state_for_sent_copy_policy = Rc::clone(&state);
     let runtime_for_sent_copy_policy = runtime.clone();
     let ui_task_tx_for_sent_copy_policy = ui_task_tx.clone();

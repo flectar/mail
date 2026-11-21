@@ -235,9 +235,9 @@ const PER_DEVICE_ACCOUNT_SETTINGS: &[&str] = &[
     "security",
 ];
 
-/// Connection settings each device keeps to itself: the proxy, which goes
-/// with the device's network.
-const PER_DEVICE_CONNECTION_SETTINGS: &[&str] = &["proxy"];
+/// Connection settings each device keeps to itself, the proxy and how long
+/// to wait for the servers (#252), which go with the device's network.
+const PER_DEVICE_CONNECTION_SETTINGS: &[&str] = &["proxy", "serverTimeoutSecs"];
 
 /// The account's synced settings: all but the ones each device keeps to
 /// itself. Every field is there, null when empty.
@@ -1470,6 +1470,7 @@ fn merged_account_settings(current: &AccountSettings, synced: &AccountSettings) 
         ..synced.clone()
     };
     merged.connection.proxy = current.connection.proxy.clone();
+    merged.connection.server_timeout_secs = current.connection.server_timeout_secs;
     merged
 }
 
@@ -2761,11 +2762,18 @@ mod tests {
         config.settings.check_interval = CheckInterval::Minutes(30);
         config.settings.push = false;
         config.settings.connection.proxy = AccountProxy::Direct;
+        config.settings.connection.server_timeout_secs = Some(120);
         let body = account_body(&config, &Settings::default(), 0).unwrap();
         assert!(body["settings"].get("checkInterval").is_none(), "{body}");
         assert!(body["settings"].get("push").is_none(), "{body}");
         assert!(
             body["settings"]["connection"].get("proxy").is_none(),
+            "{body}"
+        );
+        assert!(
+            body["settings"]["connection"]
+                .get("serverTimeoutSecs")
+                .is_none(),
             "{body}"
         );
 
@@ -2774,10 +2782,12 @@ mod tests {
         synced.check_interval = CheckInterval::App;
         synced.push = true;
         synced.connection.proxy = AccountProxy::App;
+        synced.connection.server_timeout_secs = None;
         let merged = merged_account_settings(&config.settings, &synced);
         assert_eq!(merged.check_interval, CheckInterval::Minutes(30));
         assert!(!merged.push);
         assert_eq!(merged.connection.proxy, AccountProxy::Direct);
+        assert_eq!(merged.connection.server_timeout_secs, Some(120));
     }
 
     #[test]
