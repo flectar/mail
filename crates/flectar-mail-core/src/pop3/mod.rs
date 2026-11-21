@@ -60,6 +60,10 @@ pub enum Error {
     },
     #[error("the server accepts no password on this connection")]
     NoPasswordSignIn,
+    /// The account is set to a sign-in the server doesn't offer on this
+    /// unencrypted connection, though it offers another (#252).
+    #[error("the server doesn't offer this sign-in without encryption")]
+    MethodNotOffered,
     /// A line break or NUL would corrupt the commands, and USER and PASS
     /// must fit the 255-octet command limit.
     #[error("the user name or password cannot be sent to a POP3 server")]
@@ -184,6 +188,9 @@ pub struct Server<'a> {
     pub security: ConnectionSecurity,
     /// Additional trusted certificates of the account, as PEM.
     pub trusted_certificate_pem: &'a str,
+    /// How to sign in, with SASL PLAIN when announced and USER and PASS
+    /// otherwise, or only the way the account was set to (#252).
+    pub login: crate::models::LoginMethod,
 }
 
 /// An authenticated session in the TRANSACTION state.
@@ -222,7 +229,7 @@ impl Session {
             session = session.start_tls(&connector, server.host).await?;
         }
         session.capabilities = session.query_capabilities().await?;
-        session.sign_in(user, password).await?;
+        session.sign_in(user, password, server.login).await?;
         // Values such as EXPIRE can depend on the user and are only final
         // after sign-in.
         let capabilities = session.query_capabilities().await?;
@@ -268,22 +275,43 @@ impl Session {
         }
     }
 
-    /// SASL PLAIN when offered, otherwise USER and PASS. Credentials travel
-    /// as UTF-8 either way.
-    async fn sign_in(&mut self, user: &str, password: &str) -> Result<()> {
+    /// SASL PLAIN when offered, otherwise USER and PASS, unless the account
+    /// was set to one of them. That one goes out even unannounced, but over
+    /// an unencrypted connection a password goes out only as the server
+    /// offers, or by USER and PASS to a server that lists nothing (RFC 1939).
+    /// Credentials travel as UTF-8 either way.
+    async fn sign_in(
+        &mut self,
+        user: &str,
+        password: &str,
+        login: crate::models::LoginMethod,
+    ) -> Result<()> {
+        use crate::models::LoginMethod;
         if [user, password]
             .iter()
             .any(|value| value.contains(['\r', '\n', '\0']))
         {
             return Err(Error::UnsendableCredentials);
         }
-        let plain = self
+        let offers_plain = self
             .capabilities
             .sasl
             .iter()
             .any(|mechanism| mechanism == "PLAIN");
-        if !plain && self.capabilities.announced && !self.capabilities.user {
-            return Err(Error::NoPasswordSignIn);
+        let offers_user = !self.capabilities.announced || self.capabilities.user;
+        let plain = match login {
+            LoginMethod::Plain => true,
+            LoginMethod::Login => false,
+            LoginMethod::Automatic | LoginMethod::None => offers_plain,
+        };
+        let chosen = matches!(login, LoginMethod::Plain | LoginMethod::Login);
+        let offered = if plain { offers_plain } else { offers_user };
+        if !offered && !(chosen && self.stream.get_ref().is_encrypted()) {
+            return Err(if offers_plain || offers_user {
+                Error::MethodNotOffered
+            } else {
+                Error::NoPasswordSignIn
+            });
         }
         // Without UTF-8 mode, the server may replace internationalized
         // messages with a surrogate or refuse them. The mode can only be

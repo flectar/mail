@@ -130,7 +130,7 @@ global ImportText {
         if code == "missing-email" { return @tr("No valid email address was found."); }
         if code == "missing-incoming-server" { return @tr("No incoming mail server is configured."); }
         if code == "incoming-protocol-unsupported" { return @tr("The incoming server {} uses a protocol Flectar Mail does not support.", detail); }
-        if code == "missing-outgoing-server" { return @tr("No outgoing mail server is configured."); }
+        if code == "missing-outgoing-server" { return @tr("No outgoing mail server is configured, so the account only receives mail."); }
         if code == "outgoing-protocol-unsupported" { return @tr("The outgoing server {} uses a protocol Flectar Mail does not support.", detail); }
         if code == "unencrypted-incoming" { return @tr("The incoming server {} is not encrypted, so your password and mail cross the network unprotected.", detail); }
         if code == "unencrypted-outgoing" { return @tr("The outgoing server {} is not encrypted, so your password and mail cross the network unprotected.", detail); }
@@ -139,10 +139,9 @@ global ImportText {
         if code == "incoming-sign-in-unsupported" && detail == "none" { return @tr("The incoming server connects without signing in, which Flectar Mail does not support."); }
         if code == "incoming-sign-in-unsupported" && detail == "client certificate" { return @tr("The incoming server signs in with a client certificate, which Flectar Mail does not support."); }
         if code == "incoming-sign-in-unsupported" { return @tr("The incoming server signs in with {}, which Flectar Mail does not support.", detail); }
-        if code == "outgoing-sign-in-unsupported" && detail == "none" { return @tr("The outgoing server sends mail without signing in, which Flectar Mail does not support."); }
         if code == "outgoing-sign-in-unsupported" && detail == "client certificate" { return @tr("The outgoing server signs in with a client certificate, which Flectar Mail does not support."); }
         if code == "outgoing-sign-in-unsupported" { return @tr("The outgoing server signs in with {}, which Flectar Mail does not support.", detail); }
-        if code == "separate-outgoing-login" { return @tr("The outgoing server signs in as {}. Flectar Mail uses one sign-in for both servers.", detail); }
+        if code == "separate-outgoing-login" { return @tr("The outgoing server signs in as {}. If its password differs from the account's, enter it in Advanced settings when you sign in.", detail); }
         if code == "missing-username" { return @tr("The incoming server has no user name."); }
         if code == "invalid-server" { return @tr("The server settings for {} are not valid.", detail); }
         if code == "duplicate-in-source" { return @tr("This address appears earlier in the file."); }

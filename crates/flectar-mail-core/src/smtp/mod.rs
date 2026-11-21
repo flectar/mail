@@ -2,8 +2,9 @@
 //! here and handed to lettre's protocol client, so every security mode uses
 //! the account's own TLS trust and one code path.
 
+use crate::accounts::credentials::{self, CredentialStoreHandle, Slot};
 use crate::error::{CoreError, Result};
-use crate::models::{AccountConfig, ConnectionSecurity};
+use crate::models::{AccountConfig, AuthKind, ConnectionSecurity, LoginMethod};
 use crate::net::{self, MailStream};
 use lettre::address::Envelope;
 use lettre::transport::smtp::{
@@ -78,6 +79,41 @@ impl Gate {
 pub enum SmtpAuth {
     Password(String),
     XOAuth2(String),
+    /// No sign-in, for a server that relays the mail of its network (#252).
+    None,
+}
+
+/// How account `config` signs in to its SMTP server, with its OAuth token,
+/// the SMTP server's own password or the account's, or not at all (#252).
+pub(crate) async fn account_auth(
+    ctx: &crate::sync::engine::SyncCtx,
+    config: &AccountConfig,
+) -> Result<SmtpAuth> {
+    Ok(match config.auth_kind {
+        AuthKind::Oauth2 => {
+            SmtpAuth::XOAuth2(ctx.tokens.access_token(config.id, config.provider).await?)
+        }
+        AuthKind::Password if config.settings.connection.smtp_login == LoginMethod::None => {
+            SmtpAuth::None
+        }
+        AuthKind::Password => SmtpAuth::Password(password(ctx.credentials.clone(), config).await?),
+    })
+}
+
+/// The SMTP password of account `config`. That's the SMTP server's own when
+/// it signs in with its own username and one is saved, else the account's.
+pub(crate) async fn password(
+    store: CredentialStoreHandle,
+    config: &AccountConfig,
+) -> Result<String> {
+    if config.settings.connection.smtp_username.is_some() {
+        match credentials::load_async(store.clone(), config.id, Slot::SmtpPassword).await {
+            Ok(own) if !own.is_empty() => return Ok(own),
+            Err(error @ CoreError::CredentialStoreUnavailable(_)) => return Err(error),
+            _ => {}
+        }
+    }
+    credentials::load_async(store, config.id, Slot::Password).await
 }
 
 /// The stream lettre drives. After STARTTLS the server's greeting has been
@@ -265,14 +301,17 @@ fn map_smtp_sign_in_error(
     auth: &SmtpAuth,
     error: lettre::transport::smtp::Error,
 ) -> CoreError {
-    let (host, port, user) = (&cfg.smtp_host, cfg.smtp_port, &cfg.username);
+    let (host, port, user) = (&cfg.smtp_host, cfg.smtp_port, cfg.smtp_username());
     match error.status().map(u16::from) {
         Some(535) => CoreError::Auth(match auth {
-            SmtpAuth::Password(_) => {
+            SmtpAuth::Password(_) | SmtpAuth::None => {
                 format!("{host} rejected the username {user} or its password ({error})")
             }
             SmtpAuth::XOAuth2(_) => {
-                format!("{host} rejected the OAuth sign-in for {user} ({error})")
+                format!(
+                    "{host} rejected the OAuth sign-in for {} ({error})",
+                    cfg.username
+                )
             }
         }),
         Some(534) => CoreError::Smtp(format!(
@@ -288,16 +327,25 @@ fn map_smtp_sign_in_error(
     }
 }
 
-fn smtp_auth(auth: &SmtpAuth, username: &str) -> (Credentials, Vec<Mechanism>) {
+/// What `auth` signs in with, and the mechanisms the account allows, in
+/// order of preference. `None` signs in not at all.
+fn smtp_auth(auth: &SmtpAuth, cfg: &AccountConfig) -> Option<(Credentials, Vec<Mechanism>)> {
     match auth {
-        SmtpAuth::Password(password) => (
-            Credentials::new(username.to_owned(), password.clone()),
-            vec![Mechanism::Plain, Mechanism::Login],
-        ),
-        SmtpAuth::XOAuth2(token) => (
-            Credentials::new(username.to_owned(), token.clone()),
+        SmtpAuth::Password(password) => Some((
+            Credentials::new(cfg.smtp_username().to_owned(), password.clone()),
+            match cfg.settings.connection.smtp_login {
+                LoginMethod::Plain => vec![Mechanism::Plain],
+                LoginMethod::Login => vec![Mechanism::Login],
+                LoginMethod::Automatic | LoginMethod::None => {
+                    vec![Mechanism::Plain, Mechanism::Login]
+                }
+            },
+        )),
+        SmtpAuth::XOAuth2(token) => Some((
+            Credentials::new(cfg.username.clone(), token.clone()),
             vec![Mechanism::Xoauth2],
-        ),
+        )),
+        SmtpAuth::None => None,
     }
 }
 
@@ -385,19 +433,32 @@ async fn connect(
         )
         .await
         .map_err(|error| map_smtp_error(cfg, error))?;
-        let (credentials, mechanisms) = smtp_auth(auth, &cfg.username);
-        // Servers commonly offer sign-in only after STARTTLS. Say so instead
-        // of reporting a failed sign-in.
-        if !encrypted
-            && !mechanisms
-                .iter()
-                .any(|mechanism| connection.server_info().supports_auth_mechanism(*mechanism))
-        {
+        let Some((credentials, mechanisms)) = smtp_auth(auth, cfg) else {
+            return Ok(connection);
+        };
+        let offers =
+            |mechanism: &Mechanism| connection.server_info().supports_auth_mechanism(*mechanism);
+        if matches!(auth, SmtpAuth::Password(_)) && !mechanisms.iter().any(offers) {
+            let offers_password = [Mechanism::Plain, Mechanism::Login].iter().any(offers);
+            let (host, port) = (&cfg.smtp_host, cfg.smtp_port);
+            let message = if offers_password {
+                format!(
+                    "{host}:{port} doesn't offer {} sign-in. Choose another sign-in method.",
+                    mechanisms[0]
+                )
+            } else if !encrypted {
+                // Servers commonly offer sign-in only after STARTTLS. Say so
+                // instead of reporting a failed sign-in.
+                format!(
+                    "{host}:{port} accepts passwords only over an encrypted connection. Choose STARTTLS or SSL/TLS."
+                )
+            } else {
+                format!(
+                    "{host}:{port} offers no sign-in with a password. If it sends mail without one, choose No sign-in."
+                )
+            };
             connection.abort().await;
-            return Err(CoreError::Smtp(format!(
-                "{}:{} accepts passwords only over an encrypted connection. Choose STARTTLS or SSL/TLS.",
-                cfg.smtp_host, cfg.smtp_port
-            )));
+            return Err(CoreError::Smtp(message));
         }
         connection
             .auth(&mechanisms, &credentials)
@@ -499,6 +560,7 @@ async fn send_message(
         auth = match auth {
             SmtpAuth::Password(_) => "password",
             SmtpAuth::XOAuth2(_) => "xoauth2",
+            SmtpAuth::None => "none",
         },
         bytes = raw.len(),
         recipients = recipients.len(),

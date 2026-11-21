@@ -118,6 +118,8 @@ export global I18n {
     pure callback contact-history-available() -> string;
     pure callback new-contact-entry() -> string;
     pure callback no-connected-account() -> string;
+    // New mail's From when every account only receives mail.
+    pure callback no-sending-account() -> string;
     pure callback interaction-count(int) -> string;
     // Words of new-mail notifications (src/notifications.rs).
     pure callback notification-new-message() -> string;
@@ -248,6 +250,7 @@ export global I18n {
     contact-history-available() => { return @tr("Conversation history available"); }
     new-contact-entry() => { return @tr("New address-book entry"); }
     no-connected-account() => { return @tr("No connected account"); }
+    no-sending-account() => { return @tr("No account sends mail"); }
     interaction-count(count) => {
         return @tr("{n} interaction" | "{n} interactions" % count);
     }
@@ -886,6 +889,8 @@ export global I18n {
         if (key == "Certificate import failed: {}") { return @tr("Certificate import failed: {}", argument); }
         if (key == "Testing IMAP and SMTP connections…") { return @tr("Testing IMAP and SMTP connections…"); }
         if (key == "Testing POP3 and SMTP connections…") { return @tr("Testing POP3 and SMTP connections…"); }
+        if (key == "Testing the IMAP connection…") { return @tr("Testing the IMAP connection…"); }
+        if (key == "Testing the POP3 connection…") { return @tr("Testing the POP3 connection…"); }
         return "";
     }
 
@@ -1385,6 +1390,7 @@ export component AppWindow inherits Window {
             ThemeDraft.revert();
             root.account_form_open = false;
             root.account_password = "";
+            root.smtp_password = "";
             root.caldav_account_id = -1;
             root.caldav_connection_id = -1;
             root.caldav_password = "";
@@ -1533,6 +1539,12 @@ export component AppWindow inherits Window {
     in-out property <string> incoming_security: "tls";
     in-out property <string> smtp_security: "tls";
     in-out property <string> trusted_certificate_pem;
+    // The account form's advanced settings (#252).
+    in-out property <bool> account_sends_mail: true;
+    in-out property <string> incoming_login: "automatic";
+    in-out property <string> smtp_login: "automatic";
+    in-out property <string> smtp_username;
+    in-out property <string> smtp_password;
     in property <string> oauth_authorization_url;
     in property <bool> oauth_browser_error;
     callback retry_oauth_browser();
@@ -2423,6 +2435,11 @@ export component AppWindow inherits Window {
             incoming_security <=> root.incoming_security;
             smtp_security <=> root.smtp_security;
             trusted_certificate_pem <=> root.trusted_certificate_pem;
+            account_sends_mail <=> root.account_sends_mail;
+            incoming_login <=> root.incoming_login;
+            smtp_login <=> root.smtp_login;
+            smtp_username <=> root.smtp_username;
+            smtp_password <=> root.smtp_password;
             oauth_authorization_url: root.oauth_authorization_url;
             oauth_browser_error: root.oauth_browser_error;
             retry_oauth_browser => { root.retry_oauth_browser(); }
@@ -2963,6 +2980,11 @@ export component AppWindow inherits Window {
         incoming-security <=> root.incoming_security;
         smtp-security <=> root.smtp_security;
         trusted-certificate-pem <=> root.trusted_certificate_pem;
+        account-sends-mail <=> root.account_sends_mail;
+        incoming-login <=> root.incoming_login;
+        smtp-login <=> root.smtp_login;
+        smtp-username <=> root.smtp_username;
+        smtp-password <=> root.smtp_password;
         account-username <=> root.account_username;
         oauth-authorization-url: root.oauth_authorization_url;
         oauth-browser-error: root.oauth_browser_error;

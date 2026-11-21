@@ -1304,8 +1304,8 @@ fn detail_from_row(row: &rusqlite::Row) -> rusqlite::Result<MessageDetail> {
 }
 
 /// The read receipt a message row asks for, when one may be sent. Requests
-/// to the account's own addresses are left out later, by
-/// [`drop_own_receipt_requests`].
+/// to the account's own addresses, and those of an account that sends no
+/// mail, are left out later, by [`drop_unanswerable_receipt_requests`].
 fn receipt_request_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<ReceiptRequest>> {
     let Some(to) = row.get::<_, Option<String>>("receipt_to")? else {
         return Ok(None);
@@ -1332,10 +1332,15 @@ fn receipt_request_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<Rece
     }))
 }
 
-/// Leave out read receipt requests that would go to the account's own
-/// addresses: there's no one to tell.
-fn drop_own_receipt_requests(conn: &Connection, details: &mut [MessageDetail]) -> Result<()> {
+/// Leave out read receipt requests no receipt can answer. Those to the
+/// account's own addresses have no one to tell, and an account that sends no
+/// mail, such as local mail or one that only receives (#252), can't send one.
+fn drop_unanswerable_receipt_requests(
+    conn: &Connection,
+    details: &mut [MessageDetail],
+) -> Result<()> {
     use std::collections::hash_map::Entry;
+    // Each account's own addresses, or None when it sends no mail.
     let mut own = std::collections::HashMap::new();
     for detail in details {
         let Some(request) = &detail.receipt_request else {
@@ -1343,16 +1348,25 @@ fn drop_own_receipt_requests(conn: &Connection, details: &mut [MessageDetail]) -
         };
         let addresses = match own.entry(detail.account_id) {
             Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => entry.insert(super::sender_identities::own_addresses(
-                conn,
-                detail.account_id,
-            )?),
+            Entry::Vacant(entry) => {
+                let sends = super::accounts::get_config(conn, detail.account_id)?
+                    .is_some_and(|config| config.sends_mail());
+                entry.insert(if sends {
+                    Some(super::sender_identities::own_addresses(
+                        conn,
+                        detail.account_id,
+                    )?)
+                } else {
+                    None
+                })
+            }
         };
-        if request
-            .to
-            .iter()
-            .any(|address| addresses.contains(&address.email))
-        {
+        if addresses.as_ref().is_none_or(|addresses| {
+            request
+                .to
+                .iter()
+                .any(|address| addresses.contains(&address.email))
+        }) {
             detail.receipt_request = None;
         }
     }
@@ -1470,7 +1484,7 @@ pub fn detail(conn: &Connection, id: i64) -> Result<MessageDetail> {
     for a in atts {
         detail.attachments.push(a?);
     }
-    drop_own_receipt_requests(conn, std::slice::from_mut(&mut detail))?;
+    drop_unanswerable_receipt_requests(conn, std::slice::from_mut(&mut detail))?;
     super::returned_receipts::attach(conn, std::slice::from_mut(&mut detail))?;
     Ok(detail)
 }
@@ -1553,7 +1567,7 @@ pub fn list_for_thread(conn: &Connection, thread_id: i64) -> Result<Vec<MessageD
             m.attachments = atts;
         }
     }
-    drop_own_receipt_requests(conn, &mut out)?;
+    drop_unanswerable_receipt_requests(conn, &mut out)?;
     super::returned_receipts::attach(conn, &mut out)?;
     Ok(out)
 }
@@ -1572,7 +1586,7 @@ pub fn list_outline_for_thread(conn: &Connection, thread_id: i64) -> Result<Vec<
     let mut out = stmt
         .query_map(params![thread_id], detail_from_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    drop_own_receipt_requests(conn, &mut out)?;
+    drop_unanswerable_receipt_requests(conn, &mut out)?;
     super::returned_receipts::attach(conn, &mut out)?;
     Ok(out)
 }

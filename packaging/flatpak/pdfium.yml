@@ -12,8 +12,7 @@ build-commands:
   # Use the runtime's ICU.
   - mkdir -p third_party/icu
   - ln -sf ../../build/linux/unbundle/icu.gn third_party/icu/BUILD.gn
-  - mkdir -p tools/generate_shim_headers
-  - base64 --decode generate_shim_headers.py.b64 > tools/generate_shim_headers/generate_shim_headers.py
+  - install -Dm0644 generate_shim_headers.py tools/generate_shim_headers/generate_shim_headers.py
   # A standalone checkout has no gclient, which normally writes this file.
   - echo 'build_with_chromium = false' > build/config/gclient_args.gni
   - sed -i '/"\/\/third_party\/test_fonts",/s/^/#/' testing/BUILD.gn
@@ -61,11 +60,12 @@ sources:
     url: https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git
     commit: 34164f547b7df3f5d794ff67e9f885c36819ebfc
     dest: third_party/fast_float/src
-  # Chromium's copy at the chromium/8044 branch head; gitiles serves it as base64.
+  # Chromium's tools/generate_shim_headers/generate_shim_headers.py at the
+  # chromium/8044 branch head (f7a30920701e9b5a44c8ab55df9d21fb75e8d2e2),
+  # under Chromium's BSD license. It is kept here because Chromium's web view
+  # of single files refuses automated downloads at times.
   - type: file
-    url: https://chromium.googlesource.com/chromium/src/+/f7a30920701e9b5a44c8ab55df9d21fb75e8d2e2/tools/generate_shim_headers/generate_shim_headers.py?format=TEXT
-    dest-filename: generate_shim_headers.py.b64
-    sha256: 0294e322b4ab283861162b4c3fe7c7f2de8b643afd3d9175730b2e91f0337fb9
+    path: generate_shim_headers.py
 modules:
   # A build tool only, so none of it stays in the app.
   - name: gn
