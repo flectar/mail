@@ -1,0 +1,59 @@
+import { TypeScale } from "../typography.slint";
+
+// The hover help bubble shared by the application's controls: a dark box with
+// a caret pointing at what it describes. The caller places the bubble; the
+// caret's tip is the bubble's edge on `caret-side`.
+export component TooltipBubble inherits Rectangle {
+    in property <string> text;
+    // "top" for a bubble below its control, "bottom" for one above, "left"
+    // for one to the right.
+    in property <string> caret-side: "top";
+    // Where the caret points along its side, in the bubble's coordinates. It
+    // stays clear of the rounded corners.
+    in property <length> caret-at: self.caret-side == "left" ? self.bubble-height / 2 : self.width / 2;
+    in property <length> font-size: TypeScale.secondary;
+    in property <length> bubble-height: 28px;
+    in property <length> max-text-width: 480px;
+
+    private property <bool> sideways: self.caret-side == "left";
+    private property <length> caret: 6px;
+    private property <length> box-width: min(label.preferred-width, self.max-text-width) + 20px;
+
+    width: self.box-width + (self.sideways ? self.caret : 0px);
+    height: self.bubble-height + (self.sideways ? 0px : self.caret);
+    accessible-role: none;
+
+    Path {
+        x: root.sideways ? 0px : max(8px, min(root.width - 20px, root.caret-at - 6px));
+        y: root.sideways ? (root.bubble-height - 12px) / 2
+            : root.caret-side == "bottom" ? root.bubble-height : 0px;
+        width: root.sideways ? root.caret : 12px;
+        height: root.sideways ? 12px : root.caret;
+        viewbox-width: root.sideways ? 6 : 12;
+        viewbox-height: root.sideways ? 12 : 6;
+        commands: root.sideways ? "M 6 0 L 0 6 L 6 12 Z"
+            : root.caret-side == "bottom" ? "M 0 0 L 6 6 L 12 0 Z" : "M 0 6 L 6 0 L 12 6 Z";
+        fill: #292929;
+        accessible-role: none;
+    }
+
+    Rectangle {
+        x: root.sideways ? root.caret : 0px;
+        y: root.caret-side == "top" ? root.caret : 0px;
+        width: root.box-width;
+        height: root.bubble-height;
+        border-radius: 6px;
+        background: #292929;
+
+        label := Text {
+            x: 10px;
+            width: parent.width - 20px;
+            text: root.text;
+            color: white;
+            font-size: root.font-size;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}

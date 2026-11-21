@@ -33,6 +33,7 @@ import "../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,RON
 
 import { Palette } from "std-widgets.slint";
 import { InterfaceText, TypeScale } from "typography.slint";
+import { TooltipBubble } from "components/tooltip-bubble.slint";
 export { AppTheme, MotionSettings, ThemeUtilities } from "design-system.slint";
 export { InterfaceText } from "typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings } from "design-system.slint";
@@ -2679,23 +2680,13 @@ export component AppWindow inherits Window {
         // The rail width comes from the shared workspace geometry. Its hover label is
         // rendered here, above the adjacent workspace, so it can extend right
         // of the icon without being clipped by the rail component.
-        Rectangle {
+        TooltipBubble {
             visible: !root.compact-layout && product-rail.tooltip-text != "";
-            x: LayoutMetrics.product-rail-width + 6px;
+            x: LayoutMetrics.product-rail-width + 2px;
             y: product-rail.tooltip-y;
-            width: rail-tooltip-label.preferred-width + 16px;
-            height: 28px;
-            border-radius: 5px;
-            background: #292929;
+            text: product-rail.tooltip-text;
+            caret-side: "left";
             z: 10000;
-
-            rail-tooltip-label := Text {
-                text: product-rail.tooltip-text;
-                color: white;
-                font-size: TypeScale.secondary;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
         }
     }
 
