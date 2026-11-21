@@ -1142,6 +1142,9 @@ static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
     .add_tag_attributes("img", ["src", "alt", "width", "height"])
     .add_tag_attributes("font", ["face", "size", "color"])
     .add_tag_attributes("a", ["href", "title"])
+    // Whether a collapsible section starts open, and the group of which only
+    // one may be open at a time. DOMPurify keeps both too.
+    .add_tag_attributes("details", ["open", "name"])
     .url_schemes(std::collections::HashSet::from([
         "http", "https", "mailto", "tel", "cid", "data",
     ]))
@@ -4377,6 +4380,27 @@ mod tests {
             cleaned.contains(r#"<span dir="auto">"#),
             "cleaned: {cleaned}"
         );
+    }
+
+    #[test]
+    fn sanitizing_html_keeps_collapsible_sections() {
+        let cleaned = sanitize_html(
+            r#"<details open name="faq" ontoggle="steal()"><summary>Question</summary><p>Answer</p></details><details><summary><h3>Changelog</h3></summary><ul><li>Fix</li></ul></details>"#,
+        );
+
+        assert!(
+            cleaned.contains(
+                r#"<details open="" name="faq"><summary>Question</summary><p>Answer</p></details>"#
+            ),
+            "cleaned: {cleaned}"
+        );
+        assert!(
+            cleaned.contains(
+                "<details><summary><h3>Changelog</h3></summary><ul><li>Fix</li></ul></details>"
+            ),
+            "cleaned: {cleaned}"
+        );
+        assert!(!cleaned.contains("ontoggle"), "cleaned: {cleaned}");
     }
 
     #[test]
