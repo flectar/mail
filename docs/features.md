@@ -926,9 +926,9 @@ provider as before.
 Turn it on in Settings → Sync. **Add a device** on a device that already syncs
 shows a QR code to scan with your phone, or a short code to type on the other
 device, and a device can also join with your recovery code. Each device keeps
-its own mail checking, how much mail history it downloads, its proxy, and
-settings that belong to the device itself, such as reduced motion and text
-size.
+its own mail checking, how much mail history it downloads, its proxy and server
+timeout, and settings that belong to the device itself, such as reduced motion
+and text size.
 
 Flectar Mail Sync is a paid service, with a free trial, that pays for the
 servers it runs on. Each contribution to Flectar Mail earns a free year of it,
