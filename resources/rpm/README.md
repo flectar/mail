@@ -57,3 +57,23 @@ RPM cannot pass the matrix, publish separately labelled per-release builds.
 Keep RPM's automatic ELF requirements enabled. Removing a requirement or
 using `--nodeps` hides an incompatible binary instead of fixing it. The public
 RPM filename remains stable, and checksums/attestations cover the tested bytes.
+
+## Signed repository
+
+`scripts/build-rpm-repo.sh` signs both architectures' RPMs with one key,
+builds the dnf and zypper repository with signed metadata, and writes
+`flectar-mail.repo`. In `.github/workflows/native-platforms.yml` the
+`rpm-repo` job runs it after the builds and replaces the RPM artifacts with
+the signed files, so the release attaches exactly what the repository serves.
+The runtime matrix installs from that repository through its `.repo` file,
+with package and metadata signature checks on. Release tags publish it to
+GitHub Pages at https://flectar.github.io/mail/rpm/, holding the latest
+release only.
+
+The key is the `RPM_SIGNING_KEY` repository secret, an ASCII-armored private
+key, with its passphrase in `RPM_SIGNING_PASSPHRASE`. Pull requests and other
+runs without it sign with a throwaway key, so every run exercises signing; a
+release tag fails without the real key. The packages and metadata are held in
+one place because zypper downloads packages relative to the repository and
+ignores `xml:base`, so the RPMs can't stay on the GitHub release alone.
+
