@@ -1,8 +1,10 @@
 import { TypeScale } from "../typography.slint";
+import { AppTheme } from "../design-system.slint";
 
-// The hover help bubble shared by the application's controls: a dark box with
-// a caret pointing at what it describes. The caller places the bubble; the
-// caret's tip is the bubble's edge on `caret-side`.
+// The hover help bubble shared by the application's controls: a box with a
+// caret pointing at what it describes, dark on a light theme and light on a
+// dark one. The caller places the bubble; the caret's tip is the bubble's edge
+// on `caret-side`.
 export component TooltipBubble inherits Rectangle {
     in property <string> text;
     // "top" for a bubble below its control, "bottom" for one above, "left"
@@ -17,6 +19,7 @@ export component TooltipBubble inherits Rectangle {
 
     private property <bool> sideways: self.caret-side == "left";
     private property <length> caret: 6px;
+    private property <color> bubble-color: AppTheme.dark ? #e8e8e8 : #292929;
     private property <length> box-width: min(label.preferred-width, self.max-text-width) + 20px;
 
     width: self.box-width + (self.sideways ? self.caret : 0px);
@@ -33,7 +36,7 @@ export component TooltipBubble inherits Rectangle {
         viewbox-height: root.sideways ? 12 : 6;
         commands: root.sideways ? "M 6 0 L 0 6 L 6 12 Z"
             : root.caret-side == "bottom" ? "M 0 0 L 6 6 L 12 0 Z" : "M 0 6 L 6 0 L 12 6 Z";
-        fill: #292929;
+        fill: root.bubble-color;
         accessible-role: none;
     }
 
@@ -43,17 +46,137 @@ export component TooltipBubble inherits Rectangle {
         width: root.box-width;
         height: root.bubble-height;
         border-radius: 6px;
-        background: #292929;
+        background: root.bubble-color;
 
         label := Text {
             x: 10px;
             width: parent.width - 20px;
             text: root.text;
-            color: white;
+            color: AppTheme.dark ? #1f1f1f : white;
             font-size: root.font-size;
             horizontal-alignment: center;
             vertical-alignment: center;
             overflow: elide;
         }
+    }
+}
+
+// The action help of one window. A control reports its text and where it is
+// through an `ActionTooltipSource`, and the window's `ActionTooltipLayer`
+// draws the bubble above every pane, so no neighbouring pane or later sibling
+// covers it. It stays in the main scene: native Tooltip uses a popup surface,
+// which is not consistently presented by every AppImage/Wayland compositor
+// combination.
+export global ActionTooltip {
+    out property <string> text;
+    // The control, in window coordinates.
+    out property <length> anchor-x;
+    out property <length> anchor-y;
+    out property <length> anchor-width;
+    out property <length> anchor-height;
+    // Above the control instead of below it.
+    out property <bool> above;
+    // Along the control's leading edge instead of centred on it.
+    out property <bool> align-left;
+    // Counts reports, so the layer can tell that the control is still there.
+    out property <int> reports;
+    out property <int> checked-reports;
+
+    public function show(text: string, x: length, y: length, width: length, height: length, above: bool, align-left: bool) {
+        self.anchor-x = x;
+        self.anchor-y = y;
+        self.anchor-width = width;
+        self.anchor-height = height;
+        self.above = above;
+        self.align-left = align-left;
+        self.text = text;
+        self.reports += 1;
+    }
+
+    // Like `show`, but leaves another control's help alone.
+    public function keep(text: string, x: length, y: length, width: length, height: length, above: bool, align-left: bool) {
+        if self.text == "" || (self.anchor-x == x && self.anchor-y == y) {
+            self.show(text, x, y, width, height, above, align-left);
+        }
+    }
+
+    // Hide the help of the control at `x`, `y`, unless another control has
+    // replaced it since.
+    public function hide(x: length, y: length) {
+        if self.anchor-x == x && self.anchor-y == y {
+            self.text = "";
+        }
+    }
+
+    // A control that goes away reports nothing more, so help that was not
+    // reported since the last check goes too.
+    public function check() {
+        if self.reports == self.checked-reports {
+            self.text = "";
+        }
+        self.checked-reports = self.reports;
+    }
+}
+
+// Reports a control's help to the window. It covers the control, or the part
+// the help points at, and takes no input.
+export component ActionTooltipSource inherits Rectangle {
+    in property <bool> shown;
+    in property <string> text;
+    in property <bool> above;
+    in property <bool> align-left;
+
+    accessible-role: none;
+    changed shown => { root.refresh(); }
+    changed text => { root.refresh(); }
+
+    public function refresh() {
+        if root.shown && root.text != "" {
+            ActionTooltip.show(root.text, root.absolute-position.x, root.absolute-position.y,
+                root.width, root.height, root.above, root.align-left);
+        } else {
+            root.hide();
+        }
+    }
+
+    public function hide() {
+        ActionTooltip.hide(root.absolute-position.x, root.absolute-position.y);
+    }
+
+    // Keeps the help while it shows, and follows the control if it moves.
+    Timer {
+        interval: 100ms;
+        running: root.shown && root.text != "";
+        triggered => {
+            ActionTooltip.keep(root.text, root.absolute-position.x, root.absolute-position.y,
+                root.width, root.height, root.above, root.align-left);
+        }
+    }
+}
+
+// Draws the window's action help. It fills the window, above its panes and
+// dialogs, and takes no input.
+export component ActionTooltipLayer inherits Rectangle {
+    accessible-role: none;
+
+    Timer {
+        interval: 300ms;
+        running: ActionTooltip.text != "";
+        triggered => { ActionTooltip.check(); }
+    }
+
+    if ActionTooltip.text != "" : TooltipBubble {
+        text: ActionTooltip.text;
+        caret-side: ActionTooltip.above ? "bottom" : "top";
+        // Centred on the control, or along its left edge, and kept inside the
+        // window. The caret keeps pointing at the control's centre.
+        private property <length> preferred-x: ActionTooltip.align-left
+            ? ActionTooltip.anchor-x
+            : ActionTooltip.anchor-x + (ActionTooltip.anchor-width - self.width) / 2;
+        x: max(8px, min(self.preferred-x, root.width - self.width - 8px));
+        y: ActionTooltip.above
+            ? ActionTooltip.anchor-y - self.height - 2px
+            : ActionTooltip.anchor-y + ActionTooltip.anchor-height + 2px;
+        caret-at: ActionTooltip.anchor-x + ActionTooltip.anchor-width / 2 - self.x;
     }
 }

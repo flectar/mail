@@ -1,6 +1,6 @@
 import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
-import { TooltipBubble } from "tooltip-bubble.slint";
+import { ActionTooltipSource } from "tooltip-bubble.slint";
 import { LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { WindowChrome, WindowDragArea } from "../window-chrome.slint";
 import { MailProfileRow } from "../models.slint";
@@ -458,6 +458,7 @@ component TabItem inherits Rectangle {
     private property <length> offset: hit.dragging ? hit.travel : root.shift;
 
     function close() {
+        tooltip.hide();
         root.closing();
         TabsUi.close(root.entry.id);
     }
@@ -688,14 +689,15 @@ component TabItem inherits Rectangle {
         running: root.hovered && root.truncated && !root.tooltip-due && !root.tooltip-dismissed;
         triggered => { root.tooltip-due = true; }
     }
-    if root.tooltip-due && root.hovered && root.truncated && !root.tooltip-dismissed : TooltipBubble {
-        // Below the tab, kept inside the window, with the caret near the
-        // tab's leading edge.
-        x: max(8px - root.absolute-position.x,
-            min(8px, WindowChrome.window-width - root.absolute-position.x - self.width - 8px));
-        y: parent.height;
+    // Below the tab, drawn by the window, with the caret near the tab's
+    // leading edge.
+    tooltip := ActionTooltipSource {
+        x: 8px;
+        width: 32px;
+        height: parent.height;
+        shown: root.tooltip-due && root.hovered && root.truncated && !root.tooltip-dismissed;
         text: root.title;
-        caret-at: 24px - self.x;
+        align-left: true;
     }
 }
 
@@ -727,15 +729,12 @@ component NewTabButton inherits Rectangle {
         accessible-action-default => { TabsUi.create(); }
         clicked => { TabsUi.create(); }
     }
-    if hit.has-hover : TooltipBubble {
-        // Centred below the button, kept inside the window, with the caret
-        // on the button.
-        x: max(8px - root.absolute-position.x,
-            min((root.width - self.width) / 2,
-                WindowChrome.window-width - root.absolute-position.x - self.width - 8px));
-        y: parent.height + 2px;
+    // Centred below the button, drawn by the window.
+    ActionTooltipSource {
+        width: parent.width;
+        height: parent.height;
+        shown: hit.has-hover;
         text: @tr("New tab");
-        caret-at: root.width / 2 - self.x;
     }
 }
 

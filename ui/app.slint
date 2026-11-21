@@ -33,7 +33,7 @@ import "../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,RON
 
 import { Palette } from "std-widgets.slint";
 import { InterfaceText, TypeScale } from "typography.slint";
-import { TooltipBubble } from "components/tooltip-bubble.slint";
+import { ActionTooltipLayer, TooltipBubble } from "components/tooltip-bubble.slint";
 export { AppTheme, MotionSettings, ThemeUtilities } from "design-system.slint";
 export { InterfaceText } from "typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings } from "design-system.slint";
@@ -993,6 +993,13 @@ export component ComposerWindow inherits Window {
         width: parent.width;
         height: parent.height;
         z: 15000;
+    }
+
+    // The composer window's action help, above its dialogs.
+    ActionTooltipLayer {
+        width: parent.width;
+        height: parent.height;
+        z: 49000;
     }
 }
 
@@ -3110,6 +3117,13 @@ export component AppWindow inherits Window {
             root.settings_tab = "Accounts";
             root.open-settings();
         }
+    }
+
+    // Action help, above the panes and dialogs.
+    ActionTooltipLayer {
+        width: parent.width;
+        height: parent.height;
+        z: 49000;
     }
 
     if WindowChrome.controls-visible : WindowControls {

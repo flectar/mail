@@ -1,6 +1,6 @@
 import { HorizontalBox } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
-import { TooltipBubble } from "tooltip-bubble.slint";
+import { ActionTooltipSource } from "tooltip-bubble.slint";
 
 // Shared by onboarding and account settings so provider entry points keep the
 // same recognizable brand treatment throughout the app.
@@ -74,6 +74,7 @@ export component ProviderButton inherits Rectangle {
 
     provider-hit := TouchArea {
         clicked => {
+            tooltip.hide();
             if root.enabled {
                 root.clicked();
             }
@@ -81,12 +82,13 @@ export component ProviderButton inherits Rectangle {
         mouse-cursor: root.enabled ? pointer : default;
     }
 
-    TooltipBubble {
-        visible: root.tooltip-text != "" && provider-hit.has-hover;
-        x: (parent.width - self.width) / 2;
-        y: -self.height - 2px;
+    // Centred above the button, drawn by the window, so a scrolled list does
+    // not clip it.
+    tooltip := ActionTooltipSource {
+        width: parent.width;
+        height: parent.height;
+        shown: provider-hit.has-hover;
         text: root.tooltip-text;
-        caret-side: "bottom";
-        z: 10000;
+        above: true;
     }
 }

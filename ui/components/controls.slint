@@ -2,7 +2,7 @@ import { ScrollView } from "std-widgets.slint";
 import { AppTheme, LayoutMetrics, MotionSettings, ThemeUtilities } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
-import { TooltipBubble } from "tooltip-bubble.slint";
+import { ActionTooltipSource, TooltipBubble } from "tooltip-bubble.slint";
 import { WindowChrome } from "../window-chrome.slint";
 
 export component TextEdit inherits Rectangle {
@@ -303,6 +303,9 @@ export component IconButton inherits Rectangle {
     in property <string> tooltip-text: "";
     in property <bool> tooltip-above: false;
     in property <bool> tooltip-align-left: false;
+    // A button in a popup draws its own help: the popup covers the window's
+    // shared bubble.
+    in property <bool> tooltip-in-popup: false;
     // A click focuses the button, as it does a FocusScope. The buttons of a text editor's
     // toolbar turn this off, so the text keeps the focus and its selection. Tab still
     // reaches them.
@@ -313,6 +316,9 @@ export component IconButton inherits Rectangle {
         keyboard.pointer-activated();
         IconButtonInput.keyboard = false;
     }
+
+    private property <bool> tooltip-shown: root.tooltip-text != ""
+        && (IconButtonInput.keyboard ? keyboard.has-focus : hit-area.has-hover);
 
     width: 32px;
     height: 32px;
@@ -350,12 +356,17 @@ export component IconButton inherits Rectangle {
 
     keyboard := FocusVisibleScope {
         enabled: root.interactive;
-        changed has-focus => { if self.has-focus { IconButtonInput.keyboard = true; } }
+        // A tap focuses the button too; only focus from the keyboard shows
+        // its help, so a phone does not keep the bubble up.
+        changed has-focus => { if self.focus-visible { IconButtonInput.keyboard = true; } }
         focus-on-tab-navigation: true;
         accessible-role: none;
         key-pressed(event) => {
             IconButtonInput.keyboard = true;
+            // Show its help at once, also after a click hid it.
+            tooltip.refresh();
             if root.interactive && (event.text == Key.Return || event.text == Key.Space) {
+                tooltip.hide();
                 root.clicked();
                 return accept;
             }
@@ -378,31 +389,32 @@ export component IconButton inherits Rectangle {
                 keyboard.focus();
             }
             root.pointer-activated();
+            // The action may remove the button. One that stays shows its help
+            // again on the next report.
+            tooltip.hide();
             root.clicked();
         }
         mouse-cursor: pointer;
     }
 
-    // Keep action help inside the main scene. Native Tooltip uses a popup
-    // surface, which is not consistently presented by every AppImage/Wayland
-    // compositor combination.
-    TooltipBubble {
-        visible: root.tooltip-text != "" && (IconButtonInput.keyboard ? keyboard.has-focus : hit-area.has-hover);
+    // The window draws the help, so it is not clipped by this button's pane
+    // or covered by the panes after it.
+    tooltip := ActionTooltipSource {
+        width: parent.width;
+        height: parent.height;
+        shown: root.tooltip-shown && !root.tooltip-in-popup;
+        text: root.tooltip-text;
+        above: root.tooltip-above;
+        align-left: root.tooltip-align-left;
+    }
+
+    // A popup is drawn above the window, so its buttons show their own help.
+    if root.tooltip-in-popup && root.tooltip-shown : TooltipBubble {
         text: root.tooltip-text;
         caret-side: root.tooltip-above ? "bottom" : "top";
-        // Point at the button's centre, also when the bubble is shifted to
-        // stay inside the window.
-        caret-at: root.width / 2 - self.x;
-        // Centred on the button, or along its left edge, and kept inside the
-        // main window. Windows that do not report their width keep the
-        // button's own edges.
-        private property <length> preferred-x: root.tooltip-align-left ? 0px : (parent.width - self.width) / 2;
-        x: WindowChrome.window-width > 0px
-            ? max(8px - root.absolute-position.x,
-                min(self.preferred-x, WindowChrome.window-width - root.absolute-position.x - self.width - 8px))
-            : root.tooltip-align-left ? 0px : parent.width - self.width;
+        x: root.tooltip-align-left ? 0px : (parent.width - self.width) / 2;
         y: root.tooltip-above ? -self.height - 2px : parent.height + 2px;
-        z: 10000;
+        caret-at: root.width / 2 - self.x;
     }
 }
 
