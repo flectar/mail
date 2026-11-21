@@ -80,8 +80,10 @@ presenters and prints the app's memory for each.
 `0005-windows-fit-new-windows-into-the-work-area.patch` checks a window on
 Windows before its first frame, after Slint gave it its preferred size. When
 the window doesn't fit in the work area of the monitor that Windows put it on,
-it moves inside and shrinks as far as needed. A window shown again after it was
-hidden keeps the place the user gave it, unless it is on no monitor at all,
+it moves inside and shrinks as far as needed. The patch sets the outer frame
+itself, since winit sizes a window from its inner size plus a standard frame,
+and Flectar Mail's window draws its own title bar. A window shown again after it
+was hidden keeps the place the user gave it, unless it is on no monitor at all,
 for example after the monitor it was on was disconnected. The Windows packaging
 job's `scripts/test-clean-exit.py` fails when a window of the app doesn't fit
 the work area of its monitor. The runners' screen is 1024 by 768 pixels.
