@@ -243,6 +243,9 @@
     "sidebar-expand.svg": {
       "source": "panel-left-open"
     },
+    "sign-in.svg": {
+      "source": "log-in"
+    },
     "sparkles.svg": {
       "source": "sparkles"
     },
@@ -571,6 +574,10 @@
     "lock-keyhole": {
       "path": "sources/lock-keyhole.svg",
       "sha256": "8b44d8c3d29e92764bb93c20a1ae170f03ce3c35f8fbc4f6c15564fbcf5ed197"
+    },
+    "log-in": {
+      "path": "sources/log-in.svg",
+      "sha256": "2c5d911ec76556f29f870707d0cd4bcd541659eb575e074d4d34d61f09620c20"
     },
     "mail": {
       "path": "sources/mail.svg",
