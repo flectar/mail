@@ -114,6 +114,9 @@ export global I18n {
     // ACCEPTED), in the user's language.
     pure callback guest-answer(string) -> string;
     pure callback untitled-event() -> string;
+    // The title of a collapsible section in a message that has none of its
+    // own, as browsers show one (the default summary of HTML's <details>).
+    pure callback details-summary() -> string;
     pure callback no-contact-history() -> string;
     pure callback contact-history-available() -> string;
     pure callback new-contact-entry() -> string;
@@ -246,6 +249,9 @@ export global I18n {
             : answer == "NEEDS-ACTION" ? @tr("Not answered yet") : answer;
     }
     untitled-event() => { return @tr("(untitled event)"); }
+    details-summary() => {
+        return @tr("title of a collapsible section in a message" => "Details");
+    }
     no-contact-history() => { return @tr("No conversation history"); }
     contact-history-available() => { return @tr("Conversation history available"); }
     new-contact-entry() => { return @tr("New address-book entry"); }

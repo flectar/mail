@@ -109,7 +109,9 @@ pub(super) fn register_renderer_input_callbacks(
             return;
         };
         if url.starts_with('#') {
-            if let Some(y) = r.borrow().fragment_y(&url) {
+            // The scroll below asks the renderer again, so let it go first.
+            let target = r.borrow_mut().fragment_y(&url);
+            if let Some(y) = target {
                 let y = y + banner_height(&app);
                 app.set_email_scroll_y(-y);
                 app.invoke_email_scroll(y, app.get_email_viewport_height());
@@ -243,6 +245,18 @@ pub(super) fn register_renderer_input_callbacks(
                     r.borrow_mut()
                         .set_visible_region(y, app.get_email_viewport_height());
                 }
+                repaint_reader(&app, &r, gpu);
+            }
+        });
+    let weak = app.as_weak();
+    let r = renderer.clone();
+    app.global::<EmailReader>()
+        .on_toggle_section(move |section| {
+            let (Some(app), Ok(section)) = (weak.upgrade(), usize::try_from(section)) else {
+                return;
+            };
+            let toggled = r.borrow_mut().toggle_section(section);
+            if toggled {
                 repaint_reader(&app, &r, gpu);
             }
         });

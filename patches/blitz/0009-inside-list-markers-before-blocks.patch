@@ -1,0 +1,206 @@
+diff --git a/crates/blitz-dom/src/layout/construct.rs b/crates/blitz-dom/src/layout/construct.rs
+index fb6a1de2..700db0bc 100644
+--- a/crates/blitz-dom/src/layout/construct.rs
++++ b/crates/blitz-dom/src/layout/construct.rs
+@@ -504,10 +504,15 @@ fn collect_layout_children_with_wrap(
+         collect_list_item_children(doc, &mut index, reversed, container_node_id);
+     }
+ 
+-    // Skip further construction if the node has no children or psuedo-children
++    // Skip further construction if the node has no children or psuedo-children.
++    // An inside marker still needs a line of its own.
+     {
+         let node = &doc.nodes[container_node_id];
+-        if node.children.is_empty() && node.before().is_none() && node.after().is_none() {
++        if node.children.is_empty()
++            && node.before().is_none()
++            && node.after().is_none()
++            && inside_marker(node).is_none()
++        {
+             return;
+         }
+     }
+@@ -597,7 +602,10 @@ fn collect_layout_children_with_wrap(
+             let mut classification = FlowClassification::default();
+             classify_flow_children(doc, container_node_id, &mut classification);
+ 
+-            if classification.all_out_of_flow {
++            // An inside marker is in flow, so its list item has a line for it.
++            if classification.all_out_of_flow
++                && inside_marker(&doc.nodes[container_node_id]).is_none()
++            {
+                 // Contents-transparent: a display:contents child may be
+                 // holding the out-of-flow elements (otherwise the contents
+                 // node itself would be pushed as a layout box).
+@@ -632,10 +640,11 @@ fn collect_layout_children_with_wrap(
+             // If the children are either all inline or all block then simply return the regular children
+             // as the layout children
+             if classification.all_block & !classification.has_contents {
+-                return push_non_whitespace_children_and_pseudos(
++                push_non_whitespace_children_and_pseudos(
+                     &mut out.children,
+                     &doc.nodes[container_node_id],
+                 );
++                return place_inside_marker(doc, container_node_id, out);
+             } else if classification.all_inline & !classification.has_contents {
+                 return push_children_and_pseudos(&mut out.children, &doc.nodes[container_node_id]);
+             }
+@@ -647,7 +656,53 @@ fn collect_layout_children_with_wrap(
+                 false,
+                 block_item_needs_wrap,
+             );
++            place_inside_marker(doc, container_node_id, out);
++        }
++    }
++}
++
++/// The marker of a list item whose `list-style-position` is `inside`.
++fn inside_marker(node: &Node) -> Option<&Marker> {
++    match node.element_data()?.list_item_data.as_deref()? {
++        ListItemLayout {
++            marker,
++            position: ListItemLayoutPosition::Inside,
++        } => Some(marker),
++        _ => None,
++    }
++}
++
++/// An inside marker is an inline box in front of the list item's content
++/// (CSS Lists 3, `list-style-position`). A list item that is an inline
++/// formatting context of its own draws it in its own text. One whose content
++/// starts with an anonymous block of inline content hands the marker to that
++/// block. One whose content starts with a block, such as a `<summary>` holding
++/// a heading, gets an anonymous block that holds only the marker, which then
++/// stands on a line above the block as in browsers.
++fn place_inside_marker(
++    doc: &mut BaseDocument,
++    container_node_id: NodeId,
++    out: &mut LayoutChildren,
++) {
++    let Some(marker) = inside_marker(&doc.nodes[container_node_id]).cloned() else {
++        return;
++    };
++    let line = match out.children.first() {
++        Some(&first) if out.anonymous_blocks.contains(&first) => first,
++        _ => {
++            let open_block = out.anonymous_block_id.take();
++            out.create_anonymous_block(container_node_id, doc);
++            let line = out.children.pop().unwrap();
++            out.children.insert(0, line);
++            out.anonymous_block_id = open_block;
++            line
+         }
++    };
++    if let Some(element_data) = doc.nodes[line].element_data_mut() {
++        element_data.list_item_data = Some(Box::new(ListItemLayout {
++            marker,
++            position: ListItemLayoutPosition::Inside,
++        }));
+     }
+ }
+ 
+@@ -1317,3 +1372,104 @@ pub(crate) fn build_inline_layout_into(
+         }
+     }
+ }
++
++#[cfg(test)]
++mod inside_marker_tests {
++    use crate::{Attribute, BaseDocument, DocumentConfig, DocumentMutator, NodeId, qual_name};
++    use blitz_traits::shell::{ColorScheme, Viewport};
++
++    /// A closed `<details>` whose `<summary>` holds what `content` builds,
++    /// made by hand because the HTML parser lives in blitz-html.
++    fn summary_holding(
++        content: impl FnOnce(&mut DocumentMutator) -> Vec<NodeId>,
++    ) -> (BaseDocument, NodeId) {
++        let mut doc = BaseDocument::new(DocumentConfig {
++            viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
++            ..Default::default()
++        });
++        let root_id = doc.root_node().id;
++        let mut mutator = doc.mutate();
++        let html = mutator.create_element(qual_name!("html", html), vec![]);
++        let body = mutator.create_element(
++            qual_name!("body", html),
++            vec![Attribute {
++                name: qual_name!("style"),
++                value: "margin:0".into(),
++            }],
++        );
++        let details = mutator.create_element(qual_name!("details", html), vec![]);
++        let summary = mutator.create_element(qual_name!("summary", html), vec![]);
++        let children = content(&mut mutator);
++        mutator.append_children(summary, &children);
++        let hidden = mutator.create_element(qual_name!("p", html), vec![]);
++        mutator.append_children(details, &[summary, hidden]);
++        mutator.append_children(body, &[details]);
++        mutator.append_children(html, &[body]);
++        mutator.append_children(root_id, &[html]);
++        drop(mutator);
++        doc.resolve(0.0);
++        (doc, summary)
++    }
++
++    fn layout_children(doc: &BaseDocument, id: NodeId) -> Vec<NodeId> {
++        doc.nodes[id]
++            .layout_children
++            .borrow()
++            .as_deref()
++            .unwrap_or_default()
++            .to_vec()
++    }
++
++    fn inline_text(doc: &BaseDocument, id: NodeId) -> Option<String> {
++        let element = doc.nodes[id].element_data()?;
++        Some(element.inline_layout_data.as_ref()?.text.clone())
++    }
++
++    fn is_anonymous(doc: &BaseDocument, id: NodeId) -> bool {
++        matches!(doc.nodes[id].data, crate::NodeData::AnonymousBlock(_))
++    }
++
++    #[test]
++    fn marker_of_inline_summary_stays_in_its_text() {
++        let (doc, summary) = summary_holding(|m| vec![m.create_text_node("Plain")]);
++        assert_eq!(inline_text(&doc, summary).as_deref(), Some("▸ Plain"));
++    }
++
++    #[test]
++    fn marker_stands_on_its_own_line_above_a_block() {
++        let (doc, summary) = summary_holding(|m| {
++            let heading = m.create_element(qual_name!("h3", html), vec![]);
++            let text = m.create_text_node("Changelog");
++            m.append_children(heading, &[text]);
++            vec![heading]
++        });
++        let children = layout_children(&doc, summary);
++        assert_eq!(children.len(), 2, "a marker line, then the heading");
++        assert!(is_anonymous(&doc, children[0]));
++        assert_eq!(inline_text(&doc, children[0]).as_deref(), Some("▸"));
++        assert_eq!(inline_text(&doc, children[1]).as_deref(), Some("Changelog"));
++        assert_eq!(inline_text(&doc, summary), None);
++    }
++
++    #[test]
++    fn marker_joins_inline_content_before_a_block() {
++        let (doc, summary) = summary_holding(|m| {
++            let text = m.create_text_node("Notes");
++            let block = m.create_element(qual_name!("div", html), vec![]);
++            let more = m.create_text_node("More");
++            m.append_children(block, &[more]);
++            vec![text, block]
++        });
++        let children = layout_children(&doc, summary);
++        assert_eq!(children.len(), 2, "the wrapped text, then the block");
++        assert!(is_anonymous(&doc, children[0]));
++        assert_eq!(inline_text(&doc, children[0]).as_deref(), Some("▸ Notes"));
++        assert_eq!(inline_text(&doc, children[1]).as_deref(), Some("More"));
++    }
++
++    #[test]
++    fn empty_summary_still_shows_its_marker() {
++        let (doc, summary) = summary_holding(|_| Vec::new());
++        assert_eq!(inline_text(&doc, summary).as_deref(), Some("▸"));
++    }
++}
