@@ -35,7 +35,7 @@ pub(super) fn install(
 }
 
 /// The saved search the list shows: its query, run in the accounts in view.
-fn selected(state: &InboxState) -> Option<&mail::SavedSearchEntry> {
+pub(super) fn selected(state: &InboxState) -> Option<&mail::SavedSearchEntry> {
     let query = state.query.trim();
     if query.is_empty() || state.scope != Scope::UNIFIED_INBOX {
         return None;
@@ -46,17 +46,14 @@ fn selected(state: &InboxState) -> Option<&mail::SavedSearchEntry> {
         .find(|saved| saved.query == query)
 }
 
-/// Marks the saved search the list shows, and names the list after it.
+/// Marks the saved search the list shows, which names the list too
+/// (`mail_view_model::list_title`).
 pub(super) fn show(app: &AppWindow, state: &InboxState) {
-    let selected = selected(state);
     app.global::<SavedSearchUi>().set_selected_id(
-        selected
+        selected(state)
             .and_then(|saved| i32::try_from(saved.id).ok())
             .unwrap_or(-1),
     );
-    if let Some(saved) = selected {
-        app.set_selected_scope_title(saved.name.as_str().into());
-    }
 }
 
 /// Puts the saved searches' rows after what the accounts share, before the

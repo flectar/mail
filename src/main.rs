@@ -40,6 +40,8 @@ pub mod documents;
 mod email_document;
 pub mod favicon;
 mod files_controller;
+#[cfg(all(linux_desktop, feature = "flatpak"))]
+mod flatpak_secrets;
 mod han_fallback;
 mod import_controller;
 mod invitation;
@@ -1268,6 +1270,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
     if let Err(error) = slint::select_bundled_translation(selected) {
         eprintln!("could not select {selected} translation: {error}");
     }
+    sidebar_model::reload_mailbox_names(app);
     app.set_language_mode(language_mode.into());
     app.set_privacy_policy_url(privacy_policy_url(selected).into());
     app.invoke_app_language_changed(language_mode.into(), selected.into());
@@ -1658,6 +1661,9 @@ fn desktop_credential_store(
             flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore::new(path),
         );
     }
+    #[cfg(all(linux_desktop, feature = "flatpak"))]
+    return flatpak_secrets::credential_store(paths);
+    #[cfg(not(all(linux_desktop, feature = "flatpak")))]
     Arc::new(flectar_mail_core::accounts::credentials::SystemCredentialStore::for_profile(paths))
 }
 
@@ -1985,10 +1991,6 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             tracing::warn!(%error, "withdrawing privacy consent failed");
         }
     });
-    let app_language = platform.app_language.clone();
-    app.on_app_language_changed(move |mode, selected| {
-        app_language.set(mode.as_str(), selected.as_str());
-    });
     app.on_settings_search_matches(|haystack, query| {
         let query = query.to_string().trim().to_lowercase();
         query.is_empty() || haystack.to_string().to_lowercase().contains(&query)
@@ -2306,6 +2308,24 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     app.set_thread_messages(Rc::clone(&initial_state.conversation_rows).into());
     app.set_sidebar_rows(Rc::clone(&initial_state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(initial_state));
+    let app_language = platform.app_language.clone();
+    let language_state = Rc::downgrade(&state);
+    app.on_app_language_changed(move |mode, selected| {
+        app_language.set(mode.as_str(), selected.as_str());
+        // A folder filter matches standard mailboxes by their names in the
+        // new language too. It runs again on the next event-loop turn,
+        // outside whatever state the caller is holding.
+        let state = language_state.clone();
+        Timer::single_shot(Duration::ZERO, move || {
+            let Some(state) = state.upgrade() else {
+                return;
+            };
+            let filtering = !state.borrow().folder_filter.trim().is_empty();
+            if filtering {
+                refresh_sidebar(&state);
+            }
+        });
+    });
     mail_work::register(&app, &state, &runtime);
     move_picker::register(&app, &state, &runtime);
     files_controller::register(
@@ -8279,6 +8299,7 @@ mod tests {
             ("RU-ru", Some("ru")),
             ("zh", Some("zh_Hans")),
             ("zh_CN.UTF-8", Some("zh_Hans")),
+            ("zh-Hans-CN", Some("zh_Hans")),
             ("zh_SG", Some("zh_Hans")),
             ("zh-Hans-TW", Some("zh_Hans")),
             ("zh_TW", None),
@@ -8288,6 +8309,62 @@ mod tests {
             ("en_US", None),
         ] {
             assert_eq!(bundled_language_for_locale(locale), expected, "{locale}");
+        }
+    }
+
+    #[test]
+    fn standard_mailboxes_are_named_in_the_selected_language() {
+        use slint::platform::{
+            Platform, WindowAdapter,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+
+        struct Headless;
+        impl Platform for Headless {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+            }
+        }
+        slint::platform::set_platform(Box::new(Headless)).unwrap();
+        let app = AppWindow::new().unwrap();
+        let words = app.global::<MailboxWords>();
+        let title = |role, account: &str, unified| {
+            words.invoke_title(
+                MailboxTitle {
+                    role,
+                    account: account.into(),
+                    unified,
+                },
+                "Receipts".into(),
+            )
+        };
+
+        slint::select_bundled_translation("en").unwrap();
+        for mailbox in StandardMailbox::ALL {
+            assert_eq!(words.invoke_name(mailbox.role()), mailbox.label());
+            assert_eq!(
+                title(mailbox.role(), "", true),
+                Scope::Unified(mailbox).to_string()
+            );
+        }
+        assert_eq!(title(MailboxRole::Inbox, "Person", false), "Person / Inbox");
+        assert_eq!(title(MailboxRole::Other, "", false), "Other");
+        assert_eq!(title(MailboxRole::Snoozed, "", false), "Snoozed");
+        assert_eq!(title(MailboxRole::Scheduled, "", false), "Scheduled");
+        assert_eq!(title(MailboxRole::None, "Person", true), "Receipts");
+
+        // Chosen in Settings, or followed from the system.
+        let chosen = normalized_language_preference("zh_Hans");
+        let system = bundled_language_for_locale("zh-Hans-CN").unwrap();
+        for language in [chosen, system] {
+            slint::select_bundled_translation(language).unwrap();
+            let inbox = words.invoke_name(MailboxRole::Inbox);
+            assert_ne!(inbox, "Inbox");
+            assert_eq!(
+                title(MailboxRole::Inbox, "Person", false),
+                format!("Person / {inbox}")
+            );
+            assert_eq!(title(MailboxRole::None, "", false), "Receipts");
         }
     }
 

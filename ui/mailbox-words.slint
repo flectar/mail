@@ -1,0 +1,37 @@
+import { MailboxRole, MailboxTitle } from "models.slint";
+
+// Standard mailboxes are named in the interface's language. Folders, labels
+// and saved searches keep the names their accounts and users gave them.
+export global MailboxWords {
+    public pure function name(role: MailboxRole) -> string {
+        if role == MailboxRole.inbox { return @tr("Inbox"); }
+        if role == MailboxRole.starred { return @tr("Starred"); }
+        if role == MailboxRole.sent { return @tr("mailbox" => "Sent"); }
+        if role == MailboxRole.archive { return @tr("mailbox" => "Archive"); }
+        if role == MailboxRole.spam { return @tr("Spam"); }
+        if role == MailboxRole.trash { return @tr("Trash"); }
+        if role == MailboxRole.drafts { return @tr("Drafts"); }
+        if role == MailboxRole.important { return @tr("Important"); }
+        if role == MailboxRole.other { return @tr("Other"); }
+        if role == MailboxRole.snoozed { return @tr("Snoozed"); }
+        if role == MailboxRole.scheduled { return @tr("Scheduled"); }
+        return "";
+    }
+
+    // What a list or tab is called: the standard mailbox `mailbox` names, or
+    // else `text`.
+    public pure function title(mailbox: MailboxTitle, text: string) -> string {
+        if mailbox.role == MailboxRole.none { return text; }
+        if mailbox.unified {
+            if mailbox.role == MailboxRole.inbox { return @tr("Unified Inbox"); }
+            if mailbox.role == MailboxRole.starred { return @tr("Unified Starred"); }
+            if mailbox.role == MailboxRole.sent { return @tr("Unified Sent"); }
+            if mailbox.role == MailboxRole.archive { return @tr("Unified Archive"); }
+            if mailbox.role == MailboxRole.spam { return @tr("Unified Spam"); }
+            if mailbox.role == MailboxRole.trash { return @tr("Unified Trash"); }
+            if mailbox.role == MailboxRole.drafts { return @tr("Unified Drafts"); }
+        }
+        let name = MailboxWords.name(mailbox.role);
+        return mailbox.account == "" ? name : mailbox.account + " / " + name;
+    }
+}

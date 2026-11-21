@@ -18,8 +18,9 @@ use flectar_mail::{
     CalendarWeekDay, ComposerUi, ContactAccountRow, ContactRow, ContactSidebarRow,
     ContactSidebarRowKind, ContactSyncState, ContactValueRow, EmailRow, ImportAccountRow,
     ImportFailureRow, ImportFindingRow, ImportProfileRow, LocalizedMessage, MailAttachment,
-    MailAttachments, MailLabelRow, MailListEntry, MailProfileRow, MailboxRow, MotionSettings,
-    ProfileMemberRow, SidebarRow, SidebarRowKind, StorageUsageRow, ThreadMessageRow,
+    MailAttachments, MailLabelRow, MailListEntry, MailProfileRow, MailboxRole, MailboxRow,
+    MotionSettings, ProfileMemberRow, SidebarRow, SidebarRowKind, StorageUsageRow,
+    ThreadMessageRow,
 };
 use i_slint_core::accessibility::{
     AccessibilityAction, AccessibleStringProperty, SupportedAccessibilityAction,
@@ -280,12 +281,12 @@ fn mail_entries(grouped: bool) -> Vec<MailListEntry> {
 }
 
 fn sidebar_rows() -> Vec<SidebarRow> {
-    let mailbox = |label: &str, scope: &str, count: &str| MailboxRow {
+    let mailbox = |role, label: &str, scope: &str, count: &str| MailboxRow {
         account_id: 1,
         label: label.into(),
         scope: scope.into(),
         count: count.into(),
-        is_standard: true,
+        role,
         is_selectable: true,
         ..Default::default()
     };
@@ -306,7 +307,7 @@ fn sidebar_rows() -> Vec<SidebarRow> {
         row(
             "unified-inbox",
             SidebarRowKind::UnifiedInbox,
-            mailbox("Unified Inbox", "Unified Inbox", "14"),
+            mailbox(MailboxRole::Inbox, "Unified Inbox", "Unified Inbox", "14"),
         ),
         row(
             "accounts-heading",
@@ -320,28 +321,28 @@ fn sidebar_rows() -> Vec<SidebarRow> {
                 is_account: true,
                 avatar: "AM".into(),
                 detail: "alex.morgan@example.com".into(),
-                ..mailbox("Alex Morgan", "account:1", "9")
+                ..mailbox(MailboxRole::None, "Alex Morgan", "account:1", "9")
             },
         ),
         row(
             "folder-1",
             SidebarRowKind::Folder,
-            mailbox("Inbox", "folder:1", "9"),
+            mailbox(MailboxRole::Inbox, "Inbox", "folder:1", "9"),
         ),
         row(
             "folder-2",
             SidebarRowKind::Folder,
-            mailbox("Sent", "folder:2", ""),
+            mailbox(MailboxRole::Sent, "Sent", "folder:2", ""),
         ),
         row(
             "folder-3",
             SidebarRowKind::Folder,
-            mailbox("Archive", "folder:3", ""),
+            mailbox(MailboxRole::Archive, "Archive", "folder:3", ""),
         ),
         row(
             "new-folder-1",
             SidebarRowKind::NewFolder,
-            mailbox("", "", ""),
+            mailbox(MailboxRole::None, "", "", ""),
         ),
     ]
 }

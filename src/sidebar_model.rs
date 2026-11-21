@@ -169,7 +169,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         depth,
         has_children,
         expanded,
-        is_standard,
+        role,
         is_selectable,
         can_create_children,
         can_rename,
@@ -201,7 +201,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         && *depth == other.depth
         && *has_children == other.has_children
         && *expanded == other.expanded
-        && *is_standard == other.is_standard
+        && *role == other.role
         && *is_selectable == other.is_selectable
         && *can_create_children == other.can_create_children
         && *can_rename == other.can_rename
@@ -219,6 +219,38 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         && *has_custom_color == other.has_custom_color
         && *status == other.status
         && (!has_avatar || *avatar_image == other.avatar_image)
+}
+
+/// The standard mailboxes' names in the window's language, lowercased, which
+/// the folder filter matches as well as their English labels.
+#[derive(Debug, Default)]
+pub(super) struct MailboxNames(Vec<(MailboxRole, String)>);
+
+impl MailboxNames {
+    fn matches(&self, role: MailboxRole, query: &str) -> bool {
+        self.0
+            .iter()
+            .any(|(named, name)| *named == role && name.contains(query))
+    }
+}
+
+thread_local! {
+    // The UI thread filters the sidebar, so each thread keeps its own names
+    // and tests running in parallel threads stay independent.
+    static MAILBOX_NAMES: RefCell<MailboxNames> = RefCell::default();
+}
+
+/// Loads the names after the window's language changed.
+pub(super) fn reload_mailbox_names(app: &AppWindow) {
+    let words = app.global::<MailboxWords>();
+    let names = StandardMailbox::ALL
+        .into_iter()
+        .map(|mailbox| {
+            let role = mailbox.role();
+            (role, words.invoke_name(role).to_lowercase())
+        })
+        .collect();
+    MAILBOX_NAMES.set(MailboxNames(names));
 }
 
 pub(super) fn refresh_sidebar(state: &Rc<RefCell<InboxState>>) {
@@ -295,7 +327,9 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
         .filter_map(|account| i32::try_from(account.id).ok())
         .collect::<HashSet<_>>();
     let mut rows = if filtering {
-        make_filtered_sidebar_rows(mailboxes, labels, query, &gmail_account_ids)
+        MAILBOX_NAMES.with_borrow(|names| {
+            make_filtered_sidebar_rows(mailboxes, labels, query, &gmail_account_ids, names)
+        })
     } else {
         make_sidebar_rows(
             SidebarLayout::for_account_count(state.mail_accounts().len()),
@@ -385,6 +419,7 @@ fn make_filtered_sidebar_rows(
     labels: Vec<MailLabelRow>,
     query: &str,
     gmail_account_ids: &HashSet<i32>,
+    mailbox_names: &MailboxNames,
 ) -> Vec<SidebarRow> {
     use SidebarRowKind as Kind;
 
@@ -396,7 +431,9 @@ fn make_filtered_sidebar_rows(
             // Search results show accounts open, with their folders' badges.
             mailbox.count = Default::default();
             accounts.push(mailbox);
-        } else if mailbox.label.to_lowercase().contains(&query) {
+        } else if mailbox.label.to_lowercase().contains(&query)
+            || mailbox_names.matches(mailbox.role, &query)
+        {
             folders.entry(mailbox.account_id).or_default().push(mailbox);
         }
     }
@@ -953,8 +990,13 @@ mod tests {
         assert_eq!(account_count(&HashSet::new()), "");
         assert_eq!(account_count(&HashSet::from(["account:1".into()])), "5");
         // Search results show accounts open.
-        let filtered =
-            make_filtered_sidebar_rows(mailboxes.clone(), Vec::new(), "folder", &HashSet::new());
+        let filtered = make_filtered_sidebar_rows(
+            mailboxes.clone(),
+            Vec::new(),
+            "folder",
+            &HashSet::new(),
+            &MailboxNames::default(),
+        );
         assert_eq!(filtered[0].kind, Kind::Account);
         assert_eq!(filtered[0].mailbox.count, "");
     }
@@ -1409,7 +1451,13 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let rows = make_filtered_sidebar_rows(accounts(2, 0), labels, "travel", &HashSet::new());
+        let rows = make_filtered_sidebar_rows(
+            accounts(2, 0),
+            labels,
+            "travel",
+            &HashSet::new(),
+            &MailboxNames::default(),
+        );
         assert!(
             rows.iter()
                 .any(|row| row.kind == Kind::AccountLabel && row.label.id == 11)
@@ -1496,12 +1544,38 @@ mod tests {
     }
 
     #[test]
+    fn folder_filter_matches_standard_mailboxes_by_their_shown_names() {
+        // The account's Archive mailbox, and a folder of its own that is
+        // also called Archive.
+        let mut data = accounts(1, 2);
+        data[1].label = "Archive".into();
+        data[1].role = MailboxRole::Archive;
+        data[2].label = "Archive".into();
+        let names = MailboxNames(vec![(MailboxRole::Archive, "归档".into())]);
+        let filter = |query| {
+            make_filtered_sidebar_rows(data.clone(), vec![], query, &HashSet::new(), &names)
+                .into_iter()
+                .filter(|row| row.kind == Kind::Folder)
+                .map(|row| row.mailbox.folder_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(filter("归档"), [data[1].folder_id]);
+        assert_eq!(filter("archive"), [data[1].folder_id, data[2].folder_id]);
+    }
+
+    #[test]
     fn folder_filter_is_case_insensitive_and_keeps_account_context() {
         let mut data = accounts(2, 3);
         data[2].label = "Receipts".into();
         data[5].label = "RECEIPTS 2025".into();
 
-        let rows = make_filtered_sidebar_rows(data, vec![], "receipts", &HashSet::new());
+        let rows = make_filtered_sidebar_rows(
+            data,
+            vec![],
+            "receipts",
+            &HashSet::new(),
+            &MailboxNames::default(),
+        );
         assert_eq!(
             rows.iter().map(|row| row.kind).collect::<Vec<_>>(),
             vec![Kind::Account, Kind::Folder, Kind::Account, Kind::Folder]

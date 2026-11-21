@@ -1,6 +1,8 @@
 import { ScrollView } from "std-widgets.slint";
 import { AppTheme, LayoutMetrics, MailIconPalette } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
+import { MailboxWords } from "../mailbox-words.slint";
+import { MailboxRole } from "../models.slint";
 import { LineEdit, ToolbarIconButton } from "../components/controls.slint";
 
 // One destination in the Move to picker, or a heading above a group of them.
@@ -41,10 +43,10 @@ export global MovePickerUi {
     // What a row shows, which search matches too: a standard mailbox's or a
     // heading's translated name, or the folder's own.
     public pure function display-name(kind: string, label: string) -> string {
-        if kind == "inbox" { return @tr("Inbox"); }
-        if kind == "archive" { return @tr("Archive"); }
-        if kind == "spam" { return @tr("Spam"); }
-        if kind == "trash" { return @tr("Trash"); }
+        if kind == "inbox" { return MailboxWords.name(MailboxRole.inbox); }
+        if kind == "archive" { return MailboxWords.name(MailboxRole.archive); }
+        if kind == "spam" { return MailboxWords.name(MailboxRole.spam); }
+        if kind == "trash" { return MailboxWords.name(MailboxRole.trash); }
         if kind == "recent" { return @tr("Recent"); }
         if kind == "folders" { return @tr("All folders"); }
         if kind == "device" { return @tr("On this device"); }

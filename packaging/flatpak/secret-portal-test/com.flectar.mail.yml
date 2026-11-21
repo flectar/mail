@@ -1,0 +1,18 @@
+# The test program under the app's id, so the Secret portal gives it the key
+# it would give Flectar Mail.
+app-id: com.flectar.mail
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: probe
+finish-args:
+  - --share=ipc
+modules:
+  - name: probe
+    buildsystem: simple
+    build-commands:
+      - install -Dm0755 probe /app/bin/probe
+    sources:
+      - type: file
+        path: target/release/secret-e2e
+        dest-filename: probe

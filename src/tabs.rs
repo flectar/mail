@@ -166,7 +166,7 @@ struct Tab {
     id: i32,
     place: Place,
     /// Title shown while the tab is inactive; the active tab shows live state.
-    title: String,
+    title: MailTitle,
     rows: Option<CachedRows>,
 }
 
@@ -175,6 +175,10 @@ struct SavedTab {
     location: Location,
     #[serde(default)]
     title: String,
+    /// The standard mailbox the tab is named after instead of `title`, which
+    /// the window names in its language.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title_mailbox: Option<SavedMailboxTitle>,
     /// Settings page shown instead of the location, which closing it shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     settings: Option<String>,
@@ -195,8 +199,53 @@ struct SavedTabs {
     active: usize,
 }
 
+/// A standard mailbox a saved tab is named after: its scope, as `Location`
+/// keeps it, and its account's name. See [`MailTitle::Mailbox`].
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct SavedMailboxTitle {
+    scope: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    account: String,
+}
+
 impl SavedTab {
-    fn into_place(self) -> (Place, String) {
+    fn new(place: &Place, title: &MailTitle) -> Self {
+        let (title, title_mailbox) = match title {
+            MailTitle::Text(text) => (text.clone(), None),
+            MailTitle::Mailbox { scope, account } => (
+                String::new(),
+                Some(SavedMailboxTitle {
+                    scope: scope.to_string(),
+                    account: account.clone(),
+                }),
+            ),
+        };
+        Self {
+            location: place.location.clone(),
+            title,
+            title_mailbox,
+            settings: place.settings.clone(),
+            thread_message: place.thread_message,
+            account: place.account,
+            scroll: place.scroll,
+            unseen: place.unseen,
+        }
+    }
+
+    fn into_place(self) -> (Place, MailTitle) {
+        let title = match self.title_mailbox {
+            // A mailbox this version doesn't know names the workspace.
+            Some(saved) => saved
+                .scope
+                .parse()
+                .map(|scope| MailTitle::Mailbox {
+                    scope,
+                    account: saved.account,
+                })
+                .unwrap_or_default(),
+            None => english_mailbox_title(&self.location, &self.title)
+                .unwrap_or(MailTitle::Text(self.title)),
+        };
         let settings = self
             .settings
             .filter(|page| SETTINGS_PAGES.contains(&page.as_str()));
@@ -209,16 +258,40 @@ impl SavedTab {
                 scroll: self.scroll.sanitized(),
                 unseen: self.unseen,
             },
-            self.title,
+            title,
         )
     }
+}
+
+/// Tabs saved before titles named standard mailboxes kept their mailbox's
+/// English title as text: the mailbox, after its account's name unless it
+/// spans every account. Such a title names its mailbox again, so the window
+/// shows it in its own language.
+fn english_mailbox_title(location: &Location, title: &str) -> Option<MailTitle> {
+    let Location::Mail { scope, .. } = location else {
+        return None;
+    };
+    let account = match *scope {
+        Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
+            (title == scope.to_string()).then(String::new)?
+        }
+        Scope::Account { mailbox, .. } if title == mailbox.label() => String::new(),
+        Scope::Account { mailbox, .. } => title
+            .strip_suffix(&format!(" / {}", mailbox.label()))?
+            .to_owned(),
+        Scope::Folder(_) | Scope::Label { .. } => return None,
+    };
+    Some(MailTitle::Mailbox {
+        scope: *scope,
+        account,
+    })
 }
 
 /// A closed tab that can be reopened where it was.
 struct ClosedTab {
     index: usize,
     place: Place,
-    title: String,
+    title: MailTitle,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -246,7 +319,7 @@ impl TabStrip {
             next_id: 1,
             closed: Vec::new(),
         };
-        strip.insert(0, place, String::new(), None);
+        strip.insert(0, place, MailTitle::default(), None);
         strip
     }
 
@@ -274,15 +347,7 @@ impl TabStrip {
             tabs: self
                 .tabs
                 .iter()
-                .map(|tab| SavedTab {
-                    location: tab.place.location.clone(),
-                    title: tab.title.clone(),
-                    settings: tab.place.settings.clone(),
-                    thread_message: tab.place.thread_message,
-                    account: tab.place.account,
-                    scroll: tab.place.scroll,
-                    unseen: tab.place.unseen,
-                })
+                .map(|tab| SavedTab::new(&tab.place, &tab.title))
                 .collect(),
             active: self.active,
         }
@@ -292,7 +357,7 @@ impl TabStrip {
         &mut self,
         index: usize,
         place: Place,
-        title: String,
+        title: MailTitle,
         rows: Option<CachedRows>,
     ) -> usize {
         let id = self.next_id;
@@ -313,7 +378,7 @@ impl TabStrip {
     }
 
     /// Open a tab to the right of the active one, as browsers do.
-    fn open(&mut self, place: Place, title: String, rows: Option<CachedRows>) -> Option<usize> {
+    fn open(&mut self, place: Place, title: MailTitle, rows: Option<CachedRows>) -> Option<usize> {
         if self.tabs.len() >= MAX_TABS {
             return None;
         }
@@ -350,7 +415,7 @@ impl TabStrip {
                 Tab {
                     id,
                     place: home.clone(),
-                    title: String::new(),
+                    title: MailTitle::default(),
                     rows: None,
                 },
             );
@@ -791,7 +856,7 @@ impl Tabs {
         let opened = self
             .strip
             .borrow_mut()
-            .open(Place::default(), String::new(), None);
+            .open(Place::default(), MailTitle::default(), None);
         match opened {
             Some(index) => self.activate(index),
             None => self.refuse(),
@@ -867,7 +932,11 @@ impl Tabs {
 
     /// A conversation of the current mail list as a new tab opens it: its
     /// place, its title, and a copy of the list rows.
-    fn conversation_place(&self, app: &AppWindow, id: i32) -> Option<(Place, String, CachedRows)> {
+    fn conversation_place(
+        &self,
+        app: &AppWindow,
+        id: i32,
+    ) -> Option<(Place, MailTitle, CachedRows)> {
         let state = self.context.state.borrow();
         let row = state.messages.iter().find(|row| row.id == id)?;
         let place = Place {
@@ -887,9 +956,9 @@ impl Tabs {
             ..Place::default()
         };
         let title = if row.subject.is_empty() {
-            app.get_selected_scope_title().to_string()
+            mail_view_model::list_title(&state)
         } else {
-            row.subject.clone()
+            MailTitle::Text(row.subject.clone())
         };
         Some((place, title, cached_rows(&state)))
     }
@@ -974,7 +1043,7 @@ impl Tabs {
         &self,
         app: &AppWindow,
         with_rows: bool,
-    ) -> (Place, Option<String>, Option<CachedRows>) {
+    ) -> (Place, Option<MailTitle>, Option<CachedRows>) {
         // Settings shows instead of the screen it goes back to, which is
         // where the tab is.
         let shown = app.get_active_view();
@@ -995,15 +1064,15 @@ impl Tabs {
                     date: calendar.selected_date,
                     mode: calendar.view_mode.clone(),
                 };
-                (Some(String::new()), None)
+                (Some(MailTitle::default()), None)
             }
             "contacts" => {
                 place.location = Location::Contacts;
-                (Some(String::new()), None)
+                (Some(MailTitle::default()), None)
             }
             "files" => {
                 place.location = Location::Files;
-                (Some(String::new()), None)
+                (Some(MailTitle::default()), None)
             }
             _ => {
                 let (mail, title, rows) = self.live_mail(app, with_rows);
@@ -1030,19 +1099,20 @@ impl Tabs {
         &self,
         app: &AppWindow,
         with_rows: bool,
-    ) -> (Place, Option<String>, Option<CachedRows>) {
+    ) -> (Place, Option<MailTitle>, Option<CachedRows>) {
         let mut place = Place::default();
         let ui = app.global::<TabsUi>();
         let state = self.context.state.borrow();
         let shown = state.selected_id.filter(|_| !state.preview_closed);
         // A shown tab may still be loading the conversation it reopens.
         let conversation = state.pending_selection.or(shown);
-        let scope_title = || app.get_selected_scope_title().to_string();
         let row = conversation.and_then(|id| state.messages.iter().find(|row| row.id == id));
         let title = match (conversation, row) {
-            (None, _) => Some(scope_title()),
-            (Some(_), Some(row)) if row.subject.is_empty() => Some(scope_title()),
-            (Some(_), Some(row)) => Some(row.subject.clone()),
+            (None, _) => Some(mail_view_model::list_title(&state)),
+            (Some(_), Some(row)) if row.subject.is_empty() => {
+                Some(mail_view_model::list_title(&state))
+            }
+            (Some(_), Some(row)) => Some(MailTitle::Text(row.subject.clone())),
             // Unknown while loading; the tab keeps its saved title.
             (Some(_), None) => None,
         };
@@ -1524,36 +1594,37 @@ impl Tabs {
                 Location::Mail { scope, .. } => scope_owned_by(&state, scope, account_id),
                 _ => false,
             };
-            let forget = |place: &mut Place, title: &mut String, rows: Option<&mut CachedRows>| {
-                if owned(place) {
-                    *place = Place {
-                        settings: place.settings.take(),
-                        ..Place::default()
-                    };
-                    title.clear();
-                    return true;
-                }
-                let conversation = place.conversation();
-                let in_rows = rows.as_ref().is_some_and(|rows| {
-                    rows.messages
-                        .iter()
-                        .any(|row| Some(row.id) == conversation && row.account_id == account_id)
-                });
-                if let Some(rows) = rows {
-                    rows.messages.retain(|row| row.account_id != account_id);
-                }
-                if place.account == Some(account_id) || in_rows {
-                    if let Location::Mail { conversation, .. } = &mut place.location {
-                        *conversation = None;
+            let forget =
+                |place: &mut Place, title: &mut MailTitle, rows: Option<&mut CachedRows>| {
+                    if owned(place) {
+                        *place = Place {
+                            settings: place.settings.take(),
+                            ..Place::default()
+                        };
+                        *title = MailTitle::default();
+                        return true;
                     }
-                    place.thread_message = None;
-                    place.account = None;
-                    place.scroll.reader = 0.0;
-                    place.unseen = false;
-                    title.clear();
-                }
-                false
-            };
+                    let conversation = place.conversation();
+                    let in_rows = rows.as_ref().is_some_and(|rows| {
+                        rows.messages
+                            .iter()
+                            .any(|row| Some(row.id) == conversation && row.account_id == account_id)
+                    });
+                    if let Some(rows) = rows {
+                        rows.messages.retain(|row| row.account_id != account_id);
+                    }
+                    if place.account == Some(account_id) || in_rows {
+                        if let Location::Mail { conversation, .. } = &mut place.location {
+                            *conversation = None;
+                        }
+                        place.thread_message = None;
+                        place.account = None;
+                        place.scroll.reader = 0.0;
+                        place.unseen = false;
+                        *title = MailTitle::default();
+                    }
+                    false
+                };
             let mut strip = self.strip.borrow_mut();
             let active = strip.active;
             for (index, tab) in strip.tabs.iter_mut().enumerate() {
@@ -1574,11 +1645,11 @@ impl Tabs {
     /// all belong to the old grouping. Tabs keep their mailboxes and searches,
     /// and are written at once, so no old id is ever read in the new grouping.
     fn regroup(&self) {
-        fn forget_open(place: &mut Place, title: &mut String) {
+        fn forget_open(place: &mut Place, title: &mut MailTitle) {
             if let Location::Mail { conversation, .. } = &mut place.location
                 && conversation.take().is_some()
             {
-                title.clear();
+                *title = MailTitle::default();
             }
             place.thread_message = None;
             place.account = None;
@@ -1675,6 +1746,11 @@ impl Tabs {
         let strip = self.strip.borrow();
         let rows = strip.tabs.iter().enumerate().map(|(index, tab)| {
             let settings = tab.place.settings.is_some();
+            let (mailbox, title) = if settings {
+                Default::default()
+            } else {
+                tab.title.ui()
+            };
             TabRow {
                 id: tab.id,
                 workspace: if settings {
@@ -1683,7 +1759,8 @@ impl Tabs {
                     tab.place.location.workspace()
                 }
                 .into(),
-                title: if settings { "" } else { tab.title.as_str() }.into(),
+                title,
+                mailbox,
                 active: index == strip.active,
             }
         });
@@ -1816,7 +1893,7 @@ mod tests {
     fn strip_of(places: &[Scope]) -> TabStrip {
         let mut strip = TabStrip::new(mail(places[0]));
         for (index, scope) in places.iter().enumerate().skip(1) {
-            strip.insert(index, mail(*scope), String::new(), None);
+            strip.insert(index, mail(*scope), MailTitle::default(), None);
         }
         strip
     }
@@ -1824,8 +1901,8 @@ mod tests {
     #[test]
     fn tabs_open_beside_the_active_tab_and_close_like_a_browser() {
         let mut strip = TabStrip::new(mail(A));
-        strip.open(mail(B), String::new(), None);
-        strip.open(mail(C), String::new(), None);
+        strip.open(mail(B), MailTitle::default(), None);
+        strip.open(mail(C), MailTitle::default(), None);
         // Each opens right after the active tab, which stays A.
         assert_eq!(scopes(&strip), [A, C, B]);
         assert_eq!(strip.active, 0);
@@ -1858,7 +1935,7 @@ mod tests {
     #[test]
     fn closing_an_inactive_tab_keeps_the_active_tab() {
         let mut strip = TabStrip::new(mail(A));
-        strip.open(mail(B), String::new(), None);
+        strip.open(mail(B), MailTitle::default(), None);
         strip.active = 1;
         let a = strip.tabs[0].id;
         assert_eq!(strip.close(a, &Place::default()), Closed::Inactive);
@@ -1913,8 +1990,8 @@ mod tests {
     #[test]
     fn moving_tabs_keeps_the_active_tab_and_cycling_wraps() {
         let mut strip = TabStrip::new(mail(A));
-        strip.open(mail(C), String::new(), None);
-        strip.open(mail(B), String::new(), None);
+        strip.open(mail(C), MailTitle::default(), None);
+        strip.open(mail(B), MailTitle::default(), None);
         let a = strip.tabs[0].id;
         strip.move_tab(a, 9);
         assert_eq!(scopes(&strip), [B, C, A]);
@@ -1927,12 +2004,12 @@ mod tests {
     fn the_number_of_tabs_is_bounded() {
         let mut strip = TabStrip::new(mail(A));
         for _ in 1..MAX_TABS {
-            assert!(strip.open(mail(B), String::new(), None).is_some());
+            assert!(strip.open(mail(B), MailTitle::default(), None).is_some());
         }
-        assert!(strip.open(mail(B), String::new(), None).is_none());
+        assert!(strip.open(mail(B), MailTitle::default(), None).is_none());
         let first = strip.tabs[1].id;
         strip.close(first, &Place::default());
-        strip.open(mail(C), String::new(), None);
+        strip.open(mail(C), MailTitle::default(), None);
         assert_eq!(strip.reopen(), None, "a full strip reopens nothing");
         assert_eq!(strip.closed.len(), 1, "and keeps the closed tab");
     }
@@ -1953,7 +2030,7 @@ mod tests {
                 settings: Some("Accounts".into()),
                 ..Place::default()
             },
-            String::new(),
+            MailTitle::default(),
             None,
         );
         strip.open(
@@ -1975,7 +2052,7 @@ mod tests {
                 // after a restart.
                 unseen: true,
             },
-            "Invoice".into(),
+            MailTitle::Text("Invoice".into()),
             None,
         );
         strip.active = 1;
@@ -2007,7 +2084,7 @@ mod tests {
         .unwrap();
         let legacy = TabStrip::restore(read_file(&path).unwrap());
         assert_eq!(scopes(&legacy), [Scope::UNIFIED_INBOX, Scope::Folder(7)]);
-        assert_eq!(legacy.tabs[0].title, "Sent");
+        assert_eq!(legacy.tabs[0].title, MailTitle::Text("Sent".into()));
         assert_eq!(legacy.active, 1);
         assert_eq!(legacy.tabs[1].place.scroll, Scroll::default());
 
@@ -2046,8 +2123,8 @@ mod tests {
         let row = |id: i32, active: bool| TabRow {
             id,
             workspace: "mail".into(),
-            title: "".into(),
             active,
+            ..Default::default()
         };
         sync_rows(&model, [row(1, true), row(2, false)].into_iter());
         sync_rows(
@@ -2115,6 +2192,224 @@ mod tests {
             path: dir.path().join("tabs.json"),
         };
         (app, context, dir, window)
+    }
+
+    #[test]
+    fn standard_mailbox_titles_are_saved_by_mailbox_and_old_english_ones_upgrade() {
+        let inbox = |account_id| Scope::Account {
+            account_id,
+            mailbox: StandardMailbox::Inbox,
+        };
+        let sent = Scope::Account {
+            account_id: 4,
+            mailbox: StandardMailbox::Sent,
+        };
+        let unified_archive = Scope::Unified(StandardMailbox::Archive);
+        let mailbox = |scope, account: &str| MailTitle::Mailbox {
+            scope,
+            account: account.into(),
+        };
+        let text = |text: &str| MailTitle::Text(text.into());
+        let tab = |scope, query: &str, conversation, title: &str| SavedTab {
+            location: Location::Mail {
+                scope,
+                query: query.into(),
+                filter: default_filter(),
+                conversation,
+            },
+            title: title.into(),
+            ..SavedTab::default()
+        };
+        // Files from before kept every title as English text.
+        let strip = TabStrip::restore(SavedTabs {
+            tabs: vec![
+                tab(inbox(3), "", None, "Person / Inbox"),
+                tab(sent, "", None, "Work / Personal / Sent"),
+                // Mail kept on this device names no account.
+                tab(inbox(9), "", None, "Inbox"),
+                tab(unified_archive, "", None, "Unified Archive"),
+                tab(Scope::Important, "", None, "Important"),
+                tab(Scope::Snoozed, "", None, "Snoozed"),
+                // A conversation without a subject and a search were named
+                // after their mailbox too.
+                tab(Scope::UNIFIED_INBOX, "", Some(10), "Unified Inbox"),
+                tab(Scope::UNIFIED_INBOX, "from:bob", None, "Unified Inbox"),
+                // Subjects and the names of saved searches and folders stay,
+                // as does a title another mailbox had.
+                tab(inbox(3), "", Some(11), "Lunch"),
+                tab(Scope::UNIFIED_INBOX, "from:bob", None, "Bob"),
+                tab(Scope::Folder(7), "", None, "Receipts"),
+                tab(Scope::UNIFIED_INBOX, "", None, "Sent"),
+            ],
+            active: 0,
+        });
+        assert_eq!(
+            strip
+                .tabs
+                .iter()
+                .map(|tab| tab.title.clone())
+                .collect::<Vec<_>>(),
+            [
+                mailbox(inbox(3), "Person"),
+                mailbox(sent, "Work / Personal"),
+                mailbox(inbox(9), ""),
+                mailbox(unified_archive, ""),
+                mailbox(Scope::Important, ""),
+                mailbox(Scope::Snoozed, ""),
+                mailbox(Scope::UNIFIED_INBOX, ""),
+                mailbox(Scope::UNIFIED_INBOX, ""),
+                text("Lunch"),
+                text("Bob"),
+                text("Receipts"),
+                text("Sent"),
+            ]
+        );
+
+        // A mailbox is saved as one, by its scope and its account's name.
+        let saved = strip.saved();
+        assert_eq!(saved.tabs[1].title, "");
+        assert_eq!(
+            saved.tabs[1].title_mailbox,
+            Some(SavedMailboxTitle {
+                scope: "Account:4:Sent".into(),
+                account: "Work / Personal".into(),
+            })
+        );
+        assert_eq!(saved.tabs[8].title, "Lunch");
+        assert_eq!(saved.tabs[8].title_mailbox, None);
+        let json = serde_json::to_string(&saved).unwrap();
+        assert!(json.contains(r#""title_mailbox":{"scope":"Unified Archive"}"#));
+        let reloaded = TabStrip::restore(serde_json::from_str(&json).unwrap());
+        assert_eq!(reloaded.saved(), saved);
+
+        // A mailbox this version doesn't know names the workspace.
+        let unknown = serde_json::from_str(
+            r#"{"tabs":[{"location":{"workspace":"mail","scope":"Unified Inbox"},
+                "title":"","title_mailbox":{"scope":"Unified Outbox"}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            TabStrip::restore(unknown).tabs[0].title,
+            MailTitle::default()
+        );
+    }
+
+    /// Saved searches load with the mail after the active tab is shown: an
+    /// inactive tab still showed the inbox's name in place of its search's.
+    #[test]
+    fn restored_tabs_keep_their_names_while_mail_loads() {
+        let (app, context, _dir, _) = headless();
+        let inbox = Scope::Account {
+            account_id: 3,
+            mailbox: StandardMailbox::Inbox,
+        };
+        let search = SavedTab {
+            location: Location::Mail {
+                scope: Scope::UNIFIED_INBOX,
+                query: "from:bob".into(),
+                filter: default_filter(),
+                conversation: None,
+            },
+            title: "Bob".into(),
+            ..SavedTab::default()
+        };
+        let mailbox = MailTitle::Mailbox {
+            scope: inbox,
+            account: "Person".into(),
+        };
+        write_file(
+            &context.path,
+            &SavedTabs {
+                tabs: vec![
+                    SavedTab::default(),
+                    search,
+                    SavedTab::new(&mail(inbox), &mailbox),
+                ],
+                active: 0,
+            },
+        )
+        .unwrap();
+        register(&app, context);
+        let ui = app.global::<TabsUi>();
+        ui.invoke_restore_active();
+        let rows = ui.get_rows();
+        let row = |index| rows.row_data(index).unwrap();
+        assert_eq!(row(1).title, "Bob");
+        assert_eq!(row(1).mailbox, MailboxTitle::default());
+        assert_eq!(
+            row(2).mailbox,
+            MailboxTitle {
+                role: MailboxRole::Inbox,
+                account: "Person".into(),
+                unified: false,
+            }
+        );
+        assert_eq!(row(2).title, "");
+
+        // The window names the mailbox in its language as it shows it.
+        let words = app.global::<MailboxWords>();
+        let shown = |index| {
+            let row = row(index);
+            words.invoke_title(row.mailbox, row.title)
+        };
+        assert_eq!(shown(2), "Person / Inbox");
+        slint::select_bundled_translation("zh_Hans").unwrap();
+        let inbox_name = words.invoke_name(MailboxRole::Inbox);
+        assert_ne!(inbox_name, "Inbox");
+        assert_eq!(shown(2), format!("Person / {inbox_name}"));
+        assert_eq!(shown(1), "Bob");
+    }
+
+    #[test]
+    fn tabs_are_named_after_their_search_subject_or_mailbox() {
+        let (app, context, _dir, _) = headless();
+        let tabs = Tabs::new(&app, context);
+        let state = Rc::clone(&tabs.context.state);
+        let title = || tabs.live_mail(&app, false).1;
+        let inbox = MailTitle::Mailbox {
+            scope: Scope::UNIFIED_INBOX,
+            account: String::new(),
+        };
+        assert_eq!(title(), Some(inbox.clone()));
+        {
+            let mut state = state.borrow_mut();
+            state.saved_searches.push(mail::SavedSearchEntry {
+                id: 1,
+                name: "Bob".into(),
+                query: "from:bob".into(),
+                profile_id: None,
+                unread: 0,
+            });
+            state.query = "from:bob".into();
+        }
+        assert_eq!(title(), Some(MailTitle::Text("Bob".into())));
+        state.borrow_mut().query = "from:alice".into();
+        assert_eq!(title(), Some(inbox.clone()), "a search names its mailbox");
+
+        let messages = {
+            let mut state = state.borrow_mut();
+            state.query.clear();
+            let mut messages = mail::fixture_messages();
+            messages.truncate(2);
+            messages[1].subject.clear();
+            state.messages = messages.clone();
+            state.selected_id = Some(messages[0].id);
+            state.preview_closed = false;
+            messages
+        };
+        assert_eq!(title(), Some(MailTitle::Text(messages[0].subject.clone())));
+        state.borrow_mut().selected_id = Some(messages[1].id);
+        assert_eq!(title(), Some(inbox.clone()), "no subject names the mailbox");
+
+        // Conversations opened in new tabs are named the same way.
+        tabs.open_conversation(messages[1].id, false);
+        tabs.open_conversation(messages[0].id, false);
+        let strip = tabs.strip.borrow();
+        assert_eq!(
+            strip.tabs[1].title,
+            MailTitle::Text(messages[0].subject.clone())
+        );
+        assert_eq!(strip.tabs[2].title, inbox);
     }
 
     /// Drives the registered callbacks the way the tab strip and keyboard
@@ -2480,7 +2775,9 @@ mod tests {
             },
             ..Place::default()
         };
-        tabs.strip.borrow_mut().open(search, "Search".into(), None);
+        tabs.strip
+            .borrow_mut()
+            .open(search, MailTitle::Text("Search".into()), None);
 
         tabs.activate(1);
         assert_eq!(app.get_active_view(), "settings");
@@ -2622,7 +2919,7 @@ mod tests {
                 },
                 ..mail(Scope::Folder(7))
             },
-            "Gone".into(),
+            MailTitle::Text("Gone".into()),
             None,
         );
         tabs.activate(1);
@@ -2775,7 +3072,7 @@ mod tests {
                 unseen: true,
                 ..Place::default()
             },
-            "Plans".into(),
+            MailTitle::Text("Plans".into()),
             None,
         );
 
@@ -2788,7 +3085,7 @@ mod tests {
         assert_eq!(place.account, None);
         assert_eq!(place.scroll, Scroll::default());
         assert!(!place.unseen);
-        assert!(strip.tabs[1].title.is_empty());
+        assert_eq!(strip.tabs[1].title, MailTitle::default());
         assert!(
             matches!(&place.location, Location::Mail { query, .. } if query == "plans"),
             "the tab keeps its search"
@@ -2823,17 +3120,17 @@ mod tests {
             let mut strip = tabs.strip.borrow_mut();
             strip.open(
                 conversation(Scope::Folder(7), 1, 4),
-                "Folder mail".into(),
+                MailTitle::Text("Folder mail".into()),
                 None,
             );
             strip.open(
                 conversation(Scope::UNIFIED_INBOX, 2, 4),
-                "Removed".into(),
+                MailTitle::Text("Removed".into()),
                 None,
             );
             strip.open(
                 conversation(Scope::UNIFIED_INBOX, 3, 5),
-                "Kept".into(),
+                MailTitle::Text("Kept".into()),
                 None,
             );
         }
@@ -2842,9 +3139,18 @@ mod tests {
         let titles = strip
             .tabs
             .iter()
-            .map(|tab| tab.title.as_str())
+            .map(|tab| tab.title.clone())
             .collect::<Vec<_>>();
-        assert_eq!(titles, ["", "Kept", "", ""]);
+        let kept = MailTitle::Text("Kept".into());
+        assert_eq!(
+            titles,
+            [
+                MailTitle::default(),
+                kept,
+                MailTitle::default(),
+                MailTitle::default()
+            ]
+        );
         // A tab on the account's folder starts over at the inbox; one on its
         // conversation keeps its mailbox.
         assert_eq!(strip.tabs[3].place, Place::default());

@@ -7,6 +7,7 @@ import { MailProfileRow } from "../models.slint";
 import { ProfileSwitcher } from "profile-switcher.slint";
 import { PaneDivider } from "workspace-layout.slint";
 import { TabRow, TabsUi, WorkspaceIcon } from "tabs-ui.slint";
+import { MailboxWords } from "../mailbox-words.slint";
 
 export { TabRow, TabsUi }
 
@@ -446,9 +447,10 @@ component TabItem inherits Rectangle {
         : root.workspace == "contacts" ? @tr("Contacts")
         : root.workspace == "settings" ? @tr("Settings")
         : @tr("Mail");
+    private property <string> saved-title: MailboxWords.title(root.entry.mailbox, root.entry.title);
     private property <string> title: root.entry.active
         ? (root.live-title != "" ? root.live-title : root.workspace-name)
-        : (root.entry.title != "" ? root.entry.title : root.workspace-name);
+        : (root.saved-title != "" ? root.saved-title : root.workspace-name);
     // Narrow tabs keep only their icon, as in a browser.
     private property <bool> labelled: root.width >= 72px;
     private property <bool> truncated: !root.labelled || label.preferred-width > label.width;

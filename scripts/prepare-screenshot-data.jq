@@ -107,6 +107,7 @@ def event_defaults:
 | .sidebar_rows |= map(
     .show_row = true
     | .reveal_row = false
+    | .mailbox.role = (.mailbox.role // "none")
     | .mailbox.is_selectable = (if .mailbox.is_selectable == null then true else .mailbox.is_selectable end)
     | .mailbox.can_create_children = (.mailbox.can_create_children // false)
     | .mailbox.can_rename = (.mailbox.can_rename // false)

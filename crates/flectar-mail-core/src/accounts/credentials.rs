@@ -14,6 +14,14 @@ mod system;
 pub use system::DevelopmentFileCredentialStore;
 #[cfg(desktop)]
 pub use system::SystemCredentialStore;
+#[cfg(desktop)]
+mod migrating;
+#[cfg(desktop)]
+mod sealed_file;
+#[cfg(desktop)]
+pub use migrating::MigratingCredentialStore;
+#[cfg(desktop)]
+pub use sealed_file::SealedFileCredentialStore;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Slot {
