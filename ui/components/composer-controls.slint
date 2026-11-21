@@ -1,4 +1,5 @@
 import { TypeScale } from "../typography.slint";
+import { TooltipBubble } from "tooltip-bubble.slint";
 
 export component RecipientRow inherits Rectangle {
     in-out property <string> text;
@@ -173,23 +174,14 @@ export component FormatButton inherits Rectangle {
         mouse-cursor: pointer;
     }
 
-    Rectangle {
+    TooltipBubble {
         visible: root.tooltip-text != "" && hit.has-hover;
         x: (parent.width - self.width) / 2;
-        y: parent.height + 7px;
-        width: tip.preferred-width + 16px;
-        height: 26px;
-        border-radius: 5px;
-        background: #292929;
+        y: parent.height + 3px;
+        text: root.tooltip-text;
+        font-size: TypeScale.caption;
+        bubble-height: 26px;
         z: 1000;
-
-        tip := Text {
-            text: root.tooltip-text;
-            color: white;
-            font-size: TypeScale.caption;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
     }
 }
 

@@ -2,6 +2,7 @@ import { ScrollView } from "std-widgets.slint";
 import { AppTheme, LayoutMetrics, MotionSettings, ThemeUtilities } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
+import { TooltipBubble } from "tooltip-bubble.slint";
 import { WindowChrome } from "../window-chrome.slint";
 
 export component TextEdit inherits Rectangle {
@@ -364,7 +365,14 @@ export component IconButton inherits Rectangle {
 
     hit-area := TouchArea {
         enabled: root.interactive;
-        moved => { IconButtonInput.keyboard = false; }
+        // `moved` only fires while the button is held, so a hovering pointer
+        // is seen through its move events. A pointer that stays still keeps
+        // keyboard help where it is.
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.move {
+                IconButtonInput.keyboard = false;
+            }
+        }
         clicked => {
             if root.focus-on-click {
                 keyboard.focus();
@@ -378,23 +386,23 @@ export component IconButton inherits Rectangle {
     // Keep action help inside the main scene. Native Tooltip uses a popup
     // surface, which is not consistently presented by every AppImage/Wayland
     // compositor combination.
-    Rectangle {
+    TooltipBubble {
         visible: root.tooltip-text != "" && (IconButtonInput.keyboard ? keyboard.has-focus : hit-area.has-hover);
-        x: root.tooltip-align-left ? 0px : parent.width - self.width;
-        y: root.tooltip-above ? -self.height - 6px : parent.height + 6px;
-        width: tooltip-label.preferred-width + 16px;
-        height: 28px;
-        border-radius: 5px;
-        background: #292929;
+        text: root.tooltip-text;
+        caret-side: root.tooltip-above ? "bottom" : "top";
+        // Point at the button's centre, also when the bubble is shifted to
+        // stay inside the window.
+        caret-at: root.width / 2 - self.x;
+        // Centred on the button, or along its left edge, and kept inside the
+        // main window. Windows that do not report their width keep the
+        // button's own edges.
+        private property <length> preferred-x: root.tooltip-align-left ? 0px : (parent.width - self.width) / 2;
+        x: WindowChrome.window-width > 0px
+            ? max(8px - root.absolute-position.x,
+                min(self.preferred-x, WindowChrome.window-width - root.absolute-position.x - self.width - 8px))
+            : root.tooltip-align-left ? 0px : parent.width - self.width;
+        y: root.tooltip-above ? -self.height - 2px : parent.height + 2px;
         z: 10000;
-
-        tooltip-label := Text {
-            text: root.tooltip-text;
-            color: white;
-            font-size: TypeScale.secondary;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
     }
 }
 

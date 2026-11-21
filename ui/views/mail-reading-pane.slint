@@ -771,6 +771,9 @@ export component MailReadingPane inherits FocusScope {
                         // Under the tab strip the toolbar shares the list's
                         // surface, so the band below the tabs is one color.
                         background: WindowChrome.top-bar ? root.surface : root.surface-raised;
+                        // Above the divider and message below, so the action
+                        // tooltips that hang past the toolbar are not crossed.
+                        z: 1;
                         private property <length> inset: root.compact ? 8px : 14px;
                         // Width left for buttons once integrated window
                         // controls are accounted for. Copied on change so the

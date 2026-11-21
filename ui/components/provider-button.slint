@@ -1,5 +1,6 @@
 import { HorizontalBox } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
+import { TooltipBubble } from "tooltip-bubble.slint";
 
 // Shared by onboarding and account settings so provider entry points keep the
 // same recognizable brand treatment throughout the app.
@@ -80,22 +81,12 @@ export component ProviderButton inherits Rectangle {
         mouse-cursor: root.enabled ? pointer : default;
     }
 
-    Rectangle {
+    TooltipBubble {
         visible: root.tooltip-text != "" && provider-hit.has-hover;
         x: (parent.width - self.width) / 2;
-        y: -self.height - 6px;
-        width: tooltip-label.preferred-width + 16px;
-        height: 28px;
-        border-radius: 5px;
-        background: #292929;
+        y: -self.height - 2px;
+        text: root.tooltip-text;
+        caret-side: "bottom";
         z: 10000;
-
-        tooltip-label := Text {
-            text: root.tooltip-text;
-            color: white;
-            font-size: TypeScale.secondary;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
     }
 }
