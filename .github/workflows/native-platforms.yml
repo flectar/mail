@@ -56,6 +56,11 @@ jobs:
     if: github.event_name == 'push' || inputs.run_quality
     name: Release quality gate
     uses: ./.github/workflows/quality.yml
+    # Its tests pull the Flectar Mail Sync server image. A called workflow's
+    # token gets no more than the caller grants here.
+    permissions:
+      contents: read
+      packages: read
 
   metadata:
     name: Release preflight
