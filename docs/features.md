@@ -18,6 +18,9 @@ A closer look at what the [README](../README.md) summarizes.
 - [Undo](#undo)
 - [Before sending](#before-sending)
 - [Undo send](#undo-send)
+- [Snooze](#snooze)
+- [Send later](#send-later)
+- [Reply reminders](#reply-reminders)
 - [Unsubscribing](#unsubscribing)
 - [Blocking senders](#blocking-senders)
 - [Rules](#rules)
@@ -26,6 +29,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Calendar invitations](#calendar-invitations)
 - [Translation](#translation)
 - [AI agents](#ai-agents)
+- [Flectar Mail Sync](#flectar-mail-sync)
 - [Storage and backups](#storage-and-backups)
 - [Network and proxies](#network-and-proxies)
 - [Importing accounts and mail](#importing-accounts-and-mail)
@@ -577,6 +581,49 @@ and **Open draft** brings it back to fix and send again. Quitting Flectar Mail
 during the delay sends the waiting messages right away rather than at the next
 start.
 
+## Snooze
+
+Snooze takes a conversation out of the Inbox until a time you choose, then
+brings it back to the top. Choose **Snooze…** in a message's menu or the mail
+list's, also for several checked conversations at once, and pick **Later
+today** (in the evening, offered until 5 PM), **Tomorrow** or **Next week**
+(in the morning), **This weekend** (Saturday morning), or a date and time of
+your own. Snoozed conversations wait in **Snoozed** in the sidebar, each with
+the time it comes back, and **Unsnooze** there brings one back at once.
+
+## Send later
+
+The clock beside **Send** in the composer schedules the message for
+**Tomorrow morning**, **Tomorrow afternoon**, **Monday morning**, or a date and
+time of your own. Scheduled messages wait in **Scheduled** in the sidebar.
+Open one to send it now, pick another time, or **Cancel send**, which makes it
+a draft again.
+
+The device you scheduled a message on sends it at its time, as long as
+Flectar Mail runs there. With **Keep running in system tray** (**Keep running
+in the background** where there is no tray) in Settings → General, closing
+the window keeps it running. If Flectar Mail isn't running at the time, the
+message goes out as soon as it starts again. A JMAP server that holds
+scheduled mail itself, in a Scheduled mailbox, sends the message even with
+all your devices off.
+
+With [Flectar Mail Sync](#flectar-mail-sync), scheduled messages show on all
+your devices, and any of them that is running sends a message when the device
+that scheduled it is off, whatever kind of account it is from. A message goes
+out once however many devices you have: a device sends only in its turn, and
+one that takes over a send another device may have started first makes sure
+it didn't go out already. When a mail server never confirms that it took a
+message, Flectar Mail doesn't send it again by itself, and the message shows
+**May have gone out. Check Sent first.** Look in Sent, then send it again or
+cancel it.
+
+## Reply reminders
+
+**Remind me if no reply**, the bell in the composer, picks a time:
+**Tomorrow**, **In 3 days**, **In a week**, or your own. If nobody has replied
+by then, the conversation comes back to the top of the Inbox, marked **No
+reply yet**.
+
 ## Unsubscribing
 
 Mail from a mailing list shows **This message is from a mailing list.** with
@@ -837,6 +884,27 @@ week after.
 What a message says comes from its sender. Agents are told to treat mail as
 data, and message text reaches them between markers that say so, but no agent
 is immune to instructions hidden in mail, so give agents only what they need.
+
+## Flectar Mail Sync
+
+Flectar Mail Sync keeps your accounts and their sign-ins, preferences,
+signatures, profiles, templates, blocked senders, snoozes, reply reminders
+and scheduled messages the same on all your devices. Everything is end-to-end
+encrypted before it leaves a device, so not even Flectar Mail can read it, and
+there is no account to create: a 24-word recovery code brings sync back on a
+new device. Your mail, contacts and calendars keep syncing with your mail
+provider as before.
+
+Turn it on in Settings → Sync. **Add a device** on a device that already syncs
+shows a QR code to scan with your phone, or a short code to type on the other
+device, and a device can also join with your recovery code. Each device keeps
+its own mail checking, how much mail history it downloads, its proxy, and
+settings that belong to the device itself, such as reduced motion and text
+size.
+
+Flectar Mail Sync is a paid service, with a free trial, that pays for the
+servers it runs on. Each contribution to Flectar Mail earns a free year of it,
+see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Storage and backups
 

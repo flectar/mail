@@ -66,6 +66,9 @@ export global SendLaterUi {
     in property <string> open-send-time;
     // The open draft's send failed: why.
     in property <string> open-send-error;
+    // Its send may have gone out: the mail server never confirmed it, so it
+    // isn't sent again unless the user says so.
+    in property <bool> open-send-uncertain;
     // The open scheduled draft: pick another time, send it now, or make it
     // a plain draft again.
     callback change-time();

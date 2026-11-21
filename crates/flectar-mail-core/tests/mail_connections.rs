@@ -1265,7 +1265,9 @@ fn smtp_config(port: u16, mode: ConnectionSecurity, certificate: &str) -> Accoun
     }
 }
 /// A relay that takes the message and then never answers must not hold the
-/// submission worker forever.
+/// submission worker forever. It gets the ten minutes RFC 5321 section
+/// 4.5.3.2.6 gives the reply to a message's end, and since it may have the
+/// message then, the send ends uncertain rather than being tried again.
 #[tokio::test]
 async fn smtp_send_gives_up_on_a_stalled_relay() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1311,10 +1313,13 @@ async fn smtp_send_gives_up_on_a_stalled_relay() {
         .expect("the relay never received the message")
         .unwrap();
     tokio::time::pause();
-    tokio::time::advance(std::time::Duration::from_secs(61)).await;
+    tokio::time::advance(std::time::Duration::from_secs(10 * 60 + 1)).await;
     let error = send.await.unwrap().unwrap_err();
     assert!(
-        error.to_string().contains("connection timed out after 60s"),
+        matches!(error, flectar_mail_core::error::CoreError::SendUncertain(_))
+            && error
+                .to_string()
+                .contains("connection timed out after 600s"),
         "{error}"
     );
     server.abort();

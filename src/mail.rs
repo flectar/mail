@@ -87,6 +87,9 @@ pub struct MailMessage {
     pub send_at: Option<i64>,
     /// Why a scheduled draft could not go out.
     pub send_error: Option<String>,
+    /// Its send may have gone out: the mail server never confirmed it, so
+    /// it isn't sent again by itself.
+    pub send_uncertain: bool,
     /// When the user asked to be reminded unless someone replies.
     pub reply_reminder_at: Option<i64>,
     /// That time came with no reply.
@@ -155,6 +158,7 @@ impl MailMessage {
             snoozed_until: None,
             send_at: None,
             send_error: None,
+            send_uncertain: false,
             reply_reminder_at: None,
             reply_reminder_due: false,
             to: email.to.to_owned(),
@@ -4124,8 +4128,9 @@ fn shown_times(mut message: MailMessage, view: View, sends: &[ScheduledSend]) ->
         .min_by_key(|send| send.send_at);
     message.send_at = send.map(|send| send.send_at);
     message.send_error = send
-        .filter(|send| send.state == "failed")
+        .filter(|send| matches!(send.state.as_str(), "failed" | "uncertain"))
         .map(|send| send.error.clone().unwrap_or_default());
+    message.send_uncertain = send.is_some_and(|send| send.state == "uncertain");
     message
 }
 
@@ -4178,6 +4183,7 @@ fn summary_to_message(
         snoozed_until: thread.snoozed_until,
         send_at: None,
         send_error: None,
+        send_uncertain: false,
         reply_reminder_at: thread.reply_reminder_at,
         reply_reminder_due: thread.reply_reminder_due,
         to: String::new(),
@@ -4289,6 +4295,7 @@ fn message_summary_to_message(
         snoozed_until: message.snoozed_until,
         send_at: None,
         send_error: None,
+        send_uncertain: false,
         reply_reminder_at: message.reply_reminder_at,
         reply_reminder_due: message.reply_reminder_due,
         to: message
@@ -4404,6 +4411,7 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
         snoozed_until: row.snoozed_until,
         send_at: row.send_at.filter(|_| scheduled),
         send_error: row.send_error.clone().filter(|_| scheduled),
+        send_uncertain: row.send_uncertain && scheduled,
         reply_reminder_at: row.reply_reminder_at,
         reply_reminder_due: row.reply_reminder_due,
         to: message

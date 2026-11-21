@@ -193,6 +193,21 @@ async fn execute_actions(
                 defer_limited(ctx, action_id, &e).await?;
                 return Err(e);
             }
+            Err(e @ CoreError::SendUncertain(_)) => {
+                // The server may have the message: a retry could deliver it
+                // twice, so the user checks Sent and decides.
+                let message = e.to_string();
+                tracing::warn!(account_id, action_id, error = %message, "send outcome unknown");
+                let saved = message.clone();
+                ctx.db
+                    .write(move |conn| repo::actions::fail_uncertain(conn, action_id, &saved))
+                    .await?;
+                ctx.bus.emit(CoreEvent::ActionState {
+                    action_id,
+                    state: "uncertain".into(),
+                    error: Some(message),
+                });
+            }
             Err(e) => {
                 let msg = e.to_string();
                 if action.kind == "send" && is_connection_failure(&msg) {
@@ -1021,6 +1036,18 @@ async fn append_sent_action(
 }
 
 async fn find_sent_uid(session: &mut Session, message_id: &str) -> Result<Option<u32>> {
+    let found = sent_uids(session, message_id).await?;
+    if found.len() > 1 {
+        return Err(CoreError::Other(
+            "multiple Sent copies match this submission; automatic append suppressed".into(),
+        ));
+    }
+    Ok(found.first().copied())
+}
+
+/// The copies of a submission in the selected mailbox, by its Message-ID or
+/// by the submission id that stays when a provider replaces the Message-ID.
+async fn sent_uids(session: &mut Session, message_id: &str) -> Result<Vec<u32>> {
     let bare = message_id.trim_matches(['<', '>']);
     if bare.is_empty() {
         return Err(CoreError::NotFound("outgoing Message-ID".into()));
@@ -1031,7 +1058,7 @@ async fn find_sent_uid(session: &mut Session, message_id: &str) -> Result<Option
         .extend(imap::uid_search_header(session, crate::mime::SUBMISSION_ID_HEADER, bare).await?);
     candidates.sort_unstable();
     candidates.dedup();
-    let mut found = None;
+    let mut found = Vec::new();
     // SEARCH HEADER is a substring search: verify complete header identities
     // before assigning a UID. Chunk to keep the FETCH command bounded.
     for chunk in candidates.chunks(100) {
@@ -1045,17 +1072,55 @@ async fn find_sent_uid(session: &mut Session, message_id: &str) -> Result<Option
             if parsed.message_id.as_deref() == Some(bare)
                 || parsed.submission_id.as_deref() == Some(bare)
             {
-                if found.is_some() {
-                    return Err(CoreError::Other(
-                        "multiple Sent copies match this submission; automatic append suppressed"
-                            .into(),
-                    ));
-                }
-                found = Some(header.uid);
+                found.push(header.uid);
             }
         }
     }
     Ok(found)
+}
+
+/// Whether the account's mail server shows a message went out, or `None`
+/// where it can't tell. A copy in Sent says it did. Only a server that files
+/// every message sent through it in Sent can say one didn't (Gmail and
+/// Microsoft 365 document that they do); elsewhere a missing copy proves
+/// nothing, and POP3 keeps no Sent on the server.
+async fn went_out(ctx: &SyncCtx, config: &AccountConfig, message_id: &str) -> Result<Option<bool>> {
+    if config.mail_protocol != MailProtocol::Imap {
+        return Ok(None);
+    }
+    let account_id = config.id;
+    let Some(sent) = ctx
+        .db
+        .read(move |conn| repo::folders::by_role(conn, account_id, roles::SENT))
+        .await?
+    else {
+        return Ok(None);
+    };
+    let mut session = crate::sync::engine::connect(ctx, config).await?;
+    imap::select(&mut session, &sent.path).await?;
+    let copies = sent_uids(&mut session, message_id).await;
+    let _ = session.logout().await;
+    let files_sent_mail = !config
+        .settings
+        .sent_copy_policy
+        .should_append(config.provider);
+    Ok(match copies?.is_empty() {
+        false => Some(true),
+        true if files_sent_mail => Some(false),
+        true => None,
+    })
+}
+
+/// When a shared send must have gone out by: the end of this device's claim
+/// on it. Past it another device may take the send over.
+async fn send_deadline(ctx: &SyncCtx, action_id: i64) -> Result<Option<i64>> {
+    ctx.db
+        .read(move |conn| {
+            Ok(repo::synced_sends::by_action(conn, action_id)?
+                .and_then(|send| send.may_send_until)
+                .filter(|until| *until != repo::actions::HELD))
+        })
+        .await
 }
 
 async fn finish_sent_filing(
@@ -1378,29 +1443,50 @@ async fn send_action(
         return Err(CoreError::Smtp("no recipients".into()));
     }
 
+    // Another of the user's devices may have handed this message over
+    // already: it goes out only if the mail server shows it didn't.
+    let already_sent = if action.payload["checkFirst"].as_bool() == Some(true) {
+        match went_out(ctx, config, &msg_id).await? {
+            Some(sent) => sent,
+            None => {
+                return Err(CoreError::SendUncertain(
+                    "another of your devices may have sent this message already, and its mail server can't show whether it did".into(),
+                ));
+            }
+        }
+    } else {
+        false
+    };
+    let deadline = send_deadline(ctx, action.id).await?;
     tracing::info!(
         account_id = config.id,
         host = %config.smtp_host,
         port = config.smtp_port,
         recipients = recipients.len(),
+        already_sent,
         "smtp send: dispatching",
     );
-    let submitted = match smtp::send_raw(config, &auth, &from, &recipients, &raw).await {
-        Err(CoreError::Auth(_)) if config.auth_kind == AuthKind::Oauth2 => {
-            // AUTH rejection happens before MAIL FROM/DATA, so it is safe to
-            // invalidate an unexpectedly stale provider token and retry the
-            // connection once without risking a duplicate delivery.
-            tracing::info!(
-                account_id = config.id,
-                provider = ?config.provider,
-                "SMTP rejected cached OAuth token; refreshing once"
-            );
-            ctx.tokens.invalidate(config.id).await;
-            let retry_auth =
-                smtp::SmtpAuth::XOAuth2(ctx.tokens.access_token(config.id, config.provider).await?);
-            smtp::send_raw(config, &retry_auth, &from, &recipients, &raw).await
+    let submitted = if already_sent {
+        Ok(())
+    } else {
+        match smtp::send_raw_before(config, &auth, &from, &recipients, &raw, deadline).await {
+            Err(CoreError::Auth(_)) if config.auth_kind == AuthKind::Oauth2 => {
+                // AUTH rejection happens before MAIL FROM/DATA, so it is safe
+                // to invalidate an unexpectedly stale provider token and retry
+                // the connection once without risking a duplicate delivery.
+                tracing::info!(
+                    account_id = config.id,
+                    provider = ?config.provider,
+                    "SMTP rejected cached OAuth token; refreshing once"
+                );
+                ctx.tokens.invalidate(config.id).await;
+                let retry_auth = smtp::SmtpAuth::XOAuth2(
+                    ctx.tokens.access_token(config.id, config.provider).await?,
+                );
+                smtp::send_raw_before(config, &retry_auth, &from, &recipients, &raw, deadline).await
+            }
+            result => result,
         }
-        result => result,
     };
     // Plain SMTP cannot list permitted From addresses, so the submission
     // outcome is the evidence shown next to the identity in settings.

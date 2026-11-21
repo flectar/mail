@@ -2072,6 +2072,7 @@ mod tests {
             snoozed_until: None,
             send_at: None,
             send_error: None,
+            send_uncertain: false,
             reply_reminder_at: None,
             reply_reminder_due: false,
             to: String::new(),
