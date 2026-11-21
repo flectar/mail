@@ -231,7 +231,8 @@ impl Core {
 
     /// Answer the invitation a message carries, or with `occurrence` one
     /// occurrence of it, adding it to the calendar first when it isn't
-    /// there.
+    /// there. The organizer is told by mail, unless the account only
+    /// receives mail (#252), when the answer stays in the calendar.
     pub async fn answer_invitation(
         &self,
         message_id: i64,
@@ -239,11 +240,21 @@ impl Core {
         occurrence: Option<i64>,
     ) -> Result<CalendarEvent> {
         let event_id = self.add_invitation(message_id).await?;
+        let notify = self
+            .db
+            .read(move |conn| {
+                let Some(row) = repo::messages::get_row(conn, message_id)? else {
+                    return Ok(true);
+                };
+                Ok(repo::accounts::get_config(conn, row.account_id)?
+                    .is_none_or(|config| config.sends_mail()))
+            })
+            .await?;
         self.rsvp_event(RsvpEventArgs {
             event_id,
             response: response.to_owned(),
             comment: None,
-            notify: true,
+            notify,
             occurrence,
         })
         .await

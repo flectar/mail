@@ -247,6 +247,10 @@ class ReleaseTests(unittest.TestCase):
         pdfium = flathub.PDFIUM_MODULE.read_text()
         self.assertNotIn("type: archive", pdfium + bundle + template)
         self.assertNotIn("pdfium-binaries", pdfium + bundle + template)
+        # Every file the module lists from beside it ships with the manifest.
+        local_files = re.findall(r"^    path: (\S+)$", pdfium, re.MULTILINE)
+        self.assertEqual(local_files, [path.name for path in flathub.PDFIUM_FILES])
+        self.assertNotIn("format=TEXT", pdfium)
 
         commit = "0123456789abcdef0123456789abcdef01234567"
         release = flathub.manifest(tag="v0.1.0-beta.1", commit=commit)
@@ -264,7 +268,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(flathub.LOCAL_MANIFEST.parent, SCRIPTS.parent)
         with tempfile.TemporaryDirectory() as directory:
             flathub.write(Path(directory), tag="v0.1.0", commit=commit)
-            for name in ("cargo-sources.json", "pdfium.yml"):
+            for name in ("cargo-sources.json", "pdfium.yml", "generate_shim_headers.py"):
                 self.assertEqual(
                     (Path(directory) / name).read_bytes(),
                     (SCRIPTS.parent / "packaging/flatpak" / name).read_bytes(),

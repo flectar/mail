@@ -212,6 +212,31 @@ for downloading in the background from then on. When many accounts start
 together, they take turns connecting, and a few at a time download their older
 mail.
 
+## Advanced account settings
+
+When you add or edit an IMAP or POP3 account, **Advanced settings** at the end
+of the form holds what few accounts need. It opens on its own for an account
+that uses any of it.
+
+Turning off **Send mail** sets up an account that only receives mail, with no
+SMTP server. It isn't offered as a sender, replies to its mail start from an
+account that sends, and it's never asked for read receipts. Its answers to
+invitations stay in its calendar without a reply by mail, it can't invite
+anyone, and it leaves a mailing list only through the list's web page.
+
+**IMAP sign-in**, **POP3 sign-in** and **SMTP sign-in** choose how Flectar Mail
+signs in to each server. **Automatic** uses SASL PLAIN where the server offers
+it and the plain login command otherwise, or when PLAIN fails. **PLAIN** and
+**LOGIN** (**USER/PASS** for POP3) use only that way, for a server that offers
+one it can't handle. Over an unencrypted connection, a password goes out only
+in a way the server offers. **No sign-in** sends through an SMTP server that
+takes mail from its own network without one.
+
+An SMTP server that signs in with another username, such as your provider's or
+company's relay, takes it in **SMTP username**, with its own **SMTP password**,
+which stays in the system keyring like the account's. Without one, the SMTP
+server signs in with the account's password.
+
 ## New-mail notifications
 
 Flectar Mail lets you know when new mail reaches your Inbox while it's running,

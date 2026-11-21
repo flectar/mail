@@ -1,5 +1,8 @@
 import { VerticalBox, HorizontalBox, ComboBox, TextEdit } from "std-widgets.slint";
 import { Button } from "button.slint";
+import { Switch } from "controls.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
+import { FormField } from "settings-components.slint";
 import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
@@ -32,9 +35,11 @@ export component MailSecurityFields inherits VerticalBox {
     in-out property <string> smtp-port: "465";
     in-out property <string> certificate-pem;
     in property <bool> enabled: true;
+    // An account that only receives mail has no SMTP server to secure.
+    in property <bool> sends-mail: true;
     callback import-certificate();
     private property <bool> certificate-expanded: false;
-    private property <bool> uses-tls: root.incoming-security != "none" || root.smtp-security != "none";
+    private property <bool> uses-tls: root.incoming-security != "none" || (root.sends-mail && root.smtp-security != "none");
     spacing: 8px;
     padding: 0px;
     vertical-stretch: 0;
@@ -99,6 +104,8 @@ export component MailSecurityFields inherits VerticalBox {
             horizontal-stretch: 1;
             padding: 0px;
             spacing: 4px;
+            // Kept in the layout, so the IMAP selector stays half wide.
+            visible: root.sends-mail;
             Text { text: @tr("SMTP encryption"); color: AppTheme.secondary; font-size: TypeScale.caption; }
             smtp-encryption := ComboBox {
                 height: 36px;
@@ -110,7 +117,7 @@ export component MailSecurityFields inherits VerticalBox {
             }
         }
     }
-    if root.incoming-security == "none" || root.smtp-security == "none" : Text {
+    if root.incoming-security == "none" || (root.sends-mail && root.smtp-security == "none") : Text {
         text: @tr("Without encryption, anyone on the network can read your password and mail. Use this only with a server on a network you trust.");
         color: AppTheme.destructive; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
     }
@@ -135,5 +142,189 @@ export component MailSecurityFields inherits VerticalBox {
     }
     if root.uses-tls && root.certificate-pem != "" && !root.certificate-expanded : Text {
         text: @tr("Custom certificate added for this account."); color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
+    }
+}
+
+// The account form's advanced settings (#252), during setup and edits. They
+// say whether the account sends mail, how it signs in to its servers, and
+// the SMTP server's own username and password.
+export component MailAdvancedFields inherits VerticalBox {
+    // "imap" or "pop3".
+    in property <string> incoming-protocol: "imap";
+    in-out property <bool> expanded: false;
+    in-out property <bool> sends-mail: true;
+    // "automatic", "plain" or "login", and for SMTP also "none".
+    in-out property <string> incoming-login: "automatic";
+    in-out property <string> smtp-login: "automatic";
+    in-out property <string> smtp-username;
+    in-out property <string> smtp-password;
+    // An edit of an account whose SMTP server has a username of its own. An
+    // empty password then keeps the one it signs in with.
+    in property <bool> keeps-smtp-password: false;
+    in property <bool> enabled: true;
+    // The selectors' positions, kept apart from the values the form sets so
+    // a reset form shows its values again after a choice.
+    private property <int> incoming-index: root.login-index(root.incoming-login);
+    private property <int> smtp-index: root.login-index(root.smtp-login);
+    private property <bool> smtp-signs-in: root.sends-mail && root.smtp-login != "none";
+    spacing: 8px;
+    padding: 0px;
+    vertical-stretch: 0;
+
+    pure function login-index(login: string) -> int {
+        return login == "plain" ? 1 : login == "login" ? 2 : login == "none" ? 3 : 0;
+    }
+
+    pure function login-at(index: int) -> string {
+        return index == 1 ? "plain" : index == 2 ? "login" : index == 3 ? "none" : "automatic";
+    }
+
+    changed incoming-login => { root.incoming-index = root.login-index(root.incoming-login); }
+    changed smtp-login => { root.smtp-index = root.login-index(root.smtp-login); }
+
+    advanced-header := Rectangle {
+        height: 36px;
+        border-radius: 6px;
+        border-width: header-focus.focus-visible ? 2px : 1px;
+        border-color: header-focus.focus-visible ? AppTheme.accent : AppTheme.control-border;
+        background: header-hit.pressed ? AppTheme.muted-control-bg
+            : header-hit.has-hover ? AppTheme.control-bg.brighter(AppTheme.dark ? 8% : 2%)
+            : AppTheme.surface;
+        opacity: root.enabled ? 1 : 0.5;
+
+        Image {
+            x: 11px;
+            y: (parent.height - self.height) / 2;
+            width: 14px;
+            height: 14px;
+            source: root.expanded
+                ? @image-url("../icons/lucide/outline/chevron-down.svg")
+                : @image-url("../icons/lucide/outline/chevron-right.svg");
+            colorize: AppTheme.secondary;
+            image-fit: contain;
+            accessible-role: none;
+        }
+        Text {
+            x: 34px;
+            width: parent.width - self.x - 12px;
+            height: parent.height;
+            text: @tr("Advanced settings");
+            color: AppTheme.heading;
+            font-size: TypeScale.secondary;
+            font-weight: 500;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        header-focus := FocusVisibleScope {
+            enabled: root.enabled;
+            accessible-role: button;
+            accessible-label: @tr("Advanced settings");
+            accessible-expanded: root.expanded;
+            accessible-action-default => { root.expanded = !root.expanded; }
+            key-pressed(event) => {
+                if event.text == Key.Return || event.text == Key.Space {
+                    root.expanded = !root.expanded;
+                    return accept;
+                }
+                reject
+            }
+        }
+        header-hit := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: pointer;
+            clicked => { header-focus.focus(); header-focus.pointer-activated(); root.expanded = !root.expanded; }
+        }
+    }
+
+    if root.expanded : VerticalBox {
+        padding: 0px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 16px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                min-width: 0px;
+                spacing: 2px;
+                Text {
+                    text: @tr("Send mail");
+                    color: AppTheme.heading;
+                    font-size: TypeScale.secondary;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: @tr("Turn off for an account that only receives mail. It then needs no SMTP server.");
+                    color: AppTheme.secondary;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+            }
+            VerticalLayout {
+                alignment: start;
+                Switch {
+                    checked <=> root.sends-mail;
+                    enabled: root.enabled;
+                    control-label: @tr("Send mail");
+                }
+            }
+        }
+        HorizontalBox {
+            height: 58px;
+            min-width: 0px;
+            padding: 0px;
+            spacing: 8px;
+            VerticalBox {
+                min-width: 0px;
+                preferred-width: 0px;
+                horizontal-stretch: 1;
+                padding: 0px;
+                spacing: 4px;
+                Text { text: root.incoming-protocol == "pop3" ? @tr("POP3 sign-in") : @tr("IMAP sign-in"); color: AppTheme.secondary; font-size: TypeScale.caption; }
+                ComboBox {
+                    height: 36px;
+                    min-width: 0px;
+                    enabled: root.enabled;
+                    model: root.incoming-protocol == "pop3"
+                        ? [@tr("Automatic"), "PLAIN", "USER/PASS"]
+                        : [@tr("Automatic"), "PLAIN", "LOGIN"];
+                    current-index <=> root.incoming-index;
+                    selected(value) => { root.incoming-login = root.login-at(root.incoming-index); }
+                }
+            }
+            VerticalBox {
+                min-width: 0px;
+                preferred-width: 0px;
+                horizontal-stretch: 1;
+                padding: 0px;
+                spacing: 4px;
+                visible: root.sends-mail;
+                Text { text: @tr("SMTP sign-in"); color: AppTheme.secondary; font-size: TypeScale.caption; }
+                ComboBox {
+                    height: 36px;
+                    min-width: 0px;
+                    enabled: root.enabled;
+                    model: [@tr("Automatic"), "PLAIN", "LOGIN", @tr("No sign-in")];
+                    current-index <=> root.smtp-index;
+                    selected(value) => { root.smtp-login = root.login-at(root.smtp-index); }
+                }
+            }
+        }
+        if root.smtp-signs-in : FormField {
+            enabled: root.enabled;
+            label: @tr("SMTP username");
+            value <=> root.smtp-username;
+            placeholder: @tr("Same as the account's");
+            label-color: AppTheme.secondary;
+        }
+        if root.smtp-signs-in : FormField {
+            enabled: root.enabled && root.smtp-username != "";
+            label: @tr("SMTP password");
+            value <=> root.smtp-password;
+            placeholder: root.smtp-username == "" ? @tr("Same as the account's")
+                : root.keeps-smtp-password ? @tr("Leave blank to keep the current one")
+                : @tr("Leave blank to use the account's");
+            input-type: password;
+            label-color: AppTheme.secondary;
+        }
     }
 }

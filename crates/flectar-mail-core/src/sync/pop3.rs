@@ -23,7 +23,7 @@ use crate::db::repo::{
 use crate::error::{CoreError, LimitKind, Result};
 use crate::events::CoreEvent;
 use crate::models::{
-    AccountConfig, AccountSettings, ConnectionSecurity, KeepOnServer, now_ms, roles,
+    AccountConfig, AccountSettings, ConnectionSecurity, KeepOnServer, LoginMethod, now_ms, roles,
 };
 use crate::pop3::{self, SignInRefusal};
 use std::collections::{HashMap, HashSet};
@@ -318,6 +318,13 @@ fn failure(config: &AccountConfig, error: pop3::Error) -> Failure {
                 }
             },
         )),
+        pop3::Error::MethodNotOffered => Failure::Other(CoreError::Pop3(format!(
+            "{host} doesn't offer {} sign-in without encryption. Choose STARTTLS or SSL/TLS, or another sign-in method.",
+            match config.settings.connection.incoming_login {
+                LoginMethod::Plain => "PLAIN",
+                _ => "USER and PASS",
+            }
+        ))),
         pop3::Error::Tls(message) => {
             Failure::Other(CoreError::Tls(format!("POP3 {host}:{port}: {message}")))
         }
@@ -361,6 +368,7 @@ async fn connect(
         port: config.incoming_port,
         security: connection.incoming_security,
         trusted_certificate_pem: &connection.trusted_certificate_pem,
+        login: connection.incoming_login,
     };
     pop3::Session::connect(&server, &config.username, password)
         .await
