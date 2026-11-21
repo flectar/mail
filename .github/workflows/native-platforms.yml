@@ -176,7 +176,7 @@ jobs:
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
           # Release files tell of newer releases; stores update the app themselves.
           FLECTAR_UPDATE_CHECKS: github
-        run: ./scripts/ci-build-scope.sh cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
+        run: ./scripts/ci-build-scope.sh ./scripts/mem-watch.sh cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
 
       # The startup benchmark below must not measure swapped memory.
       - name: Take the build's swap away again
@@ -254,6 +254,7 @@ jobs:
             libxkbcommon-x11-devel \
             make \
             pkgconf-pkg-config \
+            procps-ng \
             python3 \
             rpm-build \
             tar \
@@ -282,7 +283,7 @@ jobs:
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
           # Release files tell of newer releases; stores update the app themselves.
           FLECTAR_UPDATE_CHECKS: github
-        run: cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
+        run: ./scripts/mem-watch.sh cargo build --locked --release --no-default-features --features remote-content,gpu-renderer --bin flectar-mail
       - name: Build and inspect RPM
         env:
           FLECTAR_SKIP_BUILD: "1"
@@ -374,7 +375,7 @@ jobs:
         # runner has; see scripts/ci-swap.sh.
         run: ./scripts/ci-swap.sh on
       - name: Build Flatpak bundle from locked sources
-        run: ./scripts/ci-build-scope.sh ./scripts/build-flatpak.sh
+        run: ./scripts/ci-build-scope.sh ./scripts/mem-watch.sh ./scripts/build-flatpak.sh
       - name: Test Flatpak installation and packaged runtime
         env:
           EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
@@ -466,7 +467,7 @@ jobs:
           mkdir -p target/flathub/local
           cd target/flathub/local
           # The builder calls the host's flatpak over the session bus.
-          "$GITHUB_WORKSPACE/scripts/ci-build-scope.sh" \
+          "$GITHUB_WORKSPACE/scripts/ci-build-scope.sh" "$GITHUB_WORKSPACE/scripts/mem-watch.sh" \
             dbus-run-session -- flatpak run --command=flathub-build org.flatpak.Builder \
             "$GITHUB_WORKSPACE/.flathub-local.yml"
           # Flathub publishes the mirrored screenshots in their own ref.
