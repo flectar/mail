@@ -389,7 +389,7 @@ pub async fn connect_with(
     .await
 }
 
-async fn connect_as(
+pub(crate) async fn connect_as(
     owner: Owner,
     email: &str,
     username: &str,

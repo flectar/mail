@@ -11,8 +11,8 @@ use super::model::{
 };
 use crate::accounts::{mailbox_key, providers};
 use crate::models::{
-    AccountSettings, AuthKind, ConnectionSecurity, KeepOnServer, MailConnectionSettings,
-    MailProtocol, PortableAccountConfig, Provider,
+    AccountSettings, AuthKind, ConnectionSecurity, KeepOnServer, LoginMethod,
+    MailConnectionSettings, MailProtocol, PortableAccountConfig, Provider,
 };
 use crate::sender_identities::MAX_DISPLAY_NAME_CHARS;
 use crate::signatures::{MAX_SIGNATURE_BYTES, MAX_SIGNATURES_PER_ACCOUNT};
@@ -127,6 +127,7 @@ pub enum FindingCode {
     /// Exchange Web Services, WebDAV, or another protocol Flectar can't
     /// read mail with.
     IncomingProtocolUnsupported,
+    /// No outgoing server, so the account only receives mail (#252).
     MissingOutgoingServer,
     OutgoingProtocolUnsupported,
     /// The server is not encrypted and Flectar connects to it the same way;
@@ -137,10 +138,12 @@ pub enum FindingCode {
     /// or OAuth), but Flectar would send it there in the clear; detail is
     /// the host.
     UnprotectedPassword,
-    /// Client certificates, Kerberos, NTLM, or no authentication.
+    /// Client certificates, Kerberos, NTLM, or for the incoming server no
+    /// authentication.
     IncomingSignInUnsupported,
     OutgoingSignInUnsupported,
-    /// The outgoing server signs in with a different user name; detail is it.
+    /// The outgoing server signs in with a user name of its own, which the
+    /// account keeps with a password of its own (#252). Detail is the name.
     SeparateOutgoingLogin,
     MissingUsername,
     /// A host name or port is unusable; detail is the offending value.
@@ -190,17 +193,17 @@ impl FindingCode {
             Self::MissingEmail
             | Self::MissingIncomingServer
             | Self::IncomingProtocolUnsupported
-            | Self::MissingOutgoingServer
             | Self::OutgoingProtocolUnsupported
             | Self::UnprotectedPassword
             | Self::IncomingSignInUnsupported
             | Self::OutgoingSignInUnsupported
-            | Self::SeparateOutgoingLogin
             | Self::MissingUsername
             | Self::InvalidServer
             | Self::DuplicateInSource
             | Self::OAuthLoginUnsupported => Severity::Blocking,
-            Self::UnencryptedIncoming
+            Self::MissingOutgoingServer
+            | Self::SeparateOutgoingLogin
+            | Self::UnencryptedIncoming
             | Self::UnencryptedOutgoing
             | Self::PasswordMechanismChanged
             | Self::MicrosoftSignInReplacesPassword
@@ -480,6 +483,7 @@ fn password_mapping(
         incoming,
         FindingCode::IncomingSignInUnsupported,
         SourceAuth::OAuth2,
+        false,
         findings,
     );
     let incoming_host = check_host(incoming, findings);
@@ -490,43 +494,22 @@ fn password_mapping(
         findings.push(Finding::new(FindingCode::InvalidServer, &incoming.host));
     }
 
-    let Some(outgoing) = &candidate.outgoing else {
+    // Without an outgoing server the account only receives mail (#252).
+    let outgoing = candidate.outgoing.as_ref();
+    if outgoing.is_none() {
         findings.push(Finding::new(FindingCode::MissingOutgoingServer, ""));
-        return None;
+    }
+    let smtp = match outgoing {
+        Some(outgoing) => Some(outgoing_mapping(incoming, outgoing, findings)?),
+        None => None,
     };
-    if outgoing.protocol != ServerProtocol::Smtp {
-        findings.push(Finding::new(
-            FindingCode::OutgoingProtocolUnsupported,
-            &outgoing.host,
-        ));
-        return None;
-    }
-    let smtp_security = check_security(outgoing, FindingCode::UnencryptedOutgoing, findings);
-    // An OAuth SMTP server paired with OAuth IMAP falls back to the same app
-    // password; paired with a password login it cannot be reproduced.
-    check_password_auth(
-        outgoing,
-        FindingCode::OutgoingSignInUnsupported,
-        incoming.auth,
-        findings,
-    );
-    let smtp_host = check_host(outgoing, findings);
-    let outgoing_username = outgoing.username.trim();
-    if !outgoing_username.is_empty()
-        && !outgoing_username.eq_ignore_ascii_case(incoming.username.trim())
-    {
-        findings.push(Finding::new(
-            FindingCode::SeparateOutgoingLogin,
-            outgoing_username,
-        ));
-    }
     if incoming.auth == SourceAuth::OAuth2 {
         findings.push(Finding::new(
             FindingCode::OAuthReplacedByPassword,
             &incoming.host,
         ));
     }
-    if [incoming, outgoing].iter().any(|server| {
+    if std::iter::once(incoming).chain(outgoing).any(|server| {
         server.auth == SourceAuth::EncryptedPassword && server.security != SourceSecurity::None
     }) {
         findings.push(Finding::new(FindingCode::PasswordMechanismChanged, ""));
@@ -550,10 +533,79 @@ fn password_mapping(
         username: incoming.username.trim().to_owned(),
         incoming_host: incoming_host?,
         incoming_port: incoming.effective_port(),
-        smtp_host: smtp_host?,
-        smtp_port: outgoing.effective_port(),
-        connection: MailConnectionSettings::new(incoming_security?, smtp_security?),
+        connection: match &smtp {
+            Some(smtp) => MailConnectionSettings {
+                smtp_login: smtp.login,
+                smtp_username: smtp.username.clone(),
+                ..MailConnectionSettings::new(incoming_security?, smtp.security?)
+            },
+            None => MailConnectionSettings::new(incoming_security?, ConnectionSecurity::Tls),
+        },
+        smtp_port: smtp.as_ref().map_or(0, |smtp| smtp.port),
+        smtp_host: match smtp {
+            Some(smtp) => smtp.host?,
+            None => String::new(),
+        },
         keep_on_server,
+    })
+}
+
+/// The SMTP server of a password account, as checked.
+struct OutgoingMapping {
+    host: Option<String>,
+    port: u16,
+    security: Option<ConnectionSecurity>,
+    /// Its own login name, when it isn't the incoming server's.
+    username: Option<String>,
+    login: LoginMethod,
+}
+
+fn outgoing_mapping(
+    incoming: &ServerCandidate,
+    outgoing: &ServerCandidate,
+    findings: &mut Vec<Finding>,
+) -> Option<OutgoingMapping> {
+    if outgoing.protocol != ServerProtocol::Smtp {
+        findings.push(Finding::new(
+            FindingCode::OutgoingProtocolUnsupported,
+            &outgoing.host,
+        ));
+        return None;
+    }
+    let security = check_security(outgoing, FindingCode::UnencryptedOutgoing, findings);
+    // An OAuth SMTP server paired with OAuth IMAP falls back to the same app
+    // password. Paired with a password login it can't be reproduced.
+    check_password_auth(
+        outgoing,
+        FindingCode::OutgoingSignInUnsupported,
+        incoming.auth,
+        true,
+        findings,
+    );
+    let host = check_host(outgoing, findings);
+    let login = if outgoing.auth == SourceAuth::None {
+        LoginMethod::None
+    } else {
+        LoginMethod::Automatic
+    };
+    let own = outgoing.username.trim();
+    let username = (login != LoginMethod::None
+        && !own.is_empty()
+        && !own.eq_ignore_ascii_case(incoming.username.trim()))
+    .then(|| own.to_owned());
+    if let Some(username) = &username {
+        if username.len() > MAX_USERNAME_BYTES {
+            findings.push(Finding::new(FindingCode::InvalidServer, &outgoing.host));
+        } else {
+            findings.push(Finding::new(FindingCode::SeparateOutgoingLogin, username));
+        }
+    }
+    Some(OutgoingMapping {
+        host,
+        port: outgoing.effective_port(),
+        security,
+        username,
+        login,
     })
 }
 
@@ -637,19 +689,20 @@ fn check_security(
 
 /// `oauth_allowed_with` is the incoming method under which an OAuth server can
 /// fall back to an app password.
+/// Report a sign-in Flectar Mail can't reproduce. Only an SMTP server
+/// (`none_allowed`) may take mail without one.
 fn check_password_auth(
     server: &ServerCandidate,
     unsupported: FindingCode,
     oauth_allowed_with: SourceAuth,
+    none_allowed: bool,
     findings: &mut Vec<Finding>,
 ) {
     let supported = match server.auth {
         SourceAuth::Password | SourceAuth::EncryptedPassword | SourceAuth::Automatic => true,
         SourceAuth::OAuth2 => oauth_allowed_with == SourceAuth::OAuth2,
-        SourceAuth::ClientCertificate
-        | SourceAuth::Kerberos
-        | SourceAuth::Ntlm
-        | SourceAuth::None => false,
+        SourceAuth::None => none_allowed,
+        SourceAuth::ClientCertificate | SourceAuth::Kerberos | SourceAuth::Ntlm => false,
         SourceAuth::Unknown => {
             findings.push(Finding::new(FindingCode::InvalidServer, &server.host));
             return;
@@ -1030,19 +1083,40 @@ mod tests {
         assert_eq!(codes(&plan), [FindingCode::PasswordMechanismChanged]);
     }
 
+    fn connection(plan: &AccountPlan) -> &MailConnectionSettings {
+        &plan.draft.as_ref().unwrap().config.settings.connection
+    }
+
+    /// A separate SMTP login, and an SMTP server that takes mail without
+    /// one, import as they are (#252).
     #[test]
-    fn a_separate_outgoing_login_blocks_import() {
+    fn the_outgoing_server_keeps_its_own_sign_in() {
         let mut account = candidate("me@example.com");
         account.outgoing.as_mut().unwrap().username = "relay-user".into();
         let plan = plan_one(account);
-        assert_eq!(plan.status, PlanStatus::Unsupported);
-        assert_eq!(plan.findings[0].code, FindingCode::SeparateOutgoingLogin);
+        assert_eq!(plan.status, PlanStatus::Ready);
+        assert_eq!(codes(&plan), [FindingCode::SeparateOutgoingLogin]);
         assert_eq!(plan.findings[0].detail, "relay-user");
+        assert_eq!(
+            connection(&plan).smtp_username.as_deref(),
+            Some("relay-user")
+        );
 
         // Login names that differ only in ASCII case name the same mailbox.
         let mut account = candidate("me@example.com");
         account.outgoing.as_mut().unwrap().username = "ME".into();
-        assert_eq!(plan_one(account).status, PlanStatus::Ready);
+        let plan = plan_one(account);
+        assert_eq!(codes(&plan), []);
+        assert_eq!(connection(&plan).smtp_username, None);
+
+        let mut account = candidate("me@example.com");
+        let outgoing = account.outgoing.as_mut().unwrap();
+        outgoing.auth = SourceAuth::None;
+        outgoing.username = "ignored".into();
+        let plan = plan_one(account);
+        assert_eq!(codes(&plan), []);
+        assert_eq!(connection(&plan).smtp_login, LoginMethod::None);
+        assert_eq!(connection(&plan).smtp_username, None);
     }
 
     #[test]
@@ -1062,10 +1136,17 @@ mod tests {
             assert_eq!(plan.findings[0].detail, expected);
         }
         let mut account = candidate("me@example.com");
-        account.outgoing.as_mut().unwrap().auth = SourceAuth::None;
+        account.outgoing.as_mut().unwrap().auth = SourceAuth::Ntlm;
         assert_eq!(
             codes(&plan_one(account)),
             [FindingCode::OutgoingSignInUnsupported]
+        );
+        // Only an SMTP server may take mail without a sign-in.
+        let mut account = candidate("me@example.com");
+        account.incoming.as_mut().unwrap().auth = SourceAuth::None;
+        assert_eq!(
+            codes(&plan_one(account)),
+            [FindingCode::IncomingSignInUnsupported]
         );
         let mut account = candidate("me@example.com");
         account.incoming.as_mut().unwrap().security = SourceSecurity::Unknown;
@@ -1206,12 +1287,14 @@ mod tests {
                 FindingCode::MissingEmail
             ]
         );
+        // Without an outgoing server the account only receives mail.
         let mut account = candidate("me@example.com");
         account.outgoing = None;
-        assert_eq!(
-            codes(&plan_one(account)),
-            [FindingCode::MissingOutgoingServer]
-        );
+        let plan = plan_one(account);
+        assert_eq!(plan.status, PlanStatus::Ready);
+        assert_eq!(codes(&plan), [FindingCode::MissingOutgoingServer]);
+        let config = &plan.draft.as_ref().unwrap().config;
+        assert_eq!((config.smtp_host.as_str(), config.smtp_port), ("", 0));
         let mut account = candidate("me@example.com");
         account.incoming.as_mut().unwrap().username = " ".into();
         account.outgoing.as_mut().unwrap().username = String::new();

@@ -89,6 +89,7 @@ async fn reply_send_reaches_smtp_and_sent_folder() {
     let tmp = tempfile::tempdir().unwrap();
     let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
     core.add_account_password(AddPasswordAccountArgs {
+        smtp_password: None,
         connection: flectar_mail_core::models::MailConnectionSettings::new(
             flectar_mail_core::models::ConnectionSecurity::Tls,
             flectar_mail_core::models::ConnectionSecurity::Starttls,

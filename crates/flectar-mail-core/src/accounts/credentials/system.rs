@@ -485,6 +485,7 @@ fn system_delete_all(service: &str, account_id: i64) -> Result<()> {
         Slot::DeviceSync,
         Slot::SyncTrial,
         Slot::ProxyPassword,
+        Slot::SmtpPassword,
     ] {
         system_delete(service, account_id, slot)?;
     }

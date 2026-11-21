@@ -321,6 +321,14 @@ export struct AccountRow {
     incoming_port: string,
     smtp_host: string,
     smtp_port: string,
+    // An IMAP or POP3 account with no SMTP server, which only receives mail.
+    receive_only: bool,
+    // How the incoming and SMTP servers are signed in to, as "automatic",
+    // "plain" or "login", and for SMTP also "none".
+    incoming_login: string,
+    smtp_login: string,
+    // The SMTP server's own username, or empty for the account's.
+    smtp_username: string,
     mail_history: string,
     sent_copy_policy: string,
     keep_on_server: string,

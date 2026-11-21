@@ -277,6 +277,16 @@ pub struct MailConnectionSettings {
     /// its own (#250).
     #[serde(default)]
     pub proxy: crate::net::proxy::AccountProxy,
+    /// How the incoming server is signed in to (#252).
+    #[serde(default)]
+    pub incoming_login: LoginMethod,
+    /// How the SMTP server is signed in to.
+    #[serde(default)]
+    pub smtp_login: LoginMethod,
+    /// The SMTP server's own username, when it isn't the account's. Its
+    /// password is saved apart, or is the account's when none is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smtp_username: Option<String>,
 }
 
 impl MailConnectionSettings {
@@ -286,6 +296,48 @@ impl MailConnectionSettings {
             smtp_security,
             trusted_certificate_pem: String::new(),
             proxy: crate::net::proxy::AccountProxy::App,
+            incoming_login: LoginMethod::Automatic,
+            smtp_login: LoginMethod::Automatic,
+            smtp_username: None,
+        }
+    }
+}
+
+/// How Flectar Mail signs in to a server with a password (#252).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LoginMethod {
+    /// As the server offers, with SASL PLAIN where it's announced and the
+    /// plain login command otherwise or when PLAIN fails.
+    #[default]
+    Automatic,
+    /// SASL PLAIN (RFC 4616), as IMAP's AUTHENTICATE PLAIN and POP3's and
+    /// SMTP's AUTH PLAIN.
+    Plain,
+    /// The plain login command, as IMAP's LOGIN, POP3's USER and PASS and
+    /// SMTP's AUTH LOGIN.
+    Login,
+    /// No sign-in, for an SMTP server that relays the mail of its network.
+    None,
+}
+
+impl LoginMethod {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Automatic => "automatic",
+            Self::Plain => "plain",
+            Self::Login => "login",
+            Self::None => "none",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "automatic" => Some(Self::Automatic),
+            "plain" => Some(Self::Plain),
+            "login" => Some(Self::Login),
+            "none" => Some(Self::None),
+            _ => None,
         }
     }
 }
@@ -748,6 +800,26 @@ pub struct AccountConfig {
 }
 
 impl AccountConfig {
+    /// The username the SMTP server is signed in with.
+    pub fn smtp_username(&self) -> &str {
+        self.settings
+            .connection
+            .smtp_username
+            .as_deref()
+            .unwrap_or(&self.username)
+    }
+
+    /// Whether the account sends mail. API accounts send through their API,
+    /// IMAP and POP3 accounts through an SMTP server unless they only
+    /// receive (#252).
+    pub fn sends_mail(&self) -> bool {
+        match self.mail_protocol {
+            MailProtocol::Imap | MailProtocol::Pop3 => !self.smtp_host.is_empty(),
+            MailProtocol::Gmail | MailProtocol::Jmap => true,
+            MailProtocol::Local => false,
+        }
+    }
+
     /// Whose proxy settings the account's connections follow: its own once
     /// it's saved, the app's while it's being set up.
     pub fn proxy_owner(&self) -> crate::net::proxy::Owner {
@@ -1870,8 +1942,14 @@ pub struct AddPasswordAccountArgs {
     pub jmap_url: String,
     pub incoming_host: String,
     pub incoming_port: u16,
+    /// Empty, with port 0, for an account that only receives mail.
     pub smtp_host: String,
     pub smtp_port: u16,
+    /// The SMTP server's own password, when it signs in with its own
+    /// username (`connection.smtp_username`). Without one, an edit keeps the
+    /// one saved, and the account's password stands in.
+    #[serde(default)]
+    pub smtp_password: Option<String>,
     pub connection: MailConnectionSettings,
 }
 
