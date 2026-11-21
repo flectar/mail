@@ -62,6 +62,8 @@ pub(crate) struct Server<'a> {
     pub(crate) security: ConnectionSecurity,
     /// Additional trusted certificates of the account, as PEM.
     pub(crate) trusted_certificate_pem: &'a str,
+    /// The account's server timeout, which stretches every wait (#252).
+    pub(crate) timeout: Duration,
 }
 
 /// What the server announced it supports (RFC 5804 section 1.7).
@@ -152,15 +154,18 @@ struct Done {
 pub(crate) struct Session {
     stream: BufReader<MailStream>,
     capabilities: Capabilities,
+    /// The account's server timeout, which stretches every wait (#252).
+    timeout: Duration,
 }
 
 impl Session {
     /// Connects and secures the connection as `server` asks, without
     /// signing in, and reads what the server offers.
     pub(crate) async fn open(server: &Server<'_>) -> Result<Self> {
-        tokio::time::timeout(CONNECT_TIMEOUT, Self::start(server))
+        let timeout = crate::net::timeouts::stretch(CONNECT_TIMEOUT, server.timeout);
+        tokio::time::timeout(timeout, Self::start(server))
             .await
-            .map_err(|_| Error::Timeout(CONNECT_TIMEOUT))?
+            .map_err(|_| Error::Timeout(timeout))?
     }
 
     async fn start(server: &Server<'_>) -> Result<Self> {
@@ -174,6 +179,7 @@ impl Session {
         let mut session = Self {
             stream: BufReader::new(stream),
             capabilities: Capabilities::default(),
+            timeout: server.timeout,
         };
         session.capabilities = session.read_capabilities().await?;
         if server.security == ConnectionSecurity::Starttls {
@@ -204,6 +210,7 @@ impl Session {
         let mut session = Self {
             stream: BufReader::new(tls_handshake(connector, tcp, host).await?),
             capabilities: Capabilities::default(),
+            timeout: self.timeout,
         };
         session.capabilities = session.read_capabilities().await?;
         Ok(session)
@@ -219,9 +226,10 @@ impl Session {
     /// Signs in with the mail account's user name and password, as PLAIN,
     /// the mechanism every server has (section 2.1).
     pub(crate) async fn sign_in(&mut self, user: &str, password: &str) -> Result<()> {
-        tokio::time::timeout(CONNECT_TIMEOUT, self.authenticate(user, password))
+        let timeout = crate::net::timeouts::stretch(CONNECT_TIMEOUT, self.timeout);
+        tokio::time::timeout(timeout, self.authenticate(user, password))
             .await
-            .map_err(|_| Error::Timeout(CONNECT_TIMEOUT))?
+            .map_err(|_| Error::Timeout(timeout))?
     }
 
     async fn authenticate(&mut self, user: &str, password: &str) -> Result<()> {
@@ -406,9 +414,12 @@ impl Session {
     }
 
     async fn peek(&mut self) -> Result<u8> {
-        let buffer = tokio::time::timeout(IDLE_TIMEOUT, self.stream.fill_buf())
-            .await
-            .map_err(|_| Error::Timeout(IDLE_TIMEOUT))??;
+        let buffer = tokio::time::timeout(
+            crate::net::timeouts::stretch(IDLE_TIMEOUT, self.timeout),
+            self.stream.fill_buf(),
+        )
+        .await
+        .map_err(|_| Error::Timeout(crate::net::timeouts::stretch(IDLE_TIMEOUT, self.timeout)))??;
         buffer.first().copied().ok_or_else(|| {
             Error::Io(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
@@ -496,9 +507,12 @@ impl Session {
             }
         }
         let mut bytes = vec![0; length];
-        tokio::time::timeout(IDLE_TIMEOUT, self.stream.read_exact(&mut bytes))
-            .await
-            .map_err(|_| Error::Timeout(IDLE_TIMEOUT))??;
+        tokio::time::timeout(
+            crate::net::timeouts::stretch(IDLE_TIMEOUT, self.timeout),
+            self.stream.read_exact(&mut bytes),
+        )
+        .await
+        .map_err(|_| Error::Timeout(crate::net::timeouts::stretch(IDLE_TIMEOUT, self.timeout)))??;
         Ok(Token::Text(text(bytes)?))
     }
 }

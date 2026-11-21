@@ -52,8 +52,8 @@ pub(crate) fn spawn(
 ) -> Vec<tokio::task::JoinHandle<()>> {
     debug_assert_eq!(config.mail_protocol, MailProtocol::Jmap);
     vec![
-        tokio::spawn(actor(ctx.clone(), config.clone(), rx, settings_rx)),
-        tokio::spawn(body_actor(ctx, config, body_rx)),
+        crate::net::timeouts::spawn(actor(ctx.clone(), config.clone(), rx, settings_rx)),
+        crate::net::timeouts::spawn(body_actor(ctx, config, body_rx)),
     ]
 }
 

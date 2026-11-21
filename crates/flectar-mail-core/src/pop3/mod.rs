@@ -191,6 +191,8 @@ pub struct Server<'a> {
     /// How to sign in, with SASL PLAIN when announced and USER and PASS
     /// otherwise, or only the way the account was set to (#252).
     pub login: crate::models::LoginMethod,
+    /// The account's server timeout, which stretches every wait (#252).
+    pub timeout: Duration,
 }
 
 /// An authenticated session in the TRANSACTION state.
@@ -200,14 +202,17 @@ pub struct Session {
     /// A response was cut short or the connection failed; the next bytes
     /// cannot be trusted to start a response.
     ended: bool,
+    /// How long one read or write may wait for the server.
+    idle: Duration,
 }
 
 impl Session {
     /// Connect, secure the connection as configured, and sign in.
     pub async fn connect(server: &Server<'_>, user: &str, password: &str) -> Result<Self> {
-        tokio::time::timeout(CONNECT_TIMEOUT, Self::open(server, user, password))
+        let timeout = net::timeouts::stretch(CONNECT_TIMEOUT, server.timeout);
+        tokio::time::timeout(timeout, Self::open(server, user, password))
             .await
-            .map_err(|_| Error::Timeout(CONNECT_TIMEOUT))?
+            .map_err(|_| Error::Timeout(timeout))?
     }
 
     async fn open(server: &Server<'_>, user: &str, password: &str) -> Result<Self> {
@@ -223,7 +228,8 @@ impl Session {
             ConnectionSecurity::Tls => tls_handshake(&connector, tcp, server.host).await?,
             ConnectionSecurity::Starttls | ConnectionSecurity::None => MailStream::Plain(tcp),
         };
-        let mut session = Self::new(stream);
+        let idle = net::timeouts::stretch(IDLE_TIMEOUT, server.timeout);
+        let mut session = Self::new(stream, idle);
         session.expect_ok("greeting").await?;
         if server.security == ConnectionSecurity::Starttls {
             session = session.start_tls(&connector, server.host).await?;
@@ -239,11 +245,12 @@ impl Session {
         Ok(session)
     }
 
-    fn new(stream: MailStream) -> Self {
+    fn new(stream: MailStream, idle: Duration) -> Self {
         Self {
             stream: BufReader::new(stream),
             capabilities: Capabilities::default(),
             ended: false,
+            idle,
         }
     }
 
@@ -263,7 +270,10 @@ impl Session {
         let MailStream::Plain(tcp) = self.stream.into_inner() else {
             return Err(Error::Tls("STLS needs an unencrypted connection".into()));
         };
-        Ok(Self::new(tls_handshake(connector, tcp, host).await?))
+        Ok(Self::new(
+            tls_handshake(connector, tcp, host).await?,
+            self.idle,
+        ))
     }
 
     async fn query_capabilities(&mut self) -> Result<Capabilities> {
@@ -472,7 +482,7 @@ impl Session {
             stream.write_all(b"\r\n").await?;
             stream.flush().await
         };
-        match tokio::time::timeout(IDLE_TIMEOUT, write).await {
+        match tokio::time::timeout(self.idle, write).await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => {
                 self.ended = true;
@@ -480,7 +490,7 @@ impl Session {
             }
             Err(_) => {
                 self.ended = true;
-                Err(Error::Timeout(IDLE_TIMEOUT))
+                Err(Error::Timeout(self.idle))
             }
         }
     }
@@ -492,7 +502,7 @@ impl Session {
         }
         let mut line = Vec::new();
         loop {
-            let available = match tokio::time::timeout(IDLE_TIMEOUT, self.stream.fill_buf()).await {
+            let available = match tokio::time::timeout(self.idle, self.stream.fill_buf()).await {
                 Ok(Ok(available)) if !available.is_empty() => available,
                 Ok(Ok(_)) => {
                     self.ended = true;
@@ -504,7 +514,7 @@ impl Session {
                 }
                 Err(_) => {
                     self.ended = true;
-                    return Err(Error::Timeout(IDLE_TIMEOUT));
+                    return Err(Error::Timeout(self.idle));
                 }
             };
             let (length, complete) = match available.iter().position(|&byte| byte == b'\n') {

@@ -369,6 +369,7 @@ async fn connect(
         security: connection.incoming_security,
         trusted_certificate_pem: &connection.trusted_certificate_pem,
         login: connection.incoming_login,
+        timeout: connection.server_timeout(),
     };
     pop3::Session::connect(&server, &config.username, password)
         .await

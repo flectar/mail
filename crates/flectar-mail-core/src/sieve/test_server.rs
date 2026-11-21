@@ -66,6 +66,7 @@ pub(crate) fn server_at(port: u16) -> Server<'static> {
         port,
         security: ConnectionSecurity::Starttls,
         trusted_certificate_pem: CERT,
+        timeout: crate::net::timeouts::STANDARD,
     }
 }
 

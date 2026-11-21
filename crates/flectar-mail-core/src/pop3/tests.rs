@@ -128,6 +128,7 @@ fn server_at(port: u16, security: ConnectionSecurity) -> Server<'static> {
         security,
         trusted_certificate_pem: CERT,
         login: crate::models::LoginMethod::Automatic,
+        timeout: crate::net::timeouts::STANDARD,
     }
 }
 
@@ -737,4 +738,27 @@ async fn arbitrary_responses_never_panic_hang_or_overrun_limits() {
         .await;
         assert!(finished.is_ok(), "hung on {command} with {garbage:?}");
     }
+}
+
+/// A server that never greets is given up on as late as the account's
+/// server timeout stretches the wait (#252).
+#[tokio::test(start_paused = true)]
+async fn a_silent_server_is_waited_for_as_long_as_the_account_says() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let _silent = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        std::future::pending::<()>().await;
+        drop(tcp);
+    });
+    let patient = Server {
+        timeout: Duration::from_secs(120),
+        ..server_at(port, ConnectionSecurity::None)
+    };
+    let started = tokio::time::Instant::now();
+    match Session::connect(&patient, "me", "pw").await {
+        Err(Error::Timeout(waited)) => assert_eq!(waited, Duration::from_secs(120)),
+        other => panic!("expected a timeout, got {:?}", other.err()),
+    }
+    assert_eq!(started.elapsed(), Duration::from_secs(120));
 }
