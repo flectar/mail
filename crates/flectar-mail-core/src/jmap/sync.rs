@@ -2133,7 +2133,7 @@ async fn execute_actions(ctx: &SyncCtx, config: &AccountConfig, c: &ConnectedCli
                     .await?;
                 ctx.bus.emit(CoreEvent::ActionState {
                     action_id,
-                    state: "failed".into(),
+                    state: "uncertain".into(),
                     error: Some(message),
                 });
             }

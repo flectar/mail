@@ -1365,7 +1365,9 @@ fn drop_own_receipt_requests(conn: &Connection, details: &mut [MessageDetail]) -
 /// active send action. Kept as a shared fragment so `detail` and
 /// `list_for_thread` expose the same columns `detail_from_row` reads.
 const SEND_STATE_COLS: &str = "
-    (SELECT CASE WHEN pa.state = 'failed' OR pa.last_error IS NOT NULL
+    (SELECT CASE WHEN pa.state = 'failed' AND json_extract(pa.payload, '$.uncertain') = 1
+                 THEN 'uncertain'
+                 WHEN pa.state = 'failed' OR pa.last_error IS NOT NULL
                  THEN 'failed' ELSE 'queued' END
      FROM pending_actions pa
      WHERE pa.message_id = m.id AND pa.kind = 'send'

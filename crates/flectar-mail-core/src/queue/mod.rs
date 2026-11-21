@@ -204,7 +204,7 @@ async fn execute_actions(
                     .await?;
                 ctx.bus.emit(CoreEvent::ActionState {
                     action_id,
-                    state: "failed".into(),
+                    state: "uncertain".into(),
                     error: Some(message),
                 });
             }

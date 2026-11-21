@@ -1285,7 +1285,8 @@ pub struct MessageDetail {
     /// attempt errored (e.g. the account needs re-authentication, or SMTP
     /// rejected it). `None` for received mail and for drafts never sent. Lets the
     /// UI keep a failed send visible with an error instead of it silently
-    /// reverting to a plain draft.
+    /// reverting to a plain draft. `"uncertain"` when it may have gone out,
+    /// the mail server never having confirmed it.
     pub send_state: Option<String>,
     /// The last delivery error when `send_state` is `"failed"`.
     pub send_error: Option<String>,
@@ -2111,7 +2112,9 @@ pub struct ScheduledSend {
     pub account_id: i64,
     /// When it goes out, in ms since the epoch.
     pub send_at: i64,
-    /// `pending`, `inflight`, or `failed` and waiting for the user.
+    /// `pending`, `inflight`, `failed` and waiting for the user, or
+    /// `uncertain`: it may have gone out, as the mail server never confirmed
+    /// it, so it isn't sent again by itself.
     pub state: String,
     pub error: Option<String>,
 }

@@ -227,7 +227,9 @@ pub fn scheduled_sends(conn: &Connection) -> Result<Vec<crate::models::Scheduled
     let mut statement = conn.prepare(
         "SELECT pa.id, pa.message_id, m.thread_id, pa.account_id,
                 COALESCE(json_extract(pa.payload, '$.sendAt'), pa.not_before) AS send_at,
-                pa.state, pa.last_error
+                CASE WHEN pa.state = 'failed' AND json_extract(pa.payload, '$.uncertain') = 1
+                     THEN 'uncertain' ELSE pa.state END,
+                pa.last_error
          FROM pending_actions pa LEFT JOIN messages m ON m.id = pa.message_id
          WHERE pa.kind = 'send' AND pa.message_id IS NOT NULL
            AND pa.state IN ('pending', 'inflight', 'failed')

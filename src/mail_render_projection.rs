@@ -120,6 +120,7 @@ pub(super) fn clear_reader_projection(app: &AppWindow) {
     let send_later = app.global::<SendLaterUi>();
     send_later.set_open_send_time(Default::default());
     send_later.set_open_send_error(Default::default());
+    send_later.set_open_send_uncertain(false);
     let reminder = app.global::<ReminderUi>();
     reminder.set_open_remind_time(Default::default());
     reminder.set_open_due(false);
@@ -178,6 +179,7 @@ pub(super) fn apply_email(
             .into(),
     );
     send_later.set_open_send_error(email.send_error.clone().unwrap_or_default().into());
+    send_later.set_open_send_uncertain(email.send_uncertain);
     app.set_selected_initials(email.initials.clone().into());
     app.set_selected_starred(email.starred);
     app.set_selected_unread(email.unread);
