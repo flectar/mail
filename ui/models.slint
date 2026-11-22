@@ -305,7 +305,13 @@ export struct CalendarConnectionRow {
 export struct AccountRow {
     id: int,
     drag_key: string,
+    // What lists of accounts call it: `custom_name`, else `default_name`.
     name: string,
+    // The name the user gave the account, or empty.
+    custom_name: string,
+    // What it's called without a name of its own: its owner's name from
+    // the provider, else its address.
+    default_name: string,
     email: string,
     provider: string,
     mail_protocol: string,

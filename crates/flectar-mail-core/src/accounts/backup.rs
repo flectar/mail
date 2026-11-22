@@ -260,6 +260,7 @@ mod tests {
         let account = PortableAccountConfig {
             email: "me@example.test".into(),
             display_name: None,
+            name: None,
             provider: Provider::Generic,
             auth_kind: AuthKind::Password,
             mail_protocol: MailProtocol::Imap,
