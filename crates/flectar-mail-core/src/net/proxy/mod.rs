@@ -234,7 +234,7 @@ pub async fn connect(route: &Route, host: &str, port: u16) -> io::Result<TcpStre
             source,
         })?;
     let opened = tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
+        super::timeouts::scaled(HANDSHAKE_TIMEOUT),
         tunnel::open(&mut stream, server, host, port),
     )
     .await

@@ -1998,11 +1998,23 @@ export component MailReadingPane inherits FocusScope {
                                         for item in EmailReader.items : VerticalBox {
                                             width: reader-list.visible-width;
                                             padding: 16px; spacing: 0px;
+                                            if item.kind == "section" : Button {
+                                                text: item.name;
+                                                has-icon: true;
+                                                icon: item.open ? @image-url("../icons/lucide/outline/chevron-down.svg") : @image-url("../icons/lucide/outline/chevron-right.svg");
+                                                accessible-label: item.name;
+                                                accessible-expandable: true;
+                                                accessible-expanded: item.open;
+                                                accessible-action-expand => {
+                                                    if !item.open { EmailReader.toggle-section(item.section); }
+                                                }
+                                                clicked => { EmailReader.toggle-section(item.section); }
+                                            }
                                             if item.url != "" : Button {
                                                 text: item.name; accessible-label: item.name;
                                                 clicked => { root.open_email_link(item.url); }
                                             }
-                                            if item.url == "" : Text {
+                                            if item.url == "" && item.kind != "section" : Text {
                                                 text: item.name; wrap: word-wrap;
                                                 font-size: item.kind == "heading" ? 22px * EmailReader.zoom : 16px * EmailReader.zoom;
                                                 font-weight: item.kind == "heading" ? 700 : 400;

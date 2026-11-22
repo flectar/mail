@@ -255,6 +255,7 @@ async fn fixture(behavior: Behavior) -> (Fixture, Option<Session>) {
         incoming_login: Default::default(),
         smtp_login: Default::default(),
         smtp_username: None,
+        server_timeout_secs: None,
     };
     credentials::store_async(
         ctx.credentials.clone(),

@@ -33,6 +33,8 @@ async fn with_deadline<T, F>(label: &'static str, timeout: Duration, future: F) 
 where
     F: Future<Output = Result<T>>,
 {
+    // As long as the account's server timeout stretches it (#252).
+    let timeout = net::timeouts::scaled(timeout);
     tokio::time::timeout(timeout, future).await.map_err(|_| {
         tracing::warn!(
             operation = label,
@@ -609,15 +611,16 @@ pub async fn connect_as(
     // greeting, or an AUTHENTICATE that never gets a tagged response) surfaces
     // as an error instead of hanging the sync actor forever.
     const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-    tokio::time::timeout(
-        CONNECT_TIMEOUT,
-        connect_inner(owner, host, port, creds, settings),
-    )
-    .await
-    .map_err(|_| {
-        tracing::warn!(%host, port, "imap connect: timed out after 30s");
-        CoreError::Imap(format!("connect {host}:{port}: timed out"))
-    })?
+    let timeout = net::timeouts::stretch(CONNECT_TIMEOUT, settings.server_timeout());
+    tokio::time::timeout(timeout, connect_inner(owner, host, port, creds, settings))
+        .await
+        .map_err(|_| {
+            tracing::warn!(%host, port, seconds = timeout.as_secs(), "imap connect: timed out");
+            CoreError::Imap(format!(
+                "connect {host}:{port}: timed out after {}s",
+                timeout.as_secs()
+            ))
+        })?
 }
 
 async fn connect_inner(
@@ -2406,8 +2409,8 @@ pub async fn idle_wait<C>(
     };
 
     // Leave IDLE. Bound DONE so a server that never acks can't wedge the actor.
-    let session = match tokio::time::timeout(std::time::Duration::from_secs(10), idle.done()).await
-    {
+    let done = net::timeouts::scaled(std::time::Duration::from_secs(10));
+    let session = match tokio::time::timeout(done, idle.done()).await {
         Ok(r) => r.map_err(|e| CoreError::Imap(e.to_string()))?,
         Err(_) => return Err(CoreError::Imap("IDLE DONE timed out".into())),
     };

@@ -116,7 +116,7 @@ export global ServiceIconPalette {
 }
 
 // Application colors live here instead of being re-declared by every custom
-// button and view. Palette.color-scheme is set by AppWindow's theme setting,
+// button and view. Palette.color-scheme is set by each window's theme setting,
 // so all consumers update together when the user changes appearance.
 export global AppTheme {
     // Color scheme and palette are separate preferences. This lets every
@@ -136,7 +136,12 @@ export global AppTheme {
     // Set with WindowChrome.top-bar, while the tab strip spans the window.
     in property <bool> top-bar: false;
 
-    out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+    // "System" sets Palette.color-scheme to unknown, and Slint's style then
+    // follows the OS. Slint gives app code no other view of the scheme it
+    // picks than the palette it paints with, so read it from the background.
+    out property <bool> dark: Palette.color-scheme == ColorScheme.unknown
+        ? Palette.background.to-oklch().lightness < 0.5
+        : Palette.color-scheme == ColorScheme.dark;
 
     // Each non-default preset starts from five user-facing foundation colors.
     // The rest of the semantic tokens are derived consistently, so adding a

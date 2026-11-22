@@ -340,6 +340,9 @@ export struct AccountRow {
     check_interval: string,
     // IMAP and JMAP: the server tells of new mail as it arrives.
     push: bool,
+    // IMAP, POP3 and JMAP: how long to wait for the account's servers, in
+    // seconds, as "30", "60", "120" or "300".
+    server_timeout: string,
     // Days a POP3 server keeps downloaded mail on its own; -1 when it
     // keeps it or hasn't said.
     server_keeps_mail_days: int,
@@ -602,7 +605,10 @@ export struct ContactSidebarRow {
 }
 
 // Email document controls are shared directly with the native renderer.
-export struct ReaderItem { name: string, url: string, kind: string, y: float }
+// A row of the reader view. A "section" row is the summary of a collapsible
+// section of the message: `section` counts the message's sections in document
+// order, and `open` tells whether it shows its content.
+export struct ReaderItem { name: string, url: string, kind: string, y: float, section: int, open: bool }
 export struct ReaderImage { x: float, y: float, width: float, height: float, alt: string, state: string }
 export struct ReaderCaret { x: float, y: float, height: float, valid: bool }
 export global EmailReader {
@@ -619,6 +625,8 @@ export global EmailReader {
     pure callback link-at(float, float) -> string;
     callback command(string);
     callback find(string, int);
+    // Opens or closes the section that a "section" row of `items` stands for.
+    callback toggle-section(int);
     in-out property <bool> auto-fit: true;
     in-out property <float> zoom: 1;
     in-out property <int> zoom-revision: 0;

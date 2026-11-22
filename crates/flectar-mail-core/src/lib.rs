@@ -1931,6 +1931,55 @@ impl Core {
             .await
     }
 
+    /// Set how long an IMAP, POP3 or JMAP account waits for its servers
+    /// before it gives up, in seconds, one of [`net::timeouts::CHOICES`]
+    /// (#252). The account's work starts over, so every connection and wait
+    /// takes the new timeout.
+    pub async fn set_account_server_timeout(&self, account_id: i64, seconds: u32) -> Result<()> {
+        if !net::timeouts::CHOICES.contains(&seconds) {
+            return Err(CoreError::Other(format!(
+                "a server timeout is {} seconds",
+                net::timeouts::CHOICES
+                    .map(|seconds| seconds.to_string())
+                    .join(", ")
+            )));
+        }
+        let wanted = (std::time::Duration::from_secs(u64::from(seconds))
+            != net::timeouts::STANDARD)
+            .then_some(seconds);
+        let changed = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                if !matches!(
+                    config.mail_protocol,
+                    MailProtocol::Imap | MailProtocol::Pop3 | MailProtocol::Jmap
+                ) {
+                    return Err(CoreError::Other(format!(
+                        "{} keeps the standard server timeout",
+                        config.email
+                    )));
+                }
+                if config.settings.connection.server_timeout_secs == wanted {
+                    return Ok(None);
+                }
+                config.settings.connection.server_timeout_secs = wanted;
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(Some(config))
+            })
+            .await?;
+        if let Some(config) = changed {
+            if let Some(handle) = self.handles.write().await.remove(&account_id) {
+                handle.abort();
+            }
+            self.spawn_actor(config).await;
+        }
+        Ok(())
+    }
+
     /// Stores a change to how an account syncs and wakes its worker, which
     /// checks for mail and then waits as the settings now say.
     async fn update_sync_settings(
@@ -2273,6 +2322,9 @@ impl Core {
                     .await?
                 {
                     args.connection.proxy = config.settings.connection.proxy;
+                    // So does its server timeout, set on its card (#252).
+                    args.connection.server_timeout_secs =
+                        config.settings.connection.server_timeout_secs;
                 }
                 // The SMTP server's own password, as saved, unless a new one
                 // came with the edit.
@@ -2300,25 +2352,37 @@ impl Core {
         // exact Mail account selected from the authenticated Session so a
         // later reconnect can never drift to a different shared account.
         let mut pop3_probe = None;
+        // The checks wait as long as the account's server timeout says (#252).
+        let server_timeout = args.connection.server_timeout();
         let jmap_account_id = match args.mail_protocol {
             MailProtocol::Jmap => Some(
-                crate::jmap::client::connect_as(
-                    password_account_config(&args, checked_as).proxy_owner(),
-                    &args.email,
-                    &args.username,
-                    &args.password,
-                    &args.jmap_url,
-                    None,
+                net::timeouts::scope(
+                    server_timeout,
+                    crate::jmap::client::connect_as(
+                        password_account_config(&args, checked_as).proxy_owner(),
+                        &args.email,
+                        &args.username,
+                        &args.password,
+                        &args.jmap_url,
+                        None,
+                    ),
                 )
                 .await?
                 .account_id,
             ),
             MailProtocol::Imap => {
-                self.check_imap_smtp(&mut args, checked_as).await?;
+                net::timeouts::scope(server_timeout, self.check_imap_smtp(&mut args, checked_as))
+                    .await?;
                 None
             }
             MailProtocol::Pop3 => {
-                pop3_probe = Some(self.check_pop3_smtp(&mut args, checked_as).await?);
+                pop3_probe = Some(
+                    net::timeouts::scope(
+                        server_timeout,
+                        self.check_pop3_smtp(&mut args, checked_as),
+                    )
+                    .await?,
+                );
                 None
             }
             MailProtocol::Gmail => return Err(gmail_needs_google_sign_in()),
@@ -5067,14 +5131,19 @@ impl Core {
                     .as_ref()
                     .map(|parent| format!("{}{delimiter}{encoded_leaf}", parent.path))
                     .unwrap_or(encoded_leaf);
-                let mut session = self.connect_folder_imap(&config).await?;
-                imap::create_folder(&mut session, &remote_name).await?;
-                // Clients that show only subscribed folders, this one among
-                // them, list it then.
-                if let Err(error) = imap::subscribe(&mut session, &remote_name).await {
-                    tracing::warn!(account_id, %error, "could not subscribe to a new folder");
-                }
-                imap::logout(session).await;
+                // As long as the account's server timeout says (#252).
+                net::timeouts::scope(config.settings.connection.server_timeout(), async {
+                    let mut session = self.connect_folder_imap(&config).await?;
+                    imap::create_folder(&mut session, &remote_name).await?;
+                    // Clients that show only subscribed folders, this one
+                    // among them, list it then.
+                    if let Err(error) = imap::subscribe(&mut session, &remote_name).await {
+                        tracing::warn!(account_id, %error, "could not subscribe to a new folder");
+                    }
+                    imap::logout(session).await;
+                    Ok::<_, CoreError>(())
+                })
+                .await?;
                 self.db
                     .write(move |conn| {
                         let folder_id = repo::folders::upsert(
@@ -5232,11 +5301,17 @@ impl Core {
                 let new_name = parent_prefix
                     .map(|parent| format!("{parent}{delimiter}{encoded}"))
                     .unwrap_or(encoded);
-                let mut session = self.connect_folder_imap(&config).await?;
-                let subscribed = subscriptions_in_tree(&mut session, &old_name, &delimiter).await;
-                imap::rename_folder(&mut session, &old_name, &new_name).await?;
-                move_subscriptions(&mut session, &subscribed, &old_name, &new_name).await;
-                imap::logout(session).await;
+                // As long as the account's server timeout says (#252).
+                net::timeouts::scope(config.settings.connection.server_timeout(), async {
+                    let mut session = self.connect_folder_imap(&config).await?;
+                    let subscribed =
+                        subscriptions_in_tree(&mut session, &old_name, &delimiter).await;
+                    imap::rename_folder(&mut session, &old_name, &new_name).await?;
+                    move_subscriptions(&mut session, &subscribed, &old_name, &new_name).await;
+                    imap::logout(session).await;
+                    Ok::<_, CoreError>(())
+                })
+                .await?;
                 self.db
                     .write(move |conn| {
                         repo::folders::rename_tree(
@@ -5330,16 +5405,22 @@ impl Core {
             }
             MailProtocol::Imap => {
                 let config = self.folder_account_config(account_id).await?;
-                let mut session = self.connect_folder_imap(&config).await?;
-                for candidate in &tree {
-                    imap::delete_folder(&mut session, &candidate.path).await?;
-                    // A server keeps the subscription of a deleted folder,
-                    // which would list a folder made later under its name.
-                    if let Err(error) = imap::unsubscribe(&mut session, &candidate.path).await {
-                        tracing::debug!(%error, "deleted folder kept its subscription");
+                // As long as the account's server timeout says (#252).
+                net::timeouts::scope(config.settings.connection.server_timeout(), async {
+                    let mut session = self.connect_folder_imap(&config).await?;
+                    for candidate in &tree {
+                        imap::delete_folder(&mut session, &candidate.path).await?;
+                        // A server keeps the subscription of a deleted
+                        // folder, which would list a folder made later under
+                        // its name.
+                        if let Err(error) = imap::unsubscribe(&mut session, &candidate.path).await {
+                            tracing::debug!(%error, "deleted folder kept its subscription");
+                        }
                     }
-                }
-                imap::logout(session).await;
+                    imap::logout(session).await;
+                    Ok::<_, CoreError>(())
+                })
+                .await?;
                 sync::delete_folder_tree(&self.sync_ctx(), account_id, folder.path, delimiter)
                     .await?;
             }
@@ -16033,6 +16114,71 @@ mod unsubscribe_offer_tests {
 fn account_setup_is_send(core: &Core, args: AddPasswordAccountArgs) {
     fn send<T: Send>(_: T) {}
     send(core.add_account_password(args));
+}
+
+#[cfg(test)]
+mod server_timeout_tests {
+    use super::*;
+
+    async fn timeout_of(core: &Core) -> Option<u32> {
+        core.list_account_configs()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|config| config.id == 1)
+            .unwrap()
+            .settings
+            .connection
+            .server_timeout_secs
+    }
+
+    /// An account waits for its servers as long as it's set to, and only
+    /// in the steps Settings offers (#252).
+    #[tokio::test]
+    async fn an_account_keeps_the_server_timeout_it_is_set_to() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        core.set_account_server_timeout(1, 120).await.unwrap();
+        assert_eq!(timeout_of(&core).await, Some(120));
+        let config = core
+            .list_account_configs()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|config| config.id == 1)
+            .unwrap();
+        assert_eq!(
+            config.settings.connection.server_timeout(),
+            std::time::Duration::from_secs(120)
+        );
+        // The standard one is kept as none.
+        core.set_account_server_timeout(1, 30).await.unwrap();
+        assert_eq!(timeout_of(&core).await, None);
+        assert!(core.set_account_server_timeout(1, 45).await.is_err());
+        assert_eq!(timeout_of(&core).await, None);
+
+        core.db
+            .write(|conn| {
+                conn.execute(
+                    "UPDATE accounts SET mail_protocol = 'gmail', provider = 'gmail',
+                         auth_kind = 'oauth2' WHERE id = 1",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(core.set_account_server_timeout(1, 60).await.is_err());
+    }
 }
 
 #[cfg(test)]
