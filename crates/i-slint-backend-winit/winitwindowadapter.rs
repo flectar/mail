@@ -277,6 +277,168 @@ fn platform_dictates_window_size() -> bool {
     cfg!(ios_and_friends)
 }
 
+/// The handle of a winit window on Windows.
+#[cfg(target_os = "windows")]
+fn win32_window(winit_window: &winit::window::Window) -> Option<windows::Win32::Foundation::HWND> {
+    use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+    let handle = winit_window.window_handle().ok()?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else { return None };
+    Some(windows::Win32::Foundation::HWND(handle.hwnd.get() as *mut _))
+}
+
+/// The work area of the monitor nearest to a window, in physical pixels.
+#[cfg(target_os = "windows")]
+fn work_area(hwnd: windows::Win32::Foundation::HWND) -> Option<windows::Win32::Foundation::RECT> {
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    };
+    let mut monitor =
+        MONITORINFO { cbSize: core::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+    // SAFETY: the monitor handle comes from the system, and `monitor` is a MONITORINFO whose
+    // `cbSize` is set as GetMonitorInfoW requires.
+    unsafe { GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor) }
+        .as_bool()
+        .then_some(monitor.rcWork)
+}
+
+/// A window's placement: its state, and the rectangle it has when restored, which stays the
+/// one the user gave it while the window is minimized or maximized.
+#[cfg(target_os = "windows")]
+fn window_placement(
+    hwnd: windows::Win32::Foundation::HWND,
+) -> Option<windows::Win32::UI::WindowsAndMessaging::WINDOWPLACEMENT> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowPlacement, WINDOWPLACEMENT};
+    let mut placement = WINDOWPLACEMENT {
+        length: core::mem::size_of::<WINDOWPLACEMENT>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: `hwnd` is a live window handle, and `placement` has its `length` set as
+    // GetWindowPlacement requires.
+    unsafe { GetWindowPlacement(hwnd, &mut placement) }.ok()?;
+    Some(placement)
+}
+
+/// Gives a window that is about to be shown the rectangle another one had when restored, and
+/// keeps it hidden. Returns whether it did.
+///
+/// The placement goes back as it came: GetWindowPlacement and SetWindowPlacement both use
+/// workspace coordinates, which differ from screen coordinates where a taskbar sits at the top
+/// or left. A window that comes onto a monitor with another scale is rescaled by winit, so the
+/// rectangle is set once more there.
+#[cfg(target_os = "windows")]
+fn restore_window_placement(
+    winit_window: &winit::window::Window,
+    mut placement: windows::Win32::UI::WindowsAndMessaging::WINDOWPLACEMENT,
+) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SW_HIDE, SetWindowPlacement, WINDOWPLACEMENT_FLAGS,
+    };
+    let Some(hwnd) = win32_window(winit_window) else { return false };
+    placement.flags = WINDOWPLACEMENT_FLAGS(0);
+    placement.showCmd = SW_HIDE.0 as u32;
+    for _ in 0..2 {
+        // SAFETY: `hwnd` is the live window handle that winit owns, and this runs on its thread.
+        if unsafe { SetWindowPlacement(hwnd, &placement) }.is_err() {
+            return false;
+        }
+        if window_placement(hwnd)
+            .is_some_and(|now| now.rcNormalPosition == placement.rcNormalPosition)
+        {
+            break;
+        }
+    }
+    true
+}
+
+/// What a window keeps when hiding destroys it, for when it is created again on show.
+#[derive(Clone, Copy)]
+struct PlaceBeforeHiding {
+    /// Whether the size saved with the window is the one the user gave it. A maximized or full
+    /// screen window's size isn't, and the application restores those states itself.
+    size: bool,
+    /// The window's placement and the work area of its monitor at the time.
+    #[cfg(target_os = "windows")]
+    placement: Option<(
+        windows::Win32::UI::WindowsAndMessaging::WINDOWPLACEMENT,
+        windows::Win32::Foundation::RECT,
+    )>,
+}
+
+/// Places a window that is about to be shown inside the work area of its monitor, at the size
+/// Slint asked for. Returns whether it changed.
+///
+/// winit creates a window at the default position with the default size and only then gives it
+/// the size Slint asks for, so Windows cascades it off the top left of a monitor without
+/// checking that it fits. A window whose size suits a larger screen opens partly beyond the
+/// screen edge or behind the taskbar. Microsoft's guidance for window placement is to move such
+/// a window until all of it is visible on its monitor, and to reduce a resizable window that is
+/// larger than the monitor until it fits.
+/// <https://learn.microsoft.com/en-us/windows/win32/uxguide/win-window-mgt#window-location>
+///
+/// `inner` is the client size Slint just asked winit for, if it did. winit adds a standard frame
+/// to it, while a window that draws its own title bar keeps only the side and bottom borders of
+/// that frame, so its client area came out taller by the caption. The outer frame is set from
+/// the borders the window actually has instead.
+///
+/// With `only_if_lost`, a window that is on a monitor at all keeps its place. A window shown
+/// again was placed by the user, who may let it span monitors.
+#[cfg(target_os = "windows")]
+fn place_in_work_area(
+    winit_window: &winit::window::Window,
+    inner: Option<winit::dpi::PhysicalSize<u32>>,
+    only_if_lost: bool,
+) -> bool {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromWindow};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClientRect, GetWindowRect, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SetWindowPos,
+    };
+
+    let Some(hwnd) = win32_window(winit_window) else { return false };
+    // SAFETY: `hwnd` is the live window handle that winit owns.
+    if only_if_lost && !unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL) }.is_invalid() {
+        return false;
+    }
+    let Some(work) = work_area(hwnd) else { return false };
+    let (mut window, mut client) = (RECT::default(), RECT::default());
+    // SAFETY: `hwnd` is the live window handle that winit owns.
+    let measured = unsafe {
+        GetWindowRect(hwnd, &mut window).is_ok() && GetClientRect(hwnd, &mut client).is_ok()
+    };
+    if !measured {
+        return false;
+    }
+    let (outer_width, outer_height) = (window.right - window.left, window.bottom - window.top);
+    // The client rectangle starts at 0, 0, so its far corner is its size.
+    let (width, height) = match inner {
+        Some(inner) => (
+            outer_width - client.right + inner.width as i32,
+            outer_height - client.bottom + inner.height as i32,
+        ),
+        None => (outer_width, outer_height),
+    };
+    let width = width.min(work.right - work.left);
+    let height = height.min(work.bottom - work.top);
+    let x = window.left.min(work.right - width).max(work.left);
+    let y = window.top.min(work.bottom - height).max(work.top);
+    if (x, y, width, height) == (window.left, window.top, outer_width, outer_height) {
+        return false;
+    }
+    // SAFETY: `hwnd` is the live window handle that winit owns, and this runs on its thread.
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            None,
+            x,
+            y,
+            width,
+            height,
+            SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
+        )
+    }
+    .is_ok()
+}
+
 fn apply_scale_factor_to_logical_sizes_in_attributes(
     attributes: &mut WindowAttributes,
     scale_factor: f64,
@@ -534,6 +696,9 @@ pub struct WinitWindowAdapter {
     /// Indicate whether we've ever received a resize event from winit after showing the window.
     pending_resize_event_after_show: Cell<bool>,
 
+    /// Where the window was when hiding destroyed it, for when it is shown again.
+    place_before_hiding: Cell<Option<PlaceBeforeHiding>>,
+
     has_presentable_frame: Cell<bool>,
 
     #[cfg(target_arch = "wasm32")]
@@ -614,6 +779,7 @@ impl WinitWindowAdapter {
             physical_size_before_scale_factor: Cell::new(None),
             has_explicit_size: Default::default(),
             pending_resize_event_after_show: Default::default(),
+            place_before_hiding: Default::default(),
             has_presentable_frame: Default::default(),
             renderer,
             #[cfg(target_arch = "wasm32")]
@@ -763,10 +929,12 @@ impl WinitWindowAdapter {
 
         // Create the window at its preferred size: the renderer's surface is created together
         // with the window, and on Wayland resizing it afterwards only takes effect after the
-        // next present, so the first frame would be rendered at the pre-show size.
+        // next present, so the first frame would be rendered at the pre-show size. A window that
+        // hiding destroyed is created at the size it had, which suspend() saved.
         if !platform_dictates_window_size()
             && !self.has_explicit_size.get()
             && window_attributes.fullscreen.is_none()
+            && !self.place_before_hiding.get().is_some_and(|place| place.size)
             && let Some(preferred_size) = self.preferred_size()
         {
             window_attributes.inner_size = Some(preferred_size.into());
@@ -922,6 +1090,24 @@ impl WinitWindowAdapter {
         }
 
         Ok(winit_window)
+    }
+
+    /// Where the window is, before hiding destroys it. suspend() keeps its size and position in
+    /// the attributes it is created with again.
+    fn place_before_hiding(&self) -> Option<PlaceBeforeHiding> {
+        let window = self.winit_window()?;
+        let size = !window.is_maximized() && window.fullscreen().is_none();
+        #[cfg(target_os = "windows")]
+        let placement = win32_window(&window)
+            .and_then(|hwnd| Some((window_placement(hwnd)?, work_area(hwnd)?)));
+        // The placement has the rectangle a maximized window is restored to.
+        #[cfg(target_os = "windows")]
+        let size = size || placement.is_some();
+        Some(PlaceBeforeHiding {
+            size,
+            #[cfg(target_os = "windows")]
+            placement,
+        })
     }
 
     pub(crate) fn suspend(&self) -> Result<(), PlatformError> {
@@ -1904,18 +2090,44 @@ impl WinitWindowAdapter {
                 }
             }
 
-            if !platform_dictates_window_size()
+            // A window that hiding destroyed is created again with the size it had, which the user
+            // may have given it.
+            let place_before_hiding = self.place_before_hiding.take();
+            let requested_size = (!platform_dictates_window_size()
                 && winit_window.fullscreen().is_none()
                 && !self.has_explicit_size.get()
                 && preferred_size.width > 0 as Coord
                 && preferred_size.height > 0 as Coord
                 // Don't set the preferred size as the user may have resized the window
                 && !recreating_window
-            {
-                // use the Slint's window Scale factor to take in account the override
-                let size = preferred_size.to_physical::<u32>(scale_factor);
+                && !place_before_hiding.is_some_and(|place| place.size))
+            // use the Slint's window Scale factor to take in account the override
+            .then(|| preferred_size.to_physical::<u32>(scale_factor));
+            if let Some(size) = requested_size {
                 self.resize_window(size.into())?;
-            };
+            }
+
+            // Before the first frame, which is drawn at the size the window then has. A minimized
+            // window is left alone, since its position is the off-screen one Windows parks it at.
+            #[cfg(target_os = "windows")]
+            if !platform_dictates_window_size()
+                && winit_window.fullscreen().is_none()
+                && !winit_window.is_maximized()
+                && winit_window.is_minimized() != Some(true)
+            {
+                // A window created again goes back where the user left it, and is moved only when
+                // the work area of its monitor changed while it was hidden, as after a resolution
+                // change.
+                let kept_work_area = place_before_hiding
+                    .and_then(|place| place.placement)
+                    .filter(|(placement, _)| restore_window_placement(&winit_window, *placement))
+                    .map(|(_, work)| work);
+                let only_if_lost = recreating_window
+                    || kept_work_area.is_some_and(|work| {
+                        win32_window(&winit_window).and_then(work_area) == Some(work)
+                    });
+                place_in_work_area(&winit_window, requested_size, only_if_lost);
+            }
 
             // Pre-render the first frame before mapping the window to avoid a flash of
             // uninitialized VRAM on X11 (no background_pixmap). Skipped on Wayland, where
@@ -1977,7 +2189,9 @@ impl WinitWindowAdapter {
                     matches!(h.as_raw(), raw_window_handle::RawWindowHandle::Wayland(..))
                 }) || std::env::var_os("SLINT_DESTROY_WINDOW_ON_HIDE").is_some()
             }) {
+                let place = self.place_before_hiding();
                 self.suspend()?;
+                self.place_before_hiding.set(place);
                 // Note: Don't register the window in inactive_windows for re-creation later, as creating the window
                 // on wayland implies making it visible. Unfortunately, winit won't allow creating a window on wayland
                 // that's not visible.
@@ -2099,6 +2313,8 @@ impl WindowAdapter for WinitWindowAdapter {
     }
 
     fn set_position(&self, position: corelib::api::WindowPosition) {
+        // The application's own position wins over where the window was before hiding.
+        self.place_before_hiding.take();
         let winit_pos = position_to_winit(&position);
         match &*self.winit_window_or_none.borrow() {
             WinitWindowOrNone::HasWindow { window, .. } => {
@@ -2112,6 +2328,7 @@ impl WindowAdapter for WinitWindowAdapter {
 
     fn set_size(&self, size: corelib::api::WindowSize) {
         self.has_explicit_size.set(true);
+        self.place_before_hiding.take();
         // TODO: don't ignore error, propagate to caller
         self.resize_window(window_size_to_winit(&size)).ok();
     }

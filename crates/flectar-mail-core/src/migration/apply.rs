@@ -244,6 +244,7 @@ fn insert(conn: &rusqlite::Connection, account: &Checked, settings: &mut Setting
                 source: crate::models::SenderIdentitySource::Manual,
                 delivery_status: Default::default(),
                 delivery_error: None,
+                bcc: Vec::new(),
             },
         )?;
     }

@@ -82,6 +82,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/063_send_indexes.sql")),
     Migration::Plain(include_str!("migrations/064_synced_send_fences.sql")),
     Migration::Plain(include_str!("migrations/065_folder_detected_role.sql")),
+    Migration::Plain(include_str!("migrations/066_sender_identity_bcc.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

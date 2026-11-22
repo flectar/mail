@@ -7,6 +7,7 @@ import { FloatingActionButton, SelectionCheckBox, ToolbarIconButton } from "../c
 import { FileTypeIcon } from "../components/file-type-icon.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { LabelChip } from "../components/label-chip.slint";
+import { MailboxWords } from "../mailbox-words.slint";
 import { TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
@@ -1173,7 +1174,7 @@ export component MailListPane inherits FocusScope {
                                         + ", " + mail-row.account-name
                                         + (mail-data.account_profile == "" ? "" : ", " + @tr("Profile: {}", mail-data.account_profile))
                                         + (mail-data.message_count > 1 ? ", " + @tr("{} messages", mail-data.message_count) : "")
-                                        + (mail-data.label_summary == "" ? "" : ", " + mail-data.label_summary)
+                                        + MailboxWords.label-note(mail-data.label_categories, mail-data.label_summary)
                                         + (mail-data.verification_code == "" ? ""
                                             : ", " + @tr("Verification code {}", mail-data.verification_code_spelled))
                                         + (mail-data.has_attachments ? ", " + @tr("Has attachments") : "")
@@ -1648,7 +1649,7 @@ export component MailListPane inherits FocusScope {
                                                                 max-width: self.preferred-width;
                                                                 min-width: min(self.preferred-width, self.least-width);
                                                                 horizontal-stretch: 0;
-                                                                name: label.name;
+                                                                name: MailboxWords.label-name(label);
                                                                 name-has-emoji: label.name_has_emoji;
                                                                 use-label-icon: mail-data.account_uses_labels;
                                                                 label-color: label.color;
