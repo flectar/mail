@@ -78,10 +78,12 @@ impl Core {
     async fn next_prefetch(&self, failed: &HashMap<i64, i64>) -> Result<Option<i64>> {
         let mut next = None::<(i64, i64)>;
         for config in self.list_account_configs().await? {
-            if config.mail_protocol != MailProtocol::Imap
-                || config.settings.download != DownloadPolicy::Everything
-                || self.pace.account(config.id).paused().is_some()
-            {
+            let everything = config.settings.download == DownloadPolicy::Everything
+                && matches!(
+                    config.mail_protocol,
+                    MailProtocol::Imap | MailProtocol::Jmap
+                );
+            if !everything || self.pace.account(config.id).paused().is_some() {
                 continue;
             }
             let account_id = config.id;
@@ -126,9 +128,9 @@ mod tests {
             .download
     }
 
-    /// An IMAP account chooses what it downloads, the attachments of one set
-    /// to download everything come next, and other accounts keep what their
-    /// providers give (#253).
+    /// An IMAP or JMAP account chooses what it downloads, the attachments of
+    /// one set to download everything come next, and other accounts keep what
+    /// their providers give (#253).
     #[tokio::test]
     async fn an_account_set_to_download_everything_gets_its_attachments() {
         let temp = tempfile::tempdir().unwrap();
@@ -173,6 +175,31 @@ mod tests {
                 .await
                 .unwrap(),
             None
+        );
+
+        // A JMAP server sends each attachment as its blob.
+        let blob = core
+            .db
+            .write(|conn| {
+                conn.execute(
+                    "UPDATE accounts SET mail_protocol = 'jmap' WHERE id = 1",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO attachments (message_id, filename, size, jmap_blob_id)
+                     VALUES (10, 'b.pdf', 10, 'blob-b')",
+                    [],
+                )?;
+                Ok(conn.last_insert_rowid())
+            })
+            .await
+            .unwrap();
+        core.set_account_download(1, DownloadPolicy::Everything)
+            .await
+            .unwrap();
+        assert_eq!(
+            core.next_prefetch(&HashMap::new()).await.unwrap(),
+            Some(blob)
         );
 
         core.db

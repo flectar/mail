@@ -7,7 +7,7 @@ use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
 use crate::jmap::client::{self, ConnectedClient};
 use crate::models::{
-    AccountConfig, Address, MailProtocol, SenderDeliveryStatus, ServerRulesState,
+    AccountConfig, Address, DownloadPolicy, MailProtocol, SenderDeliveryStatus, ServerRulesState,
     ServerSearchCursor, now_ms, roles,
 };
 use crate::sync::engine::{
@@ -42,6 +42,23 @@ const MAX_JMAP_MESSAGE_BYTES: usize = 128 * 1024 * 1024;
 /// message. A request the server doesn't answer in time lowers it.
 const ATTACHMENT_LISTING_BYTES: i64 = 32 * 1024 * 1024;
 const ATTACHMENT_LISTING_EMAILS: usize = 50;
+/// Downloading a body ahead of time costs the server the same read, so one
+/// body download is bounded alike (#253).
+const BODY_DOWNLOAD_BYTES: i64 = ATTACHMENT_LISTING_BYTES;
+const BODY_DOWNLOAD_EMAILS: usize = ATTACHMENT_LISTING_EMAILS;
+/// The most text of one body part a body download asks for. A message with a
+/// longer one downloads whole, as when it's opened.
+const MAX_BODY_VALUE_BYTES: usize = 1024 * 1024;
+/// The header fields a body downloaded ahead of time reads, as the whole
+/// message would give them: whether its sender is verified, and how to
+/// unsubscribe.
+const BODY_HEADERS: [&str; 5] = [
+    "From",
+    "Authentication-Results",
+    "List-Unsubscribe",
+    "List-Unsubscribe-Post",
+    "List-Id",
+];
 
 pub(crate) fn spawn(
     ctx: SyncCtx,
@@ -140,6 +157,7 @@ async fn actor(
     // Mail that came in before this worker started is caught up on silently.
     let live_since = crate::sync::ingest::live_since(now_ms());
     let mut listing_bytes = ATTACHMENT_LISTING_BYTES;
+    let mut body_bytes = BODY_DOWNLOAD_BYTES;
     // Kept from one sync to the next, with its connection. A failed sync or a
     // changed Session makes the next one connect again.
     let mut session: Option<ConnectedClient> = None;
@@ -279,6 +297,7 @@ async fn actor(
                 }
             }
         }
+        let mut downloading = connected.is_some();
         let mut listing = connected.is_some();
         loop {
             let wake = next_wake(
@@ -289,26 +308,45 @@ async fn actor(
                 deadline.as_mut(),
                 config.id,
             );
-            let wake = match (&connected, listing) {
-                // Attachment listing fills idle time one request at a time and
-                // gives way as soon as anything else needs the actor.
-                (Some(connected), true) => match wake.now_or_never() {
+            let wake = match &connected {
+                // Body downloads and attachment listing fill idle time one
+                // request at a time and give way as soon as anything else
+                // needs the actor. Bodies go first, as each of their requests
+                // lists the attachments too.
+                Some(connected) if downloading || listing => match wake.now_or_never() {
                     Some(wake) => wake,
                     None => {
-                        listing = match list_attachments(
-                            &ctx,
-                            &config,
-                            connected,
-                            &mut listing_bytes,
-                        )
-                        .await
-                        {
-                            Ok(listed) => listed,
-                            Err(error) => {
-                                tracing::warn!(account_id = config.id, %error, "JMAP attachment listing failed; retrying after the next sync");
-                                false
-                            }
-                        };
+                        if downloading {
+                            downloading = match download_bodies(
+                                &ctx,
+                                &config,
+                                connected,
+                                &mut body_bytes,
+                            )
+                            .await
+                            {
+                                Ok(downloaded) => downloaded,
+                                Err(error) => {
+                                    tracing::warn!(account_id = config.id, %error, "JMAP body download failed; retrying after the next sync");
+                                    false
+                                }
+                            };
+                        } else {
+                            listing = match list_attachments(
+                                &ctx,
+                                &config,
+                                connected,
+                                &mut listing_bytes,
+                            )
+                            .await
+                            {
+                                Ok(listed) => listed,
+                                Err(error) => {
+                                    tracing::warn!(account_id = config.id, %error, "JMAP attachment listing failed; retrying after the next sync");
+                                    false
+                                }
+                            };
+                        }
                         continue;
                     }
                 },
@@ -1054,9 +1092,18 @@ const RECEIPT_HEADERS: [&str; 3] = [
 /// Where the message asks a read receipt to go, and whether RFC 8098
 /// section 2.1 wants the user's confirmation first.
 fn receipt_request(email: &Email) -> (Vec<Address>, bool) {
+    raw_header_block(email, &RECEIPT_HEADERS)
+        .and_then(|block| crate::mime::parse_header_block(block.as_bytes()).ok())
+        .map(|headers| (headers.receipt_to, headers.receipt_confirm))
+        .unwrap_or_default()
+}
+
+/// The fields `names` of an email fetched raw and all (`Header::as_raw(name,
+/// true)`), as a header block the MIME parser reads; None without any.
+fn raw_header_block(email: &Email, names: &[&str]) -> Option<String> {
     let mut block = String::new();
-    for name in RECEIPT_HEADERS {
-        let values = match email.header(&Header::as_raw(name, true)) {
+    for name in names {
+        let values = match email.header(&Header::as_raw(*name, true)) {
             Some(HeaderValue::AsTextAll(values)) => values.clone(),
             Some(HeaderValue::AsText(value)) => vec![value.clone()],
             _ => Vec::new(),
@@ -1070,12 +1117,10 @@ fn receipt_request(email: &Email) -> (Vec<Address>, bool) {
         }
     }
     if block.is_empty() {
-        return (Vec::new(), false);
+        return None;
     }
     block.push_str("\r\n");
-    crate::mime::parse_header_block(block.as_bytes())
-        .map(|headers| (headers.receipt_to, headers.receipt_confirm))
-        .unwrap_or_default()
+    Some(block)
 }
 
 /// RFC 9007 and the IANA keyword registry spell it in lowercase for JMAP.
@@ -1887,16 +1932,7 @@ async fn list_attachments(
         .await?;
     let mut count = queue.len();
     loop {
-        let mut bytes = 0_i64;
-        let mut batch = Vec::new();
-        for message in queue.iter().take(count) {
-            let size = message.size.max(0);
-            if !batch.is_empty() && bytes.saturating_add(size) > *budget {
-                break;
-            }
-            bytes = bytes.saturating_add(size);
-            batch.push(message.clone());
-        }
+        let (batch, bytes) = budgeted(&queue, count, *budget);
         if batch.is_empty() {
             return Ok(false);
         }
@@ -1933,9 +1969,29 @@ async fn list_attachments(
     }
 }
 
+/// The first `count` messages of `queue` that `budget` message bytes cover,
+/// or the first alone when it's larger, and how many bytes they are.
+fn budgeted(
+    queue: &[repo::messages::JmapQueued],
+    count: usize,
+    budget: i64,
+) -> (Vec<repo::messages::JmapQueued>, i64) {
+    let mut bytes = 0_i64;
+    let mut batch = Vec::new();
+    for message in queue.iter().take(count) {
+        let size = message.size.max(0);
+        if !batch.is_empty() && bytes.saturating_add(size) > budget {
+            break;
+        }
+        bytes = bytes.saturating_add(size);
+        batch.push(message.clone());
+    }
+    (batch, bytes)
+}
+
 async fn request_attachments(
     c: &ConnectedClient,
-    batch: &[repo::messages::JmapAttachmentListing],
+    batch: &[repo::messages::JmapQueued],
 ) -> jmap_client::Result<Vec<Email>> {
     let mut request = c.request();
     request
@@ -1966,7 +2022,7 @@ async fn request_attachments(
 /// left to header sync, which queues them again if their blob changes.
 async fn store_attachments(
     ctx: &SyncCtx,
-    batch: Vec<repo::messages::JmapAttachmentListing>,
+    batch: Vec<repo::messages::JmapQueued>,
     listed: Vec<Email>,
 ) -> Result<()> {
     let thread_ids = ctx
@@ -2061,6 +2117,359 @@ fn persist_attachment_parts(
         if !retained.contains(&id) {
             db.execute("DELETE FROM attachments WHERE id=?1", [id])?;
         }
+    }
+    Ok(())
+}
+
+/// Downloads the bodies of the newest messages still without one, as many as
+/// one request covers, when the account downloads them ahead of time (#253).
+/// Returns whether a request was made; the next call finds out whether more
+/// messages wait.
+///
+/// The text comes as the server reads it out of each message (RFC 8621
+/// section 4.2's body values), without the attachments, which download when
+/// they're opened, or ahead of time too when the account downloads
+/// everything (see [`crate::prefetch`]). Like attachment listing, the reads
+/// are bounded per request by `budget`, which halves whenever the server
+/// doesn't answer in time.
+async fn download_bodies(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    budget: &mut i64,
+) -> Result<bool> {
+    if config.settings.download == DownloadPolicy::Headers {
+        return Ok(false);
+    }
+    let account_id = config.id;
+    let since = config.settings.mail_history.cutoff_ms_at(now_ms());
+    let limit = max_objects_in_get(c).min(BODY_DOWNLOAD_EMAILS);
+    let queue = ctx
+        .db
+        .read(move |conn| {
+            repo::messages::jmap_body_download_queue(conn, account_id, since, limit as i64)
+        })
+        .await?;
+    let mut count = queue.len();
+    loop {
+        let (batch, bytes) = budgeted(&queue, count, *budget);
+        if batch.is_empty() {
+            return Ok(false);
+        }
+        match request_bodies(c, &batch).await {
+            Ok(emails) => {
+                store_bodies(ctx, config, c, batch, emails).await?;
+                return Ok(true);
+            }
+            Err(error) if client::is_timeout(&error) && batch.len() > 1 => {
+                count = batch.len() / 2;
+                *budget = (bytes / 2).max(1);
+                tracing::debug!(
+                    account_id,
+                    budget = *budget,
+                    "JMAP body download timed out; asking for fewer"
+                );
+            }
+            Err(error) if client::is_timeout(&error) => {
+                // The server can't read this one message in time. It waits as
+                // a body that failed does, and comes when it's opened.
+                tracing::warn!(
+                    account_id,
+                    size = bytes,
+                    "JMAP body download of one message timed out; it waits"
+                );
+                let failed = batch
+                    .iter()
+                    .map(|message| {
+                        (
+                            message.message_id,
+                            "the server didn't answer in time".into(),
+                        )
+                    })
+                    .collect();
+                crate::sync::engine::record_content_failure_details(ctx, failed).await?;
+                return Ok(true);
+            }
+            Err(error) => return Err(client::map_error(error)),
+        }
+    }
+}
+
+async fn request_bodies(
+    c: &ConnectedClient,
+    batch: &[repo::messages::JmapQueued],
+) -> jmap_client::Result<Vec<Email>> {
+    let mut request = c.request();
+    request
+        .get_email()
+        .account_id(&c.account_id)
+        .ids(batch.iter().map(|message| message.remote_id.clone()))
+        .properties(
+            [
+                EmailProperty::Id,
+                EmailProperty::BlobId,
+                EmailProperty::TextBody,
+                EmailProperty::HtmlBody,
+                EmailProperty::Attachments,
+                EmailProperty::BodyValues,
+            ]
+            .into_iter()
+            .chain(BODY_HEADERS.map(|name| EmailProperty::Header(Header::as_raw(name, true)))),
+        )
+        .arguments()
+        .body_properties([
+            BodyProperty::PartId,
+            BodyProperty::BlobId,
+            BodyProperty::Size,
+            BodyProperty::Name,
+            BodyProperty::Type,
+            BodyProperty::Disposition,
+            BodyProperty::Cid,
+        ])
+        .fetch_text_body_values(true)
+        .fetch_html_body_values(true)
+        .max_body_value_bytes(MAX_BODY_VALUE_BYTES);
+    let mut response: EmailGetResponse = c.send_single(request).await?;
+    Ok(response.take_list())
+}
+
+/// A body downloaded ahead of time, as the whole message would give it.
+struct DownloadedBody {
+    message_id: i64,
+    remote_id: String,
+    blob_id: String,
+    text: Option<String>,
+    html: Option<String>,
+    snippet: String,
+    headers: Option<crate::mime::ParsedHeaders>,
+    attachments: Vec<jmap_client::email::EmailBodyPart>,
+    calendar_parts: Vec<String>,
+}
+
+/// Keeps what the server sent for `batch`. A message whose text didn't all
+/// come, and a small read receipt, whose report part is no text, download
+/// whole instead, as when they're opened. One the server didn't send as it
+/// is here waits as a body that failed does, while header sync catches up
+/// with it.
+async fn store_bodies(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    batch: Vec<repo::messages::JmapQueued>,
+    emails: Vec<Email>,
+) -> Result<()> {
+    let mut bodies = Vec::new();
+    let mut whole = Vec::new();
+    let mut failed = Vec::new();
+    for message in batch {
+        let Some(email) = emails
+            .iter()
+            .find(|email| email.id() == Some(message.remote_id.as_str()))
+        else {
+            failed.push((message.message_id, "the server didn't send it".into()));
+            continue;
+        };
+        if email.blob_id() != Some(message.blob_id.as_str()) {
+            failed.push((message.message_id, "it changed on the server".into()));
+            continue;
+        }
+        let attachments = email.attachments().unwrap_or_default();
+        let receipt = attachments.iter().any(|part| {
+            part.content_type()
+                .is_some_and(crate::mime::is_disposition_report_part)
+        });
+        let text = if receipt
+            && u64::try_from(message.size)
+                .is_ok_and(|size| size <= crate::sync::engine::WHOLE_RECEIPT_LIMIT)
+        {
+            None
+        } else {
+            body_text(email)
+        };
+        let Some((text, html)) = text else {
+            whole.push(message.message_id);
+            continue;
+        };
+        // Invitations are read from their calendar parts, each its own blob.
+        let mut calendar_parts = Vec::new();
+        let mut calendars_failed = None;
+        for part in attachments.iter().filter(|part| {
+            part.content_type()
+                .is_some_and(|value| value.eq_ignore_ascii_case("text/calendar"))
+        }) {
+            let Some(blob) = part.blob_id() else {
+                continue;
+            };
+            match download_message_bounded(c, blob).await {
+                Ok(bytes) => calendar_parts.push(String::from_utf8_lossy(&bytes).into_owned()),
+                Err(error) => {
+                    calendars_failed = Some(error);
+                    break;
+                }
+            }
+        }
+        if let Some(error) = calendars_failed {
+            failed.push((message.message_id, error.to_string()));
+            continue;
+        }
+        let snippet = crate::mime::make_body_snippet(text.as_deref(), html.as_deref());
+        let headers = raw_header_block(email, &BODY_HEADERS)
+            .and_then(|block| crate::mime::parse_header_block(block.as_bytes()).ok());
+        bodies.push(DownloadedBody {
+            message_id: message.message_id,
+            remote_id: message.remote_id,
+            blob_id: message.blob_id,
+            text,
+            html,
+            snippet,
+            headers,
+            attachments: attachments.to_vec(),
+            calendar_parts,
+        });
+    }
+    persist_bodies(ctx, config.id, bodies).await?;
+    for message_id in whole {
+        if let Err(error) =
+            fetch_body_over(ctx, config, BodyConnection::Shared(c), message_id).await
+        {
+            failed.push((message_id, error.to_string()));
+        }
+    }
+    crate::sync::engine::record_content_failure_details(ctx, failed).await
+}
+
+/// An email's text as its body parts give it, plain and sanitized HTML, each
+/// part joined as IMAP's background download joins them; None when a text
+/// part didn't come whole.
+fn body_text(email: &Email) -> Option<(Option<String>, Option<String>)> {
+    let mut seen = HashSet::new();
+    let mut plain = Vec::new();
+    let mut html = Vec::new();
+    let parts = email.text_body().unwrap_or_default();
+    for part in parts.iter().chain(email.html_body().unwrap_or_default()) {
+        let Some(part_id) = part.part_id() else {
+            continue;
+        };
+        // Images, audio and video show as the message's attachments.
+        let is_html = match part.content_type() {
+            Some(value) if value.eq_ignore_ascii_case("text/plain") => false,
+            Some(value) if value.eq_ignore_ascii_case("text/html") => true,
+            _ => continue,
+        };
+        if !seen.insert(part_id) {
+            continue;
+        }
+        let value = email.body_value(part_id)?;
+        if value.is_truncated() {
+            return None;
+        }
+        if is_html {
+            html.push(crate::mime::sanitize_html(value.value()));
+        } else {
+            plain.push(value.value().to_owned());
+        }
+    }
+    Some((
+        (!plain.is_empty()).then(|| plain.join("\n\n")),
+        (!html.is_empty()).then(|| html.join("\n")),
+    ))
+}
+
+/// Stores downloaded bodies whose messages still wait for them, as a
+/// message opened from the server is stored, but without its raw file.
+async fn persist_bodies(ctx: &SyncCtx, account_id: i64, bodies: Vec<DownloadedBody>) -> Result<()> {
+    if bodies.is_empty() {
+        return Ok(());
+    }
+    let (thread_ids, fresh, calendar_events) = ctx
+        .db
+        .write(move |conn| {
+            let tx = conn.transaction()?;
+            let mut thread_ids = Vec::new();
+            let mut fresh = Vec::new();
+            let mut calendar_events = Vec::new();
+            for body in bodies {
+                // Changed or opened meanwhile: header sync or the open has it.
+                let current = tx
+                    .query_row(
+                        "SELECT thread_id, has_attachments FROM messages
+                         WHERE id=?1 AND jmap_id=?2 AND jmap_blob_id=?3 AND body_state='none'",
+                        params![body.message_id, body.remote_id, body.blob_id],
+                        |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, bool>(1)?)),
+                    )
+                    .optional()?;
+                let Some((thread_id, has_attachments)) = current else {
+                    continue;
+                };
+                let message_id = body.message_id;
+                persist_attachment_parts(&tx, message_id, &body.attachments)?;
+                tx.execute(
+                    "UPDATE messages SET jmap_attachments_blob_id=?2 WHERE id=?1",
+                    params![message_id, body.blob_id],
+                )?;
+                // The paperclip stays the server's call (RFC 8621 hasAttachment).
+                repo::messages::store_body(
+                    &tx,
+                    message_id,
+                    body.text.as_deref(),
+                    body.html.as_deref(),
+                    None,
+                    has_attachments,
+                    Some(&body.snippet),
+                )?;
+                if let Some(headers) = &body.headers {
+                    repo::messages::set_sender_verification(
+                        &tx,
+                        message_id,
+                        headers.sender_verification,
+                    )?;
+                    repo::messages::fill_list_headers(
+                        &tx,
+                        message_id,
+                        headers.list_unsubscribe.as_deref(),
+                        headers.list_unsubscribe_post.as_deref(),
+                        headers.list_id.as_deref(),
+                    )?;
+                }
+                repo::search::index_message(&tx, message_id)?;
+                let _ = repo::sync_failures::clear_content(&tx, message_id);
+                // Rules that waited for this body go on (#238).
+                if let Some(resumed) = crate::rules::resume(&tx, message_id)?
+                    && resumed.announced
+                {
+                    fresh.push(resumed.thread_id);
+                }
+                if let Some(thread_id) = thread_id
+                    && !thread_ids.contains(&thread_id)
+                {
+                    thread_ids.push(thread_id);
+                }
+                if !body.calendar_parts.is_empty() {
+                    calendar_events.push((message_id, body.calendar_parts));
+                }
+            }
+            for &thread_id in &thread_ids {
+                repo::threads::recompute(&tx, thread_id)?;
+            }
+            tx.commit()?;
+            Ok((thread_ids, fresh, calendar_events))
+        })
+        .await?;
+    crate::sync::ingest::store_calendar_events(
+        ctx,
+        account_id,
+        calendar_events,
+        crate::sync::ingest::Arrival::Received,
+    )
+    .await?;
+    if !thread_ids.is_empty() {
+        ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+    }
+    if !fresh.is_empty() {
+        ctx.bus.emit(CoreEvent::MailNew {
+            account_id,
+            thread_ids: fresh,
+        });
     }
     Ok(())
 }

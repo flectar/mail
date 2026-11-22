@@ -1848,8 +1848,8 @@ impl Core {
     }
 
     /// Choose what an account downloads ahead of time within its mail history
-    /// (#253). An IMAP account's worker downloads messages unless only their
-    /// headers are wanted, and attachments as well when everything is.
+    /// (#253). An IMAP or JMAP account's worker downloads messages unless only
+    /// their headers are wanted, and attachments as well when everything is.
     pub async fn set_account_download(
         &self,
         account_id: i64,
@@ -1861,7 +1861,10 @@ impl Core {
                 let tx = conn.transaction()?;
                 let mut config = repo::accounts::get_config(&tx, account_id)?
                     .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
-                if config.mail_protocol != MailProtocol::Imap {
+                if !matches!(
+                    config.mail_protocol,
+                    MailProtocol::Imap | MailProtocol::Jmap
+                ) {
                     return Err(CoreError::Other(format!(
                         "{} downloads mail as its provider allows",
                         config.email

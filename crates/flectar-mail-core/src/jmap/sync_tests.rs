@@ -130,6 +130,8 @@ struct MockJmap {
     seen: Arc<std::sync::Mutex<Vec<String>>>,
     /// Email/set answers as if it marked them, and doesn't.
     forget_seen: bool,
+    /// What a download of these blobs returns; any other is a short message.
+    blobs: Vec<(&'static str, &'static str)>,
 }
 
 impl Default for MockJmap {
@@ -148,6 +150,7 @@ impl Default for MockJmap {
             submissions: Arc::new(std::sync::Mutex::new(Vec::new())),
             seen: Arc::default(),
             forget_seen: false,
+            blobs: Vec::new(),
         }
     }
 }
@@ -160,6 +163,8 @@ struct Mock {
     connections: Arc<std::sync::atomic::AtomicUsize>,
     /// The EmailSubmissions the server keeps.
     submissions: Arc<std::sync::Mutex<Vec<Value>>>,
+    /// The blobs downloaded, in order.
+    downloads: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl Mock {
@@ -217,20 +222,23 @@ impl MockJmap {
         });
         let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
         let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let downloads = Arc::new(std::sync::Mutex::new(Vec::new()));
         let submissions = self.submissions.clone();
         let server = Arc::new((self, session));
         let task = tokio::spawn({
             let calls = calls.clone();
             let connections = connections.clone();
+            let downloads = downloads.clone();
             async move {
                 loop {
                     let (stream, _) = listener.accept().await.unwrap();
                     connections.fetch_add(1, Ordering::SeqCst);
                     let server = server.clone();
                     let calls = calls.clone();
+                    let downloads = downloads.clone();
                     tokio::spawn(async move {
                         let (mock, session) = &*server;
-                        mock.serve(stream, session, &calls).await;
+                        mock.serve(stream, session, &calls, &downloads).await;
                     });
                 }
             }
@@ -250,6 +258,7 @@ impl MockJmap {
             calls,
             connections,
             submissions,
+            downloads,
         }
     }
 
@@ -258,6 +267,7 @@ impl MockJmap {
         stream: tokio::net::TcpStream,
         session: &Value,
         calls: &std::sync::Mutex<Vec<(String, Value)>>,
+        downloads: &std::sync::Mutex<Vec<String>>,
     ) {
         let mut stream = BufReader::new(stream);
         // Like a real server, keep the connection open for further requests.
@@ -268,6 +278,12 @@ impl MockJmap {
             }
             let get = line.starts_with("GET ");
             let download = line.starts_with("GET /download/");
+            // GET /download/{accountId}/{blobId}/{name}?accept={type} HTTP/1.1
+            let blob = if download {
+                line.split('/').nth(3).unwrap_or_default().to_owned()
+            } else {
+                String::new()
+            };
             let mut length = 0;
             loop {
                 line.clear();
@@ -290,7 +306,12 @@ impl MockJmap {
             let mut status = "200 OK";
             let mut hold = Duration::ZERO;
             let response = if download {
-                "From: sender@mail.example\r\nSubject: Conversation\r\n\r\nBody\r\n".to_owned()
+                downloads.lock().unwrap().push(blob.clone());
+                match self.blobs.iter().find(|(id, _)| *id == blob) {
+                    Some((_, content)) => (*content).to_owned(),
+                    None => "From: sender@mail.example\r\nSubject: Conversation\r\n\r\nBody\r\n"
+                        .to_owned(),
+                }
             } else if get {
                 session.to_string()
             } else {
@@ -2579,4 +2600,383 @@ async fn a_server_search_keeps_what_it_finds_and_goes_on_where_it_stopped() {
         .map(|(_, query)| query["position"].clone())
         .collect::<Vec<_>>();
     assert_eq!(positions, [json!(0), json!(2), json!(0), json!(2)]);
+}
+
+/// `email` with a plain body, and an HTML one when given, as a body download
+/// asks for them. Without HTML, the plain part stands for it too, as RFC 8621
+/// section 4.1.4 has it.
+fn with_bodies(mut email: Value, plain: &str, html: Option<&str>) -> Value {
+    let text_part =
+        json!({"partId": "10", "blobId": "text-blob", "size": plain.len(), "type": "text/plain"});
+    email["textBody"] = json!([text_part]);
+    email["bodyValues"] = json!({
+        "10": {"value": plain, "isEncodingProblem": false, "isTruncated": false}
+    });
+    match html {
+        Some(html) => {
+            email["htmlBody"] = json!([
+                {"partId": "11", "blobId": "html-blob", "size": html.len(), "type": "text/html"}
+            ]);
+            email["bodyValues"]["11"] =
+                json!({"value": html, "isEncodingProblem": false, "isTruncated": false});
+        }
+        None => email["htmlBody"] = json!([text_part]),
+    }
+    email
+}
+
+/// One body download request with the full byte budget.
+async fn download_once(ctx: &SyncCtx, config: &AccountConfig, c: &ConnectedClient) -> bool {
+    let mut budget = BODY_DOWNLOAD_BYTES;
+    download_bodies(ctx, config, c, &mut budget).await.unwrap()
+}
+
+/// What each message holds of its body: its remote id, body state, text,
+/// HTML and raw file.
+type StoredBody = (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+async fn stored_bodies(ctx: &SyncCtx) -> Vec<StoredBody> {
+    ctx.db
+        .read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT m.jmap_id, m.body_state, b.text_body, b.html_body, m.raw_path
+                 FROM messages m LEFT JOIN message_bodies b ON b.message_id = m.id
+                 WHERE m.jmap_id IS NOT NULL ORDER BY m.jmap_id",
+            )?;
+            Ok(stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+        .unwrap()
+}
+
+/// A message's id, body state, unsubscribe link and paperclip.
+struct StoredMessage {
+    id: i64,
+    body_state: String,
+    list_unsubscribe: Option<String>,
+    has_attachments: bool,
+}
+
+async fn message_with(ctx: &SyncCtx, remote_id: &'static str) -> StoredMessage {
+    ctx.db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT id, body_state, list_unsubscribe, has_attachments FROM messages
+                 WHERE jmap_id = ?1",
+                [remote_id],
+                |row| {
+                    Ok(StoredMessage {
+                        id: row.get(0)?,
+                        body_state: row.get(1)?,
+                        list_unsubscribe: row.get(2)?,
+                        has_attachments: row.get(3)?,
+                    })
+                },
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
+/// An account downloads the text of its messages ahead of time, without
+/// their attachments, with the header fields the whole message would give
+/// (#253).
+#[tokio::test]
+async fn bodies_download_ahead_of_time_without_their_attachments() {
+    let (_dir, ctx, config) = fixture().await;
+    assert_eq!(config.settings.download, DownloadPolicy::Messages);
+    let mut letter = with_bodies(
+        with_attachment(email("email-a", "thread-a"), 100, "2026-10-08T12:00:01Z"),
+        "Plain words",
+        Some("<p>HTML words</p><script>alert(1)</script>"),
+    );
+    letter["header:List-Unsubscribe:all"] = json!([" <https://news.example/unsubscribe>"]);
+    letter["header:List-Unsubscribe-Post:all"] = json!([" List-Unsubscribe=One-Click"]);
+    let note = with_bodies(email("email-b", "thread-b"), "Just a note", None);
+    let mock = MockJmap {
+        emails: vec![letter, note],
+        max_objects_in_get: 500,
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    run_sync(&ctx, &config, &mock.connected).await.unwrap();
+    let headers = mock.calls("Email/get").len();
+
+    assert!(download_once(&ctx, &config, &mock.connected).await);
+    let downloads = mock.calls("Email/get").split_off(headers);
+    assert_eq!(downloads.len(), 1);
+    let request = &downloads[0];
+    assert_eq!(listed_ids(request), ["email-a", "email-b"]);
+    for property in ["bodyValues", "textBody", "htmlBody", "attachments"] {
+        assert!(
+            request["properties"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(property)),
+            "{request}"
+        );
+    }
+    assert!(
+        request["properties"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("header:Authentication-Results:all"))
+    );
+    assert_eq!(request["fetchTextBodyValues"], true);
+    assert_eq!(request["fetchHTMLBodyValues"], true);
+    assert_eq!(request["maxBodyValueBytes"], MAX_BODY_VALUE_BYTES);
+
+    let stored = stored_bodies(&ctx).await;
+    let (_, state, text, html, raw) = &stored[0];
+    assert_eq!(state, "cached");
+    assert_eq!(text.as_deref(), Some("Plain words"));
+    let html = html.as_deref().unwrap();
+    assert!(
+        html.contains("HTML words") && !html.contains("script"),
+        "{html}"
+    );
+    assert_eq!(raw, &None);
+    assert_eq!(
+        stored[1],
+        (
+            "email-b".to_owned(),
+            "cached".to_owned(),
+            Some("Just a note".to_owned()),
+            None,
+            None
+        )
+    );
+    // The attachment is listed, and waits to be opened.
+    assert_eq!(
+        attachment_rows(&ctx).await,
+        [(
+            "email-a".to_owned(),
+            "2".to_owned(),
+            "email-a.pdf".to_owned(),
+            "part-email-a".to_owned()
+        )]
+    );
+    assert!(mock.downloads.lock().unwrap().is_empty());
+    let letter = message_with(&ctx, "email-a").await;
+    assert_eq!(
+        letter.list_unsubscribe.as_deref(),
+        Some("<https://news.example/unsubscribe>")
+    );
+    assert!(letter.has_attachments);
+
+    let calls = mock.calls("Email/get").len();
+    assert!(!download_once(&ctx, &config, &mock.connected).await);
+    assert!(!list_once(&ctx, &config, &mock.connected).await);
+    assert_eq!(mock.calls("Email/get").len(), calls);
+    mock.task.abort();
+}
+
+/// An account set to download headers alone leaves each body on the server
+/// until it's opened.
+#[tokio::test]
+async fn an_account_set_to_headers_only_downloads_no_bodies() {
+    let (_dir, ctx, mut config) = fixture().await;
+    config.settings.download = DownloadPolicy::Headers;
+    let mock = MockJmap {
+        emails: vec![with_bodies(email("email-a", "thread-a"), "Words", None)],
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    run_sync(&ctx, &config, &mock.connected).await.unwrap();
+    let calls = mock.calls("Email/get").len();
+    assert!(!download_once(&ctx, &config, &mock.connected).await);
+    assert_eq!(mock.calls("Email/get").len(), calls);
+    assert_eq!(stored_bodies(&ctx).await[0].1, "none");
+    mock.task.abort();
+}
+
+/// A message whose text the server cut short, and a small read receipt,
+/// whose report is no text, download whole, as when they're opened.
+#[tokio::test]
+async fn messages_with_more_than_their_text_download_whole() {
+    let (_dir, ctx, config) = fixture().await;
+    let mut long = with_bodies(email("email-a", "thread-a"), "A long text", None);
+    long["receivedAt"] = json!("2026-10-08T12:00:02Z");
+    long["bodyValues"]["10"]["isTruncated"] = json!(true);
+    let mut receipt = with_bodies(email("email-b", "thread-b"), "It was read", None);
+    receipt["receivedAt"] = json!("2026-10-08T12:00:01Z");
+    receipt["attachments"] = json!([{
+        "partId": "2", "blobId": "report-b", "size": 200,
+        "type": "message/disposition-notification"
+    }]);
+    let mock = MockJmap {
+        emails: vec![long, receipt],
+        max_objects_in_get: 500,
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    run_sync(&ctx, &config, &mock.connected).await.unwrap();
+    while download_once(&ctx, &config, &mock.connected).await {}
+    assert_eq!(
+        *mock.downloads.lock().unwrap(),
+        ["blob-email-a", "blob-email-b"]
+    );
+    for (remote_id, state, _, _, raw) in stored_bodies(&ctx).await {
+        assert_eq!(state, "cached", "{remote_id}");
+        assert!(raw.is_some(), "{remote_id}");
+    }
+    mock.task.abort();
+}
+
+/// A message the server no longer sends as it is here waits as a body that
+/// failed does, while the others come.
+#[tokio::test]
+async fn bodies_the_server_no_longer_sends_wait() {
+    let (_dir, ctx, config) = fixture().await;
+    ctx.db
+        .write(|conn| {
+            for (remote_id, blob) in [
+                ("email-a", "blob-email-a"),
+                ("email-gone", "blob-email-gone"),
+                ("email-c", "blob-stale"),
+            ] {
+                let (_, message) = crate::db::testutil::seed_message(
+                    conn,
+                    "sender@mail.example",
+                    remote_id,
+                    false,
+                );
+                repo::messages::set_jmap_remote(conn, message, remote_id, Some(blob))?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mock = MockJmap {
+        emails: vec![
+            with_bodies(email("email-a", "thread-a"), "Here", None),
+            with_bodies(email("email-c", "thread-c"), "Changed", None),
+        ],
+        max_objects_in_get: 500,
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    assert!(download_once(&ctx, &config, &mock.connected).await);
+    let states = stored_bodies(&ctx)
+        .await
+        .into_iter()
+        .map(|(remote_id, state, ..)| (remote_id, state))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        states,
+        [
+            ("email-a".to_owned(), "cached".to_owned()),
+            ("email-c".to_owned(), "none".to_owned()),
+            ("email-gone".to_owned(), "none".to_owned()),
+        ]
+    );
+    let calls = mock.calls("Email/get").len();
+    assert!(!download_once(&ctx, &config, &mock.connected).await);
+    assert_eq!(mock.calls("Email/get").len(), calls);
+    mock.task.abort();
+}
+
+const INVITATION: &str = concat!(
+    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Example//EN\r\nMETHOD:REQUEST\r\n",
+    "BEGIN:VEVENT\r\nUID:planning@mail.example\r\nDTSTAMP:20261008T120000Z\r\n",
+    "DTSTART:20261010T090000Z\r\nDTEND:20261010T100000Z\r\nSUMMARY:Planning\r\n",
+    "ORGANIZER:mailto:sender@mail.example\r\nATTENDEE:mailto:reader@mail.example\r\n",
+    "END:VEVENT\r\nEND:VCALENDAR\r\n",
+);
+
+/// An invitation's calendar downloads as its own blob, for the card above
+/// the message.
+#[tokio::test]
+async fn an_invitation_downloads_its_calendar() {
+    let (_dir, ctx, config) = fixture().await;
+    let mut invitation = with_bodies(email("email-a", "thread-a"), "Join us", None);
+    invitation["attachments"] = json!([{
+        "partId": "3", "blobId": "calendar-a", "size": INVITATION.len(),
+        "type": "text/calendar", "name": "invite.ics"
+    }]);
+    let mock = MockJmap {
+        emails: vec![invitation],
+        blobs: vec![("calendar-a", INVITATION)],
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    run_sync(&ctx, &config, &mock.connected).await.unwrap();
+    assert!(download_once(&ctx, &config, &mock.connected).await);
+    assert_eq!(*mock.downloads.lock().unwrap(), ["calendar-a"]);
+    let message = message_with(&ctx, "email-a").await;
+    assert_eq!(message.body_state, "cached");
+    let calendar = ctx
+        .calendar_db
+        .read(move |conn| repo::calendar::message_calendar(conn, message.id))
+        .await
+        .unwrap();
+    assert_eq!(calendar.as_deref(), Some(INVITATION));
+    mock.task.abort();
+}
+
+#[tokio::test]
+async fn body_downloads_bound_the_message_bytes_of_each_request() {
+    let (_dir, ctx, config) = fixture().await;
+    let mib = 1024 * 1024;
+    let message = |id: &str, size: i64, received_at: &str| {
+        let mut email = with_bodies(email(id, &format!("thread-{id}")), "Words", None);
+        email["size"] = json!(size);
+        email["receivedAt"] = json!(received_at);
+        email
+    };
+    let mock = MockJmap {
+        emails: vec![
+            message("email-a", 20 * mib, "2026-10-08T12:00:05Z"),
+            message("email-b", 20 * mib, "2026-10-08T12:00:04Z"),
+            message("email-c", 40 * mib, "2026-10-08T12:00:03Z"),
+            message("email-d", 1024, "2026-10-08T12:00:02Z"),
+            message("email-e", 1024, "2026-10-08T12:00:01Z"),
+        ],
+        max_objects_in_get: 500,
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    run_sync(&ctx, &config, &mock.connected).await.unwrap();
+    let headers = mock.calls("Email/get").len();
+    while download_once(&ctx, &config, &mock.connected).await {}
+    let downloads = mock.calls("Email/get").split_off(headers);
+    // Newest first; a message larger than the budget goes alone.
+    assert_eq!(
+        downloads.iter().map(listed_ids).collect::<Vec<_>>(),
+        [
+            vec!["email-a"],
+            vec!["email-b"],
+            vec!["email-c"],
+            vec!["email-d", "email-e"],
+        ]
+    );
+    assert!(
+        stored_bodies(&ctx)
+            .await
+            .iter()
+            .all(|(_, state, ..)| state == "cached")
+    );
+    mock.task.abort();
 }
