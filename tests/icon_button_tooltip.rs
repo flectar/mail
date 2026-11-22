@@ -3,7 +3,9 @@
 //! after keyboard use, sits centred under its button with a caret, stays
 //! inside the window, is not covered by a pane drawn after the button, and
 //! goes away with its button. A click or an activation keeps it away until
-//! the pointer leaves, and a button that moves does not leave it behind.
+//! the pointer leaves, a button that moves does not leave it behind, a key
+//! press hides the help under a resting pointer, and keyboard help moves
+//! with a button scrolled into view.
 use slint::platform::{
     Platform, PointerEventButton, WindowAdapter, WindowEvent,
     software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
@@ -431,6 +433,19 @@ fn window_bubble_follows_the_pointer_and_its_button() {
         "a click on a disabled provider keeps its help"
     );
     harness.leave();
+
+    // A click gives a button the focus, but not keyboard focus. When the
+    // window goes inactive and comes back, as a phone app does after another
+    // app was used, the button gets its focus back without showing its help.
+    harness.click(ARCHIVE);
+    harness.exit();
+    harness.send(WindowEvent::WindowActiveChanged(false));
+    harness.send(WindowEvent::WindowActiveChanged(true));
+    harness.wait(SETTLE);
+    assert!(
+        !dark(&harness.frame(), ARCHIVE, BUBBLE_Y),
+        "a clicked button shows no help when its window comes back"
+    );
 
     harness.ui.set_dark(true);
     harness.hover(STAR);
