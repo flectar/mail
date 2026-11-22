@@ -205,6 +205,15 @@ waits for a slow server, or a slow connection to it, before it gives up. Every
 wait grows alike, from connecting and signing in to downloading attachments,
 and a change takes effect at once.
 
+An IMAP or JMAP account downloads its messages in the background, as far back
+as its **Mail history** goes, so they open at once and without a connection.
+**Download** in the account's card changes what comes ahead of time.
+**Headers only** leaves each message on the server until you open it,
+**Messages** is where every account starts, and **Messages and attachments**
+also downloads attachments up to 25 MB, one at a time, so they open offline
+too. Larger ones download when you open them, and each device keeps its own
+choice.
+
 A server can ask Flectar Mail to slow down, when an account has too many
 connections open or makes too many requests, or while another app is using a
 POP3 mailbox. Flectar Mail then waits before it asks that server again, for as
@@ -978,8 +987,9 @@ Turn it on in Settings → Sync. To add a device, choose **Add a device** on one
 that already syncs and type the code it shows into **Enter code** on the new
 one, either on the welcome screen or in Settings → Sync. A device can also join
 with your recovery code. Each device keeps its own mail checking, how much mail
-history it downloads, its proxy and server timeout, and settings that belong to
-the device itself, such as reduced motion and text size.
+history it downloads and what it downloads ahead of time, its proxy and server
+timeout, and settings that belong to the device itself, such as reduced motion
+and text size.
 
 Flectar Mail Sync is a paid service, with a free trial, that pays for the
 servers it runs on. Each contribution to Flectar Mail earns a free year of it,

@@ -575,6 +575,10 @@ export global I18n {
         if (key == "Could not update CardDAV sync: {}") { return @tr("Could not update CardDAV sync: {}", argument); }
         if (key == "CardDAV disconnected.") { return @tr("CardDAV disconnected."); }
         if (key == "Could not disconnect CardDAV: {}") { return @tr("Could not disconnect CardDAV: {}", argument); }
+        // What an account downloads ahead of time (#253).
+        if (key == "Updating download settings…") { return @tr("Updating download settings…"); }
+        if (key == "Download settings updated.") { return @tr("Download settings updated."); }
+        if (key == "Could not update download settings: {}") { return @tr("Could not update download settings: {}", argument); }
         // Message source (#253).
         if (key == "Copied the message source") { return @tr("Copied the message source"); }
         if (key == "Could not read the message source: {}") { return @tr("Could not read the message source: {}", argument); }
@@ -1149,6 +1153,7 @@ export component AppWindow inherits Window {
     callback save_account_check_interval(int, string);
     callback save_account_push(int, bool);
     callback save_account_server_timeout(int, int);
+    callback save_account_download(int, string);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -2580,6 +2585,7 @@ export component AppWindow inherits Window {
             save_account_check_interval(account-id, value) => { root.save_account_check_interval(account-id, value); }
             save_account_push(account-id, enabled) => { root.save_account_push(account-id, enabled); }
             save_account_server_timeout(account-id, seconds) => { root.save_account_server_timeout(account-id, seconds); }
+            save_account_download(account-id, value) => { root.save_account_download(account-id, value); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
             connect_caldav(account-id, connection-id, url, username, password) => { root.connect_caldav(account-id, connection-id, url, username, password); }
             set_calendar_connection_enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }
