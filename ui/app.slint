@@ -22,6 +22,7 @@ export { AgentAccess, AgentAccount, AgentActivityEntry, AgentFolder } from "agen
 export { Notice } from "notice.slint";
 export { Unsubscribe } from "unsubscribe.slint";
 export { BlockSender } from "block-sender.slint";
+export { ContactImport } from "contact-import.slint";
 export { MailRules, RuleActionRow, RuleConditionRow, RuleRow } from "rules.slint";
 import { MailRules } from "rules.slint";
 export { Invitation } from "invitation.slint";
@@ -59,6 +60,8 @@ import { Notice } from "notice.slint";
 import { UnsubscribeDialog } from "dialogs/unsubscribe-dialog.slint";
 import { Unsubscribe } from "unsubscribe.slint";
 import { BlockSenderDialog } from "dialogs/block-sender-dialog.slint";
+import { ContactImportDialog } from "dialogs/contact-import-dialog.slint";
+import { ContactImport } from "contact-import.slint";
 import { BlockSender } from "block-sender.slint";
 import { BoundComposer, ComposerUi } from "components/composer-ui.slint";
 import { ComposerText } from "components/composer-fields.slint";
@@ -713,6 +716,19 @@ export global I18n {
         if (key == "Updating sync settings…") { return @tr("Updating sync settings…"); }
         if (key == "Sync settings updated.") { return @tr("Sync settings updated."); }
         if (key == "Could not update sync settings: {}") { return @tr("Could not update sync settings: {}", argument); }
+        if (key == "Import contacts") { return @tr("Import contacts"); }
+        if (key == "Export contacts") { return @tr("Export contacts"); }
+        if (key == "vCard contacts") { return @tr("vCard contacts"); }
+        if (key == "Could not read the contacts file: {}") { return @tr("Could not read the contacts file: {}", argument); }
+        if (key == "This file is larger than 64 MB.") { return @tr("This file is larger than 64 MB."); }
+        if (key == "This file has more than 25,000 contacts.") { return @tr("This file has more than 25,000 contacts."); }
+        if (key == "No contacts found in this file.") { return @tr("No contacts found in this file."); }
+        if (key == "Imported {} contacts.") { return @tr("Imported one contact." | "Imported {0} contacts." % round(argument.to-float()), argument); }
+        if (key == "No new contacts to import.") { return @tr("No new contacts to import."); }
+        if (key == "Could not import contacts: {}") { return @tr("Could not import contacts: {}", argument); }
+        if (key == "Exported {} contacts.") { return @tr("Exported one contact." | "Exported {0} contacts." % round(argument.to-float()), argument); }
+        if (key == "No saved contacts to export.") { return @tr("No saved contacts to export."); }
+        if (key == "Could not export contacts: {}") { return @tr("Could not export contacts: {}", argument); }
         if (key == "Mail history requires local mail data.") { return @tr("Mail history requires local mail data."); }
         if (key == "Updating mail history…") { return @tr("Updating mail history…"); }
         if (key == "Remote images are unavailable in this minimal build.") { return @tr("Remote images are unavailable in this minimal build."); }
@@ -2755,6 +2771,14 @@ export component AppWindow inherits Window {
     }
 
     if BlockSender.stage != "" : BlockSenderDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        z: 16000;
+    }
+
+    if ContactImport.stage != "" : ContactImportDialog {
         x: root.content-x;
         y: root.content-y;
         width: root.content-width;

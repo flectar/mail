@@ -1,0 +1,21 @@
+// Bringing contacts in from a vCard file, as other address books and Google
+// Contacts export them, and taking every saved contact out to one
+// (src/contact_import.rs).
+export global ContactImport {
+    // Where an import is: "" (none), "review" (the dialog tells what the
+    // file holds) or "working".
+    in property <string> stage;
+    // What the file holds.
+    in property <int> new-count;
+    in property <int> duplicate-count;
+    in property <int> unreadable-count;
+    // The address book new contacts go to, or "" when they stay on this
+    // device.
+    in property <string> destination;
+    callback choose-file();
+    callback export();
+    // What happens to contacts already saved: 0 leaves them as they are, 1
+    // adds what's new to them, 2 imports them again as copies.
+    callback confirm(int);
+    callback close();
+}

@@ -8,7 +8,8 @@ import { FloatingActionButton, LineEdit, TextEdit, ToolbarIconButton } from "../
 import { SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
 import { SidebarStyle } from "../components/sidebar-row.slint";
 import { TypeScale } from "../typography.slint";
-import { LayoutMetrics } from "../design-system.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { ContactImport } from "../contact-import.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
 import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
@@ -341,6 +342,31 @@ export component ContactsView inherits Rectangle {
                         edited(value) => { root.search(value); }
                         filter-selected(value) => { root.open-filter(value); }
                         refresh => { root.refresh(); }
+
+                        contacts-more-menu := ContextMenuArea {
+                            width: LayoutMetrics.desktop-icon-button-size;
+                            height: LayoutMetrics.control-height;
+
+                            ToolbarIconButton {
+                                icon: @image-url("../icons/lucide/outline/kebab-horizontal.svg");
+                                icon-color: AppTheme.secondary;
+                                hover-background: AppTheme.muted-control-bg;
+                                tooltip-text: @tr("More contact actions");
+                                accessible-id: "contacts-more-button";
+                                clicked => { contacts-more-menu.show({ x: 0px, y: parent.height }); }
+                            }
+
+                            Menu {
+                                MenuItem {
+                                    title: @tr("Import contacts…");
+                                    activated => { ContactImport.choose-file(); }
+                                }
+                                MenuItem {
+                                    title: @tr("Export contacts…");
+                                    activated => { ContactImport.export(); }
+                                }
+                            }
+                        }
                     }
                 }
 

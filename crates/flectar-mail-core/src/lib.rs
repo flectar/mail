@@ -299,6 +299,16 @@ fn normalize_account_email(value: &str) -> Option<String> {
 
 /// Rules every account created from portable or migrated settings must
 /// satisfy. Interactive setup checks the same fields as the user types them.
+/// The cards of a contacts file, read off the async runtime: a large file
+/// takes a while.
+async fn read_contact_file(
+    file: Vec<u8>,
+) -> Result<std::result::Result<carddav::import::ImportedCards, ContactFileProblem>> {
+    tokio::task::spawn_blocking(move || carddav::import::read(&file))
+        .await
+        .map_err(|error| CoreError::Other(error.to_string()))
+}
+
 pub(crate) fn validate_portable_account(config: &PortableAccountConfig) -> Result<()> {
     net::tls::trusted_certificates(&config.settings.connection.trusted_certificate_pem)?;
     let email = config.email.trim();
@@ -7811,6 +7821,120 @@ impl Core {
             .await?;
         self.nudge_card(None).await;
         Ok(saved)
+    }
+
+    /// What importing a vCard file would do: how many of its contacts are
+    /// new, already saved, or unreadable, or why it can't be imported.
+    pub async fn preview_contact_import(&self, file: Vec<u8>) -> Result<ContactImportPreview> {
+        let imported = match read_contact_file(file).await? {
+            Ok(imported) => imported,
+            Err(problem) => {
+                return Ok(ContactImportPreview {
+                    problem: Some(problem),
+                    ..Default::default()
+                });
+            }
+        };
+        self.db
+            .read(move |conn| {
+                let mut preview = ContactImportPreview {
+                    unreadable: imported.unreadable,
+                    ..Default::default()
+                };
+                let mut earlier = carddav::import::EarlierCards::default();
+                for card in &imported.cards {
+                    // A card repeating an earlier one of the file finds it
+                    // saved by the time the import reaches it.
+                    let repeated = earlier.repeats(card);
+                    if repeated || repo::contact_entries::duplicate_of(conn, card)?.is_some() {
+                        preview.duplicates += 1;
+                    } else {
+                        preview.new += 1;
+                    }
+                }
+                Ok(preview)
+            })
+            .await
+    }
+
+    /// Save the contacts of a vCard file. New contacts go to the address
+    /// book of `account_id` where it has one that takes them, and are saved
+    /// on this device otherwise. `duplicates` says what happens to contacts
+    /// already saved.
+    pub async fn import_contacts(
+        &self,
+        file: Vec<u8>,
+        account_id: Option<i64>,
+        duplicates: ImportedDuplicates,
+    ) -> Result<ContactImportOutcome> {
+        let imported = read_contact_file(file)
+            .await?
+            .map_err(|problem| CoreError::Other(format!("{problem:?}")))?;
+        let outcome = self
+            .db
+            .write(move |conn| {
+                let mut tx = conn.transaction()?;
+                let mut outcome = ContactImportOutcome {
+                    unreadable: imported.unreadable,
+                    ..Default::default()
+                };
+                let add = |tx: &rusqlite::Connection, card: &carddav::vcard::Card| -> Result<()> {
+                    let id = repo::contact_entries::store(tx, None, card)?;
+                    if let Some(account_id) = account_id {
+                        repo::carddav::attach_new_contact(tx, account_id, id)?;
+                    }
+                    Ok(())
+                };
+                for card in &imported.cards {
+                    let Some(saved_id) = repo::contact_entries::duplicate_of(&tx, card)? else {
+                        add(&tx, card)?;
+                        outcome.added += 1;
+                        continue;
+                    };
+                    match duplicates {
+                        ImportedDuplicates::Skip => outcome.skipped += 1,
+                        ImportedDuplicates::Add => {
+                            // An address book names each card by its UID.
+                            let copy = carddav::import::with_new_uid(card).ok_or_else(|| {
+                                CoreError::Other("contact could not be copied".into())
+                            })?;
+                            add(&tx, &copy)?;
+                            outcome.added += 1;
+                        }
+                        ImportedDuplicates::Merge => {
+                            let merged =
+                                repo::contacts::get_record(&tx, saved_id)?.and_then(|saved| {
+                                    repo::contact_entries::merged(&saved, card.record())
+                                });
+                            let Some(merged) = merged else {
+                                outcome.skipped += 1;
+                                continue;
+                            };
+                            // A read-only or conflicting contact stays as it is.
+                            let savepoint = tx.savepoint()?;
+                            if repo::contact_entries::save(&savepoint, &merged).is_ok() {
+                                savepoint.commit()?;
+                                outcome.merged += 1;
+                            } else {
+                                outcome.skipped += 1;
+                            }
+                        }
+                    }
+                }
+                tx.commit()?;
+                Ok(outcome)
+            })
+            .await?;
+        self.bus.emit(CoreEvent::ContactsUpdated { account_id: 0 });
+        self.nudge_card(None).await;
+        Ok(outcome)
+    }
+
+    /// Every saved contact as one vCard file, and how many it holds.
+    pub async fn export_contacts(&self) -> Result<(String, usize)> {
+        self.db
+            .read(|conn| repo::contact_entries::export(conn))
+            .await
     }
 
     /// Delete a saved contact as of `revision`, or forget a suggestion.
@@ -17745,5 +17869,179 @@ mod answer_route_tests {
             route(Some(read_only), "TENTATIVE"),
             AnswerRoute::Mail { store: false }
         );
+    }
+}
+
+#[cfg(test)]
+mod contact_import_tests {
+    use super::*;
+
+    /// Ada, Grace, Ada again with her title, and a card with no name.
+    const FILE: &str = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ada Lovelace\r\nEMAIL:ada@example.com\r\nTEL:+44 20 1234\r\nEND:VCARD\r\n\
+        BEGIN:VCARD\r\nVERSION:2.1\r\nN:Hopper;Grace;;;\r\nEMAIL;INTERNET:grace@example.com\r\nORG:Navy\r\nEND:VCARD\r\n\
+        BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ada again\r\nEMAIL:ADA@example.com\r\nTITLE:Countess\r\nEND:VCARD\r\n\
+        BEGIN:VCARD\r\nVERSION:3.0\r\nNOTE:Nothing to call them by\r\nEND:VCARD\r\n";
+
+    async fn core() -> (tempfile::TempDir, Core) {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        (temp, core)
+    }
+
+    async fn saved(core: &Core) -> Vec<ContactRecord> {
+        core.db
+            .read(|conn| {
+                let mut statement = conn.prepare("SELECT id FROM contact_entries ORDER BY id")?;
+                let ids = statement
+                    .query_map([], |row| row.get::<_, i64>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                ids.into_iter()
+                    .filter_map(|id| repo::contacts::get_record(conn, id).transpose())
+                    .collect::<Result<Vec<_>>>()
+            })
+            .await
+            .unwrap()
+    }
+
+    fn file() -> Vec<u8> {
+        FILE.as_bytes().to_vec()
+    }
+
+    #[tokio::test]
+    async fn a_file_tells_what_importing_it_adds_then_imports_it() {
+        let (_temp, core) = core().await;
+        let preview = core.preview_contact_import(file()).await.unwrap();
+        assert_eq!(
+            preview,
+            ContactImportPreview {
+                new: 2,
+                duplicates: 1,
+                unreadable: 1,
+                problem: None
+            }
+        );
+        let outcome = core
+            .import_contacts(file(), None, ImportedDuplicates::Skip)
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            ContactImportOutcome {
+                added: 2,
+                merged: 0,
+                skipped: 1,
+                unreadable: 1
+            }
+        );
+        let names = saved(&core)
+            .await
+            .into_iter()
+            .map(|contact| contact.name)
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["Ada Lovelace", "Grace Hopper"]);
+        // Every contact of the file is saved now.
+        let again = core.preview_contact_import(file()).await.unwrap();
+        assert_eq!((again.new, again.duplicates), (0, 3));
+    }
+
+    #[tokio::test]
+    async fn saved_contacts_take_what_is_new_or_get_a_copy() {
+        let (_temp, core) = core().await;
+        core.import_contacts(file(), None, ImportedDuplicates::Skip)
+            .await
+            .unwrap();
+        // Only Ada's second card adds something: her title.
+        let outcome = core
+            .import_contacts(file(), None, ImportedDuplicates::Merge)
+            .await
+            .unwrap();
+        assert_eq!((outcome.merged, outcome.skipped), (1, 2));
+        let contacts = saved(&core).await;
+        let ada = contacts
+            .iter()
+            .find(|contact| contact.name == "Ada Lovelace")
+            .unwrap();
+        assert_eq!(ada.job_title, "Countess");
+        assert_eq!(ada.details.emails.len(), 1, "the same address in capitals");
+        assert_eq!(ada.phone, "+44 20 1234");
+
+        let outcome = core
+            .import_contacts(file(), None, ImportedDuplicates::Add)
+            .await
+            .unwrap();
+        assert_eq!(outcome.added, 3);
+        let uids = core
+            .db
+            .read(|conn| {
+                let mut statement = conn.prepare("SELECT DISTINCT uid FROM contact_entries")?;
+                Ok(statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(uids.len(), 5, "each copy has a UID of its own");
+    }
+
+    #[tokio::test]
+    async fn new_contacts_join_the_address_book_of_the_account_chosen() {
+        let (_temp, core) = core().await;
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                repo::carddav::upsert_addressbook(
+                    conn,
+                    1,
+                    "https://dav.example/books/personal/",
+                    Some("Personal"),
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        core.import_contacts(file(), Some(1), ImportedDuplicates::Skip)
+            .await
+            .unwrap();
+        let uploads = core
+            .db
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT COUNT(*) FROM carddav_objects WHERE dirty = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(uploads, 2);
+    }
+
+    #[tokio::test]
+    async fn every_saved_contact_exports_as_one_file_that_imports_again() {
+        let (_temp, core) = core().await;
+        core.import_contacts(file(), None, ImportedDuplicates::Skip)
+            .await
+            .unwrap();
+        let (text, count) = core.export_contacts().await.unwrap();
+        assert_eq!(count, 2);
+        let cards = carddav::import::read(text.as_bytes()).unwrap().cards;
+        let names = cards
+            .iter()
+            .map(|card| card.record().name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["Ada Lovelace", "Grace Hopper"]);
+    }
+
+    #[tokio::test]
+    async fn a_file_too_large_is_refused_before_reading() {
+        let (_temp, core) = core().await;
+        let preview = core
+            .preview_contact_import(vec![b' '; carddav::import::MAX_FILE_BYTES + 1])
+            .await
+            .unwrap();
+        assert_eq!(preview.problem, Some(ContactFileProblem::TooLarge));
     }
 }
