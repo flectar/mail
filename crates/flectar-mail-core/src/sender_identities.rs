@@ -24,7 +24,10 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 const GMAIL_SEND_AS_URL: &str = "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs";
-pub(crate) const MAX_IDENTITIES: usize = 256;
+/// Sender identities an account keeps at most (#252): more than providers
+/// allow, which is 99 on Gmail, 300 to 400 on Exchange Online, and 600 plus
+/// 15 per user for a whole Fastmail account.
+pub(crate) const MAX_IDENTITIES: usize = 1000;
 pub(crate) const MAX_DISPLAY_NAME_CHARS: usize = 256;
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
@@ -460,7 +463,7 @@ pub(crate) async fn jmap_sender_identities(
     let identities = connected
         .send_single::<jmap_client::core::response::IdentityGetResponse>(request)
         .await
-        .map_err(crate::jmap::client::map_error)?
+        .map_err(identity_list_error)?
         .take_list();
     parse_jmap_identities(
         account,
@@ -479,6 +482,20 @@ pub(crate) async fn jmap_sender_identities(
                 .collect(),
         }),
     )
+}
+
+/// Why a JMAP server's identities couldn't be listed. RFC 8621 has no
+/// Identity/query, so a server with more of them than it gets at once
+/// (maxObjectsInGet, RFC 8620 section 5.1) can't list them at all.
+fn identity_list_error(error: jmap_client::Error) -> CoreError {
+    match &error {
+        jmap_client::Error::Method(method)
+            if *method.error() == jmap_client::core::error::MethodErrorType::RequestTooLarge =>
+        {
+            CoreError::Jmap("the server has more sender addresses than it lists at once".into())
+        }
+        _ => crate::jmap::client::map_error(error),
+    }
 }
 
 struct JmapIdentity<'a> {
@@ -1023,6 +1040,20 @@ mod tests {
             .await
             .unwrap();
         assert!(settings(&core).await.identity_copies.is_empty());
+    }
+
+    /// A server with more identities than it lists at once says so, as
+    /// Stalwart does from 1.0 (#252).
+    #[test]
+    fn too_many_jmap_identities_to_list_are_named() {
+        let refused = serde_json::from_value::<jmap_client::core::error::MethodError>(
+            serde_json::json!({"type": "requestTooLarge"}),
+        )
+        .unwrap();
+        assert_eq!(
+            identity_list_error(jmap_client::Error::Method(refused)).to_string(),
+            "jmap error: the server has more sender addresses than it lists at once"
+        );
     }
 
     #[test]
