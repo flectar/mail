@@ -1043,6 +1043,10 @@ fn apply_account(
                 repo::folders::apply_chosen_roles(conn, local_id, &settings_json.folder_roles)?;
                 applied.folders_changed = true;
             }
+            // So do the folders hidden there (#253).
+            if settings_json.hidden_folders != current.settings.hidden_folders {
+                applied.folders_changed = true;
+            }
             local_id
         }
         None => {
@@ -1969,6 +1973,55 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sync_id_of(&conn, local), smaller);
+    }
+
+    /// A folder hidden on another device hides here too, as soon as its
+    /// account's record comes (#253).
+    #[test]
+    fn folders_hidden_on_another_device_hide_here() {
+        let conn = testutil::conn();
+        let sync_id = "cd".repeat(16);
+        let local = account(&conn, "me@example.com", &sync_id);
+        let notes = repo::folders::upsert(&conn, local, "Notes", Some("/"), None).unwrap();
+        let id = sync_id_bytes(&sync_id).unwrap();
+        let settings = repo::settings::get(&conn).unwrap();
+        let shown = repo::accounts::get_config(&conn, local).unwrap().unwrap();
+        let mut hidden = shown.clone();
+        hidden.settings.hidden_folders.insert("Notes".into());
+        let record = |config: &crate::models::AccountConfig| {
+            entry(ACCOUNT, account_body(config, &settings, 0).unwrap())
+        };
+        assert_eq!(record(&shown).body["settings"]["hiddenFolders"], json!([]));
+
+        let applied = apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(record(&shown)),
+                next: Some(record(&hidden)),
+            },
+        );
+        assert!(applied.folders_changed);
+        assert!(
+            repo::folders::hidden_ids(&conn, Some(local))
+                .unwrap()
+                .contains(&notes)
+        );
+
+        let applied = apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(record(&hidden)),
+                next: Some(record(&shown)),
+            },
+        );
+        assert!(applied.folders_changed);
+        assert!(
+            repo::folders::hidden_ids(&conn, Some(local))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     /// Folders chosen for roles on another device take them here at once,

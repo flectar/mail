@@ -409,6 +409,33 @@ fn folder_path_delimiter(protocol: MailProtocol, folder: &repo::folders::Folder)
 
 /// Why account `config` chooses no folders for its roles: its provider
 /// gives them (#252).
+/// A folder's name after its parents' names, outermost first: IMAP names
+/// are whole paths, as "Archive/2026".
+fn folder_names(folder: &FolderInfo) -> Vec<String> {
+    match folder.delimiter.as_deref().filter(|d| !d.is_empty()) {
+        Some(delimiter) => folder
+            .display_name
+            .split(delimiter)
+            .map(str::to_owned)
+            .collect(),
+        None => vec![folder.display_name.clone()],
+    }
+}
+
+/// Folder names to sort by, so parents come before the folders in them.
+fn lowercase_names(names: &[String]) -> Vec<String> {
+    names.iter().map(|name| name.to_lowercase()).collect()
+}
+
+/// Whether an account's folders can be hidden (#253): Gmail's labels are
+/// its own, and mail kept on this device has no settings to show them again.
+fn hides_folders(protocol: MailProtocol) -> bool {
+    matches!(
+        protocol,
+        MailProtocol::Imap | MailProtocol::Jmap | MailProtocol::Pop3
+    )
+}
+
 fn not_imap_folder_roles(config: &AccountConfig) -> CoreError {
     CoreError::Other(format!(
         "{} keeps the folders its provider gives each role",
@@ -2086,25 +2113,10 @@ impl Core {
                     .iter()
                     .map(|folder| FolderChoice {
                         id: folder.id,
-                        // IMAP names are whole paths, as "Archive/2026".
-                        names: match folder.delimiter.as_deref().filter(|d| !d.is_empty()) {
-                            Some(delimiter) => folder
-                                .display_name
-                                .split(delimiter)
-                                .map(str::to_owned)
-                                .collect(),
-                            None => vec![folder.display_name.clone()],
-                        },
+                        names: folder_names(folder),
                     })
                     .collect::<Vec<_>>();
-                folders.sort_by_cached_key(|folder| {
-                    let names = folder
-                        .names
-                        .iter()
-                        .map(|name| name.to_lowercase())
-                        .collect::<Vec<_>>();
-                    (names, folder.id)
-                });
+                folders.sort_by_cached_key(|folder| (lowercase_names(&folder.names), folder.id));
                 let chosen = &config.settings.folder_roles;
                 let detected = repo::folders::detected_roles(conn, account_id)?;
                 let roles = repo::folders::CHOOSABLE_ROLES
@@ -2188,6 +2200,87 @@ impl Core {
             .await?;
         // The worker files sent mail and drafts in the folders the roles now
         // name, and the views and folder list show them there.
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
+        self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        Ok(())
+    }
+
+    /// An account's folders as Settings lists them to choose which show, the
+    /// Inbox first and parents before the folders in them (#253).
+    pub async fn account_folders(&self, account_id: i64) -> Result<Vec<AccountFolder>> {
+        self.db
+            .read(move |conn| {
+                let config = repo::accounts::get_config(conn, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                if !hides_folders(config.mail_protocol) {
+                    return Err(CoreError::Other(format!(
+                        "{} shows the folders its provider gives",
+                        config.email
+                    )));
+                }
+                let hidden_ids = repo::folders::hidden_ids(conn, Some(account_id))?;
+                let mut folders = repo::folders::list_info(conn, Some(account_id))?
+                    .into_iter()
+                    .map(|folder| {
+                        let always_shown =
+                            repo::folders::always_shown(&folder.path, folder.role.as_deref());
+                        let hidden =
+                            !always_shown && config.settings.hidden_folders.contains(&folder.path);
+                        AccountFolder {
+                            id: folder.id,
+                            names: folder_names(&folder),
+                            always_shown,
+                            hidden,
+                            inside_hidden: !hidden && hidden_ids.contains(&folder.id),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                folders.sort_by_cached_key(|folder| {
+                    let inbox =
+                        folder.names.len() == 1 && folder.names[0].eq_ignore_ascii_case("INBOX");
+                    (!inbox, lowercase_names(&folder.names), folder.id)
+                });
+                Ok(folders)
+            })
+            .await
+    }
+
+    /// Hide a folder, with the folders in it, from the sidebar and the Move
+    /// to list, or show it again (#253). Its mail still syncs, and the other
+    /// devices of Flectar Mail Sync hide it too.
+    pub async fn set_folder_hidden(&self, folder_id: i64, hidden: bool) -> Result<()> {
+        let (account_id, settings) = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let folder = repo::folders::get(&tx, folder_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("folder {folder_id}")))?;
+                if repo::folders::always_shown(&folder.path, folder.role.as_deref()) {
+                    return Err(CoreError::Other(
+                        "the Inbox and the folders for Sent, Drafts and the like always show"
+                            .into(),
+                    ));
+                }
+                let mut config = repo::accounts::get_config(&tx, folder.account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {}", folder.account_id)))?;
+                if !hides_folders(config.mail_protocol) {
+                    return Err(CoreError::Other(format!(
+                        "{} shows the folders its provider gives",
+                        config.email
+                    )));
+                }
+                if hidden {
+                    config.settings.hidden_folders.insert(folder.path);
+                } else {
+                    config.settings.hidden_folders.remove(&folder.path);
+                }
+                repo::accounts::set_settings(&tx, folder.account_id, &config.settings)?;
+                tx.commit()?;
+                Ok((folder.account_id, config.settings))
+            })
+            .await?;
         if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
             handle.update_settings(settings);
         }
@@ -5289,6 +5382,20 @@ impl Core {
     pub async fn list_folders(&self, account_id: Option<i64>) -> Result<Vec<FolderInfo>> {
         self.db
             .read(move |conn| repo::folders::list_info(conn, account_id))
+            .await
+    }
+
+    /// The folders the sidebar and the Move to list show: all but the hidden
+    /// ones and the folders in them (#253).
+    pub async fn list_shown_folders(&self, account_id: Option<i64>) -> Result<Vec<FolderInfo>> {
+        self.db
+            .read(move |conn| {
+                let hidden = repo::folders::hidden_ids(conn, account_id)?;
+                Ok(repo::folders::list_info(conn, account_id)?
+                    .into_iter()
+                    .filter(|folder| !hidden.contains(&folder.id))
+                    .collect())
+            })
             .await
     }
 
@@ -16891,6 +16998,88 @@ mod server_timeout_tests {
             .await
             .unwrap();
         assert!(core.set_account_server_timeout(1, 60).await.is_err());
+    }
+}
+
+#[cfg(test)]
+mod hidden_folder_tests {
+    use super::*;
+
+    /// A folder hidden leaves the sidebar's folders with the folders in it,
+    /// and shows again when chosen so. The Inbox and folders with a role
+    /// always show, and Gmail keeps its labels (#253).
+    #[tokio::test]
+    async fn an_account_hides_and_shows_its_folders() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let (sent, notes, ideas) = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                let folder = |path: &str, role: Option<&str>| {
+                    repo::folders::upsert(conn, 1, path, Some("/"), role)
+                };
+                Ok((
+                    folder("Sent", Some(roles::SENT))?,
+                    folder("Notes", None)?,
+                    folder("Notes/Ideas", None)?,
+                ))
+            })
+            .await
+            .unwrap();
+        let shown = || async {
+            core.list_shown_folders(Some(1))
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|folder| folder.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shown().await, [1, sent, notes, ideas]);
+
+        core.set_folder_hidden(notes, true).await.unwrap();
+        assert_eq!(shown().await, [1, sent]);
+        // Every folder still is, for rules and the like.
+        assert_eq!(core.list_folders(Some(1)).await.unwrap().len(), 4);
+        let listed = core.account_folders(1).await.unwrap();
+        assert_eq!(
+            listed
+                .iter()
+                .map(|folder| (
+                    folder.names.join(" / "),
+                    folder.always_shown,
+                    folder.hidden,
+                    folder.inside_hidden
+                ))
+                .collect::<Vec<_>>(),
+            [
+                ("INBOX".to_owned(), true, false, false),
+                ("Notes".to_owned(), false, true, false),
+                ("Notes / Ideas".to_owned(), false, false, true),
+                ("Sent".to_owned(), true, false, false),
+            ]
+        );
+        for always in [1, sent] {
+            assert!(core.set_folder_hidden(always, true).await.is_err());
+        }
+
+        core.set_folder_hidden(notes, false).await.unwrap();
+        assert_eq!(shown().await, [1, sent, notes, ideas]);
+
+        core.db
+            .write(|conn| {
+                conn.execute(
+                    "UPDATE accounts SET mail_protocol = 'gmail', provider = 'gmail' WHERE id = 1",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(core.set_folder_hidden(notes, true).await.is_err());
+        assert!(core.account_folders(1).await.is_err());
     }
 }
 
