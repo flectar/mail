@@ -100,6 +100,35 @@ macro_rules! basic_message_select {
     };
 }
 
+/// The attachment of an account's newest mail since `since` that hasn't
+/// downloaded yet and is `largest` bytes at most, with that mail's date,
+/// but those in `skip` (#253). Only parts the server can send alone count.
+pub fn next_attachment_to_prefetch(
+    conn: &Connection,
+    account_id: i64,
+    since: Option<i64>,
+    largest: i64,
+    skip: &[i64],
+) -> Result<Option<(i64, i64)>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT a.id, COALESCE(m.internal_date, m.date) AS sent
+         FROM attachments a JOIN messages m ON m.id = a.message_id
+         WHERE m.account_id = ?1 AND m.is_draft = 0
+           AND a.file_path IS NULL AND a.imap_section IS NOT NULL
+           AND (a.size IS NULL OR a.size <= ?3)
+           AND (?2 IS NULL OR COALESCE(m.internal_date, m.date) >= ?2)
+         ORDER BY sent DESC, a.id DESC
+         LIMIT ?4",
+    )?;
+    let limit = i64::try_from(skip.len().saturating_add(1)).unwrap_or(i64::MAX);
+    let rows = stmt
+        .query_map(params![account_id, since, largest, limit], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows.into_iter().find(|(id, _)| !skip.contains(id)))
+}
+
 pub fn get_row(conn: &Connection, id: i64) -> Result<Option<MessageRow>> {
     let mut stmt = conn.prepare_cached(basic_message_select!("WHERE id = ?1"))?;
     Ok(stmt.query_row(params![id], row_basic).optional()?)
@@ -1783,6 +1812,52 @@ fn missing_bodies_at(
 mod tests {
     use super::*;
     use crate::db::{repo::sync_failures, testutil};
+
+    /// The attachment to download ahead of time is the newest mail's that
+    /// hasn't downloaded, inside the history, not too large, and not one
+    /// that failed (#253).
+    #[test]
+    fn the_next_attachment_to_download_is_the_newest_mails() {
+        let conn = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&conn);
+        let message = |date: i64, draft: bool| -> i64 {
+            conn.execute(
+                "INSERT INTO messages (account_id, folder_id, subject, from_addr, date,
+                                       is_read, is_draft, is_outgoing)
+                 VALUES (1, 1, 'Files', 'a@example.com', ?1, 1, ?2, 0)",
+                params![date, draft],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let attachment = |message_id: i64, size: i64, cached: bool, section: Option<&str>| -> i64 {
+            conn.execute(
+                "INSERT INTO attachments (message_id, filename, size, file_path, imap_section)
+                 VALUES (?1, 'a.pdf', ?2, ?3, ?4)",
+                params![message_id, size, cached.then_some("/cache/a.pdf"), section],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let old = message(1_000, false);
+        let new = message(5_000, false);
+        let draft = message(9_000, true);
+        let old_file = attachment(old, 10, false, Some("2"));
+        let new_file = attachment(new, 10, false, Some("2"));
+        attachment(new, 10, true, Some("3"));
+        attachment(new, 10_000, false, Some("4"));
+        attachment(new, 10, false, None);
+        attachment(draft, 10, false, Some("2"));
+        let next = |since, skip: &[i64]| {
+            next_attachment_to_prefetch(&conn, 1, since, 1_000, skip).unwrap()
+        };
+
+        assert_eq!(next(None, &[]), Some((new_file, 5_000)));
+        assert_eq!(next(None, &[new_file]), Some((old_file, 1_000)));
+        // Outside the history, an older one waits.
+        assert_eq!(next(Some(2_000), &[new_file]), None);
+        assert_eq!(next(None, &[new_file, old_file]), None);
+    }
 
     #[test]
     fn missing_body_pages_cover_equal_timestamps_without_repeating_ids() {

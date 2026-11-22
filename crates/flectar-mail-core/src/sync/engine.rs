@@ -4338,7 +4338,15 @@ async fn drain_missing_bodies(
         // queued IDs across accounts and always takes the planning permit
         // before any worker can take the body-byte permit.
         let plan_page = Arc::new(reserve_background_plan_page().await);
-        let mail_history = settings_rx.borrow_and_update().mail_history;
+        let (mail_history, download) = {
+            let settings = settings_rx.borrow_and_update();
+            (settings.mail_history, settings.download)
+        };
+        // Only the headers are wanted: messages download when they're
+        // opened (#253).
+        if download == crate::models::DownloadPolicy::Headers {
+            return Ok(());
+        }
         let cutoff_ms = mail_history.cutoff_ms_at(now_ms());
         let folders = ctx
             .db
