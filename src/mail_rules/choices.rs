@@ -1,19 +1,20 @@
 //! What the rule editor offers (#238): the fields, comparisons and actions
 //! in its order, and the folders and labels a rule's account can use.
 
-use crate::mail_scope::label_category;
+use crate::MailboxRole;
+use crate::mail_scope::label_role;
 use flectar_mail_core::models::{
     Account, FolderInfo, Label, MailProtocol, MailRule, RuleAction, RuleField, RuleHereWhy, RuleOp,
     ServerRules, ServerRulesState,
 };
 
 /// What a category the rule editor offers is called.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) enum TabName {
-    /// By a name the window has in its language, which is the key of its
-    /// message: Important, Other, and the automatic categories that still
-    /// have the names the app gave them.
-    Message(&'static str),
+    /// By the name the window gives the role in its language: Important,
+    /// Other, and the automatic categories that still have the names the app
+    /// gave them.
+    Role(MailboxRole),
     /// By the name its label was given.
     Text(String),
 }
@@ -171,18 +172,18 @@ impl Choices {
     /// names the automatic categories that keep their built-in names.
     pub(super) fn tabs(&self) -> Vec<(String, TabName)> {
         let mut tabs = vec![
-            ("important".to_owned(), TabName::Message("Important")),
-            ("other".to_owned(), TabName::Message("Other")),
+            ("important".to_owned(), TabName::Role(MailboxRole::Important)),
+            ("other".to_owned(), TabName::Role(MailboxRole::Other)),
         ];
         tabs.extend(
             self.labels
                 .iter()
                 .filter(|label| label.is_auto)
                 .map(|label| {
-                    let name = label_category(label).map_or_else(
-                        || TabName::Text(label.name.clone()),
-                        |category| TabName::Message(category.default_name()),
-                    );
+                    let name = match label_role(label) {
+                        MailboxRole::None => TabName::Text(label.name.clone()),
+                        role => TabName::Role(role),
+                    };
                     (format!("label:{}", label.id), name)
                 }),
         );
@@ -643,10 +644,10 @@ mod tests {
         assert_eq!(
             choices.tabs(),
             [
-                ("important".to_owned(), TabName::Message("Important")),
-                ("other".to_owned(), TabName::Message("Other")),
-                ("label:4".to_owned(), TabName::Message("News")),
-                ("label:5".to_owned(), TabName::Message("Marketing")),
+                ("important".to_owned(), TabName::Role(MailboxRole::Important)),
+                ("other".to_owned(), TabName::Role(MailboxRole::Other)),
+                ("label:4".to_owned(), TabName::Role(MailboxRole::News)),
+                ("label:5".to_owned(), TabName::Role(MailboxRole::Marketing)),
                 ("label:6".to_owned(), TabName::Text("Offers".to_owned())),
                 ("label:7".to_owned(), TabName::Text("Pitch".to_owned())),
             ]

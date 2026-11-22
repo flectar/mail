@@ -483,10 +483,11 @@ impl Controller {
         )));
         ui.set_can_copy(copies);
         let tabs = editor.choices.tabs();
+        let words = app.global::<MailboxWords>();
         ui.set_tabs(ModelRc::new(VecModel::from(
             tabs.iter()
                 .map(|(_, name)| match name {
-                    TabName::Message(key) => translated(app, &UiMessage::plain(key)),
+                    TabName::Role(role) => words.invoke_name(*role),
                     TabName::Text(name) => SharedString::from(name.as_str()),
                 })
                 .collect::<Vec<_>>(),

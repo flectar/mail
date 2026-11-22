@@ -8432,17 +8432,27 @@ mod tests {
         assert_eq!(title(MailboxRole::Snoozed, "", false), "Snoozed");
         assert_eq!(title(MailboxRole::Scheduled, "", false), "Scheduled");
         assert_eq!(title(MailboxRole::None, "Person", true), "Receipts");
-        // The automatic categories are named by their roles as well, and the
-        // rule editor asks for the same names by their English ones.
+        // The automatic categories are named by their roles as well.
         for category in flectar_mail_core::autolabel::Category::ALL {
             let role = mail_scope::category_role(category);
             assert_eq!(words.invoke_name(role), category.default_name());
             assert_eq!(title(role, "", false), category.default_name());
-            assert_eq!(
-                translated(&app, &UiMessage::plain(category.default_name())),
-                category.default_name()
-            );
         }
+        // A conversation's labels are read in the order the chips show them:
+        // its categories first.
+        let note = |categories: &[MailboxRole], text: &str| {
+            words.invoke_label_note(
+                ModelRc::new(VecModel::from(categories.to_vec())),
+                text.into(),
+            )
+        };
+        assert_eq!(note(&[], ""), "");
+        assert_eq!(note(&[], "Travel"), ", Travel");
+        assert_eq!(note(&[MailboxRole::News], ""), ", News");
+        assert_eq!(
+            note(&[MailboxRole::News, MailboxRole::Pitch], "Travel · Work"),
+            ", News · Pitch · Travel · Work"
+        );
 
         // Chosen in Settings, or followed from the system.
         let chosen = normalized_language_preference("zh_Hans");
@@ -8456,16 +8466,12 @@ mod tests {
                 format!("Person / {inbox}")
             );
             assert_eq!(title(MailboxRole::None, "", false), "Receipts");
-            // Whatever a catalog calls the categories, every place that
-            // names one asks the same words.
+            // Whatever a catalog calls the categories, a title names one by
+            // the same words as its role.
             for category in flectar_mail_core::autolabel::Category::ALL {
                 let role = mail_scope::category_role(category);
                 let name = words.invoke_name(role);
                 assert_eq!(title(role, "", false), name);
-                assert_eq!(
-                    translated(&app, &UiMessage::plain(category.default_name())),
-                    name
-                );
             }
         }
     }

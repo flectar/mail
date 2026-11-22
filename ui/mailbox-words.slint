@@ -1,7 +1,10 @@
 import { MailboxRole, MailboxTitle, MailLabelRow } from "models.slint";
 
-// Standard mailboxes are named in the interface's language. Folders, labels
-// and saved searches keep the names their accounts and users gave them.
+// Standard mailboxes are named in the interface's language, and so are the
+// automatic categories (Marketing, News, Social and Pitch), which have roles
+// of their own while they keep the names the app gave them. Folders, saved
+// searches and the other labels keep the names their accounts and users gave
+// them.
 export global MailboxWords {
     public pure function name(role: MailboxRole) -> string {
         if role == MailboxRole.inbox { return @tr("Inbox"); }
@@ -18,7 +21,10 @@ export global MailboxWords {
         if role == MailboxRole.marketing { return @tr("category" => "Marketing"); }
         if role == MailboxRole.news { return @tr("category" => "News"); }
         if role == MailboxRole.social { return @tr("category" => "Social"); }
-        if role == MailboxRole.pitch { return @tr("category" => "Pitch"); }
+        if role == MailboxRole.pitch {
+            // Partnership, sponsorship and similar offers from unknown senders.
+            return @tr("category" => "Pitch");
+        }
         return "";
     }
 
@@ -29,16 +35,16 @@ export global MailboxWords {
     }
 
     // The labels of a conversation, for a screen reader, after a comma, or
-    // nothing when it has none: `text` has the names of the labels that are
-    // not automatic categories, and `categories` the categories, which at most
-    // four can be.
+    // nothing when it has none, in the order the chips show them: the
+    // automatic categories first, which at most four can be, then the other
+    // labels, whose names `text` has.
     public pure function label-note(categories: [MailboxRole], text: string) -> string {
         let names = (categories.length > 0 ? MailboxWords.name(categories[0]) : "")
             + (categories.length > 1 ? " · " + MailboxWords.name(categories[1]) : "")
             + (categories.length > 2 ? " · " + MailboxWords.name(categories[2]) : "")
             + (categories.length > 3 ? " · " + MailboxWords.name(categories[3]) : "");
-        if text == "" { return names == "" ? "" : ", " + names; }
-        return ", " + text + (names == "" ? "" : " · " + names);
+        if names == "" { return text == "" ? "" : ", " + text; }
+        return ", " + names + (text == "" ? "" : " · " + text);
     }
 
     // What a list or tab is called: the standard mailbox `mailbox` names, or

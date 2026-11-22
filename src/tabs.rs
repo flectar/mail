@@ -286,9 +286,15 @@ impl SavedTab {
 /// English title as text: the mailbox, after its account's name unless it
 /// spans every account, or an automatic category's built-in name. Such a
 /// title names its mailbox or category again, so the window shows it in its
-/// own language.
+/// own language. A tab showing a conversation is named by its subject, which
+/// may be any words, so it keeps its title.
 fn english_mailbox_title(location: &Location, title: &str) -> Option<MailTitle> {
-    let Location::Mail { scope, .. } = location else {
+    let Location::Mail {
+        scope,
+        conversation: None,
+        ..
+    } = location
+    else {
         return None;
     };
     if let Scope::Label {
@@ -2257,12 +2263,12 @@ mod tests {
                 tab(unified_archive, "", None, "Unified Archive"),
                 tab(Scope::Important, "", None, "Important"),
                 tab(Scope::Snoozed, "", None, "Snoozed"),
-                // A conversation without a subject and a search were named
-                // after their mailbox too.
-                tab(Scope::UNIFIED_INBOX, "", Some(10), "Unified Inbox"),
+                // A search was named after its mailbox too.
                 tab(Scope::UNIFIED_INBOX, "from:bob", None, "Unified Inbox"),
-                // Subjects and the names of saved searches and folders stay,
-                // as does a title another mailbox had.
+                // A conversation is named by its subject, whatever the words,
+                // so it stays, as do the names of saved searches and folders
+                // and a title another mailbox had.
+                tab(Scope::UNIFIED_INBOX, "", Some(10), "Unified Inbox"),
                 tab(inbox(3), "", Some(11), "Lunch"),
                 tab(Scope::UNIFIED_INBOX, "from:bob", None, "Bob"),
                 tab(Scope::Folder(7), "", None, "Receipts"),
@@ -2284,7 +2290,7 @@ mod tests {
                 mailbox(Scope::Important, ""),
                 mailbox(Scope::Snoozed, ""),
                 mailbox(Scope::UNIFIED_INBOX, ""),
-                mailbox(Scope::UNIFIED_INBOX, ""),
+                text("Unified Inbox"),
                 text("Lunch"),
                 text("Bob"),
                 text("Receipts"),
@@ -2496,6 +2502,56 @@ mod tests {
                     "title":"Offers","title_category":"FlectarMailAutoOutreach"}]}"#
             ),
             MailTitle::Text("Offers".into())
+        );
+    }
+
+    #[test]
+    fn restored_conversation_tabs_keep_their_subjects() {
+        let category = Scope::Label {
+            kind: LabelKind::Category,
+            id: 5,
+        };
+        let restored = |scope, conversation, title: &str| {
+            let strip = TabStrip::restore(SavedTabs {
+                tabs: vec![SavedTab {
+                    location: Location::Mail {
+                        scope,
+                        query: String::new(),
+                        filter: default_filter(),
+                        conversation,
+                    },
+                    title: title.into(),
+                    ..SavedTab::default()
+                }],
+                active: 0,
+            });
+            strip.tabs[0].title.clone()
+        };
+        // A list named like a category or a mailbox is named again, but a
+        // conversation opened from it is named by its subject, whatever the
+        // words.
+        assert_eq!(
+            restored(category, None, "News"),
+            MailTitle::Category(Category::News)
+        );
+        assert_eq!(
+            restored(category, Some(3), "News"),
+            MailTitle::Text("News".into())
+        );
+        assert_eq!(
+            restored(Scope::UNIFIED_INBOX, None, "Unified Inbox"),
+            MailTitle::Mailbox {
+                scope: Scope::UNIFIED_INBOX,
+                account: String::new(),
+            }
+        );
+        assert_eq!(
+            restored(Scope::UNIFIED_INBOX, Some(3), "Unified Inbox"),
+            MailTitle::Text("Unified Inbox".into())
+        );
+        assert_eq!(
+            restored(Scope::Important, Some(3), "Important"),
+            MailTitle::Text("Important".into())
         );
     }
 
