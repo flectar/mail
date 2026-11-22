@@ -1690,3 +1690,44 @@ fn legacy_word_break_lets_long_words_break_in_narrow_columns() {
     );
     close(node(&doc, "#c").final_layout().size.width, 100.0);
 }
+
+#[test]
+fn images_that_wont_load_lay_out_with_their_alt_text() {
+    // As browsers lay out an image they can't show, one that the embedder
+    // blocks or that fails to decode takes the room of its alt text, on one
+    // line or wrapped inside a width it is given. An empty alt takes no room.
+    let images = std::sync::Arc::new(HeldImages::default());
+    let mut doc = HtmlDocument::from_html(
+        "<style>body{margin:0} img{display:block;font:20px/30px sans-serif}</style>
+         <img id=a src='https://example.com/a.png' alt='Weekly header'>
+         <img id=b src='https://example.com/b.png' alt=''>
+         <img id=c src='https://example.com/c.png' alt='Hero' style='width:100%'>
+         <img id=d src='https://example.com/d.png' alt='Broken'>
+         <img id=e src='https://example.com/e.png' alt='Weekly header' style='width:80px'>",
+        DocumentConfig {
+            viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+            net_provider: Some(images.clone()),
+            ..Default::default()
+        },
+    );
+    doc.resolve(0.0);
+    for (url, handler) in images.0.lock().unwrap().drain(..) {
+        if url.ends_with("d.png") {
+            handler.bytes(url, blitz_traits::net::Bytes::from_static(b"not an image"));
+        }
+    }
+    for url in ["a", "b", "c", "e"] {
+        doc.fail_image(&format!("https://example.com/{url}.png"));
+    }
+    doc.resolve(0.0);
+    let size = |selector| node(&doc, selector).final_layout().size;
+    assert!(size("#a").width > 60.0, "{:?}", size("#a"));
+    close(size("#a").height, 30.0);
+    assert_eq!((size("#b").width, size("#b").height), (0.0, 0.0));
+    close(size("#c").width, 400.0);
+    close(size("#c").height, 30.0);
+    assert!(size("#d").width > 30.0, "{:?}", size("#d"));
+    close(size("#d").height, 30.0);
+    close(size("#e").width, 80.0);
+    close(size("#e").height, 60.0);
+}

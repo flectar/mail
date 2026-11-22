@@ -1337,7 +1337,9 @@ impl BaseDocument {
                 DocumentEvent::ResourceLoad(res) => {
                     updates.layout |= self.pending_critical_resources.contains(&res.request_id);
                     match &res.result {
-                        Ok(Resource::Image(..) | Resource::Raster(..)) => {
+                        // An image that fails to load lays out with its alt
+                        // text, so it changes layout as a loaded one does.
+                        Ok(Resource::Image(..) | Resource::Raster(..)) | Err(_) => {
                             if let Some(waiting) = res
                                 .resolved_url
                                 .as_ref()
@@ -1355,7 +1357,7 @@ impl BaseDocument {
                                 }
                             }
                         }
-                        Ok(Resource::None) | Err(_) => {}
+                        Ok(Resource::None) => {}
                         _ => updates.layout = true,
                     }
                 }
@@ -1414,6 +1416,7 @@ impl BaseDocument {
             Err(err) => {
                 if let Some(url) = res.resolved_url.as_ref() {
                     let waiting_nodes = self.pending_images.remove(url).unwrap_or_default();
+                    self.mark_images_unavailable(&waiting_nodes);
                     #[cfg(feature = "tracing")]
                     tracing::warn!(
                         url = url.as_str(),
@@ -1525,6 +1528,62 @@ impl BaseDocument {
 
     /// Cache a loaded image and apply it to all nodes waiting on it
     /// (`<img>` elements, `background-image` layers and `mask-image` layers).
+    /// The URLs of images still waiting for a response.
+    pub fn pending_image_urls(&self) -> impl Iterator<Item = &str> + '_ {
+        self.pending_images.keys().map(String::as_str)
+    }
+
+    /// Tells the document that the image at `url` won't load, as when the
+    /// embedder blocks it. The `<img>` elements waiting for it then lay out
+    /// with their alt text, as browsers lay out an image they can't show, and
+    /// the next [`Self::drain_pending_updates`] reports the change.
+    pub fn fail_image(&mut self, url: &str) {
+        let Some(waiting) = self.pending_images.remove(url) else {
+            return;
+        };
+        self.mark_images_unavailable(&waiting);
+        self.resource_updates.changed = true;
+        for &(id, kind) in &waiting {
+            if matches!(kind, ImageType::Image)
+                && self
+                    .get_node(id)
+                    .is_some_and(|node| !image_has_fixed_size(self, node))
+            {
+                self.resource_updates.layout = true;
+            }
+            self.resource_updates.paint_nodes.push(id);
+        }
+    }
+
+    fn mark_images_unavailable(&mut self, waiting: &[(NodeId, ImageType)]) {
+        for &(id, kind) in waiting {
+            if !matches!(kind, ImageType::Image) {
+                continue;
+            }
+            let Some(node) = self.get_node_mut(id) else {
+                continue;
+            };
+            let Some(element) = node.element_data_mut() else {
+                continue;
+            };
+            #[cfg(feature = "custom-widget")]
+            if element.custom_widget_data().is_some() {
+                continue;
+            }
+            // An image that never loaded has no image data yet.
+            let unloaded = match &element.special_data {
+                SpecialElementData::None => true,
+                SpecialElementData::Image(image) => matches!(**image, ImageData::None),
+                _ => false,
+            };
+            if unloaded {
+                element.special_data = SpecialElementData::Image(Box::new(ImageData::Unavailable));
+                node.clear_layout_cache();
+                node.insert_damage(ALL_DAMAGE);
+            }
+        }
+    }
+
     fn apply_loaded_image(&mut self, url: &str, image: ImageData) {
         // Get all nodes waiting for this image
         let waiting_nodes = self.pending_images.remove(url).unwrap_or_default();

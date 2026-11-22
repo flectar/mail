@@ -121,6 +121,71 @@ impl<'doc> LayoutPassState<'doc> {
         }
     }
 
+    /// For an `<img>` that won't load, the size of its alt text in its font,
+    /// which browsers show in its place: on one line, or wrapped inside a
+    /// width or max-width the image is given. `None` for any other node or an
+    /// empty alt, which leaves the image without a natural size.
+    fn unavailable_image_alt_size(
+        &mut self,
+        dom_id: crate::NodeId,
+        inputs: &taffy::LayoutInput,
+    ) -> Option<taffy::Size<f32>> {
+        let doc = &mut *self.doc;
+        let node = &doc.nodes[dom_id];
+        let element = node.element_data()?;
+        let SpecialElementData::Image(image) = &element.special_data else {
+            return None;
+        };
+        if !matches!(**image, ImageData::Unavailable) {
+            return None;
+        }
+        let alt = element.attr(local_name!("alt"))?.trim();
+        if alt.is_empty() {
+            return None;
+        }
+        let style = node.primary_styles()?;
+        let wrap_width = {
+            let layout_style = node.layout_style();
+            let parent_width = inputs.parent_size.width;
+            let frame = layout_style
+                .padding()
+                .resolve_or_zero(parent_width, resolve_calc_value)
+                .horizontal_axis_sum()
+                + layout_style
+                    .border()
+                    .resolve_or_zero(parent_width, resolve_calc_value)
+                    .horizontal_axis_sum();
+            [
+                inputs.known_dimensions.width.map(|width| width - frame),
+                layout_style
+                    .size()
+                    .width
+                    .maybe_resolve(parent_width, resolve_calc_value),
+                layout_style
+                    .max_size()
+                    .width
+                    .maybe_resolve(parent_width, resolve_calc_value),
+            ]
+            .into_iter()
+            .flatten()
+            .reduce(f32::min)
+            .map(|width| width.max(0.0))
+        };
+        let text_style = crate::stylo_to_parley::style(dom_id, &style);
+        let scale = doc.viewport.scale();
+        let mut font_ctx = doc.font_ctx.lock().unwrap();
+        let mut builder = doc
+            .layout_ctx
+            .tree_builder(&mut font_ctx, scale, true, &text_style);
+        builder.push_text(alt);
+        let mut layout = builder.build().0;
+        layout.break_all_lines(wrap_width.map(|width| width * scale));
+        Some(taffy::Size {
+            width: layout.full_width() / scale,
+            height: layout.height() / scale,
+        })
+    }
+
     pub(crate) fn new(doc: &'doc mut BaseDocument) -> Self {
         #[cfg(feature = "writing-mode")]
         let root_id = doc.try_root_element().map(|root| root.id);
@@ -224,6 +289,7 @@ impl LayoutPassState<'_> {
         block_ctx: Option<&mut BlockContext<'_>>,
     ) -> taffy::tree::LayoutOutput {
         let orthogonal_percent_basis = self.orthogonal_percent_basis_of(dom_node_id(node_id));
+        let unavailable_image_alt = self.unavailable_image_alt_size(dom_node_id(node_id), &inputs);
         let node = &mut self.nodes[dom_node_id(node_id)];
 
         let font_styles = node.primary_styles().map(|style| {
@@ -430,6 +496,14 @@ impl LayoutPassState<'_> {
                                 )
                             }
                             ImageData::None => (IntrinsicSizes::default(), taffy::Size::ZERO),
+                            ImageData::Unavailable => (
+                                IntrinsicSizes {
+                                    width: unavailable_image_alt.map(|size| size.width),
+                                    height: unavailable_image_alt.map(|size| size.height),
+                                    ratio: None,
+                                },
+                                taffy::Size::ZERO,
+                            ),
                         },
                         SpecialElementData::Canvas(_)
                         | SpecialElementData::SubDocument(_)

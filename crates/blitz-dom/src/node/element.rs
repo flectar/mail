@@ -867,6 +867,10 @@ pub enum ImageData {
     #[cfg(feature = "svg")]
     Svg(SvgImageData),
     None,
+    /// An image that won't load, such as one that failed to decode or that
+    /// the embedder blocks (see [`crate::BaseDocument::fail_image`]). It lays
+    /// out with its alt text, as browsers lay out an image they can't show.
+    Unavailable,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -913,6 +917,7 @@ impl std::fmt::Debug for SpecialElementData {
                 #[cfg(feature = "svg")]
                 ImageData::Svg(_) => f.write_str("NodeSpecificData::Image(Svg)"),
                 ImageData::None => f.write_str("NodeSpecificData::Image(None)"),
+                ImageData::Unavailable => f.write_str("NodeSpecificData::Image(Unavailable)"),
             },
             SpecialElementData::Canvas(_) => f.write_str("NodeSpecificData::Canvas"),
             SpecialElementData::TableRoot(_) => f.write_str("NodeSpecificData::TableRoot"),
