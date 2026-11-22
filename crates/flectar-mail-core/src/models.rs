@@ -609,6 +609,12 @@ pub struct AccountSettings {
     /// written, empty too, as `folder_roles` is.
     #[serde(default)]
     pub hidden_folders: std::collections::BTreeSet<String>,
+    /// IMAP accounts: the folders this device leaves out of its background
+    /// sync, by their paths (#253). Opening one checks it once. The Inbox,
+    /// Sent and Drafts always sync. Each device keeps its own, as it does
+    /// `mail_history`.
+    #[serde(default)]
+    pub unsynced_folders: std::collections::BTreeSet<String>,
 }
 
 const fn plain_text_replies_default() -> bool {
@@ -639,6 +645,7 @@ impl AccountSettings {
             push: push_default(),
             folder_roles: std::collections::BTreeMap::new(),
             hidden_folders: std::collections::BTreeSet::new(),
+            unsynced_folders: std::collections::BTreeSet::new(),
             copies: AutomaticCopies::default(),
             identity_copies: std::collections::BTreeMap::new(),
         }
@@ -836,6 +843,23 @@ mod account_settings_tests {
             );
         }
         assert_eq!(DownloadPolicy::from_storage("bodies"), None);
+    }
+
+    /// Every folder starts synced, and the unsynced ones are always written
+    /// (#253).
+    #[test]
+    fn unsynced_folders_start_empty_and_are_always_written() {
+        let mut settings: AccountSettings = serde_json::from_str(MINIMAL_SETTINGS).unwrap();
+        assert!(settings.unsynced_folders.is_empty());
+        assert!(
+            serde_json::to_string(&settings)
+                .unwrap()
+                .contains(r#""unsyncedFolders":[]"#)
+        );
+        settings.unsynced_folders.insert("Archive".into());
+        let restored: AccountSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.unsynced_folders, settings.unsynced_folders);
     }
 
     /// No folder starts hidden, and the hidden ones are always written, so
@@ -2616,6 +2640,13 @@ pub struct AccountFolder {
     pub hidden: bool,
     /// Hidden with a folder it's in.
     pub inside_hidden: bool,
+    /// IMAP accounts: whether this device syncs it in the background.
+    pub synced: bool,
+    /// The Inbox, Sent and Drafts always sync.
+    pub always_synced: bool,
+    /// A folder Flectar Mail syncs at all: one that holds mail, but not the
+    /// All Mail folder that repeats every other one.
+    pub syncable: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

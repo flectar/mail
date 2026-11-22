@@ -89,15 +89,23 @@ impl Core {
             let account_id = config.id;
             let since = config.settings.mail_history.cutoff_ms_at(now_ms());
             let skip = failed.keys().copied().collect::<Vec<_>>();
+            let unsynced = config.settings.unsynced_folders;
             let candidate = self
                 .db
                 .read(move |conn| {
+                    // Nor the mail of the folders the account doesn't sync.
+                    let skip_folders = repo::folders::list(conn, Some(account_id))?
+                        .into_iter()
+                        .filter(|folder| !repo::folders::syncs(folder, &unsynced))
+                        .map(|folder| folder.id)
+                        .collect::<Vec<_>>();
                     repo::messages::next_attachment_to_prefetch(
                         conn,
                         account_id,
                         since,
                         DownloadPolicy::LARGEST_ATTACHMENT,
                         &skip,
+                        &skip_folders,
                     )
                 })
                 .await?;
