@@ -237,6 +237,14 @@ fn register_desktop_events(app: &AppWindow) {
         if !matches!(event, winit::event::WindowEvent::RedrawRequested) {
             crate::memory::release_free_heap_when_idle();
         }
+        // A key pressed anywhere hands help to the keyboard, so the help of a
+        // control under a resting pointer does not stay over what the key
+        // opened.
+        if let winit::event::WindowEvent::KeyboardInput { event, .. } = event
+            && event.state.is_pressed()
+        {
+            app.global::<crate::ActionTooltip>().set_keyboard(true);
+        }
         #[cfg(linux_desktop)]
         if let winit::event::WindowEvent::KeyboardInput { event, .. } = event
             && quit_key(&app, event, modifiers.get())

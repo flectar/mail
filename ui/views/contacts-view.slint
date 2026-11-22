@@ -311,9 +311,6 @@ export component ContactsView inherits Rectangle {
 
                 Rectangle {
                     height: root.compact ? LayoutMetrics.compact-header-height : LayoutMetrics.desktop-mail-toolbar-height;
-                    // Tooltips extend below the toolbar; keep them above the
-                    // list body, which is declared later in this layout.
-                    z: 1;
                     WorkspaceSearchToolbar {
                         x: root.compact ? LayoutMetrics.compact-inset : LayoutMetrics.content-inset;
                         y: (parent.height - self.height) / 2;
