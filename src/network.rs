@@ -2,7 +2,8 @@
 //! and the accounts that go another way. The core keeps the choices and
 //! hands them to every connection (`flectar_mail_core::net::proxy`); this
 //! shows them, saves them, and checks a proxy typed in by connecting through
-//! it to a mail server.
+//! it to a mail server. It also says whether the connection is metered, as
+//! the system tells, and whether downloads wait on one (#253).
 
 use super::*;
 use flectar_mail_core::error::CoreError;
@@ -159,6 +160,16 @@ fn set_account_state(app: &AppWindow, state: &str, failure: Option<(&str, String
 fn refresh() {
     with_core(|core, weak, runtime| {
         runtime.spawn(async move {
+            let pause = core
+                .get_settings()
+                .await
+                .is_ok_and(|settings| settings.pause_downloads_when_metered);
+            let metered = core.connection_metered();
+            let _ = weak.upgrade_in_event_loop(move |app| {
+                let ui = app.global::<Network>();
+                ui.set_pause_when_metered(pause);
+                ui.set_metered(metered);
+            });
             let Ok(settings) = core.network_settings().await else {
                 return;
             };
@@ -498,6 +509,60 @@ pub(super) fn install(
             refresh();
         }
     });
+    ui.on_save_pause_when_metered(save_pause_when_metered);
+}
+
+/// Save whether downloads wait on a metered connection (#253).
+fn save_pause_when_metered(pause: bool) {
+    with_core(|core, weak, runtime| {
+        runtime.spawn(async move {
+            let saved = async {
+                let mut settings = core.get_settings().await?;
+                settings.pause_downloads_when_metered = pause;
+                core.set_settings(settings).await
+            }
+            .await;
+            if let Err(error) = saved {
+                tracing::warn!(%error, "the metered connection choice couldn't be saved");
+                // Show what's kept.
+                let _ = weak.upgrade_in_event_loop(|_| refresh());
+            }
+        });
+    });
+}
+
+/// Watch whether the connection is metered, as the system tells, once the
+/// core is up (#253). The core asks before it downloads ahead of time, and
+/// is woken when the answer changes, as is the Network page.
+pub(super) fn watch_metered(
+    core: Arc<Core>,
+    app: slint::Weak<AppWindow>,
+    runtime: &tokio::runtime::Handle,
+) {
+    let metered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let current = Arc::clone(&metered);
+    let app_for_page = app.clone();
+    let wake = Arc::clone(&core);
+    let wake_runtime = runtime.clone();
+    let changed = move |now: bool| {
+        if current.swap(now, std::sync::atomic::Ordering::Relaxed) == now {
+            return;
+        }
+        let core = Arc::clone(&wake);
+        wake_runtime.spawn(async move { core.metered_changed().await });
+        let _ = app.upgrade_in_event_loop(move |app| app.global::<Network>().set_metered(now));
+    };
+    if crate::platform::metered::watch(changed, runtime) {
+        let _ = app_for_page
+            .upgrade_in_event_loop(|app| app.global::<Network>().set_metered_known(true));
+        let probe = Arc::clone(&metered);
+        runtime.spawn(async move {
+            core.set_metered_probe(Arc::new(move || {
+                probe.load(std::sync::atomic::Ordering::Relaxed)
+            }))
+            .await;
+        });
+    }
 }
 
 #[cfg(test)]
