@@ -19,6 +19,11 @@ export struct SenderIdentityRow {
     // "unknown" | "confirmed" | "rejected"
     delivery: string,
     error: string,
+    // The copies mail from this address starts with besides the account's
+    // (#252): its own Cc and Bcc, and the Bcc its provider keeps.
+    cc: string,
+    bcc: string,
+    provider-bcc: string,
 }
 export global AccountMailPreferences {
     in-out property <int> account-id: -1;
@@ -51,6 +56,15 @@ export global AccountMailPreferences {
     in-out property <string> sender-form-name;
     in-out property <string> sender-form-reply-to;
     in-out property <bool> sender-form-editing: false;
+    // The address's own copies (#252). An address the provider gives keeps
+    // its name and reply-to address, and only these change here.
+    in-out property <string> sender-form-cc;
+    in-out property <string> sender-form-bcc;
+    in-out property <bool> sender-form-provider: false;
+    // The copies every message written from the account starts with.
+    in-out property <string> copies-cc;
+    in-out property <string> copies-bcc;
+    callback save-copies;
     // How the account's messages start: 0 formatted, 1 plain text, and whether replies and
     // forwards to plain-text messages start in plain text. Each change saves at once.
     in-out property <int> message-format-index: 0;
@@ -122,6 +136,22 @@ export global AccountMailPreferences {
     in-out property <string> reader-text;
 }
 
+// Cc and Bcc addresses, each named beside its field (#252).
+component CopiesFields inherits GridLayout {
+    in property <bool> enabled: true;
+    in-out property <string> cc;
+    in-out property <string> bcc;
+    spacing: 8px;
+    Row {
+        Text { horizontal-stretch: 0; text: @tr("Cc"); color: AppTheme.secondary; vertical-alignment: center; }
+        LineEdit { text <=> root.cc; input-label: @tr("Cc"); placeholder-text: @tr("Addresses that get a copy (optional)"); enabled: root.enabled; }
+    }
+    Row {
+        Text { horizontal-stretch: 0; text: @tr("Bcc"); color: AppTheme.secondary; vertical-alignment: center; }
+        LineEdit { text <=> root.bcc; input-label: @tr("Bcc"); placeholder-text: @tr("Addresses that get a hidden copy (optional)"); enabled: root.enabled; }
+    }
+}
+
 export component AccountMailPreferencesPanel inherits Rectangle {
     in property <[AccountRow]> accounts;
     in property <bool> compact: false;
@@ -132,6 +162,14 @@ export component AccountMailPreferencesPanel inherits Rectangle {
     border-width: 1px;
     border-color: AppTheme.input-border;
     vertical-stretch: 0;
+    // The copies mail from an address starts with besides the account's.
+    pure function identity-copies(identity: SenderIdentityRow) -> string {
+        let cc = identity.cc != "" ? @tr("Cc {}", identity.cc) : "";
+        let bcc = identity.bcc != "" ? @tr("Bcc {}", identity.bcc) : "";
+        let provider = identity.provider-bcc != "" ? @tr("Bcc {} from your provider", identity.provider-bcc) : "";
+        let first = cc != "" && bcc != "" ? cc + " · " + bcc : cc + bcc;
+        return first != "" && provider != "" ? first + " · " + provider : first + provider;
+    }
     pure function identity-detail(identity: SenderIdentityRow) -> string {
         if identity.wildcard {
             return @tr("Server allows any address at this domain");
@@ -188,31 +226,59 @@ export component AccountMailPreferencesPanel inherits Rectangle {
                     padding: 0px; spacing: 4px;
                     Text { min-height: self.preferred-height; vertical-stretch: 0; text: identity.name != "" ? identity.name + "  <" + identity.email + ">" : identity.email; color: AppTheme.heading; overflow: elide; }
                     Text { min-height: self.preferred-height; vertical-stretch: 0; text: root.identity-detail(identity); color: identity.delivery == "rejected" ? AppTheme.destructive : AppTheme.secondary; wrap: word-wrap; }
-                    if identity.manual : HorizontalBox {
+                    if root.identity-copies(identity) != "" : Text { min-height: self.preferred-height; vertical-stretch: 0; text: root.identity-copies(identity); color: AppTheme.secondary; wrap: word-wrap; }
+                    if !identity.wildcard : HorizontalBox {
                         padding: 0px;
                         alignment: start;
                         Button { min-width: max(64px, self.content-width); text: @tr("Edit"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.edit-sender-identity(identity.email); } }
-                        Button { min-width: max(64px, self.content-width); text: @tr("Remove"); destructive: true; enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.remove-sender-identity(identity.email); } }
+                        if identity.manual : Button { min-width: max(64px, self.content-width); text: @tr("Remove"); destructive: true; enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.remove-sender-identity(identity.email); } }
                     }
                 }
-                if AccountMailPreferences.sender-identity-policy == "never" : Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Gmail decides which addresses you can send from. Add an address in Gmail settings under Accounts › Send mail as, then refresh sender identities."); color: AppTheme.secondary; wrap: word-wrap; }
-                if AccountMailPreferences.sender-identity-policy != "never" : VerticalBox {
+                if AccountMailPreferences.sender-identity-policy == "never" && !AccountMailPreferences.sender-form-provider : Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Gmail decides which addresses you can send from. Add an address in Gmail settings under Accounts › Send mail as, then refresh sender identities."); color: AppTheme.secondary; wrap: word-wrap; }
+                if AccountMailPreferences.sender-identity-policy != "never" || AccountMailPreferences.sender-form-provider : VerticalBox {
                     padding: 0px; spacing: 8px;
-                    Text { min-height: self.preferred-height; vertical-stretch: 0; text: AccountMailPreferences.sender-form-editing ? @tr("Edit sender address") : @tr("Add a sender address"); color: AppTheme.heading; font-weight: 600; }
+                    Text {
+                        min-height: self.preferred-height; vertical-stretch: 0; color: AppTheme.heading; font-weight: 600; wrap: word-wrap;
+                        text: AccountMailPreferences.sender-form-provider ? @tr("Copies of mail from {}", AccountMailPreferences.sender-form-email)
+                            : AccountMailPreferences.sender-form-editing ? @tr("Edit sender address") : @tr("Add a sender address");
+                    }
                     Text {
                         min-height: self.preferred-height; vertical-stretch: 0; color: AppTheme.secondary; wrap: word-wrap;
-                        text: AccountMailPreferences.sender-identity-policy == "wildcard"
+                        text: AccountMailPreferences.sender-form-provider
+                            ? @tr("Your provider sets this address's name and reply-to address. Mail you write from it starts with these copies too.")
+                            : AccountMailPreferences.sender-identity-policy == "wildcard"
                             ? @tr("Your server lets you send from any address at the domains shown as wildcards. Add the addresses you want to choose from.")
                             : @tr("Add an alias or another address your mail server lets you send from. The server decides when you send; Flectar Mail shows whether it accepted the last message.");
                     }
-                    LineEdit { text <=> AccountMailPreferences.sender-form-email; input-label: @tr("Email address"); placeholder-text: @tr("alias@example.com"); read-only: AccountMailPreferences.sender-form-editing; enabled: !AccountMailPreferences.busy; }
-                    LineEdit { text <=> AccountMailPreferences.sender-form-name; input-label: @tr("Sender name"); placeholder-text: @tr("Name shown to recipients (optional)"); enabled: !AccountMailPreferences.busy; }
-                    LineEdit { text <=> AccountMailPreferences.sender-form-reply-to; input-label: @tr("Reply-to address"); placeholder-text: @tr("Where replies should go (optional)"); enabled: !AccountMailPreferences.busy; }
+                    if !AccountMailPreferences.sender-form-provider : LineEdit { text <=> AccountMailPreferences.sender-form-email; input-label: @tr("Email address"); placeholder-text: @tr("alias@example.com"); read-only: AccountMailPreferences.sender-form-editing; enabled: !AccountMailPreferences.busy; }
+                    if !AccountMailPreferences.sender-form-provider : LineEdit { text <=> AccountMailPreferences.sender-form-name; input-label: @tr("Sender name"); placeholder-text: @tr("Name shown to recipients (optional)"); enabled: !AccountMailPreferences.busy; }
+                    if !AccountMailPreferences.sender-form-provider : LineEdit { text <=> AccountMailPreferences.sender-form-reply-to; input-label: @tr("Reply-to address"); placeholder-text: @tr("Where replies should go (optional)"); enabled: !AccountMailPreferences.busy; }
+                    CopiesFields { cc <=> AccountMailPreferences.sender-form-cc; bcc <=> AccountMailPreferences.sender-form-bcc; enabled: !AccountMailPreferences.busy; }
                     HorizontalBox {
                         padding: 0px;
                         alignment: start;
-                        Button { min-width: max(64px, self.content-width); text: AccountMailPreferences.sender-form-editing ? @tr("Save sender address") : @tr("Add sender address"); primary: true; enabled: !AccountMailPreferences.busy && AccountMailPreferences.sender-form-email != ""; clicked => { AccountMailPreferences.save-sender-identity(); } }
+                        Button {
+                            min-width: max(64px, self.content-width);
+                            text: AccountMailPreferences.sender-form-provider ? @tr("Save copies")
+                                : AccountMailPreferences.sender-form-editing ? @tr("Save sender address") : @tr("Add sender address");
+                            primary: true;
+                            enabled: !AccountMailPreferences.busy && AccountMailPreferences.sender-form-email != "";
+                            clicked => { AccountMailPreferences.save-sender-identity(); }
+                        }
                         if AccountMailPreferences.sender-form-editing : Button { min-width: max(64px, self.content-width); text: @tr("Cancel"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.clear-sender-form(); } }
+                    }
+                }
+                Rectangle { height: 1px; background: AppTheme.input-border; }
+                // Copies of every message written from the account (#252).
+                VerticalBox {
+                    padding: 0px; spacing: 8px;
+                    Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Automatic Cc and Bcc"); color: AppTheme.heading; font-weight: 600; }
+                    Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Every message you write from this account starts with these copies, and shows them so you can take them out. Each sender address can add its own."); color: AppTheme.secondary; wrap: word-wrap; }
+                    CopiesFields { cc <=> AccountMailPreferences.copies-cc; bcc <=> AccountMailPreferences.copies-bcc; enabled: !AccountMailPreferences.busy; }
+                    HorizontalBox {
+                        padding: 0px;
+                        alignment: start;
+                        Button { min-width: max(64px, self.content-width); text: @tr("Save copies"); primary: true; enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.save-copies(); } }
                     }
                 }
                 Rectangle { height: 1px; background: AppTheme.input-border; }

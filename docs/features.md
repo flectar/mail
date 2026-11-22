@@ -8,6 +8,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Checking for mail](#checking-for-mail)
 - [Advanced account settings](#advanced-account-settings)
 - [Special folders](#special-folders)
+- [Automatic Cc and Bcc](#automatic-cc-and-bcc)
 - [New-mail notifications](#new-mail-notifications)
 - [Profiles and account colors](#profiles-and-account-colors)
 - [Appearance](#appearance)
@@ -261,6 +262,22 @@ under the names of what they hold. A chosen folder renamed in Flectar Mail keeps
 its place, one deleted gives it back to the server's folder, and with
 **Subscribed folders only** a chosen folder is listed though you haven't
 subscribed to it. Flectar Mail Sync takes the choices to your other devices.
+
+## Automatic Cc and Bcc
+
+Every message you write from an account can start with copies to the same
+addresses, such as a colleague in Cc or your archive in Bcc. Set them under
+**Automatic Cc and Bcc** in the account's **Signatures** tab in Settings →
+Accounts. **Edit** on a sender address adds copies of its own, and an address a
+JMAP server gives also gets the Bcc the server keeps for it (RFC 8621).
+
+New messages, replies, replies to all and forwards start with the copies, in Cc
+and Bcc, where you see them and can take them out before sending. An address the
+message already goes to isn't added again. Choosing another sender swaps the
+copies for that sender's and keeps the addresses you typed, while a draft you
+open again keeps the ones it had. Read receipts, answers to invitations and
+other mail Flectar Mail sends for you get none. Flectar Mail Sync takes the
+copies to your other devices.
 
 ## New-mail notifications
 
