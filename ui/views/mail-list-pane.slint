@@ -912,7 +912,10 @@ export component MailListPane inherits FocusScope {
                     bulk-toolbar := Rectangle {
                         height: root.bulk-toolbar-height;
                         background: root.surface;
-                        clip: !root.selection-mode;
+                        // Its actions show as it opens and go as it closes. Their
+                        // help is drawn by the window, so nothing has to reach
+                        // past the toolbar.
+                        clip: true;
 
                         Rectangle {
                             x: 0px;
