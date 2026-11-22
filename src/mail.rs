@@ -2028,6 +2028,28 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn account_folder_roles(
+        &self,
+        account_id: i64,
+    ) -> Result<flectar_mail_core::models::AccountFolderRoles, String> {
+        self.core
+            .account_folder_roles(account_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_account_folder_role(
+        &self,
+        account_id: i64,
+        role: String,
+        folder_id: Option<i64>,
+    ) -> Result<(), String> {
+        self.core
+            .set_account_folder_role(account_id, role, folder_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_account_sent_copy_policy(
         &self,
         account_id: i64,

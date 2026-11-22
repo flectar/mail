@@ -42,6 +42,7 @@ pub mod favicon;
 mod files_controller;
 #[cfg(all(linux_desktop, feature = "flatpak"))]
 mod flatpak_secrets;
+mod folder_roles;
 mod han_fallback;
 mod import_controller;
 mod invitation;
@@ -6604,6 +6605,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
     link_services::install(&app, &state, &runtime, platform.external_urls.clone());
     read_receipts::install(&app, &state, &runtime);
+    folder_roles::install(&app, &state, &runtime);
     translation::install(&app, &state, &runtime);
     ai_features::install(&app, &state, &runtime);
     network::install(&app, &state, &runtime);
