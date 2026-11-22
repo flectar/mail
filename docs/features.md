@@ -1086,6 +1086,12 @@ experimental, but it is also a major reason Flectar Mail can remain so
 lightweight compared with WebView-based clients built with frameworks such as
 Tauri or Wails.
 
+A message's menu has **Show HTML source**, the message's HTML to copy into such
+a report, and **Show message source** (Ctrl+U, or Cmd+U on a Mac), the whole
+message as it arrived with every header field, as the server delivered it, to
+copy or save as a file. A conversation shows its newest message, and a long
+message shows its first 512 KB, with all of it in the saved file.
+
 Desktop builds offer two renderers under Settings → General → Renderer:
 
 | Renderer | Details |

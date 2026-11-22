@@ -15,6 +15,7 @@ import { WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
+import { MessageSource } from "../message-source.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { SavedSearchUi } from "../saved-searches.slint";
 import { ServerSearchUi } from "../server-search.slint";
@@ -639,6 +640,17 @@ export component MailListPane inherits FocusScope {
         keys: Shortcuts.edit-as-new;
         enabled: !search-toolbar.search-focused;
         activated => { root.edit-as-new(); }
+    }
+    KeyBinding {
+        keys: Shortcuts.message-source;
+        enabled: !search-toolbar.search-focused;
+        activated => {
+            if MessageSource.shown {
+                MessageSource.shown = false;
+            } else {
+                MessageSource.show();
+            }
+        }
     }
 
     // Move to and Copy to open for what the other shortcuts act on.
