@@ -74,8 +74,10 @@ export component ProviderButton inherits Rectangle {
 
     provider-hit := TouchArea {
         clicked => {
-            tooltip.hide();
+            // A disabled provider's help says why it is disabled, so a click
+            // on it, which does nothing else, keeps the help up.
             if root.enabled {
+                tooltip.hide();
                 root.clicked();
             }
         }

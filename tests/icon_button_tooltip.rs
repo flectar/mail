@@ -16,6 +16,7 @@ slint::slint! {
     #[edition = "1.19"]
     import { Palette } from "std-widgets.slint";
     import { ToolbarIconButton } from "../ui/components/controls.slint";
+    import { ProviderButton } from "../ui/components/provider-button.slint";
     import { ActionTooltip, ActionTooltipLayer } from "../ui/components/tooltip-bubble.slint";
     import { MotionSettings } from "../ui/design-system.slint";
     export { ActionTooltip }
@@ -25,7 +26,7 @@ slint::slint! {
         in-out property <bool> extra-shown: true;
         in-out property <length> star-x: 200px;
         preferred-width: 400px;
-        preferred-height: 120px;
+        preferred-height: 200px;
         background: root.dark ? #111111 : white;
         init => { MotionSettings.enabled = false; }
         changed dark => {
@@ -53,6 +54,20 @@ slint::slint! {
             tooltip-above: true;
             tooltip-in-popup: true;
         }
+        // A provider that can't be chosen yet, whose help above it says why.
+        ProviderButton {
+            x: 200px;
+            y: 140px;
+            width: 120px;
+            enabled: false;
+            text: "Gmail";
+            tooltip-text: "Add app keys";
+            foreground: black;
+            muted: gray;
+            surface: white;
+            hover-surface: #eeeeee;
+            button-border: #cccccc;
+        }
         // The pane below the first button, drawn after it, like the message
         // below the reader's toolbar.
         Rectangle {
@@ -71,7 +86,7 @@ slint::slint! {
 }
 
 const WIDTH: usize = 400;
-const HEIGHT: usize = 120;
+const HEIGHT: usize = 200;
 const ARCHIVE: f32 = 80.0;
 const STAR: f32 = 220.0;
 const SNOOZE: f32 = 300.0;
@@ -84,6 +99,10 @@ const MOVED_STAR: f32 = 140.0;
 // The popup's button, and a row through the middle of its bubble.
 const POPUP_ROW: f32 = 90.0;
 const POPUP_BUBBLE_ROW: usize = 48;
+// The disabled provider, and a row through its bubble above it.
+const PROVIDER: f32 = 260.0;
+const PROVIDER_ROW: f32 = 164.0;
+const PROVIDER_BUBBLE_Y: usize = 108;
 // A spot with no button.
 const EMPTY: (f32, f32) = (10.0, 100.0);
 // Inside a bubble below the buttons, above its text, and inside its caret.
@@ -150,7 +169,11 @@ impl Harness {
     }
 
     fn click(&self, x: f32) {
-        let position = LogicalPosition::new(x, ROW);
+        self.click_at(x, ROW);
+    }
+
+    fn click_at(&self, x: f32, y: f32) {
+        let position = LogicalPosition::new(x, y);
         self.send(WindowEvent::PointerMoved { position });
         self.send(WindowEvent::PointerPressed {
             position,
@@ -391,6 +414,21 @@ fn window_bubble_follows_the_pointer_and_its_button() {
     assert!(
         (MORE as usize + 14..=MORE as usize + 20).contains(&right),
         "the popup help ends at the button's edge, not centred past it: {right}"
+    );
+    harness.leave();
+
+    // A disabled provider's help says why it is disabled, and a click on it
+    // keeps the help up, since the click does nothing else.
+    harness.hover_at(PROVIDER, PROVIDER_ROW);
+    assert!(
+        dark(&harness.frame(), PROVIDER, PROVIDER_BUBBLE_Y),
+        "a disabled provider shows its help"
+    );
+    harness.click_at(PROVIDER, PROVIDER_ROW);
+    harness.wait(SETTLE);
+    assert!(
+        dark(&harness.frame(), PROVIDER, PROVIDER_BUBBLE_Y),
+        "a click on a disabled provider keeps its help"
     );
     harness.leave();
 
