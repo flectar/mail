@@ -44,7 +44,8 @@ upstream #1342, keeping beta.4's element transform, and open upstream #1372. 000
 when a release contains them.
 
 Copied text, find in the reader and accessible names leave out 0011's edge
-placeholders (`blitz_dom::node::without_inline_edges`).
+placeholders (`blitz_dom::node::without_inline_edges`). Find in the reader highlights
+its matches through 0015's `set_text_highlights`.
 
 Table-cell layout adjustments use temporary computed-style overrides. They do
 not mutate the author's primary style or its shared hint blocks. Each call

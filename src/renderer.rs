@@ -183,7 +183,7 @@ pub struct GpuEmailRenderer {
     last_size: Option<(u32, u32, u32, u32, u32)>,
     dirty: bool,
     paint_dirty: bool,
-    painted_selection: Vec<(NodeId, usize, usize)>,
+    painted_marks: PaintedMarks,
     cpu_painter: Option<VelloCpuImageRenderer>,
     cpu_size: (u32, u32),
     tile_work_limit: usize,
@@ -250,7 +250,7 @@ impl Default for GpuEmailRenderer {
             last_size: None,
             dirty: false,
             paint_dirty: false,
-            painted_selection: Vec::new(),
+            painted_marks: PaintedMarks::default(),
             cpu_painter: None,
             cpu_size: (0, 0),
             tile_work_limit: usize::MAX,
@@ -463,7 +463,7 @@ impl GpuEmailRenderer {
         self.metadata_revision += 1;
         self.selection_anchor = None;
         self.selection_focus = None;
-        self.painted_selection.clear();
+        self.painted_marks = PaintedMarks::default();
         self.find_matches.clear();
         self.find_query.clear();
         self.cpu_painter = None;
@@ -558,7 +558,7 @@ impl GpuEmailRenderer {
         self.find_query.clear();
         self.loaded_key = None;
         self.paint_dirty = false;
-        self.painted_selection.clear();
+        self.painted_marks = PaintedMarks::default();
         self.selection_anchor = None;
         self.selection_focus = None;
         self.metadata_revision += 1;
@@ -1025,7 +1025,7 @@ impl GpuEmailRenderer {
         if self.paint_dirty {
             invalidate_selection_tiles(
                 &email.document,
-                &self.painted_selection,
+                &self.painted_marks,
                 &mut self.tiles,
                 self.tile_height,
             );
@@ -1094,7 +1094,7 @@ impl GpuEmailRenderer {
         self.last_size = Some(size);
         self.dirty = false;
         self.paint_dirty = false;
-        self.painted_selection = email.document.get_text_selection_ranges();
+        self.painted_marks = PaintedMarks::of(&email.document);
         self.region_dirty = wanted.clone().any(|index| !self.tiles.contains_key(&index));
         Ok(Some(RenderedEmail {
             tiles: self.tiles.values().cloned().collect(),
@@ -1204,7 +1204,7 @@ impl GpuEmailRenderer {
         if self.paint_dirty {
             invalidate_selection_tiles(
                 &email.document,
-                &self.painted_selection,
+                &self.painted_marks,
                 &mut self.tiles,
                 self.tile_height,
             );
@@ -1328,7 +1328,7 @@ impl GpuEmailRenderer {
         self.last_size = Some(size);
         self.dirty = false;
         self.paint_dirty = false;
-        self.painted_selection = email.document.get_text_selection_ranges();
+        self.painted_marks = PaintedMarks::of(&email.document);
         self.region_dirty = false;
 
         Ok(Some(RenderedEmail {
@@ -1517,18 +1517,70 @@ fn render_cpu_tile_cached(
     })
 }
 
+/// What the tiles show of the selection and of highlighted text, so that a
+/// change repaints only the tiles it reaches.
+#[derive(Default)]
+struct PaintedMarks {
+    selection: Vec<(NodeId, usize, usize)>,
+    /// The inline root the selection ends in, which is the one without a
+    /// selected line break at its end.
+    selection_end: Option<NodeId>,
+    highlights: Vec<blitz_dom::TextHighlight>,
+}
+
+impl PaintedMarks {
+    fn of(document: &HtmlDocument) -> Self {
+        let (selection, selection_end) = document.get_text_selection_ranges_and_end();
+        Self {
+            selection,
+            selection_end,
+            highlights: document.text_highlights().to_vec(),
+        }
+    }
+}
+
 fn invalidate_selection_tiles(
     document: &HtmlDocument,
-    previous: &[(NodeId, usize, usize)],
+    previous: &PaintedMarks,
     tiles: &mut BTreeMap<u32, RenderedEmailTile>,
     tile_height: f32,
 ) {
-    let current = document.get_text_selection_ranges();
+    let current = PaintedMarks::of(document);
+    let ends = if current.selection_end == previous.selection_end {
+        Vec::new()
+    } else {
+        [current.selection_end, previous.selection_end]
+            .into_iter()
+            .flatten()
+            .collect()
+    };
     let changed = previous
+        .selection
         .iter()
-        .filter(|r| !current.contains(r))
-        .chain(current.iter().filter(|r| !previous.contains(r)));
-    for &(id, _, _) in changed {
+        .filter(|r| !current.selection.contains(r))
+        .chain(
+            current
+                .selection
+                .iter()
+                .filter(|r| !previous.selection.contains(r)),
+        )
+        .map(|&(id, _, _)| id)
+        .chain(ends)
+        .chain(
+            previous
+                .highlights
+                .iter()
+                .filter(|h| !current.highlights.contains(h))
+                .chain(
+                    current
+                        .highlights
+                        .iter()
+                        .filter(|h| !previous.highlights.contains(h)),
+                )
+                .map(|highlight| highlight.node),
+        )
+        .collect::<Vec<_>>();
+    for id in changed {
         let Some(node) = document.get_node(id) else {
             tiles.clear();
             return;

@@ -625,6 +625,9 @@ export global EmailReader {
     pure callback link-at(float, float) -> string;
     callback command(string);
     callback find(string, int);
+    // Find is over, however the find bar closed: its matches stop being
+    // highlighted.
+    callback find-closed();
     // Opens or closes the section that a "section" row of `items` stands for.
     callback toggle-section(int);
     in-out property <bool> auto-fit: true;
@@ -637,6 +640,11 @@ export global EmailReader {
     in-out property <string> find-status;
     in-out property <string> notice;
     in-out property <bool> find-open: false;
+    changed find-open => {
+        if !self.find-open {
+            self.find-closed();
+        }
+    }
     in-out property <bool> reader-mode: false;
     in-out property <bool> caret-mode: false;
     in-out property <[ReaderItem]> items;

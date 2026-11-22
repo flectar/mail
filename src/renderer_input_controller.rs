@@ -250,6 +250,14 @@ pub(super) fn register_renderer_input_callbacks(
         });
     let weak = app.as_weak();
     let r = renderer.clone();
+    app.global::<EmailReader>().on_find_closed(move || {
+        r.borrow_mut().end_find();
+        if let Some(app) = weak.upgrade() {
+            repaint_reader(&app, &r, gpu);
+        }
+    });
+    let weak = app.as_weak();
+    let r = renderer.clone();
     app.global::<EmailReader>()
         .on_toggle_section(move |section| {
             let (Some(app), Ok(section)) = (weak.upgrade(), usize::try_from(section)) else {

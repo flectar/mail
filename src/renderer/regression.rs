@@ -899,6 +899,35 @@ fn find_handles_unicode_cycles_and_decoded_fragments() {
 }
 
 #[test]
+fn find_highlights_every_match_until_find_ends() {
+    let mut r = renderer("<body><p>one two one</p><p>one</p></body>");
+    assert!(r.render_cpu_if_needed(520, 400, 1.0).unwrap().is_some());
+    let highlights = |r: &GpuEmailRenderer| {
+        r.email
+            .as_ref()
+            .unwrap()
+            .document
+            .text_highlights()
+            .iter()
+            .map(|highlight| highlight.active)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(r.find("one", 0).1, 3);
+    assert_eq!(highlights(&r), [true, false, false]);
+    assert!(r.render_cpu_if_needed(520, 400, 1.0).unwrap().is_some());
+    r.find("one", 1);
+    assert_eq!(highlights(&r), [false, true, false]);
+    assert!(r.render_cpu_if_needed(520, 400, 1.0).unwrap().is_some());
+    // When find ends, the matches lose their highlights and the current one
+    // stays selected, as in browsers.
+    r.end_find();
+    assert!(highlights(&r).is_empty());
+    assert_eq!(r.selected_text().as_deref(), Some("one"));
+    assert!(r.render_cpu_if_needed(520, 400, 1.0).unwrap().is_some());
+    assert!(r.render_cpu_if_needed(520, 400, 1.0).unwrap().is_none());
+}
+
+#[test]
 fn premultiplied_alpha_matches_white_canvas() {
     let mut email=prepare_email_html("<body style='margin:0'><div style='width:50px;height:50px;background:rgba(255,0,0,0.5)'></div></body>").unwrap();
     let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
