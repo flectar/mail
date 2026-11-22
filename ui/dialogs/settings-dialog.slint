@@ -803,7 +803,7 @@ export component SettingsDialog inherits Rectangle {
         @tr("1 year"),
         @tr("All mail"),
     ];
-    // What an IMAP account downloads ahead of time (#253).
+    // What an IMAP or JMAP account downloads ahead of time (#253).
     private property <[string]> download-options: [
         @tr("Headers only"),
         @tr("Messages"),
@@ -2865,9 +2865,9 @@ export component SettingsDialog inherits Rectangle {
                                 private property <bool> has-subscriptions: account.mail_protocol == "imap";
                                 // IMAP IDLE and JMAP's event source; Gmail and POP3 servers don't push.
                                 private property <bool> has-push: account.mail_protocol == "imap" || account.mail_protocol == "jmap";
-                                // IMAP accounts download messages ahead of time in the
-                                // background, which this turns down or up (#253).
-                                private property <bool> has-download: account.mail_protocol == "imap";
+                                // IMAP and JMAP accounts download messages ahead of time
+                                // in the background, which this turns down or up (#253).
+                                private property <bool> has-download: account.mail_protocol == "imap" || account.mail_protocol == "jmap";
                                 // Gmail's servers keep the standard wait.
                                 private property <bool> has-timeout: account.mail_protocol == "imap" || account.mail_protocol == "pop3" || account.mail_protocol == "jmap";
                                 private property <bool> unencrypted: account.incoming_security == "none" || (!account.receive_only && account.smtp_security == "none");
