@@ -10,8 +10,8 @@
 //!
 //! Attribute values are untrusted. Each value is parsed into a number, color
 //! or keyword before it is written to the declaration list; raw attribute text
-//! is never copied into CSS, except font family names, which are serialized as
-//! escaped CSS strings.
+//! is never copied into CSS, except font family names and `background` URLs,
+//! which are serialized as escaped CSS strings.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -32,20 +32,46 @@ use crate::node::{ElementData, Node, NodeData};
 
 type HintBlock = ServoArc<Locked<PropertyDeclarationBlock>>;
 
-/// Hint blocks for one document, keyed by their canonical CSS text.
+/// Hint blocks for one document, keyed by their canonical CSS text, and the
+/// URL their `background` URLs resolve against.
 #[derive(Default)]
-pub struct PresentationalHintCache(Mutex<HashMap<Box<str>, HintBlock>>);
+pub struct PresentationalHintCache(Mutex<HintCache>);
+
+#[derive(Default)]
+struct HintCache {
+    blocks: HashMap<Box<str>, HintBlock>,
+    url: Option<UrlExtraData>,
+}
+
+impl PresentationalHintCache {
+    /// Resolve the document's hints against `url` from now on. Blocks
+    /// resolved against another URL are dropped.
+    pub(crate) fn set_url(&self, url: UrlExtraData) {
+        let mut cache = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache.url.as_ref() != Some(&url) {
+            cache.blocks.clear();
+            cache.url = Some(url);
+        }
+    }
+}
 
 impl std::fmt::Debug for PresentationalHintCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let len = self.0.lock().map(|map| map.len()).unwrap_or_default();
+        let len = self
+            .0
+            .lock()
+            .map(|cache| cache.blocks.len())
+            .unwrap_or_default();
         f.debug_struct("PresentationalHintCache")
             .field("len", &len)
             .finish()
     }
 }
 
-// Hints never contain URLs, so they resolve against an inert base.
+// The base of hints outside a document, which have no document URL.
 static HINT_URL_DATA: LazyLock<UrlExtraData> = LazyLock::new(|| {
     UrlExtraData(ServoArc::new(
         url::Url::parse("about:blank").expect("static URL is valid"),
@@ -76,7 +102,7 @@ where
         // Word and Outlook put `lang` on most paragraphs and spans; a shared
         // block keeps those elements sharing styles. The key cannot collide
         // with a declaration list, which never contains NUL.
-        let block = cached_block(node, format!("\0{lang}"), || {
+        let block = cached_block(node, format!("\0{lang}"), |_| {
             PropertyDeclarationBlock::with_one(
                 PropertyDeclaration::XLang(XLang(style::Atom::from(lang))),
                 Importance::Normal,
@@ -100,14 +126,8 @@ where
         return;
     }
 
-    let block = cached_block(node, css.clone(), || {
-        parse_style_attribute(
-            &css,
-            &HINT_URL_DATA,
-            None,
-            QuirksMode::NoQuirks,
-            CssRuleType::Style,
-        )
+    let block = cached_block(node, css.clone(), |url| {
+        parse_style_attribute(&css, url, None, QuirksMode::NoQuirks, CssRuleType::Style)
     });
     hints.push(ApplicableDeclarationBlock::from_declarations(
         block,
@@ -116,11 +136,12 @@ where
     ));
 }
 
-/// The document's shared block for `key`, built on first use.
+/// The document's shared block for `key`, built on first use against the
+/// document's URL.
 fn cached_block(
     node: &Node,
     key: String,
-    build: impl FnOnce() -> PropertyDeclarationBlock,
+    build: impl FnOnce(&UrlExtraData) -> PropertyDeclarationBlock,
 ) -> HintBlock {
     let wrap = |block| ServoArc::new(node.guard().wrap(block));
 
@@ -130,7 +151,7 @@ fn cached_block(
     }
     let NodeData::Document(data) = &doc.data else {
         // Detached subtrees are styled rarely; they just skip the cache.
-        return wrap(build());
+        return wrap(build(&HINT_URL_DATA));
     };
 
     let mut cache = data
@@ -138,11 +159,11 @@ fn cached_block(
         .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(block) = cache.get(key.as_str()) {
+    if let Some(block) = cache.blocks.get(key.as_str()) {
         return block.clone();
     }
-    let block = wrap(build());
-    cache.insert(key.into_boxed_str(), block.clone());
+    let block = wrap(build(cache.url.as_ref().unwrap_or(&HINT_URL_DATA)));
+    cache.blocks.insert(key.into_boxed_str(), block.clone());
     block
 }
 
@@ -387,6 +408,28 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                     }
                 }
             }
+            // As in Blink, `all` clears both sides, and `clear`'s own keywords
+            // apply as they are.
+            "clear" if *tag == local_name!("br") => {
+                let value = value.trim_matches(|c: char| c.is_ascii_whitespace());
+                let clear = if value.eq_ignore_ascii_case("all") {
+                    Some("both")
+                } else {
+                    [
+                        "left",
+                        "right",
+                        "both",
+                        "none",
+                        "inline-start",
+                        "inline-end",
+                    ]
+                    .into_iter()
+                    .find(|keyword| value.eq_ignore_ascii_case(keyword))
+                };
+                if let Some(clear) = clear {
+                    let _ = write!(css, "clear:{clear};");
+                }
+            }
             // List types as Blink maps them: an `<ol>` takes its letters
             // case-sensitively, a `<ul>` its names in any case, and an `<li>`
             // either.
@@ -404,6 +447,24 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                 if let Some(style) = ordered_list_type(value).or_else(|| unordered_list_type(value))
                 {
                     let _ = write!(css, "list-style-type:{style};");
+                }
+            }
+            // A URL, resolved against the document like Blink's
+            // `CompleteURL`, as a CSS string the attribute can't escape.
+            "background"
+                if *tag == local_name!("body")
+                    || *tag == local_name!("table")
+                    || *tag == local_name!("thead")
+                    || *tag == local_name!("tbody")
+                    || *tag == local_name!("tfoot")
+                    || *tag == local_name!("tr")
+                    || is_cell =>
+            {
+                let url = value.trim_matches(|c: char| c.is_ascii_whitespace());
+                if !url.is_empty() {
+                    css.push_str("background-image:url(");
+                    let _ = cssparser::serialize_string(url, css);
+                    css.push_str(");");
                 }
             }
             "hidden" => css.push_str("display:none;"),

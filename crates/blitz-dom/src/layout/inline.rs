@@ -1,5 +1,5 @@
 use blitz_traits::node_id::NodeId;
-use parley::{AlignmentOptions, BreakReason, IndentOptions};
+use parley::{AlignmentOptions, BreakReason, IndentOptions, InlineBoxKind};
 use style::values::specified::box_::{DisplayInside, DisplayOutside};
 use style::values::{
     computed::{BaselineSource, CSSPixelLength, Contain},
@@ -447,7 +447,9 @@ impl LayoutPassState<'_> {
             let box_inputs = inline_box_inputs(style.size().width, margin, child_inputs);
             drop(style);
 
-            if is_out_of_flow || is_floated {
+            // A float, an absolutely positioned box or the empty box after a
+            // `<br>` that clears floats.
+            if is_out_of_flow || is_floated || ibox.kind == InlineBoxKind::CustomOutOfFlow {
                 ibox.width = 0.0;
                 ibox.height = 0.0;
                 ibox.baseline = None;
@@ -687,6 +689,9 @@ impl LayoutPassState<'_> {
         // up from them. They move with the content when `align-content` shifts it.
         #[cfg(feature = "floats")]
         let mut placed_floats = Vec::new();
+        // Whether a `<br>` that clears floats moved a line below them.
+        #[cfg(feature = "floats")]
+        let mut cleared_floats = false;
         #[cfg(feature = "floats")]
         let mut float_oof_candidates = OofCandidates::new();
 
@@ -751,6 +756,29 @@ impl LayoutPassState<'_> {
                     YieldData::InlineBoxBreak(box_break_data) => {
                         let state = breaker.state_mut();
                         let node_id = NodeId::from_u64(box_break_data.inline_box_id);
+
+                        // The box after a `<br>` that clears floats: the line
+                        // it starts goes below them.
+                        let br_clear = {
+                            let style = self.child_layout_style(&self.nodes[node_id]);
+                            (!style.float().is_floated()).then(|| style.clear())
+                        };
+                        if let Some(clear) = br_clear {
+                            let min_y = state.line_y() / scale as f64;
+                            let slot = block_ctx.find_content_slot(min_y as f32, clear, None);
+                            cleared_floats |= f64::from(slot.y) > min_y;
+                            has_active_floats = slot.segment_id.is_some();
+                            state
+                                .set_line_max_advance((slot.width * scale).min(layout_max_advance));
+                            state.set_line_x(slot.x * scale);
+                            state.set_line_y((slot.y * scale) as f64);
+                            state.append_inline_box_to_line(
+                                box_break_data.advance,
+                                f32::NEG_INFINITY,
+                                f32::NEG_INFINITY,
+                            );
+                            continue;
+                        }
 
                         let (direction, clear, margin, width) = {
                             let style = self.child_layout_style(&self.nodes[node_id]);
@@ -899,6 +927,36 @@ impl LayoutPassState<'_> {
             trailing_empty_line = Some(line_count - 1);
         }
 
+        // Parley's height sums the lines' heights, which misses the gap a
+        // `<br>` that clears floats leaves above the line after it, so the
+        // content ends at its last line instead. A last line with nothing
+        // but that `<br>`'s empty box adds only the gap.
+        #[cfg(feature = "floats")]
+        if cleared_floats {
+            let counted = trailing_empty_line.unwrap_or(line_count);
+            height = inline_layout
+                .layout
+                .lines()
+                .take(counted)
+                .map(|line| {
+                    let metrics = line.metrics();
+                    let only_boxes = line.text_range().is_empty()
+                        && line.items().all(|item| {
+                            matches!(
+                                item,
+                                parley::layout::PositionedLayoutItem::InlineBox(ibox)
+                                    if ibox.kind == InlineBoxKind::CustomOutOfFlow
+                            )
+                        });
+                    if only_boxes {
+                        metrics.block_min_coord
+                    } else {
+                        metrics.block_max_coord
+                    }
+                })
+                .fold(0.0, f32::max);
+        }
+
         #[cfg(feature = "floats")]
         {
             if is_bfc_root {
@@ -974,6 +1032,17 @@ impl LayoutPassState<'_> {
         for line in inline_layout.layout.lines() {
             for item in line.items() {
                 if let parley::layout::PositionedLayoutItem::InlineBox(ibox) = item {
+                    // The empty box after a `<br>` that clears floats is no box
+                    // of the `<br>`'s.
+                    #[cfg(feature = "floats")]
+                    if ibox.kind == InlineBoxKind::CustomOutOfFlow
+                        && !self
+                            .child_layout_style(&self.nodes[NodeId::from_u64(ibox.id)])
+                            .float()
+                            .is_floated()
+                    {
+                        continue;
+                    }
                     let order = ibox_order;
                     ibox_order += 1;
                     if inputs.run_mode == RunMode::PerformLayout {

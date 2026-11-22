@@ -1862,3 +1862,56 @@ fn lists_number_and_place_their_markers_as_browsers_do() {
         .expect("marker ink");
     assert!(marker_end < 36, "the marker ends at {marker_end}");
 }
+
+#[test]
+fn a_br_that_clears_floats_starts_the_next_line_below_them() {
+    // As in browsers, `<br clear>` moves the line after it below the floats
+    // it clears, and the block grows to hold it. A trailing one only adds the
+    // clearance, so the block ends with its float.
+    let doc = document(
+        "<style>body{margin:0;font:16px/20px sans-serif} .f{float:left;width:40px;height:50px}</style>
+         <div id=a style='width:300px'><div class=f></div>beside<br clear=all>after</div>
+         <div id=b style='width:300px'><div class=f></div>beside<br clear=right>still beside</div>
+         <div id=c style='width:300px'><div class=f></div>trailing<br clear=ALL></div>",
+    );
+    let height = |selector| node(&doc, selector).final_layout().size.height;
+    // The line after the `<br>` starts below the 50px float.
+    close(height("#a"), 70.0);
+    // Nothing floats on the right, so both lines stay beside the float.
+    close(height("#b"), 40.0);
+    close(height("#c"), 50.0);
+}
+
+#[test]
+fn background_attributes_set_background_images() {
+    // A table's, a table part's or the body's `background` attribute is a
+    // background image, resolved against the document's URL like Blink's.
+    let images = std::sync::Arc::new(HeldImages::default());
+    let mut doc = HtmlDocument::from_html(
+        "<body background='https://example.com/body.png'><table background='table.png'><tr>
+         <td background=' cell.png '>a</td><td background=''>b</td></tr></table></body>",
+        DocumentConfig {
+            viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+            base_url: Some("https://example.com/mail/".to_string()),
+            net_provider: Some(images.clone()),
+            ..Default::default()
+        },
+    );
+    doc.resolve(0.0);
+    let mut requested: Vec<String> = images
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(url, _)| url.clone())
+        .collect();
+    requested.sort();
+    assert_eq!(
+        requested,
+        [
+            "https://example.com/body.png",
+            "https://example.com/mail/cell.png",
+            "https://example.com/mail/table.png",
+        ]
+    );
+}

@@ -1400,6 +1400,24 @@ pub(crate) fn build_inline_layout_into(
                             ]);
                             builder.push_text("\n");
                             builder.pop_style_span();
+                            // A `<br>` that clears floats starts the next line
+                            // below them, as in browsers. The line breaker
+                            // stops at this empty box to move the line.
+                            #[cfg(feature = "floats")]
+                            if style.is_some_and(|s| {
+                                s.clone_clear() != style::values::computed::Clear::None
+                            }) {
+                                builder.push_inline_box(InlineBox {
+                                    id: node_id.as_u64(),
+                                    kind: InlineBoxKind::CustomOutOfFlow,
+                                    // Overridden by push_inline_box method
+                                    index: 0,
+                                    width: 0.0,
+                                    height: 0.0,
+                                    baseline: None,
+                                    vertical_align: parley::VerticalAlign::BASELINE,
+                                });
+                            }
                             text_transformer.word_break(builder);
                         } else {
                             // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);

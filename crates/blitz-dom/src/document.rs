@@ -608,6 +608,7 @@ impl BaseDocument {
         // Initialise document with root Document node
         doc.root_node_id = doc.create_node(NodeData::Document(Box::default()));
         doc.root_node_mut().flags.insert(NodeFlags::IS_IN_DOCUMENT);
+        doc.share_url_with_hints();
 
         for sheet in config.ua_stylesheets {
             doc.add_user_agent_stylesheet(sheet);
@@ -653,6 +654,15 @@ impl BaseDocument {
     /// Set base url for resolving linked resources (stylesheets, images, fonts, etc)
     pub fn set_base_url(&mut self, url: &str) {
         self.url = DocumentUrl::from(Url::parse(url).unwrap());
+        self.share_url_with_hints();
+    }
+
+    /// Resolve URLs in presentational hints, such as `<td background>`,
+    /// against the document's URL.
+    fn share_url_with_hints(&self) {
+        if let NodeData::Document(data) = &self.root_node().data {
+            data.presentational_hints.set_url(self.url.url_extra_data());
+        }
     }
 
     /// The base url used for resolving linked resources (stylesheets, images, fonts, etc)
