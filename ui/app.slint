@@ -34,7 +34,9 @@ import "../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,RON
 
 import { Palette } from "std-widgets.slint";
 import { InterfaceText, TypeScale } from "typography.slint";
-import { ActionTooltipLayer, TooltipBubble } from "components/tooltip-bubble.slint";
+import { ActionTooltip, ActionTooltipLayer, TooltipBubble } from "components/tooltip-bubble.slint";
+// The window event filters report key presses to it (window_chrome.rs, composer.rs).
+export { ActionTooltip }
 export { AppTheme, MotionSettings, ThemeUtilities } from "design-system.slint";
 export { InterfaceText } from "typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings } from "design-system.slint";
@@ -2725,7 +2727,7 @@ export component AppWindow inherits Window {
         // rendered here, above the adjacent workspace, so it can extend right
         // of the icon without being clipped by the rail component.
         TooltipBubble {
-            visible: !root.compact-layout && product-rail.tooltip-text != "";
+            visible: !root.compact-layout && product-rail.tooltip-text != "" && !ActionTooltip.keyboard;
             x: LayoutMetrics.product-rail-width + 2px;
             y: product-rail.tooltip-y;
             text: product-rail.tooltip-text;

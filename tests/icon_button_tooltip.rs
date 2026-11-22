@@ -16,8 +16,9 @@ slint::slint! {
     #[edition = "1.19"]
     import { Palette } from "std-widgets.slint";
     import { ToolbarIconButton } from "../ui/components/controls.slint";
-    import { ActionTooltipLayer } from "../ui/components/tooltip-bubble.slint";
+    import { ActionTooltip, ActionTooltipLayer } from "../ui/components/tooltip-bubble.slint";
     import { MotionSettings } from "../ui/design-system.slint";
+    export { ActionTooltip }
 
     export component TooltipHarness inherits Window {
         in-out property <bool> dark;
@@ -343,6 +344,25 @@ fn window_bubble_follows_the_pointer_and_its_button() {
     harness.leave();
     harness.ui.set_star_x(STAR_X);
     harness.frame();
+
+    // A key pressed elsewhere in the window, which the window's event filter
+    // reports, hands help to the keyboard: the help of the button under the
+    // resting pointer goes and stays away, and pointing at a button brings
+    // the pointer's help back.
+    harness.hover(MORE);
+    assert!(dark(&harness.frame(), MORE, BUBBLE_Y));
+    harness.ui.global::<ActionTooltip>().set_keyboard(true);
+    harness.wait(SETTLE);
+    assert!(
+        !dark(&harness.frame(), MORE, BUBBLE_Y),
+        "a key press hides the help under a resting pointer"
+    );
+    harness.hover(MORE);
+    assert!(
+        dark(&harness.frame(), MORE, BUBBLE_Y),
+        "pointing at the button brings it back"
+    );
+    harness.leave();
 
     // In a popup the bubble lines up with the button's trailing edge, so the
     // popup's edge does not cut it off.

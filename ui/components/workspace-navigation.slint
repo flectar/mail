@@ -1,6 +1,6 @@
 import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
-import { ActionTooltipSource } from "tooltip-bubble.slint";
+import { ActionTooltip, ActionTooltipSource } from "tooltip-bubble.slint";
 import { LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { WindowChrome, WindowDragArea } from "../window-chrome.slint";
 import { MailProfileRow } from "../models.slint";
@@ -54,6 +54,12 @@ component ProductRailItem inherits Rectangle {
             accessible-checked: root.active;
             accessible-action-default => { root.clicked(); }
             clicked => { root.clicked(); }
+            // Pointing at an item hands help back to the pointer.
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.move {
+                    ActionTooltip.keyboard = false;
+                }
+            }
             mouse-cursor: pointer;
         }
     }
@@ -569,6 +575,9 @@ component TabItem inherits Rectangle {
             accessible-item-index: root.index;
             accessible-action-default => { TabsUi.select(root.entry.id); }
             pointer-event(event) => {
+                if event.kind == PointerEventKind.move {
+                    ActionTooltip.keyboard = false;
+                }
                 if event.kind == PointerEventKind.cancel {
                     self.pressed-id = -1;
                     self.middle-pressed = false;
@@ -697,7 +706,8 @@ component TabItem inherits Rectangle {
         x: 8px;
         width: 32px;
         height: parent.height;
-        shown: root.tooltip-due && root.hovered && root.truncated && !root.tooltip-dismissed;
+        shown: root.tooltip-due && root.hovered && root.truncated && !root.tooltip-dismissed
+            && !ActionTooltip.keyboard;
         text: root.title;
         align-left: true;
     }
@@ -735,12 +745,17 @@ component NewTabButton inherits Rectangle {
             tooltip.hide();
             TabsUi.create();
         }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.move {
+                ActionTooltip.keyboard = false;
+            }
+        }
     }
     // Centred below the button, drawn by the window.
     tooltip := ActionTooltipSource {
         width: parent.width;
         height: parent.height;
-        shown: hit.has-hover;
+        shown: hit.has-hover && !ActionTooltip.keyboard;
         text: @tr("New tab");
     }
 }

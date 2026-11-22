@@ -2,7 +2,7 @@ import { ScrollView } from "std-widgets.slint";
 import { AppTheme, LayoutMetrics, MotionSettings, ThemeUtilities } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
-import { ActionTooltipSource, TooltipBubble } from "tooltip-bubble.slint";
+import { ActionTooltip, ActionTooltipSource, TooltipBubble } from "tooltip-bubble.slint";
 import { WindowChrome } from "../window-chrome.slint";
 
 export component TextEdit inherits Rectangle {
@@ -276,13 +276,9 @@ export component RadioButton inherits Rectangle {
 }
 
 // A single geometry for compact toolbar actions keeps every SVG optically
-// centered regardless of the host platform's native Button padding.
-// Show help for one input modality at a time, so keyboard focus does not
-// overlap the tooltip beneath a stationary pointer on another button.
-global IconButtonInput {
-    in-out property <bool> keyboard: false;
-}
-
+// centered regardless of the host platform's native Button padding. Help
+// follows one input at a time (`ActionTooltip.keyboard`), so keyboard focus
+// does not overlap the tooltip beneath a stationary pointer on another button.
 export component IconButton inherits Rectangle {
     in property <image> icon;
     in property <color> icon-color;
@@ -314,11 +310,11 @@ export component IconButton inherits Rectangle {
 
     public function pointer-activated() {
         keyboard.pointer-activated();
-        IconButtonInput.keyboard = false;
+        ActionTooltip.keyboard = false;
     }
 
     private property <bool> tooltip-shown: root.tooltip-text != ""
-        && (IconButtonInput.keyboard ? keyboard.has-focus : hit-area.has-hover);
+        && (ActionTooltip.keyboard ? keyboard.has-focus : hit-area.has-hover);
 
     width: 32px;
     height: 32px;
@@ -358,11 +354,11 @@ export component IconButton inherits Rectangle {
         enabled: root.interactive;
         // A tap focuses the button too; only focus from the keyboard shows
         // its help, so a phone does not keep the bubble up.
-        changed has-focus => { if self.focus-visible { IconButtonInput.keyboard = true; } }
+        changed has-focus => { if self.focus-visible { ActionTooltip.keyboard = true; } }
         focus-on-tab-navigation: true;
         accessible-role: none;
         key-pressed(event) => {
-            IconButtonInput.keyboard = true;
+            ActionTooltip.keyboard = true;
             if root.interactive && (event.text == Key.Return || event.text == Key.Space) {
                 // Like a click: whatever the action opens is not covered by
                 // the help, which stays away until focus leaves the button
@@ -385,7 +381,7 @@ export component IconButton inherits Rectangle {
         // keyboard help where it is.
         pointer-event(event) => {
             if event.kind == PointerEventKind.move {
-                IconButtonInput.keyboard = false;
+                ActionTooltip.keyboard = false;
             }
         }
         clicked => {
@@ -393,8 +389,9 @@ export component IconButton inherits Rectangle {
                 keyboard.focus();
             }
             root.pointer-activated();
-            // The action may remove the button. One that stays shows its help
-            // again on the next report.
+            // The help stays away until the pointer leaves, so it neither
+            // covers what the click opened nor outlives a button the click
+            // removed.
             tooltip.hide();
             root.clicked();
         }

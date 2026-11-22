@@ -1,6 +1,6 @@
 import { HorizontalBox } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
-import { ActionTooltipSource } from "tooltip-bubble.slint";
+import { ActionTooltip, ActionTooltipSource } from "tooltip-bubble.slint";
 
 // Shared by onboarding and account settings so provider entry points keep the
 // same recognizable brand treatment throughout the app.
@@ -79,6 +79,11 @@ export component ProviderButton inherits Rectangle {
                 root.clicked();
             }
         }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.move {
+                ActionTooltip.keyboard = false;
+            }
+        }
         mouse-cursor: root.enabled ? pointer : default;
     }
 
@@ -87,7 +92,7 @@ export component ProviderButton inherits Rectangle {
     tooltip := ActionTooltipSource {
         width: parent.width;
         height: parent.height;
-        shown: provider-hit.has-hover;
+        shown: provider-hit.has-hover && !ActionTooltip.keyboard;
         text: root.tooltip-text;
         above: true;
     }

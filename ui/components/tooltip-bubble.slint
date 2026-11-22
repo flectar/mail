@@ -70,6 +70,12 @@ export component TooltipBubble inherits Rectangle {
 // which is not consistently presented by every AppImage/Wayland compositor
 // combination.
 export global ActionTooltip {
+    // Help follows the keyboard focus instead of the pointer. A key pressed
+    // anywhere in the window turns this on, as the window's event filter
+    // reports every key, and pointing at a control turns it off again. Help
+    // for the control under the pointer hides meanwhile, as a native tooltip
+    // does on a key press, so it never stays over what a shortcut opened.
+    in-out property <bool> keyboard;
     out property <string> text;
     // The source whose help shows, by the id `new-id` gave it.
     out property <int> owner;
