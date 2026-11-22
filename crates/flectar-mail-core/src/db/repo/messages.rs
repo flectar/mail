@@ -899,6 +899,40 @@ pub fn store_body(
     Ok(())
 }
 
+/// A message whose kept body is to be read again (#455), with its account
+/// and the original kept on this device, if any.
+pub fn body_to_read_again(conn: &Connection, id: i64) -> Result<Option<(i64, Option<String>)>> {
+    Ok(conn
+        .query_row(
+            "SELECT m.account_id, m.raw_path
+             FROM bodies_to_read_again b JOIN messages m ON m.id = b.message_id
+             WHERE b.message_id = ?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
+}
+
+/// The message's body was read again, or can't be.
+pub fn body_read_again(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "DELETE FROM bodies_to_read_again WHERE message_id = ?1",
+        [id],
+    )?;
+    Ok(())
+}
+
+/// Fetch the message's body from the server again: its MIME plan is rebuilt
+/// and its body read anew, while the body kept now still shows.
+pub fn fetch_body_again(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE messages SET body_state = 'none', mime_plan_json = NULL
+         WHERE id = ?1 AND body_state = 'cached'",
+        [id],
+    )?;
+    body_read_again(conn, id)
+}
+
 /// The newest message of each of `thread_ids` when it is received mail from
 /// `since` on, its body is unread, no code was found in its subject and
 /// preview, and reading its body has not failed recently:
