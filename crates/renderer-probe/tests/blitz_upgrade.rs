@@ -1771,3 +1771,47 @@ fn rules_and_bevels_paint_as_blink_paints_them() {
         [r, g, b]
     );
 }
+
+#[test]
+fn text_shadows_paint_beneath_their_text() {
+    // As in browsers, a shadow is the text drawn again, offset, beneath the
+    // line's text, the first of a list on top, and it shadows the text's
+    // decorations too.
+    let mut doc = document(
+        "<style>body{margin:0;font:bold 60px/80px sans-serif}</style>
+         <div style='text-shadow:0 0 0 rgb(255,0,0)'>H</div>
+         <div style='text-shadow:5px 5px 0 rgb(255,0,0), 5px 5px 0 rgb(0,0,255)'>H</div>
+         <div style='font-size:20px;line-height:30px;text-decoration:underline;
+                     text-shadow:0 8px 0 rgb(0,160,0)'>&nbsp;&nbsp;&nbsp;</div>",
+    );
+    let pixels = paint(&mut doc);
+    let count = |rows: std::ops::Range<usize>, test: &dyn Fn(&[u8; 4]) -> bool| {
+        pixels[rows.start * 400 * 4..rows.end * 400 * 4]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| test(pixel))
+            .count()
+    };
+    // The canvas is transparent, so colours must be opaque to count.
+    let red = |p: &[u8; 4]| p[3] > 200 && p[0] > 200 && p[1] < 60 && p[2] < 60;
+    let blue = |p: &[u8; 4]| p[3] > 200 && p[2] > 200 && p[0] < 60 && p[1] < 60;
+    let black = |p: &[u8; 4]| p[3] > 200 && p[0] < 30 && p[1] < 30 && p[2] < 30;
+    // A shadow right under its text is covered by it.
+    assert!(count(0..80, &black) > 100);
+    assert_eq!(count(0..80, &red), 0);
+    // The first shadow covers the second.
+    assert!(count(80..160, &red) > 100);
+    assert_eq!(count(80..160, &blue), 0);
+    // The underline's shadow lies 8px under it.
+    let row_of = |color: [u8; 4]| {
+        (160..300).find(|&y| {
+            pixels[y * 400 * 4..(y + 1) * 400 * 4]
+                .as_chunks::<4>()
+                .0
+                .contains(&color)
+        })
+    };
+    let underline = row_of([0, 0, 0, 255]).expect("underline");
+    assert_eq!(row_of([0, 160, 0, 255]), Some(underline + 8));
+}
