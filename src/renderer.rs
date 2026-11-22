@@ -2251,17 +2251,22 @@ fn collect_email_links(document: &HtmlDocument, logical_width: f32) -> Vec<Email
             })
             .or_insert(rect);
     };
-    document.visit(|id, node| {
+    // A link's text is laid out where its line is, which for text next to a
+    // block is an anonymous block that only the layout tree holds.
+    for id in layout_nodes(document) {
+        let Some(node) = document.get_node(id) else {
+            continue;
+        };
         if !visible(node)
             || document
                 .node_chain(id)
                 .iter()
                 .any(|id| document.get_node(*id).is_some_and(|n| !visible(n)))
         {
-            return;
+            continue;
         }
         let Some(element) = node.element_data() else {
-            return;
+            continue;
         };
         if let Some(anchor_id) = anchor(id) {
             let size = node.final_layout().size;
@@ -2291,7 +2296,7 @@ fn collect_email_links(document: &HtmlDocument, logical_width: f32) -> Vec<Email
                 }
             }
         }
-    });
+    }
     boxes
         .into_iter()
         .filter_map(|(id, (x0, y0, x1, y1))| {

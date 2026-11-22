@@ -37,6 +37,20 @@ fn issue_454_text_beside_a_block_in_body_counts_toward_the_height() {
 }
 
 #[test]
+fn issue_454_links_beside_a_block_can_be_clicked() {
+    // The link's text is laid out in the anonymous block, which holds its box.
+    let links = |html: &str| renderer(html).email.as_ref().unwrap().links.clone();
+    let bare = links(
+        "<body><blockquote>Quote</blockquote>See <a href='https://example.com/'>the site</a></body>",
+    );
+    let wrapped = links(
+        "<body><blockquote>Quote</blockquote><div>See <a href='https://example.com/'>the site</a></div></body>",
+    );
+    assert_eq!(wrapped.len(), 1);
+    assert_eq!(bare, wrapped);
+}
+
+#[test]
 fn issue_23_missing_named_font_keeps_digits_out_of_emoji_fallback() {
     let (ctx, emoji) = font_ctx_with_color_emoji();
     let mut prepared = prepare_email_html_with_font_ctx(
