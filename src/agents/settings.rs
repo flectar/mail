@@ -233,10 +233,7 @@ impl Page {
             .into_iter()
             .map(|account| PageAccount {
                 id: account.id,
-                name: account
-                    .display_name
-                    .filter(|name| !name.trim().is_empty())
-                    .unwrap_or_else(|| account.email.clone()),
+                name: account.label().to_owned(),
                 address: account.email,
             })
             .collect::<Vec<_>>();

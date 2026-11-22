@@ -1087,9 +1087,7 @@ pub(super) fn make_rows<M: std::borrow::Borrow<MailMessage>>(
             EmailRow {
                 id: email.id,
                 account_id: i32::try_from(email.account_id).unwrap_or(-1),
-                account: account_presentation
-                    .account_label(email.account_id, &email.account)
-                    .into(),
+                account: email.account.as_str().into(),
                 account_color: account_presentation.marker_color(email.account_id),
                 account_profile: profile
                     .map(|profile| profile.name.clone())
@@ -2199,7 +2197,7 @@ mod tests {
     #[test]
     fn mail_rows_use_the_assigned_profile_color_and_name() {
         let mut email = message(1);
-        email.account = "alice@example.org".into();
+        email.account = "Client".into();
         let presentation = AccountPresentationSettings {
             profiles: vec![MailProfile {
                 id: "work".into(),
@@ -2210,7 +2208,6 @@ mod tests {
             active_profile: None,
             show_markers: true,
             account_colors: HashMap::new(),
-            account_short_names: HashMap::from([("1".into(), "Client".into())]),
         };
 
         let rows = make_rows(

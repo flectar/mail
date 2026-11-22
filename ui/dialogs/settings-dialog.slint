@@ -29,7 +29,7 @@ import { IconButton, LineEdit, RadioButton, Switch } from "../components/control
 import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { ProviderButton } from "../components/provider-button.slint";
-import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, ShortcutRow, ShortcutSection } from "../components/settings-components.slint";
+import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, SettingsTextRow, ShortcutRow, ShortcutSection } from "../components/settings-components.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { KeyboardKeys } from "../components/kbd.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
@@ -696,6 +696,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_account_check_interval(int, string);
     callback save_account_push(int, bool);
     callback save_account_server_timeout(int, int);
+    callback save_account_name(int, string);
     callback save_account_download(int, string);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
@@ -2906,6 +2907,7 @@ export component SettingsDialog inherits Rectangle {
 
                                 // The header, and the server's words about a failure.
                                 private property <length> collapsed-height: account.sync_error != "" ? sync-error.y + sync-error.height + 12px : account-header.height;
+                                private property <length> name-end: name-row.y + name-row.height - self.select-end;
                                 private property <length> history-end: history-row.y + history-row.height - self.select-end;
                                 private property <length> download-end: self.has-download ? download-row.y + download-row.height - self.select-end : self.history-end;
                                 private property <length> check-end: check-row.y + check-row.height - self.select-end;
@@ -3082,10 +3084,24 @@ export component SettingsDialog inherits Rectangle {
                                         // a phone, 16px on a desktop; switch rows by 16px. Each
                                         // row is placed so its texts start at `content-x` and its
                                         // control ends 16px from the card's edge.
-                                        history-row := SettingsSelectRow {
+                                        name-row := SettingsTextRow {
                                             x: drop-target.content-x - (root.compact ? 8px : 16px);
                                             y: drop-target.collapsed-height + (root.compact ? 56px : 22px) - drop-target.select-top;
                                             width: parent.width - self.x - 8px;
+                                            compact: root.compact;
+                                            compact-description-height: 51px;
+                                            title: @tr("Account name");
+                                            description: @tr("Shown instead of the address in the sidebar and lists. People you email don't see it.");
+                                            value: account.custom_name;
+                                            placeholder: account.default_name;
+                                            title-color: root.body-text;
+                                            description-color: root.faint-text;
+                                            committed(name) => { root.save_account_name(account.id, name); }
+                                        }
+                                        history-row := SettingsSelectRow {
+                                            x: name-row.x;
+                                            y: drop-target.name-end + drop-target.gap - drop-target.select-top;
+                                            width: name-row.width;
                                             compact: root.compact;
                                             title: @tr("Mail history");
                                             compact-description-height: 51px;

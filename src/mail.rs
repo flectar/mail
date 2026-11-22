@@ -2059,6 +2059,13 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_account_name(&self, account_id: i64, name: &str) -> Result<(), String> {
+        self.core
+            .set_account_name(account_id, name)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_account_sent_copy_policy(
         &self,
         account_id: i64,
@@ -4593,11 +4600,7 @@ fn readable_message_html(html: Option<&str>, text: Option<&str>, snippet: &str) 
 }
 
 fn account_label(account: &Account) -> String {
-    account
-        .display_name
-        .clone()
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| account.email.clone())
+    account.label().to_owned()
 }
 
 fn avatar_initials(label: &str) -> String {
@@ -4804,6 +4807,7 @@ mod tests {
             id: 1,
             email: "person@example.com".into(),
             display_name: Some("Person".into()),
+            name: None,
             avatar_url: None,
             provider: Provider::Generic,
             auth_kind: AuthKind::Password,
@@ -5226,6 +5230,20 @@ mod tests {
         };
         let row = summary_to_message(thread.clone(), &[test_account()], "Inbox").unwrap();
 
+        assert_eq!(
+            row.account, "Person",
+            "the owner's name without a name of its own"
+        );
+        let named = Account {
+            name: Some("Shop".into()),
+            ..test_account()
+        };
+        assert_eq!(
+            summary_to_message(thread.clone(), &[named], "Inbox")
+                .unwrap()
+                .account,
+            "Shop"
+        );
         assert_eq!(row.sender, "Maya, Alex +1");
         assert_eq!(row.address, "maya@example.com");
         assert_eq!(MailTarget::of(&row), Some(MailTarget::Thread(22)));

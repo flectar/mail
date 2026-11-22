@@ -84,6 +84,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/065_folder_detected_role.sql")),
     Migration::Plain(include_str!("migrations/066_sender_identity_bcc.sql")),
     Migration::Plain(include_str!("migrations/067_jmap_body_downloads.sql")),
+    Migration::Plain(include_str!("migrations/068_account_names.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
