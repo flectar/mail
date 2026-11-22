@@ -6,6 +6,7 @@ export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
 export { FolderRoles, FolderRoleRow } from "folder-roles.slint";
+export { MessageSource } from "message-source.slint";
 export { Translation, TranslationLanguage } from "translation.slint";
 export { Ai, AiPromptRow } from "ai.slint";
 export { AiSummary } from "ai-summary.slint";
@@ -571,6 +572,10 @@ export global I18n {
         if (key == "Could not update CardDAV sync: {}") { return @tr("Could not update CardDAV sync: {}", argument); }
         if (key == "CardDAV disconnected.") { return @tr("CardDAV disconnected."); }
         if (key == "Could not disconnect CardDAV: {}") { return @tr("Could not disconnect CardDAV: {}", argument); }
+        // Message source (#253).
+        if (key == "Copied the message source") { return @tr("Copied the message source"); }
+        if (key == "Could not read the message source: {}") { return @tr("Could not read the message source: {}", argument); }
+        if (key == "Could not save the message: {}") { return @tr("Could not save the message: {}", argument); }
         // Automatic Cc and Bcc (#252).
         if (key == "Copies saved.") { return @tr("Copies saved."); }
         if (key == "Could not save the copies: {}") { return @tr("Could not save the copies: {}", argument); }
