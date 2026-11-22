@@ -1815,3 +1815,50 @@ fn text_shadows_paint_beneath_their_text() {
     let underline = row_of([0, 0, 0, 255]).expect("underline");
     assert_eq!(row_of([0, 160, 0, 255]), Some(underline + 8));
 }
+
+#[test]
+fn lists_number_and_place_their_markers_as_browsers_do() {
+    use blitz_dom::node::Marker;
+    // `start`, `reversed`, `value` and `type` number and style a list as the
+    // HTML standard and Blink do, in the predefined counter styles, and an
+    // outside marker keeps the space after its `.`, so `1.` ends a space
+    // before the item's content as in browsers.
+    let mut doc = document(
+        "<style>body{margin:0;font:16px/20px sans-serif;color:#000}
+         ol,ul{margin:0;padding-left:40px}</style>
+         <ol reversed><li id=a>a</li><li>b</li><li>c</li></ol>
+         <ol start=-1 type=I><li>x</li><li id=b>y</li><li id=c value=4>z</li><li id=d>w</li></ol>
+         <ul type=SQUARE><li id=e>s</li></ul>
+         <ol><li type=a id=f>t</li><li style='list-style-type:hebrew' id=g>u</li></ol>
+         <ol id=h><li>x</li></ol>",
+    );
+    let marker = |selector| {
+        node(&doc, selector)
+            .element_data()
+            .unwrap()
+            .list_item_data
+            .as_ref()
+            .map(|data| data.marker.clone())
+    };
+    let string = |text: &str| Some(Marker::String(text.to_string()));
+    assert_eq!(marker("#a"), string("3. "));
+    // Roman numerals start at 1, so 0 is decimal.
+    assert_eq!(marker("#b"), string("0. "));
+    assert_eq!(marker("#c"), string("IV. "));
+    assert_eq!(marker("#d"), string("V. "));
+    assert_eq!(marker("#e"), Some(Marker::Char('▪')));
+    assert_eq!(marker("#f"), string("a. "));
+    assert_eq!(marker("#g"), string("2. "));
+
+    let pixels = paint(&mut doc);
+    let list = node(&doc, "#h").final_layout();
+    let (y0, y1) = (
+        list.location.y as usize,
+        (list.location.y + list.size.height) as usize,
+    );
+    let marker_end = (0..40)
+        .rev()
+        .find(|&x| (y0..y1).any(|y| pixels[(y * 400 + x) * 4 + 3] > 128))
+        .expect("marker ink");
+    assert!(marker_end < 36, "the marker ends at {marker_end}");
+}

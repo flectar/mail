@@ -387,6 +387,25 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                     }
                 }
             }
+            // List types as Blink maps them: an `<ol>` takes its letters
+            // case-sensitively, a `<ul>` its names in any case, and an `<li>`
+            // either.
+            "type" if *tag == local_name!("ol") => {
+                if let Some(style) = ordered_list_type(value) {
+                    let _ = write!(css, "list-style-type:{style};");
+                }
+            }
+            "type" if *tag == local_name!("ul") => {
+                if let Some(style) = unordered_list_type(value) {
+                    let _ = write!(css, "list-style-type:{style};");
+                }
+            }
+            "type" if *tag == local_name!("li") => {
+                if let Some(style) = ordered_list_type(value).or_else(|| unordered_list_type(value))
+                {
+                    let _ = write!(css, "list-style-type:{style};");
+                }
+            }
             "hidden" => css.push_str("display:none;"),
             _ => {}
         }
@@ -415,6 +434,25 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
             }
         }
     }
+}
+
+/// The `list-style-type` of an `<ol type>`: `1`, `a`, `A`, `i` or `I`.
+fn ordered_list_type(value: &str) -> Option<&'static str> {
+    Some(match value {
+        "1" => "decimal",
+        "a" => "lower-alpha",
+        "A" => "upper-alpha",
+        "i" => "lower-roman",
+        "I" => "upper-roman",
+        _ => return None,
+    })
+}
+
+/// The `list-style-type` of a `<ul type>`, in any case.
+fn unordered_list_type(value: &str) -> Option<&'static str> {
+    ["disc", "circle", "square", "none"]
+        .into_iter()
+        .find(|style| value.eq_ignore_ascii_case(style))
 }
 
 fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css: &mut String) {
