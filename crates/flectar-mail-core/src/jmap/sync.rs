@@ -2093,6 +2093,9 @@ fn persist_attachment_parts(
         let Some(part_id) = part.part_id() else {
             continue;
         };
+        // Shown in the message or as a file, as a MIME part read here is.
+        let is_inline =
+            crate::mime::part_is_inline(part.content_disposition(), part.content_id().is_some());
         let existing: Option<i64> = db
             .query_row(
                 "SELECT id FROM attachments WHERE message_id=?1 AND part_id=?2 AND jmap_blob_id=?3",
@@ -2101,9 +2104,15 @@ fn persist_attachment_parts(
             )
             .optional()?;
         let id = if let Some(id) = existing {
+            // Listed before embedded parts without a disposition counted as
+            // shown in the message.
+            db.execute(
+                "UPDATE attachments SET is_inline=?2 WHERE id=?1",
+                params![id, is_inline],
+            )?;
             id
         } else {
-            db.execute("INSERT INTO attachments(message_id,part_id,filename,mime_type,size,content_id,is_inline,jmap_blob_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![message,part_id,part.name(),part.content_type(),part.size() as i64,part.content_id(),part.content_disposition()==Some("inline"),blob])?;
+            db.execute("INSERT INTO attachments(message_id,part_id,filename,mime_type,size,content_id,is_inline,jmap_blob_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![message,part_id,part.name(),part.content_type(),part.size() as i64,part.content_id(),is_inline,blob])?;
             db.last_insert_rowid()
         };
         retained.push(id);

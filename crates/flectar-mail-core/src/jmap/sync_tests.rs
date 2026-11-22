@@ -2980,3 +2980,62 @@ async fn body_downloads_bound_the_message_bytes_of_each_request() {
     );
     mock.task.abort();
 }
+
+/// An embedded image without a disposition shows in its message, as a MIME
+/// part read here does, and a file stays a file with a Content-ID too. Parts
+/// listed under the older rule take this one when they're listed again.
+#[tokio::test]
+async fn embedded_parts_without_a_disposition_show_in_their_message() {
+    let (_dir, ctx, config) = fixture().await;
+    let mut letter = with_attachment(email("email-a", "thread-a"), 100, "2026-10-08T12:00:00Z");
+    letter["attachments"] = json!([
+        {
+            "partId": "2", "blobId": "logo-a", "size": 10, "type": "image/png",
+            "cid": "logo@mail.example"
+        },
+        {
+            "partId": "3", "blobId": "file-a", "size": 10, "type": "application/pdf",
+            "name": "a.pdf", "disposition": "attachment", "cid": "file@mail.example"
+        }
+    ]);
+    let mock = MockJmap {
+        emails: vec![letter],
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    run_sync(&ctx, &config, &mock.connected).await.unwrap();
+    let inline = || async {
+        ctx.db
+            .read(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT jmap_blob_id, is_inline FROM attachments ORDER BY jmap_blob_id",
+                )?;
+                Ok(stmt
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?)
+            })
+            .await
+            .unwrap()
+    };
+    let expected = [("file-a".to_owned(), false), ("logo-a".to_owned(), true)];
+    assert!(list_once(&ctx, &config, &mock.connected).await);
+    assert_eq!(inline().await, expected);
+
+    ctx.db
+        .write(|conn| {
+            conn.execute(
+                "UPDATE attachments SET is_inline = 0 WHERE jmap_blob_id = 'logo-a'",
+                [],
+            )?;
+            conn.execute("UPDATE messages SET jmap_attachments_blob_id = NULL", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(list_once(&ctx, &config, &mock.connected).await);
+    assert_eq!(inline().await, expected);
+    mock.task.abort();
+}
