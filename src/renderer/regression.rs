@@ -51,6 +51,39 @@ fn issue_454_links_beside_a_block_can_be_clicked() {
 }
 
 #[test]
+fn issue_454_selections_reach_text_beside_a_block() {
+    const HTML: &str = "<body><blockquote>Quote</blockquote>After 1<br>TAIL MARKER</body>";
+    let mut r = renderer(HTML);
+    let control = InputModifiers::new(true, false, false, false);
+    r.handle_key_event("a", true, false, control);
+    let all = r.selected_text();
+    assert!(
+        all.as_deref()
+            .is_some_and(|text| text.ends_with("TAIL MARKER")),
+        "{all:?}"
+    );
+    // A new layout, as after a zoom, keeps the selection.
+    let bookmark = r.selection_bookmark();
+    r.set_email(prepare_email_html(HTML).unwrap());
+    r.restore_selection(bookmark);
+    assert_eq!(r.selected_text(), all);
+    // Control+Shift+End selects to the end of the message.
+    r.clear_selection();
+    r.handle_key_event(
+        "\u{f72b}",
+        true,
+        false,
+        InputModifiers::new(true, true, false, false),
+    );
+    assert!(
+        r.selected_text()
+            .is_some_and(|text| text.ends_with("TAIL MARKER")),
+        "{:?}",
+        r.selected_text()
+    );
+}
+
+#[test]
 fn issue_23_missing_named_font_keeps_digits_out_of_emoji_fallback() {
     let (ctx, emoji) = font_ctx_with_color_emoji();
     let mut prepared = prepare_email_html_with_font_ctx(
