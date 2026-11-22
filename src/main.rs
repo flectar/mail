@@ -111,6 +111,7 @@ mod rendering_report;
 mod retained_model;
 mod rich_compose;
 mod saved_searches;
+mod sender_picker;
 mod server_search;
 mod settings_controller;
 pub mod spelling;
