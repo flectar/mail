@@ -3924,7 +3924,7 @@ impl SelectivePersistGuard {
 /// stand in for what some reporters leave out then arrive together. A
 /// larger one returns the original message with its files, and is cached
 /// like any other message.
-const WHOLE_RECEIPT_LIMIT: u64 = 256 * 1024;
+pub(crate) const WHOLE_RECEIPT_LIMIT: u64 = 256 * 1024;
 
 fn fetch_receipt_whole(plan: &crate::mime::MimePlan) -> bool {
     plan.carries_disposition_report() && plan.encoded_size() <= WHOLE_RECEIPT_LIMIT
@@ -4338,7 +4338,15 @@ async fn drain_missing_bodies(
         // queued IDs across accounts and always takes the planning permit
         // before any worker can take the body-byte permit.
         let plan_page = Arc::new(reserve_background_plan_page().await);
-        let mail_history = settings_rx.borrow_and_update().mail_history;
+        let (mail_history, download) = {
+            let settings = settings_rx.borrow_and_update();
+            (settings.mail_history, settings.download)
+        };
+        // Only the headers are wanted: messages download when they're
+        // opened (#253).
+        if download == crate::models::DownloadPolicy::Headers {
+            return Ok(());
+        }
         let cutoff_ms = mail_history.cutoff_ms_at(now_ms());
         let folders = ctx
             .db
@@ -5023,7 +5031,10 @@ async fn record_content_failure(ctx: &SyncCtx, message_id: i64, error: &CoreErro
     let _ = record_content_failure_details(ctx, vec![(message_id, error.to_string())]).await;
 }
 
-async fn record_content_failure_details(ctx: &SyncCtx, failures: Vec<(i64, String)>) -> Result<()> {
+pub(crate) async fn record_content_failure_details(
+    ctx: &SyncCtx,
+    failures: Vec<(i64, String)>,
+) -> Result<()> {
     if failures.is_empty() {
         return Ok(());
     }

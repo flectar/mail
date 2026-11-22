@@ -697,6 +697,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_account_push(int, bool);
     callback save_account_server_timeout(int, int);
     callback save_account_name(int, string);
+    callback save_account_download(int, string);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -802,6 +803,12 @@ export component SettingsDialog inherits Rectangle {
         @tr("6 months · Recommended"),
         @tr("1 year"),
         @tr("All mail"),
+    ];
+    // What an IMAP or JMAP account downloads ahead of time (#253).
+    private property <[string]> download-options: [
+        @tr("Headers only"),
+        @tr("Messages"),
+        @tr("Messages and attachments"),
     ];
     private property <[string]> server-timeout-options: [
         @tr("30 seconds"),
@@ -2859,6 +2866,9 @@ export component SettingsDialog inherits Rectangle {
                                 private property <bool> has-subscriptions: account.mail_protocol == "imap";
                                 // IMAP IDLE and JMAP's event source; Gmail and POP3 servers don't push.
                                 private property <bool> has-push: account.mail_protocol == "imap" || account.mail_protocol == "jmap";
+                                // IMAP and JMAP accounts download messages ahead of time
+                                // in the background, which this turns down or up (#253).
+                                private property <bool> has-download: account.mail_protocol == "imap" || account.mail_protocol == "jmap";
                                 // Gmail's servers keep the standard wait.
                                 private property <bool> has-timeout: account.mail_protocol == "imap" || account.mail_protocol == "pop3" || account.mail_protocol == "jmap";
                                 private property <bool> unencrypted: account.incoming_security == "none" || (!account.receive_only && account.smtp_security == "none");
@@ -2899,6 +2909,7 @@ export component SettingsDialog inherits Rectangle {
                                 private property <length> collapsed-height: account.sync_error != "" ? sync-error.y + sync-error.height + 12px : account-header.height;
                                 private property <length> name-end: name-row.y + name-row.height - self.select-end;
                                 private property <length> history-end: history-row.y + history-row.height - self.select-end;
+                                private property <length> download-end: self.has-download ? download-row.y + download-row.height - self.select-end : self.history-end;
                                 private property <length> check-end: check-row.y + check-row.height - self.select-end;
                                 private property <length> checks-end: self.has-push ? push-row.y + push-row.height - self.switch-end : self.check-end;
                                 private property <length> timeout-end: self.has-timeout ? timeout-row.y + timeout-row.height - self.select-end : self.checks-end;
@@ -3103,9 +3114,28 @@ export component SettingsDialog inherits Rectangle {
                                             description-color: root.faint-text;
                                             selected(index, value) => { root.select-mail-history(account.id, index); }
                                         }
-                                        check-row := SettingsSelectRow {
+                                        download-row := SettingsSelectRow {
+                                            visible: drop-target.has-download;
                                             x: history-row.x;
                                             y: drop-target.history-end + drop-target.gap - drop-target.select-top;
+                                            width: history-row.width;
+                                            compact: root.compact;
+                                            title: @tr("Download");
+                                            compact-description-height: 51px;
+                                            description: account.download == "headers" ? @tr("Messages download when you open them.")
+                                                : account.download == "everything" ? @tr("Messages and their attachments up to 25 MB download ahead of time, to open them offline.")
+                                                : @tr("Messages download ahead of time, and attachments when you open them.");
+                                            choices: root.download-options;
+                                            selected-index: account.download == "headers" ? 0 : account.download == "everything" ? 2 : 1;
+                                            title-color: root.body-text;
+                                            description-color: root.faint-text;
+                                            selected(index, value) => {
+                                                root.save_account_download(account.id, index == 0 ? "headers" : index == 2 ? "everything" : "messages");
+                                            }
+                                        }
+                                        check-row := SettingsSelectRow {
+                                            x: history-row.x;
+                                            y: drop-target.download-end + drop-target.gap - drop-target.select-top;
                                             width: history-row.width;
                                             compact: root.compact;
                                             title: @tr("Check for new mail");
@@ -3683,8 +3713,9 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    shortcuts-scroll := ScrollView {
-                        visible: root.settings_tab == "Shortcuts";
+                    // Built only while it shows, as each page always built makes
+                    // the account view's stack frame bigger.
+                    if root.settings_tab == "Shortcuts" : shortcuts-scroll := ScrollView {
                         width: parent.width; height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
                         content-width: self.visible-width;

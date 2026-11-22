@@ -171,6 +171,44 @@ pub enum MailHistory {
     All,
 }
 
+/// What an account downloads ahead of time within its mail history (#253).
+/// Anything not downloaded comes from the server when it's opened.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DownloadPolicy {
+    /// Headers alone: messages download when they're opened.
+    Headers,
+    /// Headers and messages, with attachments when they're opened.
+    #[default]
+    Messages,
+    /// Messages and their attachments, up to
+    /// [`DownloadPolicy::LARGEST_ATTACHMENT`] each, to open offline.
+    Everything,
+}
+
+impl DownloadPolicy {
+    /// Attachments larger than this download when they're opened, as their
+    /// provider's sending limits are often about this size.
+    pub const LARGEST_ATTACHMENT: i64 = 25 * 1024 * 1024;
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Headers => "headers",
+            Self::Messages => "messages",
+            Self::Everything => "everything",
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "headers" => Some(Self::Headers),
+            "messages" => Some(Self::Messages),
+            "everything" => Some(Self::Everything),
+            _ => None,
+        }
+    }
+}
+
 impl MailHistory {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -510,6 +548,11 @@ pub struct AccountSettings {
     // value never triggers an unbounded mailbox download.
     #[serde(default = "default_mail_history")]
     pub mail_history: MailHistory,
+    /// What this device downloads ahead of time within the mail history
+    /// (#253). Each device keeps its own, as it goes with the device's
+    /// storage and network.
+    #[serde(default)]
+    pub download: DownloadPolicy,
     #[serde(default)]
     pub security: crate::mail_security::MailSecurity,
     pub connection: MailConnectionSettings,
@@ -577,6 +620,7 @@ impl AccountSettings {
     pub fn new(connection: MailConnectionSettings) -> Self {
         Self {
             mail_history: default_mail_history(),
+            download: DownloadPolicy::default(),
             security: Default::default(),
             connection,
             default_sender_email: None,
@@ -763,6 +807,29 @@ mod account_settings_tests {
         let restored: AccountSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert_eq!(restored, settings);
+    }
+
+    /// An account downloads messages ahead of time unless it's set otherwise,
+    /// and the choice survives storage (#253).
+    #[test]
+    fn what_an_account_downloads_starts_at_messages_and_is_kept() {
+        let mut settings: AccountSettings = serde_json::from_str(MINIMAL_SETTINGS).unwrap();
+        assert_eq!(settings.download, DownloadPolicy::Messages);
+        for download in [
+            DownloadPolicy::Headers,
+            DownloadPolicy::Messages,
+            DownloadPolicy::Everything,
+        ] {
+            settings.download = download;
+            let restored: AccountSettings =
+                serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(restored.download, download);
+            assert_eq!(
+                DownloadPolicy::from_storage(download.as_str()),
+                Some(download)
+            );
+        }
+        assert_eq!(DownloadPolicy::from_storage("bodies"), None);
     }
 
     #[test]
