@@ -899,6 +899,31 @@ fn find_handles_unicode_cycles_and_decoded_fragments() {
 }
 
 #[test]
+fn blocked_images_keep_room_for_their_alt_text() {
+    // Remote images are blocked by default. One without a size lays out with
+    // its alt text, as browsers lay out an image they can't show, so the
+    // reader's placeholder has room to show that text. An empty alt still
+    // takes no room.
+    let mut r = GpuEmailRenderer::default();
+    let provider =
+        crate::remote::email_image_provider_tracked(Arc::new(|_| {}), false, r.resources.clone())
+            .unwrap();
+    r.set_email(
+        prepare_email_html_with_provider(
+            "<body style='margin:0'><img src='https://example.com/header.png' alt='Weekly header' style='display:block'>\
+             <img src='https://example.com/spacer.gif' alt='' style='display:block'><p>After</p></body>",
+            Some(provider),
+        )
+        .unwrap(),
+    );
+    r.render_cpu_if_needed(400, 300, 1.0).unwrap();
+    let placeholders = r.image_placeholders();
+    assert_eq!(placeholders.len(), 1);
+    assert_eq!(placeholders[0].alt, "Weekly header");
+    assert!(placeholders[0].width > 40.0 && placeholders[0].height >= 10.0);
+}
+
+#[test]
 fn xhtml_mail_parses_as_html() {
     // Browsers parse mail as HTML whatever its doctype, so a `<br>` or an
     // `<img>` without a closing slash doesn't swallow the text after it, as

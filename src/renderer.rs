@@ -405,6 +405,7 @@ impl GpuEmailRenderer {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 drain_email_updates(
                     email,
+                    &self.resources,
                     &mut self.dirty,
                     &mut self.region_dirty,
                     &mut self.tiles,
@@ -882,6 +883,7 @@ impl GpuEmailRenderer {
         };
         drain_email_updates(
             email,
+            &self.resources,
             &mut self.dirty,
             &mut self.region_dirty,
             &mut self.tiles,
@@ -992,6 +994,7 @@ impl GpuEmailRenderer {
         };
         drain_email_updates(
             email,
+            &self.resources,
             &mut self.dirty,
             &mut self.region_dirty,
             &mut self.tiles,
@@ -1187,6 +1190,7 @@ impl GpuEmailRenderer {
 
         drain_email_updates(
             email,
+            &self.resources,
             &mut self.dirty,
             &mut self.region_dirty,
             &mut self.tiles,
@@ -1594,14 +1598,43 @@ fn invalidate_selection_tiles(
     }
 }
 
+/// Images the reader won't load, such as blocked remote images and ones past
+/// its limits or failing to load, are failed in the document, which lays them
+/// out with their alt text, as browsers lay out an image they can't show.
+fn fail_unavailable_images(email: &mut PreparedEmail, ledger: &crate::remote::ResourceLedger) {
+    use crate::remote::ResourceState;
+    let id = email.document.id();
+    let unavailable: Vec<String> = {
+        let states = ledger
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        email
+            .document
+            .pending_image_urls()
+            .filter(|url| {
+                matches!(
+                    states.get(&crate::remote::resource_key(id, url)),
+                    Some(ResourceState::Blocked | ResourceState::Limited | ResourceState::Failed)
+                )
+            })
+            .map(str::to_owned)
+            .collect()
+    };
+    for url in unavailable {
+        email.document.fail_image(&url);
+    }
+}
+
 fn drain_email_updates(
     email: &mut PreparedEmail,
+    ledger: &crate::remote::ResourceLedger,
     dirty: &mut bool,
     region_dirty: &mut bool,
     tiles: &mut BTreeMap<u32, RenderedEmailTile>,
     metadata_revision: &mut u64,
     tile_height: f32,
 ) -> bool {
+    fail_unavailable_images(email, ledger);
     let updates = email.document.drain_pending_updates();
     *dirty |= updates.layout;
     if updates.changed {
