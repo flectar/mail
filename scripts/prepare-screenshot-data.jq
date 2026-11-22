@@ -65,6 +65,8 @@ def event_defaults:
 | del(.contact_email, .contact_phone)
 | .connected_accounts |= map(
     .mail_protocol = (.mail_protocol // "")
+    | .custom_name = (.custom_name // "")
+    | .default_name = (.default_name // .email)
     | .profile_id = (if .id == 2 then "support" else "work" end)
     | .profile_name = (if .id == 2 then "Support" else "Work" end)
     | .profile_color = (if .id == 2 then "#ea580c" else "#8b5cf6" end)

@@ -378,6 +378,7 @@ mod tests {
             id: 1,
             email: "alex@example.com".into(),
             display_name: None,
+            name: None,
             avatar_url: None,
             provider: flectar_mail_core::models::Provider::Generic,
             auth_kind: flectar_mail_core::models::AuthKind::Password,

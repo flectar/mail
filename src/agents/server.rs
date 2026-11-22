@@ -333,6 +333,7 @@ struct ScopeAccount {
     id: i64,
     /// None for the mail on this device, which has no address.
     address: Option<String>,
+    /// What the user calls the account, else its owner's name.
     name: Option<String>,
     provider: &'static str,
 }
@@ -354,7 +355,10 @@ impl Scope {
             .map(|account| ScopeAccount {
                 id: account.id,
                 address: Some(account.email.clone()),
-                name: account.display_name.clone(),
+                name: account
+                    .name
+                    .clone()
+                    .or_else(|| account.display_name.clone()),
                 provider: account.provider.as_str(),
             })
             .collect::<Vec<_>>();

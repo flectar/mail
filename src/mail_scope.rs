@@ -404,6 +404,7 @@ mod tests {
             id,
             email: format!("{id}@example.test"),
             display_name: Some("Work / Unified Folder:1".into()),
+            name: None,
             avatar_url: None,
             provider: Provider::Generic,
             auth_kind: AuthKind::Password,

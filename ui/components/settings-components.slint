@@ -394,6 +394,113 @@ export component ShortcutRow inherits Rectangle {
     }
 }
 
+// A setting typed as one line of text, laid out like SettingsSelectRow so the
+// two line up in a card. What is typed is committed with Enter or when the
+// field loses focus, and only when it changed.
+export component SettingsTextRow inherits Rectangle {
+    in property <bool> compact: false;
+    in property <length> compact-description-height: 34px;
+    in property <string> title;
+    in property <string> description;
+    // The saved text. The field follows it while it isn't being edited.
+    in property <string> value;
+    in property <string> placeholder;
+    in property <bool> enabled: true;
+    in property <color> title-color;
+    in property <color> description-color;
+    callback committed(string);
+
+    function commit(text: string) {
+        if text != root.value {
+            root.committed(text);
+        }
+    }
+
+    changed value => {
+        if !desktop-field.has-focus && !compact-field.has-focus {
+            desktop-field.text = root.value;
+            compact-field.text = root.value;
+        }
+    }
+
+    height: root.compact
+        ? 66px + compact-title.height + compact-description.height
+        : 23px + desktop-title.height + desktop-description.height;
+    vertical-stretch: 0;
+
+    HorizontalBox {
+        visible: !root.compact;
+        spacing: 20px;
+        VerticalBox {
+            horizontal-stretch: 1;
+            min-width: 0px;
+            spacing: 2px;
+            desktop-title := Text {
+                height: max(18px, self.preferred-height);
+                text: root.title;
+                color: root.title-color;
+                font-size: TypeScale.body;
+                font-weight: 600;
+                overflow: elide;
+            }
+            desktop-description := Text {
+                height: max(17px, self.preferred-height);
+                text: root.description;
+                color: root.description-color;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+        }
+        desktop-field := LineEdit {
+            width: 210px;
+            enabled: root.enabled;
+            text: root.value;
+            placeholder-text: root.placeholder;
+            input-label: root.title;
+            accepted(text) => { root.commit(text); }
+            changed has-focus => {
+                if !self.has-focus {
+                    root.commit(self.text);
+                }
+            }
+        }
+    }
+
+    VerticalBox {
+        visible: root.compact;
+        padding: 8px;
+        spacing: 7px;
+        compact-title := Text {
+            height: max(20px, self.preferred-height);
+            text: root.title;
+            color: root.title-color;
+            font-size: TypeScale.body;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+        compact-description := Text {
+            height: max(root.compact-description-height, self.preferred-height);
+            text: root.description;
+            color: root.description-color;
+            font-size: TypeScale.caption;
+            wrap: word-wrap;
+        }
+        compact-field := LineEdit {
+            horizontal-stretch: 1;
+            enabled: root.enabled;
+            text: root.value;
+            placeholder-text: root.placeholder;
+            input-label: root.title;
+            accepted(text) => { root.commit(text); }
+            changed has-focus => {
+                if !self.has-focus {
+                    root.commit(self.text);
+                }
+            }
+        }
+    }
+}
+
 export component FormField inherits VerticalBox {
     in property <bool> enabled: true;
     in property <string> label;

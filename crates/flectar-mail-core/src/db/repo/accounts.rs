@@ -13,6 +13,7 @@ fn account_from_row(row: &Row) -> rusqlite::Result<Account> {
         id: row.get("id")?,
         email: row.get("email")?,
         display_name: row.get("display_name")?,
+        name: row.get("name")?,
         avatar_url: row.get("avatar_url")?,
         provider: row.get("provider")?,
         auth_kind: row.get("auth_kind")?,
@@ -38,6 +39,7 @@ fn config_from_row(row: &Row) -> rusqlite::Result<AccountConfig> {
         id: row.get("id")?,
         email: row.get("email")?,
         display_name: row.get("display_name")?,
+        name: row.get("name")?,
         avatar_url: row.get("avatar_url")?,
         provider: row.get("provider")?,
         auth_kind: row.get("auth_kind")?,
@@ -55,7 +57,7 @@ fn config_from_row(row: &Row) -> rusqlite::Result<AccountConfig> {
 
 pub fn list(conn: &Connection) -> Result<Vec<Account>> {
     let mut stmt = conn.prepare(
-        "SELECT a.id, a.email, a.display_name, a.avatar_url, a.provider, a.auth_kind,
+        "SELECT a.id, a.email, a.display_name, a.name, a.avatar_url, a.provider, a.auth_kind,
                 a.mail_protocol, a.sync_state, a.sync_error, a.sync_retry_at,
                 a.can_create_top_level_mailbox,
                 a.caught_up_at, s.expire
@@ -71,7 +73,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Account>> {
 
 pub fn list_configs(conn: &Connection) -> Result<Vec<AccountConfig>> {
     let mut stmt = conn.prepare(
-        "SELECT id, email, display_name, avatar_url, provider, auth_kind,
+        "SELECT id, email, display_name, name, avatar_url, provider, auth_kind,
                 mail_protocol, username, jmap_url, jmap_account_id, incoming_host,
                 incoming_port, smtp_host, smtp_port, settings_json
          FROM accounts
@@ -86,7 +88,7 @@ pub fn list_configs(conn: &Connection) -> Result<Vec<AccountConfig>> {
 
 pub fn get_config(conn: &Connection, id: i64) -> Result<Option<AccountConfig>> {
     let mut stmt = conn.prepare(
-        "SELECT id, email, display_name, avatar_url, provider, auth_kind,
+        "SELECT id, email, display_name, name, avatar_url, provider, auth_kind,
                 mail_protocol, username, jmap_url, jmap_account_id, incoming_host,
                 incoming_port, smtp_host, smtp_port, settings_json
          FROM accounts WHERE id = ?1 AND mail_protocol <> 'local'",
@@ -96,7 +98,7 @@ pub fn get_config(conn: &Connection, id: i64) -> Result<Option<AccountConfig>> {
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<Account>> {
     let mut stmt = conn.prepare(
-        "SELECT a.id, a.email, a.display_name, a.avatar_url, a.provider, a.auth_kind,
+        "SELECT a.id, a.email, a.display_name, a.name, a.avatar_url, a.provider, a.auth_kind,
                 a.mail_protocol, a.sync_state, a.sync_error, a.sync_retry_at,
                 a.can_create_top_level_mailbox,
                 a.caught_up_at, s.expire
@@ -243,6 +245,19 @@ pub fn set_settings(conn: &Connection, id: i64, settings: &AccountSettings) -> R
     let changed = conn.execute(
         "UPDATE accounts SET settings_json = ?2 WHERE id = ?1",
         params![id, settings_json],
+    )?;
+    if changed == 0 {
+        return Err(crate::error::CoreError::NotFound(format!("account {id}")));
+    }
+    Ok(())
+}
+
+/// Give an account the name lists of accounts show for it, or take its name
+/// away with `None`. See [`Account::name`].
+pub fn set_name(conn: &Connection, id: i64, name: Option<&str>) -> Result<()> {
+    let changed = conn.execute(
+        "UPDATE accounts SET name = ?2 WHERE id = ?1 AND mail_protocol <> 'local'",
+        params![id, name],
     )?;
     if changed == 0 {
         return Err(crate::error::CoreError::NotFound(format!("account {id}")));
@@ -1093,6 +1108,34 @@ mod tests {
             list(&conn).unwrap()[0].caught_up_at,
             Some(1_763_100_000_000)
         );
+    }
+
+    #[test]
+    fn an_account_keeps_the_name_it_was_given_until_it_is_taken_away() {
+        let conn = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&conn);
+        assert_eq!(get(&conn, 1).unwrap().unwrap().name, None);
+
+        set_name(&conn, 1, Some("Shop")).unwrap();
+        assert_eq!(
+            get(&conn, 1).unwrap().unwrap().name.as_deref(),
+            Some("Shop")
+        );
+        assert_eq!(list(&conn).unwrap()[0].name.as_deref(), Some("Shop"));
+        assert_eq!(
+            get_config(&conn, 1).unwrap().unwrap().name.as_deref(),
+            Some("Shop")
+        );
+        assert_eq!(list(&conn).unwrap()[0].label(), "Shop");
+
+        set_name(&conn, 1, None).unwrap();
+        let account = get(&conn, 1).unwrap().unwrap();
+        assert_eq!(account.name, None);
+        assert_eq!(account.label(), account.email);
+        assert!(matches!(
+            set_name(&conn, 99, Some("Gone")),
+            Err(crate::error::CoreError::NotFound(_))
+        ));
     }
 
     #[test]

@@ -12,7 +12,7 @@ use crate::db::repo;
 use crate::error::Result;
 use crate::models::{
     AccountSettings, MailProfile, MailProtocol, PortableAccountConfig, Settings, Signature,
-    SignatureDefaults,
+    SignatureDefaults, clean_account_name,
 };
 use flectar_mail_sync_client::{Entry, Mirrored};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -104,7 +104,6 @@ const SYNCED_SETTINGS: &[&str] = &[
     "signatureDefaults",
     "mailProfiles",
     "accountColors",
-    "accountShortNames",
     "accountThemes",
 ];
 
@@ -266,10 +265,6 @@ fn account_body(
         .as_object_mut()
         .expect("an account config serializes to an object");
     object.insert("color".into(), json!(settings.account_colors.get(&key)));
-    object.insert(
-        "shortName".into(),
-        json!(settings.account_short_names.get(&key)),
-    );
     object.insert("theme".into(), json!(settings.account_themes.get(&key)));
     object.insert(
         "signatureDefaults".into(),
@@ -942,6 +937,7 @@ fn apply_account(
     if crate::validate_portable_account(&config).is_err() {
         return Ok(Outcome::Ignored);
     }
+    let name = config.name.as_deref().and_then(clean_account_name);
     let sync_id = sync_id_hex(id);
     let mut local = conn
         .query_row(
@@ -1007,8 +1003,8 @@ fn apply_account(
             conn.execute(
                 "UPDATE accounts SET display_name = ?1, username = ?2, jmap_url = ?3,
                         incoming_host = ?4, incoming_port = ?5, smtp_host = ?6, smtp_port = ?7,
-                        settings_json = ?8
-                 WHERE id = ?9",
+                        settings_json = ?8, name = ?9
+                 WHERE id = ?10",
                 params![
                     config.display_name,
                     config.username.trim(),
@@ -1018,6 +1014,7 @@ fn apply_account(
                     config.smtp_host.trim(),
                     config.smtp_port,
                     serde_json::to_string(&settings_json)?,
+                    name,
                     local_id
                 ],
             )?;
@@ -1064,8 +1061,8 @@ fn apply_account(
                 "needs_reauth",
             )?;
             conn.execute(
-                "UPDATE accounts SET sync_id = ?1 WHERE id = ?2",
-                params![sync_id, local_id],
+                "UPDATE accounts SET sync_id = ?1, name = ?2 WHERE id = ?3",
+                params![sync_id, name, local_id],
             )?;
             local_id
         }
@@ -1079,7 +1076,6 @@ fn apply_account(
     let key = local_id.to_string();
     let text = |field: &str| body.get(field).and_then(Value::as_str).map(str::to_owned);
     set_or_remove(&mut settings.account_colors, &key, text("color"));
-    set_or_remove(&mut settings.account_short_names, &key, text("shortName"));
     set_or_remove(&mut settings.account_themes, &key, text("theme"));
     match body
         .get("signatureDefaults")
@@ -1841,19 +1837,14 @@ mod tests {
         theirs.body["vacationReply"] = json!("Away until Monday");
         theirs.body["settings"]["archiveAfterDays"] = json!(30);
 
-        let mut settings = repo::settings::get(&conn).unwrap();
-        settings
-            .account_short_names
-            .insert(local.to_string(), "Ada".into());
-        repo::settings::set(&conn, &settings).unwrap();
+        repo::accounts::set_name(&conn, local, Some("Ada")).unwrap();
         let ours = own_record(&conn, id, Some(&theirs));
-        assert_eq!(ours.body["shortName"], "Ada");
+        assert_eq!(ours.body["name"], "Ada");
         assert_eq!(ours.body["vacationReply"], "Away until Monday");
         assert_eq!(ours.body["settings"]["archiveAfterDays"], 30);
 
         // Unchanged here, it is the server's copy, so it isn't uploaded.
-        settings.account_short_names.clear();
-        repo::settings::set(&conn, &settings).unwrap();
+        repo::accounts::set_name(&conn, local, None).unwrap();
         assert_eq!(own_record(&conn, id, Some(&theirs)), theirs);
     }
 
@@ -2835,6 +2826,56 @@ mod tests {
         assert_eq!(
             merged_account_settings(&current, &synced).security,
             current.security
+        );
+    }
+
+    #[test]
+    fn an_account_name_reaches_the_other_devices() {
+        let sync_id = "e1".repeat(16);
+        let id = sync_id_bytes(&sync_id).unwrap();
+        // Named on one device.
+        let named = testutil::conn();
+        let there = account(&named, "me@example.com", &sync_id);
+        repo::accounts::set_name(&named, there, Some("Shop")).unwrap();
+        let config = repo::accounts::get_config(&named, there).unwrap().unwrap();
+        let body = account_body(&config, &Settings::default(), 0).unwrap();
+        assert_eq!(body["name"], "Shop");
+
+        // The other device takes the name, kept on one line.
+        let conn = testutil::conn();
+        let here = account(&conn, "me@example.com", &sync_id);
+        let previous = entry(ACCOUNT, {
+            let config = repo::accounts::get_config(&conn, here).unwrap().unwrap();
+            account_body(&config, &Settings::default(), 0).unwrap()
+        });
+        let mut next = body.clone();
+        next["name"] = json!("  Corner\n shop ");
+        let applied = apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(previous.clone()),
+                next: Some(entry(ACCOUNT, next)),
+            },
+        );
+        assert!(applied.accounts_changed);
+        let account = repo::accounts::get(&conn, here).unwrap().unwrap();
+        assert_eq!(account.name.as_deref(), Some("Corner shop"));
+
+        // Taken away there, it goes here too.
+        let mut next = body;
+        next["name"] = Value::Null;
+        apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(previous),
+                next: Some(entry(ACCOUNT, next)),
+            },
+        );
+        assert_eq!(
+            repo::accounts::get(&conn, here).unwrap().unwrap().name,
+            None
         );
     }
 
