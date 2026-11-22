@@ -65,6 +65,7 @@ mod mail_work;
 mod mailto_links;
 mod memory;
 mod message_appearance;
+mod message_source;
 mod motion;
 mod move_picker;
 mod network;
@@ -111,6 +112,7 @@ mod rendering_report;
 mod retained_model;
 mod rich_compose;
 mod saved_searches;
+mod sender_picker;
 mod server_search;
 mod settings_controller;
 pub mod spelling;
@@ -5783,6 +5785,46 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     });
 
+    let app_weak_for_download = app.as_weak();
+    let state_for_download = Rc::clone(&state);
+    let runtime_for_download = runtime.clone();
+    let ui_task_tx_for_download = ui_task_tx.clone();
+    app.on_save_account_download(move |account_id, value| {
+        let Some(app) = app_weak_for_download.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_download.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Sync settings require local mail data."));
+            return;
+        };
+        let account_id = i64::from(account_id);
+        let value = value.to_string();
+        app.set_sync_status(UiMessage::plain("Updating download settings…"));
+        let updates = ui_task_tx_for_download.clone();
+        runtime_for_download.spawn(async move {
+            let message = match core.set_account_download(account_id, &value).await {
+                Ok(()) => UiMessage::plain("Download settings updated."),
+                Err(error) => UiMessage::detail("Could not update download settings: {}", error),
+            };
+            // Reload either way so the choice shows what was saved.
+            let accounts = core.load_account_snapshot().await.ok();
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts,
+                    calendar_connections: None,
+                    carddav_connections: None,
+                    calendar_error: None,
+                    account_removal: None,
+                    clear_account_form: false,
+                    finishes_account_setup: false,
+                    finishes_oauth: false,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
     let app_weak = app.as_weak();
     let state_for_sent_copy_policy = Rc::clone(&state);
     let runtime_for_sent_copy_policy = runtime.clone();
@@ -6607,6 +6649,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     link_services::install(&app, &state, &runtime, platform.external_urls.clone());
     read_receipts::install(&app, &state, &runtime);
     folder_roles::install(&app, &state, &runtime);
+    message_source::install(&app, &state, &runtime, platform.documents.clone());
     translation::install(&app, &state, &runtime);
     ai_features::install(&app, &state, &runtime);
     network::install(&app, &state, &runtime);
@@ -8435,6 +8478,27 @@ mod tests {
         assert_eq!(title(MailboxRole::Snoozed, "", false), "Snoozed");
         assert_eq!(title(MailboxRole::Scheduled, "", false), "Scheduled");
         assert_eq!(title(MailboxRole::None, "Person", true), "Receipts");
+        // The automatic categories are named by their roles as well.
+        for category in flectar_mail_core::autolabel::Category::ALL {
+            let role = mail_scope::category_role(category);
+            assert_eq!(words.invoke_name(role), category.default_name());
+            assert_eq!(title(role, "", false), category.default_name());
+        }
+        // A conversation's labels are read in the order the chips show them:
+        // its categories first.
+        let note = |categories: &[MailboxRole], text: &str| {
+            words.invoke_label_note(
+                ModelRc::new(VecModel::from(categories.to_vec())),
+                text.into(),
+            )
+        };
+        assert_eq!(note(&[], ""), "");
+        assert_eq!(note(&[], "Travel"), ", Travel");
+        assert_eq!(note(&[MailboxRole::News], ""), ", News");
+        assert_eq!(
+            note(&[MailboxRole::News, MailboxRole::Pitch], "Travel · Work"),
+            ", News · Pitch · Travel · Work"
+        );
 
         // Chosen in Settings, or followed from the system.
         let chosen = normalized_language_preference("zh_Hans");
@@ -8448,6 +8512,13 @@ mod tests {
                 format!("Person / {inbox}")
             );
             assert_eq!(title(MailboxRole::None, "", false), "Receipts");
+            // Whatever a catalog calls the categories, a title names one by
+            // the same words as its role.
+            for category in flectar_mail_core::autolabel::Category::ALL {
+                let role = mail_scope::category_role(category);
+                let name = words.invoke_name(role);
+                assert_eq!(title(role, "", false), name);
+            }
         }
     }
 

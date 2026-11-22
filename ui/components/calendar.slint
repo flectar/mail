@@ -1167,6 +1167,7 @@ export component FunctionalCalendarView inherits Rectangle {
                     icon-color: root.secondary-color;
                     hover-background: root.control-hover-color;
                     tooltip-text: @tr("Close");
+                    tooltip-in-popup: true;
                     clicked => { day-list.close(); }
                 }
                 day-list-view := ListView {

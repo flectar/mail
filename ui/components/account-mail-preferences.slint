@@ -1,10 +1,12 @@
 import { VerticalBox, HorizontalBox, ScrollView, TextEdit } from "std-widgets.slint";
 import { AccountRow } from "../models.slint";
-import { AppTheme } from "../design-system.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { Button } from "button.slint";
 import { LineEdit } from "controls.slint";
 import { SettingsSelectRow, SettingsSwitchRow } from "settings-components.slint";
+import { SenderChoiceRow } from "sender-picker.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
 
 export struct SignatureChoice { id: string, name: string, text: string }
 export struct SenderIdentityChoice { email: string, label: string }
@@ -99,6 +101,26 @@ export global AccountMailPreferences {
     in-out property <int> composer-sender-index: 0;
     in-out property <string> composer-sender-email;
     callback composer-sender(int);
+    // The composer's From among more addresses than a list shows (#252):
+    // whether the picker is open, its search, and the matches Rust lists.
+    in-out property <bool> composer-sender-picker-open: false;
+    in-out property <string> composer-sender-query;
+    in property <[SenderChoiceRow]> composer-sender-matches;
+    in property <int> composer-sender-match-count;
+    callback composer-sender-search(string);
+    // The same for Settings' default sender.
+    in-out property <bool> default-sender-picker-open: false;
+    in-out property <string> default-sender-query;
+    in property <[SenderChoiceRow]> default-sender-matches;
+    in property <int> default-sender-match-count;
+    callback default-sender-search(string);
+    // Settings lists the addresses matching this search, so many at most,
+    // of `sender-identity-count` in all and `sender-identity-match-count`
+    // matching.
+    in-out property <string> sender-identity-query;
+    in property <int> sender-identity-count;
+    in property <int> sender-identity-match-count;
+    callback sender-identity-search(string);
     callback read-message;
     callback export-message;
     callback close-reader;
@@ -134,6 +156,107 @@ export global AccountMailPreferences {
     in-out property <bool> reader-open: false;
     in-out property <string> reader-status;
     in-out property <string> reader-text;
+}
+
+// The address chosen among many, which looks like a select and opens the
+// picker that searches them on a click, Return, Space or the down arrow.
+component PickerField inherits FocusVisibleScope {
+    in property <string> text;
+    in property <string> name;
+    callback clicked();
+
+    height: 36px;
+    accessible-role: combobox;
+    accessible-label: root.name;
+    accessible-value: root.text;
+    accessible-action-default => { root.clicked(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == " " || event.text == Key.DownArrow {
+            root.clicked();
+            return accept;
+        }
+        reject
+    }
+
+    Rectangle {
+        border-radius: LayoutMetrics.corner-radius - 2px;
+        border-width: root.focus-visible ? 2px : 1px;
+        border-color: root.focus-visible ? AppTheme.accent : AppTheme.control-border;
+        background: area.has-hover ? AppTheme.control-bg : AppTheme.surface;
+
+        Text {
+            x: 11px;
+            width: parent.width - 44px;
+            text: root.text;
+            color: AppTheme.heading;
+            font-size: TypeScale.body;
+            vertical-alignment: center;
+            overflow: elide;
+            accessible-role: none;
+        }
+        Image {
+            x: parent.width - 28px;
+            width: 16px;
+            height: 16px;
+            source: @image-url("../icons/lucide/outline/chevron-down.svg");
+            colorize: AppTheme.secondary;
+            accessible-role: none;
+        }
+        area := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.focus();
+                root.pointer-activated();
+                root.clicked();
+            }
+        }
+    }
+}
+
+// A choice among more sender addresses than a list shows (#252): what it
+// is, and the address chosen, which opens a picker to search them.
+export component SenderPickerRow inherits Rectangle {
+    in property <bool> compact: false;
+    in property <string> title;
+    in property <string> description;
+    in property <string> value;
+    in property <color> title-color;
+    in property <color> description-color;
+    callback clicked();
+
+    height: root.compact ? 66px + compact-title.height + compact-description.height
+        : 23px + desktop-title.height + desktop-description.height;
+    vertical-stretch: 0;
+
+    HorizontalBox {
+        visible: !root.compact;
+        spacing: 20px;
+        VerticalBox {
+            horizontal-stretch: 1;
+            min-width: 0px;
+            spacing: 2px;
+            desktop-title := Text { height: max(18px, self.preferred-height); text: root.title; color: root.title-color; font-size: TypeScale.body; font-weight: 600; overflow: elide; }
+            desktop-description := Text { height: max(17px, self.preferred-height); text: root.description; color: root.description-color; font-size: TypeScale.caption; wrap: word-wrap; }
+        }
+        PickerField {
+            width: 210px;
+            text: root.value;
+            name: root.title;
+            clicked => { root.clicked(); }
+        }
+    }
+    VerticalBox {
+        visible: root.compact;
+        padding: 8px;
+        spacing: 7px;
+        compact-title := Text { height: max(20px, self.preferred-height); text: root.title; color: root.title-color; font-size: TypeScale.body; font-weight: 600; wrap: word-wrap; }
+        compact-description := Text { height: max(34px, self.preferred-height); text: root.description; color: root.description-color; font-size: TypeScale.caption; wrap: word-wrap; }
+        PickerField {
+            text: root.value;
+            name: root.title;
+            clicked => { root.clicked(); }
+        }
+    }
 }
 
 // Cc and Bcc addresses, each named beside its field (#252).
@@ -211,17 +334,39 @@ export component AccountMailPreferencesPanel inherits Rectangle {
             }
             if root.tab == "signatures" : VerticalBox {
                 spacing: 10px;
-                SettingsSelectRow {
+                if AccountMailPreferences.sender-identity-names.length <= 10 : SettingsSelectRow {
                     compact: root.compact; title: @tr("Default sender identity"); description: @tr("Preselected for new messages. Your sign-in address is unchanged.");
                     choices: AccountMailPreferences.sender-identity-names; selected-index <=> AccountMailPreferences.default-sender-index;
                     title-color: AppTheme.heading; description-color: AppTheme.secondary;
                     selected(index, value) => { AccountMailPreferences.default-sender-index = index; }
+                }
+                // Past ten addresses, one is found by searching (#252).
+                if AccountMailPreferences.sender-identity-names.length > 10 : SenderPickerRow {
+                    compact: root.compact;
+                    title: @tr("Default sender identity");
+                    description: @tr("Preselected for new messages. Your sign-in address is unchanged.");
+                    value: AccountMailPreferences.sender-identity-names[AccountMailPreferences.default-sender-index];
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                    clicked => {
+                        AccountMailPreferences.default-sender-query = "";
+                        AccountMailPreferences.default-sender-search("");
+                        AccountMailPreferences.default-sender-picker-open = true;
+                    }
                 }
                 HorizontalBox {
                     Button { text: @tr("Save sender default"); primary: true; enabled: !AccountMailPreferences.busy && AccountMailPreferences.sender-identities.length > 0; clicked => { AccountMailPreferences.save-default-sender(); } }
                     Button { text: @tr("Refresh sender identities"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.refresh-sender-identities(); } }
                 }
                 if AccountMailPreferences.sender-identity-status != "" : Text { min-height: self.preferred-height; vertical-stretch: 0; text: AccountMailPreferences.sender-identity-status; color: AppTheme.secondary; wrap: word-wrap; }
+                if AccountMailPreferences.sender-identity-count > 10 : LineEdit {
+                    text <=> AccountMailPreferences.sender-identity-query;
+                    placeholder-text: @tr("Search sender addresses");
+                    input-label: @tr("Search sender addresses");
+                    show-leading-icon: true;
+                    leading-icon: @image-url("../icons/lucide/outline/search.svg");
+                    leading-icon-color: AppTheme.muted;
+                    edited(value) => { AccountMailPreferences.sender-identity-search(value); }
+                }
                 for identity in AccountMailPreferences.sender-identity-rows : VerticalBox {
                     padding: 0px; spacing: 4px;
                     Text { min-height: self.preferred-height; vertical-stretch: 0; text: identity.name != "" ? identity.name + "  <" + identity.email + ">" : identity.email; color: AppTheme.heading; overflow: elide; }
@@ -233,6 +378,14 @@ export component AccountMailPreferencesPanel inherits Rectangle {
                         Button { min-width: max(64px, self.content-width); text: @tr("Edit"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.edit-sender-identity(identity.email); } }
                         if identity.manual : Button { min-width: max(64px, self.content-width); text: @tr("Remove"); destructive: true; enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.remove-sender-identity(identity.email); } }
                     }
+                }
+                if AccountMailPreferences.sender-identity-match-count > AccountMailPreferences.sender-identity-rows.length : Text {
+                    min-height: self.preferred-height; vertical-stretch: 0; color: AppTheme.secondary; wrap: word-wrap;
+                    text: @tr("Showing {} of {} addresses. Search to find the others.", AccountMailPreferences.sender-identity-rows.length, AccountMailPreferences.sender-identity-match-count);
+                }
+                if AccountMailPreferences.sender-identity-count > 10 && AccountMailPreferences.sender-identity-match-count == 0 : Text {
+                    min-height: self.preferred-height; vertical-stretch: 0; color: AppTheme.secondary; wrap: word-wrap;
+                    text: @tr("No matching addresses");
                 }
                 if AccountMailPreferences.sender-identity-policy == "never" && !AccountMailPreferences.sender-form-provider : Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Gmail decides which addresses you can send from. Add an address in Gmail settings under Accounts › Send mail as, then refresh sender identities."); color: AppTheme.secondary; wrap: word-wrap; }
                 if AccountMailPreferences.sender-identity-policy != "never" || AccountMailPreferences.sender-form-provider : VerticalBox {

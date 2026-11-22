@@ -231,6 +231,21 @@ fn find_byte(bytes: &[u8], from: usize, target: u8) -> Option<usize> {
         .map(|offset| from + offset)
 }
 
+/// Whether a part shows inside the message rather than as a file of its own,
+/// from its Content-Disposition and whether it has a Content-ID. A Content-ID
+/// alone does not make a part inline: Gmail and Exchange stamp one on every
+/// part, including ordinary file attachments, so trusting it hid real
+/// attachments (no paperclip, no footer chip). An explicit disposition is
+/// authoritative; the Content-ID is only a fallback for parts that declare no
+/// disposition at all.
+pub fn part_is_inline(disposition: Option<&str>, has_content_id: bool) -> bool {
+    match disposition {
+        Some(value) if value.eq_ignore_ascii_case("attachment") => false,
+        Some(value) if value.eq_ignore_ascii_case("inline") => true,
+        _ => has_content_id,
+    }
+}
+
 /// Build the selective-fetch plan directly from an IMAP BODYSTRUCTURE tree.
 /// Only readable body parts (plain text, HTML, and calendars) enter
 /// `text_sections`; PDFs, images, and other files are descriptors only.
@@ -294,16 +309,7 @@ pub fn plan_bodystructure(bs: &async_imap::imap_proto::BodyStructure<'_>) -> Mim
             .is_some_and(|value| value.eq_ignore_ascii_case("attachment"))
             || filename.is_some();
         let content_id = other.id.as_ref().map(|value| normalize_cid(value));
-        // A Content-ID alone does not make a part inline: Gmail and Exchange
-        // stamp one on every part, including ordinary file attachments, so
-        // trusting it hid real attachments (no paperclip, no footer chip).
-        // An explicit disposition is authoritative; the Content-ID is only a
-        // fallback for parts that declare no disposition at all.
-        let is_inline = match disposition {
-            Some(value) if value.eq_ignore_ascii_case("attachment") => false,
-            Some(value) if value.eq_ignore_ascii_case("inline") => true,
-            _ => content_id.is_some(),
-        };
+        let is_inline = part_is_inline(disposition, content_id.is_some());
 
         let kind = if mime_type == "text/plain" {
             Some(TextSectionKind::Plain)
@@ -2932,13 +2938,10 @@ pub fn parse_message(raw: &[u8]) -> Result<ParsedBody> {
             calendar_parts.push(String::from_utf8_lossy(part.contents()).into_owned());
         }
         let content_id = part.content_id().map(|s| s.to_string());
-        // Mirrors `plan_bodystructure`: Content-Disposition decides, and a bare
-        // Content-ID only counts when no disposition was declared.
-        let is_inline = match part.content_disposition() {
-            Some(cd) if cd.is_attachment() => false,
-            Some(cd) if cd.is_inline() => true,
-            _ => content_id.is_some(),
-        };
+        let is_inline = part_is_inline(
+            part.content_disposition().map(|cd| cd.ctype()),
+            content_id.is_some(),
+        );
         attachments.push(ParsedAttachment {
             part_id: i.to_string(),
             filename,

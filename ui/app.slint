@@ -6,6 +6,7 @@ export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
 export { FolderRoles, FolderRoleRow } from "folder-roles.slint";
+export { MessageSource } from "message-source.slint";
 export { Translation, TranslationLanguage } from "translation.slint";
 export { Ai, AiPromptRow } from "ai.slint";
 export { AiSummary } from "ai-summary.slint";
@@ -34,6 +35,9 @@ import "../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,RON
 
 import { Palette } from "std-widgets.slint";
 import { InterfaceText, TypeScale } from "typography.slint";
+import { ActionTooltip, ActionTooltipLayer, TooltipBubble } from "components/tooltip-bubble.slint";
+// The window event filters report key presses to it (window_chrome.rs, composer.rs).
+export { ActionTooltip }
 export { AppTheme, MotionSettings, ThemeUtilities } from "design-system.slint";
 export { InterfaceText } from "typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings } from "design-system.slint";
@@ -82,6 +86,7 @@ export { SavedSearchUi } from "saved-searches.slint";
 export { ServerSearchUi } from "server-search.slint";
 export { Numbers } from "numbers.slint";
 import { LocalMailUi } from "local-mail.slint";
+import { JoinDeviceDialog, SyncUi } from "device-sync.slint";
 export { AccountImport, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportMailRow, ImportProfileRow } from "dialogs/import-dialog.slint";
 export { AutoReplies } from "auto-replies.slint";
 import { AutoReplies } from "auto-replies.slint";
@@ -325,8 +330,6 @@ export global I18n {
 
     ui-message-settings(key, argument, second-argument, third-argument) => {
         if (key == "All accounts") { return @tr("All accounts"); }
-        if (key == "Important") { return @tr("Important"); }
-        if (key == "Other") { return @tr("Other"); }
         if (key == "Name this rule.") { return @tr("Name this rule."); }
         if (key == "Condition {}: give a size in KB.") { return @tr("Condition {}: give a size in KB.", argument); }
         if (key == "Condition {}: this isn't a valid regular expression.") { return @tr("Condition {}: this isn't a valid regular expression.", argument); }
@@ -572,6 +575,14 @@ export global I18n {
         if (key == "Could not update CardDAV sync: {}") { return @tr("Could not update CardDAV sync: {}", argument); }
         if (key == "CardDAV disconnected.") { return @tr("CardDAV disconnected."); }
         if (key == "Could not disconnect CardDAV: {}") { return @tr("Could not disconnect CardDAV: {}", argument); }
+        // What an account downloads ahead of time (#253).
+        if (key == "Updating download settings…") { return @tr("Updating download settings…"); }
+        if (key == "Download settings updated.") { return @tr("Download settings updated."); }
+        if (key == "Could not update download settings: {}") { return @tr("Could not update download settings: {}", argument); }
+        // Message source (#253).
+        if (key == "Copied the message source") { return @tr("Copied the message source"); }
+        if (key == "Could not read the message source: {}") { return @tr("Could not read the message source: {}", argument); }
+        if (key == "Could not save the message: {}") { return @tr("Could not save the message: {}", argument); }
         // Automatic Cc and Bcc (#252).
         if (key == "Copies saved.") { return @tr("Copies saved."); }
         if (key == "Could not save the copies: {}") { return @tr("Could not save the copies: {}", argument); }
@@ -1016,6 +1027,13 @@ export component ComposerWindow inherits Window {
         height: parent.height;
         z: 15000;
     }
+
+    // The composer window's action help, above its dialogs.
+    ActionTooltipLayer {
+        width: parent.width;
+        height: parent.height;
+        z: 49000;
+    }
 }
 
 export component AppWindow inherits Window {
@@ -1135,6 +1153,7 @@ export component AppWindow inherits Window {
     callback save_account_check_interval(int, string);
     callback save_account_push(int, bool);
     callback save_account_server_timeout(int, int);
+    callback save_account_download(int, string);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -1395,6 +1414,9 @@ export component AppWindow inherits Window {
     in-out property <length> email-scroll-document-height: 0px;
     in-out property <length> email-scroll-y: 0px;
     private property <bool> settings-open: root.active_view == "settings";
+    // The join dialog was opened from the welcome screen, which has no
+    // Settings to show it in.
+    private property <bool> welcome-join;
     changed settings-open => {
         // Leaving Settings destroys the dialog before its own change handlers
         // run, so an unsaved palette and open forms are discarded here. The
@@ -2563,6 +2585,7 @@ export component AppWindow inherits Window {
             save_account_check_interval(account-id, value) => { root.save_account_check_interval(account-id, value); }
             save_account_push(account-id, enabled) => { root.save_account_push(account-id, enabled); }
             save_account_server_timeout(account-id, seconds) => { root.save_account_server_timeout(account-id, seconds); }
+            save_account_download(account-id, value) => { root.save_account_download(account-id, value); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
             connect_caldav(account-id, connection-id, url, username, password) => { root.connect_caldav(account-id, connection-id, url, username, password); }
             set_calendar_connection_enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }
@@ -2719,23 +2742,13 @@ export component AppWindow inherits Window {
         // The rail width comes from the shared workspace geometry. Its hover label is
         // rendered here, above the adjacent workspace, so it can extend right
         // of the icon without being clipped by the rail component.
-        Rectangle {
-            visible: !root.compact-layout && product-rail.tooltip-text != "";
-            x: LayoutMetrics.product-rail-width + 6px;
+        TooltipBubble {
+            visible: !root.compact-layout && product-rail.tooltip-text != "" && !ActionTooltip.keyboard;
+            x: LayoutMetrics.product-rail-width + 2px;
             y: product-rail.tooltip-y;
-            width: rail-tooltip-label.preferred-width + 16px;
-            height: 28px;
-            border-radius: 5px;
-            background: #292929;
+            text: product-rail.tooltip-text;
+            caret-side: "left";
             z: 10000;
-
-            rail-tooltip-label := Text {
-                text: product-rail.tooltip-text;
-                color: white;
-                font-size: TypeScale.secondary;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
         }
     }
 
@@ -3019,9 +3032,35 @@ export component AppWindow inherits Window {
             root.start_oauth(provider);
         }
         cancel-oauth => { root.cancel_oauth(); }
+        join-sync(method) => {
+            root.welcome-join = true;
+            SyncUi.join-method = method;
+            SyncUi.dialog = "join";
+        }
         import-accounts => { root.import_accounts(); }
         privacy-policy-url: root.privacy-policy-url;
         open-link(url) => { root.open_email_link(url); }
+    }
+    // Joining from the welcome screen: the dialog stays until it's closed,
+    // also once the accounts that arrive replace the welcome screen. Settings
+    // shows its own copy, and exists only once there is mail.
+    if root.welcome-join && SyncUi.dialog == "join" && !(root.has-mail && root.settings-open) : JoinDeviceDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        compact: root.compact-layout;
+        surface: root.surface;
+        panel-border-color: root.border-subtle;
+        title-color: root.title-color;
+        body-text: root.body-text;
+        secondary-text: root.secondary-text;
+        fill: root.page-bg;
+        closed => {
+            root.welcome-join = false;
+            SyncUi.dialog = "";
+            SyncUi.cancel-pairing();
+        }
     }
 
     // Keep the progressively painted shell inert until its callbacks have a
@@ -3164,6 +3203,13 @@ export component AppWindow inherits Window {
             root.settings_tab = "Accounts";
             root.open-settings();
         }
+    }
+
+    // Action help, above the panes and dialogs.
+    ActionTooltipLayer {
+        width: parent.width;
+        height: parent.height;
+        z: 49000;
     }
 
     if WindowChrome.controls-visible : WindowControls {

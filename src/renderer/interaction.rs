@@ -185,17 +185,19 @@ impl GpuEmailRenderer {
         let Some(email) = self.email.as_mut() else {
             return;
         };
-        let mut roots = Vec::new();
-        email.document.visit(|id, node| {
-            if visible(node)
-                && node
-                    .element_data()
+        // In layout order, which includes the anonymous blocks that hold text
+        // next to a block.
+        let roots: Vec<NodeId> = details::inline_roots(&email.document)
+            .into_iter()
+            .filter(|&id| {
+                email
+                    .document
+                    .get_node(id)
+                    .and_then(|node| node.element_data())
                     .and_then(|e| e.inline_layout_data.as_ref())
                     .is_some_and(|l| !l.text.is_empty())
-            {
-                roots.push(id);
-            }
-        });
+            })
+            .collect();
         let Some(first) = roots.first().copied() else {
             return;
         };
@@ -488,20 +490,15 @@ impl GpuEmailRenderer {
         let email = self.email.as_ref()?;
         let (anchor, focus) = (self.selection_anchor?, self.selection_focus?);
         let (mut start, mut end, mut offset) = (None, None, 0);
-        email.document.visit(|id, node| {
-            if let Some(inline) = node
-                .element_data()
-                .and_then(|e| e.inline_layout_data.as_ref())
-            {
-                if id == anchor.0 {
-                    start = Some(offset + anchor.1);
-                }
-                if id == focus.0 {
-                    end = Some(offset + focus.1);
-                }
-                offset += inline.text.len();
+        for (id, len) in text_runs(&email.document) {
+            if id == anchor.0 {
+                start = Some(offset + anchor.1);
             }
-        });
+            if id == focus.0 {
+                end = Some(offset + focus.1);
+            }
+            offset += len;
+        }
         Some((start?, end?))
     }
     pub fn restore_selection(&mut self, bookmark: Option<(usize, usize)>) {
@@ -513,21 +510,23 @@ impl GpuEmailRenderer {
         };
         let mut offset = 0;
         let (mut anchor, mut focus) = (None, None);
-        email.document.visit(|id, node| {
-            if let Some(inline) = node
-                .element_data()
-                .and_then(|e| e.inline_layout_data.as_ref())
-            {
-                let len = inline.text.len();
-                if start >= offset && start <= offset + len && anchor.is_none() {
-                    anchor = Some((id, inline.text.floor_char_boundary(start - offset)));
-                }
-                if end >= offset && end <= offset + len && focus.is_none() {
-                    focus = Some((id, inline.text.floor_char_boundary(end - offset)));
-                }
-                offset += len;
+        for (id, len) in text_runs(&email.document) {
+            let boundary = |at: usize| {
+                email
+                    .document
+                    .get_node(id)
+                    .and_then(|node| node.element_data())
+                    .and_then(|e| e.inline_layout_data.as_ref())
+                    .map_or(at, |inline| inline.text.floor_char_boundary(at))
+            };
+            if start >= offset && start <= offset + len && anchor.is_none() {
+                anchor = Some((id, boundary(start - offset)));
             }
-        });
+            if end >= offset && end <= offset + len && focus.is_none() {
+                focus = Some((id, boundary(end - offset)));
+            }
+            offset += len;
+        }
         if let (Some((a, ai)), Some((f, fi))) = (anchor, focus) {
             email.document.set_text_selection(a, ai, f, fi);
             self.selection_anchor = anchor;
@@ -535,4 +534,20 @@ impl GpuEmailRenderer {
             self.paint_dirty = true;
         }
     }
+}
+
+/// The laid out runs of text in layout order with their lengths, which a
+/// selection bookmark counts through.
+fn text_runs(document: &blitz_dom::BaseDocument) -> Vec<(NodeId, usize)> {
+    details::inline_roots(document)
+        .into_iter()
+        .filter_map(|id| {
+            let inline = document
+                .get_node(id)?
+                .element_data()?
+                .inline_layout_data
+                .as_ref()?;
+            Some((id, inline.text.len()))
+        })
+        .collect()
 }

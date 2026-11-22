@@ -228,6 +228,9 @@ pub(super) fn register_renderer_input_callbacks(
                 }
                 "Copied email text" => app.set_render_status(UiMessage::plain("Copied email text")),
                 "Copied link" => app.set_render_status(UiMessage::plain("Copied link")),
+                "Copied the message source" => {
+                    app.set_render_status(UiMessage::plain("Copied the message source"))
+                }
                 _ => {}
             }
         }

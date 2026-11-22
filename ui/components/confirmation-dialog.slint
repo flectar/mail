@@ -52,7 +52,13 @@ export component ConfirmationDialog inherits Rectangle {
         root.confirmed();
     }
 
-    changed open => {
+    // A dialog that `if` creates is open from the start, and `changed` is not
+    // called for a starting value, so it takes the focus as it is created
+    // too. Without it, keys would go to whatever opened it behind the scrim.
+    init => { root.take-focus(); }
+    changed open => { root.take-focus(); }
+
+    function take-focus() {
         if root.open {
             root.confirm-selected = false;
             dialog-focus.focus();

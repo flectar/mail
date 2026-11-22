@@ -4,7 +4,9 @@
 mod removal_tests;
 
 use super::*;
+use crate::mail_scope::{category_role, label_category, label_role};
 use chrono::{Datelike, Timelike};
+use flectar_mail_core::autolabel::Category;
 
 pub(super) fn refresh_from_source(
     app: &AppWindow,
@@ -514,6 +516,7 @@ pub(super) fn render_current(
         // "View plain text" is a message action, not a global display mode.
         app.set_text_mode(false);
         app.set_source_mode(false);
+        crate::message_source::hide(app);
         app.set_rendering_info_open(false);
     }
 
@@ -765,6 +768,7 @@ pub(super) fn select_thread_message(
     }
     app.set_text_mode(false);
     app.set_source_mode(false);
+    crate::message_source::hide(app);
     app.set_rendering_info_open(false);
     render_current(app, state, runtime)
 }
@@ -864,7 +868,13 @@ fn project_label_rows(
                     || label.owner_account_id == Some(account_id)
             })
         })
-        .filter(|label| query.is_empty() || label.name.to_lowercase().contains(&query))
+        .filter(|label| {
+            let role = label_role(label);
+            query.is_empty()
+                || label.name.to_lowercase().contains(&query)
+                // A category is also found by the name the window shows.
+                || crate::sidebar_model::mailbox_name_matches(role, &query)
+        })
         .filter_map(|label| {
             Some(MailLabelRow {
                 id: i32::try_from(label.id).ok()?,
@@ -884,6 +894,7 @@ fn project_label_rows(
                 applied: applied.contains(&label.id),
                 is_auto: label.is_auto,
                 is_global: !label.is_auto && label.owner_account_id.is_none(),
+                role: label_role(label),
                 count: Default::default(),
             })
         })
@@ -921,6 +932,7 @@ fn applied_label_rows(
                 applied: true,
                 is_auto: label.is_auto,
                 is_global: !label.is_auto && label.owner_account_id.is_none(),
+                role: label_role(label),
                 count: Default::default(),
             })
         })
@@ -1044,6 +1056,7 @@ pub(super) fn same_email_row(a: &EmailRow, b: &EmailRow) -> bool {
         && a.has_replied == b.has_replied
         && a.message_count == b.message_count
         && a.label_summary == b.label_summary
+        && a.label_categories.iter().eq(b.label_categories.iter())
         && a.account_uses_labels == b.account_uses_labels
         && a.verification_code == b.verification_code
         && a.attachment == b.attachment
@@ -1109,6 +1122,10 @@ pub(super) fn make_rows<M: std::borrow::Borrow<MailMessage>>(
                     .unwrap_or(i32::MAX)
                     .max(1),
                 label_summary: label_summary(&email.labels, labels).into(),
+                label_categories: ModelRc::new(VecModel::from(label_categories(
+                    &email.labels,
+                    labels,
+                ))),
                 labels: ModelRc::new(VecModel::from(applied_label_rows(labels, &email.labels))),
                 account_uses_labels: email.account_uses_labels,
                 verification_code: email.verification_code.clone().unwrap_or_default().into(),
@@ -1195,13 +1212,31 @@ fn message_time_label(date_ms: i64, now: &chrono::DateTime<Local>, name_yesterda
     }
 }
 
+/// The names of a conversation's labels that are not automatic categories,
+/// which the window names itself; see [`label_categories`].
 fn label_summary(ids: &[i64], labels: &[flectar_mail_core::models::Label]) -> String {
     labels
         .iter()
-        .filter(|label| ids.contains(&label.id))
+        .filter(|label| ids.contains(&label.id) && label_category(label).is_none())
         .map(|label| label.name.as_str())
         .collect::<Vec<_>>()
         .join(" · ")
+}
+
+/// The automatic categories among a conversation's labels, once each.
+fn label_categories(ids: &[i64], labels: &[flectar_mail_core::models::Label]) -> Vec<MailboxRole> {
+    let mut roles = Vec::new();
+    for category in labels
+        .iter()
+        .filter(|label| ids.contains(&label.id))
+        .filter_map(label_category)
+    {
+        let role = category_role(category);
+        if !roles.contains(&role) {
+            roles.push(role);
+        }
+    }
+    roles
 }
 
 type SenderImage = (std::sync::Weak<[u8]>, u32, u32, Image, usize);
@@ -1798,6 +1833,10 @@ pub(crate) enum MailTitle {
     /// the name of its account unless the mailbox spans every account or the
     /// account has no name, as with mail kept on this device.
     Mailbox { scope: Scope, account: String },
+    /// An automatic category of the Inbox that still has the name the app
+    /// gave it, which the window names in its own language like a mailbox. A
+    /// category given a name of its own is a [`MailTitle::Text`].
+    Category(Category),
     /// A name from the mail itself: a folder's, label's or saved search's, or
     /// a conversation's subject. An empty one names the workspace instead.
     Text(String),
@@ -1818,6 +1857,14 @@ impl MailTitle {
                     role: scope.mailbox_role(),
                     account: account.as_str().into(),
                     unified: matches!(scope, Scope::Unified(_)),
+                },
+                slint::SharedString::default(),
+            ),
+            Self::Category(category) => (
+                MailboxTitle {
+                    role: category_role(*category),
+                    account: slint::SharedString::default(),
+                    unified: false,
                 },
                 slint::SharedString::default(),
             ),
@@ -1864,12 +1911,11 @@ fn scope_title(
         Scope::Folder(_) => {
             MailTitle::Text(entry().map_or_else(|| "Folder".into(), |entry| entry.label.clone()))
         }
-        Scope::Label { id, .. } => MailTitle::Text(
-            labels
-                .iter()
-                .find(|label| label.id == id)
-                .map_or_else(|| "Label".into(), |label| label.name.clone()),
-        ),
+        Scope::Label { id, .. } => match labels.iter().find(|label| label.id == id) {
+            Some(label) => label_category(label)
+                .map_or_else(|| MailTitle::Text(label.name.clone()), MailTitle::Category),
+            None => MailTitle::Text("Label".into()),
+        },
     }
 }
 
@@ -1887,6 +1933,7 @@ fn is_trash_scope(scope: Scope) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mail_scope::LabelKind;
 
     #[test]
     fn the_note_on_mail_only_on_the_server_is_at_the_lists_old_end() {
@@ -2762,6 +2809,136 @@ mod tests {
             parts(MailTitle::Text("Receipts".into())),
             (MailboxRole::None, String::new(), false, "Receipts".into())
         );
+    }
+
+    fn category_label(
+        id: i64,
+        name: &str,
+        keyword: &str,
+        is_auto: bool,
+    ) -> flectar_mail_core::models::Label {
+        flectar_mail_core::models::Label {
+            id,
+            name: name.into(),
+            color: "#e0708a".into(),
+            keyword: keyword.into(),
+            position: 1000,
+            owner_account_id: None,
+            is_auto,
+        }
+    }
+
+    #[test]
+    fn automatic_categories_are_named_by_role_unless_they_were_renamed() {
+        let labels = [
+            category_label(1, "Marketing", "FlectarMailAutoMarketing", true),
+            category_label(2, "News", "FlectarMailAutoNews", true),
+            category_label(3, "Social", "FlectarMailAutoSocial", true),
+            category_label(4, "Pitch", "FlectarMailAutoPitch", true),
+            // Renamed: it keeps the name its user gave it.
+            category_label(5, "Offers", "FlectarMailAutoMarketing", true),
+            // A manual label that happens to be called Social.
+            category_label(6, "Social", "Social", false),
+            // Not seeded with a category's keyword.
+            category_label(7, "News", "News", true),
+        ];
+        let roles = |rows: Vec<MailLabelRow>| {
+            rows.iter()
+                .map(|row| (row.id, row.role, row.name.to_string()))
+                .collect::<Vec<_>>()
+        };
+        let expected = vec![
+            (1, MailboxRole::Marketing, "Marketing".to_owned()),
+            (2, MailboxRole::News, "News".to_owned()),
+            (3, MailboxRole::Social, "Social".to_owned()),
+            (4, MailboxRole::Pitch, "Pitch".to_owned()),
+            (5, MailboxRole::None, "Offers".to_owned()),
+            (6, MailboxRole::None, "Social".to_owned()),
+            (7, MailboxRole::None, "News".to_owned()),
+        ];
+        // The picker and the chips of a conversation name them alike, and
+        // the stored names stay as they are.
+        assert_eq!(roles(project_label_rows(&labels, &[], None, "")), expected);
+        assert_eq!(
+            roles(applied_label_rows(&labels, &[1, 2, 3, 4, 5, 6, 7])),
+            expected
+        );
+        assert_eq!(roles(make_label_rows(&labels, None, "")), expected);
+    }
+
+    #[test]
+    fn a_category_is_found_by_the_name_the_window_shows() {
+        let labels = [
+            category_label(1, "Marketing", "FlectarMailAutoMarketing", true),
+            category_label(2, "Offers", "FlectarMailAutoNews", true),
+            category_label(3, "Travel", "Travel", false),
+        ];
+        let found = |query: &str| {
+            project_label_rows(&labels, &[], None, query)
+                .iter()
+                .map(|row| row.id)
+                .collect::<Vec<_>>()
+        };
+        crate::sidebar_model::set_mailbox_names_for_test(&[
+            (MailboxRole::Marketing, "Shown Marketing"),
+            (MailboxRole::News, "Shown News"),
+        ]);
+        assert_eq!(found("shown"), [1]);
+        assert_eq!(found("marketing"), [1]);
+        // The renamed category is no longer called what its role is.
+        assert_eq!(found("news"), Vec::<i32>::new());
+        assert_eq!(found("offers"), [2]);
+        crate::sidebar_model::set_mailbox_names_for_test(&[]);
+        assert_eq!(found("shown"), Vec::<i32>::new());
+    }
+
+    #[test]
+    fn a_conversation_names_its_categories_apart_from_its_other_labels() {
+        let labels = [
+            category_label(1, "Travel", "Travel", false),
+            category_label(2, "Social", "FlectarMailAutoSocial", true),
+            category_label(3, "Offers", "FlectarMailAutoMarketing", true),
+            category_label(4, "Pitch", "FlectarMailAutoPitch", true),
+        ];
+        // Labels of other kinds, and a renamed category, are told by name.
+        assert_eq!(label_summary(&[4, 3, 2, 1], &labels), "Travel · Offers");
+        assert_eq!(
+            label_categories(&[4, 3, 2, 1, 99], &labels),
+            [MailboxRole::Social, MailboxRole::Pitch]
+        );
+        assert!(label_categories(&[1, 3], &labels).is_empty());
+    }
+
+    #[test]
+    fn a_category_is_titled_by_its_role_and_other_labels_by_name() {
+        let labels = [
+            category_label(1, "Social", "FlectarMailAutoSocial", true),
+            category_label(2, "Offers", "FlectarMailAutoMarketing", true),
+            category_label(3, "Travel", "Travel", false),
+        ];
+        let title = |id, kind| scope_title(Scope::Label { kind, id }, &[], &labels);
+        assert_eq!(
+            title(1, LabelKind::Category),
+            MailTitle::Category(Category::Social)
+        );
+        assert_eq!(
+            title(2, LabelKind::Category),
+            MailTitle::Text("Offers".into())
+        );
+        assert_eq!(
+            title(3, LabelKind::Global),
+            MailTitle::Text("Travel".into())
+        );
+        assert_eq!(
+            title(9, LabelKind::Category),
+            MailTitle::Text("Label".into())
+        );
+
+        let (mailbox, text) = title(1, LabelKind::Category).ui();
+        assert_eq!(mailbox.role, MailboxRole::Social);
+        assert_eq!(mailbox.account, "");
+        assert!(!mailbox.unified);
+        assert_eq!(text, "");
     }
 
     #[test]

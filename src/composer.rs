@@ -1750,16 +1750,24 @@ impl ComposeSession {
 
     /// A message's own window returns the memory input leaves behind once
     /// it goes still, as the main window does, keeps no pixels while it is
-    /// minimized, and quits the app for Control+Q as the main window does.
+    /// minimized, hands its help to the keyboard on a key press as the main
+    /// window does, and quits the app for Control+Q as the main window does.
     #[cfg(desktop)]
     fn watch_window(self: &Rc<Self>, window: &ComposerWindow) {
         let session = self.reference();
+        let help = window.as_weak();
         #[cfg(linux_desktop)]
         let modifiers = std::cell::Cell::new(winit::keyboard::ModifiersState::empty());
         window.window().on_winit_window_event(move |native, event| {
             use winit::event::WindowEvent;
             if !matches!(event, WindowEvent::RedrawRequested) {
                 crate::memory::release_free_heap_when_idle();
+            }
+            if let WindowEvent::KeyboardInput { event, .. } = event
+                && event.state.is_pressed()
+                && let Some(window) = help.upgrade()
+            {
+                window.global::<crate::ActionTooltip>().set_keyboard(true);
             }
             #[cfg(linux_desktop)]
             match event {
@@ -2317,6 +2325,12 @@ impl ComposeSession {
         preferences.on_composer_sender(move |index| {
             if let Some(session) = weak.upgrade() {
                 session.choose_sender(index);
+            }
+        });
+        let weak = self.reference();
+        preferences.on_composer_sender_search(move |query| {
+            if let Some(session) = weak.upgrade() {
+                session.search_senders(&query);
             }
         });
         let weak = self.reference();
@@ -4197,6 +4211,7 @@ impl ComposeSession {
         preferences.set_composer_sender_names(ModelRc::default());
         preferences.set_composer_sender_index(0);
         preferences.set_composer_sender_email("".into());
+        preferences.set_composer_sender_picker_open(false);
         preferences.set_composer_security("".into());
         preferences.set_composer_preferences_ready(false);
     }
@@ -4379,6 +4394,23 @@ impl ComposeSession {
         preferences.set_composer_sender_index(index);
         preferences.set_composer_sender_email(identity.email.clone());
         self.apply_copies(&identity.email);
+    }
+
+    /// List the sender addresses matching `query` in the From picker, for an
+    /// account with more than a list shows (#252).
+    fn search_senders(&self, query: &str) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let preferences = host.preferences();
+        let choices = preferences
+            .get_composer_sender_identities()
+            .iter()
+            .map(|choice| (choice.label.to_string(), choice.email.to_string()))
+            .collect::<Vec<_>>();
+        let (rows, total) = sender_picker::rows(&choices, query);
+        preferences.set_composer_sender_matches(ModelRc::new(VecModel::from(rows)));
+        preferences.set_composer_sender_match_count(i32::try_from(total).unwrap_or(i32::MAX));
     }
 
     /// Give the message the copies mail from `sender` starts with, in place

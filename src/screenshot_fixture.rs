@@ -149,6 +149,7 @@ fixture_row!(MailLabelRow {
     applied,
     is_auto,
     is_global,
+    role,
     count
 });
 fixture_row!(MailboxRow {
@@ -209,6 +210,7 @@ fixture_row!(EmailRow {
     reply_due,
     message_count,
     label_summary,
+    label_categories,
     labels,
     account_uses_labels,
     verification_code,
@@ -314,6 +316,10 @@ impl FixtureValue for MailboxRole {
             "other" => Self::Other,
             "snoozed" => Self::Snoozed,
             "scheduled" => Self::Scheduled,
+            "marketing" => Self::Marketing,
+            "news" => Self::News,
+            "social" => Self::Social,
+            "pitch" => Self::Pitch,
             role => panic!("unknown screenshot mailbox role: {role}"),
         }
     }

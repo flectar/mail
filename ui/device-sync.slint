@@ -55,6 +55,9 @@ export global SyncUi {
     in-out property <string> join-method: "code";
     // This device can scan QR codes with its camera.
     in property <bool> can-scan;
+    // Devices can pair by QR code. No build can scan one yet (#449), so the
+    // QR options stay hidden and devices pair with a code.
+    in property <bool> qr-pairing: false;
     // Passwords and sign-ins sync too, on every device of the group.
     in-out property <bool> sync-sign-ins: true;
 
@@ -598,6 +601,10 @@ export component SyncSettingsPage inherits VerticalBox {
         SyncUi.opened();
     }
 
+    // Ways to connect this device that the card offers: a code, the
+    // recovery code, and showing or scanning a QR code where that works.
+    private property <int> join-options: SyncUi.qr-pairing || SyncUi.can-scan ? 3 : 2;
+
     function open-join(method: string) {
         SyncUi.join-method = method;
         SyncUi.dialog = "join";
@@ -680,12 +687,14 @@ export component SyncSettingsPage inherits VerticalBox {
         description: @tr("Already syncing on another device? Add this one to it.");
         note: SyncUi.can-scan
             ? @tr("Scan the QR code your other device shows, enter its code, or use your recovery code.")
-            : @tr("Show a QR code for your phone to scan, enter the code your other device shows, or use your recovery code.");
+            : SyncUi.qr-pairing
+            ? @tr("Show a QR code for your phone to scan, enter the code your other device shows, or use your recovery code.")
+            : @tr("Enter the code your other device shows, or use your recovery code.");
         icon: @image-url("icons/lucide/outline/link.svg");
         icon-color: root.accent;
-        actions-width: 430px;
-        // Three labels don't fit side by side on a phone.
-        actions-height: root.compact ? 3 * 32px + 2 * 8px : 32px;
+        actions-width: root.join-options == 3 ? 430px : 286px;
+        // The labels don't fit side by side on a phone.
+        actions-height: root.compact ? root.join-options * 32px + (root.join-options - 1) * 8px : 32px;
         surface: root.surface;
         card-border-color: root.card-border-color;
         heading: root.heading;
@@ -695,12 +704,12 @@ export component SyncSettingsPage inherits VerticalBox {
             spacing: 8px;
             Button { height: 32px; text: @tr("Enter code"); enabled: !SyncUi.busy; clicked => { root.open-join("code"); } }
             if SyncUi.can-scan : Button { height: 32px; text: @tr("Scan QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("scan"); } }
-            if !SyncUi.can-scan : Button { height: 32px; text: @tr("QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("qr"); } }
+            if SyncUi.qr-pairing && !SyncUi.can-scan : Button { height: 32px; text: @tr("QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("qr"); } }
             Button { height: 32px; text: @tr("Recovery code"); enabled: !SyncUi.busy; clicked => { root.open-join("recovery"); } }
         }
         if !root.compact : Button { text: @tr("Enter code"); enabled: !SyncUi.busy; clicked => { root.open-join("code"); } }
         if !root.compact && SyncUi.can-scan : Button { text: @tr("Scan QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("scan"); } }
-        if !root.compact && !SyncUi.can-scan : Button { text: @tr("QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("qr"); } }
+        if !root.compact && SyncUi.qr-pairing && !SyncUi.can-scan : Button { text: @tr("QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("qr"); } }
         if !root.compact : Button { text: @tr("Recovery code"); enabled: !SyncUi.busy; clicked => { root.open-join("recovery"); } }
     }
 
@@ -833,7 +842,7 @@ export component SyncSettingsPage inherits VerticalBox {
             enabled: !SyncUi.busy;
             clicked => {
                 SyncUi.dialog = "invite";
-                SyncUi.invite(false);
+                SyncUi.invite(!SyncUi.qr-pairing);
             }
         }
         devices-list := VerticalLayout {
@@ -863,7 +872,7 @@ export component SyncSettingsPage inherits VerticalBox {
             enabled: !SyncUi.busy;
             clicked => {
                 SyncUi.dialog = "invite";
-                SyncUi.invite(false);
+                SyncUi.invite(!SyncUi.qr-pairing);
             }
         }
     }
@@ -1257,7 +1266,7 @@ export component InviteDeviceDialog inherits SyncModal {
     in property <color> secondary-text;
     in property <color> fill;
     in property <color> accent;
-    in-out property <bool> with-code: false;
+    in-out property <bool> with-code: !SyncUi.qr-pairing;
     callback closed();
 
     private property <bool> ended: SyncUi.pairing-stage == "declined" || SyncUi.pairing-stage == "expired" || SyncUi.pairing-stage == "not-found" || SyncUi.pairing-stage == "failed";
@@ -1285,7 +1294,7 @@ export component InviteDeviceDialog inherits SyncModal {
         label: @tr("QR code for adding a device");
     }
     if SyncUi.pairing-stage == "code" && root.with-code : Text {
-        text: @tr("On your other device, open Flectar Mail, go to Settings → Sync → Connect this device → Enter code, and type:");
+        text: @tr("On your other device, open Flectar Mail and choose Enter code, on the welcome screen or in Settings → Sync → Connect this device. Then type:");
         color: root.body-text;
         font-size: TypeScale.secondary;
         wrap: word-wrap;
@@ -1345,7 +1354,7 @@ export component InviteDeviceDialog inherits SyncModal {
                 SyncUi.scan();
             }
         }
-        if SyncUi.pairing-stage == "code" : Button {
+        if SyncUi.pairing-stage == "code" && SyncUi.qr-pairing : Button {
             width: max(130px, self.content-width);
             height: 32px;
             text: root.with-code ? @tr("Show QR code") : @tr("Use a code");
@@ -1402,7 +1411,9 @@ export component JoinDeviceDialog inherits SyncModal {
     dismissed => { root.closed(); }
 
     if root.typing && root.method == "code" : Text {
-        text: @tr("On your other device, go to Settings → Sync → Add a device → Use a code. Enter the code it shows:");
+        text: SyncUi.qr-pairing
+            ? @tr("On your other device, go to Settings → Sync → Add a device → Use a code. Enter the code it shows:")
+            : @tr("On your other device, go to Settings → Sync → Add a device. Enter the code it shows:");
         color: root.body-text;
         font-size: TypeScale.secondary;
         wrap: word-wrap;

@@ -63,10 +63,11 @@ export struct AccountStatus {
 }
 
 // The mailboxes Flectar Mail names itself, in the interface's language: the
-// standard ones every account has, the two halves of a split inbox, and
-// snoozed and scheduled mail. Folders and labels have no role and keep the
-// names their accounts give them.
-export enum MailboxRole { none, inbox, starred, sent, archive, spam, trash, drafts, important, other, snoozed, scheduled }
+// standard ones every account has, the two halves of a split inbox, snoozed
+// and scheduled mail, and the automatic categories (marketing to pitch).
+// Folders and labels have no role and keep the names their accounts give
+// them.
+export enum MailboxRole { none, inbox, starred, sent, archive, spam, trash, drafts, important, other, snoozed, scheduled, marketing, news, social, pitch }
 
 // What the list or tab of a standard mailbox is called: the mailbox, after
 // the name of its account unless it shows every account's at once.
@@ -124,6 +125,10 @@ export struct MailLabelRow {
     applied: bool,
     is_auto: bool,
     is_global: bool,
+    // The automatic category this label still is, which the window names in
+    // its language; none for every other label, and for a category that has
+    // been given a name of its own.
+    role: MailboxRole,
     // Unread mail the label's list shows, as the sidebar badge shows it.
     count: string,
 }
@@ -185,7 +190,10 @@ export struct EmailRow {
     // Sent with high importance (#236), for a marker in the list.
     high_importance: bool,
     message_count: int,
+    // The names of the labels other than automatic categories, and the
+    // categories the labels include, which the window names in its language.
     label_summary: string,
+    label_categories: [MailboxRole],
     labels: [MailLabelRow],
     // Gmail labels are tags; other accounts file labels like folders.
     account_uses_labels: bool,
@@ -343,6 +351,9 @@ export struct AccountRow {
     // IMAP, POP3 and JMAP: how long to wait for the account's servers, in
     // seconds, as "30", "60", "120" or "300".
     server_timeout: string,
+    // IMAP: what downloads ahead of time, "headers", "messages" or
+    // "everything" (#253).
+    download: string,
     // Days a POP3 server keeps downloaded mail on its own; -1 when it
     // keeps it or hasn't said.
     server_keeps_mail_days: int,

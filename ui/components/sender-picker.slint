@@ -1,0 +1,228 @@
+import { ScrollView } from "std-widgets.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { LineEdit, ToolbarIconButton } from "controls.slint";
+
+// One sender address a picker shows.
+export struct SenderChoiceRow {
+    // The address's place among the account's, which choosing it gives back.
+    index: int,
+    label: string,
+}
+
+// Finding one of an account's many sender addresses by searching, as the
+// Move to picker finds folders (#252). Rust lists the matches as the search
+// changes; arrows move through them and only Return or a click chooses.
+export component SenderPicker inherits Rectangle {
+    in property <bool> compact: false;
+    in property <string> title;
+    in property <[SenderChoiceRow]> rows;
+    // How many addresses match in all, of which `rows` shows the first.
+    in property <int> matches;
+    in-out property <string> query;
+    callback search(string);
+    callback choose(int);
+    callback close();
+
+    private property <length> row-height: root.compact ? LayoutMetrics.touch-target : 34px;
+    private property <int> highlighted: -1;
+    private property <length> scroll-y: 0px;
+    private property <length> list-height: 0px;
+    // The card keeps the size it opens with, so the search field stays put
+    // while the list narrows.
+    private property <int> opened-rows: 0;
+    // Everything on the card but the rows.
+    private property <length> chrome-height: root.compact ? 160px : 148px;
+
+    background: #00000066;
+    forward-focus: search-field;
+    accessible-role: groupbox;
+    accessible-label: root.title;
+
+    function reset() {
+        root.scroll-y = 0px;
+        root.highlighted = root.rows.length > 0 ? 0 : -1;
+    }
+
+    function move-highlight(steps: int) {
+        if root.rows.length == 0 { return; }
+        root.highlighted = root.highlighted < 0 ? 0
+            : max(0, min(root.rows.length - 1, root.highlighted + steps));
+        let item-y = 4px + root.highlighted * root.row-height;
+        if item-y + root.scroll-y < 0px {
+            root.scroll-y = -item-y;
+        } else if item-y + root.row-height + root.scroll-y > root.list-height {
+            root.scroll-y = root.list-height - item-y - root.row-height;
+        }
+    }
+
+    function choose-highlighted() {
+        if root.highlighted < 0 || root.highlighted >= root.rows.length { return; }
+        root.choose(root.rows[root.highlighted].index);
+    }
+
+    changed rows => { root.reset(); }
+    init => {
+        root.opened-rows = root.rows.length;
+        root.reset();
+        search-field.focus();
+    }
+
+    // A click outside the card closes the picker.
+    TouchArea {
+        clicked => { root.close(); }
+    }
+
+    card := Rectangle {
+        width: root.compact ? root.width - 24px : min(460px, root.width - 32px);
+        height: min(root.height - (root.compact ? 48px : 64px),
+            root.chrome-height + max(4, min(root.opened-rows, 9)) * root.row-height);
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: AppTheme.border;
+        background: AppTheme.surface-raised;
+        drop-shadow-blur: 18px;
+        drop-shadow-offset-y: 5px;
+        drop-shadow-color: #0000002e;
+        clip: true;
+
+        // Swallows clicks so only the backdrop closes the picker.
+        TouchArea { }
+
+        FocusScope {
+            // Arrows, Return and Escape steer the list while the search
+            // field keeps every other key.
+            capture-key-pressed(event) => {
+                if event.text == Key.DownArrow {
+                    root.move-highlight(1);
+                    return accept;
+                }
+                if event.text == Key.UpArrow {
+                    root.move-highlight(-1);
+                    return accept;
+                }
+                if event.text == Key.PageDown {
+                    root.move-highlight(max(1, floor(root.list-height / root.row-height) - 1));
+                    return accept;
+                }
+                if event.text == Key.PageUp {
+                    root.move-highlight(-max(1, floor(root.list-height / root.row-height) - 1));
+                    return accept;
+                }
+                if event.text == Key.Return {
+                    root.choose-highlighted();
+                    return accept;
+                }
+                if event.text == Key.Escape {
+                    root.close();
+                    return accept;
+                }
+                reject
+            }
+
+            VerticalLayout {
+                padding: 12px;
+                padding-bottom: 10px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: root.title;
+                        color: AppTheme.title;
+                        font-size: TypeScale.heading;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    ToolbarIconButton {
+                        compact: root.compact;
+                        icon: @image-url("../icons/lucide/outline/x.svg");
+                        icon-color: AppTheme.secondary;
+                        hover-background: AppTheme.muted-control-bg;
+                        tooltip-text: @tr("Close");
+                        clicked => { root.close(); }
+                    }
+                }
+
+                search-field := LineEdit {
+                    height: root.compact ? LayoutMetrics.touch-target : 36px;
+                    text <=> root.query;
+                    placeholder-text: @tr("Search by name or address");
+                    input-label: @tr("Search by name or address");
+                    show-leading-icon: true;
+                    leading-icon: @image-url("../icons/lucide/outline/search.svg");
+                    leading-icon-color: AppTheme.muted;
+                    edited(value) => { root.search(value); }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+
+                    address-list := ScrollView {
+                        accessible-role: list;
+                        accessible-label: root.title;
+                        accessible-item-count: root.rows.length;
+                        content-y <=> root.scroll-y;
+                        content-height: max(self.visible-height, root.rows.length * root.row-height + 8px);
+                        horizontal-scrollbar-policy: always-off;
+                        changed visible-height => { root.list-height = self.visible-height; }
+                        init => { root.list-height = self.visible-height; }
+
+                        for row[index] in root.rows : Rectangle {
+                            x: 0px;
+                            y: 4px + index * root.row-height;
+                            width: address-list.visible-width;
+                            height: root.row-height;
+                            border-radius: 6px;
+                            background: index == root.highlighted ? AppTheme.control-bg : transparent;
+
+                            Text {
+                                x: 10px;
+                                width: parent.width - 20px;
+                                height: parent.height;
+                                text: row.label;
+                                color: AppTheme.heading;
+                                font-size: TypeScale.body;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                accessible-role: none;
+                            }
+                            TouchArea {
+                                accessible-role: button;
+                                accessible-label: row.label;
+                                accessible-item-index: index;
+                                accessible-action-default => { root.choose(row.index); }
+                                changed has-hover => {
+                                    if self.has-hover { root.highlighted = index; }
+                                }
+                                clicked => { root.choose(row.index); }
+                                mouse-cursor: pointer;
+                            }
+                        }
+                    }
+
+                    if root.rows.length == 0 : Text {
+                        width: parent.width;
+                        height: 64px;
+                        text: @tr("No matching addresses");
+                        color: AppTheme.muted;
+                        font-size: TypeScale.body;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.matches > root.rows.length : Text {
+                    text: @tr("Showing {} of {} addresses. Type more to narrow them down.", root.rows.length, root.matches);
+                    color: AppTheme.muted;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}

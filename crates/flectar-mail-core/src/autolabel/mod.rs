@@ -16,9 +16,27 @@ pub enum Category {
 }
 
 impl Category {
+    pub const ALL: [Category; 4] = [
+        Category::Marketing,
+        Category::News,
+        Category::Social,
+        Category::Pitch,
+    ];
+
+    /// The name the seed rows carry, which the interface shows in its own
+    /// language for as long as the label keeps it.
+    pub const fn default_name(self) -> &'static str {
+        match self {
+            Category::Marketing => "Marketing",
+            Category::News => "News",
+            Category::Social => "Social",
+            Category::Pitch => "Pitch",
+        }
+    }
+
     /// Stable keyword the seed rows carry; rows are resolved by keyword, not
     /// name, so users can rename the labels freely.
-    pub fn keyword(self) -> &'static str {
+    pub const fn keyword(self) -> &'static str {
         match self {
             Category::Marketing => "FlectarMailAutoMarketing",
             Category::News => "FlectarMailAutoNews",
