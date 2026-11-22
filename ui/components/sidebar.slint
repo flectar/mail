@@ -546,7 +546,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
-                        label: entry.label.name;
+                        label: MailboxWords.label-name(entry.label);
                         count: entry.label.count;
                         can-mark-all-read: entry.label.count != "" && entry.label.count != "0";
                         label-has-emoji: entry.label.name_has_emoji;
