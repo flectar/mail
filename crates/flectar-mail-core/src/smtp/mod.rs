@@ -57,21 +57,25 @@ struct Gate {
     /// from here the server may take it, and its reply may take as long as
     /// [`MESSAGE_REPLY_TIMEOUT`].
     ended: AtomicBool,
+    /// The account's server timeout, which stretches the idle wait (#252).
+    timeout: Duration,
 }
 
 impl Gate {
-    fn until(deadline: Option<Instant>) -> Arc<Self> {
+    fn until(deadline: Option<Instant>, timeout: Duration) -> Arc<Self> {
         Arc::new(Self {
             deadline,
+            timeout,
             ..Self::default()
         })
     }
 
     fn idle_timeout(&self) -> Duration {
+        let idle = net::timeouts::stretch(IDLE_TIMEOUT, self.timeout);
         if self.ended.load(Ordering::Acquire) {
-            MESSAGE_REPLY_TIMEOUT
+            MESSAGE_REPLY_TIMEOUT.max(idle)
         } else {
-            IDLE_TIMEOUT
+            idle
         }
     }
 }
@@ -133,7 +137,7 @@ impl SmtpStream {
         Self {
             inner,
             greeting,
-            idle: Box::pin(tokio::time::sleep(IDLE_TIMEOUT)),
+            idle: Box::pin(tokio::time::sleep(gate.idle_timeout())),
             gate,
         }
     }
@@ -467,16 +471,15 @@ async fn connect(
         Ok(connection)
     };
 
-    tokio::time::timeout(SMTP_TIMEOUT, open)
-        .await
-        .map_err(|_| {
-            CoreError::Smtp(format!(
-                "SMTP {}:{} connection timed out after {}s",
-                cfg.smtp_host,
-                cfg.smtp_port,
-                SMTP_TIMEOUT.as_secs()
-            ))
-        })?
+    let timeout = net::timeouts::stretch(SMTP_TIMEOUT, cfg.settings.connection.server_timeout());
+    tokio::time::timeout(timeout, open).await.map_err(|_| {
+        CoreError::Smtp(format!(
+            "SMTP {}:{} connection timed out after {}s",
+            cfg.smtp_host,
+            cfg.smtp_port,
+            timeout.as_secs()
+        ))
+    })?
 }
 
 /// Send a fully built RFC 5322 message.
@@ -512,7 +515,7 @@ pub async fn send_raw_before(
         Some(from),
         recipients,
         raw,
-        Gate::until(deadline),
+        Gate::until(deadline, cfg.settings.connection.server_timeout()),
     )
     .await
 }
@@ -527,7 +530,8 @@ pub async fn send_raw_from(
     recipients: &[String],
     raw: &[u8],
 ) -> Result<()> {
-    send_message(cfg, auth, from, recipients, raw, Gate::until(None)).await
+    let gate = Gate::until(None, cfg.settings.connection.server_timeout());
+    send_message(cfg, auth, from, recipients, raw, gate).await
 }
 
 async fn send_message(
@@ -704,7 +708,8 @@ async fn submit(
 
 /// Cheap connectivity/auth probe used by test_connection.
 pub async fn test_connection(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<()> {
-    let mut connection = connect(cfg, auth, Gate::until(None)).await?;
+    let gate = Gate::until(None, cfg.settings.connection.server_timeout());
+    let mut connection = connect(cfg, auth, gate).await?;
     connection
         .command(Noop)
         .await

@@ -6,13 +6,17 @@ pub(super) fn visible(node: &blitz_dom::Node) -> bool {
         !style.clone_display().is_none() && style.clone_visibility() == Visibility::Visible
     })
 }
-fn excluded(node: &blitz_dom::Node) -> bool {
+/// Elements that hold no text of the message.
+fn metadata(node: &blitz_dom::Node) -> bool {
     node.element_data().is_some_and(|e| {
         matches!(
             e.name.local.as_str(),
             "head" | "style" | "script" | "title" | "template"
         )
-    }) || !visible(node)
+    })
+}
+fn excluded(node: &blitz_dom::Node) -> bool {
+    metadata(node) || !visible(node)
 }
 fn boundary(output: &mut String, count: usize) {
     while output.ends_with(' ') || output.ends_with('\t') {
@@ -25,17 +29,27 @@ fn boundary(output: &mut String, count: usize) {
         }
     }
 }
+/// The message's text. Plain text has no summary to open a closed section
+/// with, so it shows what the section holds, as mail clients without
+/// collapsible sections do.
 pub(super) fn plain_text(document: &HtmlDocument) -> String {
-    subtree_text(document, document.root_node().id)
+    text_under(document, document.root_node().id, true)
 }
+/// The text under `root` that the reader shows.
 pub(super) fn subtree_text(document: &HtmlDocument, root: NodeId) -> String {
+    text_under(document, root, false)
+}
+fn text_under(document: &HtmlDocument, root: NodeId, closed_sections: bool) -> String {
     let mut output = String::new();
     let mut stack = vec![(root, false, false)];
     while let Some((id, end, pre)) = stack.pop() {
         let Some(node) = document.get_node(id) else {
             continue;
         };
-        if excluded(node) {
+        if metadata(node)
+            || (!visible(node)
+                && !(closed_sections && details::hidden_by_closed_section(document, id)))
+        {
             continue;
         }
         let tag = node
@@ -114,15 +128,33 @@ impl GpuEmailRenderer {
         let Some(email) = &self.email else {
             return vec![];
         };
+        let sections = details::sections(&email.document);
         let mut items = Vec::new();
         email.document.visit(|id, node| {
+            let chain = email.document.node_chain(id);
             if !visible(node)
-                || email
-                    .document
-                    .node_chain(id)
+                || chain
                     .iter()
                     .any(|id| email.document.get_node(*id).is_some_and(excluded))
+                // A summary is one button, so nothing inside it is listed apart.
+                || chain[1..]
+                    .iter()
+                    .any(|&id| details::summarized_section(&email.document, id).is_some())
             {
+                return;
+            }
+            if let Some((section, open)) = details::summarized_section(&email.document, id) {
+                items.push(crate::ReaderItem {
+                    name: subtree_text(&email.document, id).into(),
+                    kind: "section".into(),
+                    section: sections
+                        .iter()
+                        .position(|&listed| listed == section)
+                        .unwrap_or_default() as i32,
+                    open,
+                    y: node.absolute_position(0.0, 0.0).y * self.zoom,
+                    ..Default::default()
+                });
                 return;
             }
             let Some(e) = node.element_data() else {
@@ -181,15 +213,18 @@ impl GpuEmailRenderer {
                 })
                 .into(),
                 y: node.absolute_position(0.0, 0.0).y * self.zoom,
+                ..Default::default()
             });
         });
-        if !email.plain_text.is_empty() {
+        let shown = subtree_text(&email.document, email.document.root_node().id);
+        if !shown.is_empty() {
             // Mixed inline/block containers can leave visible text in an
             // anonymous layout box with no semantic element of its own. A
             // reader projection built only from retained element layouts
             // would silently omit that text. Verify that the non-action rows
-            // partition the complete document text; if they do not, use the
-            // authoritative plain-text projection and retain link actions.
+            // partition the complete shown text; if they do not, use the
+            // authoritative text projection and retain link and section
+            // actions.
             let projected = items
                 .iter()
                 .filter(|item| item.url.is_empty())
@@ -197,12 +232,12 @@ impl GpuEmailRenderer {
                 .collect::<Vec<_>>()
                 .join(" ");
             let normalized = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
-            if normalized(&projected) != normalized(&email.plain_text) {
-                items.retain(|item| !item.url.is_empty());
+            if normalized(&projected) != normalized(&shown) {
+                items.retain(|item| !item.url.is_empty() || item.kind == "section");
                 items.insert(
                     0,
                     crate::ReaderItem {
-                        name: email.plain_text.clone().into(),
+                        name: shown.into(),
                         kind: "text".into(),
                         ..Default::default()
                     },
@@ -222,8 +257,11 @@ impl GpuEmailRenderer {
         let hit = email.document.hit(x / self.zoom, y / self.zoom)?;
         anchor_url_for_node(&email.document, hit.node_id)
     }
-    pub fn fragment_y(&self, fragment: &str) -> Option<f32> {
-        let email = self.email.as_ref()?;
+    /// Where a link to `fragment` within the message scrolls to. Like a
+    /// browser, it targets the first element with that id, or else the first
+    /// `<a>` with that name, and opens the closed sections around it.
+    pub fn fragment_y(&mut self, fragment: &str) -> Option<f32> {
+        let email = self.email.as_mut()?;
         let value = url::Url::parse(&format!("https://email.invalid/{fragment}")).ok()?;
         let encoded = value.fragment()?;
         let fragment = percent_encoding::percent_decode_str(encoded)
@@ -232,15 +270,31 @@ impl GpuEmailRenderer {
         if fragment.is_empty() {
             return Some(0.0);
         }
-        let mut found = None;
-        email.document.visit(|_, node| {
-            if node.data.attr(local_name!("id")) == Some(fragment.as_ref())
-                || node.data.attr(local_name!("name")) == Some(fragment.as_ref())
+        let (mut by_id, mut by_name) = (None, None);
+        email.document.visit(|id, node| {
+            if by_id.is_none() && node.data.attr(local_name!("id")) == Some(fragment.as_ref()) {
+                by_id = Some(id);
+            }
+            if by_name.is_none()
+                && node.data.is_element_with_tag_name(&local_name!("a"))
+                && node.data.attr(local_name!("name")) == Some(fragment.as_ref())
             {
-                found = Some(node.absolute_position(0.0, 0.0).y * self.zoom);
+                by_name = Some(id);
             }
         });
-        found
+        let target = by_id.or(by_name)?;
+        if details::reveal(&mut email.document, target) {
+            self.relayout_now();
+        }
+        let email = self.email.as_ref()?;
+        Some(
+            email
+                .document
+                .get_node(target)?
+                .absolute_position(0.0, 0.0)
+                .y
+                * self.zoom,
+        )
     }
 }
 

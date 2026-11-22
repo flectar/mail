@@ -51,6 +51,7 @@ pub(crate) fn server(config: &AccountConfig) -> Server<'_> {
             ConnectionSecurity::Tls | ConnectionSecurity::Starttls => ConnectionSecurity::Starttls,
         },
         trusted_certificate_pem: &connection.trusted_certificate_pem,
+        timeout: connection.server_timeout(),
     }
 }
 

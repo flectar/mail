@@ -4497,8 +4497,10 @@ pub(super) fn spawn(
     let actor_ctx = ctx.clone();
     let actor_config = config.clone();
     vec![
-        tokio::spawn(async move { run_actor(actor_ctx, actor_config, rx, settings_rx).await }),
-        tokio::spawn(async move { run_reader(ctx, config, body_rx).await }),
+        crate::net::timeouts::spawn(async move {
+            run_actor(actor_ctx, actor_config, rx, settings_rx).await
+        }),
+        crate::net::timeouts::spawn(async move { run_reader(ctx, config, body_rx).await }),
     ]
 }
 
