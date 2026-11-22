@@ -34,6 +34,7 @@ import { Shortcuts } from "../shortcuts.slint";
 import { KeyboardKeys } from "../components/kbd.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { AccountProfilePicker, ProfileColorChoice, ProfileMemberChoice, ProfilePalette } from "../components/profile-controls.slint";
+import { FolderRoles, FolderRolesDialog } from "../folder-roles.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
 import { InterfaceText, TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
@@ -633,6 +634,11 @@ export component SettingsDialog inherits Rectangle {
     // The picker shows the account's live row, which changes as choices apply.
     private property <int> account-profile-picker-index: -1;
     private property <AccountRow> account-profile-picker-account: root.connected_accounts[root.account-profile-picker-index];
+    // The account whose special folders are open to choose, as the profile
+    // picker keeps its account (#252).
+    private property <int> folder-roles-id: -1;
+    private property <int> folder-roles-index: -1;
+    private property <AccountRow> folder-roles-account: root.connected_accounts[root.folder-roles-index];
     private property <string> profile-editor-error: "";
     callback save_theme(string);
     callback save_theme_preset(string);
@@ -1235,6 +1241,17 @@ export component SettingsDialog inherits Rectangle {
         root.account-profile-picker-open = false;
         root.account-profile-picker-id = -1;
         root.account-profile-picker-index = -1;
+    }
+
+    function open-folder-roles(account: AccountRow, index: int) {
+        root.folder-roles-id = account.id;
+        root.folder-roles-index = index;
+        FolderRoles.load(account.id);
+    }
+
+    function close-folder-roles() {
+        root.folder-roles-id = -1;
+        root.folder-roles-index = -1;
     }
 
     function add-caldav(account: AccountRow) {
@@ -2885,7 +2902,7 @@ export component SettingsDialog inherits Rectangle {
                                 private property <length> sent-copy-end: self.has-sent-copy ? sent-copy-row.y + sent-copy-row.height - self.select-end : self.timeout-end;
                                 // Where the settings of the account's kind end.
                                 private property <length> kind-end: self.has-subscriptions
-                                    ? subscribed-row.y + subscribed-row.height - self.switch-end
+                                    ? folders-row.y + folders-row.height - self.plain-end
                                     : self.has-server-copies
                                         ? server-copies-note.y + server-copies-note.height
                                         : self.timeout-end;
@@ -3146,6 +3163,40 @@ export component SettingsDialog inherits Rectangle {
                                             title-color: root.body-text;
                                             description-color: root.faint-text;
                                             toggled(checked) => { root.save_account_subscribed_folders_only(account.id, checked); }
+                                        }
+                                        // Which folders Sent, Drafts and the rest are (#252).
+                                        folders-row := Rectangle {
+                                            visible: drop-target.has-subscriptions;
+                                            x: drop-target.content-x;
+                                            y: subscribed-row.y + subscribed-row.height - drop-target.switch-end + drop-target.gap - drop-target.plain-lead;
+                                            width: parent.width - self.x - 16px;
+                                            height: 12px + folders-label.height + folders-description.height;
+                                            folders-label := Text {
+                                                x: 0px; y: drop-target.plain-top;
+                                                width: parent.width - folders-button.width - 16px; height: max(20px, self.preferred-height);
+                                                text: @tr("Special folders");
+                                                color: root.body-text;
+                                                font-size: TypeScale.body;
+                                                font-weight: 600;
+                                                vertical-alignment: center;
+                                            }
+                                            folders-description := Text {
+                                                x: 0px; y: folders-label.y + folders-label.height + 1px;
+                                                width: folders-label.width; height: max(18px, self.preferred-height);
+                                                text: @tr("Sent, Drafts, Trash, Spam and Archive");
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                wrap: word-wrap;
+                                                vertical-alignment: center;
+                                            }
+                                            folders-button := Button {
+                                                x: parent.width - self.width;
+                                                y: drop-target.plain-control-y;
+                                                width: 136px;
+                                                height: 34px;
+                                                text: @tr("Choose…");
+                                                clicked => { root.open-folder-roles(account, account-index); }
+                                            }
                                         }
                                         server-copies-row := SettingsSelectRow {
                                             visible: drop-target.has-server-copies;
@@ -4697,6 +4748,27 @@ export component SettingsDialog inherits Rectangle {
                     root.open-new-profile(account-id);
                 }
                 close => { root.close-account-profile-picker(); }
+            }
+        }
+
+        if root.folder-roles-id >= 0
+            && root.folder-roles-account.id == root.folder-roles-id : Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: #00000088;
+            z: 950;
+            accessible-role: groupbox;
+            accessible-label: @tr("Special folders of {}", root.folder-roles-account.email);
+
+            TouchArea { clicked => { root.close-folder-roles(); } }
+            FolderRolesDialog {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(480px, parent.width - 24px);
+                height: min(self.content-height, parent.height - 24px);
+                compact: root.compact;
+                account: root.folder-roles-account;
+                close => { root.close-folder-roles(); }
             }
         }
 

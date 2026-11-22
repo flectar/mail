@@ -6,6 +6,7 @@ Usage: python scripts/test-clean-exit.py target/package/windows/flectar-mail.exe
 Starts the app with the current user's profile (a fresh one on CI), waits
 until its local data is ready, posts WM_CLOSE to its window the way the title
 bar's close button does, and fails unless the process then exits with code 0.
+Before that, each of its windows must lie inside the work area of its monitor.
 Only a close from the window runs the full shutdown: ending the event loop
 while the window is still shown keeps the window's state alive. A profile
 that this run created is removed afterwards, so later checks, such as the
@@ -134,6 +135,53 @@ def close_windows(pid):
     return len(windows)
 
 
+def windows_outside_work_area(pid):
+    """The app's windows that reach beyond the work area of their monitor, as
+    (window, work area) rectangles in physical pixels.
+
+    Windows places a new window without checking that it fits, so a window
+    larger than the screen would open partly behind the taskbar or past the
+    screen edge (#433). The runners' 1024 by 768 screen is smaller than the
+    main window's preferred size.
+    """
+    from ctypes import wintypes
+
+    class MonitorInfo(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", wintypes.RECT),
+            ("rcWork", wintypes.RECT),
+            ("dwFlags", wintypes.DWORD),
+        ]
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.SetThreadDpiAwarenessContext.argtypes = [wintypes.HANDLE]
+    user32.SetThreadDpiAwarenessContext.restype = wintypes.HANDLE
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.GetWindowRect.restype = wintypes.BOOL
+    user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+    user32.MonitorFromWindow.restype = wintypes.HMONITOR
+    user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MonitorInfo)]
+    user32.GetMonitorInfoW.restype = wintypes.BOOL
+    # Physical pixels, as the app sees them: per-monitor aware v2.
+    user32.SetThreadDpiAwarenessContext(wintypes.HANDLE(-4))
+    outside = []
+    for hwnd in app_windows(pid):
+        window = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(window)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        # MONITOR_DEFAULTTONEAREST
+        monitor = MonitorInfo(cbSize=ctypes.sizeof(MonitorInfo))
+        if not user32.GetMonitorInfoW(user32.MonitorFromWindow(hwnd, 2), ctypes.byref(monitor)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        work = monitor.rcWork
+        if (window.left < work.left or window.top < work.top
+                or window.right > work.right or window.bottom > work.bottom):
+            rectangles = [(r.left, r.top, r.right, r.bottom) for r in (window, work)]
+            outside.append(tuple(rectangles))
+    return outside
+
+
 def profile_dirs():
     """The desktop profile: data under %APPDATA%, caches under %LOCALAPPDATA%."""
     return [Path(os.environ[name]) / "flectar-mail" for name in ("APPDATA", "LOCALAPPDATA")]
@@ -224,6 +272,8 @@ def main(binary, gdi=False):
             drain(lines, output, 5)
             fail(f"the app exited with {exit_code(process.returncode)} before it was closed", output)
         private, working_set = memory(process.pid)
+        for window, work in windows_outside_work_area(process.pid):
+            fail(f"a window at {window} reaches beyond its monitor's work area {work}", output)
         if close_windows(process.pid) == 0:
             fail("the app showed no window to close", output)
         closed = time.monotonic()

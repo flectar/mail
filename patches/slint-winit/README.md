@@ -30,13 +30,32 @@ ms. Frames slipped against the display by about 0.67 ms each, so every 25th one
 was shown twice or not at all, and the blits kept passing through DWM's
 compositions.
 
+## Windows that fit the screen
+
+winit creates a window at the default position with the default size and only
+then gives it the size Slint asks for. Windows cascades that position off the
+top left of a monitor for a window of the default size, so a window sized for a
+larger screen opened partly below the screen edge or behind the taskbar
+(Mail #433). The main window asks for 1320 by 800 logical pixels. That is
+taller than a 1366 by 768 screen, and at 125% scale on a 1920 by 1080 screen it
+leaves no room for the offset Windows places it at. Its client area also came
+out taller than asked by the caption, because winit adds a standard frame to
+the size and Flectar Mail's window draws its own title bar. The bottom of the
+window, with the last rows of the mail list, stayed out of reach until the
+window was moved. In alpha.7 that part also stayed white once the window was
+moved onto the screen, which Slint 1.19 and the DXGI presenter fixed.
+Microsoft's guidance for window placement is to move such a window until all
+of it is visible on its monitor, and to shrink a resizable window that is
+larger than the monitor until it fits. Chromium sizes its first window to the
+work area in the same way.
+
 ## Sources and adaptation
 
 `crates/i-slint-backend-winit` is the published 1.19.0 archive, revision
-`e436f546f71481d786cbc2a74316b1be1ef678c1`, plus four patches.
+`e436f546f71481d786cbc2a74316b1be1ef678c1`, plus five patches.
 `0001-dependency-scanner.patch` lists five dependencies that the release
 declares but does not import, so `cargo machete` can scan the crate. The other
-three are ours.
+four are ours.
 
 `0002-wayland-file-drops.patch` gives the clipboard a drop handler that sends
 each drag to the event loop, which finds the window by its Wayland surface and
@@ -63,6 +82,22 @@ fails later gets a new swap chain instead. The swap chain's two buffers add two
 window-sized surfaces, and the staging texture takes the place of softbuffer's
 bitmap. The Windows packaging job runs `scripts/test-clean-exit.py` with both
 presenters and prints the app's memory for each.
+
+`0005-windows-fit-new-windows-into-the-work-area.patch` checks a window on
+Windows before its first frame, after Slint gave it its preferred size. When
+the window doesn't fit in the work area of the monitor that Windows put it on,
+it moves inside and shrinks as far as needed. The patch sets the outer frame
+itself, from the borders the window actually has, so the client area gets the
+size Slint asked for. Flectar Mail's window keeps only the side and bottom
+borders of the standard frame. A minimized window is left alone. Slint shows a
+hidden window again where the user left it, unless it is on no monitor at all,
+for example after the monitor it was on was disconnected. Flectar Mail destroys
+its window when it goes to the tray (`src/desktop.rs`), so the window is
+created again at its last place and checked like a new one. It comes back fully
+on screen after a resolution or monitor change, as Microsoft's guidance for
+redisplayed windows asks. The Windows packaging job's
+`scripts/test-clean-exit.py` fails when a window of the app doesn't fit the
+work area of its monitor. The runners' screen is 1024 by 768 pixels.
 
 `Cargo.toml.orig` is kept unchanged for provenance. The standalone lockfile is
 omitted, and the application lockfiles resolve the patched manifest.

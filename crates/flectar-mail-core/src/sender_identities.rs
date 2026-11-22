@@ -14,8 +14,8 @@
 use crate::db::repo;
 use crate::error::{CoreError, Result};
 use crate::models::{
-    AccountConfig, Address, MailProtocol, Provider, SenderDeliveryStatus, SenderIdentity,
-    SenderIdentitySource, now_ms,
+    AccountConfig, Address, AutomaticCopies, MailProtocol, Provider, SenderDeliveryStatus,
+    SenderIdentity, SenderIdentitySource, now_ms,
 };
 use crate::{Core, http_body};
 use reqwest::StatusCode;
@@ -220,6 +220,7 @@ impl Core {
                         identity.delivery_status
                     }),
                     delivery_error: existing.and_then(|identity| identity.delivery_error.clone()),
+                    bcc: Vec::new(),
                 };
                 repo::sender_identities::save_manual(conn, &identity)?;
                 Ok(identity)
@@ -227,9 +228,55 @@ impl Core {
             .await
     }
 
+    /// Choose the copies the messages written from an account start with,
+    /// or with `identity` the ones those written from that sender identity
+    /// start with too (#252). Each address counts once, and one in Cc gets
+    /// no copy in Bcc too.
+    pub async fn set_automatic_copies(
+        &self,
+        account_id: i64,
+        identity: Option<String>,
+        copies: AutomaticCopies,
+    ) -> Result<AutomaticCopies> {
+        let copies = checked_copies(copies)?;
+        self.db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut account = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                match identity {
+                    None => account.settings.copies = copies.clone(),
+                    Some(email) => {
+                        let key = email.trim().to_lowercase();
+                        repo::sender_identities::ensure_primary(&tx, &account)?;
+                        let known = repo::sender_identities::list(&tx, account_id)?.iter().any(
+                            |identity| {
+                                !identity.is_wildcard() && identity.email.to_lowercase() == key
+                            },
+                        );
+                        if !known {
+                            return Err(CoreError::Other(format!(
+                                "{} isn't a sender identity of this account",
+                                email.trim()
+                            )));
+                        }
+                        if copies.is_empty() {
+                            account.settings.identity_copies.remove(&key);
+                        } else {
+                            account.settings.identity_copies.insert(key, copies.clone());
+                        }
+                    }
+                }
+                repo::accounts::set_settings(&tx, account_id, &account.settings)?;
+                tx.commit()?;
+                Ok(copies)
+            })
+            .await
+    }
+
     /// Remove a manually added address. Provider identities can only change
     /// at the provider. A matching Flectar default falls back to the
-    /// provider default.
+    /// provider default, and the address's own copies go with it.
     pub async fn remove_sender_identity(&self, account_id: i64, email: String) -> Result<()> {
         let email = email.trim().to_owned();
         self.db
@@ -241,6 +288,11 @@ impl Core {
                         "{email} is managed by the provider and cannot be removed here"
                     )));
                 }
+                let mut changed = account
+                    .settings
+                    .identity_copies
+                    .remove(&email.to_lowercase())
+                    .is_some();
                 if account
                     .settings
                     .default_sender_email
@@ -248,6 +300,9 @@ impl Core {
                     .is_some_and(|default| default.eq_ignore_ascii_case(&email))
                 {
                     account.settings.default_sender_email = None;
+                    changed = true;
+                }
+                if changed {
                     repo::accounts::set_settings(conn, account_id, &account.settings)?;
                 }
                 Ok(())
@@ -338,6 +393,7 @@ fn primary_identity(account: &AccountConfig) -> SenderIdentity {
         source: SenderIdentitySource::Provider,
         delivery_status: SenderDeliveryStatus::Unknown,
         delivery_error: None,
+        bcc: Vec::new(),
     }
 }
 
@@ -415,6 +471,12 @@ pub(crate) async fn jmap_sender_identities(
                 .reply_to()
                 .and_then(|addresses| addresses.first())
                 .map(|address| address.email()),
+            bcc: identity
+                .bcc()
+                .unwrap_or_default()
+                .iter()
+                .map(|address| (address.name(), address.email()))
+                .collect(),
         }),
     )
 }
@@ -423,6 +485,30 @@ struct JmapIdentity<'a> {
     name: Option<&'a str>,
     email: Option<&'a str>,
     reply_to: Option<&'a str>,
+    /// Names and addresses of the identity's Bcc.
+    bcc: Vec<(Option<&'a str>, &'a str)>,
+}
+
+/// The usable addresses of a list of copies, each once and at most
+/// [`AutomaticCopies::MAX_ADDRESSES`]: real addresses, not `*@domain` ones,
+/// with names cleaned as identities' are.
+pub(crate) fn copy_addresses<'a>(
+    addresses: impl IntoIterator<Item = (Option<&'a str>, &'a str)>,
+) -> Vec<Address> {
+    let mut seen = HashSet::new();
+    addresses
+        .into_iter()
+        .filter_map(|(name, email)| {
+            let email = email.trim();
+            (valid_email(email) && !email.starts_with("*@") && seen.insert(email.to_lowercase()))
+                .then(|| Address {
+                    name: clean_optional(name.map(str::to_owned))
+                        .map(|name| name.chars().take(MAX_DISPLAY_NAME_CHARS).collect()),
+                    email: email.to_owned(),
+                })
+        })
+        .take(AutomaticCopies::MAX_ADDRESSES)
+        .collect()
 }
 
 /// Project RFC 8621 Identity objects. JMAP permits several identities with
@@ -472,6 +558,7 @@ fn parse_jmap_identities<'a>(
             source: SenderIdentitySource::Provider,
             delivery_status: SenderDeliveryStatus::Unknown,
             delivery_error: None,
+            bcc: copy_addresses(identity.bcc),
         });
     }
     if !parsed.iter().any(|identity| identity.is_primary) {
@@ -620,6 +707,7 @@ fn parse_gmail_identities(
             source: SenderIdentitySource::Provider,
             delivery_status: SenderDeliveryStatus::Unknown,
             delivery_error: None,
+            bcc: Vec::new(),
         });
     }
     let primary = identities
@@ -651,6 +739,33 @@ pub(crate) fn parse_gmail_identities_value(
     let response: GmailSendAsResponse = serde_json::from_value(value)
         .map_err(|error| CoreError::Network(format!("invalid Gmail SendAs JSON: {error}")))?;
     parse_gmail_identities(account, response.send_as)
+}
+
+/// `copies` as they're kept: real addresses with clean names, each once,
+/// and no more than a list takes.
+fn checked_copies(copies: AutomaticCopies) -> Result<AutomaticCopies> {
+    for address in copies.cc.iter().chain(&copies.bcc) {
+        let email = address.email.trim();
+        if !valid_email(email) || email.starts_with("*@") {
+            return Err(CoreError::Other(format!("{email} isn't an email address")));
+        }
+    }
+    let clean = |list: &[Address]| {
+        copy_addresses(
+            list.iter()
+                .map(|address| (address.name.as_deref(), address.email.as_str())),
+        )
+    };
+    if copies.cc.len().max(copies.bcc.len()) > AutomaticCopies::MAX_ADDRESSES {
+        return Err(CoreError::Other(format!(
+            "Cc and Bcc take at most {} addresses each",
+            AutomaticCopies::MAX_ADDRESSES
+        )));
+    }
+    Ok(AutomaticCopies::default().and(&AutomaticCopies {
+        cc: clean(&copies.cc),
+        bcc: clean(&copies.bcc),
+    }))
 }
 
 fn clean_optional(value: Option<String>) -> Option<String> {
@@ -775,6 +890,7 @@ mod tests {
             source: SenderIdentitySource::Manual,
             delivery_status: SenderDeliveryStatus::Unknown,
             delivery_error: None,
+            bcc: Vec::new(),
         }
     }
 
@@ -783,6 +899,130 @@ mod tests {
             name: None,
             email: email.into(),
         }
+    }
+
+    fn copy(email: &str) -> Address {
+        Address {
+            name: None,
+            email: email.into(),
+        }
+    }
+
+    /// The account's copies and each sender identity's own are kept, each
+    /// real address once, and an identity's go when it's removed (#252).
+    #[tokio::test]
+    async fn accounts_and_identities_keep_their_automatic_copies() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(crate::Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                crate::db::testutil::seed_account(conn);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        core.save_sender_identity(1, "Sales@Example.test".into(), None, None)
+            .await
+            .unwrap();
+        let settings = |core: &Core| {
+            let core = core.clone();
+            async move {
+                core.list_account_configs()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|config| config.id == 1)
+                    .unwrap()
+                    .settings
+            }
+        };
+
+        let saved = core
+            .set_automatic_copies(
+                1,
+                None,
+                AutomaticCopies {
+                    cc: vec![copy(" boss@example.test "), copy("BOSS@example.test")],
+                    bcc: vec![copy("boss@example.test"), copy("archive@example.test")],
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            saved,
+            AutomaticCopies {
+                cc: vec![copy("boss@example.test")],
+                bcc: vec![copy("archive@example.test")],
+            }
+        );
+        assert_eq!(settings(&core).await.copies, saved);
+
+        let own = AutomaticCopies {
+            cc: Vec::new(),
+            bcc: vec![copy("ledger@example.test")],
+        };
+        core.set_automatic_copies(1, Some("sales@example.test".into()), own.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            settings(&core)
+                .await
+                .identity_copies
+                .get("sales@example.test"),
+            Some(&own)
+        );
+
+        // Addresses that aren't real, too many, and addresses that aren't
+        // the account's identities are refused.
+        for (identity, copies) in [
+            (
+                None,
+                AutomaticCopies {
+                    cc: vec![copy("not an address")],
+                    bcc: Vec::new(),
+                },
+            ),
+            (
+                None,
+                AutomaticCopies {
+                    cc: Vec::new(),
+                    bcc: vec![copy("*@example.test")],
+                },
+            ),
+            (
+                None,
+                AutomaticCopies {
+                    cc: (0..=AutomaticCopies::MAX_ADDRESSES)
+                        .map(|n| copy(&format!("person{n}@example.test")))
+                        .collect(),
+                    bcc: Vec::new(),
+                },
+            ),
+            (Some("stranger@example.test".to_owned()), own.clone()),
+        ] {
+            assert!(
+                core.set_automatic_copies(1, identity, copies)
+                    .await
+                    .is_err()
+            );
+        }
+        assert_eq!(settings(&core).await.copies, saved);
+
+        // Removing the identity removes its copies.
+        core.remove_sender_identity(1, "sales@example.test".into())
+            .await
+            .unwrap();
+        assert!(settings(&core).await.identity_copies.is_empty());
+        // So does choosing none for one.
+        core.set_automatic_copies(1, Some("me@test.dev".into()), own)
+            .await
+            .unwrap();
+        core.set_automatic_copies(1, Some("me@test.dev".into()), AutomaticCopies::default())
+            .await
+            .unwrap();
+        assert!(settings(&core).await.identity_copies.is_empty());
     }
 
     #[test]
@@ -794,16 +1034,24 @@ mod tests {
                     name: Some(" Sales "),
                     email: Some("sales@example.com"),
                     reply_to: Some("desk@example.com"),
+                    bcc: vec![
+                        (Some(" Archive "), "archive@example.com"),
+                        (None, "ARCHIVE@example.com"),
+                        (None, "*@example.com"),
+                        (None, "not an address"),
+                    ],
                 },
                 JmapIdentity {
                     name: Some("Sales (again)"),
                     email: Some("SALES@example.com"),
                     reply_to: None,
+                    bcc: Vec::new(),
                 },
                 JmapIdentity {
                     name: None,
                     email: Some("*@team.example"),
                     reply_to: None,
+                    bcc: Vec::new(),
                 },
             ],
         )
@@ -813,6 +1061,14 @@ mod tests {
         assert_eq!(
             identities[0].reply_to_email.as_deref(),
             Some("desk@example.com")
+        );
+        // The provider's Bcc, each real address once (RFC 8621 section 6).
+        assert_eq!(
+            identities[0].bcc,
+            [Address {
+                name: Some("Archive".into()),
+                email: "archive@example.com".into(),
+            }]
         );
         assert!(identities[1].is_wildcard());
         assert!(!identities[1].is_selectable());
@@ -827,6 +1083,7 @@ mod tests {
                     name: None,
                     email: Some("not an address"),
                     reply_to: None,
+                    bcc: Vec::new(),
                 }],
             )
             .is_err()
