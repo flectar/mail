@@ -1187,6 +1187,32 @@ fn tall_images_keep_their_detail_within_the_pixel_budget() {
     assert_eq!((decoded.pixel_width, decoded.pixel_height), (141, 70));
 }
 
+fn paint(doc: &mut HtmlDocument) -> Vec<u8> {
+    render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    )
+}
+
+/// The bounding columns and rows of the pixels that pass `test`.
+fn bounds_where(
+    pixels: &[u8],
+    test: impl Fn(&[u8; 4]) -> bool,
+) -> Option<(usize, usize, usize, usize)> {
+    let mut bounds: Option<(usize, usize, usize, usize)> = None;
+    for (index, pixel) in pixels.as_chunks::<4>().0.iter().enumerate() {
+        if test(pixel) {
+            let (x, y) = (index % 400, index / 400);
+            bounds = Some(match bounds {
+                Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
+                None => (x, y, x, y),
+            });
+        }
+    }
+    bounds
+}
+
 #[test]
 fn a_cell_height_is_the_minimum_of_its_row() {
     // CSS 2.1 §17.5.3: a row is as tall as its cells' heights and contents, so
@@ -1239,4 +1265,136 @@ fn auto_columns_share_width_in_proportion_to_their_range() {
     ));
     close(node(&doc, "#a").final_layout().size.width, 70.0);
     close(node(&doc, "#b").final_layout().size.width, 80.0);
+}
+
+#[test]
+fn inline_padding_and_margins_take_room_and_paint() {
+    // The span's margins and padding take room in its line (CSS 2.1 §10.3.1)
+    // and its background covers its padding box: 5px of margin, then 10px of
+    // padding each side of a 20px box, so the next box starts at 50px.
+    let mut doc = document(
+        "<p style='margin:0;font-size:0'><span style='background:rgb(255,0,0);padding:4px 10px;margin:0 5px'>
+         <span style='display:inline-block;width:20px;height:10px;background:rgb(0,0,255)'></span></span><span
+         style='display:inline-block;width:10px;height:10px;background:rgb(0,255,0)'></span></p>",
+    );
+    let pixels = paint(&mut doc);
+    let red =
+        bounds_where(&pixels, |pixel| *pixel == [255, 0, 0, 255]).expect("background painted");
+    assert_eq!((red.0, red.2), (5, 44), "{red:?}");
+    let blue = bounds_where(&pixels, |pixel| *pixel == [0, 0, 255, 255]).unwrap();
+    assert_eq!((blue.0, blue.2), (15, 34), "{blue:?}");
+    let green = bounds_where(&pixels, |pixel| *pixel == [0, 255, 0, 255]).unwrap();
+    assert_eq!(green.0, 50, "{green:?}");
+}
+
+#[test]
+fn wrapped_inline_boxes_paint_their_edges_once() {
+    // Sliced at its line breaks, a wrapped inline box has its left border on its
+    // first line only and its right border on its last.
+    let mut doc = document(
+        "<div style='width:30px;font:10px/30px sans-serif'><span style='border:solid rgb(255,0,0);border-width:0 4px;color:transparent'>aaaa aaaa aaaa</span></div>",
+    );
+    let pixels = paint(&mut doc);
+    let red_in_row = |y: usize| {
+        (0..400)
+            .filter(|x| pixels[(y * 400 + x) * 4..(y * 400 + x) * 4 + 4] == [255, 0, 0, 255])
+            .count()
+    };
+    let lines: Vec<usize> = [15, 45, 75].into_iter().map(red_in_row).collect();
+    // Four border columns on the first and last lines, none on the middle one.
+    assert_eq!(lines, [4, 0, 4], "{lines:?}");
+}
+
+#[test]
+fn inline_opacity_groups_text_and_boxes() {
+    // An inline element's opacity applies to its text and to the boxes in it,
+    // and at zero hides them, as for hidden preheader text.
+    let mut doc = document(
+        "<p style='margin:0;font:20px/24px sans-serif;color:rgb(255,0,0)'><span style='opacity:0'>HIDDEN</span></p>
+         <p style='margin:0'><span style='opacity:0.5'><span style='display:inline-block;width:10px;height:10px;background:rgb(0,0,255)'></span></span></p>",
+    );
+    let pixels = paint(&mut doc);
+    assert!(bounds_where(&pixels, |pixel| pixel[0] > 0 && pixel[3] > 0).is_none());
+    let (x, y, _, _) = bounds_where(&pixels, |pixel| pixel[2] > 0).expect("box painted");
+    let alpha = pixels[(y * 400 + x) * 4 + 3];
+    assert!((120..=135).contains(&alpha), "alpha {alpha}");
+}
+
+#[test]
+fn underlines_skip_descenders_but_not_trailing_spaces() {
+    // `text-decoration-skip-ink: auto` interrupts the underline where a
+    // descender crosses it, and a line's hanging space is not underlined.
+    let mut doc = document(
+        "<div style='width:120px;font:30px/40px sans-serif;color:rgb(0,0,0)'>
+         <u style='text-decoration-color:rgb(255,0,0)'>xxgxx xxxxxxxx</u></div>",
+    );
+    let pixels = paint(&mut doc);
+    let red =
+        |x: usize, y: usize| pixels[(y * 400 + x) * 4..(y * 400 + x) * 4 + 4] == [255, 0, 0, 255];
+    // The first line's underline row, and its runs of red.
+    let row = (0..40)
+        .max_by_key(|&y| (0..400).filter(|&x| red(x, y)).count())
+        .unwrap();
+    let mut runs = 0;
+    for x in 0..400 {
+        if red(x, row) && (x == 0 || !red(x - 1, row)) {
+            runs += 1;
+        }
+    }
+    assert!(
+        runs >= 2,
+        "the underline is interrupted under the g ({runs} runs)"
+    );
+    let underline_end = (0..400).rev().find(|&x| red(x, row)).unwrap();
+    let text_end = (0..400)
+        .rev()
+        .find(|&x| {
+            (0..40).any(|y| pixels[(y * 400 + x) * 4..(y * 400 + x) * 4 + 4] == [0, 0, 0, 255])
+        })
+        .unwrap();
+    assert!(
+        underline_end <= text_end + 2,
+        "underline to {underline_end}, text to {text_end}"
+    );
+}
+
+#[test]
+fn a_wbr_breaks_text_that_does_not_wrap() {
+    // As in Chromium, a <wbr> is a line break opportunity even under
+    // `white-space: nowrap`.
+    let doc = document(
+        "<p id='p' style='margin:0;width:1px;white-space:nowrap;font:10px/20px sans-serif'>aaaa<wbr>bbbb</p>",
+    );
+    close(node(&doc, "#p").final_layout().size.height, 40.0);
+}
+
+#[test]
+fn line_breaks_in_middle_aligned_cells_keep_their_line_height() {
+    // A <br> sits on its parent's baseline: it isn't aligned to the cell's
+    // middle a second time, which grew each line by a pixel.
+    let doc = document(
+        "<table style='border-spacing:0'><tr><td id='c' style='vertical-align:middle;font:16px/24px sans-serif'>a<br>b<br>c</td></tr></table>",
+    );
+    close(node(&doc, "#c").final_layout().size.height, 72.0);
+}
+
+#[test]
+fn copied_text_leaves_out_inline_edges() {
+    // An inline element's padding is laid out as an invisible placeholder,
+    // which isn't the document's text.
+    let mut doc =
+        document("<p id='p'>a <span style='padding:0 5px;border:1px solid'>b</span>c<wbr>d</p>");
+    let p = doc.query_selector("#p").unwrap().unwrap();
+    let len = doc
+        .get_node(p)
+        .unwrap()
+        .element_data()
+        .unwrap()
+        .inline_layout_data
+        .as_ref()
+        .unwrap()
+        .text
+        .len();
+    doc.set_text_selection(p, 0, p, len);
+    assert_eq!(doc.get_selected_text().as_deref(), Some("a bcd"));
 }

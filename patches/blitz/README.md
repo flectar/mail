@@ -28,6 +28,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0008 offscreen culling bounds | Builds each element's cull box at its own origin, like its scaled scrollable overflow, and rescales every element's overflow after a scale change. Tiles far down a message no longer paint the elements above them, nor cull content whose overflow was measured at another scale. |
 | 0009 inside list markers before blocks | Keeps a `list-style-position: inside` marker in front of the list item's content when that content starts with a block or is empty, on an anonymous line of its own as in browsers. A `<summary>` that holds a heading, as GitHub's release mails have, lost its disclosure triangle. |
 | 0010 email table sizing | A cell's `height` is the minimum of its row (CSS 2.1 §17.5.3): the cell is measured with it as `min-height`, so its content no longer spills into the next row. Consecutive children of a row that aren't cells share one anonymous cell (§17.2.1), where responsive emails' `display: block` cells stack instead of overflowing side by side. Auto columns share the width left over after their min-content widths in proportion to how far each can grow toward its max-content width, as Chromium does (CSS Tables 3 §3.9.3), where grid tracks grew by equal amounts. |
+| 0011 inline boxes and text painting | A non-atomic inline element's inline-axis margin, border and padding take room in its line (CSS 2.1 §10.3.1), each edge laid out as an invisible placeholder (U+2061 at the start, U+2060 at the end) whose letter spacing is the edge's width. White space collapses across the placeholders and line breaks keep them with their content. Backgrounds (gradients and images included), borders, radii and box shadows paint on each line fragment, sliced from one strip of the element's fragments (`box-decoration-break: slice`), and `opacity` groups an element's fragments and text. Each line paints its boxes, then its selection, then its text. A `<wbr>` is a line break opportunity even in text that doesn't wrap, and `<br>` and `display: contents` content sits on its parent's baseline. Text decorations follow Blink: an `auto` thickness of a tenth of the font size, lengths rounded, an `auto` underline just below the baseline by half its thickness, lines on whole device pixels, ink skipped where glyphs cross underlines and overlines (not for `/`, `\`, `_` or CJK, as in Blink), and no decoration under white space that hangs at a line's end. A face without a bold is emboldened as Skia fakes bold. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
@@ -35,8 +36,11 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 and 0010 are local. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009, 0010 and 0011 are local. Drop the backported parts
 when a release contains them.
+
+Copied text, find in the reader and accessible names leave out 0011's edge
+placeholders (`blitz_dom::node::without_inline_edges`).
 
 Table-cell layout adjustments use temporary computed-style overrides. They do
 not mutate the author's primary style or its shared hint blocks. Each call
@@ -88,7 +92,8 @@ cargo test -p flectar-mail --lib issue_23_gpu --locked -- --ignored
 ```
 
 `crates/renderer-probe/tests/blitz_upgrade.rs` covers the upstream/local table
-overlap, locale-sensitive text, and 0010's table sizing. Application renderer tests cover float
+overlap, locale-sensitive text, and 0010's and 0011's table sizing, inline
+boxes, opacity, decorations and line breaks. Application renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.
 

@@ -375,9 +375,14 @@ impl GpuEmailRenderer {
                         continue;
                     };
                     // Map folded characters back to original UTF-8 offsets.
+                    // Inline elements' edges, laid out as invisible characters,
+                    // are skipped, so text on both sides of one still matches.
                     let mut folded = String::new();
                     let mut offsets = Vec::new();
                     for (i, c) in inline.text.char_indices() {
+                        if blitz_dom::node::is_inline_edge_char(c) {
+                            continue;
+                        }
                         for lower in c.to_lowercase() {
                             for _ in 0..lower.len_utf8() {
                                 offsets.push(i);

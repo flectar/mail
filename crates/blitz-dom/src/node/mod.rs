@@ -27,4 +27,7 @@ pub use scrollbar::{ScrollbarColor, ScrollbarRef, ScrollbarWidth};
 pub use stylo_data::ComputedStyleRef;
 #[cfg(feature = "svg")]
 pub use svg::{SvgImageData, SvgIntrinsicDimensions};
-pub use text::{GeneratedTextInputEvent, TextBrush, TextInputData, TextLayout};
+pub use text::{
+    GeneratedText, GeneratedTextInputEvent, INLINE_END_EDGE, INLINE_START_EDGE, TextBrush,
+    TextInputData, TextLayout, is_inline_edge_char, without_inline_edges,
+};

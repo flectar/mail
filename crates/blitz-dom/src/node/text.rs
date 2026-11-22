@@ -13,11 +13,62 @@ use crate::util::ACTION_MOD;
 pub struct TextBrush {
     /// The node id for the span
     pub id: NodeId,
+    /// Set on text the layout generates, which isn't the document's.
+    pub generated: GeneratedText,
 }
 
 impl TextBrush {
     pub(crate) fn from_id(id: NodeId) -> Self {
-        Self { id }
+        Self {
+            id,
+            generated: GeneratedText::None,
+        }
+    }
+}
+
+/// What a run of text the layout generates stands for. It is invisible, and
+/// left out of copied text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GeneratedText {
+    /// The document's own text.
+    #[default]
+    None,
+    /// A non-atomic inline element's inline-start or inline-end edge: its
+    /// margin, border and padding on that side, which take room in its line
+    /// (CSS 2.1 §10.3.1, §9.4.2). Each edge with a size is laid out as a
+    /// single invisible placeholder character whose letter spacing is the
+    /// edge's width: [`INLINE_START_EDGE`] before the element's content and
+    /// [`INLINE_END_EDGE`] after it. A start edge is on the element's first
+    /// line and an end edge on its last, as with `box-decoration-break: slice`.
+    StartEdge,
+    EndEdge,
+    /// A `<wbr>`, laid out as U+200B ZERO WIDTH SPACE as in Chromium: a line
+    /// break opportunity, even where the text around it doesn't wrap.
+    LineBreakOpportunity,
+}
+
+/// The placeholder for an inline element's start edge: U+2061 FUNCTION
+/// APPLICATION. It is default ignorable, has no glyph and takes no part in font
+/// selection, and its alphabetic line breaking class keeps it with the text
+/// after it while allowing a break after a preceding space.
+pub const INLINE_START_EDGE: char = '\u{2061}';
+/// The placeholder for an inline element's end edge: U+2060 WORD JOINER, which
+/// allows no line break on either side, so the edge stays with the element's
+/// last content.
+pub const INLINE_END_EDGE: char = '\u{2060}';
+
+/// Whether `c` is one of the placeholders inline edges are laid out as.
+pub fn is_inline_edge_char(c: char) -> bool {
+    matches!(c, INLINE_START_EDGE | INLINE_END_EDGE)
+}
+
+/// `text` without the placeholders inline edges are laid out as, for text that
+/// people read or copy.
+pub fn without_inline_edges(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.contains(is_inline_edge_char) {
+        text.chars().filter(|c| !is_inline_edge_char(*c)).collect()
+    } else {
+        std::borrow::Cow::Borrowed(text)
     }
 }
 

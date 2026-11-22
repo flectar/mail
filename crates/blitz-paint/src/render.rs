@@ -3,6 +3,7 @@ mod border;
 mod box_shadow;
 mod clip_path;
 mod form_controls;
+mod inline_box;
 mod mask;
 
 use std::cell::RefCell;
@@ -274,7 +275,9 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
         }
 
         let effects = styles.get_effects();
-        let opacity = effects.opacity;
+        // A non-atomic inline element has no box of its own to group its
+        // content in: its opacity applies to the boxes inside it here.
+        let opacity = effects.opacity * inline_box::inline_ancestor_opacity(self.dom, node);
         if opacity == 0.0 {
             return;
         }
@@ -907,6 +910,32 @@ impl ElementCx<'_, '_> {
                 .as_ref()
                 .and_then(|cache| cache.get(&self.node.id))
                 .filter(|bounds| bounds.len() == text_layout.layout.len());
+
+            // Inline elements' backgrounds, borders and shadows, by line.
+            let fragments = inline_box::inline_fragments(
+                self.context.dom,
+                &text_layout.layout,
+                self.node.id,
+                self.scale,
+            );
+            // Their ink, which can reach past the line's glyphs.
+            let mut fragment_ink: HashMap<usize, Rect> = HashMap::new();
+            for fragment in &fragments {
+                let Some(style) = self
+                    .context
+                    .dom
+                    .get_node(fragment.node_id)
+                    .and_then(|node| node.primary_styles())
+                else {
+                    continue;
+                };
+                let ink = fragment.ink_rect(&style, self.scale);
+                fragment_ink
+                    .entry(fragment.line)
+                    .and_modify(|rect| *rect = rect.union(ink))
+                    .or_insert(ink);
+            }
+
             let lines = text_layout
                 .layout
                 .lines()
@@ -916,6 +945,9 @@ impl ElementCx<'_, '_> {
                         .zip(bounds)
                         .and_then(|(viewport, bounds)| {
                             bounds.get(index).copied().flatten().map(|bounds| {
+                                let bounds = fragment_ink
+                                    .get(&index)
+                                    .map_or(bounds, |ink| bounds.union(*ink));
                                 let bounds = transform.transform_rect_bbox(bounds);
                                 bounds.is_finite()
                                     && (bounds.x1 < viewport.x0
@@ -925,37 +957,111 @@ impl ElementCx<'_, '_> {
                             })
                         })
                         .unwrap_or(false);
-                    (!outside).then_some(line)
+                    (!outside).then_some((index, line))
                 });
-            crate::text::draw_inline_backgrounds(
-                scene,
-                lines.clone(),
-                self.context.dom,
-                transform,
-                self.node.id,
-            );
-            // Render text selection highlight (if any) using cached selection ranges
-            if let Some(&(sel_start, sel_end)) = self.context.selection_ranges.get(&self.node.id) {
-                crate::text::draw_text_selection(
-                    scene,
-                    &text_layout.layout,
-                    transform,
-                    sel_start,
-                    sel_end,
-                );
-            }
 
+            // The text selection highlight (if any), using cached selection ranges
+            let selection = self
+                .context
+                .selection_ranges
+                .get(&self.node.id)
+                .map(|&(sel_start, sel_end)| {
+                    crate::text::text_selection_rects(&text_layout.layout, sel_start, sel_end)
+                })
+                .unwrap_or_default();
+
+            let rtl = text_layout.layout.is_rtl();
+            // Inline elements with `opacity` are painted as groups.
+            let groups =
+                inline_box::OpacityGroups::new(self.context.dom, &text_layout.layout, self.node.id);
+
+            // Each line is painted in turn, its inline boxes' decorations, then
+            // its selection, then its text (CSS 2.1 Appendix E, 7.2.1): where
+            // a line's boxes reach into the line above, they cover its text.
             let mut draw_text_context = self.context.draw_text_context.borrow_mut();
-            crate::text::stroke_text(
-                scene,
-                lines,
-                self.context.dom,
-                transform,
-                self.scale,
-                self.node.id,
-                &mut draw_text_context,
-                viewport,
-            );
+            let mut next_fragment = 0;
+            for (index, line) in lines {
+                while fragments
+                    .get(next_fragment)
+                    .is_some_and(|fragment| fragment.line < index)
+                {
+                    next_fragment += 1;
+                }
+                let line_fragments = {
+                    let start = next_fragment;
+                    while fragments
+                        .get(next_fragment)
+                        .is_some_and(|fragment| fragment.line == index)
+                    {
+                        next_fragment += 1;
+                    }
+                    &fragments[start..next_fragment]
+                };
+                for fragment in line_fragments {
+                    if groups.group_of(fragment.node_id).is_none() {
+                        self.draw_inline_fragment(scene, fragment, transform);
+                    }
+                }
+                for (_, rect) in selection.iter().filter(|(line, _)| *line == index) {
+                    scene.fill(Fill::NonZero, transform, SELECTION_COLOR, None, rect);
+                }
+                let ungrouped = |id: NodeId| groups.group_of(id).is_none();
+                crate::text::stroke_text(
+                    scene,
+                    std::iter::once(line.clone()),
+                    self.context.dom,
+                    transform,
+                    self.scale,
+                    self.node.id,
+                    &mut draw_text_context,
+                    crate::text::TextPaint {
+                        viewport,
+                        run_filter: (!groups.is_empty())
+                            .then_some(&ungrouped as &dyn Fn(NodeId) -> bool),
+                        text: &text_layout.text,
+                        rtl,
+                    },
+                );
+                // Each group on the line, its decorations and text in a layer
+                // with its opacity.
+                for (group, opacity, bounds) in groups.on_line(&line, line_fragments, self.scale) {
+                    if opacity <= 0.0 {
+                        continue;
+                    }
+                    self.layer_manager.maybe_with_layer(
+                        scene,
+                        true,
+                        opacity,
+                        transform,
+                        &bounds,
+                        None,
+                        None,
+                        |scene| {
+                            for fragment in line_fragments {
+                                if groups.group_of(fragment.node_id) == Some(group) {
+                                    self.draw_inline_fragment(scene, fragment, transform);
+                                }
+                            }
+                            let in_group = |id: NodeId| groups.group_of(id) == Some(group);
+                            crate::text::stroke_text(
+                                scene,
+                                std::iter::once(line.clone()),
+                                self.context.dom,
+                                transform,
+                                self.scale,
+                                self.node.id,
+                                &mut draw_text_context,
+                                crate::text::TextPaint {
+                                    viewport,
+                                    run_filter: Some(&in_group),
+                                    text: &text_layout.text,
+                                    rtl,
+                                },
+                            );
+                        },
+                    );
+                }
+            }
         }
     }
 
@@ -1013,15 +1119,21 @@ impl ElementCx<'_, '_> {
 
             // Render text
             let mut draw_text_context = self.context.draw_text_context.borrow_mut();
+            let layout = input_data.editor.try_layout().unwrap();
             crate::text::stroke_text(
                 scene,
-                input_data.editor.try_layout().unwrap().lines(),
+                layout.lines(),
                 self.context.dom,
                 transform,
                 self.scale,
                 self.node.id,
                 &mut draw_text_context,
-                None,
+                crate::text::TextPaint {
+                    viewport: None,
+                    run_filter: None,
+                    text: "",
+                    rtl: layout.is_rtl(),
+                },
             );
         }
     }
@@ -1077,7 +1189,12 @@ impl ElementCx<'_, '_> {
                 self.scale,
                 self.node.id,
                 &mut draw_text_context,
-                None,
+                crate::text::TextPaint {
+                    viewport: None,
+                    run_filter: None,
+                    text: "",
+                    rtl: layout.is_rtl(),
+                },
             );
         }
     }

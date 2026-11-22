@@ -7,6 +7,7 @@ mod color;
 mod debug_overlay;
 mod filters;
 mod gradient;
+mod ink_skip;
 mod kurbo_css;
 mod layers;
 mod render;

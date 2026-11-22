@@ -24,8 +24,8 @@ use crate::{
         CONSTRUCT_BOX, CONSTRUCT_DESCENDENT, CONSTRUCT_FC, sort_layout_children_by_order,
     },
     node::{
-        ListItemLayout, ListItemLayoutPosition, Marker, NodeFlags, NodeKind, SpecialElementData,
-        TextBrush, TextInputData, TextLayout,
+        GeneratedText, INLINE_END_EDGE, INLINE_START_EDGE, ListItemLayout, ListItemLayoutPosition,
+        Marker, NodeFlags, NodeKind, SpecialElementData, TextBrush, TextInputData, TextLayout,
     },
     qual_name, stylo_to_parley,
     traversal::{iter_children, iter_children_and_pseudos},
@@ -1159,11 +1159,16 @@ pub(crate) fn build_inline_layout_into(
     // The marker is a separate box, so words in the content don't continue from it.
     let mut text_transformer = TextTransformer::default();
     text_transformer.word_break(&builder);
+    let mut edges = InlineEdges {
+        content_started: !builder.text().is_empty(),
+        ..InlineEdges::default()
+    };
 
     if let Some(before_id) = root_node.before() {
         build_inline_layout_recursive(
             &mut builder,
             &mut text_transformer,
+            &mut edges,
             nodes,
             before_id,
             &text_transform,
@@ -1173,6 +1178,7 @@ pub(crate) fn build_inline_layout_into(
         build_inline_layout_recursive(
             &mut builder,
             &mut text_transformer,
+            &mut edges,
             nodes,
             child_id,
             &text_transform,
@@ -1182,18 +1188,23 @@ pub(crate) fn build_inline_layout_into(
         build_inline_layout_recursive(
             &mut builder,
             &mut text_transformer,
+            &mut edges,
             nodes,
             after_id,
             &text_transform,
         );
     }
 
+    if edges.used {
+        builder.set_line_break_override(Some(EDGE_LINE_BREAKS));
+    }
     text_layout.text = builder.build_into(&mut text_layout.layout);
     return;
 
     fn build_inline_layout_recursive(
         builder: &mut TreeBuilder<TextBrush>,
         text_transformer: &mut TextTransformer,
+        edges: &mut InlineEdges,
         nodes: &crate::NodeTree,
         node_id: NodeId,
         parent_text_transform: &CaseTransform,
@@ -1239,6 +1250,9 @@ pub(crate) fn build_inline_layout_into(
                         // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
                     }
                     (DisplayOutside::None, DisplayInside::Contents) => {
+                        // The span copies its parent's style, but the
+                        // element has no box to align: its content sits on
+                        // the parent's baseline.
                         let whitespace = style.map(|s| {
                             [
                                 parley::StyleProperty::WhiteSpaceCollapse(
@@ -1248,6 +1262,9 @@ pub(crate) fn build_inline_layout_into(
                                 ),
                                 parley::StyleProperty::TextWrapMode(
                                     stylo_to_parley::text_wrap_mode(s.clone_text_wrap_mode()),
+                                ),
+                                parley::StyleProperty::VerticalAlign(
+                                    parley::VerticalAlign::BASELINE,
                                 ),
                             ]
                         });
@@ -1261,6 +1278,7 @@ pub(crate) fn build_inline_layout_into(
                             build_inline_layout_recursive(
                                 builder,
                                 text_transformer,
+                                edges,
                                 nodes,
                                 child_id,
                                 &text_transform,
@@ -1274,6 +1292,7 @@ pub(crate) fn build_inline_layout_into(
                         if is_inline_box_element(tag_name) {
                             if box_kind == InlineBoxKind::InFlow {
                                 text_transformer.word_break(builder);
+                                edges.content(builder);
                             }
                             builder.push_inline_box(InlineBox {
                                 id: node_id.as_u64(),
@@ -1289,12 +1308,35 @@ pub(crate) fn build_inline_layout_into(
                                     .map(|s| stylo_to_parley::vertical_align(&s))
                                     .unwrap_or_default(),
                             });
+                        } else if *tag_name == local_name!("wbr") {
+                            // A line break opportunity, even in text that
+                            // doesn't wrap, as Chromium lays it out.
+                            edges.content(builder);
+                            builder.push_style_modification_span(&[
+                                parley::StyleProperty::TextWrapMode(parley::TextWrapMode::Wrap),
+                                parley::StyleProperty::Brush(TextBrush {
+                                    id: node_id,
+                                    generated: GeneratedText::LineBreakOpportunity,
+                                }),
+                                parley::StyleProperty::VerticalAlign(
+                                    parley::VerticalAlign::BASELINE,
+                                ),
+                            ]);
+                            builder.push_text("\u{200B}");
+                            builder.pop_style_span();
                         } else if *tag_name == local_name!("br") {
                             // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
                             // TODO: update span id for br spans
+                            edges.content(builder);
+                            // The newline sits on its parent's baseline: the
+                            // span copies the parent's `vertical-align`, which
+                            // would otherwise align it a second time.
                             builder.push_style_modification_span(&[
                                 parley::StyleProperty::WhiteSpaceCollapse(
                                     WhiteSpaceCollapse::Preserve,
+                                ),
+                                parley::StyleProperty::VerticalAlign(
+                                    parley::VerticalAlign::BASELINE,
                                 ),
                             ]);
                             builder.push_text("\n");
@@ -1310,12 +1352,27 @@ pub(crate) fn build_inline_layout_into(
                                     ..Default::default()
                                 });
 
+                            let (start_edge, end_edge) = node
+                                .primary_styles()
+                                .map(|s| inline_edge_widths(&s))
+                                .unwrap_or_default();
+
+                            // A space held back from content before this
+                            // element precedes it, outside its box.
+                            edges.flush_held_space(builder);
                             builder.push_style_span(style);
+                            if start_edge != 0.0 {
+                                edges.push_start(builder, node.id, start_edge);
+                            }
+                            if end_edge != 0.0 {
+                                edges.end_depth += 1;
+                            }
 
                             if let Some(before_id) = node.before() {
                                 build_inline_layout_recursive(
                                     builder,
                                     text_transformer,
+                                    edges,
                                     nodes,
                                     before_id,
                                     &text_transform,
@@ -1326,6 +1383,7 @@ pub(crate) fn build_inline_layout_into(
                                 build_inline_layout_recursive(
                                     builder,
                                     text_transformer,
+                                    edges,
                                     nodes,
                                     child_id,
                                     &text_transform,
@@ -1335,12 +1393,17 @@ pub(crate) fn build_inline_layout_into(
                                 build_inline_layout_recursive(
                                     builder,
                                     text_transformer,
+                                    edges,
                                     nodes,
                                     after_id,
                                     &text_transform,
                                 );
                             }
 
+                            if end_edge != 0.0 {
+                                edges.end_depth -= 1;
+                                edges.push_end(builder, node.id, end_edge);
+                            }
                             builder.pop_style_span();
                         }
                     }
@@ -1348,6 +1411,7 @@ pub(crate) fn build_inline_layout_into(
                     (_, _) => {
                         if box_kind == InlineBoxKind::InFlow {
                             text_transformer.word_break(builder);
+                            edges.content(builder);
                         }
                         builder.push_inline_box(InlineBox {
                             id: node_id.as_u64(),
@@ -1372,12 +1436,182 @@ pub(crate) fn build_inline_layout_into(
 
                 let text =
                     text_transformer.transform(&data.content, parent_text_transform, builder);
-                builder.push_text(text);
+                let collapse = node
+                    .parent
+                    .and_then(|parent| nodes[parent].primary_styles())
+                    .map(|s| stylo_to_parley::white_space_collapse(s.clone_white_space_collapse()))
+                    .unwrap_or(WhiteSpaceCollapse::Collapse);
+                edges.push_text(builder, text, collapse);
             }
             NodeData::Comment { .. } => {
                 // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
             }
             NodeData::Document(_) => unreachable!(),
+        }
+    }
+}
+
+/// Line breaking around inline edge placeholders, which UAX #14 mostly
+/// handles: a start edge (alphabetic) stays with what follows it, except that
+/// it may break from an ideograph, which this forbids.
+static EDGE_LINE_BREAKS: &parley::LineBreakOverrideFn =
+    &(edge_line_break as fn(parley::LineBreakContext) -> Option<bool>);
+
+fn edge_line_break(cx: parley::LineBreakContext) -> Option<bool> {
+    (cx.before == INLINE_START_EDGE).then_some(false)
+}
+
+/// The widths of an inline element's inline-start and inline-end edges, its
+/// margin, border and padding on each side, in CSS px. Percentages and `auto`
+/// count as zero, as the containing block's width is not known yet.
+fn inline_edge_widths(style: &style::properties::ComputedValues) -> (f32, f32) {
+    use style::values::computed::{LengthPercentage, Margin};
+    if !style.writing_mode.is_horizontal() {
+        return (0.0, 0.0);
+    }
+    let length = |lp: &LengthPercentage| lp.to_length().map_or(0.0, |l| l.px());
+    let margin = |m: &Margin| match m {
+        Margin::LengthPercentage(lp) => length(lp),
+        _ => 0.0,
+    };
+    let (margins, padding, border) = (style.get_margin(), style.get_padding(), style.get_border());
+    // A border's computed width stays `medium` when it has no style.
+    let border_width = |style: style::values::computed::BorderStyle, width: app_units::Au| {
+        if style.none_or_hidden() {
+            0.0
+        } else {
+            width.to_f32_px()
+        }
+    };
+    let left = margin(&margins.margin_left)
+        + border_width(border.border_left_style, border.border_left_width.0)
+        + length(&padding.padding_left.0);
+    let right = margin(&margins.margin_right)
+        + border_width(border.border_right_style, border.border_right_width.0)
+        + length(&padding.padding_right.0);
+    let sanitize = |width: f32| if width.is_finite() { width } else { 0.0 };
+    if style.writing_mode.is_bidi_ltr() {
+        (sanitize(left), sanitize(right))
+    } else {
+        (sanitize(right), sanitize(left))
+    }
+}
+
+/// White space processing around inline edge placeholders, which are
+/// transparent to it: a collapsible space next to an element's edges collapses
+/// with spaces on the other side of them.
+///
+/// Parley collapses white space between pushed texts and drops it at the end
+/// of the paragraph, but a placeholder is content to it. So the leading white
+/// space after a start edge that follows a space (or starts the paragraph) is
+/// skipped here, and trailing white space inside an element with an end edge is
+/// held back, to be pushed after the edge only if more content follows.
+#[derive(Default)]
+struct InlineEdges {
+    /// Whether any placeholder was pushed.
+    used: bool,
+    /// Whether the paragraph has content other than placeholders.
+    content_started: bool,
+    /// Skip collapsible white space until the next content.
+    skip_leading_space: bool,
+    /// A collapsible space taken off the end of the last text.
+    held_space: bool,
+    /// How many enclosing elements have an end edge.
+    end_depth: u32,
+}
+
+impl InlineEdges {
+    fn flush_held_space(&mut self, builder: &mut TreeBuilder<TextBrush>) {
+        if self.held_space {
+            self.held_space = false;
+            // Parley keeps it pending, so it only lands before more content.
+            builder.push_text(" ");
+        }
+    }
+
+    /// Content that is not text, such as an atomic inline or a line break.
+    fn content(&mut self, builder: &mut TreeBuilder<TextBrush>) {
+        self.flush_held_space(builder);
+        self.skip_leading_space = false;
+        self.content_started = true;
+    }
+
+    fn push_edge(
+        &mut self,
+        builder: &mut TreeBuilder<TextBrush>,
+        id: NodeId,
+        width: f32,
+        edge: GeneratedText,
+    ) {
+        self.used = true;
+        builder.push_style_modification_span(&[
+            StyleProperty::LetterSpacing(width),
+            StyleProperty::Brush(TextBrush {
+                id,
+                generated: edge,
+            }),
+            StyleProperty::VerticalAlign(parley::VerticalAlign::BASELINE),
+        ]);
+        let mut placeholder = [0u8; 4];
+        let placeholder = match edge {
+            GeneratedText::EndEdge => INLINE_END_EDGE,
+            _ => INLINE_START_EDGE,
+        }
+        .encode_utf8(&mut placeholder);
+        builder.push_text(placeholder);
+        builder.pop_style_span();
+    }
+
+    fn push_start(&mut self, builder: &mut TreeBuilder<TextBrush>, id: NodeId, width: f32) {
+        // A pending space before the element is committed before its edge,
+        // and white space at the start of its content then collapses into it.
+        let after_space = builder.has_pending_whitespace() || !self.content_started;
+        self.push_edge(builder, id, width, GeneratedText::StartEdge);
+        self.skip_leading_space |= after_space;
+    }
+
+    fn push_end(&mut self, builder: &mut TreeBuilder<TextBrush>, id: NodeId, width: f32) {
+        self.push_edge(builder, id, width, GeneratedText::EndEdge);
+    }
+
+    fn push_text(
+        &mut self,
+        builder: &mut TreeBuilder<TextBrush>,
+        text: &str,
+        collapse: WhiteSpaceCollapse,
+    ) {
+        if !self.held_space && !self.skip_leading_space && self.end_depth == 0 {
+            if !self.content_started && text.contains(|c: char| !c.is_ascii_whitespace()) {
+                self.content_started = true;
+            }
+            builder.push_text(text);
+            return;
+        }
+        let collapsible = |c: char| match collapse {
+            WhiteSpaceCollapse::Collapse => c.is_ascii_whitespace(),
+            WhiteSpaceCollapse::PreserveBreaks => matches!(c, ' ' | '\t'),
+            _ => false,
+        };
+        let mut text = text;
+        if self.skip_leading_space {
+            text = text.trim_start_matches(collapsible);
+            if text.is_empty() {
+                return;
+            }
+            self.skip_leading_space = false;
+        }
+        let content = if self.end_depth > 0 {
+            text.trim_end_matches(collapsible)
+        } else {
+            text
+        };
+        if !content.is_empty() {
+            self.flush_held_space(builder);
+            builder.push_text(content);
+            self.content_started = true;
+        }
+        if content.len() < text.len() {
+            self.held_space = true;
         }
     }
 }

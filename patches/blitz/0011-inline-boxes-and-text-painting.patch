@@ -1,0 +1,2523 @@
+diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
+index cc5ada5..2f3d854 100644
+--- a/crates/blitz-dom/src/document.rs
++++ b/crates/blitz-dom/src/document.rs
+@@ -2813,7 +2813,15 @@ impl BaseDocument {
+                         continue;
+                     }
+                     // A run can mix styles, so each cluster is checked.
+-                    let id = cluster.style().brush.id;
++                    let brush = cluster.style().brush;
++                    if brush.generated != crate::node::GeneratedText::None {
++                        // An inline element's edge is laid out as a
++                        // placeholder character that isn't the document's.
++                        hidden
++                            .push(text_range.start.max(range.start)..text_range.end.min(range.end));
++                        continue;
++                    }
++                    let id = brush.id;
+                     let is_hidden = match last {
+                         Some((last_id, is_hidden)) if last_id == id => is_hidden,
+                         _ => {
+diff --git a/crates/blitz-dom/src/layout/construct.rs b/crates/blitz-dom/src/layout/construct.rs
+index ae6a4de..2a027e0 100644
+--- a/crates/blitz-dom/src/layout/construct.rs
++++ b/crates/blitz-dom/src/layout/construct.rs
+@@ -24,8 +24,8 @@ use crate::{
+         CONSTRUCT_BOX, CONSTRUCT_DESCENDENT, CONSTRUCT_FC, sort_layout_children_by_order,
+     },
+     node::{
+-        ListItemLayout, ListItemLayoutPosition, Marker, NodeFlags, NodeKind, SpecialElementData,
+-        TextBrush, TextInputData, TextLayout,
++        GeneratedText, INLINE_END_EDGE, INLINE_START_EDGE, ListItemLayout, ListItemLayoutPosition,
++        Marker, NodeFlags, NodeKind, SpecialElementData, TextBrush, TextInputData, TextLayout,
+     },
+     qual_name, stylo_to_parley,
+     traversal::{iter_children, iter_children_and_pseudos},
+@@ -1159,11 +1159,16 @@ pub(crate) fn build_inline_layout_into(
+     // The marker is a separate box, so words in the content don't continue from it.
+     let mut text_transformer = TextTransformer::default();
+     text_transformer.word_break(&builder);
++    let mut edges = InlineEdges {
++        content_started: !builder.text().is_empty(),
++        ..InlineEdges::default()
++    };
+ 
+     if let Some(before_id) = root_node.before() {
+         build_inline_layout_recursive(
+             &mut builder,
+             &mut text_transformer,
++            &mut edges,
+             nodes,
+             before_id,
+             &text_transform,
+@@ -1173,6 +1178,7 @@ pub(crate) fn build_inline_layout_into(
+         build_inline_layout_recursive(
+             &mut builder,
+             &mut text_transformer,
++            &mut edges,
+             nodes,
+             child_id,
+             &text_transform,
+@@ -1182,18 +1188,23 @@ pub(crate) fn build_inline_layout_into(
+         build_inline_layout_recursive(
+             &mut builder,
+             &mut text_transformer,
++            &mut edges,
+             nodes,
+             after_id,
+             &text_transform,
+         );
+     }
+ 
++    if edges.used {
++        builder.set_line_break_override(Some(EDGE_LINE_BREAKS));
++    }
+     text_layout.text = builder.build_into(&mut text_layout.layout);
+     return;
+ 
+     fn build_inline_layout_recursive(
+         builder: &mut TreeBuilder<TextBrush>,
+         text_transformer: &mut TextTransformer,
++        edges: &mut InlineEdges,
+         nodes: &crate::NodeTree,
+         node_id: NodeId,
+         parent_text_transform: &CaseTransform,
+@@ -1239,6 +1250,9 @@ pub(crate) fn build_inline_layout_into(
+                         // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
+                     }
+                     (DisplayOutside::None, DisplayInside::Contents) => {
++                        // The span copies its parent's style, but the
++                        // element has no box to align: its content sits on
++                        // the parent's baseline.
+                         let whitespace = style.map(|s| {
+                             [
+                                 parley::StyleProperty::WhiteSpaceCollapse(
+@@ -1249,6 +1263,9 @@ pub(crate) fn build_inline_layout_into(
+                                 parley::StyleProperty::TextWrapMode(
+                                     stylo_to_parley::text_wrap_mode(s.clone_text_wrap_mode()),
+                                 ),
++                                parley::StyleProperty::VerticalAlign(
++                                    parley::VerticalAlign::BASELINE,
++                                ),
+                             ]
+                         });
+                         builder.push_style_modification_span(
+@@ -1261,6 +1278,7 @@ pub(crate) fn build_inline_layout_into(
+                             build_inline_layout_recursive(
+                                 builder,
+                                 text_transformer,
++                                edges,
+                                 nodes,
+                                 child_id,
+                                 &text_transform,
+@@ -1274,6 +1292,7 @@ pub(crate) fn build_inline_layout_into(
+                         if is_inline_box_element(tag_name) {
+                             if box_kind == InlineBoxKind::InFlow {
+                                 text_transformer.word_break(builder);
++                                edges.content(builder);
+                             }
+                             builder.push_inline_box(InlineBox {
+                                 id: node_id.as_u64(),
+@@ -1289,13 +1308,36 @@ pub(crate) fn build_inline_layout_into(
+                                     .map(|s| stylo_to_parley::vertical_align(&s))
+                                     .unwrap_or_default(),
+                             });
++                        } else if *tag_name == local_name!("wbr") {
++                            // A line break opportunity, even in text that
++                            // doesn't wrap, as Chromium lays it out.
++                            edges.content(builder);
++                            builder.push_style_modification_span(&[
++                                parley::StyleProperty::TextWrapMode(parley::TextWrapMode::Wrap),
++                                parley::StyleProperty::Brush(TextBrush {
++                                    id: node_id,
++                                    generated: GeneratedText::LineBreakOpportunity,
++                                }),
++                                parley::StyleProperty::VerticalAlign(
++                                    parley::VerticalAlign::BASELINE,
++                                ),
++                            ]);
++                            builder.push_text("\u{200B}");
++                            builder.pop_style_span();
+                         } else if *tag_name == local_name!("br") {
+                             // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
+                             // TODO: update span id for br spans
++                            edges.content(builder);
++                            // The newline sits on its parent's baseline: the
++                            // span copies the parent's `vertical-align`, which
++                            // would otherwise align it a second time.
+                             builder.push_style_modification_span(&[
+                                 parley::StyleProperty::WhiteSpaceCollapse(
+                                     WhiteSpaceCollapse::Preserve,
+                                 ),
++                                parley::StyleProperty::VerticalAlign(
++                                    parley::VerticalAlign::BASELINE,
++                                ),
+                             ]);
+                             builder.push_text("\n");
+                             builder.pop_style_span();
+@@ -1310,12 +1352,27 @@ pub(crate) fn build_inline_layout_into(
+                                     ..Default::default()
+                                 });
+ 
++                            let (start_edge, end_edge) = node
++                                .primary_styles()
++                                .map(|s| inline_edge_widths(&s))
++                                .unwrap_or_default();
++
++                            // A space held back from content before this
++                            // element precedes it, outside its box.
++                            edges.flush_held_space(builder);
+                             builder.push_style_span(style);
++                            if start_edge != 0.0 {
++                                edges.push_start(builder, node.id, start_edge);
++                            }
++                            if end_edge != 0.0 {
++                                edges.end_depth += 1;
++                            }
+ 
+                             if let Some(before_id) = node.before() {
+                                 build_inline_layout_recursive(
+                                     builder,
+                                     text_transformer,
++                                    edges,
+                                     nodes,
+                                     before_id,
+                                     &text_transform,
+@@ -1326,6 +1383,7 @@ pub(crate) fn build_inline_layout_into(
+                                 build_inline_layout_recursive(
+                                     builder,
+                                     text_transformer,
++                                    edges,
+                                     nodes,
+                                     child_id,
+                                     &text_transform,
+@@ -1335,12 +1393,17 @@ pub(crate) fn build_inline_layout_into(
+                                 build_inline_layout_recursive(
+                                     builder,
+                                     text_transformer,
++                                    edges,
+                                     nodes,
+                                     after_id,
+                                     &text_transform,
+                                 );
+                             }
+ 
++                            if end_edge != 0.0 {
++                                edges.end_depth -= 1;
++                                edges.push_end(builder, node.id, end_edge);
++                            }
+                             builder.pop_style_span();
+                         }
+                     }
+@@ -1348,6 +1411,7 @@ pub(crate) fn build_inline_layout_into(
+                     (_, _) => {
+                         if box_kind == InlineBoxKind::InFlow {
+                             text_transformer.word_break(builder);
++                            edges.content(builder);
+                         }
+                         builder.push_inline_box(InlineBox {
+                             id: node_id.as_u64(),
+@@ -1372,7 +1436,12 @@ pub(crate) fn build_inline_layout_into(
+ 
+                 let text =
+                     text_transformer.transform(&data.content, parent_text_transform, builder);
+-                builder.push_text(text);
++                let collapse = node
++                    .parent
++                    .and_then(|parent| nodes[parent].primary_styles())
++                    .map(|s| stylo_to_parley::white_space_collapse(s.clone_white_space_collapse()))
++                    .unwrap_or(WhiteSpaceCollapse::Collapse);
++                edges.push_text(builder, text, collapse);
+             }
+             NodeData::Comment { .. } => {
+                 // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
+@@ -1382,6 +1451,171 @@ pub(crate) fn build_inline_layout_into(
+     }
+ }
+ 
++/// Line breaking around inline edge placeholders, which UAX #14 mostly
++/// handles: a start edge (alphabetic) stays with what follows it, except that
++/// it may break from an ideograph, which this forbids.
++static EDGE_LINE_BREAKS: &parley::LineBreakOverrideFn =
++    &(edge_line_break as fn(parley::LineBreakContext) -> Option<bool>);
++
++fn edge_line_break(cx: parley::LineBreakContext) -> Option<bool> {
++    (cx.before == INLINE_START_EDGE).then_some(false)
++}
++
++/// The widths of an inline element's inline-start and inline-end edges, its
++/// margin, border and padding on each side, in CSS px. Percentages and `auto`
++/// count as zero, as the containing block's width is not known yet.
++fn inline_edge_widths(style: &style::properties::ComputedValues) -> (f32, f32) {
++    use style::values::computed::{LengthPercentage, Margin};
++    if !style.writing_mode.is_horizontal() {
++        return (0.0, 0.0);
++    }
++    let length = |lp: &LengthPercentage| lp.to_length().map_or(0.0, |l| l.px());
++    let margin = |m: &Margin| match m {
++        Margin::LengthPercentage(lp) => length(lp),
++        _ => 0.0,
++    };
++    let (margins, padding, border) = (style.get_margin(), style.get_padding(), style.get_border());
++    // A border's computed width stays `medium` when it has no style.
++    let border_width = |style: style::values::computed::BorderStyle, width: app_units::Au| {
++        if style.none_or_hidden() {
++            0.0
++        } else {
++            width.to_f32_px()
++        }
++    };
++    let left = margin(&margins.margin_left)
++        + border_width(border.border_left_style, border.border_left_width.0)
++        + length(&padding.padding_left.0);
++    let right = margin(&margins.margin_right)
++        + border_width(border.border_right_style, border.border_right_width.0)
++        + length(&padding.padding_right.0);
++    let sanitize = |width: f32| if width.is_finite() { width } else { 0.0 };
++    if style.writing_mode.is_bidi_ltr() {
++        (sanitize(left), sanitize(right))
++    } else {
++        (sanitize(right), sanitize(left))
++    }
++}
++
++/// White space processing around inline edge placeholders, which are
++/// transparent to it: a collapsible space next to an element's edges collapses
++/// with spaces on the other side of them.
++///
++/// Parley collapses white space between pushed texts and drops it at the end
++/// of the paragraph, but a placeholder is content to it. So the leading white
++/// space after a start edge that follows a space (or starts the paragraph) is
++/// skipped here, and trailing white space inside an element with an end edge is
++/// held back, to be pushed after the edge only if more content follows.
++#[derive(Default)]
++struct InlineEdges {
++    /// Whether any placeholder was pushed.
++    used: bool,
++    /// Whether the paragraph has content other than placeholders.
++    content_started: bool,
++    /// Skip collapsible white space until the next content.
++    skip_leading_space: bool,
++    /// A collapsible space taken off the end of the last text.
++    held_space: bool,
++    /// How many enclosing elements have an end edge.
++    end_depth: u32,
++}
++
++impl InlineEdges {
++    fn flush_held_space(&mut self, builder: &mut TreeBuilder<TextBrush>) {
++        if self.held_space {
++            self.held_space = false;
++            // Parley keeps it pending, so it only lands before more content.
++            builder.push_text(" ");
++        }
++    }
++
++    /// Content that is not text, such as an atomic inline or a line break.
++    fn content(&mut self, builder: &mut TreeBuilder<TextBrush>) {
++        self.flush_held_space(builder);
++        self.skip_leading_space = false;
++        self.content_started = true;
++    }
++
++    fn push_edge(
++        &mut self,
++        builder: &mut TreeBuilder<TextBrush>,
++        id: NodeId,
++        width: f32,
++        edge: GeneratedText,
++    ) {
++        self.used = true;
++        builder.push_style_modification_span(&[
++            StyleProperty::LetterSpacing(width),
++            StyleProperty::Brush(TextBrush {
++                id,
++                generated: edge,
++            }),
++            StyleProperty::VerticalAlign(parley::VerticalAlign::BASELINE),
++        ]);
++        let mut placeholder = [0u8; 4];
++        let placeholder = match edge {
++            GeneratedText::EndEdge => INLINE_END_EDGE,
++            _ => INLINE_START_EDGE,
++        }
++        .encode_utf8(&mut placeholder);
++        builder.push_text(placeholder);
++        builder.pop_style_span();
++    }
++
++    fn push_start(&mut self, builder: &mut TreeBuilder<TextBrush>, id: NodeId, width: f32) {
++        // A pending space before the element is committed before its edge,
++        // and white space at the start of its content then collapses into it.
++        let after_space = builder.has_pending_whitespace() || !self.content_started;
++        self.push_edge(builder, id, width, GeneratedText::StartEdge);
++        self.skip_leading_space |= after_space;
++    }
++
++    fn push_end(&mut self, builder: &mut TreeBuilder<TextBrush>, id: NodeId, width: f32) {
++        self.push_edge(builder, id, width, GeneratedText::EndEdge);
++    }
++
++    fn push_text(
++        &mut self,
++        builder: &mut TreeBuilder<TextBrush>,
++        text: &str,
++        collapse: WhiteSpaceCollapse,
++    ) {
++        if !self.held_space && !self.skip_leading_space && self.end_depth == 0 {
++            if !self.content_started && text.contains(|c: char| !c.is_ascii_whitespace()) {
++                self.content_started = true;
++            }
++            builder.push_text(text);
++            return;
++        }
++        let collapsible = |c: char| match collapse {
++            WhiteSpaceCollapse::Collapse => c.is_ascii_whitespace(),
++            WhiteSpaceCollapse::PreserveBreaks => matches!(c, ' ' | '\t'),
++            _ => false,
++        };
++        let mut text = text;
++        if self.skip_leading_space {
++            text = text.trim_start_matches(collapsible);
++            if text.is_empty() {
++                return;
++            }
++            self.skip_leading_space = false;
++        }
++        let content = if self.end_depth > 0 {
++            text.trim_end_matches(collapsible)
++        } else {
++            text
++        };
++        if !content.is_empty() {
++            self.flush_held_space(builder);
++            builder.push_text(content);
++            self.content_started = true;
++        }
++        if content.len() < text.len() {
++            self.held_space = true;
++        }
++    }
++}
++
+ #[cfg(test)]
+ mod inside_marker_tests {
+     use crate::{Attribute, BaseDocument, DocumentConfig, DocumentMutator, NodeId, qual_name};
+diff --git a/crates/blitz-dom/src/node/mod.rs b/crates/blitz-dom/src/node/mod.rs
+index 34b8a2e..4ab862e 100644
+--- a/crates/blitz-dom/src/node/mod.rs
++++ b/crates/blitz-dom/src/node/mod.rs
+@@ -27,4 +27,7 @@ pub use scrollbar::{ScrollbarColor, ScrollbarRef, ScrollbarWidth};
+ pub use stylo_data::ComputedStyleRef;
+ #[cfg(feature = "svg")]
+ pub use svg::{SvgImageData, SvgIntrinsicDimensions};
+-pub use text::{GeneratedTextInputEvent, TextBrush, TextInputData, TextLayout};
++pub use text::{
++    GeneratedText, GeneratedTextInputEvent, INLINE_END_EDGE, INLINE_START_EDGE, TextBrush,
++    TextInputData, TextLayout, is_inline_edge_char, without_inline_edges,
++};
+diff --git a/crates/blitz-dom/src/node/text.rs b/crates/blitz-dom/src/node/text.rs
+index e2318c5..daab1fd 100644
+--- a/crates/blitz-dom/src/node/text.rs
++++ b/crates/blitz-dom/src/node/text.rs
+@@ -13,11 +13,62 @@ use crate::util::ACTION_MOD;
+ pub struct TextBrush {
+     /// The node id for the span
+     pub id: NodeId,
++    /// Set on text the layout generates, which isn't the document's.
++    pub generated: GeneratedText,
+ }
+ 
+ impl TextBrush {
+     pub(crate) fn from_id(id: NodeId) -> Self {
+-        Self { id }
++        Self {
++            id,
++            generated: GeneratedText::None,
++        }
++    }
++}
++
++/// What a run of text the layout generates stands for. It is invisible, and
++/// left out of copied text.
++#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
++pub enum GeneratedText {
++    /// The document's own text.
++    #[default]
++    None,
++    /// A non-atomic inline element's inline-start or inline-end edge: its
++    /// margin, border and padding on that side, which take room in its line
++    /// (CSS 2.1 §10.3.1, §9.4.2). Each edge with a size is laid out as a
++    /// single invisible placeholder character whose letter spacing is the
++    /// edge's width: [`INLINE_START_EDGE`] before the element's content and
++    /// [`INLINE_END_EDGE`] after it. A start edge is on the element's first
++    /// line and an end edge on its last, as with `box-decoration-break: slice`.
++    StartEdge,
++    EndEdge,
++    /// A `<wbr>`, laid out as U+200B ZERO WIDTH SPACE as in Chromium: a line
++    /// break opportunity, even where the text around it doesn't wrap.
++    LineBreakOpportunity,
++}
++
++/// The placeholder for an inline element's start edge: U+2061 FUNCTION
++/// APPLICATION. It is default ignorable, has no glyph and takes no part in font
++/// selection, and its alphabetic line breaking class keeps it with the text
++/// after it while allowing a break after a preceding space.
++pub const INLINE_START_EDGE: char = '\u{2061}';
++/// The placeholder for an inline element's end edge: U+2060 WORD JOINER, which
++/// allows no line break on either side, so the edge stays with the element's
++/// last content.
++pub const INLINE_END_EDGE: char = '\u{2060}';
++
++/// Whether `c` is one of the placeholders inline edges are laid out as.
++pub fn is_inline_edge_char(c: char) -> bool {
++    matches!(c, INLINE_START_EDGE | INLINE_END_EDGE)
++}
++
++/// `text` without the placeholders inline edges are laid out as, for text that
++/// people read or copy.
++pub fn without_inline_edges(text: &str) -> std::borrow::Cow<'_, str> {
++    if text.contains(is_inline_edge_char) {
++        text.chars().filter(|c| !is_inline_edge_char(*c)).collect()
++    } else {
++        std::borrow::Cow::Borrowed(text)
+     }
+ }
+ 
+diff --git a/crates/blitz-paint/src/ink_skip.rs b/crates/blitz-paint/src/ink_skip.rs
+new file mode 100644
+index 0000000..5977ff3
+--- /dev/null
++++ b/crates/blitz-paint/src/ink_skip.rs
+@@ -0,0 +1,244 @@
++//! `text-decoration-skip-ink: auto` (CSS Text Decoration 4, 2.6), as Blink
++//! does it (`TextPainter::ClipDecorationLine` over Skia's
++//! `SkFont::getIntercepts`): an underline or overline is interrupted where a
++//! glyph's outline crosses it, from a little before the outline's leftmost
++//! crossing to a little after its rightmost one.
++//!
++//! Stylo only parses `text-decoration-skip-ink` for Gecko, so it is always
++//! `auto` here.
++
++use std::collections::HashMap;
++
++use skrifa::instance::{LocationRef, NormalizedCoord, Size};
++use skrifa::outline::{DrawSettings, OutlinePen};
++use skrifa::{FontRef, GlyphId, MetadataProvider};
++
++/// How many entries the intercept cache holds before it starts over.
++const MAX_CACHED_INTERCEPTS: usize = 8192;
++
++#[derive(Hash, PartialEq, Eq)]
++struct InterceptKey {
++    font: u64,
++    index: u32,
++    glyph: u32,
++    size: u32,
++    coords: u64,
++    skew: u32,
++    /// The band, in 1/64 px below the glyph's baseline.
++    top: i32,
++    bottom: i32,
++}
++
++/// Cached glyph intercepts and per-font glyph exclusions.
++#[derive(Default)]
++pub(crate) struct InkSkip {
++    intercepts: HashMap<InterceptKey, Option<(f32, f32)>>,
++    /// The glyphs of `/`, `\` and `_`, which Blink never skips: a line under a
++    /// path or an identifier stays whole.
++    excluded: HashMap<(u64, u32), [Option<u32>; 3]>,
++}
++
++impl InkSkip {
++    /// The glyphs whose ink the decoration line runs through regardless.
++    pub(crate) fn excluded_glyphs(&mut self, font: &parley::FontData) -> [Option<u32>; 3] {
++        *self
++            .excluded
++            .entry((font.data.id(), font.index))
++            .or_insert_with(|| {
++                let Ok(font) = FontRef::from_index(font.data.as_ref(), font.index) else {
++                    return [None; 3];
++                };
++                let charmap = font.charmap();
++                ['/', '\\', '_'].map(|c| charmap.map(c).map(|glyph| glyph.to_u32()))
++            })
++    }
++
++    /// Where glyph `glyph`'s outline crosses the band from `top` to `bottom`
++    /// px below its baseline: its leftmost and rightmost x there, relative to
++    /// the glyph's origin.
++    #[allow(clippy::too_many_arguments)]
++    pub(crate) fn intercept(
++        &mut self,
++        font: &parley::FontData,
++        font_size: f32,
++        coords: &[i16],
++        skew: f32,
++        glyph: u32,
++        top: f32,
++        bottom: f32,
++    ) -> Option<(f32, f32)> {
++        let key = InterceptKey {
++            font: font.data.id(),
++            index: font.index,
++            glyph,
++            size: font_size.to_bits(),
++            coords: coords.iter().fold(0u64, |hash, coord| {
++                hash.rotate_left(16) ^ u64::from(*coord as u16)
++            }),
++            skew: skew.to_bits(),
++            top: (top * 64.0).round() as i32,
++            bottom: (bottom * 64.0).round() as i32,
++        };
++        if let Some(intercept) = self.intercepts.get(&key) {
++            return *intercept;
++        }
++        let intercept = compute_intercept(font, font_size, coords, skew, glyph, top, bottom);
++        if self.intercepts.len() >= MAX_CACHED_INTERCEPTS {
++            self.intercepts.clear();
++        }
++        self.intercepts.insert(key, intercept);
++        intercept
++    }
++}
++
++fn compute_intercept(
++    font: &parley::FontData,
++    font_size: f32,
++    coords: &[i16],
++    skew: f32,
++    glyph: u32,
++    top: f32,
++    bottom: f32,
++) -> Option<(f32, f32)> {
++    let font = FontRef::from_index(font.data.as_ref(), font.index).ok()?;
++    let coords: Vec<NormalizedCoord> = coords
++        .iter()
++        .map(|coord| NormalizedCoord::from_bits(*coord))
++        .collect();
++    let location = LocationRef::new(&coords);
++    let size = Size::new(font_size);
++    let glyph_id = GlyphId::new(glyph);
++    // Outlines are y-up: the band below the baseline is at negative y.
++    let (low, high) = (-bottom, -top);
++    // Most glyphs don't reach the band, which their bounds tell cheaply.
++    if skew == 0.0
++        && let Some(bounds) = font.glyph_metrics(size, location).bounds(glyph_id)
++        && (bounds.y_max < low || bounds.y_min > high)
++    {
++        return None;
++    }
++    let outline = font.outline_glyphs().get(glyph_id)?;
++    let mut pen = BandPen {
++        low,
++        high,
++        skew,
++        start: (0.0, 0.0),
++        current: (0.0, 0.0),
++        min: f32::INFINITY,
++        max: f32::NEG_INFINITY,
++    };
++    outline
++        .draw(DrawSettings::unhinted(size, location), &mut pen)
++        .ok()?;
++    (pen.min < pen.max).then_some((pen.min, pen.max))
++}
++
++/// Finds the horizontal extent of an outline within a horizontal band.
++struct BandPen {
++    low: f32,
++    high: f32,
++    /// The synthetic italic's slant, as x per y.
++    skew: f32,
++    start: (f32, f32),
++    current: (f32, f32),
++    min: f32,
++    max: f32,
++}
++
++impl BandPen {
++    fn segment(&mut self, from: (f32, f32), to: (f32, f32)) {
++        let (x0, y0) = (from.0 + self.skew * from.1, from.1);
++        let (x1, y1) = (to.0 + self.skew * to.1, to.1);
++        if y0.max(y1) < self.low || y0.min(y1) > self.high {
++            return;
++        }
++        let dy = y1 - y0;
++        let (a, b) = if dy.abs() < f32::EPSILON {
++            (x0, x1)
++        } else {
++            // The part of the segment inside the band.
++            let ta = ((self.low - y0) / dy).clamp(0.0, 1.0);
++            let tb = ((self.high - y0) / dy).clamp(0.0, 1.0);
++            (x0 + (x1 - x0) * ta, x0 + (x1 - x0) * tb)
++        };
++        self.min = self.min.min(a.min(b));
++        self.max = self.max.max(a.max(b));
++    }
++}
++
++impl OutlinePen for BandPen {
++    fn move_to(&mut self, x: f32, y: f32) {
++        self.start = (x, y);
++        self.current = (x, y);
++    }
++
++    fn line_to(&mut self, x: f32, y: f32) {
++        self.segment(self.current, (x, y));
++        self.current = (x, y);
++    }
++
++    fn quad_to(&mut self, cx0: f32, cy0: f32, x: f32, y: f32) {
++        let (x0, y0) = self.current;
++        const STEPS: usize = 8;
++        let mut previous = (x0, y0);
++        for step in 1..=STEPS {
++            let t = step as f32 / STEPS as f32;
++            let mt = 1.0 - t;
++            let point = (
++                mt * mt * x0 + 2.0 * mt * t * cx0 + t * t * x,
++                mt * mt * y0 + 2.0 * mt * t * cy0 + t * t * y,
++            );
++            self.segment(previous, point);
++            previous = point;
++        }
++        self.current = (x, y);
++    }
++
++    fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
++        let (x0, y0) = self.current;
++        const STEPS: usize = 12;
++        let mut previous = (x0, y0);
++        for step in 1..=STEPS {
++            let t = step as f32 / STEPS as f32;
++            let mt = 1.0 - t;
++            let point = (
++                mt * mt * mt * x0
++                    + 3.0 * mt * mt * t * cx0
++                    + 3.0 * mt * t * t * cx1
++                    + t * t * t * x,
++                mt * mt * mt * y0
++                    + 3.0 * mt * mt * t * cy0
++                    + 3.0 * mt * t * t * cy1
++                    + t * t * t * y,
++            );
++            self.segment(previous, point);
++            previous = point;
++        }
++        self.current = (x, y);
++    }
++
++    fn close(&mut self) {
++        self.segment(self.current, self.start);
++        self.current = self.start;
++    }
++}
++
++/// Whether ink skipping leaves `c` out, as Blink's `CanTextDecorationSkipInk`
++/// does: CJK ideographs and symbols, kana, bopomofo and Hangul.
++pub(crate) fn never_skips_ink(c: char) -> bool {
++    matches!(u32::from(c),
++        0x1100..=0x11FF // Hangul Jamo
++        | 0x2E80..=0x2FFF // CJK radicals, Kangxi radicals, ideographic description
++        | 0x3000..=0x31FF // CJK symbols and punctuation, kana, bopomofo, strokes
++        | 0x3200..=0x4DBF // enclosed CJK, CJK compatibility, extension A
++        | 0x4E00..=0x9FFF // CJK unified ideographs
++        | 0xA960..=0xA97F // Hangul Jamo extended A
++        | 0xAC00..=0xD7FF // Hangul syllables, Jamo extended B
++        | 0xF900..=0xFAFF // CJK compatibility ideographs
++        | 0xFE30..=0xFE4F // CJK compatibility forms
++        | 0xFF00..=0xFFEF // half and full width forms
++        | 0x10080..=0x100FF // Linear B ideograms
++        | 0x1F200..=0x1F2FF // enclosed ideographic supplement
++        | 0x20000..=0x3FFFF // supplementary ideographic planes
++    )
++}
+diff --git a/crates/blitz-paint/src/lib.rs b/crates/blitz-paint/src/lib.rs
+index 9705020..45d19ab 100644
+--- a/crates/blitz-paint/src/lib.rs
++++ b/crates/blitz-paint/src/lib.rs
+@@ -7,6 +7,7 @@ mod color;
+ mod debug_overlay;
+ mod filters;
+ mod gradient;
++mod ink_skip;
+ mod kurbo_css;
+ mod layers;
+ mod render;
+diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
+index b664442..378714d 100644
+--- a/crates/blitz-paint/src/render.rs
++++ b/crates/blitz-paint/src/render.rs
+@@ -3,6 +3,7 @@ mod border;
+ mod box_shadow;
+ mod clip_path;
+ mod form_controls;
++mod inline_box;
+ mod mask;
+ 
+ use std::cell::RefCell;
+@@ -274,7 +275,9 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+         }
+ 
+         let effects = styles.get_effects();
+-        let opacity = effects.opacity;
++        // A non-atomic inline element has no box of its own to group its
++        // content in: its opacity applies to the boxes inside it here.
++        let opacity = effects.opacity * inline_box::inline_ancestor_opacity(self.dom, node);
+         if opacity == 0.0 {
+             return;
+         }
+@@ -907,6 +910,32 @@ impl ElementCx<'_, '_> {
+                 .as_ref()
+                 .and_then(|cache| cache.get(&self.node.id))
+                 .filter(|bounds| bounds.len() == text_layout.layout.len());
++
++            // Inline elements' backgrounds, borders and shadows, by line.
++            let fragments = inline_box::inline_fragments(
++                self.context.dom,
++                &text_layout.layout,
++                self.node.id,
++                self.scale,
++            );
++            // Their ink, which can reach past the line's glyphs.
++            let mut fragment_ink: HashMap<usize, Rect> = HashMap::new();
++            for fragment in &fragments {
++                let Some(style) = self
++                    .context
++                    .dom
++                    .get_node(fragment.node_id)
++                    .and_then(|node| node.primary_styles())
++                else {
++                    continue;
++                };
++                let ink = fragment.ink_rect(&style, self.scale);
++                fragment_ink
++                    .entry(fragment.line)
++                    .and_modify(|rect| *rect = rect.union(ink))
++                    .or_insert(ink);
++            }
++
+             let lines = text_layout
+                 .layout
+                 .lines()
+@@ -916,6 +945,9 @@ impl ElementCx<'_, '_> {
+                         .zip(bounds)
+                         .and_then(|(viewport, bounds)| {
+                             bounds.get(index).copied().flatten().map(|bounds| {
++                                let bounds = fragment_ink
++                                    .get(&index)
++                                    .map_or(bounds, |ink| bounds.union(*ink));
+                                 let bounds = transform.transform_rect_bbox(bounds);
+                                 bounds.is_finite()
+                                     && (bounds.x1 < viewport.x0
+@@ -925,37 +957,111 @@ impl ElementCx<'_, '_> {
+                             })
+                         })
+                         .unwrap_or(false);
+-                    (!outside).then_some(line)
++                    (!outside).then_some((index, line))
+                 });
+-            crate::text::draw_inline_backgrounds(
+-                scene,
+-                lines.clone(),
+-                self.context.dom,
+-                transform,
+-                self.node.id,
+-            );
+-            // Render text selection highlight (if any) using cached selection ranges
+-            if let Some(&(sel_start, sel_end)) = self.context.selection_ranges.get(&self.node.id) {
+-                crate::text::draw_text_selection(
++
++            // The text selection highlight (if any), using cached selection ranges
++            let selection = self
++                .context
++                .selection_ranges
++                .get(&self.node.id)
++                .map(|&(sel_start, sel_end)| {
++                    crate::text::text_selection_rects(&text_layout.layout, sel_start, sel_end)
++                })
++                .unwrap_or_default();
++
++            let rtl = text_layout.layout.is_rtl();
++            // Inline elements with `opacity` are painted as groups.
++            let groups =
++                inline_box::OpacityGroups::new(self.context.dom, &text_layout.layout, self.node.id);
++
++            // Each line is painted in turn, its inline boxes' decorations, then
++            // its selection, then its text (CSS 2.1 Appendix E, 7.2.1): where
++            // a line's boxes reach into the line above, they cover its text.
++            let mut draw_text_context = self.context.draw_text_context.borrow_mut();
++            let mut next_fragment = 0;
++            for (index, line) in lines {
++                while fragments
++                    .get(next_fragment)
++                    .is_some_and(|fragment| fragment.line < index)
++                {
++                    next_fragment += 1;
++                }
++                let line_fragments = {
++                    let start = next_fragment;
++                    while fragments
++                        .get(next_fragment)
++                        .is_some_and(|fragment| fragment.line == index)
++                    {
++                        next_fragment += 1;
++                    }
++                    &fragments[start..next_fragment]
++                };
++                for fragment in line_fragments {
++                    if groups.group_of(fragment.node_id).is_none() {
++                        self.draw_inline_fragment(scene, fragment, transform);
++                    }
++                }
++                for (_, rect) in selection.iter().filter(|(line, _)| *line == index) {
++                    scene.fill(Fill::NonZero, transform, SELECTION_COLOR, None, rect);
++                }
++                let ungrouped = |id: NodeId| groups.group_of(id).is_none();
++                crate::text::stroke_text(
+                     scene,
+-                    &text_layout.layout,
++                    std::iter::once(line.clone()),
++                    self.context.dom,
+                     transform,
+-                    sel_start,
+-                    sel_end,
++                    self.scale,
++                    self.node.id,
++                    &mut draw_text_context,
++                    crate::text::TextPaint {
++                        viewport,
++                        run_filter: (!groups.is_empty())
++                            .then_some(&ungrouped as &dyn Fn(NodeId) -> bool),
++                        text: &text_layout.text,
++                        rtl,
++                    },
+                 );
++                // Each group on the line, its decorations and text in a layer
++                // with its opacity.
++                for (group, opacity, bounds) in groups.on_line(&line, line_fragments, self.scale) {
++                    if opacity <= 0.0 {
++                        continue;
++                    }
++                    self.layer_manager.maybe_with_layer(
++                        scene,
++                        true,
++                        opacity,
++                        transform,
++                        &bounds,
++                        None,
++                        None,
++                        |scene| {
++                            for fragment in line_fragments {
++                                if groups.group_of(fragment.node_id) == Some(group) {
++                                    self.draw_inline_fragment(scene, fragment, transform);
++                                }
++                            }
++                            let in_group = |id: NodeId| groups.group_of(id) == Some(group);
++                            crate::text::stroke_text(
++                                scene,
++                                std::iter::once(line.clone()),
++                                self.context.dom,
++                                transform,
++                                self.scale,
++                                self.node.id,
++                                &mut draw_text_context,
++                                crate::text::TextPaint {
++                                    viewport,
++                                    run_filter: Some(&in_group),
++                                    text: &text_layout.text,
++                                    rtl,
++                                },
++                            );
++                        },
++                    );
++                }
+             }
+-
+-            let mut draw_text_context = self.context.draw_text_context.borrow_mut();
+-            crate::text::stroke_text(
+-                scene,
+-                lines,
+-                self.context.dom,
+-                transform,
+-                self.scale,
+-                self.node.id,
+-                &mut draw_text_context,
+-                viewport,
+-            );
+         }
+     }
+ 
+@@ -1013,15 +1119,21 @@ impl ElementCx<'_, '_> {
+ 
+             // Render text
+             let mut draw_text_context = self.context.draw_text_context.borrow_mut();
++            let layout = input_data.editor.try_layout().unwrap();
+             crate::text::stroke_text(
+                 scene,
+-                input_data.editor.try_layout().unwrap().lines(),
++                layout.lines(),
+                 self.context.dom,
+                 transform,
+                 self.scale,
+                 self.node.id,
+                 &mut draw_text_context,
+-                None,
++                crate::text::TextPaint {
++                    viewport: None,
++                    run_filter: None,
++                    text: "",
++                    rtl: layout.is_rtl(),
++                },
+             );
+         }
+     }
+@@ -1077,7 +1189,12 @@ impl ElementCx<'_, '_> {
+                 self.scale,
+                 self.node.id,
+                 &mut draw_text_context,
+-                None,
++                crate::text::TextPaint {
++                    viewport: None,
++                    run_filter: None,
++                    text: "",
++                    rtl: layout.is_rtl(),
++                },
+             );
+         }
+     }
+diff --git a/crates/blitz-paint/src/render/inline_box.rs b/crates/blitz-paint/src/render/inline_box.rs
+new file mode 100644
+index 0000000..8a9b175
+--- /dev/null
++++ b/crates/blitz-paint/src/render/inline_box.rs
+@@ -0,0 +1,661 @@
++//! The box decorations of non-atomic inline elements: their backgrounds,
++//! borders and box shadows, painted on each of their line box fragments (CSS
++//! 2.1 Appendix E, step 7.2.1).
++//!
++//! An inline element broken across lines is painted as if it were one box, laid
++//! out as a strip of all its fragments end to end and then sliced into them
++//! (`box-decoration-break: slice`): its inline-start border, padding and radii
++//! are only on its first fragment, its inline-end ones only on its last, and
++//! its backgrounds continue from one fragment to the next.
++
++use std::cell::RefCell;
++use std::collections::HashMap;
++
++use anyrender::PaintScene;
++use blitz_dom::node::{GeneratedText, TextBrush};
++use blitz_dom::{BaseDocument, NodeId};
++use kurbo::{Affine, Rect, Vec2};
++use parley::{InlineBoxKind, Layout, Line, PositionedLayoutItem};
++use peniko::Fill;
++use style::properties::ComputedValues;
++use style::values::computed::{BorderStyle, LengthPercentage, Margin};
++use style::values::generics::image::GenericImage;
++
++use super::ElementCx;
++use crate::color::ToColorColor as _;
++
++/// One line's part of a decorated inline element.
++pub(crate) struct InlineFragment {
++    pub(crate) node_id: NodeId,
++    /// The line the fragment is on.
++    pub(crate) line: usize,
++    /// How many decorated inline ancestors the element has in its inline
++    /// formatting context. Outer elements paint first.
++    depth: u16,
++    /// The fragment's border box, in the layout's (device) pixels.
++    rect: Rect,
++    /// Where the fragment starts in its element's strip, and the strip's width.
++    strip_offset: f64,
++    strip_width: f64,
++    /// Sides that are an edge of the whole element rather than a line break:
++    /// what is painted past them, such as shadows, is not cut off.
++    open_left: bool,
++    open_right: bool,
++}
++
++impl InlineFragment {
++    /// How far past its border box the fragment may paint: its outer shadows.
++    pub(crate) fn ink_rect(&self, style: &ComputedValues, scale: f64) -> Rect {
++        let reach = shadow_reach(style, scale);
++        self.rect.inflate(reach, reach)
++    }
++}
++
++/// Paint-relevant geometry of a decorated inline element, in device pixels.
++#[derive(Clone, Copy)]
++struct Decorated {
++    depth: u16,
++    rtl: bool,
++    margin_start: f64,
++    margin_end: f64,
++    /// Padding and border above and below the content area.
++    top: f64,
++    bottom: f64,
++}
++
++/// What the runs and boxes of one line contribute to one element.
++struct LineExtent {
++    line: usize,
++    x0: f32,
++    x1: f32,
++    /// The extents of the element's own start and end edge placeholders.
++    start: Option<(f32, f32)>,
++    end: Option<(f32, f32)>,
++    /// Baseline, ascent and descent of the element's own text on the line,
++    /// else of the first text inside it.
++    own_metrics: Option<(f32, f32, f32)>,
++    metrics: Option<(f32, f32, f32)>,
++    /// The line's content ends before its hanging white space.
++    content_x0: f32,
++    content_x1: f32,
++}
++
++fn length(lp: &LengthPercentage) -> f64 {
++    lp.to_length().map_or(0.0, |l| f64::from(l.px()))
++}
++
++fn margin(margin: &Margin) -> f64 {
++    match margin {
++        Margin::LengthPercentage(lp) => length(lp),
++        _ => 0.0,
++    }
++}
++
++/// A border's used widths, top, right, bottom and left. Its computed width
++/// stays `medium` when it has no style.
++fn border_widths(style: &ComputedValues) -> [f64; 4] {
++    let border = style.get_border();
++    let width = |style: BorderStyle, width: f32| {
++        if matches!(style, BorderStyle::None | BorderStyle::Hidden) {
++            0.0
++        } else {
++            f64::from(width)
++        }
++    };
++    [
++        width(
++            border.border_top_style,
++            border.border_top_width.0.to_f32_px(),
++        ),
++        width(
++            border.border_right_style,
++            border.border_right_width.0.to_f32_px(),
++        ),
++        width(
++            border.border_bottom_style,
++            border.border_bottom_width.0.to_f32_px(),
++        ),
++        width(
++            border.border_left_style,
++            border.border_left_width.0.to_f32_px(),
++        ),
++    ]
++}
++
++fn shadow_reach(style: &ComputedValues, scale: f64) -> f64 {
++    style
++        .get_effects()
++        .box_shadow
++        .0
++        .iter()
++        .filter(|shadow| !shadow.inset)
++        .map(|shadow| {
++            let offset = f64::from(shadow.base.horizontal.px().abs())
++                .max(f64::from(shadow.base.vertical.px().abs()));
++            offset + f64::from(shadow.spread.px()) + f64::from(shadow.base.blur.px()) * 2.5
++        })
++        .fold(0.0, f64::max)
++        * scale
++        + 2.0
++}
++
++/// Whether an inline element has anything of its own box to paint.
++fn has_box_decorations(style: &ComputedValues) -> bool {
++    let background = style.get_background();
++    let current_color = style.clone_color();
++    let color = background
++        .background_color
++        .resolve_to_absolute(&current_color)
++        .as_srgb_color();
++    if color.components[3] > 0.0 {
++        return true;
++    }
++    if background
++        .background_image
++        .0
++        .iter()
++        .any(|image| !matches!(image, GenericImage::None))
++    {
++        return true;
++    }
++    if border_widths(style).iter().any(|width| *width > 0.0) {
++        return true;
++    }
++    !style.get_effects().box_shadow.0.is_empty()
++}
++
++/// The decorated inline elements a run or box is inside, innermost first,
++/// from `id` up to (but not including) the inline root.
++fn decorated_chain(
++    doc: &BaseDocument,
++    root: NodeId,
++    id: NodeId,
++    scale: f64,
++    decorated: &mut HashMap<NodeId, Option<Decorated>>,
++    chains: &mut HashMap<NodeId, Vec<NodeId>>,
++) -> Vec<NodeId> {
++    if let Some(chain) = chains.get(&id) {
++        return chain.clone();
++    }
++    // The ancestors on the way up, innermost first, that stay inline.
++    let mut path = Vec::new();
++    let mut current = Some(id);
++    while let Some(node_id) = current {
++        if node_id == root {
++            break;
++        }
++        let Some(node) = doc.get_node(node_id) else {
++            break;
++        };
++        if let Some(styles) = node.primary_styles() {
++            let display = styles.clone_display();
++            // A `display: contents` element has no box; inline content of an
++            // anonymous block keeps its DOM parent, which is not inline.
++            if !display.is_contents() {
++                if !display.is_inline_flow() {
++                    break;
++                }
++                path.push(node_id);
++            }
++        }
++        current = node.parent;
++    }
++    let depth_of = |index: usize| (path.len() - 1 - index) as u16;
++    let chain: Vec<NodeId> = path
++        .iter()
++        .enumerate()
++        .filter(|(index, node_id)| {
++            decorated
++                .entry(**node_id)
++                .or_insert_with(|| decoration(doc, **node_id, depth_of(*index), scale))
++                .is_some()
++        })
++        .map(|(_, node_id)| *node_id)
++        .collect();
++    chains.insert(id, chain.clone());
++    chain
++}
++
++fn decoration(doc: &BaseDocument, id: NodeId, depth: u16, scale: f64) -> Option<Decorated> {
++    let node = doc.get_node(id)?;
++    let style = node.primary_styles()?;
++    if style.get_inherited_box().visibility != style::computed_values::visibility::T::Visible
++        || !has_box_decorations(&style)
++    {
++        return None;
++    }
++    let margins = style.get_margin();
++    let padding = style.get_padding();
++    let [border_top, _, border_bottom, _] = border_widths(&style);
++    let rtl = !style.writing_mode.is_bidi_ltr();
++    let (margin_start, margin_end) = if rtl {
++        (margin(&margins.margin_right), margin(&margins.margin_left))
++    } else {
++        (margin(&margins.margin_left), margin(&margins.margin_right))
++    };
++    Some(Decorated {
++        depth,
++        rtl,
++        margin_start: margin_start * scale,
++        margin_end: margin_end * scale,
++        top: (length(&padding.padding_top.0) + border_top) * scale,
++        bottom: (length(&padding.padding_bottom.0) + border_bottom) * scale,
++    })
++}
++
++/// The fragments of the decorated inline elements in an inline formatting
++/// context, in paint order: by line, then outer elements before inner ones.
++pub(crate) fn inline_fragments(
++    doc: &BaseDocument,
++    layout: &Layout<TextBrush>,
++    root: NodeId,
++    scale: f64,
++) -> Vec<InlineFragment> {
++    let mut decorated = HashMap::new();
++    let mut chains = HashMap::new();
++
++    // Most paragraphs have no decorated inline element: tell from their
++    // styles, without walking their lines.
++    let any = layout.styles().iter().any(|style| {
++        !decorated_chain(
++            doc,
++            root,
++            style.brush.id,
++            scale,
++            &mut decorated,
++            &mut chains,
++        )
++        .is_empty()
++    }) || layout.inline_boxes().any(|inline_box| {
++        let parent = doc
++            .get_node(NodeId::from_u64(inline_box.id))
++            .and_then(|node| node.parent);
++        parent.is_some_and(|parent| {
++            !decorated_chain(doc, root, parent, scale, &mut decorated, &mut chains).is_empty()
++        })
++    });
++    if !any {
++        return Vec::new();
++    }
++
++    let rtl_paragraph = layout.is_rtl();
++    let mut extents: HashMap<NodeId, Vec<LineExtent>> = HashMap::new();
++    for (line_index, line) in layout.lines().enumerate() {
++        let metrics = line.metrics();
++        let start = metrics.offset + metrics.inline_min_coord;
++        let (content_x0, content_x1) = if rtl_paragraph {
++            (start + metrics.hanging_advance, start + metrics.advance)
++        } else {
++            (start, start + metrics.advance - metrics.hanging_advance)
++        };
++        for item in line.items() {
++            let (owner, x0, x1, run) = match item {
++                PositionedLayoutItem::GlyphRun(glyph_run) => {
++                    let x0 = glyph_run.offset();
++                    let brush = glyph_run.style().brush;
++                    (
++                        brush.id,
++                        x0,
++                        x0 + glyph_run.advance(),
++                        Some((glyph_run, brush)),
++                    )
++                }
++                PositionedLayoutItem::InlineBox(inline_box) => {
++                    if inline_box.kind != InlineBoxKind::InFlow {
++                        continue;
++                    }
++                    let Some(parent) = doc
++                        .get_node(NodeId::from_u64(inline_box.id))
++                        .and_then(|node| node.parent)
++                    else {
++                        continue;
++                    };
++                    (parent, inline_box.x, inline_box.x + inline_box.width, None)
++                }
++            };
++            let chain = decorated_chain(doc, root, owner, scale, &mut decorated, &mut chains);
++            for node_id in chain {
++                let lines = extents.entry(node_id).or_default();
++                if lines.last().is_none_or(|extent| extent.line != line_index) {
++                    lines.push(LineExtent {
++                        line: line_index,
++                        x0,
++                        x1,
++                        start: None,
++                        end: None,
++                        own_metrics: None,
++                        metrics: None,
++                        content_x0,
++                        content_x1,
++                    });
++                }
++                let extent = lines.last_mut().unwrap();
++                extent.x0 = extent.x0.min(x0);
++                extent.x1 = extent.x1.max(x1);
++                let Some((glyph_run, brush)) = &run else {
++                    continue;
++                };
++                let run_metrics = glyph_run.run().font_metrics();
++                let metrics = (
++                    glyph_run.baseline(),
++                    run_metrics.ascent,
++                    run_metrics.descent,
++                );
++                if brush.id == node_id {
++                    match brush.generated {
++                        GeneratedText::StartEdge => extent.start = Some((x0, x1)),
++                        GeneratedText::EndEdge => extent.end = Some((x0, x1)),
++                        GeneratedText::None | GeneratedText::LineBreakOpportunity => {}
++                    }
++                    extent.own_metrics.get_or_insert(metrics);
++                } else {
++                    extent.metrics.get_or_insert(metrics);
++                }
++            }
++        }
++    }
++
++    let mut fragments = Vec::new();
++    for (node_id, lines) in extents {
++        let Some(Some(decoration)) = decorated.get(&node_id).copied() else {
++            continue;
++        };
++        let first = fragments.len();
++        for extent in &lines {
++            let Some((baseline, ascent, descent)) = extent.own_metrics.or(extent.metrics) else {
++                continue;
++            };
++            // Without its edge, a side of the fragment is a line break, where
++            // the hanging white space at the end of the line is left out.
++            let (left_edge, right_edge, left_margin, right_margin) = if decoration.rtl {
++                (
++                    extent.end,
++                    extent.start,
++                    decoration.margin_end,
++                    decoration.margin_start,
++                )
++            } else {
++                (
++                    extent.start,
++                    extent.end,
++                    decoration.margin_start,
++                    decoration.margin_end,
++                )
++            };
++            let x0 = match left_edge {
++                Some((x0, _)) => f64::from(x0) + left_margin,
++                None => f64::from(extent.x0.max(extent.content_x0.min(extent.x1))),
++            };
++            let x1 = match right_edge {
++                Some((_, x1)) => f64::from(x1) - right_margin,
++                None => f64::from(extent.x1.min(extent.content_x1.max(extent.x0))),
++            };
++            // The content area is the font's ascent and descent around the
++            // baseline, which padding and borders extend.
++            let baseline = f64::from(baseline);
++            let y0 = baseline - f64::from(ascent).round() - decoration.top;
++            let y1 = baseline + f64::from(descent).round() + decoration.bottom;
++            let rect = Rect::new(
++                x0.round(),
++                y0.round(),
++                x1.round().max(x0.round()),
++                y1.round(),
++            );
++            fragments.push(InlineFragment {
++                node_id,
++                line: extent.line,
++                depth: decoration.depth,
++                rect,
++                strip_offset: 0.0,
++                strip_width: 0.0,
++                open_left: left_edge.is_some(),
++                open_right: right_edge.is_some(),
++            });
++        }
++        // The strip runs in line order, right to left for a right-to-left
++        // element, so its start edge is on the first fragment.
++        let parts = &mut fragments[first..];
++        let width: f64 = parts.iter().map(|fragment| fragment.rect.width()).sum();
++        let mut offset = 0.0;
++        let count = parts.len();
++        for (index, fragment) in parts.iter_mut().enumerate() {
++            fragment.strip_width = width;
++            fragment.strip_offset = if decoration.rtl {
++                width - offset - fragment.rect.width()
++            } else {
++                offset
++            };
++            offset += fragment.rect.width();
++            // Only a fragment with its element's start or end edge leaves that
++            // side open. An element's only fragment is never cut.
++            if count == 1 {
++                fragment.open_left = true;
++                fragment.open_right = true;
++            } else if decoration.rtl {
++                fragment.open_right |= index == 0;
++                fragment.open_left |= index + 1 == count;
++            } else {
++                fragment.open_left |= index == 0;
++                fragment.open_right |= index + 1 == count;
++            }
++        }
++    }
++    fragments.sort_by(|a, b| {
++        (a.line, a.depth)
++            .cmp(&(b.line, b.depth))
++            .then(a.rect.x0.total_cmp(&b.rect.x0))
++    });
++    fragments
++}
++
++impl ElementCx<'_, '_> {
++    /// Paint one fragment of an inline element's box, positioned by
++    /// `transform` (the inline layout's).
++    pub(super) fn draw_inline_fragment(
++        &self,
++        scene: &mut impl PaintScene,
++        fragment: &InlineFragment,
++        transform: Affine,
++    ) {
++        let Some(node) = self.context.dom.get_node(fragment.node_id) else {
++            return;
++        };
++        let Some(style) = node.primary_styles() else {
++            return;
++        };
++        if node.element_data().is_none() {
++            return;
++        }
++        let scale = self.scale;
++        let [border_top, border_right, border_bottom, border_left] =
++            border_widths(&style).map(|width| width as f32);
++        let padding = style.get_padding();
++        let px = |value: f64| (value / scale) as f32;
++        let rect = fragment.rect;
++        // The element's whole box, as one strip of its fragments, in CSS px.
++        let layout = taffy::Layout {
++            size: taffy::Size {
++                width: px(fragment.strip_width),
++                height: px(rect.height()),
++            },
++            border: taffy::Rect {
++                left: border_left,
++                right: border_right,
++                top: border_top,
++                bottom: border_bottom,
++            },
++            padding: taffy::Rect {
++                left: length(&padding.padding_left.0) as f32,
++                right: length(&padding.padding_right.0) as f32,
++                top: length(&padding.padding_top.0) as f32,
++                bottom: length(&padding.padding_bottom.0) as f32,
++            },
++            ..taffy::Layout::new()
++        };
++        let strip_transform =
++            transform * Affine::translate(Vec2::new(rect.x0 - fragment.strip_offset, rect.y0));
++        let cx = self.context.element_cx(node, layout, strip_transform, None);
++
++        // Cut the strip at the fragment's line breaks.
++        let reach = shadow_reach(&style, scale);
++        let ink = rect.inflate(reach, reach);
++        let clip = Rect::new(
++            if fragment.open_left { ink.x0 } else { rect.x0 },
++            ink.y0,
++            if fragment.open_right { ink.x1 } else { rect.x1 },
++            ink.y1,
++        );
++        let clipped = !(fragment.open_left && fragment.open_right);
++        if clipped {
++            scene.push_clip_layer(Fill::NonZero, transform, &clip);
++        }
++        cx.draw_outset_box_shadow(scene);
++        cx.draw_background(scene);
++        cx.draw_inset_box_shadow(scene);
++        cx.draw_border(scene);
++        if clipped {
++            scene.pop_layer();
++        }
++    }
++}
++
++/// The opacity of the non-atomic inline elements around `node`, up to its
++/// nearest block-level ancestor: they have no box of their own to be painted
++/// with a layer, so boxes inside them take it on.
++pub(crate) fn inline_ancestor_opacity(doc: &BaseDocument, node: &blitz_dom::Node) -> f32 {
++    let mut opacity = 1.0;
++    let mut current = node.parent.and_then(|id| doc.get_node(id));
++    while let Some(ancestor) = current {
++        let Some(style) = ancestor.primary_styles() else {
++            break;
++        };
++        let display = style.clone_display();
++        if !display.is_contents() {
++            if !display.is_inline_flow() {
++                break;
++            }
++            opacity *= style.get_effects().opacity;
++        }
++        current = ancestor.parent.and_then(|id| doc.get_node(id));
++    }
++    opacity
++}
++
++/// The non-atomic inline elements of an inline formatting context that have
++/// an `opacity` below 1. Each is painted as a group (it is a stacking
++/// context): its fragments' decorations and its text go into a layer with its
++/// opacity, so that their overlapping parts don't show through each other.
++/// Groups nested in another are painted as part of it.
++pub(crate) struct OpacityGroups<'a> {
++    doc: &'a BaseDocument,
++    root: NodeId,
++    any: bool,
++    /// The outermost group each node is in, if any.
++    group: RefCell<HashMap<NodeId, Option<NodeId>>>,
++}
++
++impl<'a> OpacityGroups<'a> {
++    pub(crate) fn new(doc: &'a BaseDocument, layout: &Layout<TextBrush>, root: NodeId) -> Self {
++        let mut groups = Self {
++            doc,
++            root,
++            any: false,
++            group: RefCell::new(HashMap::new()),
++        };
++        groups.any = layout
++            .styles()
++            .iter()
++            .any(|style| groups.group_of(style.brush.id).is_some());
++        groups
++    }
++
++    pub(crate) fn is_empty(&self) -> bool {
++        !self.any
++    }
++
++    /// The outermost inline element with an opacity below 1 that `id` is in.
++    pub(crate) fn group_of(&self, id: NodeId) -> Option<NodeId> {
++        if let Some(group) = self.group.borrow().get(&id) {
++            return *group;
++        }
++        let mut group = None;
++        let mut current = Some(id);
++        while let Some(node_id) = current {
++            if node_id == self.root {
++                break;
++            }
++            let Some(node) = self.doc.get_node(node_id) else {
++                break;
++            };
++            if let Some(style) = node.primary_styles() {
++                let display = style.clone_display();
++                if !display.is_contents() {
++                    if !display.is_inline_flow() {
++                        break;
++                    }
++                    if style.get_effects().opacity < 1.0 {
++                        group = Some(node_id);
++                    }
++                }
++            }
++            current = node.parent;
++        }
++        self.group.borrow_mut().insert(id, group);
++        group
++    }
++
++    /// The groups with content on `line`, in the order they start on it,
++    /// with their opacity and the bounds of that content.
++    pub(crate) fn on_line(
++        &self,
++        line: &Line<'_, TextBrush>,
++        fragments: &[InlineFragment],
++        scale: f64,
++    ) -> Vec<(NodeId, f32, Rect)> {
++        let mut found: Vec<(NodeId, f32, Rect)> = Vec::new();
++        if !self.any {
++            return found;
++        }
++        let metrics = line.metrics();
++        let mut add = |group: NodeId, rect: Rect| match found.iter_mut().find(|g| g.0 == group) {
++            Some(entry) => entry.2 = entry.2.union(rect),
++            None => {
++                let opacity = self
++                    .doc
++                    .get_node(group)
++                    .and_then(|node| node.primary_styles())
++                    .map_or(1.0, |style| style.get_effects().opacity);
++                found.push((group, opacity, rect));
++            }
++        };
++        for item in line.items() {
++            let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
++                continue;
++            };
++            let Some(group) = self.group_of(glyph_run.style().brush.id) else {
++                continue;
++            };
++            // Glyphs can reach well past the line box.
++            let font_size = f64::from(glyph_run.run().font_size());
++            let x0 = f64::from(glyph_run.offset());
++            let rect = Rect::new(
++                x0 - font_size,
++                f64::from(metrics.block_min_coord) - font_size,
++                x0 + f64::from(glyph_run.advance()) + font_size,
++                f64::from(metrics.block_max_coord) + font_size,
++            );
++            add(group, rect);
++        }
++        for fragment in fragments {
++            if let Some(group) = self.group_of(fragment.node_id) {
++                let style = self
++                    .doc
++                    .get_node(fragment.node_id)
++                    .and_then(|node| node.primary_styles());
++                let ink = style.map_or(fragment.rect, |style| fragment.ink_rect(&style, scale));
++                add(group, ink);
++            }
++        }
++        found
++    }
++}
+diff --git a/crates/blitz-paint/src/text.rs b/crates/blitz-paint/src/text.rs
+index 6be7e3a..c3d773f 100644
+--- a/crates/blitz-paint/src/text.rs
++++ b/crates/blitz-paint/src/text.rs
+@@ -1,98 +1,21 @@
+ use anyrender::PaintScene;
+-use blitz_dom::{BaseDocument, NodeId, node::TextBrush, util::ToColorColor};
+-use kurbo::{Affine, BezPath, Cap, Circle, Rect, Stroke};
++use blitz_dom::{
++    BaseDocument, NodeId,
++    node::{GeneratedText, TextBrush},
++    util::ToColorColor,
++};
++use kurbo::{Affine, BezPath, Cap, Circle, Rect, Shape as _, Stroke};
+ use parley::{Affinity, Cursor, Layout, Line, PositionedLayoutItem, Selection};
+ use peniko::Fill;
+ use std::collections::HashMap;
+ use style::properties::generated::longhands::text_decoration_style::computed_value::T as TextDecorationStyle;
+-use style::properties::generated::longhands::visibility::computed_value::T as StyloVisibility;
+ use style::values::computed::{
+     Length, LengthPercentage, TextDecorationLength, TextDecorationLine, TextUnderlinePosition,
+ };
+ use style::values::generics::text::{GenericTextDecorationInset, GenericTextDecorationLength};
+ 
+-use crate::color::{Color, ToColorColor as _};
+-use crate::{FONT_EMBOLDEN_ENABLED, SELECTION_COLOR};
+-
+-/// Draw the backgrounds of inline elements (e.g. `<span style="background: ...">`).
+-///
+-/// Each glyph run carries the node id of the innermost inline element it belongs to
+-/// (via its brush). Every enclosing inline box paints its own background behind the
+-/// run, outermost first, so a transparent inner `<span>` does not hide the background
+-/// of the `<a>` around it (email call-to-action labels rely on this).
+-///
+-/// The walk stops at the inline root, whose background is painted as a normal block
+-/// box, and at the first box that is not `display: inline`. When the inline root is an
+-/// anonymous block, its wrapped children keep their DOM parent, so without that check
+-/// the walk would repaint the enclosing block's background behind the text.
+-/// `display: contents` boxes paint nothing.
+-pub(crate) fn draw_inline_backgrounds<'a>(
+-    scene: &mut impl PaintScene,
+-    lines: impl Iterator<Item = Line<'a, TextBrush>>,
+-    doc: &BaseDocument,
+-    transform: Affine,
+-    inline_root_id: NodeId,
+-) {
+-    let mut backgrounds = Vec::new();
+-    for line in lines {
+-        for item in line.items() {
+-            let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+-                continue;
+-            };
+-
+-            let node_id = glyph_run.style().brush.id;
+-            if node_id == inline_root_id {
+-                continue;
+-            }
+-
+-            backgrounds.clear();
+-            let mut candidate_id = Some(node_id);
+-            while let Some(id) = candidate_id {
+-                if id == inline_root_id {
+-                    break;
+-                }
+-                let Some(node) = doc.get_node(id) else {
+-                    break;
+-                };
+-                if let Some(styles) = node.primary_styles() {
+-                    let display = styles.clone_display();
+-                    if !display.is_contents() {
+-                        if !display.is_inline_flow() {
+-                            break;
+-                        }
+-                        if styles.get_inherited_box().visibility == StyloVisibility::Visible {
+-                            let current_color = styles.clone_color();
+-                            let color = styles
+-                                .get_background()
+-                                .background_color
+-                                .resolve_to_absolute(&current_color)
+-                                .as_srgb_color();
+-                            if color != Color::TRANSPARENT {
+-                                backgrounds.push(color);
+-                            }
+-                        }
+-                    }
+-                }
+-                candidate_id = node.parent;
+-            }
+-            if backgrounds.is_empty() {
+-                continue;
+-            }
+-
+-            let metrics = glyph_run.run().font_metrics();
+-            let x = glyph_run.offset() as f64;
+-            let w = glyph_run.advance() as f64;
+-            let baseline = glyph_run.baseline() as f64;
+-            let y0 = baseline - metrics.ascent as f64;
+-            let y1 = baseline + metrics.descent as f64;
+-            let rect = Rect::new(x, y0, x + w, y1);
+-
+-            for color in backgrounds.iter().rev() {
+-                scene.fill(Fill::NonZero, transform, *color, None, &rect);
+-            }
+-        }
+-    }
+-}
++use crate::FONT_EMBOLDEN_ENABLED;
++use crate::color::Color;
+ 
+ /// Per-font-face cache of the OS/2 `usWinAscent / unitsPerEm` ratio, keyed by the font
+ /// blob's unique id and face index. `None` is cached for fonts without a usable OS/2 or
+@@ -277,6 +200,37 @@ pub(crate) struct DrawTextContext {
+     deco_boxes: Vec<LineDecoration>,
+     win_ascent_ratios: WinAscentCache,
+     outline_bounds: HashMap<(u64, u32), Option<Rect>>,
++    ink_skip: crate::ink_skip::InkSkip,
++    /// The glyphs of a line's runs under an underline or overline, whose ink
++    /// those skip.
++    inked_runs: Vec<InkedRun>,
++    inked_glyphs: Vec<(u32, f32, f32)>,
++    inked_coords: Vec<i16>,
++    /// The decorating boxes (indices into `deco_boxes`) over each inked run.
++    inked_boxes: Vec<usize>,
++}
++
++/// A glyph run under an underline or overline on the current line.
++struct InkedRun {
++    font: parley::FontData,
++    font_size: f32,
++    /// A synthetic italic's slant, as x per y.
++    skew: f32,
++    glyphs: std::ops::Range<usize>,
++    coords: std::ops::Range<usize>,
++    boxes: std::ops::Range<usize>,
++}
++
++/// How to paint the text of an inline formatting context.
++pub(crate) struct TextPaint<'t> {
++    /// Glyph runs entirely outside it are not drawn.
++    pub(crate) viewport: Option<Rect>,
++    /// Only the runs whose node it accepts are drawn and decorated.
++    pub(crate) run_filter: Option<&'t dyn Fn(NodeId) -> bool>,
++    /// The layout's text.
++    pub(crate) text: &'t str,
++    /// Whether the paragraph runs right to left.
++    pub(crate) rtl: bool,
+ }
+ 
+ // The font-wide outline bounds include accents and overhangs which line-height
+@@ -375,86 +329,147 @@ pub(crate) fn line_paint_bounds(
+         .collect()
+ }
+ 
+-/// Resolve the CSS `text-decoration-thickness` to a device-pixel size.
+-///
+-/// - Percentages are resolved against the font size,
+-/// - `from-font` uses the metrics from Parley,
+-/// - `auto` uses a thickness of `font-size / 10` (minimum: 1px).
+-///
+-/// The result is floored to a whole number of device pixels (minimum 1), matching
+-/// browsers, which snap decoration thickness to whole pixels.
+-fn decoration_size(
++/// Resolve the CSS `text-decoration-thickness` to device pixels, as Blink's
++/// `TextDecorationThickness::Resolve` does: `auto` is a tenth of the font
++/// size, lengths and percentages (of the font size) are rounded, `from-font`
++/// is the font's own thickness. It is at least one pixel.
++fn decoration_thickness(
+     thickness: &TextDecorationLength,
+     metric_size: f32,
+     css_font_size: f64,
+     scale: f64,
+-) -> f32 {
++) -> f64 {
+     (match thickness {
+         GenericTextDecorationLength::LengthPercentage(lp) => {
+-            lp.resolve(Length::new(css_font_size as f32)).px() as f64 * scale
++            (lp.resolve(Length::new(css_font_size as f32)).px() as f64 * scale).round()
+         }
+         GenericTextDecorationLength::FromFont => metric_size as f64,
+-        GenericTextDecorationLength::Auto => (css_font_size / 10.0).max(1.0) * scale,
++        GenericTextDecorationLength::Auto => css_font_size * scale / 10.0,
+     })
+-    .floor()
+-    .max(1.0) as f32
++    .max(1.0)
+ }
+ 
+-/// Draws a single decoration line of the given `text-decoration-style` spanning
+-/// `[x0, x0 + width]`. `baseline` is the line's baseline and `offset` positions the line
+-/// relative to it (`y = baseline - offset + size / 2`, growing downward). Geometry is built
+-/// explicitly (rather than relying on backend dash support) so it renders consistently
+-/// across renderers.
+-///
+-/// `double_dir` points away from the text (`+1` = down, `-1` = up) and is used to place the
+-/// second line of a `double` decoration.
+-#[allow(clippy::too_many_arguments)]
+-fn draw_decoration_line(
+-    scene: &mut impl PaintScene,
+-    transform: Affine,
+-    scale: f64,
++/// The thickness a line of `style` is painted with: whole pixels, rounded
++/// down for solid, double and wavy lines and to the nearest for dotted and
++/// dashed ones (Blink's `DecorationLinePainter`).
++fn painted_thickness(thickness: f64, style: TextDecorationStyle) -> f64 {
++    match style {
++        TextDecorationStyle::Dotted | TextDecorationStyle::Dashed => thickness.round(),
++        _ => thickness.floor(),
++    }
++    .max(1.0)
++}
++
++/// Rounds `y`, in the coordinates `transform` maps to device pixels, to the
++/// nearest device pixel row, so that a line is crisp. Lines under rotated
++/// or scaled text are left alone.
++fn snap_y(transform: Affine, y: f64) -> f64 {
++    let [a, b, c, d, _, ty] = transform.as_coeffs();
++    if b != 0.0 || c != 0.0 || (a - 1.0).abs() > 1e-6 || (d - 1.0).abs() > 1e-6 {
++        return y;
++    }
++    (y + ty + 0.5).floor() - ty
++}
++
++/// One decoration line to draw: its extent, the top of its (first) line and
++/// what it looks like.
++struct DecorationLine<'b> {
+     x0: f64,
+-    width: f64,
+-    baseline: f32,
+-    offset: f32,
+-    size: f32,
+-    brush: &anyrender::Paint,
+-    double_dir: f64,
+-    deco_style: TextDecorationStyle,
+-    inset_start: f64,
+-    inset_end: f64,
+-) {
+-    // Inset the line from the box's start/end edges (assumes LTR: start is the left edge).
+-    // Negative insets extend the line past the text.
+-    let x = x0 + inset_start;
+-    let w = width - inset_start - inset_end;
++    x1: f64,
++    top: f64,
++    thickness: f64,
++    brush: &'b anyrender::Paint,
++    style: TextDecorationStyle,
++    /// Where the second line of a `double` decoration is, from the first.
++    double_offset: f64,
++    /// Spans where the line skips glyphs' ink, sorted and disjoint.
++    gaps: &'b [(f64, f64)],
++}
++
++/// Draws a decoration line. Geometry is built explicitly (rather than relying
++/// on backend dash support) so it renders consistently across renderers.
++fn draw_decoration_line(scene: &mut impl PaintScene, transform: Affine, line: &DecorationLine<'_>) {
++    let (x, w) = (line.x0, line.x1 - line.x0);
+     if w <= 0.0 {
+         return;
+     }
+-    let y = (baseline - offset + size / 2.0) as f64;
+-    let size = size as f64;
+-    let butt_stroke = Stroke::new(size).with_caps(Cap::Butt);
+-
+-    match deco_style {
++    let size = painted_thickness(line.thickness, line.style);
++    let brush = line.brush;
++    match line.style {
+         TextDecorationStyle::MozNone => {
+             // no line. Equivalent to `text-decoration-line: none`
+         }
+-        // `solid`
+-        TextDecorationStyle::Solid => {
+-            let line = kurbo::Line::new((x, y), (x + w, y));
+-            scene.stroke(&butt_stroke, transform, brush, None, &line);
++        // Solid and double lines are rectangles on whole device pixel rows,
++        // drawn in pieces between the glyphs whose ink they skip.
++        TextDecorationStyle::Solid | TextDecorationStyle::Double => {
++            let mut tops = vec![snap_y(transform, line.top)];
++            if line.style == TextDecorationStyle::Double {
++                tops.push(snap_y(transform, line.top + line.double_offset));
++            }
++            let mut start = x;
++            let mut pieces = Vec::new();
++            for &(gap_start, gap_end) in line.gaps {
++                if gap_end <= start || gap_start >= x + w {
++                    continue;
++                }
++                if gap_start > start {
++                    pieces.push((start, gap_start));
++                }
++                start = start.max(gap_end);
++            }
++            if start < x + w {
++                pieces.push((start, x + w));
++            }
++            for top in tops {
++                for &(piece_start, piece_end) in &pieces {
++                    let rect = Rect::new(piece_start, top, piece_end, top + size);
++                    scene.fill(Fill::NonZero, transform, brush, None, &rect);
++                }
++            }
+         }
+-        // Two lines, each `size` thick, separated by a 1px (CSS) gap. This
+-        // matches Chrome, where the second line is offset by `thickness + 1px`
+-        // and sits further from the text (below for underline, above for
+-        // overline).
+-        TextDecorationStyle::Double => {
+-            let one_css_px = scale;
+-            for cy in [y, y + double_dir * (size + one_css_px)] {
+-                let line = kurbo::Line::new((x, cy), (x + w, cy));
+-                scene.stroke(&butt_stroke, transform, brush, None, &line);
++        style => {
++            // A dotted or dashed line is centred on a pixel row (or between two,
++            // when it is an even number of pixels thick).
++            let center = line.top + size / 2.0;
++            let y = if size as i64 % 2 == 1 {
++                snap_y(transform, center - 0.5) + 0.5
++            } else {
++                snap_y(transform, center)
++            };
++            // Ink skipping cuts these through a clip.
++            let clipped = !line.gaps.is_empty();
++            if clipped {
++                let reach = 3.0 * size + 2.0;
++                let mut clip = BezPath::new();
++                let bounds = Rect::new(x - reach, y - reach, x + w + reach, y + reach);
++                clip.extend(bounds.path_elements(0.1));
++                for &(gap_start, gap_end) in line.gaps {
++                    let hole = Rect::new(gap_start, y - reach, gap_end, y + reach);
++                    clip.extend(hole.path_elements(0.1));
++                }
++                scene.push_clip_layer(Fill::EvenOdd, transform, &clip);
++            }
++            draw_patterned_line(scene, transform, brush, style, x, w, y, size);
++            if clipped {
++                scene.pop_layer();
+             }
+         }
++    }
++}
++
++/// Draws a dotted, dashed or wavy line centred on `y`.
++#[allow(clippy::too_many_arguments)]
++fn draw_patterned_line(
++    scene: &mut impl PaintScene,
++    transform: Affine,
++    brush: &anyrender::Paint,
++    style: TextDecorationStyle,
++    x: f64,
++    w: f64,
++    y: f64,
++    size: f64,
++) {
++    match style {
+         // Round dots (diameter = line thickness) spaced one dot apart.
+         TextDecorationStyle::Dotted => {
+             let radius = size / 2.0;
+@@ -511,10 +526,64 @@ fn draw_decoration_line(
+             let stroke = Stroke::new(size).with_caps(Cap::Round);
+             scene.stroke(&stroke, transform, brush, None, &path);
+         }
++        _ => {}
++    }
++}
++
++/// The spans an underline or overline of decorating box `index` skips on a
++/// line, between its `top` and `bottom` edges: around every glyph under the
++/// box whose outline crosses the line, less half a pixel above and below, from
++/// `dilation` before the outline's leftmost crossing to `dilation` after its
++/// rightmost one. Sorted and merged.
++fn ink_gaps(
++    inked: &InkedLine<'_>,
++    ink_skip: &mut crate::ink_skip::InkSkip,
++    index: usize,
++    top: f64,
++    bottom: f64,
++    dilation: f64,
++) -> Vec<(f64, f64)> {
++    let mut gaps = Vec::new();
++    let (band_top, band_bottom) = (top + 0.5, (bottom - 0.5).max(top + 0.5));
++    for run in inked.runs {
++        if !inked.boxes[run.boxes.clone()].contains(&index) {
++            continue;
++        }
++        let coords = &inked.coords[run.coords.clone()];
++        for &(glyph, x, y) in &inked.glyphs[run.glyphs.clone()] {
++            let baseline = f64::from(y);
++            if let Some((left, right)) = ink_skip.intercept(
++                &run.font,
++                run.font_size,
++                coords,
++                run.skew,
++                glyph,
++                (band_top - baseline) as f32,
++                (band_bottom - baseline) as f32,
++            ) {
++                let x = f64::from(x);
++                gaps.push((
++                    x + f64::from(left) - dilation,
++                    x + f64::from(right) + dilation,
++                ));
++            }
++        }
++    }
++    gaps.sort_by(|a, b| a.0.total_cmp(&b.0));
++    let mut merged: Vec<(f64, f64)> = Vec::with_capacity(gaps.len());
++    for gap in gaps {
++        match merged.last_mut() {
++            Some(last) if gap.0 <= last.1 => last.1 = last.1.max(gap.1),
++            _ => merged.push(gap),
++        }
+     }
++    merged
+ }
+ 
+-/// Paint the decorations accumulated for one line, one line per decorating box.
++/// Paint the decorations accumulated for one line, one line per decorating
++/// box, positioned and sized as Blink does (`TextDecorationOffset`,
++/// `TextDecorationInfo`, `DecorationLinePainter`).
++#[allow(clippy::too_many_arguments)]
+ fn flush_line_decorations(
+     scene: &mut impl PaintScene,
+     transform: Affine,
+@@ -523,10 +592,12 @@ fn flush_line_decorations(
+     win_ascent_ratios: &mut WinAscentCache,
+     inline_root_id: NodeId,
+     line_baseline: f32,
++    inked: &InkedLine<'_>,
++    ink_skip: &mut crate::ink_skip::InkSkip,
+ ) {
+     // Draw innermost boxes first so ancestors' decorations paint on top, matching the
+     // per-run drawing order this replaced (`stack.iter().rev()`).
+-    for acc in deco_boxes.iter().rev() {
++    for (index, acc) in deco_boxes.iter().enumerate().rev() {
+         let deco = &acc.deco;
+         // Prefer the decorating box's own font; fall back to the first run it covers.
+         let geom = match (&acc.own, &acc.first) {
+@@ -549,10 +620,12 @@ fn flush_line_decorations(
+             continue;
+         }
+         let brush = anyrender::Paint::from(deco.color);
++        let baseline = f64::from(geom.baseline);
+ 
+         // `text-decoration-inset` shortens (or, when negative, extends) the line from the
+         // inline-start/end edges. Percentages resolve against the decoration line length
+         // (the box's total advance on this line); `auto` is no inset.
++        // Assumes LTR: start is the left edge.
+         let (inset_start, inset_end) = match &deco.inset {
+             GenericTextDecorationInset::LengthPercentage { start, end } => {
+                 // The extent is in device pixels; convert to CSS pixels so the resolved
+@@ -565,128 +638,119 @@ fn flush_line_decorations(
+             }
+             GenericTextDecorationInset::Auto => (0.0, 0.0),
+         };
++        let (x0, x1) = (acc.min_x + inset_start, acc.max_x - inset_end);
+ 
+-        if deco.line.contains(TextDecorationLine::UNDERLINE) {
+-            let size = decoration_size(
+-                &deco.thickness,
+-                geom.underline_size,
+-                geom.css_font_size,
+-                scale,
++        let thickness = decoration_thickness(
++            &deco.thickness,
++            geom.underline_size,
++            geom.css_font_size,
++            scale,
++        );
++        let painted = painted_thickness(thickness, deco.style);
++        // Ink is skipped from a gap as wide as the line is thick, up to 13px.
++        let dilation = thickness.min(13.0);
++        let mut draw = |top: f64, double_offset: f64, skips_ink: bool| {
++            let bottom = if deco.style == TextDecorationStyle::Double {
++                (top + painted).max(top + double_offset + painted)
++            } else {
++                top + painted
++            };
++            let first_top = top.min(top + double_offset.min(0.0));
++            let gaps = if skips_ink {
++                ink_gaps(inked, ink_skip, index, first_top, bottom, dilation)
++            } else {
++                Vec::new()
++            };
++            draw_decoration_line(
++                scene,
++                transform,
++                &DecorationLine {
++                    x0,
++                    x1,
++                    top,
++                    thickness,
++                    brush: &brush,
++                    style: deco.style,
++                    double_offset,
++                    gaps: &gaps,
++                },
+             );
++        };
+ 
+-            // `text-underline-offset` moves the underline away from the text. `auto` keeps
+-            // the font's suggested position; otherwise it resolves against the font size
+-            // (percentages relative to 1em).
+-            let extra_underline_offset = deco
++        if deco.line.contains(TextDecorationLine::UNDERLINE) {
++            // `text-underline-offset` moves the underline away from the text, resolved
++            // against the font size (percentages relative to 1em), rounded.
++            let extra_offset = deco
+                 .underline_offset
+                 .as_ref()
+-                .map(|lp| lp.resolve(Length::new(geom.css_font_size as f32)).px() as f64 * scale)
++                .map(|lp| {
++                    (lp.resolve(Length::new(geom.css_font_size as f32)).px() as f64 * scale).round()
++                })
+                 .unwrap_or(0.0);
+-
+-            // `text-underline-position: under` places the underline below the glyph box
+-            // (below descenders) rather than at the font's suggested position near the
+-            // alphabetic baseline. We anchor the top of the line at the descent so it clears
+-            // descending glyphs like "gqy".
+-            // An explicit offset under `auto` is taken from the alphabetic
+-            // baseline, as CSS and Chrome have it, not from the auto gap.
+-            let base_offset = if deco.underline_under {
+-                -geom.descent
+-            } else if deco.underline_offset.is_some() && !deco.underline_from_font {
+-                0.0
++            let top = if deco.underline_under {
++                // Below the descenders.
++                baseline + f64::from(geom.descent) + extra_offset
++            } else if deco.underline_from_font {
++                // At the font's suggested position.
++                baseline - f64::from(geom.underline_offset) + extra_offset
++            } else if deco.underline_offset.is_some() {
++                // An explicit offset is taken from the alphabetic baseline.
++                baseline + extra_offset
+             } else {
+-                geom.underline_offset
++                // Just below the baseline, with a gap of half the thickness.
++                baseline + (thickness / 2.0).ceil().max(1.0)
+             };
+-            let offset = base_offset - extra_underline_offset as f32;
+-
+             // A `double` underline extends downward, away from the text.
+-            draw_decoration_line(
+-                scene,
+-                transform,
+-                scale,
+-                acc.min_x,
+-                width,
+-                geom.baseline,
+-                offset,
+-                size,
+-                &brush,
+-                1.0,
+-                deco.style,
+-                inset_start,
+-                inset_end,
+-            );
++            draw(top, thickness + 1.0, true);
+         }
+         if deco.line.contains(TextDecorationLine::OVERLINE) {
+-            // Fonts don't provide a dedicated overline metric, so reuse the underline
+-            // thickness. The line sits at the top of the "em box": its lower edge rests on
+-            // the ascent so it clears the glyphs, and it extends upward from there.
++            // The line sits on the top of the text: its lower edge rests on the ascent so
++            // it clears the glyphs, and it extends upward from there.
+             //
+             // Browsers use the OS/2 `usWinAscent` for this edge, which is taller than the
+             // hhea-based ascent Parley reports; using the smaller value would draw the
+             // overline too low. Fall back to Parley's ascent for fonts without a usable
+             // OS/2 table.
+-            let size = decoration_size(
+-                &deco.thickness,
+-                geom.underline_size,
+-                geom.css_font_size,
+-                scale,
+-            );
+             let ascent =
+                 win_ascent(win_ascent_ratios, &geom.font, geom.font_size).unwrap_or(geom.ascent);
+-            let offset = ascent + size;
+-
++            let top = baseline - f64::from(ascent) - painted;
+             // A `double` overline extends upward, away from the text.
+-            draw_decoration_line(
+-                scene,
+-                transform,
+-                scale,
+-                acc.min_x,
+-                width,
+-                geom.baseline,
+-                offset,
+-                size,
+-                &brush,
+-                -1.0,
+-                deco.style,
+-                inset_start,
+-                inset_end,
+-            );
++            draw(top, -(thickness + 1.0), true);
+         }
+         if deco.line.contains(TextDecorationLine::LINE_THROUGH) {
+-            let size = decoration_size(
++            let thickness = decoration_thickness(
+                 &deco.thickness,
+                 geom.strikethrough_size,
+                 geom.css_font_size,
+                 scale,
+             );
+-
+             // Centre the line-through a third of the ascent above the baseline, matching
+             // Chrome (which places it `2/3 * ascent` below the text-top). Parley's
+             // `strikethrough_offset` (the font's `yStrikeoutPosition`) sits lower and would
+             // draw the line too close to the baseline.
+             let ascent =
+                 win_ascent(win_ascent_ratios, &geom.font, geom.font_size).unwrap_or(geom.ascent);
+-            let offset = ascent / 3.0 + size / 2.0;
+-
++            let top = baseline - f64::from(ascent) / 3.0 - thickness / 2.0;
+             draw_decoration_line(
+                 scene,
+                 transform,
+-                scale,
+-                acc.min_x,
+-                width,
+-                geom.baseline,
+-                offset,
+-                size,
+-                &brush,
+-                1.0,
+-                deco.style,
+-                inset_start,
+-                inset_end,
++                &DecorationLine {
++                    x0,
++                    x1,
++                    top,
++                    thickness,
++                    brush: &brush,
++                    style: deco.style,
++                    double_offset: (thickness + 1.0).floor(),
++                    gaps: &[],
++                },
+             );
+         }
+     }
+ }
+ 
+ #[allow(clippy::too_many_arguments)]
++/// Draw the glyphs and text decorations of `lines`.
+ pub(crate) fn stroke_text<'a>(
+     scene: &mut impl PaintScene,
+     lines: impl Iterator<Item = Line<'a, TextBrush>>,
+@@ -695,14 +759,25 @@ pub(crate) fn stroke_text<'a>(
+     scale: f64,
+     inline_root_id: NodeId,
+     context: &mut DrawTextContext,
+-    viewport: Option<Rect>,
++    paint: TextPaint<'_>,
+ ) {
++    let TextPaint {
++        viewport,
++        run_filter,
++        text,
++        rtl,
++    } = paint;
+     let DrawTextContext {
+         stack,
+         path_scratch,
+         deco_boxes,
+         win_ascent_ratios,
+         outline_bounds,
++        ink_skip,
++        inked_runs,
++        inked_glyphs,
++        inked_coords,
++        inked_boxes,
+     } = context;
+     stack.clear();
+     path_scratch.clear();
+@@ -721,14 +796,24 @@ pub(crate) fn stroke_text<'a>(
+         // draws one decoration per box rather than one stepped segment per differently-sized
+         // run. Clearing preserves the allocation for the next line and inline context.
+         deco_boxes.clear();
++        inked_runs.clear();
++        inked_glyphs.clear();
++        inked_coords.clear();
++        inked_boxes.clear();
+ 
+         for item in line.items() {
+             if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
++                let style = glyph_run.style();
++                // An inline element's edge has no text to draw or decorate.
++                if style.brush.generated != GeneratedText::None
++                    || run_filter.is_some_and(|accept| !accept(style.brush.id))
++                {
++                    continue;
++                }
+                 let run = glyph_run.run();
+                 let font = run.font();
+                 let font_size = run.font_size();
+                 let metrics = run.font_metrics();
+-                let style = glyph_run.style();
+                 let synthesis = run.synthesis();
+                 let glyph_xform = synthesis
+                     .skew()
+@@ -764,12 +849,17 @@ pub(crate) fn stroke_text<'a>(
+                 // inherits, so the innermost inline element already carries the right value.
+                 let text_color = stack.last().map(|e| e.text_color).unwrap_or(Color::BLACK);
+ 
+-                let embolden = if FONT_EMBOLDEN_ENABLED {
++                let mut embolden = if FONT_EMBOLDEN_ENABLED {
+                     let fs = font_size as f64 / scale;
+                     kurbo::Vec2::new((0.015125 * fs).min(0.3), (0.0121 * fs).min(0.3))
+                 } else {
+                     kurbo::Vec2::default()
+                 };
++                // A face lighter than the weight asked for, with no bolder face
++                // to use, is emboldened as Skia fakes bold.
++                if synthesis.embolden() {
++                    embolden += synthetic_bold(f64::from(font_size));
++                }
+ 
+                 let outside = viewport.is_some_and(|viewport| {
+                     let bounds = *outline_bounds
+@@ -850,6 +940,7 @@ pub(crate) fn stroke_text<'a>(
+                 let run_x0 = glyph_run.offset() as f64;
+                 let run_x1 = run_x0 + glyph_run.advance() as f64;
+ 
++                let boxes_start = inked_boxes.len();
+                 for entry in stack.iter() {
+                     if entry.decoration.is_none() {
+                         continue;
+@@ -879,10 +970,75 @@ pub(crate) fn stroke_text<'a>(
+                     if entry.node_id == run_node_id {
+                         acc.own = Some(geometry.clone());
+                     }
++                    if acc
++                        .deco
++                        .line
++                        .intersects(TextDecorationLine::UNDERLINE | TextDecorationLine::OVERLINE)
++                    {
++                        inked_boxes.push(idx);
++                    }
++                }
++
++                // Keep the glyphs an underline or overline over this run skips.
++                // CJK text keeps the line whole, as in Blink.
++                let skips_ink = inked_boxes.len() > boxes_start
++                    && !text.get(run.text_range()).is_some_and(|run_text| {
++                        run_text.chars().any(crate::ink_skip::never_skips_ink)
++                    });
++                if skips_ink {
++                    let excluded = ink_skip.excluded_glyphs(font);
++                    let glyphs_start = inked_glyphs.len();
++                    inked_glyphs.extend(
++                        glyph_run
++                            .positioned_glyphs()
++                            .filter(|glyph| !excluded.contains(&Some(glyph.id)))
++                            .map(|glyph| (glyph.id, glyph.x, glyph.y)),
++                    );
++                    let coords_start = inked_coords.len();
++                    inked_coords
++                        .extend_from_slice(bytemuck::cast_slice::<_, i16>(run.normalized_coords()));
++                    inked_runs.push(InkedRun {
++                        font: font.clone(),
++                        font_size,
++                        skew: synthesis
++                            .skew()
++                            .map_or(0.0, |angle| angle.to_radians().tan()),
++                        glyphs: glyphs_start..inked_glyphs.len(),
++                        coords: coords_start..inked_coords.len(),
++                        boxes: boxes_start..inked_boxes.len(),
++                    });
++                } else {
++                    inked_boxes.truncate(boxes_start);
+                 }
+             }
+         }
+ 
++        // Decorations stop before the white space that hangs past the line's
++        // end, which browsers don't paint.
++        let metrics = line.metrics();
++        let start = f64::from(metrics.offset + metrics.inline_min_coord);
++        let (content_x0, content_x1) = if rtl {
++            (
++                start + f64::from(metrics.hanging_advance),
++                start + f64::from(metrics.advance),
++            )
++        } else {
++            (
++                start,
++                start + f64::from(metrics.advance - metrics.hanging_advance),
++            )
++        };
++        for acc in deco_boxes.iter_mut() {
++            acc.min_x = acc.min_x.max(content_x0.min(acc.max_x));
++            acc.max_x = acc.max_x.min(content_x1.max(acc.min_x));
++        }
++
++        let inked = InkedLine {
++            runs: inked_runs,
++            glyphs: inked_glyphs,
++            coords: inked_coords,
++            boxes: inked_boxes,
++        };
+         flush_line_decorations(
+             scene,
+             transform,
+@@ -891,25 +1047,49 @@ pub(crate) fn stroke_text<'a>(
+             win_ascent_ratios,
+             inline_root_id,
+             line.metrics().baseline,
++            &inked,
++            ink_skip,
+         );
+     }
+ }
+ 
+-/// Draw selection highlight rectangles for the given byte range in a layout.
+-/// Uses Parley's Selection type for accurate geometry calculation.
+-pub(crate) fn draw_text_selection(
+-    scene: &mut impl PaintScene,
++/// The glyphs a line's underlines and overlines skip.
++struct InkedLine<'a> {
++    runs: &'a [InkedRun],
++    glyphs: &'a [(u32, f32, f32)],
++    coords: &'a [i16],
++    boxes: &'a [usize],
++}
++
++/// How much a face is emboldened, per side, where it has no bold of its own:
++/// Skia's fake bold strokes the outline `font_size / 24` wide at 9px,
++/// narrowing to `font_size / 32` at 36px (`kStdFakeBoldInterpKeys`), and
++/// leaves advances as they are.
++fn synthetic_bold(font_size: f64) -> kurbo::Vec2 {
++    let t = ((font_size - 9.0) / (36.0 - 9.0)).clamp(0.0, 1.0);
++    let ratio = 1.0 / 24.0 + t * (1.0 / 32.0 - 1.0 / 24.0);
++    let per_side = font_size * ratio / 2.0;
++    kurbo::Vec2::new(per_side, per_side)
++}
++
++/// The selection highlight rectangles for the given byte range in a layout,
++/// with the line each is on. Uses Parley's Selection type for accurate
++/// geometry calculation.
++pub(crate) fn text_selection_rects(
+     layout: &Layout<TextBrush>,
+-    transform: Affine,
+     selection_start: usize,
+     selection_end: usize,
+-) {
++) -> Vec<(usize, Rect)> {
+     let anchor = Cursor::from_byte_index(layout, selection_start, Affinity::Downstream);
+     let focus = Cursor::from_byte_index(layout, selection_end, Affinity::Downstream);
+     let selection = Selection::new(anchor, focus);
+ 
+-    selection.geometry_with(layout, |rect, _line_idx| {
+-        let rect = kurbo::Rect::new(rect.x0, rect.y0, rect.x1, rect.y1);
+-        scene.fill(Fill::NonZero, transform, SELECTION_COLOR, None, &rect);
++    let mut rects = Vec::new();
++    selection.geometry_with(layout, |rect, line_idx| {
++        rects.push((
++            line_idx,
++            kurbo::Rect::new(rect.x0, rect.y0, rect.x1, rect.y1),
++        ));
+     });
++    rects
+ }

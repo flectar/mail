@@ -2813,7 +2813,15 @@ impl BaseDocument {
                         continue;
                     }
                     // A run can mix styles, so each cluster is checked.
-                    let id = cluster.style().brush.id;
+                    let brush = cluster.style().brush;
+                    if brush.generated != crate::node::GeneratedText::None {
+                        // An inline element's edge is laid out as a
+                        // placeholder character that isn't the document's.
+                        hidden
+                            .push(text_range.start.max(range.start)..text_range.end.min(range.end));
+                        continue;
+                    }
+                    let id = brush.id;
                     let is_hidden = match last {
                         Some((last_id, is_hidden)) if last_id == id => is_hidden,
                         _ => {
