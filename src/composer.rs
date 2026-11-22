@@ -2320,6 +2320,12 @@ impl ComposeSession {
             }
         });
         let weak = self.reference();
+        preferences.on_composer_sender_search(move |query| {
+            if let Some(session) = weak.upgrade() {
+                session.search_senders(&query);
+            }
+        });
+        let weak = self.reference();
         preferences.on_composer_signature(move |index| {
             if let Some(session) = weak.upgrade() {
                 session.choose_signature(index);
@@ -4197,6 +4203,7 @@ impl ComposeSession {
         preferences.set_composer_sender_names(ModelRc::default());
         preferences.set_composer_sender_index(0);
         preferences.set_composer_sender_email("".into());
+        preferences.set_composer_sender_picker_open(false);
         preferences.set_composer_security("".into());
         preferences.set_composer_preferences_ready(false);
     }
@@ -4379,6 +4386,23 @@ impl ComposeSession {
         preferences.set_composer_sender_index(index);
         preferences.set_composer_sender_email(identity.email.clone());
         self.apply_copies(&identity.email);
+    }
+
+    /// List the sender addresses matching `query` in the From picker, for an
+    /// account with more than a list shows (#252).
+    fn search_senders(&self, query: &str) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let preferences = host.preferences();
+        let choices = preferences
+            .get_composer_sender_identities()
+            .iter()
+            .map(|choice| (choice.label.to_string(), choice.email.to_string()))
+            .collect::<Vec<_>>();
+        let (rows, total) = sender_picker::rows(&choices, query);
+        preferences.set_composer_sender_matches(ModelRc::new(VecModel::from(rows)));
+        preferences.set_composer_sender_match_count(i32::try_from(total).unwrap_or(i32::MAX));
     }
 
     /// Give the message the copies mail from `sender` starts with, in place

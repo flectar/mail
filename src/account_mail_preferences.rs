@@ -12,6 +12,13 @@ use flectar_mail_core::{
 use slint::SharedString;
 use std::{cell::Cell, future::Future};
 
+thread_local! {
+    /// The account's sender addresses as Settings last listed them, with its
+    /// settings, which a search lists again from (#252).
+    static IDENTITIES: RefCell<Option<(AccountSettings, Vec<SenderIdentity>)>> =
+        const { RefCell::new(None) };
+}
+
 /// Async work is owned by a profile/account generation. A removed account or
 /// replaced core must never receive a late settings or decrypted-content result.
 #[derive(Clone)]
@@ -207,6 +214,38 @@ fn identity_rows(
         .collect()
 }
 
+/// List the account's sender addresses that Settings' search matches, so
+/// many at most (#252).
+fn list_identities(ui: &AccountMailPreferences<'_>) {
+    IDENTITIES.with_borrow(|listed| {
+        let Some((settings, identities)) = listed else {
+            return;
+        };
+        let labels = identities
+            .iter()
+            .map(|identity| (identity_label(identity), identity.email.clone()))
+            .collect::<Vec<_>>();
+        let pairs = labels
+            .iter()
+            .map(|(label, email)| (label.as_str(), email.as_str()))
+            .collect::<Vec<_>>();
+        let (shown, matches) = sender_picker::matching(
+            &pairs,
+            &ui.get_sender_identity_query(),
+            sender_picker::LISTED_AT_MOST,
+        );
+        let shown = shown
+            .into_iter()
+            .map(|index| identities[index].clone())
+            .collect::<Vec<_>>();
+        ui.set_sender_identity_rows(ModelRc::new(VecModel::from(identity_rows(
+            &shown, settings,
+        ))));
+        ui.set_sender_identity_count(i32::try_from(identities.len()).unwrap_or(i32::MAX));
+        ui.set_sender_identity_match_count(i32::try_from(matches).unwrap_or(i32::MAX));
+    });
+}
+
 /// The copies every message written from the account starts with, as
 /// Settings shows them (#252).
 fn project_copies(ui: &AccountMailPreferences<'_>, copies: &AutomaticCopies) {
@@ -263,10 +302,8 @@ fn project_identities(
             .collect::<Vec<_>>(),
     )));
     ui.set_sender_identities(ModelRc::new(VecModel::from(choices)));
-    ui.set_sender_identity_rows(ModelRc::new(VecModel::from(identity_rows(
-        identities,
-        &config.settings,
-    ))));
+    IDENTITIES.set(Some((config.settings.clone(), identities.to_vec())));
+    list_identities(&ui);
     ui.set_sender_identity_policy(policy_name(config).into());
     let configured = config.settings.default_sender_email.as_deref();
     let index = configured
@@ -445,6 +482,7 @@ pub(super) fn register(
                             ui.set_key_inventory("".into());
                             project(&app, &settings, config.id);
                             clear_sender_form(&ui);
+                            ui.set_sender_identity_query("".into());
                             project_identities(&app, config, &identities, warning.as_deref());
                             project_copies(&ui, &config.settings.copies);
                             ui.invoke_edit_signature(-1);
@@ -703,6 +741,25 @@ pub(super) fn register(
         if let Some(app) = weak.upgrade() {
             clear_sender_form(&app.global::<AccountMailPreferences>());
         }
+    });
+    let weak = app.as_weak();
+    ui.on_sender_identity_search(move |_| {
+        if let Some(app) = weak.upgrade() {
+            list_identities(&app.global::<AccountMailPreferences>());
+        }
+    });
+    let weak = app.as_weak();
+    ui.on_default_sender_search(move |query| {
+        let Some(app) = weak.upgrade() else { return };
+        let ui = app.global::<AccountMailPreferences>();
+        let choices = ui
+            .get_sender_identities()
+            .iter()
+            .map(|choice| (choice.label.to_string(), choice.email.to_string()))
+            .collect::<Vec<_>>();
+        let (rows, matches) = sender_picker::rows(&choices, &query);
+        ui.set_default_sender_matches(ModelRc::new(VecModel::from(rows)));
+        ui.set_default_sender_match_count(i32::try_from(matches).unwrap_or(i32::MAX));
     });
     let weak = app.as_weak();
     let state_copies = state.clone();

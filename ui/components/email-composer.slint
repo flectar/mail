@@ -1,4 +1,5 @@
-import { AccountMailPreferences } from "account-mail-preferences.slint";
+import { AccountMailPreferences, SenderPickerRow } from "account-mail-preferences.slint";
+import { SenderPicker } from "sender-picker.slint";
 import { SettingsSelectRow } from "settings-components.slint";
 import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, ComposeAttachment, ComposeLink, ComposeContact, ComposeEditorTile, EmailTemplateRow, SpellingLanguage } from "../models.slint";
@@ -475,7 +476,7 @@ export component EmailComposer inherits Rectangle {
             }
         }
 
-        if !root.signature-mode : SettingsSelectRow {
+        if !root.signature-mode && AccountMailPreferences.composer-sender-names.length <= 10 : SettingsSelectRow {
             compact: root.compact;
             title: @tr("From");
             description: @tr("Verified sender identity");
@@ -486,6 +487,19 @@ export component EmailComposer inherits Rectangle {
                 if AccountMailPreferences.composer-preferences-ready {
                     AccountMailPreferences.composer-sender(index);
                 }
+            }
+        }
+        // Past ten addresses, the sender is found by searching (#252).
+        if !root.signature-mode && AccountMailPreferences.composer-sender-names.length > 10 : SenderPickerRow {
+            compact: root.compact;
+            title: @tr("From");
+            description: @tr("Verified sender identity");
+            value: AccountMailPreferences.composer-sender-names[AccountMailPreferences.composer-sender-index];
+            title-color: root.title-color; description-color: root.secondary-color;
+            clicked => {
+                AccountMailPreferences.composer-sender-query = "";
+                AccountMailPreferences.composer-sender-search("");
+                AccountMailPreferences.composer-sender-picker-open = true;
             }
         }
 
@@ -1207,6 +1221,27 @@ export component EmailComposer inherits Rectangle {
             root.confirm-discard = false;
             root.close();
         }
+    }
+
+    if AccountMailPreferences.composer-sender-picker-open : SenderPicker {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        z: 4000;
+        compact: root.compact;
+        title: @tr("Send from");
+        rows: AccountMailPreferences.composer-sender-matches;
+        matches: AccountMailPreferences.composer-sender-match-count;
+        query <=> AccountMailPreferences.composer-sender-query;
+        search(value) => { AccountMailPreferences.composer-sender-search(value); }
+        choose(index) => {
+            AccountMailPreferences.composer-sender-picker-open = false;
+            if AccountMailPreferences.composer-preferences-ready {
+                AccountMailPreferences.composer-sender(index);
+            }
+        }
+        close => { AccountMailPreferences.composer-sender-picker-open = false; }
     }
 
     // Where files dragged from elsewhere go: pictures in the text, other files attached.

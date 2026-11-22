@@ -8,6 +8,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Checking for mail](#checking-for-mail)
 - [Advanced account settings](#advanced-account-settings)
 - [Special folders](#special-folders)
+- [Sender addresses](#sender-addresses)
 - [Automatic Cc and Bcc](#automatic-cc-and-bcc)
 - [New-mail notifications](#new-mail-notifications)
 - [Profiles and account colors](#profiles-and-account-colors)
@@ -262,6 +263,17 @@ under the names of what they hold. A chosen folder renamed in Flectar Mail keeps
 its place, one deleted gives it back to the server's folder, and with
 **Subscribed folders only** a chosen folder is listed though you haven't
 subscribed to it. Flectar Mail Sync takes the choices to your other devices.
+
+## Sender addresses
+
+An account can send from more addresses than the one it signs in with. Gmail's
+send-as addresses and a JMAP server's identities come from the provider, and for
+other servers you add the aliases they let you send from in the account's
+**Signatures** tab in Settings → Accounts, which also chooses the one new
+messages start from. An account keeps up to 1,000. Past ten, the composer's
+**From** and **Default sender identity** open a picker that finds an address by
+its name or address as you type, and Settings lists 50 at a time with a search
+for the others.
 
 ## Automatic Cc and Bcc
 
