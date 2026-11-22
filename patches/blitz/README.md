@@ -30,6 +30,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0010 email table sizing | A cell's `height` is the minimum of its row (CSS 2.1 §17.5.3): the cell is measured with it as `min-height`, so its content no longer spills into the next row. Consecutive children of a row that aren't cells share one anonymous cell (§17.2.1), where responsive emails' `display: block` cells stack instead of overflowing side by side. Auto columns share the width left over after their min-content widths in proportion to how far each can grow toward its max-content width, as Chromium does (CSS Tables 3 §3.9.3), where grid tracks grew by equal amounts. |
 | 0011 inline boxes and text painting | A non-atomic inline element's inline-axis margin, border and padding take room in its line (CSS 2.1 §10.3.1), each edge laid out as an invisible placeholder (U+2061 at the start, U+2060 at the end) whose letter spacing is the edge's width. White space collapses across the placeholders and line breaks keep them with their content. Backgrounds (gradients and images included), borders, radii and box shadows paint on each line fragment, sliced from one strip of the element's fragments (`box-decoration-break: slice`), and `opacity` groups an element's fragments and text. Each line paints its boxes, then its selection, then its text. A `<wbr>` is a line break opportunity even in text that doesn't wrap, and `<br>` and `display: contents` content sits on its parent's baseline. Text decorations follow Blink: an `auto` thickness of a tenth of the font size, lengths rounded, an `auto` underline just below the baseline by half its thickness, lines on whole device pixels, ink skipped where glyphs cross underlines and overlines (not for `/`, `\`, `_` or CJK, as in Blink), and no decoration under white space that hangs at a line's end. A face without a bold is emboldened as Skia fakes bold. |
 | 0012 table captions, anonymous tables and bevels | A table's captions are laid out as wide as the table, above its grid (below it with `caption-side: bottom`), and the table's background and border surround the grid alone (CSS 2.1 §17.4). They were dropped, text and all. Table parts outside a table, such as the rows of a `display: block` table or `display: table-cell` boxes without one, are wrapped in an anonymous table (§17.2.1, through a `::-servo-anonymous-table` user-agent rule) instead of laying out side by side as flex items. Inset and outset borders shade as Blink's `CalculateInsetOutsetColor` does, so black bevels between #545454 and #a8a8a8. |
+| 0013 image minimums and Chromium line breaks | A `min-width` or `min-height` no longer changes an image's specified size on the other axis (sections 10.3.2 and 10.6.2 of CSS 2.1), so an email spacer with `height: 1px; min-width: 540px` is 540 by 1 pixels instead of a 540 pixel square gap. Maximums still scale both sizes, unlike in CSS 2.1, so images the reader fits with `max-width: 100%` keep their proportions. Lines break where Chromium breaks them, between two ASCII characters only where its table allows and after every run of spaces, so a path stays whole and a date may break after a hyphen. The table looks through 0011's edge placeholders, and text with `word-break: break-all` or `line-break: anywhere` keeps the breaks of UAX #14. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
@@ -37,7 +38,7 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009, 0010, 0011 and 0012 are local. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0013 are local. Drop the backported parts
 when a release contains them.
 
 Copied text, find in the reader and accessible names leave out 0011's edge
@@ -94,8 +95,9 @@ cargo test -p flectar-mail --lib issue_23_gpu --locked -- --ignored
 
 `crates/renderer-probe/tests/blitz_upgrade.rs` covers the upstream/local table
 overlap, locale-sensitive text, 0010's and 0011's table sizing, inline
-boxes, opacity, decorations and line breaks, and 0012's captions, anonymous
-tables and bevels. Application renderer tests cover float
+boxes, opacity, decorations and line breaks, 0012's captions, anonymous
+tables and bevels, and 0013's image minimums and line breaks. Application
+renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.
 

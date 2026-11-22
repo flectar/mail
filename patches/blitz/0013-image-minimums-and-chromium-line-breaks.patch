@@ -1,0 +1,201 @@
+diff --git a/crates/blitz-dom/src/layout/construct.rs b/crates/blitz-dom/src/layout/construct.rs
+index 3b589b4..5db9a8b 100644
+--- a/crates/blitz-dom/src/layout/construct.rs
++++ b/crates/blitz-dom/src/layout/construct.rs
+@@ -26,6 +26,7 @@ use crate::{
+     node::{
+         GeneratedText, INLINE_END_EDGE, INLINE_START_EDGE, ListItemLayout, ListItemLayoutPosition,
+         Marker, NodeFlags, NodeKind, SpecialElementData, TextBrush, TextInputData, TextLayout,
++        is_inline_edge_char,
+     },
+     qual_name, stylo_to_parley,
+     traversal::{iter_children, iter_children_and_pseudos},
+@@ -1222,6 +1223,9 @@ pub(crate) fn build_inline_layout_into(
+     text_transformer.word_break(&builder);
+     let mut edges = InlineEdges {
+         content_started: !builder.text().is_empty(),
++        breaks_anywhere: root_node_style
++            .as_deref()
++            .is_some_and(|style| breaks_anywhere(style)),
+         ..InlineEdges::default()
+     };
+ 
+@@ -1256,9 +1260,14 @@ pub(crate) fn build_inline_layout_into(
+         );
+     }
+ 
+-    if edges.used {
+-        builder.set_line_break_override(Some(EDGE_LINE_BREAKS));
+-    }
++    // Lines break where Chromium breaks them, except in text that breaks
++    // anywhere, which keeps UAX #14.
++    builder.set_line_break_override(match (edges.used, edges.breaks_anywhere) {
++        (true, false) => Some(EDGE_AND_CHROMIUM_LINE_BREAKS),
++        (true, true) => Some(EDGE_LINE_BREAKS),
++        (false, false) => Some(parley::CHROMIUM_LINE_BREAK_OVERRIDE),
++        (false, true) => None,
++    });
+     text_layout.text = builder.build_into(&mut text_layout.layout);
+     return;
+ 
+@@ -1415,7 +1424,10 @@ pub(crate) fn build_inline_layout_into(
+ 
+                             let (start_edge, end_edge) = node
+                                 .primary_styles()
+-                                .map(|s| inline_edge_widths(&s))
++                                .map(|s| {
++                                    edges.breaks_anywhere |= breaks_anywhere(&s);
++                                    inline_edge_widths(&s)
++                                })
+                                 .unwrap_or_default();
+ 
+                             // A space held back from content before this
+@@ -1512,14 +1524,52 @@ pub(crate) fn build_inline_layout_into(
+     }
+ }
+ 
+-/// Line breaking around inline edge placeholders, which UAX #14 mostly
+-/// handles: a start edge (alphabetic) stays with what follows it, except that
+-/// it may break from an ideograph, which this forbids.
++/// Line breaking around inline edge placeholders: a start edge stays with
++/// what follows it, and an end edge with what precedes it. UAX #14 mostly
++/// does this, as a start edge is alphabetic and an end edge a word joiner,
++/// but a start edge may break from an ideograph, and `line-break: anywhere`
++/// and Chromium's break after every space would break before an end edge.
+ static EDGE_LINE_BREAKS: &parley::LineBreakOverrideFn =
+     &(edge_line_break as fn(parley::LineBreakContext) -> Option<bool>);
+ 
+ fn edge_line_break(cx: parley::LineBreakContext) -> Option<bool> {
+-    (cx.before == INLINE_START_EDGE).then_some(false)
++    (cx.before == INLINE_START_EDGE || cx.after == INLINE_END_EDGE).then_some(false)
++}
++
++/// Line breaking as Chromium does it (between two ASCII characters only
++/// where its table allows, and after every run of spaces), with
++/// [`EDGE_LINE_BREAKS`] first.
++///
++/// Chromium's table sees no inline edges, so it looks through them here: an
++/// end edge stands for the character before it, and a start edge for a
++/// letter, which is how the content it starts usually begins. `a/<span
++/// style="padding: 2px">b</span>` doesn't break after the slash.
++static EDGE_AND_CHROMIUM_LINE_BREAKS: &parley::LineBreakOverrideFn =
++    &(edge_and_chromium_line_break as fn(parley::LineBreakContext) -> Option<bool>);
++
++fn edge_and_chromium_line_break(mut cx: parley::LineBreakContext) -> Option<bool> {
++    if let Some(forced) = edge_line_break(cx) {
++        return Some(forced);
++    }
++    if cx.after == INLINE_START_EDGE {
++        cx.after = 'a';
++    }
++    if cx.before == INLINE_END_EDGE {
++        cx.before = cx
++            .before_before
++            .filter(|c| !is_inline_edge_char(*c))
++            .unwrap_or('a');
++        cx.before_before = None;
++    }
++    parley::CHROMIUM_LINE_BREAK_OVERRIDE(cx)
++}
++
++/// Whether a style lets text break between any two characters, which
++/// Chromium's ASCII table would forbid between letters.
++fn breaks_anywhere(style: &style::properties::ComputedValues) -> bool {
++    use style::values::computed::{LineBreak, WordBreak};
++    let text = style.get_inherited_text();
++    text.word_break == WordBreak::BreakAll || text.line_break == LineBreak::Anywhere
+ }
+ 
+ /// The widths of an inline element's inline-start and inline-end edges, its
+@@ -1579,6 +1629,8 @@ struct InlineEdges {
+     held_space: bool,
+     /// How many enclosing elements have an end edge.
+     end_depth: u32,
++    /// Whether any text may break between any two characters.
++    breaks_anywhere: bool,
+ }
+ 
+ impl InlineEdges {
+diff --git a/crates/blitz-dom/src/layout/replaced.rs b/crates/blitz-dom/src/layout/replaced.rs
+index ce8b2b1..f2c7035 100644
+--- a/crates/blitz-dom/src/layout/replaced.rs
++++ b/crates/blitz-dom/src/layout/replaced.rs
+@@ -339,6 +339,15 @@ pub fn compute_replaced_layout(
+ 
+     // Clamp following rules in table at
+     // https://www.w3.org/TR/CSS22/visudet.html#min-max-widths
++    //
++    // The table is for a width and height that are both `auto`. A minimum
++    // doesn't change a specified size on the other axis (sections 10.3.2 and
++    // 10.6.2 of CSS 2.1), so a spacer with `height: 1px; min-width: 540px` is
++    // 540 by 1, not 540 by 540. A maximum still scales both, unlike in CSS
++    // 2.1, so that an image shrunk to fit by the reader's `max-width: 100%`
++    // keeps its proportions, although senders give most images both sizes.
++    let specified_width = style_size.width.is_some();
++    let specified_height = style_size.height.is_some();
+     let size = match (width_violation, height_violation) {
+         // No constraint violation
+         (Violation::None, Violation::None) => size,
+@@ -355,7 +364,11 @@ pub fn compute_replaced_layout(
+             let min_width = min_size.width.unwrap();
+             Size {
+                 width: min_width,
+-                height: (min_width * inv_aspect_ratio).maybe_min(max_size.height),
++                height: if specified_height {
++                    size.height
++                } else {
++                    (min_width * inv_aspect_ratio).maybe_min(max_size.height)
++                },
+             }
+         }
+         // h > max-height
+@@ -370,7 +383,11 @@ pub fn compute_replaced_layout(
+         (Violation::None, Violation::Min) => {
+             let min_height = min_size.height.unwrap();
+             Size {
+-                width: (min_height * aspect_ratio).maybe_min(max_size.width),
++                width: if specified_width {
++                    size.width
++                } else {
++                    (min_height * aspect_ratio).maybe_min(max_size.width)
++                },
+                 height: min_height,
+             }
+         }
+@@ -394,16 +411,27 @@ pub fn compute_replaced_layout(
+         (Violation::Min, Violation::Min) => {
+             let min_width = min_size.width.unwrap();
+             let min_height = min_size.height.unwrap();
+-            if min_width / size.width <= min_height / size.height {
+-                Size {
+-                    width: (min_height * aspect_ratio).maybe_min(max_size.width),
+-                    height: min_height,
+-                }
+-            } else {
+-                Size {
++            let from_height = Size {
++                width: (min_height * aspect_ratio)
++                    .max(min_width)
++                    .maybe_min(max_size.width),
++                height: min_height,
++            };
++            let from_width = Size {
++                width: min_width,
++                height: (min_width * inv_aspect_ratio)
++                    .max(min_height)
++                    .maybe_min(max_size.height),
++            };
++            match (specified_width, specified_height) {
++                (true, true) => Size {
+                     width: min_width,
+-                    height: (min_width * inv_aspect_ratio).maybe_min(max_size.height),
+-                }
++                    height: min_height,
++                },
++                (true, false) => from_width,
++                (false, true) => from_height,
++                (false, false) if min_width / size.width <= min_height / size.height => from_height,
++                (false, false) => from_width,
+             }
+         }
+         // (w < min-width) and (h > max-height)

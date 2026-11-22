@@ -1446,3 +1446,83 @@ fn table_parts_outside_a_table_get_an_anonymous_table() {
     close(d.y, c.y);
     assert!(d.x > c.x, "cells share a row: {c:?} {d:?}");
 }
+
+#[test]
+fn image_minimums_keep_the_other_specified_size() {
+    // A minimum doesn't change a specified size on the other axis (sections
+    // 10.3.2 and 10.6.2 of CSS 2.1), so an email spacer with
+    // `height:1px;min-width:300px` is 300 by 1, as in browsers, not a 300 by
+    // 300 gap.
+    let square = encoded(
+        image::ImageFormat::Png,
+        image::DynamicImage::new_rgb8(10, 10),
+    );
+    for (attributes, size) in [
+        (
+            "style='display:block;height:1px;min-width:300px'",
+            (300.0, 1.0),
+        ),
+        (
+            "style='display:block;width:1px;min-height:50px'",
+            (1.0, 50.0),
+        ),
+        (
+            "width=1 height=1 style='display:block;min-width:300px'",
+            (300.0, 1.0),
+        ),
+        (
+            "style='display:block;width:100%;height:1px;min-width:500px'",
+            (500.0, 1.0),
+        ),
+        (
+            "style='display:block;width:1px;height:1px;min-width:300px;min-height:2px'",
+            (300.0, 2.0),
+        ),
+        (
+            "style='display:block;width:1px;min-width:300px;min-height:2px'",
+            (300.0, 300.0),
+        ),
+        ("style='display:block;width:600px'", (400.0, 400.0)),
+    ] {
+        let html = format!("<img src='https://example.com/a.png' {attributes}>");
+        assert_eq!(
+            image_size_after_load(&html, &square, false),
+            size,
+            "{attributes}"
+        );
+    }
+
+    // A maximum scales both sizes, unlike in CSS 2.1, so that an image the
+    // reader's `max-width: 100%` fits to the window keeps its proportions.
+    let wide = encoded(
+        image::ImageFormat::Png,
+        image::DynamicImage::new_rgb8(20, 10),
+    );
+    assert_eq!(
+        image_size_after_load(
+            "<img src='https://example.com/a.png' width=600 height=300 style='display:block'>",
+            &wide,
+            false
+        ),
+        (400.0, 200.0)
+    );
+}
+
+#[test]
+fn lines_break_where_chromium_breaks_them() {
+    // Between two ASCII characters, Chromium breaks only where its table
+    // allows: not after a slash, so a path stays whole, but after a hyphen
+    // between digits, so a date may wrap. An inline element's padding adds
+    // no opportunity, and text that may break anywhere keeps UAX #14.
+    for (style, text, lines) in [
+        ("", "a/b/c", 1.0),
+        ("", "2026-09-10", 3.0),
+        ("", "a/<span style='padding:0 2px'>b</span>/c", 1.0),
+        ("word-break:break-all", "a/b/c", 3.0),
+    ] {
+        let doc = document(&format!(
+            "<p id='p' style='margin:0;width:1px;font:10px/20px sans-serif;{style}'>{text}</p>"
+        ));
+        close(node(&doc, "#p").final_layout().size.height, 20.0 * lines);
+    }
+}
