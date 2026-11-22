@@ -214,10 +214,12 @@ export component ActionTooltipSource inherits Rectangle {
     // Keeps the help while it shows. When the control moves, keyboard help
     // that has not settled yet moves with it, and any other help is given up.
     // The window drops help that nobody reported for `ActionTooltipLayer`'s
-    // longer interval, so this one stays well below half of it.
+    // longer interval, so this one stays well below half of it. Only the
+    // source whose help shows runs it, so a control whose help another one
+    // took over does not keep waking the window.
     Timer {
         interval: 400ms;
-        running: root.active && !root.local;
+        running: root.active && !root.local && ActionTooltip.owner == root.id;
         triggered => {
             if root.absolute-position.x == root.reported-x && root.absolute-position.y == root.reported-y {
                 root.settled = true;
@@ -239,7 +241,9 @@ export component ActionTooltipLayer inherits Rectangle {
     accessible-role: none;
 
     // More than twice the sources' interval, so a showing control always
-    // reports in between. A window with help up wakes about once a second.
+    // reports in between. Help whose control went away goes within two of
+    // these checks, and a window with help up wakes about three times a
+    // second, for this and its control's reports.
     Timer {
         interval: 1000ms;
         running: ActionTooltip.text != "";
