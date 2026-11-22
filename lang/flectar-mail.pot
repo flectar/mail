@@ -4973,11 +4973,11 @@ msgstr ""
 msgid "Select"
 msgstr ""
 
-#: ui/components/controls.slint:531
+#: ui/components/controls.slint:532
 msgid "Hide password"
 msgstr ""
 
-#: ui/components/controls.slint:531
+#: ui/components/controls.slint:532
 msgid "Show password"
 msgstr ""
 

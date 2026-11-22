@@ -404,6 +404,7 @@ export component IconButton inherits Rectangle {
         width: parent.width;
         height: parent.height;
         shown: root.tooltip-shown;
+        follows-focus: ActionTooltip.keyboard;
         local: root.tooltip-in-popup;
         text: root.tooltip-text;
         above: root.tooltip-above;

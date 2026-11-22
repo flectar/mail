@@ -364,6 +364,25 @@ fn window_bubble_follows_the_pointer_and_its_button() {
     );
     harness.leave();
 
+    // Keyboard help moves with a button that moves right after it took the
+    // focus, as when Slint scrolls it into view, instead of staying behind or
+    // going away.
+    harness.click(STAR);
+    harness.key("j");
+    assert!(
+        dark(&harness.frame(), STAR, BUBBLE_Y),
+        "focused button's help"
+    );
+    harness.ui.set_star_x(MOVED_STAR_X);
+    assert!(
+        harness.wait_until(LIMIT, |frame| dark(frame, MOVED_STAR, BUBBLE_Y)
+            && !dark(frame, STAR, BUBBLE_Y)),
+        "keyboard help follows its button"
+    );
+    harness.ui.set_star_x(STAR_X);
+    harness.hover(MORE);
+    harness.leave();
+
     // In a popup the bubble lines up with the button's trailing edge, so the
     // popup's edge does not cut it off.
     harness.hover_at(MORE, POPUP_ROW);
