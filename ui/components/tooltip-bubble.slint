@@ -57,6 +57,8 @@ export component TooltipBubble inherits Rectangle {
             horizontal-alignment: center;
             vertical-alignment: center;
             overflow: elide;
+            // The control already has this name for a screen reader.
+            accessible-role: none;
         }
     }
 }
@@ -69,6 +71,8 @@ export component TooltipBubble inherits Rectangle {
 // combination.
 export global ActionTooltip {
     out property <string> text;
+    // The source whose help shows, by the id `new-id` gave it.
+    out property <int> owner;
     // The control, in window coordinates.
     out property <length> anchor-x;
     out property <length> anchor-y;
@@ -82,7 +86,17 @@ export global ActionTooltip {
     out property <int> reports;
     out property <int> checked-reports;
 
-    public function show(text: string, x: length, y: length, width: length, height: length, above: bool, align-left: bool) {
+    private property <int> last-id;
+
+    // A source asks for its id once, when it is created. Ids start at 1; 0
+    // is nobody.
+    public function new-id() -> int {
+        self.last-id += 1;
+        return self.last-id;
+    }
+
+    public function show(owner: int, text: string, x: length, y: length, width: length, height: length, above: bool, align-left: bool) {
+        self.owner = owner;
         self.anchor-x = x;
         self.anchor-y = y;
         self.anchor-width = width;
@@ -94,16 +108,16 @@ export global ActionTooltip {
     }
 
     // Like `show`, but leaves another control's help alone.
-    public function keep(text: string, x: length, y: length, width: length, height: length, above: bool, align-left: bool) {
-        if self.text == "" || (self.anchor-x == x && self.anchor-y == y) {
-            self.show(text, x, y, width, height, above, align-left);
+    public function keep(owner: int, text: string, x: length, y: length, width: length, height: length, above: bool, align-left: bool) {
+        if self.owner == owner {
+            self.show(owner, text, x, y, width, height, above, align-left);
         }
     }
 
-    // Hide the help of the control at `x`, `y`, unless another control has
-    // replaced it since.
-    public function hide(x: length, y: length) {
-        if self.anchor-x == x && self.anchor-y == y {
+    // Hide the help of `owner`, unless another control has replaced it since.
+    public function hide(owner: int) {
+        if self.owner == owner {
+            self.owner = 0;
             self.text = "";
         }
     }
@@ -120,36 +134,84 @@ export global ActionTooltip {
 
 // Reports a control's help to the window. It covers the control, or the part
 // the help points at, and takes no input.
+//
+// After `hide()`, for example when the control was clicked, the help stays
+// hidden until `shown` goes false and true again, so a control that is still
+// pointed at does not bring it back over what the click opened. The same
+// holds for a control that moved from where it reported: the bubble would be
+// pointing at nothing.
 export component ActionTooltipSource inherits Rectangle {
     in property <bool> shown;
     in property <string> text;
     in property <bool> above;
     in property <bool> align-left;
+    // The control draws the bubble itself, as inside a popup: nothing is
+    // reported to the window, but `active` still follows `hide()`.
+    in property <bool> local;
+    // Whether the help is wanted right now.
+    out property <bool> active: root.shown && root.text != "" && !root.dismissed;
+
+    private property <int> id;
+    private property <bool> dismissed;
+    private property <length> reported-x;
+    private property <length> reported-y;
 
     accessible-role: none;
-    changed shown => { root.refresh(); }
+    init => { root.id = ActionTooltip.new-id(); }
+    changed shown => {
+        if !root.shown {
+            root.dismissed = false;
+        }
+        root.refresh();
+    }
     changed text => { root.refresh(); }
+    changed active => { root.refresh(); }
 
+    // Reports the help, or takes it back, to match `active`.
     public function refresh() {
-        if root.shown && root.text != "" {
-            ActionTooltip.show(root.text, root.absolute-position.x, root.absolute-position.y,
+        if root.local {
+            return;
+        }
+        if root.active {
+            root.reported-x = root.absolute-position.x;
+            root.reported-y = root.absolute-position.y;
+            ActionTooltip.show(root.id, root.text, root.reported-x, root.reported-y,
                 root.width, root.height, root.above, root.align-left);
         } else {
-            root.hide();
+            ActionTooltip.hide(root.id);
         }
     }
 
-    public function hide() {
-        ActionTooltip.hide(root.absolute-position.x, root.absolute-position.y);
+    // Shows the help at once, also after `hide()`.
+    public function show-now() {
+        root.dismissed = false;
+        root.refresh();
     }
 
-    // Keeps the help while it shows, and follows the control if it moves.
+    // Takes the help back and keeps it away until `shown` cycles.
+    public function hide() {
+        if root.shown {
+            root.dismissed = true;
+        }
+        if !root.local {
+            ActionTooltip.hide(root.id);
+        }
+    }
+
+    // Keeps the help while it shows, and gives it up when the control moves.
+    // The window drops help that nobody reported for `ActionTooltipLayer`'s
+    // longer interval, so this one stays well below half of it.
     Timer {
-        interval: 100ms;
-        running: root.shown && root.text != "";
+        interval: 400ms;
+        running: root.active && !root.local;
         triggered => {
-            ActionTooltip.keep(root.text, root.absolute-position.x, root.absolute-position.y,
-                root.width, root.height, root.above, root.align-left);
+            if root.absolute-position.x != root.reported-x || root.absolute-position.y != root.reported-y {
+                root.dismissed = true;
+                ActionTooltip.hide(root.id);
+            } else {
+                ActionTooltip.keep(root.id, root.text, root.reported-x, root.reported-y,
+                    root.width, root.height, root.above, root.align-left);
+            }
         }
     }
 }
@@ -159,8 +221,10 @@ export component ActionTooltipSource inherits Rectangle {
 export component ActionTooltipLayer inherits Rectangle {
     accessible-role: none;
 
+    // More than twice the sources' interval, so a showing control always
+    // reports in between. A window with help up wakes about once a second.
     Timer {
-        interval: 300ms;
+        interval: 1000ms;
         running: ActionTooltip.text != "";
         triggered => { ActionTooltip.check(); }
     }

@@ -729,10 +729,15 @@ component NewTabButton inherits Rectangle {
         accessible-role: button;
         accessible-label: @tr("New tab");
         accessible-action-default => { TabsUi.create(); }
-        clicked => { TabsUi.create(); }
+        clicked => {
+            // The strip moves the button once the tab is added; the help
+            // stays away until the pointer has left and come back.
+            tooltip.hide();
+            TabsUi.create();
+        }
     }
     // Centred below the button, drawn by the window.
-    ActionTooltipSource {
+    tooltip := ActionTooltipSource {
         width: parent.width;
         height: parent.height;
         shown: hit.has-hover;

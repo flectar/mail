@@ -2,13 +2,15 @@
 //! The window draws one bubble for all its buttons: it follows the pointer
 //! after keyboard use, sits centred under its button with a caret, stays
 //! inside the window, is not covered by a pane drawn after the button, and
-//! goes away with its button.
+//! goes away with its button. A click or an activation keeps it away until
+//! the pointer leaves, and a button that moves does not leave it behind.
 use slint::platform::{
     Platform, PointerEventButton, WindowAdapter, WindowEvent,
     software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
 };
 use slint::{ComponentHandle, LogicalPosition};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 slint::slint! {
     #[edition = "1.19"]
@@ -20,6 +22,7 @@ slint::slint! {
     export component TooltipHarness inherits Window {
         in-out property <bool> dark;
         in-out property <bool> extra-shown: true;
+        in-out property <length> star-x: 200px;
         preferred-width: 400px;
         preferred-height: 120px;
         background: root.dark ? #111111 : white;
@@ -35,11 +38,20 @@ slint::slint! {
             height: 50px;
             ToolbarIconButton { x: 60px; y: 10px; tooltip-text: "Archive message"; }
         }
-        ToolbarIconButton { x: 200px; y: 10px; tooltip-text: "Star message"; }
+        ToolbarIconButton { x: root.star-x; y: 10px; tooltip-text: "Star message"; }
         // Against the window's trailing edge, like a toolbar's last action.
         ToolbarIconButton { x: 352px; y: 10px; tooltip-text: "More message actions"; }
         // A button that goes away while it is pointed at.
         if root.extra-shown : ToolbarIconButton { x: 280px; y: 10px; tooltip-text: "Snooze"; }
+        // A button in a popup draws its own help, lined up with its trailing
+        // edge so the popup's edge does not cut it off.
+        ToolbarIconButton {
+            x: 352px;
+            y: 70px;
+            tooltip-text: "Edit label";
+            tooltip-above: true;
+            tooltip-in-popup: true;
+        }
         // The pane below the first button, drawn after it, like the message
         // below the reader's toolbar.
         Rectangle {
@@ -64,9 +76,24 @@ const STAR: f32 = 220.0;
 const SNOOZE: f32 = 300.0;
 const MORE: f32 = 372.0;
 const ROW: f32 = 30.0;
+// Where the star button is, and where the test moves it to.
+const STAR_X: f32 = 200.0;
+const MOVED_STAR_X: f32 = 120.0;
+const MOVED_STAR: f32 = 140.0;
+// The popup's button, and a row through the middle of its bubble.
+const POPUP_ROW: f32 = 90.0;
+const POPUP_BUBBLE_ROW: usize = 48;
+// A spot with no button.
+const EMPTY: (f32, f32) = (10.0, 100.0);
 // Inside a bubble below the buttons, above its text, and inside its caret.
 const BUBBLE_Y: usize = 60;
 const CARET_Y: usize = 55;
+// Several refresh intervals of the buttons and a check of the window, to
+// show that help neither comes back nor goes missing in that time.
+const SETTLE: Duration = Duration::from_millis(2500);
+// How long to wait for something that has to happen, however slow the
+// machine is.
+const LIMIT: Duration = Duration::from_secs(5);
 
 struct Headless(Rc<MinimalSoftwareWindow>);
 
@@ -98,12 +125,27 @@ impl Harness {
     }
 
     fn hover(&self, x: f32) {
+        self.hover_at(x, ROW);
+    }
+
+    fn hover_at(&self, x: f32, y: f32) {
         // Two moves, as a pointer passing over the button reports.
         for x in [x - 4.0, x] {
             self.send(WindowEvent::PointerMoved {
-                position: LogicalPosition::new(x, ROW),
+                position: LogicalPosition::new(x, y),
             });
         }
+    }
+
+    // The pointer goes to a spot with no button.
+    fn leave(&self) {
+        self.hover_at(EMPTY.0, EMPTY.1);
+    }
+
+    // The pointer leaves the window, as a finger lifted from a touch screen
+    // does: no move event follows it.
+    fn exit(&self) {
+        self.send(WindowEvent::PointerExited);
     }
 
     fn click(&self, x: f32) {
@@ -119,17 +161,33 @@ impl Harness {
         });
     }
 
-    fn key(&self, text: &str) {
-        self.send(WindowEvent::KeyPressed { text: text.into() });
-        self.send(WindowEvent::KeyReleased { text: text.into() });
+    fn key(&self, text: impl Into<slint::SharedString>) {
+        let text = text.into();
+        self.send(WindowEvent::KeyPressed { text: text.clone() });
+        self.send(WindowEvent::KeyReleased { text });
     }
 
     // Lets the window's timers run for `time`.
-    fn wait(&self, time: std::time::Duration) {
-        let end = std::time::Instant::now() + time;
-        while std::time::Instant::now() < end {
-            std::thread::sleep(std::time::Duration::from_millis(20));
+    fn wait(&self, time: Duration) {
+        let end = Instant::now() + time;
+        while Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(20));
             slint::platform::update_timers_and_animations();
+        }
+    }
+
+    // Draws frames until `done` holds or `limit` has passed, so a slow
+    // machine is waited for and a fast one is not.
+    fn wait_until(&self, limit: Duration, done: impl Fn(&[slint::Rgb8Pixel]) -> bool) -> bool {
+        let end = Instant::now() + limit;
+        loop {
+            if done(&self.frame()) {
+                return true;
+            }
+            if Instant::now() >= end {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
         }
     }
 
@@ -152,6 +210,11 @@ fn dark(pixels: &[slint::Rgb8Pixel], x: f32, y: usize) -> bool {
 fn light(pixels: &[slint::Rgb8Pixel], x: f32, y: usize) -> bool {
     let pixel = pixels[y * WIDTH + x as usize];
     pixel.r > 200 && pixel.g > 200 && pixel.b > 200
+}
+
+// The last dark pixel of a row, which for a bubble is its right edge.
+fn last_dark(pixels: &[slint::Rgb8Pixel], y: usize) -> Option<usize> {
+    (0..WIDTH).rev().find(|x| dark(pixels, *x as f32, y))
 }
 
 #[test]
@@ -184,12 +247,20 @@ fn window_bubble_follows_the_pointer_and_its_button() {
     assert!(!dark(&frame, ARCHIVE, BUBBLE_Y), "one bubble at a time");
 
     // A key pressed while a clicked button keeps the focus switches help to
-    // the keyboard. Moving the pointer over another button brings it back.
+    // the keyboard, though the click itself hid it. Activating the button
+    // from the keyboard hides it again, and moving the pointer over another
+    // button brings the pointer's help back.
     harness.click(STAR);
     harness.key("j");
     assert!(
         dark(&harness.frame(), STAR, BUBBLE_Y),
         "focused button's help"
+    );
+    harness.key(slint::platform::Key::Return);
+    harness.wait(SETTLE);
+    assert!(
+        !dark(&harness.frame(), STAR, BUBBLE_Y),
+        "help stays away after the keyboard activates the button"
     );
     harness.hover(ARCHIVE);
     let frame = harness.frame();
@@ -199,21 +270,90 @@ fn window_bubble_follows_the_pointer_and_its_button() {
     );
     assert!(!dark(&frame, STAR, BUBBLE_Y));
 
+    // A click hides the help, and it stays hidden while the pointer rests on
+    // the button, over whatever the click opened, through many refreshes.
+    harness.click(ARCHIVE);
+    assert!(
+        !dark(&harness.frame(), ARCHIVE, BUBBLE_Y),
+        "a click hides the help"
+    );
+    harness.wait(SETTLE);
+    assert!(
+        !dark(&harness.frame(), ARCHIVE, BUBBLE_Y),
+        "and it does not come back under a resting pointer"
+    );
+    // The button keeps the focus the click gave it, but that is not keyboard
+    // focus: with the pointer away there is no help to show.
+    harness.leave();
+    harness.wait(SETTLE);
+    assert!(
+        !dark(&harness.frame(), ARCHIVE, BUBBLE_Y),
+        "a clicked button shows no help once the pointer has left"
+    );
+    // Without a move event, as after a tap, the pointer leaving is all there
+    // is to release the help; the same again from a new click.
+    harness.click(ARCHIVE);
+    harness.exit();
+    harness.wait(SETTLE);
+    assert!(
+        !dark(&harness.frame(), ARCHIVE, BUBBLE_Y),
+        "a tapped button shows no help once the pointer has gone"
+    );
+    // Pointing at it again is a new hover: the help was released, not left
+    // to the focus the click gave the button.
+    harness.hover(ARCHIVE);
+    assert!(
+        dark(&harness.frame(), ARCHIVE, BUBBLE_Y),
+        "the help returns when the pointer comes back"
+    );
+
     // Slint takes one platform per process, so the rest runs here too.
     harness.hover(SNOOZE);
-    harness.wait(std::time::Duration::from_millis(800));
+    harness.wait(SETTLE);
     assert!(
         dark(&harness.frame(), SNOOZE, BUBBLE_Y),
         "help stays while its button is pointed at"
     );
     // The window removes the button when it next draws.
     harness.ui.set_extra_shown(false);
-    harness.frame();
-    harness.wait(std::time::Duration::from_millis(800));
     assert!(
-        !dark(&harness.frame(), SNOOZE, BUBBLE_Y),
+        harness.wait_until(LIMIT, |frame| !dark(frame, SNOOZE, BUBBLE_Y)),
         "a removed button leaves no help behind"
     );
+
+    // A button that moves under a resting pointer takes its help back, and
+    // the help appears neither at the old place nor at the new one.
+    harness.hover(STAR);
+    assert!(dark(&harness.frame(), STAR, BUBBLE_Y));
+    harness.ui.set_star_x(MOVED_STAR_X);
+    assert!(
+        harness.wait_until(LIMIT, |frame| !dark(frame, STAR, BUBBLE_Y)),
+        "a button that moved takes its help back"
+    );
+    harness.wait(SETTLE);
+    let frame = harness.frame();
+    assert!(
+        !dark(&frame, STAR, BUBBLE_Y),
+        "it does not return at the old place"
+    );
+    assert!(
+        !dark(&frame, MOVED_STAR, BUBBLE_Y),
+        "nor appear at the new one"
+    );
+    harness.leave();
+    harness.ui.set_star_x(STAR_X);
+    harness.frame();
+
+    // In a popup the bubble lines up with the button's trailing edge, so the
+    // popup's edge does not cut it off.
+    harness.hover_at(MORE, POPUP_ROW);
+    let frame = harness.frame();
+    let right = last_dark(&frame, POPUP_BUBBLE_ROW).expect("the popup button shows its help");
+    assert!(
+        (MORE as usize + 14..=MORE as usize + 20).contains(&right),
+        "the popup help ends at the button's edge, not centred past it: {right}"
+    );
+    harness.leave();
 
     harness.ui.set_dark(true);
     harness.hover(STAR);

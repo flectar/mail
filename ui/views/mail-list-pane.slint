@@ -828,9 +828,6 @@ export component MailListPane inherits FocusScope {
                     Rectangle {
                         height: root.compact ? LayoutMetrics.compact-header-height : LayoutMetrics.desktop-mail-toolbar-height;
                         background: root.surface;
-                        // Tooltips extend below the toolbar; keep them above the
-                        // list body, which is declared later in this layout.
-                        z: 1;
                         search-toolbar := WorkspaceSearchToolbar {
                             x: root.compact ? LayoutMetrics.compact-inset : LayoutMetrics.content-inset;
                             y: (parent.height - self.height) / 2;
@@ -916,7 +913,6 @@ export component MailListPane inherits FocusScope {
                         height: root.bulk-toolbar-height;
                         background: root.surface;
                         clip: !root.selection-mode;
-                        z: 1;
 
                         Rectangle {
                             x: 0px;

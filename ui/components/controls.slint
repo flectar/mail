@@ -363,13 +363,17 @@ export component IconButton inherits Rectangle {
         accessible-role: none;
         key-pressed(event) => {
             IconButtonInput.keyboard = true;
-            // Show its help at once, also after a click hid it.
-            tooltip.refresh();
             if root.interactive && (event.text == Key.Return || event.text == Key.Space) {
+                // Like a click: whatever the action opens is not covered by
+                // the help, which stays away until focus leaves the button
+                // or the pointer takes over.
                 tooltip.hide();
                 root.clicked();
                 return accept;
             }
+            // Any other key shows the help at once, also after a click or an
+            // activation hid it.
+            tooltip.show-now();
             reject
         }
     }
@@ -402,17 +406,21 @@ export component IconButton inherits Rectangle {
     tooltip := ActionTooltipSource {
         width: parent.width;
         height: parent.height;
-        shown: root.tooltip-shown && !root.tooltip-in-popup;
+        shown: root.tooltip-shown;
+        local: root.tooltip-in-popup;
         text: root.tooltip-text;
         above: root.tooltip-above;
         align-left: root.tooltip-align-left;
     }
 
     // A popup is drawn above the window, so its buttons show their own help.
-    if root.tooltip-in-popup && root.tooltip-shown : TooltipBubble {
+    // Aligned with the button's trailing edge, or its leading one with
+    // `tooltip-align-left`, rather than centred, so the popup's edge does not
+    // cut it off. The caret still points at the button's centre.
+    if root.tooltip-in-popup && tooltip.active : TooltipBubble {
         text: root.tooltip-text;
         caret-side: root.tooltip-above ? "bottom" : "top";
-        x: root.tooltip-align-left ? 0px : (parent.width - self.width) / 2;
+        x: root.tooltip-align-left ? 0px : parent.width - self.width;
         y: root.tooltip-above ? -self.height - 2px : parent.height + 2px;
         caret-at: root.width / 2 - self.x;
     }
