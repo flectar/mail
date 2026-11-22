@@ -21,12 +21,14 @@ use super::{
 };
 use crate::platform::windows_install::{command_executable, package_family_name, same_file};
 use std::{
+    cell::Cell,
     ffi::c_void,
     sync::{Arc, mpsc},
 };
 use tokio::sync::oneshot;
 use windows::{
     Data::Xml::Dom::XmlDocument,
+    Foundation::{DateTime, IReference, PropertyValue},
     UI::Notifications::{
         BadgeNotification, BadgeUpdateManager, NotificationSetting, ToastNotification,
         ToastNotificationHistory, ToastNotificationManager, ToastNotifier,
@@ -45,7 +47,7 @@ use windows::{
             Shell::SetCurrentProcessExplicitAppUserModelID,
         },
     },
-    core::{BOOL, GUID, HSTRING, IUnknown, Interface, PCWSTR, Ref, implement},
+    core::{BOOL, GUID, HRESULT, HSTRING, IUnknown, Interface, PCWSTR, Ref, implement},
 };
 
 /// The installed copy's app id, on its process, its Start menu shortcut and
@@ -66,6 +68,13 @@ const PACKAGED_ACTIVATOR: GUID = GUID::from_u128(0x6D5AB7B0_F5FC_4A63_B767_DB4CE
 const ACTIVATION_ARGUMENT: &str = "--toast-activated";
 /// The new-mail sound of the user's sound scheme.
 const MAIL_SOUND: &str = "ms-winsoundevent:Notification.Mail";
+/// What reading the notification setting of an app without package identity
+/// fails with until the app has shown a notification: ERROR_NOT_FOUND.
+const SETTING_NOT_KEPT_YET: HRESULT = HRESULT(0x8007_0490_u32 as i32);
+/// The tag and group of the toast that introduces a copy to Windows, apart
+/// from those of mail.
+const INTRODUCTION_TAG: &str = "introduction";
+const INTRODUCTION_GROUP: &str = "app";
 
 /// How this copy of Flectar Mail is installed, which decides who registers
 /// its app id and activator.
@@ -303,6 +312,8 @@ fn serve(install: &Install, jobs: &mpsc::Receiver<Job>) {
 struct Toasts {
     /// `None` for the Store package, which uses the calls without an id.
     aumid: Option<HSTRING>,
+    /// Whether this run introduced the copy to Windows (see [`Toasts::setting`]).
+    introduced: Cell<bool>,
 }
 
 impl Toasts {
@@ -312,6 +323,7 @@ impl Toasts {
                 Install::Packaged { .. } => None,
                 install => Some(HSTRING::from(install.aumid())),
             },
+            introduced: Cell::new(false),
         }
     }
 
@@ -327,13 +339,57 @@ impl Toasts {
             // Windows shows no toasts from a process run as administrator.
             return Availability::Unavailable;
         }
-        match self.notifier().and_then(|notifier| notifier.Setting()) {
+        match self.setting() {
             Ok(NotificationSetting::Enabled) => Availability::Allowed,
             Ok(
                 NotificationSetting::DisabledForApplication | NotificationSetting::DisabledForUser,
             ) => Availability::Denied,
             Ok(_) | Err(_) => Availability::Unavailable,
         }
+    }
+
+    /// Whether Windows lets this copy show notifications.
+    ///
+    /// Windows keeps that setting for an app without package identity only
+    /// once the app has shown a notification, and reading it fails with
+    /// ERROR_NOT_FOUND until then, so an installed or portable copy that read
+    /// it first would never show one. Like the Windows Community Toolkit, such
+    /// a copy then introduces itself with a toast that neither pops up nor
+    /// stays, once per run, and reads the setting again.
+    fn setting(&self) -> windows::core::Result<NotificationSetting> {
+        match self.notifier().and_then(|notifier| notifier.Setting()) {
+            Err(error)
+                if error.code() == SETTING_NOT_KEPT_YET
+                    && self.aumid.is_some()
+                    && !self.introduced.replace(true) =>
+            {
+                if let Err(error) = self.introduce() {
+                    tracing::debug!(%error, "notifications: could not introduce the app to Windows");
+                }
+                self.notifier().and_then(|notifier| notifier.Setting())
+            }
+            setting => setting,
+        }
+    }
+
+    /// Shows a toast that doesn't pop up, sound or outlive the next seconds,
+    /// and takes it back at once.
+    fn introduce(&self) -> windows::core::Result<()> {
+        let notifier = self.notifier()?;
+        let document = XmlDocument::new()?;
+        document.LoadXml(&HSTRING::from(
+            r#"<toast><visual><binding template="ToastGeneric"><text>Flectar Mail</text></binding></visual><audio silent="true"/></toast>"#,
+        ))?;
+        let toast = ToastNotification::CreateToastNotification(&document)?;
+        toast.SetTag(&HSTRING::from(INTRODUCTION_TAG))?;
+        toast.SetGroup(&HSTRING::from(INTRODUCTION_GROUP))?;
+        toast.SetSuppressPopup(true)?;
+        // In case taking it back fails.
+        let expires = date_time(chrono::Utc::now().timestamp_millis() + 15_000);
+        let expires: IReference<DateTime> = PropertyValue::CreateDateTime(expires)?.cast()?;
+        toast.SetExpirationTime(&expires)?;
+        notifier.Show(&toast)?;
+        self.remove(INTRODUCTION_TAG, INTRODUCTION_GROUP)
     }
 
     /// Show a batch's toasts, reading the setting once for all of them.
@@ -371,16 +427,18 @@ impl Toasts {
 
     fn withdraw(&self, id: AlertId) {
         let (tag, group) = tag_and_group(id);
-        let (tag, group) = (HSTRING::from(tag), HSTRING::from(group));
-        let removed =
-            ToastNotificationManager::History().and_then(|history: ToastNotificationHistory| {
-                match &self.aumid {
-                    Some(aumid) => history.RemoveGroupedTagWithId(&tag, &group, aumid),
-                    None => history.RemoveGroupedTag(&tag, &group),
-                }
-            });
-        if let Err(error) = removed {
+        if let Err(error) = self.remove(&tag, &group) {
             tracing::debug!(%error, "notifications: could not withdraw a toast");
+        }
+    }
+
+    /// Takes a toast back from the notification center.
+    fn remove(&self, tag: &str, group: &str) -> windows::core::Result<()> {
+        let (tag, group) = (HSTRING::from(tag), HSTRING::from(group));
+        let history: ToastNotificationHistory = ToastNotificationManager::History()?;
+        match &self.aumid {
+            Some(aumid) => history.RemoveGroupedTagWithId(&tag, &group, aumid),
+            None => history.RemoveGroupedTag(&tag, &group),
         }
     }
 }
@@ -469,6 +527,16 @@ fn timestamp(received_at: i64) -> String {
         .unwrap_or_else(chrono::Utc::now)
         .format("%Y-%m-%dT%H:%M:%SZ")
         .to_string()
+}
+
+/// A Unix time in milliseconds as a Windows date and time: 100-nanosecond
+/// intervals since 1601.
+fn date_time(unix_ms: i64) -> DateTime {
+    /// 1601 to 1970 in 100-nanosecond intervals.
+    const UNIX_EPOCH: i64 = 116_444_736_000_000_000;
+    DateTime {
+        UniversalTime: UNIX_EPOCH + unix_ms * 10_000,
+    }
 }
 
 /// Escape text for XML, dropping the characters XML 1.0 cannot hold.
@@ -694,6 +762,29 @@ mod tests {
         assert_eq!(
             tag_and_group(AlertId::Summary { account_id: 3 }),
             ("summary".into(), "account-3".into())
+        );
+    }
+
+    #[test]
+    fn the_introduction_stays_apart_from_mail() {
+        for id in [
+            AlertId::Message {
+                account_id: 1,
+                message_id: 1,
+            },
+            AlertId::Summary { account_id: 1 },
+        ] {
+            assert_ne!(tag_and_group(id).1, INTRODUCTION_GROUP);
+        }
+    }
+
+    #[test]
+    fn unix_times_become_windows_times() {
+        // The Unix epoch in Windows file time, as Microsoft documents it.
+        assert_eq!(date_time(0).UniversalTime, 116_444_736_000_000_000);
+        assert_eq!(
+            date_time(15_000).UniversalTime - date_time(0).UniversalTime,
+            150_000_000
         );
     }
 
