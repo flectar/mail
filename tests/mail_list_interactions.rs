@@ -26,6 +26,9 @@ slint::slint! {
         preferred-height: 260px;
         in-out property <[EmailRow]> emails: [];
         in-out property <[MailListEntry]> entries: [];
+        in-out property <bool> dense-rows: false;
+        in-out property <bool> compact-rows: false;
+        in-out property <int> selection-count: 0;
         callback selected(int);
         init => { MotionSettings.enabled = false; }
 
@@ -34,6 +37,9 @@ slint::slint! {
             height: parent.height;
             emails: root.emails;
             list_entries: root.entries;
+            dense: root.dense-rows;
+            compact-rows: root.compact-rows;
+            selection-count: root.selection-count;
             surface: #18191a;
             heading: white;
             body-text: white;
@@ -592,4 +598,41 @@ fn labels_beside_a_long_file_name_are_only_counted() {
     assert!(labelled(ui.window(), "+2", None).is_some());
     let width = bounds(&file).2;
     assert!(width >= 149.0, "the file chip gave up its room: {width}px");
+}
+
+#[test]
+fn selection_checkbox_sits_on_the_avatar_in_every_density() {
+    let list = desktop_list(EmailRow {
+        id: 1,
+        sender: "Sender".into(),
+        initials: "QZ".into(),
+        subject: "Subject".into(),
+        ..Default::default()
+    });
+    list.ui.set_selection_count(1);
+    for (case, dense, compact) in [
+        ("comfortable", false, false),
+        ("compact", false, true),
+        ("dense", true, false),
+    ] {
+        list.ui.set_dense_rows(dense);
+        list.ui.set_compact_rows(compact);
+        settle(&list.window, Duration::ZERO);
+        let window = list.ui.window();
+        let check = labelled(window, "Select Sender", Some(AccessibleRole::Checkbox))
+            .expect("the row's selection checkbox");
+        // The avatar's initials fill its circle.
+        let avatar = labelled(window, "QZ", Some(AccessibleRole::Text)).expect("the row's avatar");
+        let (cx, cy, cw, ch) = bounds(&check);
+        let (ax, ay, aw, ah) = bounds(&avatar);
+        assert!(
+            (cx + cw / 2.0 - (ax + aw / 2.0)).abs() < 0.5
+                && (cy + ch / 2.0 - (ay + ah / 2.0)).abs() < 0.5
+                && cw <= aw + 0.5
+                && ch <= ah + 0.5,
+            "{case} rows should put the checkbox on the avatar: checkbox {:?}, avatar {:?}",
+            (cx, cy, cw, ch),
+            (ax, ay, aw, ah)
+        );
+    }
 }

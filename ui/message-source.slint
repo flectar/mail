@@ -1,0 +1,17 @@
+// Message source (#253): the open message as it arrived, every header field
+// included, as mail clients show a message's source (src/message_source.rs).
+export global MessageSource {
+    // The reader shows the original in place of the message.
+    in-out property <bool> shown: false;
+    // Reading it, from this device or the mail server.
+    in property <bool> loading: false;
+    // The message as text, or its first part when it's long.
+    in property <string> text;
+    // `text` is only the first part of a longer message.
+    in property <bool> partial: false;
+    // Why it couldn't be read, or "".
+    in property <string> error;
+    callback show();
+    // Saves the whole message as a file.
+    callback save();
+}

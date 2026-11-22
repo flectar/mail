@@ -974,12 +974,12 @@ there is no account to create: a 24-word recovery code brings sync back on a
 new device. Your mail, contacts and calendars keep syncing with your mail
 provider as before.
 
-Turn it on in Settings → Sync. **Add a device** on a device that already syncs
-shows a QR code to scan with your phone, or a short code to type on the other
-device, and a device can also join with your recovery code. Each device keeps
-its own mail checking, how much mail history it downloads, its proxy and server
-timeout, and settings that belong to the device itself, such as reduced motion
-and text size.
+Turn it on in Settings → Sync. To add a device, choose **Add a device** on one
+that already syncs and type the code it shows into **Enter code** on the new
+one, either on the welcome screen or in Settings → Sync. A device can also join
+with your recovery code. Each device keeps its own mail checking, how much mail
+history it downloads, its proxy and server timeout, and settings that belong to
+the device itself, such as reduced motion and text size.
 
 Flectar Mail Sync is a paid service, with a free trial, that pays for the
 servers it runs on. Each contribution to Flectar Mail earns a free year of it,
@@ -1076,6 +1076,12 @@ If you find an email that renders incorrectly, please
 experimental, but it is also a major reason Flectar Mail can remain so
 lightweight compared with WebView-based clients built with frameworks such as
 Tauri or Wails.
+
+A message's menu has **Show HTML source**, the message's HTML to copy into such
+a report, and **Show message source** (Ctrl+U, or Cmd+U on a Mac), the whole
+message as it arrived with every header field, as the server delivered it, to
+copy or save as a file. A conversation shows its newest message, and a long
+message shows its first 512 KB, with all of it in the saved file.
 
 Desktop builds offer two renderers under Settings → General → Renderer:
 

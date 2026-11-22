@@ -15,6 +15,7 @@ import { WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
+import { MessageSource } from "../message-source.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { SavedSearchUi } from "../saved-searches.slint";
 import { ServerSearchUi } from "../server-search.slint";
@@ -539,6 +540,7 @@ export component MailListPane inherits FocusScope {
     // Without a preview, the chips and account share the subject's line.
     private property <bool> inline-detail: !root.dense && root.preview-lines <= 0;
     private property <length> avatar-size: root.dense ? 28px : root.compact-rows ? 32px : 38px;
+    private property <length> avatar-top: root.dense ? 8px : root.row-top + 4px;
     private property <length> message-row-height: root.dense ? 44px
         : root.row-top + root.sender-line + root.line-gap + root.subject-line
             + (root.inline-detail ? 0px : root.line-gap + root.preview-height) + root.row-bottom;
@@ -638,6 +640,17 @@ export component MailListPane inherits FocusScope {
         keys: Shortcuts.edit-as-new;
         enabled: !search-toolbar.search-focused;
         activated => { root.edit-as-new(); }
+    }
+    KeyBinding {
+        keys: Shortcuts.message-source;
+        enabled: !search-toolbar.search-focused;
+        activated => {
+            if MessageSource.shown {
+                MessageSource.shown = false;
+            } else {
+                MessageSource.show();
+            }
+        }
     }
 
     // Move to and Copy to open for what the other shortcuts act on.
@@ -1225,7 +1238,7 @@ export component MailListPane inherits FocusScope {
                                 Avatar {
                                     visible: !entry.is_header && root.show-avatars;
                                     x: 14px;
-                                    y: root.dense ? 8px : root.row-top + 4px;
+                                    y: root.avatar-top;
                                     size: root.avatar-size;
                                     source: root.dense ? mail-data.favicon_small : mail-data.favicon;
                                     has-source: mail-data.has_favicon;
@@ -1693,9 +1706,10 @@ export component MailListPane inherits FocusScope {
                                                 opacity: mail-data.checked || root.selection-mode || (!root.compact && (row-hit.has-hover || self.focus-visible)) ? 1 : 0;
                                                 enabled: !root.compact || root.selection-mode || mail-data.checked;
                                                 x: root.show-avatars ? 14px : 0px;
-                                                y: root.show-avatars ? (root.dense ? 8px : 12px) : (parent.height - self.height) / 2;
-                                                width: root.show-avatars ? (root.dense ? 28px : 38px) : 32px;
-                                                height: root.show-avatars ? (root.dense ? 28px : 38px) : 32px;
+                                                // Over the avatar, in every list density.
+                                                y: root.show-avatars ? root.avatar-top : (parent.height - self.height) / 2;
+                                                width: root.show-avatars ? root.avatar-size : 32px;
+                                                height: root.show-avatars ? root.avatar-size : 32px;
                                                 checked: mail-data.checked;
                                                 avatar-overlay: root.show-avatars;
                                                 accessible-label: mail-data.checked

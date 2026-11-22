@@ -302,6 +302,36 @@ impl crate::Core {
         originals
     }
 
+    /// A message as it arrived, every header field included, to show as its
+    /// original (#253): from where this app keeps the whole message, and
+    /// otherwise from its server. A draft shows as it would be sent.
+    pub async fn message_original(&self, message_id: i64) -> Result<Vec<u8>> {
+        let (source, draft) = self
+            .db
+            .read(move |conn| {
+                let draft = conn
+                    .query_row(
+                        "SELECT is_draft FROM messages WHERE id = ?1",
+                        [message_id],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .optional()?
+                    .ok_or_else(|| CoreError::NotFound("the message".into()))?;
+                Ok((Source::get(conn, message_id)?, draft))
+            })
+            .await?;
+        if draft {
+            return self.draft_message(message_id).await;
+        }
+        let source = source.ok_or_else(|| CoreError::NotFound("the message".into()))?;
+        let mut run = Run::default();
+        let raw = self.original_bytes(&mut run, message_id, &source).await;
+        for source in run.imap.into_values() {
+            imap::logout(source.session).await;
+        }
+        raw
+    }
+
     async fn forwarded_original(
         &self,
         run: &mut Run,
