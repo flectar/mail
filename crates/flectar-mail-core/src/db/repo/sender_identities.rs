@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 const COLUMNS: &str = "account_id,email,display_name,reply_to_email,is_primary,
     is_provider_default,verification_status,last_synced_at,source,delivery_status,
-    delivery_error";
+    delivery_error,bcc";
 
 fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SenderIdentity> {
     Ok(SenderIdentity {
@@ -22,6 +22,8 @@ fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SenderIdentity> {
         source: SenderIdentitySource::parse(&row.get::<_, String>("source")?),
         delivery_status: SenderDeliveryStatus::parse(&row.get::<_, String>("delivery_status")?),
         delivery_error: row.get("delivery_error")?,
+        // Unreadable JSON is no Bcc, as the identity's next refresh rewrites it.
+        bcc: serde_json::from_str(&row.get::<_, String>("bcc")?).unwrap_or_default(),
     })
 }
 
@@ -86,14 +88,14 @@ pub fn replace(
         tx.execute(
             "INSERT INTO sender_identities (
                account_id,email,display_name,reply_to_email,is_primary,
-               is_provider_default,verification_status,last_synced_at,source
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'provider')
+               is_provider_default,verification_status,last_synced_at,source,bcc
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'provider',?9)
              ON CONFLICT(account_id,email) DO UPDATE SET
                email=excluded.email,display_name=excluded.display_name,
                reply_to_email=excluded.reply_to_email,is_primary=excluded.is_primary,
                is_provider_default=excluded.is_provider_default,
                verification_status=excluded.verification_status,
-               last_synced_at=excluded.last_synced_at,source='provider'",
+               last_synced_at=excluded.last_synced_at,source='provider',bcc=excluded.bcc",
             params![
                 account_id,
                 identity.email,
@@ -103,6 +105,7 @@ pub fn replace(
                 identity.is_provider_default as i64,
                 identity.verification_status,
                 identity.last_synced_at,
+                serde_json::to_string(&identity.bcc)?,
             ],
         )?;
     }
@@ -333,6 +336,7 @@ mod tests {
             source: SenderIdentitySource::Provider,
             delivery_status: SenderDeliveryStatus::Unknown,
             delivery_error: None,
+            bcc: Vec::new(),
         }
     }
 
@@ -442,6 +446,41 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// The Bcc a provider keeps for an identity is stored with it, comes
+    /// with an address its wildcard authorizes, and goes when the provider
+    /// drops it (#252).
+    #[test]
+    fn provider_identities_keep_their_bcc() {
+        let mut conn = crate::db::testutil::conn();
+        let account_id = account(&conn, Provider::Generic);
+        let archive = crate::models::Address {
+            name: Some("Archive".into()),
+            email: "archive@example.test".into(),
+        };
+        let mut login = identity(account_id, "login@example.test", true, "accepted");
+        login.bcc = vec![archive.clone()];
+        let mut team = identity(account_id, "*@team.example.test", false, "accepted");
+        team.bcc = vec![archive.clone()];
+        replace(&mut conn, account_id, &[login.clone(), team]).unwrap();
+        let listed = list(&conn, account_id).unwrap();
+        assert!(
+            listed
+                .iter()
+                .all(|identity| identity.bcc == [archive.clone()])
+        );
+        assert_eq!(
+            get_verified(&conn, account_id, "anne@team.example.test")
+                .unwrap()
+                .unwrap()
+                .bcc,
+            [archive]
+        );
+
+        login.bcc.clear();
+        replace(&mut conn, account_id, &[login]).unwrap();
+        assert!(list(&conn, account_id).unwrap()[0].bcc.is_empty());
     }
 
     #[test]

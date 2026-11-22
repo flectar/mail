@@ -6,7 +6,8 @@
 use super::*;
 use crate::rich_compose::{EditMark, EditState};
 use flectar_mail_core::models::{
-    Address, AttachmentMeta, Importance, SaveDraftArgs, SenderIdentity, Settings, Signature,
+    Address, AttachmentMeta, AutomaticCopies, Importance, SaveDraftArgs, SenderIdentity, Settings,
+    Signature,
 };
 use slint::SharedString;
 #[cfg(desktop)]
@@ -113,6 +114,14 @@ pub(super) struct ComposeSession {
     signature_target: RefCell<Option<SignatureTarget>>,
     /// Bumped for each sending-account change; older results are dropped.
     preferences_generation: Cell<u64>,
+    /// The copies mail from each of the sending account's identities starts
+    /// with, by the identity's address in lowercase (#252).
+    copies: RefCell<HashMap<String, AutomaticCopies>>,
+    /// The copies this composer added to the message, which choosing another
+    /// sender takes away.
+    added_copies: RefCell<automatic_copies::Added>,
+    /// A sender has been chosen for the message since it opened.
+    sender_chosen: Cell<bool>,
     spelling: MessageSpelling,
     photos: MessagePhotos,
     /// The message goes out as plain text only.
@@ -781,6 +790,9 @@ impl Composers {
             signatures: RefCell::default(),
             signature_target: RefCell::default(),
             preferences_generation: Cell::new(0),
+            copies: RefCell::default(),
+            added_copies: RefCell::default(),
+            sender_chosen: Cell::new(false),
             spelling: MessageSpelling::default(),
             photos: MessagePhotos::default(),
             plain_text: Cell::new(false),
@@ -4172,6 +4184,9 @@ impl ComposeSession {
             .set(self.preferences_generation.get().wrapping_add(1));
         *self.signature.borrow_mut() = None;
         self.signatures.borrow_mut().clear();
+        self.copies.borrow_mut().clear();
+        *self.added_copies.borrow_mut() = automatic_copies::Added::default();
+        self.sender_chosen.set(false);
         let Some(host) = self.host() else {
             return;
         };
@@ -4284,6 +4299,15 @@ impl ComposeSession {
         }
         let requested = preferences.get_composer_sender_email().to_string();
         let identities = account_mail_preferences::selectable_identities(identities, &requested);
+        *self.copies.borrow_mut() = identities
+            .iter()
+            .map(|identity| {
+                (
+                    identity.email.trim().to_lowercase(),
+                    config.settings.copies_for(identity),
+                )
+            })
+            .collect();
         let sender_choices = identities
             .iter()
             .map(|identity| SenderIdentityChoice {
@@ -4353,7 +4377,43 @@ impl ComposeSession {
             return;
         };
         preferences.set_composer_sender_index(index);
-        preferences.set_composer_sender_email(identity.email);
+        preferences.set_composer_sender_email(identity.email.clone());
+        self.apply_copies(&identity.email);
+    }
+
+    /// Give the message the copies mail from `sender` starts with, in place
+    /// of the ones this composer added for the sender before (#252). A draft
+    /// keeps the copies it was saved with, and a signature has none.
+    fn apply_copies(&self, sender: &str) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        let mode = ui.get_mode();
+        if mode == "signature" {
+            return;
+        }
+        let copies = self
+            .copies
+            .borrow()
+            .get(&sender.trim().to_lowercase())
+            .cloned()
+            .unwrap_or_default();
+        let (to, cc, bcc) = (ui.get_to(), ui.get_cc(), ui.get_bcc());
+        let first = !self.sender_chosen.replace(true);
+        if first && mode == "draft" {
+            *self.added_copies.borrow_mut() = automatic_copies::adopt(&cc, &bcc, &copies);
+            return;
+        }
+        let (new_cc, new_bcc, added) =
+            automatic_copies::apply(&to, &cc, &bcc, &self.added_copies.borrow(), &copies);
+        if new_cc != cc.as_str() {
+            ui.set_cc(new_cc.into());
+        }
+        if new_bcc != bcc.as_str() {
+            ui.set_bcc(new_bcc.into());
+        }
+        *self.added_copies.borrow_mut() = added;
     }
 
     /// Starts writing `signature`, or a new one, for `account_id`: its name where a message
