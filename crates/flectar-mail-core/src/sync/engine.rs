@@ -2304,17 +2304,22 @@ pub(crate) async fn discover_folders(
                 .map(|folder| folder.name.clone())
                 .collect::<HashSet<_>>(),
         );
-        let ruled = ctx
+        // The folders rules file into, and those chosen for roles such as
+        // Sent (#252).
+        let kept = ctx
             .db
             .read(move |conn| {
                 let mut paths = HashSet::new();
                 for folder_id in repo::rules::target_folders(conn, account_id)? {
                     paths.extend(repo::folders::get(conn, folder_id)?.map(|folder| folder.path));
                 }
+                if let Some(config) = repo::accounts::get_config(conn, account_id)? {
+                    paths.extend(config.settings.folder_roles.into_values());
+                }
                 Ok(paths)
             })
             .await?;
-        remote = crate::sync::folder_map::subscribed_only(remote, &subscribed, &ruled);
+        remote = crate::sync::folder_map::subscribed_only(remote, &subscribed, &kept);
     }
     let unlisted = ctx
         .db
@@ -2402,6 +2407,12 @@ pub(crate) async fn discover_folders(
             if listed_any {
                 repo::folders::mark_missing_on_server(&tx, account_id, &known_names)?;
             }
+            // Folders chosen by hand for a role keep it over the server's
+            // suggestions (#252).
+            let chosen = repo::accounts::get_config(&tx, account_id)?
+                .map(|config| config.settings.folder_roles)
+                .unwrap_or_default();
+            repo::folders::apply_chosen_roles(&tx, account_id, &chosen)?;
             tx.commit()?;
             Ok(unlisted)
         })

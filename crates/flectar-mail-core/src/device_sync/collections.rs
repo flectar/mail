@@ -628,6 +628,9 @@ pub(crate) struct Applied {
     pub threads_changed: Vec<i64>,
     /// Another device blocked a sender, or stopped blocking one.
     pub blocked_changed: bool,
+    /// Another device chose other folders for an account's roles, such as
+    /// Sent (#252): the folder list and every mail list show them again.
+    pub folders_changed: bool,
     /// Records taken on or left alone: see [`settle`].
     pub settled: Vec<RecordId>,
 }
@@ -1019,6 +1022,14 @@ fn apply_account(
             )?;
             if reconnect {
                 applied.follow_ups.push(FollowUp::RestartAccount(local_id));
+            }
+            // Folders chosen for roles on another device take them here at
+            // once, rather than at the next reading of the folder list.
+            if config.mail_protocol == MailProtocol::Imap
+                && settings_json.folder_roles != current.settings.folder_roles
+            {
+                repo::folders::apply_chosen_roles(conn, local_id, &settings_json.folder_roles)?;
+                applied.folders_changed = true;
             }
             local_id
         }
@@ -1941,6 +1952,79 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sync_id_of(&conn, local), smaller);
+    }
+
+    /// Folders chosen for roles on another device take them here at once,
+    /// and going back to the server's suggestion travels too (#252).
+    #[test]
+    fn folders_chosen_for_roles_on_another_device_take_them_here() {
+        use crate::models::roles;
+        let conn = testutil::conn();
+        let sync_id = "ab".repeat(16);
+        let local = account(&conn, "me@example.com", &sync_id);
+        let sent =
+            repo::folders::upsert(&conn, local, "Sent", Some("/"), Some(roles::SENT)).unwrap();
+        let sent_items =
+            repo::folders::upsert(&conn, local, "Sent Items", Some("/"), None).unwrap();
+        let id = sync_id_bytes(&sync_id).unwrap();
+        let settings = repo::settings::get(&conn).unwrap();
+        let automatic = repo::accounts::get_config(&conn, local).unwrap().unwrap();
+        let mut chosen = automatic.clone();
+        chosen
+            .settings
+            .folder_roles
+            .insert(roles::SENT.into(), "Sent Items".into());
+        let record = |config: &crate::models::AccountConfig| {
+            entry(ACCOUNT, account_body(config, &settings, 0).unwrap())
+        };
+        assert_eq!(
+            record(&automatic).body["settings"]["folderRoles"],
+            json!({})
+        );
+
+        let applied = apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(record(&automatic)),
+                next: Some(record(&chosen)),
+            },
+        );
+        assert!(applied.folders_changed);
+        assert_eq!(
+            repo::folders::by_role(&conn, local, roles::SENT)
+                .unwrap()
+                .unwrap()
+                .id,
+            sent_items
+        );
+
+        let applied = apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(record(&chosen)),
+                next: Some(record(&automatic)),
+            },
+        );
+        assert!(applied.folders_changed);
+        assert_eq!(
+            repo::folders::by_role(&conn, local, roles::SENT)
+                .unwrap()
+                .unwrap()
+                .id,
+            sent
+        );
+        // Nothing else changed.
+        let applied = apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(record(&automatic)),
+                next: Some(record(&automatic)),
+            },
+        );
+        assert!(!applied.folders_changed);
     }
 
     fn template(conn: &Connection, name: &str, shortcut: Option<&str>, sync_id: &str) {

@@ -1203,7 +1203,10 @@ impl Core {
         if applied.blocked_changed {
             self.bus.emit(CoreEvent::BlockedSendersChanged);
         }
-        if !applied.threads_changed.is_empty() {
+        if applied.folders_changed {
+            // Every list: mail filed by role may show elsewhere now.
+            self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        } else if !applied.threads_changed.is_empty() {
             self.bus.emit(CoreEvent::MailUpdated {
                 thread_ids: applied.threads_changed,
             });
