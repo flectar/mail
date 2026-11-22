@@ -1594,3 +1594,68 @@ fn tables_without_columns_have_no_spacing() {
     close(size.width, 4.0);
     close(size.height, 4.0);
 }
+
+#[test]
+fn a_selection_paints_the_line_breaks_it_selects() {
+    // As in Blink, a line whose end the selection goes past ends in a box as
+    // wide as a space, which shows that its line break is selected: a
+    // selection going on into the next paragraph reaches further right than
+    // one that ends with the first.
+    let right_edge = |into_next: bool| {
+        let mut doc = document(
+            "<p id=a style='margin:0;font:20px/30px sans-serif'>ab</p>
+             <p id=b style='margin:0;font:20px/30px sans-serif'>cd</p>",
+        );
+        let a = doc.query_selector("#a").unwrap().unwrap();
+        let b = doc.query_selector("#b").unwrap().unwrap();
+        if into_next {
+            doc.set_text_selection(a, 0, b, 1);
+        } else {
+            doc.set_text_selection(a, 0, a, 2);
+        }
+        let pixels = paint(&mut doc);
+        let first_line = &pixels[..400 * 30 * 4];
+        bounds_where(first_line, |pixel| *pixel == [180, 213, 255, 255])
+            .unwrap()
+            .2
+    };
+    let (ending, going_on) = (right_edge(false), right_edge(true));
+    assert!(going_on >= ending + 3, "{ending} {going_on}");
+}
+
+#[test]
+fn highlighted_text_paints_as_blink_paints_find_matches() {
+    // Matches are yellow and the active one orange, as tall as the text
+    // rather than the line, and their text is black whatever its colour.
+    let mut doc = document(
+        "<p id=p style='margin:0;font:20px/40px sans-serif;color:rgb(255,255,255);background:rgb(0,0,128)'>one two</p>",
+    );
+    let p = doc.query_selector("#p").unwrap().unwrap();
+    doc.set_text_highlights(vec![
+        blitz_dom::TextHighlight {
+            node: p,
+            range: 0..3,
+            active: false,
+        },
+        blitz_dom::TextHighlight {
+            node: p,
+            range: 4..7,
+            active: true,
+        },
+    ]);
+    let pixels = paint(&mut doc);
+    let yellow = bounds_where(&pixels, |pixel| *pixel == [255, 255, 0, 255]).unwrap();
+    let orange = bounds_where(&pixels, |pixel| *pixel == [255, 150, 50, 255]).unwrap();
+    assert!(yellow.2 < orange.0, "{yellow:?} {orange:?}");
+    assert!(yellow.3 - yellow.1 < 30, "{yellow:?}");
+    let any_inside = |test: &dyn Fn(&[u8]) -> bool| {
+        (yellow.1..=yellow.3).any(|y| {
+            (yellow.0..=yellow.2).any(|x| {
+                let i = (y * 400 + x) * 4;
+                test(&pixels[i..i + 4])
+            })
+        })
+    };
+    assert!(any_inside(&|pixel| pixel[..3].iter().all(|&c| c < 60)));
+    assert!(!any_inside(&|pixel| pixel[..3].iter().all(|&c| c > 200)));
+}

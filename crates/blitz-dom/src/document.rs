@@ -385,6 +385,8 @@ pub struct BaseDocument {
 
     /// Text selection state (for non-input text)
     pub(crate) text_selection: TextSelection,
+    /// Highlighted text, such as find-in-page matches
+    pub(crate) text_highlights: Vec<crate::TextHighlight>,
 
     // TODO: collapse animating state into a bitflags
     /// Whether there are active CSS animations/transitions (so we should re-render every frame)
@@ -600,6 +602,7 @@ impl BaseDocument {
             scrollbar_activity: HashMap::new(),
             scroll_animation: ScrollAnimationState::None,
             text_selection: TextSelection::default(),
+            text_highlights: Vec::new(),
         };
 
         // Initialise document with root Document node
@@ -2710,6 +2713,18 @@ impl BaseDocument {
         self.text_selection.clear();
     }
 
+    /// Highlights parts of the text, replacing the highlights before, as find
+    /// in page highlights its matches. They're painted as Blink paints
+    /// matches: yellow, the active one orange, with black text.
+    pub fn set_text_highlights(&mut self, highlights: Vec<crate::TextHighlight>) {
+        self.text_highlights = highlights;
+    }
+
+    /// The text highlighted by [`Self::set_text_highlights`].
+    pub fn text_highlights(&self) -> &[crate::TextHighlight] {
+        &self.text_highlights
+    }
+
     /// Update the selection focus point (used during mouse drag to extend selection).
     pub fn update_selection_focus(&mut self, focus_node: NodeId, focus_offset: usize) {
         // For anonymous blocks, store parent+sibling_index; otherwise store node directly
@@ -2898,15 +2913,25 @@ impl BaseDocument {
     /// Get all selection ranges as Vec<(node_id, start_offset, end_offset)>.
     /// Returns empty vec if no selection.
     pub fn get_text_selection_ranges(&self) -> Vec<(NodeId, usize, usize)> {
+        self.get_text_selection_ranges_and_end().0
+    }
+
+    /// The text selection's ranges, as [`Self::get_text_selection_ranges`]
+    /// gives them, and the inline root where the selection ends in document
+    /// order. A selection that ends at the start of a root has no range
+    /// there, but still selects the line break at the end of the root before.
+    pub fn get_text_selection_ranges_and_end(
+        &self,
+    ) -> (Vec<(NodeId, usize, usize)>, Option<NodeId>) {
         let lookup = |parent_id, idx| self.find_anonymous_block_by_index(parent_id, idx);
 
         let anchor_node = match self.text_selection.anchor.resolve_node_id(lookup) {
             Some(id) => id,
-            None => return Vec::new(),
+            None => return (Vec::new(), None),
         };
         let focus_node = match self.text_selection.focus.resolve_node_id(lookup) {
             Some(id) => id,
-            None => return Vec::new(),
+            None => return (Vec::new(), None),
         };
 
         // Guard against stale selection endpoints: nodes may have been removed from
@@ -2917,7 +2942,7 @@ impl BaseDocument {
                 .is_some_and(|node| node.flags.is_in_document())
         };
         if !node_is_in_doc(anchor_node) || !node_is_in_doc(focus_node) {
-            return Vec::new();
+            return (Vec::new(), None);
         }
 
         // Single node selection
@@ -2934,15 +2959,15 @@ impl BaseDocument {
                 .max(self.text_selection.focus.offset);
 
             if start == end {
-                return Vec::new();
+                return (Vec::new(), None);
             }
-            return vec![(anchor_node, start, end)];
+            return (vec![(anchor_node, start, end)], Some(anchor_node));
         }
 
         // Multi-node selection: collect all inline roots between anchor and focus
         let inline_roots = self.collect_inline_roots_in_range(anchor_node, focus_node);
         if inline_roots.is_empty() {
-            return Vec::new();
+            return (Vec::new(), None);
         }
 
         // Determine document order using the collected inline_roots order
@@ -3002,7 +3027,7 @@ impl BaseDocument {
             }
         }
 
-        ranges
+        (ranges, Some(last_node))
     }
 }
 

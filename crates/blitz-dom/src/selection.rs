@@ -72,6 +72,18 @@ impl SelectionEndpoint {
     }
 }
 
+/// Part of an inline root's text to highlight, as find in page highlights
+/// its matches.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextHighlight {
+    /// The inline root whose text is highlighted.
+    pub node: NodeId,
+    /// The highlighted bytes of the root's text.
+    pub range: std::ops::Range<usize>,
+    /// Whether this is the current match, which is painted more strongly.
+    pub active: bool,
+}
+
 /// Text selection state for non-input elements.
 ///
 /// Tracks both the anchor (where selection started) and focus (where it currently ends).

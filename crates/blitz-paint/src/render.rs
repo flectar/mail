@@ -18,7 +18,7 @@ use crate::kurbo_css::NonUniformRoundedRectRadii;
 use crate::layers::LayerManager;
 use crate::sizing::compute_object_fit;
 use crate::text::DrawTextContext;
-use crate::{CustomWidgetSceneMap, SELECTION_COLOR};
+use crate::{ACTIVE_MATCH_COLOR, CustomWidgetSceneMap, MATCH_COLOR, SELECTION_COLOR};
 use anyrender::{PaintScene, Scene};
 use blitz_dom::node::{
     ListItemLayout, ListItemLayoutPosition, Marker, NodeData, RasterImageData, SpecialElementData,
@@ -71,8 +71,12 @@ pub struct BlitzDomPainter<'dom, 'a> {
     pub(crate) layer_manager: LayerManager,
     /// Reusable scratch allocations shared by all text layouts painted for this document.
     pub(crate) draw_text_context: RefCell<DrawTextContext>,
-    /// Cached selection ranges for O(1) lookup: node_id -> (start_offset, end_offset)
-    pub(crate) selection_ranges: HashMap<NodeId, (usize, usize)>,
+    /// Each selected inline root's byte range, and whether the selection goes
+    /// on past the root's end.
+    pub(crate) selection_ranges: HashMap<NodeId, (usize, usize, bool)>,
+    /// Each highlighted inline root's highlighted byte ranges, and whether
+    /// each is the active one.
+    pub(crate) text_highlights: HashMap<NodeId, Vec<(usize, usize, bool)>>,
 
     // Pre-computed `Scene`s for each CustomWidget
     pub(crate) custom_widget_scenes: &'a CustomWidgetSceneMap,
@@ -89,11 +93,19 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
         initial_y: f64,
         custom_widget_scenes: &'a CustomWidgetSceneMap,
     ) -> Self {
-        let selection_ranges: HashMap<NodeId, (usize, usize)> = dom
-            .get_text_selection_ranges()
+        let (ranges, selection_end) = dom.get_text_selection_ranges_and_end();
+        let selection_ranges: HashMap<NodeId, (usize, usize, bool)> = ranges
             .into_iter()
-            .map(|(node_id, start, end)| (node_id, (start, end)))
+            .map(|(node_id, start, end)| (node_id, (start, end, Some(node_id) != selection_end)))
             .collect();
+        let mut text_highlights: HashMap<NodeId, Vec<(usize, usize, bool)>> = HashMap::new();
+        for highlight in dom.text_highlights() {
+            text_highlights.entry(highlight.node).or_default().push((
+                highlight.range.start,
+                highlight.range.end,
+                highlight.active,
+            ));
+        }
 
         let layer_manager = LayerManager::default();
         let root_element_id = dom.try_root_element().map(|el| el.id);
@@ -114,6 +126,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             layer_manager,
             draw_text_context: RefCell::new(DrawTextContext::default()),
             selection_ranges,
+            text_highlights,
             custom_widget_scenes,
         }
     }
@@ -980,10 +993,47 @@ impl ElementCx<'_, '_> {
                 .context
                 .selection_ranges
                 .get(&self.node.id)
-                .map(|&(sel_start, sel_end)| {
-                    crate::text::text_selection_rects(&text_layout.layout, sel_start, sel_end)
+                .map(|&(sel_start, sel_end, continues)| {
+                    // As in Blink, an inline-block's last line break isn't
+                    // painted, as the block may sit in the middle of a line.
+                    let atomic = self.style.get_box().display.outside() == DisplayOutside::Inline;
+                    crate::text::text_selection_rects(
+                        &text_layout.layout,
+                        sel_start,
+                        sel_end,
+                        continues && !atomic,
+                    )
                 })
                 .unwrap_or_default();
+
+            // Highlighted text (if any), such as find-in-page matches. Unlike
+            // the selection, Blink paints highlights as tall as the text, not
+            // the line.
+            let highlights: Vec<(usize, Rect, bool)> = self
+                .context
+                .text_highlights
+                .get(&self.node.id)
+                .into_iter()
+                .flatten()
+                .flat_map(|&(start, end, active)| {
+                    crate::text::text_range_rects(&text_layout.layout, start, end)
+                        .into_iter()
+                        .map(move |(line, rect)| (line, rect, active))
+                })
+                .map(|(line, rect, active)| {
+                    let rect = text_layout.layout.get(line).map_or(rect, |line| {
+                        let metrics = line.metrics();
+                        Rect::new(
+                            rect.x0,
+                            f64::from(metrics.content_block_min_coord),
+                            rect.x1,
+                            f64::from(metrics.content_block_max_coord),
+                        )
+                    });
+                    (line, rect, active)
+                })
+                .collect();
+            let layout_width = f64::from(text_layout.layout.full_width());
 
             let rtl = text_layout.layout.is_rtl();
             // Inline elements with `opacity` are painted as groups.
@@ -1020,10 +1070,32 @@ impl ElementCx<'_, '_> {
                 for (_, rect) in selection.iter().filter(|(line, _)| *line == index) {
                     scene.fill(Fill::NonZero, transform, SELECTION_COLOR, None, rect);
                 }
+                // Highlights cover the selection, as the current find match
+                // is also the selection.
+                let mut line_highlights = Vec::new();
+                for (_, rect, active) in highlights.iter().filter(|(line, ..)| *line == index) {
+                    let color = if *active {
+                        ACTIVE_MATCH_COLOR
+                    } else {
+                        MATCH_COLOR
+                    };
+                    scene.fill(Fill::NonZero, transform, color, None, rect);
+                    line_highlights.push(*rect);
+                }
+                let line_area = {
+                    let metrics = line.metrics();
+                    let margin = f64::from(metrics.line_height) * 2.0;
+                    Rect::new(
+                        -margin,
+                        f64::from(metrics.block_min_coord) - margin,
+                        layout_width + margin,
+                        f64::from(metrics.block_max_coord) + margin,
+                    )
+                };
                 let ungrouped = |id: NodeId| groups.group_of(id).is_none();
-                crate::text::stroke_text(
+                crate::text::stroke_highlighted_text(
                     scene,
-                    std::iter::once(line.clone()),
+                    line.clone(),
                     self.context.dom,
                     transform,
                     self.scale,
@@ -1035,7 +1107,10 @@ impl ElementCx<'_, '_> {
                             .then_some(&ungrouped as &dyn Fn(NodeId) -> bool),
                         text: &text_layout.text,
                         rtl,
+                        text_color: None,
                     },
+                    &line_highlights,
+                    line_area,
                 );
                 // Each group on the line, its decorations and text in a layer
                 // with its opacity.
@@ -1058,9 +1133,9 @@ impl ElementCx<'_, '_> {
                                 }
                             }
                             let in_group = |id: NodeId| groups.group_of(id) == Some(group);
-                            crate::text::stroke_text(
+                            crate::text::stroke_highlighted_text(
                                 scene,
-                                std::iter::once(line.clone()),
+                                line.clone(),
                                 self.context.dom,
                                 transform,
                                 self.scale,
@@ -1071,7 +1146,10 @@ impl ElementCx<'_, '_> {
                                     run_filter: Some(&in_group),
                                     text: &text_layout.text,
                                     rtl,
+                                    text_color: None,
                                 },
+                                &line_highlights,
+                                line_area,
                             );
                         },
                     );
@@ -1148,6 +1226,7 @@ impl ElementCx<'_, '_> {
                     run_filter: None,
                     text: "",
                     rtl: layout.is_rtl(),
+                    text_color: None,
                 },
             );
         }
@@ -1209,6 +1288,7 @@ impl ElementCx<'_, '_> {
                     run_filter: None,
                     text: "",
                     rtl: layout.is_rtl(),
+                    text_color: None,
                 },
             );
         }

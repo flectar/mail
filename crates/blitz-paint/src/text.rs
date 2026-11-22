@@ -222,6 +222,7 @@ struct InkedRun {
 }
 
 /// How to paint the text of an inline formatting context.
+#[derive(Clone, Copy)]
 pub(crate) struct TextPaint<'t> {
     /// Glyph runs entirely outside it are not drawn.
     pub(crate) viewport: Option<Rect>,
@@ -231,6 +232,8 @@ pub(crate) struct TextPaint<'t> {
     pub(crate) text: &'t str,
     /// Whether the paragraph runs right to left.
     pub(crate) rtl: bool,
+    /// A colour for every glyph instead of its own, such as a highlight's.
+    pub(crate) text_color: Option<Color>,
 }
 
 // The font-wide outline bounds include accents and overhangs which line-height
@@ -766,6 +769,7 @@ pub(crate) fn stroke_text<'a>(
         run_filter,
         text,
         rtl,
+        text_color: color_override,
     } = paint;
     let DrawTextContext {
         stack,
@@ -847,7 +851,9 @@ pub(crate) fn stroke_text<'a>(
 
                 // The glyph colour comes from the run's own node (the stack top): `color`
                 // inherits, so the innermost inline element already carries the right value.
-                let text_color = stack.last().map(|e| e.text_color).unwrap_or(Color::BLACK);
+                let text_color = color_override
+                    .or_else(|| stack.last().map(|e| e.text_color))
+                    .unwrap_or(Color::BLACK);
 
                 let mut embolden = if FONT_EMBOLDEN_ENABLED {
                     let fs = font_size as f64 / scale;
@@ -1075,21 +1081,180 @@ fn synthetic_bold(font_size: f64) -> kurbo::Vec2 {
 /// The selection highlight rectangles for the given byte range in a layout,
 /// with the line each is on. Uses Parley's Selection type for accurate
 /// geometry calculation.
+///
+/// As in Blink, a line whose end the selection goes past ends in a box as
+/// wide as a space in its last run's font, which shows that its line break
+/// is selected: after a `<br>` (where Parley draws a narrower box), after a
+/// word wrapped within itself, and after the text when the selection
+/// `continues` beyond it. A wrap after white space needs none, as the
+/// highlighted space shows it.
 pub(crate) fn text_selection_rects(
     layout: &Layout<TextBrush>,
     selection_start: usize,
     selection_end: usize,
+    continues: bool,
 ) -> Vec<(usize, Rect)> {
-    let anchor = Cursor::from_byte_index(layout, selection_start, Affinity::Downstream);
-    let focus = Cursor::from_byte_index(layout, selection_end, Affinity::Downstream);
-    let selection = Selection::new(anchor, focus);
+    let mut rects = text_range_rects(layout, selection_start, selection_end);
 
+    let line_count = layout.len();
+    for (index, line) in layout.lines().enumerate() {
+        let range = line.text_range();
+        if range.end <= selection_start || range.start >= selection_end {
+            continue;
+        }
+        let explicit = line.break_reason() == parley::BreakReason::Explicit;
+        let metrics = line.metrics();
+        let break_selected = if index + 1 == line_count {
+            continues && selection_end >= range.end
+        } else if explicit {
+            selection_end >= range.end
+        } else {
+            selection_end > range.end && metrics.hanging_advance == 0.0
+        };
+        if !break_selected {
+            continue;
+        }
+        // The line's content as laid out, justification included.
+        let (left, right) = line
+            .items()
+            .fold((f64::MAX, f64::MIN), |(left, right), item| {
+                let (start, width) = match item {
+                    PositionedLayoutItem::GlyphRun(run) => (run.offset(), run.advance()),
+                    PositionedLayoutItem::InlineBox(inline_box) => (inline_box.x, inline_box.width),
+                };
+                (
+                    left.min(f64::from(start)),
+                    right.max(f64::from(start + width)),
+                )
+            });
+        let Some(space) = range
+            .end
+            .checked_sub(1)
+            .and_then(|index| parley::Cluster::from_byte_index(layout, index))
+            .and_then(|cluster| space_advance(&cluster.run()))
+        else {
+            continue;
+        };
+        if left > right {
+            continue;
+        }
+        let top = f64::from(metrics.block_min_coord.min(metrics.content_block_min_coord));
+        let bottom = f64::from(metrics.block_max_coord.max(metrics.content_block_max_coord));
+        // Parley's box after a `<br>` gives way to this one.
+        for (_, rect) in rects.iter_mut().filter(|(line, _)| *line == index) {
+            rect.x1 = rect.x1.min(right).max(rect.x0);
+        }
+        rects.push((
+            index,
+            if layout.is_rtl() {
+                Rect::new(left - space, top, left, bottom)
+            } else {
+                Rect::new(right, top, right + space, bottom)
+            },
+        ));
+    }
+    rects.retain(|(_, rect)| rect.width() > 0.0);
+    rects
+}
+
+/// The rectangles of a byte range of a layout's text, with the line each is
+/// on, from Parley's selection geometry.
+pub(crate) fn text_range_rects(
+    layout: &Layout<TextBrush>,
+    start: usize,
+    end: usize,
+) -> Vec<(usize, Rect)> {
+    let anchor = Cursor::from_byte_index(layout, start, Affinity::Downstream);
+    let focus = Cursor::from_byte_index(layout, end, Affinity::Downstream);
     let mut rects = Vec::new();
-    selection.geometry_with(layout, |rect, line_idx| {
+    Selection::new(anchor, focus).geometry_with(layout, |rect, line_idx| {
         rects.push((
             line_idx,
             kurbo::Rect::new(rect.x0, rect.y0, rect.x1, rect.y1),
         ));
     });
     rects
+}
+
+/// Strokes a line's text, in black where `highlights` cover it, as Blink
+/// paints the text of find-in-page matches. `area` holds all of the line's
+/// ink.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn stroke_highlighted_text(
+    scene: &mut impl PaintScene,
+    line: Line<'_, TextBrush>,
+    doc: &BaseDocument,
+    transform: Affine,
+    scale: f64,
+    inline_root_id: NodeId,
+    context: &mut DrawTextContext,
+    paint: TextPaint<'_>,
+    highlights: &[Rect],
+    area: Rect,
+) {
+    if highlights.is_empty() {
+        stroke_text(
+            scene,
+            std::iter::once(line),
+            doc,
+            transform,
+            scale,
+            inline_root_id,
+            context,
+            paint,
+        );
+        return;
+    }
+    let mut outside = BezPath::new();
+    let mut inside = BezPath::new();
+    outside.extend(area.path_elements(0.1));
+    for highlight in highlights {
+        outside.extend(highlight.path_elements(0.1));
+        inside.extend(highlight.path_elements(0.1));
+    }
+    scene.push_clip_layer(Fill::EvenOdd, transform, &outside);
+    stroke_text(
+        scene,
+        std::iter::once(line.clone()),
+        doc,
+        transform,
+        scale,
+        inline_root_id,
+        context,
+        paint,
+    );
+    scene.pop_layer();
+    scene.push_clip_layer(Fill::NonZero, transform, &inside);
+    stroke_text(
+        scene,
+        std::iter::once(line),
+        doc,
+        transform,
+        scale,
+        inline_root_id,
+        context,
+        TextPaint {
+            text_color: Some(Color::BLACK),
+            ..paint
+        },
+    );
+    scene.pop_layer();
+}
+
+/// The advance of a space in a run's font, which is how wide Blink draws a
+/// selected line break.
+fn space_advance(run: &parley::Run<'_, TextBrush>) -> Option<f64> {
+    use skrifa::instance::{LocationRef, NormalizedCoord, Size};
+    use skrifa::{FontRef, MetadataProvider as _};
+    let font = run.font();
+    let font_ref = FontRef::from_index(font.data.as_ref(), font.index).ok()?;
+    let glyph = font_ref.charmap().map(' ')?;
+    let coords: Vec<NormalizedCoord> = bytemuck::cast_slice::<_, i16>(run.normalized_coords())
+        .iter()
+        .map(|coord| NormalizedCoord::from_bits(*coord))
+        .collect();
+    font_ref
+        .glyph_metrics(Size::new(run.font_size()), LocationRef::new(&coords))
+        .advance_width(glyph)
+        .map(f64::from)
 }
