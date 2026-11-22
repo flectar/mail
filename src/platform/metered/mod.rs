@@ -1,9 +1,11 @@
 //! Whether the device's connection costs by the byte (#253), as the system
 //! tells: Windows from the connection's data plan, macOS and iOS from an
-//! expensive path or Low Data Mode, and Linux from the desktop portal's
-//! network monitor or NetworkManager. Each watcher reports the answer at
-//! once and again whenever it changes.
+//! expensive path or Low Data Mode, Android from its connectivity manager,
+//! and Linux from the desktop portal's network monitor or NetworkManager.
+//! Each watcher reports the answer at once and again whenever it changes.
 
+#[cfg(target_os = "android")]
+mod android;
 #[cfg(target_vendor = "apple")]
 mod apple;
 #[cfg(linux_desktop)]
@@ -34,7 +36,16 @@ pub(crate) fn watch(
         apple::watch(changed);
         true
     }
-    #[cfg(not(any(linux_desktop, target_os = "windows", target_vendor = "apple")))]
+    #[cfg(target_os = "android")]
+    {
+        android::watch(changed, runtime)
+    }
+    #[cfg(not(any(
+        linux_desktop,
+        target_os = "windows",
+        target_vendor = "apple",
+        target_os = "android"
+    )))]
     {
         let _ = (changed, runtime);
         false
