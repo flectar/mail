@@ -3410,7 +3410,7 @@ export component SettingsDialog inherits Rectangle {
                                             shown-description := Text {
                                                 x: 0px; y: shown-label.y + shown-label.height + 1px;
                                                 width: shown-label.width; height: max(18px, self.preferred-height);
-                                                text: @tr("Which folders show in the sidebar");
+                                                text: account.mail_protocol == "imap" ? @tr("Which folders show in the sidebar and sync") : @tr("Which folders show in the sidebar");
                                                 color: root.faint-text;
                                                 font-size: TypeScale.caption;
                                                 wrap: word-wrap;

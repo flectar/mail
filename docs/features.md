@@ -9,7 +9,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Server settings for new accounts](#server-settings-for-new-accounts)
 - [Advanced account settings](#advanced-account-settings)
 - [Special folders](#special-folders)
-- [Hiding folders](#hiding-folders)
+- [Choosing folders](#choosing-folders)
 - [Sender addresses](#sender-addresses)
 - [Automatic Cc and Bcc](#automatic-cc-and-bcc)
 - [New-mail notifications](#new-mail-notifications)
@@ -302,7 +302,7 @@ its place, one deleted gives it back to the server's folder, and with
 **Subscribed folders only** a chosen folder is listed though you haven't
 subscribed to it. Flectar Mail Sync takes the choices to your other devices.
 
-## Hiding folders
+## Choosing folders
 
 Folders an account never uses, such as one for notes or an old archive, can
 leave the sidebar. **Hide folder** in a folder's menu in the sidebar hides it,
@@ -313,6 +313,12 @@ searches. The Inbox and the folders for sent mail, drafts and the like always
 show. A hidden folder renamed in Flectar Mail stays hidden, and Flectar Mail
 Sync hides it on your other devices too. This works for IMAP, JMAP and POP3
 accounts. Gmail keeps its labels.
+
+An IMAP account can also leave folders out of what this device syncs, such as a
+large archive. Turn off a folder's **Sync** switch in **Folders**, and its mail
+stops downloading in the background, while the mail already here stays. Opening
+the folder checks it then. The Inbox, Sent and Drafts always sync, and each
+device keeps its own choice.
 
 ## Sender addresses
 
@@ -1057,9 +1063,9 @@ Turn it on in Settings → Sync. To add a device, choose **Add a device** on one
 that already syncs and type the code it shows into **Enter code** on the new
 one, either on the welcome screen or in Settings → Sync. A device can also join
 with your recovery code. Each device keeps its own mail checking, how much mail
-history it downloads and what it downloads ahead of time, its proxy and server
-timeout, and settings that belong to the device itself, such as reduced motion
-and text size.
+history it downloads and what it downloads ahead of time, which folders of an
+IMAP account it syncs, its proxy and server timeout, and settings that belong
+to the device itself, such as reduced motion and text size.
 
 Accounts arrive with their passwords, so they work on a new device at once.
 Google and Microsoft sign-ins go only to devices of the same kind. A

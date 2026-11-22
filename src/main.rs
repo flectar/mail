@@ -7641,11 +7641,22 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             .set(mail_pagination_generation_for_scope.get().wrapping_add(1));
         mail_pagination_in_progress_for_scope.set(false);
         app.set_mail_loading_more(false);
+        let scope = scope.parse().unwrap_or(Scope::UNIFIED_INBOX);
+        // A folder this device doesn't sync is checked as it's opened (#253).
+        if let Scope::Folder(folder_id) = scope
+            && let Some(core) = state_for_scope.borrow().core.clone()
+        {
+            runtime_for_scope.spawn(async move {
+                if let Err(error) = core.check_folder(folder_id).await {
+                    tracing::debug!(folder_id, %error, "an opened folder couldn't be checked");
+                }
+            });
+        }
         {
             let mut state = state_for_scope.borrow_mut();
             // An unknown key cannot come from the sidebar; keep the inbox
             // reachable rather than presenting a list for no mailbox.
-            state.set_scope(scope.parse().unwrap_or(Scope::UNIFIED_INBOX));
+            state.set_scope(scope);
             state.pending_selection = None;
             state.pending_selection_opens = false;
             state.restore_thread_message = None;
