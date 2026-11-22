@@ -62,6 +62,11 @@ pub struct TableContext {
     /// `overflow-wrap: break-word` wraps long words instead of the table
     /// growing past its container.
     pub relax_text_minimums: AtomicRefCell<bool>,
+    /// What the cells' percentage padding resolves against in the current
+    /// layout of the grid (see [`TableTreeWrapper::layout_grid`]).
+    cell_padding_basis: AtomicRefCell<Option<f32>>,
+    /// Whether any cell has percentage padding.
+    has_percent_padding: bool,
     /// Per column in auto layout, the authored length its cells ask for, unless
     /// a percentage takes precedence.
     column_lengths: Vec<Option<f32>>,
@@ -131,6 +136,8 @@ struct CellLayoutStyles {
     /// as tall as its cells' heights and contents). Only cells with an
     /// authored height have one.
     measure: Option<ServoArc<ComputedValues>>,
+    /// The width the styles resolved percentage padding against, if any.
+    padding_basis: Option<f32>,
 }
 
 impl Clone for CellLayoutStyle {
@@ -151,10 +158,23 @@ impl TableCell {
         primary: &ServoArc<ComputedValues>,
         is_fixed: bool,
         measure: bool,
+        padding_basis: Option<f32>,
     ) -> ServoArc<ComputedValues> {
+        let padding = primary.get_padding();
+        let padding_basis = padding_basis.filter(|_| {
+            [
+                &padding.padding_top,
+                &padding.padding_right,
+                &padding.padding_bottom,
+                &padding.padding_left,
+            ]
+            .iter()
+            .any(|side| side.0.has_percentage())
+        });
         let mut cached = self.layout_style.0.borrow_mut();
         if let Some(styles) = cached.as_ref()
             && ServoArc::ptr_eq(&styles.primary, primary)
+            && styles.padding_basis == padding_basis
         {
             return match (&styles.measure, measure) {
                 (Some(style), true) => style.clone(),
@@ -162,6 +182,23 @@ impl TableCell {
             };
         }
         let mut style = primary.clone();
+        // A cell's percentage padding resolves against the table, as in Blink,
+        // not against the cell's own column: MJML's `padding-bottom: 70%`
+        // spacer cell makes a hero image as tall as 70% of the table's width.
+        if let Some(basis) = padding_basis {
+            use style::values::computed::{Length, LengthPercentage, NonNegativeLengthPercentage};
+            use style::values::generics::NonNegative;
+            let resolve = |side: &NonNegativeLengthPercentage| {
+                NonNegative(LengthPercentage::new_length(Length::new(
+                    side.0.resolve(Length::new(basis)).px().max(0.0),
+                )))
+            };
+            let padding = ServoArc::make_mut(&mut style).mutate_padding();
+            padding.padding_top = resolve(&padding.padding_top);
+            padding.padding_right = resolve(&padding.padding_right);
+            padding.padding_bottom = resolve(&padding.padding_bottom);
+            padding.padding_left = resolve(&padding.padding_left);
+        }
         if let Some(half) = self.collapsed_border {
             let border = ServoArc::make_mut(&mut style).mutate_border();
             border.border_top_width.0 = app_units::Au::from_f32_px(half.top);
@@ -211,6 +248,7 @@ impl TableCell {
             primary: primary.clone(),
             layout: style,
             measure: measure_style,
+            padding_basis,
         });
         result
     }
@@ -852,6 +890,12 @@ pub(crate) fn build_table_context(
     for cell in &cells {
         doc.nodes[cell.node_id].clear_layout_cache();
     }
+    let has_percent_padding = cells.iter().any(|cell| {
+        let padding = cell.style.padding;
+        [padding.top, padding.right, padding.bottom, padding.left]
+            .iter()
+            .any(|side| side.into_raw().tag() != taffy::CompactLength::LENGTH_TAG)
+    });
     let layout_children = cells
         .iter()
         .map(|cell| cell.node_id)
@@ -876,6 +920,8 @@ pub(crate) fn build_table_context(
             collapsed_borders,
             rtl,
             relax_text_minimums: AtomicRefCell::new(false),
+            cell_padding_basis: AtomicRefCell::new(None),
+            has_percent_padding,
             column_lengths,
             column_percents,
             column_extra,
@@ -1683,9 +1729,14 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
         // when its authored height is smaller; laid out, it fills the row.
         let measure = inputs.run_mode == taffy::RunMode::ComputeSize
             && inputs.known_dimensions.height.is_none();
-        let layout_style = self.doc.nodes[dom_id]
-            .primary_styles()
-            .map(|primary| cell.layout_style(&primary, self.ctx.is_fixed, measure));
+        let layout_style = self.doc.nodes[dom_id].primary_styles().map(|primary| {
+            cell.layout_style(
+                &primary,
+                self.ctx.is_fixed,
+                measure,
+                *self.ctx.cell_padding_basis.borrow(),
+            )
+        });
         let previous_style = std::mem::replace(
             &mut self.doc.nodes[dom_id].layout_data_mut().style_override,
             layout_style,
@@ -1901,6 +1952,62 @@ impl TableTreeWrapper<'_, '_> {
         }
         output.size.height += above + below;
         output
+    }
+
+    /// Lays out the table's grid. Cells resolve percentage padding against
+    /// the table's content box, as Blink does. Before an auto-width table knows its width, they resolve
+    /// it against their column, and then the table is laid out again at the
+    /// width it took.
+    pub(crate) fn layout_grid(
+        &mut self,
+        node_id: taffy::NodeId,
+        inputs: taffy::LayoutInput,
+    ) -> taffy::LayoutOutput {
+        use taffy::MaybeResolve as _;
+        let style_width = self.ctx.style.size.width;
+        let width = inputs.known_dimensions.width.or_else(|| {
+            (style_width.tag() != taffy::CompactLength::AUTO_TAG)
+                .then(|| style_width.maybe_resolve(inputs.parent_size.width, resolve_calc_value))
+                .flatten()
+        });
+        self.set_cell_padding_basis(width);
+        let output = taffy::compute_grid_layout(self, node_id, inputs);
+        if width.is_some()
+            || !self.ctx.has_percent_padding
+            || inputs.run_mode != taffy::RunMode::PerformLayout
+        {
+            return output;
+        }
+        self.set_cell_padding_basis(Some(output.size.width));
+        let inputs = taffy::LayoutInput {
+            known_dimensions: taffy::Size {
+                width: Some(output.size.width),
+                ..inputs.known_dimensions
+            },
+            ..inputs
+        };
+        taffy::compute_grid_layout(self, node_id, inputs)
+    }
+
+    /// Resolves the cells' percentage padding against the table's content
+    /// box, as Blink does: its border-box `width` less its border and padding,
+    /// though not its border spacing, which the grid's padding also holds.
+    fn set_cell_padding_basis(&self, width: Option<f32>) {
+        let basis = width.map(|width| {
+            let padding = self
+                .ctx
+                .style
+                .padding
+                .resolve_or_zero(None, resolve_calc_value);
+            let border = self
+                .ctx
+                .style
+                .border
+                .resolve_or_zero(None, resolve_calc_value);
+            let spacing = 2.0 * self.ctx.column_gap;
+            (width - padding.left - padding.right - border.left - border.right + spacing).max(0.0)
+        });
+        *self.ctx.cell_padding_basis.borrow_mut() = basis;
     }
 
     /// Decides how far authored cell widths are minimums in a layout of the

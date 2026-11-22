@@ -674,7 +674,7 @@ impl ElementData {
     pub fn flush_style_attribute(&mut self, guard: &SharedRwLock, url_extra_data: &UrlExtraData) {
         self.style_attribute = self.attr(local_name!("style")).map(|style_str| {
             ServoArc::new(guard.wrap(parse_style_attribute(
-                style_str,
+                &crate::util::rewrite_legacy_word_break(style_str),
                 url_extra_data,
                 None,
                 QuirksMode::NoQuirks,

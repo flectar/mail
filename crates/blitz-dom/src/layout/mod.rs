@@ -562,7 +562,7 @@ impl LayoutPassState<'_> {
                     };
                     table_wrapper.fold_authored_widths(table_width);
 
-                    let mut output = compute_grid_layout(&mut table_wrapper, node_id, inputs);
+                    let mut output = table_wrapper.layout_grid(node_id, inputs);
 
                     // A table is never narrower than its columns' minimums, even
                     // with an authored width or max-width: over-wide content
@@ -590,7 +590,7 @@ impl LayoutPassState<'_> {
                             ..inputs
                         };
                         let mut laid_out = if measuring {
-                            compute_grid_layout(&mut table_wrapper, node_id, layout)
+                            table_wrapper.layout_grid(node_id, layout)
                         } else {
                             output
                         };
@@ -600,12 +600,12 @@ impl LayoutPassState<'_> {
                                 .is_some_and(|required| required > laid_out.size.width + 0.5)
                         {
                             *table_wrapper.ctx.relax_text_minimums.borrow_mut() = true;
-                            laid_out = compute_grid_layout(&mut table_wrapper, node_id, layout);
+                            laid_out = table_wrapper.layout_grid(node_id, layout);
                         }
                         if let Some(required) = table_wrapper.required_width() {
                             if required > laid_out.size.width + 0.5 {
                                 layout.known_dimensions.width = Some(required);
-                                laid_out = compute_grid_layout(&mut table_wrapper, node_id, layout);
+                                laid_out = table_wrapper.layout_grid(node_id, layout);
                             }
                         }
                         output = if measuring {

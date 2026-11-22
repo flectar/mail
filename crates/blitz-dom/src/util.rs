@@ -14,6 +14,69 @@ pub type Color = AlphaColor<Srgb>;
 /// Decode raw font bytes, decompressing WOFF/WOFF2 if the `woff` feature is enabled.
 /// Returns the original slice unchanged for TTF/OTF input, and also on decompression
 /// failure. With the `woff` feature disabled, all input passes through unchanged.
+/// Rewrites each legacy `word-break: break-word` declaration in author CSS to
+/// the `word-break: normal` and `overflow-wrap: anywhere` it stands for
+/// (CSS Text 3, section 5.2), as browsers read it. Stylo parses the keyword
+/// only for Gecko and otherwise drops the declaration, though email templates
+/// put it on most table cells, where it lets long words break in narrow
+/// columns.
+pub(crate) fn rewrite_legacy_word_break(css: &str) -> Cow<'_, str> {
+    const PROPERTY: &str = "word-break";
+    const KEYWORD: &str = "break-word";
+    let bytes = css.as_bytes();
+    let is_name = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_';
+    let skip_space = |mut at: usize| {
+        while bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
+            at += 1;
+        }
+        at
+    };
+    let starts_with = |at: usize, word: &str| {
+        bytes
+            .get(at..at + word.len())
+            .is_some_and(|found| found.eq_ignore_ascii_case(word.as_bytes()))
+    };
+    let mut out = String::new();
+    let mut copied = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        if !starts_with(at, PROPERTY) || (at > 0 && is_name(bytes[at - 1])) {
+            at += 1;
+            continue;
+        }
+        let colon = skip_space(at + PROPERTY.len());
+        if bytes.get(colon) != Some(&b':') {
+            at += 1;
+            continue;
+        }
+        let value = skip_space(colon + 1);
+        let value_end = value + KEYWORD.len();
+        if !starts_with(value, KEYWORD) || bytes.get(value_end).is_some_and(|&byte| is_name(byte)) {
+            at += 1;
+            continue;
+        }
+        let bang = skip_space(value_end);
+        let (importance, end) =
+            if bytes.get(bang) == Some(&b'!') && starts_with(skip_space(bang + 1), "important") {
+                ("!important", skip_space(bang + 1) + "important".len())
+            } else {
+                ("", value_end)
+            };
+        out.push_str(&css[copied..at]);
+        out.push_str("word-break:normal");
+        out.push_str(importance);
+        out.push_str(";overflow-wrap:anywhere");
+        out.push_str(importance);
+        copied = end;
+        at = end;
+    }
+    if copied == 0 {
+        return Cow::Borrowed(css);
+    }
+    out.push_str(&css[copied..]);
+    Cow::Owned(out)
+}
+
 pub fn decode_font_bytes(bytes: &[u8]) -> Cow<'_, [u8]> {
     if bytes.len() < 4 {
         return Cow::Borrowed(bytes);
@@ -253,4 +316,31 @@ macro_rules! qual_name {
             local: $crate::local_name!($local),
         }
     };
+}
+
+#[cfg(test)]
+mod legacy_word_break_tests {
+    use super::rewrite_legacy_word_break as rewrite;
+
+    #[test]
+    fn break_word_becomes_overflow_wrap_anywhere() {
+        assert_eq!(
+            rewrite("td{word-break: break-word; color:red}"),
+            "td{word-break:normal;overflow-wrap:anywhere; color:red}"
+        );
+        assert_eq!(
+            rewrite("WORD-BREAK:Break-Word !important"),
+            "word-break:normal!important;overflow-wrap:anywhere!important"
+        );
+        assert_eq!(rewrite("word-break:break-all"), "word-break:break-all");
+        assert_eq!(
+            rewrite("x-word-break:break-word"),
+            "x-word-break:break-word"
+        );
+        assert_eq!(rewrite("word-break:break-words"), "word-break:break-words");
+        assert!(matches!(
+            rewrite("overflow-wrap:break-word"),
+            std::borrow::Cow::Borrowed(_)
+        ));
+    }
 }

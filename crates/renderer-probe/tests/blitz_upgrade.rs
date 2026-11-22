@@ -1659,3 +1659,34 @@ fn highlighted_text_paints_as_blink_paints_find_matches() {
     assert!(any_inside(&|pixel| pixel[..3].iter().all(|&c| c < 60)));
     assert!(!any_inside(&|pixel| pixel[..3].iter().all(|&c| c > 200)));
 }
+
+#[test]
+fn cell_percentage_padding_resolves_against_the_table() {
+    // As in Blink, a cell's percentage padding is a share of the table's
+    // content width, not of its own column, so MJML's hero spacer cell with
+    // `padding-bottom: 70%` is as tall as 70% of the table.
+    let doc = document(
+        "<table style='width:400px;border-collapse:collapse'><tr>
+         <td id=a style='width:0.01%;padding-bottom:70%'></td><td>Hero</td></tr></table>",
+    );
+    close(node(&doc, "#a").final_layout().size.height, 280.0);
+    // An auto-width table resolves it against the width it takes.
+    let doc = document(
+        "<table style='border-spacing:0'><tr>
+         <td id=b style='padding-bottom:50%'><div style='width:200px'></div></td></tr></table>",
+    );
+    close(node(&doc, "#b").final_layout().size.height, 100.0);
+}
+
+#[test]
+fn legacy_word_break_lets_long_words_break_in_narrow_columns() {
+    // Browsers read the `word-break: break-word` that email templates put on
+    // their cells as `overflow-wrap: anywhere`, so a long word doesn't hold
+    // its column open. Stylo drops the keyword outside Gecko.
+    let doc = document(
+        "<table style='width:200px;border-spacing:0'><tr><td style='width:50%'>a</td>
+         <td id=c style='width:50%;word-break:break-word;font:10px monospace'>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</td>
+         </tr></table>",
+    );
+    close(node(&doc, "#c").final_layout().size.width, 100.0);
+}

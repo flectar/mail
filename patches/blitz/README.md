@@ -33,6 +33,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0013 image minimums and Chromium line breaks | A `min-width` or `min-height` no longer changes an image's specified size on the other axis (sections 10.3.2 and 10.6.2 of CSS 2.1), so an email spacer with `height: 1px; min-width: 540px` is 540 by 1 pixels instead of a 540 pixel square gap. Maximums still scale both sizes, unlike in CSS 2.1, so images the reader fits with `max-width: 100%` keep their proportions. Lines break where Chromium breaks them, between two ASCII characters only where its table allows and after every run of spaces, so a path stays whole and a date may break after a hyphen. The table looks through 0011's edge placeholders, and text with `word-break: break-all` or `line-break: anywhere` keeps the breaks of UAX #14. |
 | 0014 table border attributes and spare width | A table's `border`, `frame`, `rules` and `bordercolor` attributes set its borders as Blink does, through presentational hints instead of Gecko's user-agent rules, whose `frame` sides the `border` hint used to override with `outset`. `frame` draws the sides it names solid, `bordercolor` makes the table's and its cells' borders solid in that colour instead of bevels, `rules` picks the borders between cells, and cells take the table's border colour through their rows and row groups, as the HTML rendering rules and Blink have them. A table with an authored width wider than its auto columns' max-content widths shares the excess in proportion to those widths, so an empty column gets none of it (section 3.9.3 of CSS Tables 3), where grid tracks grew by equal amounts. A table without columns has no border spacing. |
 | 0015 selection line breaks and text highlights | A line whose end the selection goes past ends in a box as wide as a space in its last run's font, as in Blink, which shows that its line break is selected. That covers lines ending in a `<br>` (where Parley drew a narrower box), words wrapped within themselves, and the end of a paragraph that the selection continues beyond, which `get_text_selection_ranges_and_end` tells apart. `set_text_highlights` highlights parts of the text as find in page does, painted as Blink paints its matches, yellow and the active one orange, as tall as the text and over the selection, with the text in black. |
+| 0016 cell percentage padding and legacy word-break | A table cell's percentage padding resolves against the table's content width, as in Blink, rather than against its own column, so MJML's hero cell with `padding-bottom: 70%` is as tall as 70% of the table instead of nearly nothing. An auto-width table is laid out again at the width it took when any cell has percentage padding. Author CSS has its legacy `word-break: break-word`, which Stylo drops outside Gecko, rewritten to the `word-break: normal` and `overflow-wrap: anywhere` it stands for (section 5.2 of CSS Text 3), so long words in narrow columns break as they do in browsers. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
@@ -40,7 +41,7 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0015 are local. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0016 are local. Drop the backported parts
 when a release contains them.
 
 Copied text, find in the reader and accessible names leave out 0011's edge
@@ -100,8 +101,9 @@ cargo test -p flectar-mail --lib issue_23_gpu --locked -- --ignored
 overlap, locale-sensitive text, 0010's and 0011's table sizing, inline
 boxes, opacity, decorations and line breaks, 0012's captions, anonymous
 tables and bevels, 0013's image minimums and line breaks, 0014's table
-border attributes and spare width, and 0015's selection line breaks and
-highlights. Application renderer tests cover float
+border attributes and spare width, 0015's selection line breaks and
+highlights, and 0016's cell percentage padding and legacy word-break.
+Application renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.
 
