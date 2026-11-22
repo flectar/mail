@@ -1985,11 +1985,13 @@ impl WinitWindowAdapter {
                 self.resize_window(size.into())?;
             };
 
-            // Before the first frame, which is drawn at the size the window then has.
+            // Before the first frame, which is drawn at the size the window then has. A minimized
+            // window is left alone, since its position is the off-screen one Windows parks it at.
             #[cfg(target_os = "windows")]
             if !platform_dictates_window_size()
                 && winit_window.fullscreen().is_none()
                 && !winit_window.is_maximized()
+                && winit_window.is_minimized() != Some(true)
             {
                 fit_into_work_area(&winit_window, recreating_window);
             }

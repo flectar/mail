@@ -1,5 +1,5 @@
 diff --git a/crates/i-slint-backend-winit/winitwindowadapter.rs b/crates/i-slint-backend-winit/winitwindowadapter.rs
-index 649425c0..ec88af98 100644
+index 649425c0..96c0c5f1 100644
 --- a/crates/i-slint-backend-winit/winitwindowadapter.rs
 +++ b/crates/i-slint-backend-winit/winitwindowadapter.rs
 @@ -277,6 +277,74 @@ fn platform_dictates_window_size() -> bool {
@@ -77,15 +77,17 @@ index 649425c0..ec88af98 100644
  fn apply_scale_factor_to_logical_sizes_in_attributes(
      attributes: &mut WindowAttributes,
      scale_factor: f64,
-@@ -1917,6 +1985,15 @@ impl WinitWindowAdapter {
+@@ -1917,6 +1985,17 @@ impl WinitWindowAdapter {
                  self.resize_window(size.into())?;
              };
  
-+            // Before the first frame, which is drawn at the size the window then has.
++            // Before the first frame, which is drawn at the size the window then has. A minimized
++            // window is left alone, since its position is the off-screen one Windows parks it at.
 +            #[cfg(target_os = "windows")]
 +            if !platform_dictates_window_size()
 +                && winit_window.fullscreen().is_none()
 +                && !winit_window.is_maximized()
++                && winit_window.is_minimized() != Some(true)
 +            {
 +                fit_into_work_area(&winit_window, recreating_window);
 +            }
