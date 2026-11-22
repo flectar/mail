@@ -2076,7 +2076,7 @@ fn prepare_email_html_at_with_font_ctx(
 ) -> Result<PreparedEmail, String> {
     let started = render_timings_enabled().then(Instant::now);
     let (html, notice) = crate::email_document::bounded_html(html);
-    let html = with_email_font_fallback(&html);
+    let html = html_parser_input(&with_email_font_fallback(&html));
     struct PreparationAbort(Option<blitz_traits::net::AbortController>);
     impl Drop for PreparationAbort {
         fn drop(&mut self) {
@@ -2157,6 +2157,17 @@ pub fn has_remote_images(html: &str) -> bool {
 /// Put the reader's fallback fonts first in the document's head: the email's
 /// own `font-family` rules come after them and win, as they would over a
 /// browser's defaults.
+/// Mail is `text/html`, which browsers parse as HTML whatever its doctype.
+/// Blitz parses a document as XML when it starts with an XHTML doctype, an XML
+/// declaration or an XHTML `<html>`, and there a `<br>` or `<img>` without a
+/// closing slash swallows the content after it. An HTML doctype on a line of
+/// its own in front keeps it HTML (the check reads the first line), and the
+/// HTML parser ignores the message's own doctype after it.
+fn html_parser_input(html: &str) -> String {
+    let html = html.strip_prefix('\u{feff}').unwrap_or(html);
+    format!("<!DOCTYPE html>\n{html}")
+}
+
 fn with_email_font_fallback(html: &str) -> String {
     let lower = html.to_ascii_lowercase();
     // The end of the `<head>` start tag, not of a `<header>`.

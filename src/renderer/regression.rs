@@ -899,6 +899,24 @@ fn find_handles_unicode_cycles_and_decoded_fragments() {
 }
 
 #[test]
+fn xhtml_mail_parses_as_html() {
+    // Browsers parse mail as HTML whatever its doctype, so a `<br>` or an
+    // `<img>` without a closing slash doesn't swallow the text after it, as
+    // it did when the XHTML doctype made Blitz parse the message as XML.
+    for doctype in [
+        r#"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">"#,
+        r#"<?xml version="1.0" encoding="utf-8"?>"#,
+        "\u{feff}",
+    ] {
+        let mut r = renderer(&format!(
+            r#"{doctype}<html xmlns="http://www.w3.org/1999/xhtml"><body><p>One<br>Two<img src="cid:x" alt=""><p>Three</p></body></html>"#
+        ));
+        assert_eq!(r.find("Two", 0).1, 1, "{doctype}");
+        assert_eq!(r.find("Three", 0).1, 1, "{doctype}");
+    }
+}
+
+#[test]
 fn find_highlights_every_match_until_find_ends() {
     let mut r = renderer("<body><p>one two one</p><p>one</p></body>");
     assert!(r.render_cpu_if_needed(520, 400, 1.0).unwrap().is_some());
