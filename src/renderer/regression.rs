@@ -693,6 +693,10 @@ fn culled_text_tiles_match_a_full_surface() {
             "transform:rotate(3deg);transform-origin:top left",
         ),
         ("filtered", "filter:opacity(0.8)"),
+        (
+            "shadowed",
+            "text-shadow:2px 3px 4px rgba(0,0,0,.6),0 0 6px #08f;filter:blur(0.5px)",
+        ),
     ] {
         let text = if name == "cached-lines" {
             "Accents ÅÉgj <b>bold</b> <i>italic</i> café <span style='background:#cfc'>highlight</span> "
@@ -712,7 +716,7 @@ fn culled_text_tiles_match_a_full_surface() {
             let full = render_to_buffer::<VelloCpuImageRenderer, _>(
                 |scene| {
                     paint_scene(
-                        scene,
+                        &mut cpu_scene::CpuScene(scene),
                         &mut email.document,
                         scale as f64,
                         tiled.width,

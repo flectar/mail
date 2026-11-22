@@ -78,7 +78,9 @@ ios = ["slint/renderer-skia"]
 pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdfium_7881", "thread_safe"] }
 anyrender = "0.14"
 anyrender_vello = { version = "0.15", optional = true }
-anyrender_vello_cpu = "0.18"
+# Filters blur text shadows. src/renderer/cpu_scene.rs passes on only the
+# filters vello_cpu runs.
+anyrender_vello_cpu = { version = "0.18", features = ["filters"] }
 # AnyRender's geometry and paint types, for the scene adapter in
 # src/renderer/cpu_scene.rs.
 kurbo = "0.13.1"
