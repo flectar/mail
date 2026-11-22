@@ -277,31 +277,38 @@ fn platform_dictates_window_size() -> bool {
     cfg!(ios_and_friends)
 }
 
-/// Moves and shrinks a window as far as needed to keep it inside the work area of its
-/// monitor. Returns whether it changed.
+/// Places a window that is about to be shown inside the work area of its monitor, at the size
+/// Slint asked for. Returns whether it changed.
 ///
-/// Windows cascades a new window off the top left of a monitor without checking that it fits,
-/// so a window whose size suits a larger screen opens partly beyond the screen edge or behind
-/// the taskbar. Microsoft's guidance for window placement is to move such a window until all
-/// of it is visible on its monitor, and to reduce a resizable window that is larger than the
-/// monitor until it fits.
+/// winit creates a window at the default position with the default size and only then gives it
+/// the size Slint asks for, so Windows cascades it off the top left of a monitor without
+/// checking that it fits. A window whose size suits a larger screen opens partly beyond the
+/// screen edge or behind the taskbar. Microsoft's guidance for window placement is to move such
+/// a window until all of it is visible on its monitor, and to reduce a resizable window that is
+/// larger than the monitor until it fits.
 /// <https://learn.microsoft.com/en-us/windows/win32/uxguide/win-window-mgt#window-location>
+///
+/// `inner` is the client size Slint just asked winit for, if it did. winit adds a standard frame
+/// to it, while a window that draws its own title bar keeps only the side and bottom borders of
+/// that frame, so its client area came out taller by the caption. The outer frame is set from
+/// the borders the window actually has instead.
 ///
 /// With `only_if_lost`, a window that is on a monitor at all keeps its place. A window shown
 /// again was placed by the user, who may let it span monitors.
-///
-/// The outer rectangle is set directly: winit turns an inner size into an outer one with a
-/// standard frame, which a window that draws its own title bar doesn't have.
 #[cfg(target_os = "windows")]
-fn fit_into_work_area(winit_window: &winit::window::Window, only_if_lost: bool) -> bool {
+fn place_in_work_area(
+    winit_window: &winit::window::Window,
+    inner: Option<winit::dpi::PhysicalSize<u32>>,
+    only_if_lost: bool,
+) -> bool {
     use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
-    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Foundation::{HWND, RECT};
     use windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL, MONITORINFO,
         MonitorFromWindow,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SetWindowPos,
+        GetClientRect, GetWindowRect, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SetWindowPos,
     };
 
     let Ok(handle) = winit_window.window_handle() else { return false };
@@ -313,21 +320,33 @@ fn fit_into_work_area(winit_window: &winit::window::Window, only_if_lost: bool) 
     }
     let mut monitor =
         MONITORINFO { cbSize: core::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-    // SAFETY: the monitor handle comes from the system, and `monitor` is a MONITORINFO whose
-    // `cbSize` is set as GetMonitorInfoW requires.
-    if !unsafe { GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor) }
-        .as_bool()
-    {
+    let (mut window, mut client) = (RECT::default(), RECT::default());
+    // SAFETY: `hwnd` is the live window handle that winit owns, the monitor handle comes from
+    // the system, and `monitor` is a MONITORINFO whose `cbSize` is set as GetMonitorInfoW
+    // requires.
+    let measured = unsafe {
+        GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor).as_bool()
+            && GetWindowRect(hwnd, &mut window).is_ok()
+            && GetClientRect(hwnd, &mut client).is_ok()
+    };
+    if !measured {
         return false;
     }
     let work = monitor.rcWork;
-    let outer = winit_window.outer_size();
-    let Ok(origin) = winit_window.outer_position() else { return false };
-    let width = outer.width.min(work.right.saturating_sub(work.left).max(0) as u32);
-    let height = outer.height.min(work.bottom.saturating_sub(work.top).max(0) as u32);
-    let x = origin.x.min(work.right - width as i32).max(work.left);
-    let y = origin.y.min(work.bottom - height as i32).max(work.top);
-    if (width, height, x, y) == (outer.width, outer.height, origin.x, origin.y) {
+    let (outer_width, outer_height) = (window.right - window.left, window.bottom - window.top);
+    // The client rectangle starts at 0, 0, so its far corner is its size.
+    let (width, height) = match inner {
+        Some(inner) => (
+            outer_width - client.right + inner.width as i32,
+            outer_height - client.bottom + inner.height as i32,
+        ),
+        None => (outer_width, outer_height),
+    };
+    let width = width.min(work.right - work.left);
+    let height = height.min(work.bottom - work.top);
+    let x = window.left.min(work.right - width).max(work.left);
+    let y = window.top.min(work.bottom - height).max(work.top);
+    if (x, y, width, height) == (window.left, window.top, outer_width, outer_height) {
         return false;
     }
     // SAFETY: `hwnd` is the live window handle that winit owns, and this runs on its thread.
@@ -337,8 +356,8 @@ fn fit_into_work_area(winit_window: &winit::window::Window, only_if_lost: bool) 
             None,
             x,
             y,
-            width as i32,
-            height as i32,
+            width,
+            height,
             SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
         )
     }
@@ -1972,18 +1991,18 @@ impl WinitWindowAdapter {
                 }
             }
 
-            if !platform_dictates_window_size()
+            let requested_size = (!platform_dictates_window_size()
                 && winit_window.fullscreen().is_none()
                 && !self.has_explicit_size.get()
                 && preferred_size.width > 0 as Coord
                 && preferred_size.height > 0 as Coord
                 // Don't set the preferred size as the user may have resized the window
-                && !recreating_window
-            {
+                && !recreating_window)
                 // use the Slint's window Scale factor to take in account the override
-                let size = preferred_size.to_physical::<u32>(scale_factor);
+                .then(|| preferred_size.to_physical::<u32>(scale_factor));
+            if let Some(size) = requested_size {
                 self.resize_window(size.into())?;
-            };
+            }
 
             // Before the first frame, which is drawn at the size the window then has. A minimized
             // window is left alone, since its position is the off-screen one Windows parks it at.
@@ -1993,7 +2012,7 @@ impl WinitWindowAdapter {
                 && !winit_window.is_maximized()
                 && winit_window.is_minimized() != Some(true)
             {
-                fit_into_work_area(&winit_window, recreating_window);
+                place_in_work_area(&winit_window, requested_size, recreating_window);
             }
 
             // Pre-render the first frame before mapping the window to avoid a flash of
