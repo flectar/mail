@@ -4,6 +4,7 @@
 mod connect;
 pub mod proxy;
 pub mod retry_after;
+pub mod timeouts;
 pub mod tls;
 
 #[cfg(test)]

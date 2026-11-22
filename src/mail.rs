@@ -2017,6 +2017,17 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_account_server_timeout(
+        &self,
+        account_id: i64,
+        seconds: u32,
+    ) -> Result<(), String> {
+        self.core
+            .set_account_server_timeout(account_id, seconds)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_account_sent_copy_policy(
         &self,
         account_id: i64,

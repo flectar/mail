@@ -272,6 +272,7 @@ fixture_row!(AccountRow {
     mail_history,
     check_interval,
     push,
+    server_timeout,
     calendar_connections,
     provider_calendar_connected,
     provider_calendar_error,

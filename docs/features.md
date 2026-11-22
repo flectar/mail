@@ -195,7 +195,10 @@ and when you ask. **Instant updates** lets an IMAP or JMAP server tell Flectar
 Mail of new mail as soon as it arrives. Turned off, the account checks at its
 interval, which saves battery and data, and helps with a server that drops
 waiting connections. An account that checks only when you ask doesn't wait for
-updates either.
+updates either. **Server timeout** sets how long an IMAP, POP3 or JMAP account
+waits for a slow server, or a slow connection to it, before it gives up. Every
+wait grows alike, from connecting and signing in to downloading attachments,
+and a change takes effect at once.
 
 A server can ask Flectar Mail to slow down, when an account has too many
 connections open or makes too many requests, or while another app is using a
@@ -923,9 +926,9 @@ provider as before.
 Turn it on in Settings → Sync. **Add a device** on a device that already syncs
 shows a QR code to scan with your phone, or a short code to type on the other
 device, and a device can also join with your recovery code. Each device keeps
-its own mail checking, how much mail history it downloads, its proxy, and
-settings that belong to the device itself, such as reduced motion and text
-size.
+its own mail checking, how much mail history it downloads, its proxy and server
+timeout, and settings that belong to the device itself, such as reduced motion
+and text size.
 
 Flectar Mail Sync is a paid service, with a free trial, that pays for the
 servers it runs on. Each contribution to Flectar Mail earns a free year of it,

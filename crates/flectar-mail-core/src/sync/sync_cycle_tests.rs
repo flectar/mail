@@ -309,6 +309,7 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
         incoming_login: Default::default(),
         smtp_login: Default::default(),
         smtp_username: None,
+        server_timeout_secs: None,
     };
     credentials::store_async(
         ctx.credentials.clone(),
@@ -567,6 +568,7 @@ async fn deleted_mail_context(port: u16) -> (tempfile::TempDir, SyncCtx, Account
         incoming_login: Default::default(),
         smtp_login: Default::default(),
         smtp_username: None,
+        server_timeout_secs: None,
     };
     credentials::store_async(
         ctx.credentials.clone(),

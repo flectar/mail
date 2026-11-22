@@ -228,8 +228,10 @@ jobs:
       image: fedora:43
       # Turning on swap for the release build needs it (scripts/ci-swap.sh).
       # The memory cap keeps the build from swapping out the runner's agent
-      # on the 16 GiB host, as scripts/ci-build-scope.sh does elsewhere.
-      options: --privileged --memory=14g --memory-swap=-1
+      # on the 16 GiB host, as scripts/ci-build-scope.sh does elsewhere. The
+      # host's cgroups let scripts/ci-protect-runner.sh keep memory for the
+      # agent itself.
+      options: --privileged --cgroupns=host --memory=14g --memory-swap=-1
     env:
       SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
@@ -270,7 +272,9 @@ jobs:
       - name: Make room for the release build
         # The app crate's release build peaks near all the memory a hosted
         # runner has; see scripts/ci-swap.sh.
-        run: ./scripts/ci-swap.sh on
+        run: |
+          ./scripts/ci-protect-runner.sh
+          ./scripts/ci-swap.sh on
       - name: Build Fedora release executable
         env:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
@@ -292,8 +296,56 @@ jobs:
           path: target/rpm/flectar-mail.rpm
           if-no-files-found: error
 
+  rpm-repo:
+    needs: [metadata, rpm]
+    # One job signs both architectures with one key, builds the dnf and
+    # zypper repository and replaces the RPM artifacts with the signed
+    # files, so the release attaches what the repository serves.
+    name: Signed RPM repository
+    runs-on: ubuntu-24.04
+    container:
+      image: fedora:43
+    steps:
+      - name: Install signing and repository tools
+        run: dnf install -y createrepo_c gnupg2 rpm-sign
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: flectar-mail-rpm-*
+          path: target/rpm-unsigned
+      - name: Sign the RPMs and build the repository
+        env:
+          RPM_SIGNING_KEY: ${{ secrets.RPM_SIGNING_KEY }}
+          RPM_SIGNING_PASSPHRASE: ${{ secrets.RPM_SIGNING_PASSPHRASE }}
+          # A release must carry the real key; other runs may use a throwaway one.
+          FLECTAR_REQUIRE_SIGNING_KEY: ${{ github.event_name == 'push' && github.ref_type == 'tag' && '1' || '0' }}
+        run: |
+          ./scripts/build-rpm-repo.sh target/rpm-repo \
+            target/rpm-unsigned/flectar-mail-rpm-x64/flectar-mail.rpm \
+            target/rpm-unsigned/flectar-mail-rpm-arm64/flectar-mail.rpm
+          mkdir -p target/rpm-signed/x64 target/rpm-signed/arm64
+          cp target/rpm-repo/*.x86_64.rpm target/rpm-signed/x64/flectar-mail.rpm
+          cp target/rpm-repo/*.aarch64.rpm target/rpm-signed/arm64/flectar-mail.rpm
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flectar-mail-rpm-x64
+          path: target/rpm-signed/x64/flectar-mail.rpm
+          if-no-files-found: error
+          overwrite: true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flectar-mail-rpm-arm64
+          path: target/rpm-signed/arm64/flectar-mail.rpm
+          if-no-files-found: error
+          overwrite: true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rpm-repository
+          path: target/rpm-repo
+          if-no-files-found: error
+
   rpm-test:
-    needs: rpm
+    needs: rpm-repo
     name: RPM runtime (${{ matrix.distro.name }}, ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -317,9 +369,9 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: flectar-mail-rpm-${{ matrix.arch }}
-          path: target/rpm
-      - name: Test published RPM in a clean container
+          name: rpm-repository
+          path: target/rpm-repo
+      - name: Install from the signed repository in a clean container
         shell: bash
         env:
           IMAGE: ${{ matrix.distro.image }}
@@ -329,7 +381,7 @@ jobs:
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/work,readonly" \
             --mount "type=bind,source=$GITHUB_WORKSPACE/target/rpm-test,target=/results" \
             "$IMAGE" \
-            bash /work/scripts/test-rpm.sh /work/target/rpm/flectar-mail.rpm /results \
+            bash /work/scripts/test-rpm.sh /work/target/rpm-repo /results \
             2>&1 | tee target/rpm-test/transaction.log
       - name: Preserve RPM runtime diagnostics
         if: always()
@@ -897,13 +949,13 @@ jobs:
       !cancelled() && github.event_name == 'push' && github.ref_type == 'tag' &&
       needs.metadata.result == 'success' && needs.quality.result == 'success' &&
       needs.linux.result == 'success' && needs.rpm.result == 'success' &&
-      needs.rpm-test.result == 'success' &&
+      needs.rpm-repo.result == 'success' && needs.rpm-test.result == 'success' &&
       needs.flatpak.result == 'success' && needs.flathub.result == 'success' &&
       needs.windows.result == 'success' &&
       needs.microsoft-store.result == 'success' &&
       needs.macos.result == 'success' && needs.android.result == 'success' &&
       needs.ios.result == 'success'
-    needs: [metadata, quality, linux, rpm, rpm-test, flatpak, flathub, windows, microsoft-store, macos, android, ios]
+    needs: [metadata, quality, linux, rpm, rpm-repo, rpm-test, flatpak, flathub, windows, microsoft-store, macos, android, ios]
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -937,3 +989,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: bash scripts/publish-release.sh
+
+  rpm-pages:
+    name: Publish the RPM repository
+    needs: release
+    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.release.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}rpm/
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rpm-repository
+          path: site/rpm
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
