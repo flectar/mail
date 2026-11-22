@@ -1154,7 +1154,10 @@ impl Composers {
             return false;
         };
         match self.show_written_in(&app, draft, "draft", Some(window)) {
-            Some(session) => self.mark_review(&session, draft_id, agent),
+            Some(session) => {
+                session.show_window();
+                self.mark_review(&session, draft_id, agent)
+            }
             None => false,
         }
     }
@@ -1659,22 +1662,10 @@ impl ComposeSession {
         self.host_id.set(self.host_id.get().wrapping_add(1));
         *self.host.borrow_mut() = window_host;
         self.connect();
-        #[cfg(desktop)]
-        if let HostRef::Window(handle) = &window {
-            self.watch_window(handle);
-        }
         self.clear_fields(&main);
         main.ui().set_open(false);
-
         #[cfg(desktop)]
-        if let HostRef::Window(handle) = &window
-            && let Err(error) = handle.show()
-        {
-            window.ui().set_notice(
-                UiMessage::detail("Could not open composer: {}", error),
-                true,
-            );
-        }
+        self.show_window();
         // A window that never appears would keep the message out of reach.
         #[cfg(desktop)]
         if app.window().has_winit_window() {
@@ -1746,6 +1737,25 @@ impl ComposeSession {
         // A main window closed meanwhile may now end the app, which saves
         // the message to Drafts.
         window_controller::composer_closed();
+    }
+
+    /// Show the window this message is in and look after it, as each window
+    /// a message opens in needs.
+    #[cfg(desktop)]
+    fn show_window(self: &Rc<Self>) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let HostRef::Window(handle) = &host else {
+            return;
+        };
+        self.watch_window(handle);
+        if let Err(error) = handle.show() {
+            host.ui().set_notice(
+                UiMessage::detail("Could not open composer: {}", error),
+                true,
+            );
+        }
     }
 
     /// A message's own window returns the memory input leaves behind once
@@ -4496,15 +4506,7 @@ impl ComposeSession {
         self.start_format(false);
         self.show("signature", None);
         #[cfg(desktop)]
-        if let HostRef::Window(handle) = &host {
-            self.watch_window(handle);
-            if let Err(error) = handle.show() {
-                ui.set_notice(
-                    UiMessage::detail("Could not open composer: {}", error),
-                    true,
-                );
-            }
-        }
+        self.show_window();
     }
 
     /// Saves the signature being written to Settings, and closes it once saved.
@@ -4819,6 +4821,7 @@ mod tests {
         assert_eq!(open_windows(), 1);
         let review = composers.holding_draft(42).unwrap();
         let host = review.host().unwrap();
+        assert!(host.window().is_visible());
         let ui = host.ui();
         assert_eq!(ui.get_subject(), "Plans");
         assert_eq!(ui.get_to(), "priya@example.com");
