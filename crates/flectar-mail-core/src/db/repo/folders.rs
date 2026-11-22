@@ -1,7 +1,16 @@
 use crate::error::Result;
-use crate::models::{FolderInfo, MailProtocol, now_ms};
+use crate::models::{FolderInfo, MailProtocol, now_ms, roles};
 use rusqlite::{Connection, OptionalExtension, Row, named_params, params};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+/// The roles an IMAP account's folders can be chosen for by hand (#252).
+pub const CHOOSABLE_ROLES: [&str; 5] = [
+    roles::SENT,
+    roles::DRAFTS,
+    roles::TRASH,
+    roles::SPAM,
+    roles::ARCHIVE,
+];
 
 /// Separates the levels of folders that exist only on this device: those
 /// of POP3 accounts and of mail kept on this device.
@@ -93,11 +102,12 @@ pub fn upsert_discovered(
     permissions: FolderPermissions,
 ) -> Result<i64> {
     conn.execute(
-        "INSERT INTO folders (account_id, path, delimiter, role, selectable,
+        "INSERT INTO folders (account_id, path, delimiter, role, detected_role, selectable,
                               can_create_children, can_rename, can_delete)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+         VALUES (?1,?2,?3,?4,?4,?5,?6,?7,?8)
          ON CONFLICT(account_id, path)
          DO UPDATE SET delimiter = excluded.delimiter, role = excluded.role,
+                       detected_role = excluded.detected_role,
                        selectable = excluded.selectable,
                        can_create_children = excluded.can_create_children,
                        can_rename = excluded.can_rename,
@@ -223,7 +233,41 @@ pub fn rename_tree(
             params![id, format!("{new_prefix}{suffix}")],
         )?;
     }
-    Ok(())
+    // A role chosen for a folder of the tree follows it (#252).
+    update_chosen_roles(conn, account_id, |chosen| {
+        let inside = format!("{old_prefix}{delimiter}");
+        for path in chosen.values_mut() {
+            if path == old_prefix {
+                *path = new_prefix.to_owned();
+            } else if let Some(rest) = path.strip_prefix(&inside)
+                && !delimiter.is_empty()
+            {
+                *path = format!("{new_prefix}{delimiter}{rest}");
+            }
+        }
+    })
+}
+
+/// Change the account's folders chosen by hand for roles (#252) as
+/// `change` says, and give its folders their roles anew if they changed.
+fn update_chosen_roles(
+    conn: &Connection,
+    account_id: i64,
+    change: impl FnOnce(&mut BTreeMap<String, String>),
+) -> Result<()> {
+    // Only IMAP accounts choose them. The others keep their provider's.
+    let Some(mut config) = super::accounts::get_config(conn, account_id)?
+        .filter(|config| config.mail_protocol == MailProtocol::Imap)
+    else {
+        return Ok(());
+    };
+    let before = config.settings.folder_roles.clone();
+    change(&mut config.settings.folder_roles);
+    if config.settings.folder_roles == before {
+        return Ok(());
+    }
+    super::accounts::set_settings(conn, account_id, &config.settings)?;
+    apply_chosen_roles(conn, account_id, &config.settings.folder_roles)
 }
 
 /// A message in a folder tree.
@@ -340,7 +384,14 @@ pub fn delete_tree(
          WHERE account_id = ?1 AND (path = ?2 OR path LIKE ?3 ESCAPE '\\')",
         params![account_id, prefix, pattern],
     )?;
-    Ok(())
+    // A role chosen for a deleted folder goes back to the server's
+    // suggestion (#252).
+    let inside = format!("{prefix}{delimiter}");
+    update_chosen_roles(conn, account_id, |chosen| {
+        chosen.retain(|_, path| {
+            path != prefix && (delimiter.is_empty() || !path.starts_with(&inside))
+        });
+    })
 }
 
 pub fn path_exists(conn: &Connection, account_id: i64, path: &str) -> Result<bool> {
@@ -359,6 +410,62 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Folder>> {
          FROM folders WHERE id = ?1",
     )?;
     Ok(stmt.query_row(params![id], from_row).optional()?)
+}
+
+/// Give an account's folders the roles its server suggests, and then the
+/// ones `chosen` by hand, as paths by role (#252). A chosen folder takes its
+/// role from the folder that had it. One that isn't there leaves the role to
+/// the suggested folder.
+pub fn apply_chosen_roles(
+    conn: &Connection,
+    account_id: i64,
+    chosen: &BTreeMap<String, String>,
+) -> Result<()> {
+    // Only roles that can be chosen: the Inbox and the like keep theirs.
+    for role in CHOOSABLE_ROLES {
+        conn.execute(
+            "UPDATE folders SET role = detected_role
+             WHERE account_id = ?1 AND (role = ?2 OR detected_role = ?2)
+               AND role IS NOT detected_role",
+            params![account_id, role],
+        )?;
+    }
+    for (role, path) in chosen {
+        if !CHOOSABLE_ROLES.contains(&role.as_str()) {
+            continue;
+        }
+        // The Inbox keeps its own role.
+        let present: bool = conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM folders WHERE account_id = ?1 AND path = ?2
+                              AND selectable = 1 AND missing_on_server = 0
+                              AND upper(path) <> 'INBOX')",
+            params![account_id, path],
+            |row| row.get(0),
+        )?;
+        if !present {
+            continue;
+        }
+        conn.execute(
+            "UPDATE folders SET role = NULL WHERE account_id = ?1 AND role = ?2 AND path <> ?3",
+            params![account_id, role, path],
+        )?;
+        conn.execute(
+            "UPDATE folders SET role = ?2 WHERE account_id = ?1 AND path = ?3",
+            params![account_id, role, path],
+        )?;
+    }
+    Ok(())
+}
+
+/// The role the server suggests for each of an account's folders, by id.
+pub fn detected_roles(conn: &Connection, account_id: i64) -> Result<HashMap<i64, String>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, detected_role FROM folders
+         WHERE account_id = ?1 AND detected_role IS NOT NULL",
+    )?;
+    Ok(stmt
+        .query_map([account_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<HashMap<_, _>>>()?)
 }
 
 /// The account's folder for a purpose, among those `list` shows.
@@ -1279,6 +1386,184 @@ mod tests {
                 .jmap_id
                 .as_deref(),
             Some("sent-mailbox")
+        );
+    }
+
+    fn chosen(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(role, path)| ((*role).to_owned(), (*path).to_owned()))
+            .collect()
+    }
+
+    fn role_of(conn: &Connection, id: i64) -> Option<String> {
+        get(conn, id).unwrap().unwrap().role
+    }
+
+    /// A folder chosen for a role takes it from the one the server suggests,
+    /// and keeps it each time the folder list is read again (#252).
+    #[test]
+    fn a_folder_chosen_for_a_role_takes_it_from_the_suggested_one() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let sent = upsert(&conn, 1, "Sent", Some("/"), Some(roles::SENT)).unwrap();
+        let sent_items = upsert(&conn, 1, "Sent Items", Some("/"), None).unwrap();
+        let trash = upsert(&conn, 1, "Trash", Some("/"), Some(roles::TRASH)).unwrap();
+        let choice = chosen(&[(roles::SENT, "Sent Items")]);
+
+        apply_chosen_roles(&conn, 1, &choice).unwrap();
+        assert_eq!(
+            by_role(&conn, 1, roles::SENT).unwrap().unwrap().id,
+            sent_items
+        );
+        assert_eq!(role_of(&conn, sent), None);
+        assert_eq!(by_role(&conn, 1, roles::TRASH).unwrap().unwrap().id, trash);
+        assert_eq!(by_role(&conn, 1, roles::INBOX).unwrap().unwrap().id, 1);
+        assert_eq!(
+            detected_roles(&conn, 1)
+                .unwrap()
+                .get(&sent)
+                .map(String::as_str),
+            Some(roles::SENT)
+        );
+
+        // Reading the folder list gives the server's roles back, and the
+        // choice wins again.
+        upsert_discovered(
+            &conn,
+            1,
+            "Sent",
+            Some("/"),
+            Some(roles::SENT),
+            true,
+            FolderPermissions::FULL,
+        )
+        .unwrap();
+        apply_chosen_roles(&conn, 1, &choice).unwrap();
+        assert_eq!(
+            by_role(&conn, 1, roles::SENT).unwrap().unwrap().id,
+            sent_items
+        );
+        assert_eq!(role_of(&conn, sent), None);
+
+        // Without the choice the suggested folder has the role again.
+        apply_chosen_roles(&conn, 1, &BTreeMap::new()).unwrap();
+        assert_eq!(by_role(&conn, 1, roles::SENT).unwrap().unwrap().id, sent);
+        assert_eq!(role_of(&conn, sent_items), None);
+    }
+
+    /// A folder holds one role: chosen for another, it leaves the role the
+    /// server suggested it for without a folder until one is chosen.
+    #[test]
+    fn a_folder_chosen_for_another_role_leaves_its_own_role() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let trash = upsert(&conn, 1, "Trash", Some("/"), Some(roles::TRASH)).unwrap();
+        let bin = upsert(&conn, 1, "Bin", Some("/"), None).unwrap();
+
+        apply_chosen_roles(&conn, 1, &chosen(&[(roles::ARCHIVE, "Trash")])).unwrap();
+        assert_eq!(
+            by_role(&conn, 1, roles::ARCHIVE).unwrap().unwrap().id,
+            trash
+        );
+        assert!(by_role(&conn, 1, roles::TRASH).unwrap().is_none());
+
+        apply_chosen_roles(
+            &conn,
+            1,
+            &chosen(&[(roles::ARCHIVE, "Trash"), (roles::TRASH, "Bin")]),
+        )
+        .unwrap();
+        assert_eq!(
+            by_role(&conn, 1, roles::ARCHIVE).unwrap().unwrap().id,
+            trash
+        );
+        assert_eq!(by_role(&conn, 1, roles::TRASH).unwrap().unwrap().id, bin);
+    }
+
+    /// A choice of a folder that isn't there, can't hold mail, or is the
+    /// Inbox leaves the role where the server suggests, as does a role that
+    /// can't be chosen.
+    #[test]
+    fn choices_that_cannot_apply_leave_the_suggested_roles() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let sent = upsert(&conn, 1, "Sent", Some("/"), Some(roles::SENT)).unwrap();
+        let gone = upsert(&conn, 1, "Gone", Some("/"), None).unwrap();
+        conn.execute(
+            "UPDATE folders SET missing_on_server = 1 WHERE id = ?1",
+            params![gone],
+        )
+        .unwrap();
+        upsert_discovered(
+            &conn,
+            1,
+            "Shared",
+            Some("/"),
+            None,
+            false,
+            FolderPermissions::FULL,
+        )
+        .unwrap();
+
+        for choice in [
+            chosen(&[(roles::SENT, "Gone")]),
+            chosen(&[(roles::SENT, "Shared")]),
+            chosen(&[(roles::SENT, "Nowhere")]),
+            chosen(&[(roles::SENT, "INBOX")]),
+            chosen(&[(roles::INBOX, "Sent")]),
+        ] {
+            apply_chosen_roles(&conn, 1, &choice).unwrap();
+            assert_eq!(by_role(&conn, 1, roles::SENT).unwrap().unwrap().id, sent);
+            assert_eq!(by_role(&conn, 1, roles::INBOX).unwrap().unwrap().id, 1);
+        }
+    }
+
+    /// A chosen folder renamed here keeps its role under its new name, and
+    /// one deleted here gives the role back to the suggested folder.
+    #[test]
+    fn renaming_or_deleting_a_chosen_folder_keeps_the_choice_in_step() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let sent = upsert(&conn, 1, "Sent", Some("/"), Some(roles::SENT)).unwrap();
+        upsert(&conn, 1, "Old", Some("/"), None).unwrap();
+        let old_sent = upsert(&conn, 1, "Old/Sent", Some("/"), None).unwrap();
+        let older = upsert(&conn, 1, "Older", Some("/"), None).unwrap();
+        let mut config = super::super::accounts::get_config(&conn, 1)
+            .unwrap()
+            .unwrap();
+        config.settings.folder_roles =
+            chosen(&[(roles::SENT, "Old/Sent"), (roles::ARCHIVE, "Older")]);
+        super::super::accounts::set_settings(&conn, 1, &config.settings).unwrap();
+        apply_chosen_roles(&conn, 1, &config.settings.folder_roles).unwrap();
+        let choices = |conn: &Connection| {
+            super::super::accounts::get_config(conn, 1)
+                .unwrap()
+                .unwrap()
+                .settings
+                .folder_roles
+        };
+
+        rename_tree(&conn, 1, "Old", "Earlier", "/").unwrap();
+        assert_eq!(
+            choices(&conn),
+            chosen(&[(roles::SENT, "Earlier/Sent"), (roles::ARCHIVE, "Older")])
+        );
+        assert_eq!(
+            by_role(&conn, 1, roles::SENT).unwrap().unwrap().id,
+            old_sent
+        );
+        assert_eq!(
+            by_role(&conn, 1, roles::ARCHIVE).unwrap().unwrap().id,
+            older
+        );
+
+        delete_tree(&conn, 1, "Earlier", "/").unwrap();
+        assert_eq!(choices(&conn), chosen(&[(roles::ARCHIVE, "Older")]));
+        assert_eq!(by_role(&conn, 1, roles::SENT).unwrap().unwrap().id, sent);
+        assert_eq!(
+            by_role(&conn, 1, roles::ARCHIVE).unwrap().unwrap().id,
+            older
         );
     }
 

@@ -396,6 +396,15 @@ fn folder_path_delimiter(protocol: MailProtocol, folder: &repo::folders::Folder)
     }
 }
 
+/// Why account `config` chooses no folders for its roles: its provider
+/// gives them (#252).
+fn not_imap_folder_roles(config: &AccountConfig) -> CoreError {
+    CoreError::Other(format!(
+        "{} keeps the folders its provider gives each role",
+        config.email
+    ))
+}
+
 /// Why account `config` doesn't send mail (#252).
 pub(crate) fn receive_only_error(config: &AccountConfig) -> CoreError {
     CoreError::Other(format!(
@@ -1977,6 +1986,138 @@ impl Core {
             }
             self.spawn_actor(config).await;
         }
+        Ok(())
+    }
+
+    /// The folders an IMAP account's roles such as Sent go to, with the one
+    /// each goes to unless one is chosen, the one chosen by hand, and the
+    /// folders a role can go to (#252).
+    pub async fn account_folder_roles(&self, account_id: i64) -> Result<AccountFolderRoles> {
+        self.db
+            .read(move |conn| {
+                let config = repo::accounts::get_config(conn, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                if config.mail_protocol != MailProtocol::Imap {
+                    return Err(not_imap_folder_roles(&config));
+                }
+                // The folders on the server that mail can be in. The Inbox
+                // keeps its own role.
+                let infos = repo::folders::list_info(conn, Some(account_id))?
+                    .into_iter()
+                    .filter(|folder| {
+                        folder.selectable && !folder.path.eq_ignore_ascii_case("INBOX")
+                    })
+                    .collect::<Vec<_>>();
+                let mut folders = infos
+                    .iter()
+                    .map(|folder| FolderChoice {
+                        id: folder.id,
+                        // IMAP names are whole paths, as "Archive/2026".
+                        names: match folder.delimiter.as_deref().filter(|d| !d.is_empty()) {
+                            Some(delimiter) => folder
+                                .display_name
+                                .split(delimiter)
+                                .map(str::to_owned)
+                                .collect(),
+                            None => vec![folder.display_name.clone()],
+                        },
+                    })
+                    .collect::<Vec<_>>();
+                folders.sort_by_cached_key(|folder| {
+                    let names = folder
+                        .names
+                        .iter()
+                        .map(|name| name.to_lowercase())
+                        .collect::<Vec<_>>();
+                    (names, folder.id)
+                });
+                let chosen = &config.settings.folder_roles;
+                let detected = repo::folders::detected_roles(conn, account_id)?;
+                let roles = repo::folders::CHOOSABLE_ROLES
+                    .iter()
+                    .map(|role| {
+                        // A folder chosen for another role keeps that one.
+                        let free = |folder: &FolderInfo| {
+                            !chosen
+                                .iter()
+                                .any(|(other, path)| other != role && *path == folder.path)
+                        };
+                        FolderRoleChoice {
+                            role: (*role).to_owned(),
+                            // As `repo::folders::by_role` finds it.
+                            suggested: infos
+                                .iter()
+                                .filter(|folder| {
+                                    detected.get(&folder.id).map(String::as_str) == Some(*role)
+                                        && free(folder)
+                                })
+                                .map(|folder| folder.id)
+                                .min(),
+                            chosen: chosen.get(*role).and_then(|path| {
+                                infos
+                                    .iter()
+                                    .find(|folder| &folder.path == path)
+                                    .map(|folder| folder.id)
+                            }),
+                        }
+                    })
+                    .collect();
+                Ok(AccountFolderRoles { roles, folders })
+            })
+            .await
+    }
+
+    /// Choose the folder an IMAP account's `role`, such as Sent, goes to,
+    /// or with none leave it to the folder its server suggests (#252). A
+    /// folder holds one role, so choosing it for another frees the first.
+    pub async fn set_account_folder_role(
+        &self,
+        account_id: i64,
+        role: String,
+        folder_id: Option<i64>,
+    ) -> Result<()> {
+        if !repo::folders::CHOOSABLE_ROLES.contains(&role.as_str()) {
+            return Err(CoreError::Other(format!(
+                "{role} isn't a folder role that can be chosen"
+            )));
+        }
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                if config.mail_protocol != MailProtocol::Imap {
+                    return Err(not_imap_folder_roles(&config));
+                }
+                match folder_id {
+                    Some(folder_id) => {
+                        let folder = repo::folders::get(&tx, folder_id)?
+                            .filter(|folder| folder.account_id == account_id && folder.selectable)
+                            .ok_or_else(|| CoreError::NotFound(format!("folder {folder_id}")))?;
+                        if folder.path.eq_ignore_ascii_case("INBOX") {
+                            return Err(CoreError::Other("the Inbox keeps its own role".into()));
+                        }
+                        let chosen = &mut config.settings.folder_roles;
+                        chosen.retain(|_, path| *path != folder.path);
+                        chosen.insert(role, folder.path);
+                    }
+                    None => {
+                        config.settings.folder_roles.remove(&role);
+                    }
+                }
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                repo::folders::apply_chosen_roles(&tx, account_id, &config.settings.folder_roles)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        // The worker files sent mail and drafts in the folders the roles now
+        // name, and the views and folder list show them there.
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
+        self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
         Ok(())
     }
 
@@ -16178,6 +16319,166 @@ mod server_timeout_tests {
             .await
             .unwrap();
         assert!(core.set_account_server_timeout(1, 60).await.is_err());
+    }
+}
+
+#[cfg(test)]
+mod folder_role_tests {
+    use super::*;
+
+    fn choice<'a>(listed: &'a AccountFolderRoles, role: &str) -> &'a FolderRoleChoice {
+        listed
+            .roles
+            .iter()
+            .find(|choice| choice.role == role)
+            .unwrap()
+    }
+
+    async fn role_folder(core: &Core, role: &'static str) -> Option<i64> {
+        core.db
+            .read(move |conn| Ok(repo::folders::by_role(conn, 1, role)?.map(|folder| folder.id)))
+            .await
+            .unwrap()
+    }
+
+    /// An IMAP account's Sent, Drafts, Trash, Spam and Archive go to the
+    /// folders chosen for them, and back to the server's when chosen so
+    /// (#252).
+    #[tokio::test]
+    async fn an_imap_account_chooses_the_folders_for_its_roles() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let (sent, archive, archive_2026, trash, shared) = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                let folder = |path: &str, role: Option<&str>| {
+                    repo::folders::upsert(conn, 1, path, Some("/"), role)
+                };
+                let ids = (
+                    folder("Sent", Some(roles::SENT))?,
+                    folder("Archive", None)?,
+                    folder("Archive/2026", None)?,
+                    folder("Trash", Some(roles::TRASH))?,
+                    repo::folders::upsert_discovered(
+                        conn,
+                        1,
+                        "Shared",
+                        Some("/"),
+                        None,
+                        false,
+                        repo::folders::FolderPermissions::FULL,
+                    )?,
+                );
+                Ok(ids)
+            })
+            .await
+            .unwrap();
+
+        let listed = core.account_folder_roles(1).await.unwrap();
+        assert_eq!(
+            listed
+                .roles
+                .iter()
+                .map(|choice| choice.role.as_str())
+                .collect::<Vec<_>>(),
+            repo::folders::CHOOSABLE_ROLES
+        );
+        // The folders that can hold mail, but the Inbox, by name.
+        assert_eq!(
+            listed
+                .folders
+                .iter()
+                .map(|folder| (folder.id, folder.names.join(" / ")))
+                .collect::<Vec<_>>(),
+            [
+                (archive, "Archive".to_owned()),
+                (archive_2026, "Archive / 2026".to_owned()),
+                (sent, "Sent".to_owned()),
+                (trash, "Trash".to_owned()),
+            ]
+        );
+        assert_eq!(choice(&listed, roles::SENT).suggested, Some(sent));
+        assert_eq!(choice(&listed, roles::SENT).chosen, None);
+        assert_eq!(choice(&listed, roles::ARCHIVE).suggested, None);
+
+        core.set_account_folder_role(1, roles::ARCHIVE.into(), Some(archive_2026))
+            .await
+            .unwrap();
+        assert_eq!(role_folder(&core, roles::ARCHIVE).await, Some(archive_2026));
+        let listed = core.account_folder_roles(1).await.unwrap();
+        assert_eq!(choice(&listed, roles::ARCHIVE).chosen, Some(archive_2026));
+
+        // A folder holds one role: chosen for another, it leaves the first.
+        core.set_account_folder_role(1, roles::SPAM.into(), Some(archive_2026))
+            .await
+            .unwrap();
+        let listed = core.account_folder_roles(1).await.unwrap();
+        assert_eq!(choice(&listed, roles::SPAM).chosen, Some(archive_2026));
+        assert_eq!(choice(&listed, roles::ARCHIVE).chosen, None);
+        assert_eq!(role_folder(&core, roles::ARCHIVE).await, None);
+
+        // The folder suggested for Trash, chosen for Archive, leaves Trash
+        // without one until Archive goes back to the server's choice.
+        core.set_account_folder_role(1, roles::ARCHIVE.into(), Some(trash))
+            .await
+            .unwrap();
+        let listed = core.account_folder_roles(1).await.unwrap();
+        assert_eq!(choice(&listed, roles::TRASH).suggested, None);
+        assert_eq!(role_folder(&core, roles::TRASH).await, None);
+        core.set_account_folder_role(1, roles::ARCHIVE.into(), None)
+            .await
+            .unwrap();
+        let listed = core.account_folder_roles(1).await.unwrap();
+        assert_eq!(choice(&listed, roles::TRASH).suggested, Some(trash));
+        assert_eq!(role_folder(&core, roles::TRASH).await, Some(trash));
+        assert_eq!(
+            core.list_account_configs()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|config| config.id == 1)
+                .unwrap()
+                .settings
+                .folder_roles,
+            std::collections::BTreeMap::from([(roles::SPAM.to_owned(), "Archive/2026".to_owned())])
+        );
+
+        // Roles that can't be chosen, the Inbox, folders that can't hold
+        // mail, and folders of other accounts are refused.
+        for (role, folder) in [
+            (roles::INBOX, sent),
+            (roles::SENT, 1),
+            (roles::SENT, shared),
+            (roles::SENT, 9_999),
+        ] {
+            assert!(
+                core.set_account_folder_role(1, role.into(), Some(folder))
+                    .await
+                    .is_err()
+            );
+        }
+        assert_eq!(role_folder(&core, roles::SENT).await, Some(sent));
+
+        // Other accounts keep the folders their providers give each role.
+        core.db
+            .write(|conn| {
+                conn.execute(
+                    "UPDATE accounts SET mail_protocol = 'pop3' WHERE id = 1",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(core.account_folder_roles(1).await.is_err());
+        assert!(
+            core.set_account_folder_role(1, roles::SENT.into(), None)
+                .await
+                .is_err()
+        );
     }
 }
 
