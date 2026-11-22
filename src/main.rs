@@ -80,6 +80,7 @@ pub use notifications::{
     NewMailNotification, NotificationHost, Response, Route, parse_payload, payload, respond,
 };
 mod app_language;
+mod automatic_copies;
 pub use app_language::AppLanguage;
 mod number_format;
 mod privacy_consent;

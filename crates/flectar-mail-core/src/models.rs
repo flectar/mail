@@ -547,6 +547,14 @@ pub struct AccountSettings {
     /// listen either.
     #[serde(default = "push_default")]
     pub push: bool,
+    /// Copies every message written from the account starts with, whichever
+    /// sender identity it's from (#252).
+    #[serde(default)]
+    pub copies: AutomaticCopies,
+    /// Copies the messages written from one of the account's sender
+    /// identities start with too, by the identity's address in lowercase.
+    #[serde(default)]
+    pub identity_copies: std::collections::BTreeMap<String, AutomaticCopies>,
     /// The folders of an IMAP account chosen by hand for roles such as Sent,
     /// as their paths by role (#252). A role without one goes to the folder
     /// the server suggests. Always written, empty too: Flectar Mail Sync
@@ -581,7 +589,24 @@ impl AccountSettings {
             check_interval: CheckInterval::App,
             push: push_default(),
             folder_roles: std::collections::BTreeMap::new(),
+            copies: AutomaticCopies::default(),
+            identity_copies: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// The copies a message written from `identity` starts with: the
+    /// account's, the identity's own, and the Bcc its provider keeps.
+    pub fn copies_for(&self, identity: &SenderIdentity) -> AutomaticCopies {
+        let own = self
+            .identity_copies
+            .get(&identity.email.trim().to_lowercase())
+            .cloned()
+            .unwrap_or_default();
+        let provider = AutomaticCopies {
+            cc: Vec::new(),
+            bcc: identity.bcc.clone(),
+        };
+        self.copies.clone().and(&own).and(&provider)
     }
 }
 
@@ -664,6 +689,80 @@ mod account_settings_tests {
         }
         assert!(SentCopyPolicy::Client.should_append(Provider::Microsoft));
         assert!(!SentCopyPolicy::Server.should_append(Provider::Generic));
+    }
+
+    fn address(name: Option<&str>, email: &str) -> Address {
+        Address {
+            name: name.map(str::to_owned),
+            email: email.to_owned(),
+        }
+    }
+
+    /// A message from an identity starts with the account's copies, the
+    /// identity's own and its provider's Bcc, each address once, and one in
+    /// Cc gets no copy in Bcc too (#252).
+    #[test]
+    fn copies_join_the_account_the_identity_and_its_provider() {
+        let mut settings: AccountSettings = serde_json::from_str(MINIMAL_SETTINGS).unwrap();
+        assert!(settings.copies.is_empty() && settings.identity_copies.is_empty());
+        // Always written, so Flectar Mail Sync carries an emptied list too.
+        let json = serde_json::to_value(&settings).unwrap();
+        assert_eq!(json["copies"], serde_json::json!({"cc": [], "bcc": []}));
+        assert_eq!(json["identityCopies"], serde_json::json!({}));
+
+        settings.copies = AutomaticCopies {
+            cc: vec![address(Some("Boss"), "boss@example.com")],
+            bcc: vec![address(None, "archive@example.com")],
+        };
+        settings.identity_copies.insert(
+            "sales@example.com".into(),
+            AutomaticCopies {
+                cc: vec![address(None, "team@example.com")],
+                bcc: vec![address(None, "BOSS@example.com")],
+            },
+        );
+        let identity = |email: &str, bcc: Vec<Address>| SenderIdentity {
+            account_id: 1,
+            email: email.into(),
+            display_name: None,
+            reply_to_email: None,
+            is_primary: false,
+            is_provider_default: false,
+            verification_status: "accepted".into(),
+            last_synced_at: 0,
+            source: SenderIdentitySource::Provider,
+            delivery_status: SenderDeliveryStatus::Unknown,
+            delivery_error: None,
+            bcc,
+        };
+        let sales = identity(
+            "Sales@Example.com",
+            vec![
+                address(None, "ledger@example.com"),
+                address(None, "team@example.com"),
+            ],
+        );
+        assert_eq!(
+            settings.copies_for(&sales),
+            AutomaticCopies {
+                cc: vec![
+                    address(Some("Boss"), "boss@example.com"),
+                    address(None, "team@example.com"),
+                ],
+                bcc: vec![
+                    address(None, "archive@example.com"),
+                    address(None, "ledger@example.com"),
+                ],
+            }
+        );
+        // Another identity gets the account's alone.
+        assert_eq!(
+            settings.copies_for(&identity("me@example.com", Vec::new())),
+            settings.copies
+        );
+        let restored: AccountSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored, settings);
     }
 
     #[test]
@@ -923,6 +1022,43 @@ pub struct SenderIdentity {
     pub delivery_status: SenderDeliveryStatus,
     /// Server reply that rejected the most recent submission, if any.
     pub delivery_error: Option<String>,
+    /// The Bcc the provider keeps for this identity, which RFC 8621 §6 asks
+    /// clients to add to the mail they write from it (#252).
+    #[serde(default)]
+    pub bcc: Vec<Address>,
+}
+
+/// Addresses a message gets copies to unless its writer removes them: those
+/// the Cc and Bcc of mail written from an account or sender identity start
+/// with (#252).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomaticCopies {
+    #[serde(default)]
+    pub cc: Vec<Address>,
+    #[serde(default)]
+    pub bcc: Vec<Address>,
+}
+
+impl AutomaticCopies {
+    /// Addresses each list takes at most.
+    pub const MAX_ADDRESSES: usize = 50;
+
+    pub fn is_empty(&self) -> bool {
+        self.cc.is_empty() && self.bcc.is_empty()
+    }
+
+    /// These and then `more`, each address once: an address in Cc gets no
+    /// copy in Bcc too.
+    pub fn and(mut self, more: &Self) -> Self {
+        let mut seen = std::collections::HashSet::new();
+        let mut keep = |address: &Address| seen.insert(address.email.trim().to_lowercase());
+        let cc = self.cc.into_iter().chain(more.cc.iter().cloned());
+        self.cc = cc.filter(|address| keep(address)).collect();
+        let bcc = self.bcc.into_iter().chain(more.bcc.iter().cloned());
+        self.bcc = bcc.filter(|address| keep(address)).collect();
+        self
+    }
 }
 
 /// Where a sender identity came from.
