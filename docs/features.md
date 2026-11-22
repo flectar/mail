@@ -219,8 +219,9 @@ On a metered connection, such as mobile data or a hotspot, downloading ahead of
 time can wait. With **Pause downloads** on in Settings → Network, accounts
 still check for new mail, and messages and attachments download when you open
 them until the connection isn't metered anymore. Each device keeps its own
-choice. The setting shows where the system tells which connections are metered,
-which on Linux the desktop portal or NetworkManager does.
+choice. Windows tells from the connection's data plan, macOS and iOS from
+cellular data, a hotspot or Low Data Mode, and Linux from the desktop portal or
+NetworkManager.
 
 A server can ask Flectar Mail to slow down, when an account has too many
 connections open or makes too many requests, or while another app is using a
