@@ -2708,8 +2708,10 @@ mod tests {
                 charset: Some("utf-8".into()),
                 transfer_encoding: "quoted-printable".into(),
                 size: 42,
+                message: None,
             }],
             attachments: Vec::new(),
+            messages: Vec::new(),
         };
         set_mime_plan(&c, message_id, Some(&plan)).unwrap();
         assert_eq!(mime_plan(&c, message_id).unwrap(), Some(plan.clone()));
@@ -2729,6 +2731,7 @@ mod tests {
             content_id: None,
             is_inline: false,
             transfer_encoding: "base64".into(),
+            message: None,
         };
         assert_eq!(
             upsert_planned_attachments(&c, message_id, std::slice::from_ref(&planned)).unwrap(),

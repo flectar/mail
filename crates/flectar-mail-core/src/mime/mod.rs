@@ -7,6 +7,11 @@ use mail_parser::MimeHeaders;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
+mod embedded;
+
+pub use embedded::{EmbeddedHeaders, is_message_type, message_file_name, message_file_stem};
+pub(crate) use embedded::{planned_messages, shows_in_body, with_messages};
+
 /// Retains our submission identity when a provider replaces Message-ID.
 pub const SUBMISSION_ID_HEADER: &str = "X-Flectar-Submission-ID";
 
@@ -66,8 +71,9 @@ pub struct ParsedAttachment {
 
 /// Schema version written into `messages.mime_plan_json`.
 /// Bumped to 3 when `is_inline` stopped treating a bare Content-ID as proof of
-/// an embedded part: plans stored under the old rule are rebuilt on demand.
-pub const MIME_PLAN_VERSION: u8 = 3;
+/// an embedded part, and to 4 when the body began showing the messages it
+/// carries (#455): plans stored under an older rule are rebuilt on demand.
+pub const MIME_PLAN_VERSION: u8 = 4;
 
 /// A compact, serializable description of the IMAP sections needed to make a
 /// message readable without downloading unrelated attachment bytes.
@@ -78,6 +84,10 @@ pub struct MimePlan {
     pub text_sections: Vec<PlannedTextSection>,
     #[serde(default)]
     pub attachments: Vec<PlannedAttachment>,
+    /// The messages inside the message that its body shows (#455), each
+    /// after the message it is inside of.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub messages: Vec<PlannedMessage>,
 }
 
 impl Default for MimePlan {
@@ -86,6 +96,7 @@ impl Default for MimePlan {
             version: MIME_PLAN_VERSION,
             text_sections: Vec::new(),
             attachments: Vec::new(),
+            messages: Vec::new(),
         }
     }
 }
@@ -105,22 +116,26 @@ impl MimePlan {
     }
 
     /// The message carries a read receipt's report (RFC 8098). The part is
-    /// no text to read, so the plan lists it with the files.
+    /// no text to read, so the plan lists it with the files. One inside a
+    /// message the body shows is that message's.
     pub fn carries_disposition_report(&self) -> bool {
         self.attachments
             .iter()
-            .any(|part| is_disposition_report_part(&part.mime_type))
+            .any(|part| part.message.is_none() && is_disposition_report_part(&part.mime_type))
     }
 
-    /// The encoded size of every planned part, each counted once.
+    /// The encoded size of every planned part, each counted once. The parts
+    /// of a message the body shows are inside that message's own.
     pub fn encoded_size(&self) -> u64 {
         let mut seen = std::collections::HashSet::new();
         self.text_sections
             .iter()
+            .filter(|part| part.message.is_none())
             .map(|part| (&part.section, part.size))
             .chain(
                 self.attachments
                     .iter()
+                    .filter(|part| part.message.is_none())
                     .map(|part| (&part.section, part.size)),
             )
             .filter(|(section, _)| seen.insert(*section))
@@ -147,6 +162,22 @@ pub struct PlannedTextSection {
     pub transfer_encoding: String,
     /// Encoded octet count reported by BODYSTRUCTURE.
     pub size: u32,
+    /// The message in [`MimePlan::messages`] the section is the text of, or
+    /// None for the message's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<u16>,
+}
+
+/// A message inside the message that its body shows (#455).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlannedMessage {
+    /// Numeric IMAP BODY section of its message/rfc822 part, for example `2`.
+    pub section: String,
+    /// The message in [`MimePlan::messages`] it is inside of, or None when it
+    /// is the message's own.
+    #[serde(default)]
+    pub parent: Option<u16>,
+    pub headers: EmbeddedHeaders,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +190,10 @@ pub struct PlannedAttachment {
     pub content_id: Option<String>,
     pub is_inline: bool,
     pub transfer_encoding: String,
+    /// The message in [`MimePlan::messages`] the file belongs to, or None
+    /// for the message's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<u16>,
 }
 
 /// Decode RFC 2047 encoded-words (`=?charset?enc?text?=`) embedded in a header
@@ -289,11 +324,15 @@ pub fn plan_bodystructure(bs: &async_imap::imap_proto::BodyStructure<'_>) -> Mim
         }
     }
 
+    /// One part. `message` is the message in `plan.messages` it belongs to,
+    /// and `unnamed` the name it has when it declares none.
     fn add_single(
         common: &BodyContentCommon<'_>,
         other: &BodyContentSinglePart<'_>,
         path: &[u32],
         plan: &mut MimePlan,
+        message: Option<u16>,
+        unnamed: Option<String>,
     ) {
         let section = section(path);
         let mut mime_type = format!("{}/{}", common.ty.ty, common.ty.subtype);
@@ -315,7 +354,9 @@ pub fn plan_bodystructure(bs: &async_imap::imap_proto::BodyStructure<'_>) -> Mim
             Some(TextSectionKind::Plain)
         } else if mime_type == "text/html" {
             Some(TextSectionKind::Html)
-        } else if mime_type == "text/calendar" {
+        } else if mime_type == "text/calendar" && message.is_none() {
+            // A calendar inside a message the body shows is that message's,
+            // not an invitation to the user: it stays a file.
             Some(TextSectionKind::Calendar)
         } else {
             None
@@ -334,49 +375,147 @@ pub fn plan_bodystructure(bs: &async_imap::imap_proto::BodyStructure<'_>) -> Mim
                 charset: param(&common.ty.params, "charset").map(str::to_owned),
                 transfer_encoding: encoding(&other.transfer_encoding),
                 size: other.octets,
+                message,
             });
         }
 
-        let is_non_body_part = !mime_type.starts_with("text/") || explicit_attachment;
+        let is_non_body_part = !mime_type.starts_with("text/")
+            || explicit_attachment
+            || (mime_type == "text/calendar" && message.is_some());
         if is_non_body_part || (mime_type == "text/calendar" && explicit_attachment) {
             plan.attachments.push(PlannedAttachment {
                 section,
-                filename,
+                filename: filename.or(unnamed),
                 mime_type,
                 size: other.octets,
                 content_id,
                 is_inline,
                 transfer_encoding: encoding(&other.transfer_encoding),
+                message,
             });
         }
     }
 
-    fn walk(bs: &BodyStructure<'_>, path: &mut Vec<u32>, plan: &mut MimePlan) {
+    /// `message` is the message in `plan.messages` the part is inside of,
+    /// `depth` how many messages deep that is.
+    fn walk(
+        bs: &BodyStructure<'_>,
+        path: &mut Vec<u32>,
+        plan: &mut MimePlan,
+        message: Option<u16>,
+        depth: usize,
+    ) {
         match bs {
             BodyStructure::Multipart { bodies, .. } => {
                 for (index, body) in bodies.iter().enumerate() {
                     path.push((index + 1) as u32);
-                    walk(body, path, plan);
+                    walk(body, path, plan, message, depth);
                     path.pop();
                 }
             }
             BodyStructure::Basic { common, other, .. }
             | BodyStructure::Text { common, other, .. } => {
-                add_single(common, other, path, plan);
+                add_single(common, other, path, plan, message, None);
             }
-            BodyStructure::Message { common, other, .. } => {
-                // message/rfc822 is normally a forwarded-message attachment.
-                // Treat it atomically; recursing would require the special
-                // RFC 3501 MESSAGE section-numbering rules and would bulk-fetch
-                // content the user did not ask to open.
-                add_single(common, other, path, plan);
+            BodyStructure::Message {
+                common,
+                other,
+                envelope,
+                body,
+                ..
+            } => {
+                // The message is a file of its own, named by its subject when
+                // it declares no name.
+                let headers = envelope_headers(envelope);
+                add_single(
+                    common,
+                    other,
+                    path,
+                    plan,
+                    message,
+                    message_file_name(&headers.subject),
+                );
+                // One sent as an attachment stays only that, and its bytes
+                // are fetched when it's opened. One the body shows is read as
+                // the body is (#455): its text sections are fetched with the
+                // message's own, and its files are listed with them.
+                let disposition = common.disposition.as_ref().map(|value| value.ty.as_ref());
+                let mime_type = format!("{}/{}", common.ty.ty, common.ty.subtype);
+                let Ok(index) = u16::try_from(plan.messages.len()) else {
+                    return;
+                };
+                if depth >= embedded::MAX_DEPTH || !shows_in_body(&mime_type, disposition) {
+                    return;
+                }
+                plan.messages.push(PlannedMessage {
+                    section: section(path),
+                    parent: message,
+                    headers,
+                });
+                // RFC 3501 section 6.4.5 numbers a message part's body below
+                // it: the parts of a multipart body as N.1, N.2 and so on,
+                // and any other body as N.1.
+                if matches!(body.as_ref(), BodyStructure::Multipart { .. }) {
+                    walk(body, path, plan, Some(index), depth + 1);
+                } else {
+                    path.push(1);
+                    walk(body, path, plan, Some(index), depth + 1);
+                    path.pop();
+                }
             }
         }
     }
 
     let mut plan = MimePlan::default();
-    walk(bs, &mut Vec::new(), &mut plan);
+    walk(bs, &mut Vec::new(), &mut plan, None, 0);
     plan
+}
+
+/// The header lines of a message inside a message, from its BODYSTRUCTURE
+/// envelope (RFC 3501 section 7.4.2), which says them as written.
+fn envelope_headers(envelope: &async_imap::imap_proto::Envelope<'_>) -> EmbeddedHeaders {
+    fn text(value: Option<&[u8]>) -> String {
+        value
+            .map(|bytes| decode_encoded_words(&String::from_utf8_lossy(bytes)))
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
+    }
+    fn addresses(list: Option<&Vec<async_imap::imap_proto::Address<'_>>>) -> Vec<Address> {
+        list.into_iter()
+            .flatten()
+            // A group's start and end have no host (RFC 3501 section 7.4.2).
+            .filter_map(|address| {
+                let mailbox = address.mailbox.as_deref()?;
+                let host = address.host.as_deref()?;
+                Some(Address {
+                    name: Some(text(address.name.as_deref())).filter(|name| !name.is_empty()),
+                    email: format!(
+                        "{}@{}",
+                        String::from_utf8_lossy(mailbox),
+                        String::from_utf8_lossy(host)
+                    ),
+                })
+            })
+            .collect()
+    }
+    let written = Some(text(envelope.date.as_deref())).filter(|date| !date.is_empty());
+    // A date that isn't one keeps the words it was written in.
+    let date = written
+        .as_deref()
+        .and_then(mail_parser::DateTime::parse_rfc822)
+        .filter(mail_parser::DateTime::is_valid);
+    EmbeddedHeaders {
+        from: addresses(envelope.from.as_ref()),
+        to: addresses(envelope.to.as_ref()),
+        cc: addresses(envelope.cc.as_ref()),
+        subject: text(envelope.subject.as_deref()),
+        date: date
+            .as_ref()
+            .map(mail_parser::DateTime::to_rfc822)
+            .or(written),
+        date_iso: date.as_ref().map(mail_parser::DateTime::to_rfc3339),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1010,6 +1149,7 @@ mod selective_section_tests {
             charset: Some("utf-8".into()),
             transfer_encoding: "base64".into(),
             size: encoded.len() as u32,
+            message: None,
         };
 
         // Office 365 occasionally returns no BODY[1.MIME] data even though
@@ -2869,37 +3009,14 @@ pub fn parse_message(raw: &[u8]) -> Result<ParsedBody> {
 
     let text = msg.body_text(0).map(|t| t.into_owned());
     let html = msg.body_html(0).map(|h| sanitize_html(&h));
+    // The messages it carries that the body shows, below its own text (#455).
+    let (text, html) = with_messages(text, html, &embedded::shown_in(&msg, 0));
 
     let snippet = make_body_snippet(text.as_deref(), html.as_deref());
 
     let mut attachments = Vec::new();
     let mut calendar_parts = Vec::new();
-    for (i, part) in msg.attachments().enumerate() {
-        let filename = part.attachment_name().map(|s| s.to_string());
-        let mime_type = part.content_type().map(|ct| match ct.subtype() {
-            Some(sub) => format!("{}/{}", ct.ctype(), sub),
-            None => ct.ctype().to_string(),
-        });
-        if mime_type
-            .as_deref()
-            .is_some_and(|m| m.eq_ignore_ascii_case("text/calendar"))
-        {
-            calendar_parts.push(String::from_utf8_lossy(part.contents()).into_owned());
-        }
-        let content_id = part.content_id().map(|s| s.to_string());
-        let is_inline = part_is_inline(
-            part.content_disposition().map(|cd| cd.ctype()),
-            content_id.is_some(),
-        );
-        attachments.push(ParsedAttachment {
-            part_id: i.to_string(),
-            filename,
-            mime_type,
-            size: part.contents().len() as i64,
-            is_inline,
-            content_id,
-        });
-    }
+    collect_attachments(&msg, "", 0, &mut attachments, Some(&mut calendar_parts));
     let disposition_report = returned_receipt(&msg, &headers);
     // Invites are often an *alternative* body part rather than an attachment.
     for part in msg.text_bodies() {
@@ -2921,6 +3038,58 @@ pub fn parse_message(raw: &[u8]) -> Result<ParsedBody> {
         calendar_parts,
         disposition_report,
     })
+}
+
+/// The files of `message`, each by its index among the message's
+/// attachments after `prefix`, the ids of the messages it is inside of: part
+/// `2.0` is the first file of the message that is the third. A message the
+/// body shows lists its files with the message's own, as mail apps list them
+/// (#455). The text/calendar parts of the message itself join `calendars`;
+/// one inside a message it carries is that message's, not an invitation.
+fn collect_attachments(
+    message: &mail_parser::Message,
+    prefix: &str,
+    depth: usize,
+    attachments: &mut Vec<ParsedAttachment>,
+    mut calendars: Option<&mut Vec<String>>,
+) {
+    for (i, part) in message.attachments().enumerate() {
+        let part_id = format!("{prefix}{i}");
+        let media_type = embedded::part_media_type(part);
+        let mime_type = (!media_type.is_empty()).then_some(media_type);
+        if let Some(calendars) = calendars.as_deref_mut()
+            && mime_type
+                .as_deref()
+                .is_some_and(|m| m.eq_ignore_ascii_case("text/calendar"))
+        {
+            calendars.push(String::from_utf8_lossy(part.contents()).into_owned());
+        }
+        let content_id = part.content_id().map(|s| s.to_string());
+        let is_inline = part_is_inline(embedded::disposition(part), content_id.is_some());
+        let inner = part.message();
+        // A message without a name of its own is named by its subject.
+        let filename = part.attachment_name().map(|s| s.to_string()).or_else(|| {
+            inner.and_then(|inner| message_file_name(inner.subject().unwrap_or_default()))
+        });
+        let shown = inner.filter(|_| {
+            depth < embedded::MAX_DEPTH
+                && shows_in_body(
+                    mime_type.as_deref().unwrap_or_default(),
+                    embedded::disposition(part),
+                )
+        });
+        attachments.push(ParsedAttachment {
+            part_id: part_id.clone(),
+            filename,
+            mime_type,
+            size: part.contents().len() as i64,
+            is_inline,
+            content_id,
+        });
+        if let Some(inner) = shown {
+            collect_attachments(inner, &format!("{part_id}."), depth + 1, attachments, None);
+        }
+    }
 }
 
 /// The read receipt a message is, when it's a multipart/report (RFC 6522)
@@ -2994,22 +3163,34 @@ pub fn parse_header_block(raw: &[u8]) -> Result<ParsedHeaders> {
     Ok(parse_headers(&msg))
 }
 
-/// Extract one attachment's bytes from a raw message by attachment index.
+/// Extract one attachment's bytes from a raw message by its part id: its
+/// index among the message's attachments, after those of the messages it is
+/// inside of, as [`parse_message`] numbers them.
 pub fn extract_attachment(raw: &[u8], part_id: &str) -> Result<(Vec<u8>, Option<String>)> {
     let msg = mail_parser::MessageParser::default()
         .parse(raw)
         .ok_or_else(|| CoreError::Mime("unparseable message".into()))?;
-    let idx: usize = part_id
-        .parse()
-        .map_err(|_| CoreError::Mime("bad part id".into()))?;
-    let part = msg
-        .attachments()
-        .nth(idx)
-        .ok_or_else(|| CoreError::NotFound("attachment".into()))?;
-    Ok((
-        part.contents().to_vec(),
-        part.attachment_name().map(|s| s.to_string()),
-    ))
+    let mut message = &msg;
+    let mut indexes = part_id.split('.').peekable();
+    while let Some(index) = indexes.next() {
+        let index: usize = index
+            .parse()
+            .map_err(|_| CoreError::Mime("bad part id".into()))?;
+        let part = message
+            .attachments()
+            .nth(index)
+            .ok_or_else(|| CoreError::NotFound("attachment".into()))?;
+        if indexes.peek().is_none() {
+            return Ok((
+                part.contents().to_vec(),
+                part.attachment_name().map(|s| s.to_string()),
+            ));
+        }
+        message = part
+            .message()
+            .ok_or_else(|| CoreError::NotFound("attachment".into()))?;
+    }
+    Err(CoreError::Mime("bad part id".into()))
 }
 
 pub struct OutgoingAttachment {
@@ -3292,12 +3473,6 @@ fn attachment_part(attachment: MessageAttachment<'_>) -> mail_builder::mime::Mim
         )
         .attachment(attachment.filename),
     }
-}
-
-/// Whether `mime_type` names a whole message, as a forwarded one is.
-fn is_message_type(mime_type: &str) -> bool {
-    let media = mime_type.split(';').next().unwrap_or_default().trim();
-    media.eq_ignore_ascii_case("message/rfc822") || media.eq_ignore_ascii_case("message/global")
 }
 
 /// A forwarded message's bytes with its lines ending in CRLF, as mail carries them, and its
