@@ -2024,6 +2024,15 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_account_download(&self, account_id: i64, value: &str) -> Result<(), String> {
+        let download = flectar_mail_core::models::DownloadPolicy::from_storage(value)
+            .ok_or_else(|| format!("unsupported download setting: {value}"))?;
+        self.core
+            .set_account_download(account_id, download)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_account_server_timeout(
         &self,
         account_id: i64,

@@ -435,6 +435,7 @@ pub(super) fn apply_connected_accounts(
                     .unwrap_or_default()
                     .into(),
                 mail_history: config.settings.mail_history.as_str().into(),
+                download: config.settings.download.as_str().into(),
                 sent_copy_policy: config.settings.sent_copy_policy.as_str().into(),
                 keep_on_server: config.settings.keep_on_server.as_str().into(),
                 subscribed_folders_only: config.settings.subscribed_folders_only,

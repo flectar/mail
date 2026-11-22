@@ -80,6 +80,7 @@ def event_defaults:
     | .check_interval = (.check_interval // "app")
     | .push = (if .push == null then true else .push end)
     | .server_timeout = (.server_timeout // "30")
+    | .download = (.download // "messages")
     | .receive_only = (.receive_only // false)
     | .incoming_login = (.incoming_login // "automatic")
     | .smtp_login = (.smtp_login // "automatic")
