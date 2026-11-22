@@ -97,6 +97,8 @@ pub(super) fn carry_selected_detail(
     summary.html = selected_detail.html.take();
     summary.text = selected_detail.text.take();
     summary.to = std::mem::take(&mut selected_detail.to);
+    summary.to_people = std::mem::take(&mut selected_detail.to_people);
+    summary.cc_people = std::mem::take(&mut selected_detail.cc_people);
     summary.attachments = std::mem::take(&mut selected_detail.attachments);
     summary.body_pending = false;
 }
@@ -719,6 +721,7 @@ pub(super) fn render_current(
         });
         app.set_selected_time("".into());
         app.set_selected_to("".into());
+        app.set_selected_details(MessageDetails::default());
         app.set_selected_label("".into());
         app.set_selected_is_draft(false);
         app.set_selected_initials("?".into());
@@ -2169,6 +2172,8 @@ mod tests {
             reply_reminder_at: None,
             reply_reminder_due: false,
             to: String::new(),
+            to_people: Vec::new(),
+            cc_people: Vec::new(),
             label: String::new(),
             unread: false,
             starred: false,
@@ -2194,6 +2199,44 @@ mod tests {
             first_attachment: None,
             attachment_total: 0,
         }
+    }
+
+    #[test]
+    fn the_details_list_every_address_and_when_it_was_sent() {
+        use flectar_mail_core::models::Address;
+        let mut email = message(1);
+        email.sender = "Ada Lovelace".into();
+        email.address = "ada@example.com".into();
+        email.to_people = vec![
+            Address {
+                name: Some("Grace".into()),
+                email: "grace@example.com".into(),
+            },
+            Address {
+                name: None,
+                email: "alan@example.com".into(),
+            },
+        ];
+        // A name that only repeats the address is left out.
+        email.cc_people = vec![Address {
+            name: Some("Edsger@Example.com".into()),
+            email: "edsger@example.com".into(),
+        }];
+        email.date_ms = 1_763_745_720_000;
+        let details = super::super::mail_render_projection::message_details(&email);
+        let rows = |model: ModelRc<slint::SharedString>| {
+            (0..model.row_count())
+                .filter_map(|index| model.row_data(index))
+                .map(|row| row.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(details.from, "Ada Lovelace <ada@example.com>");
+        assert_eq!(
+            rows(details.to),
+            ["Grace <grace@example.com>", "alan@example.com"]
+        );
+        assert_eq!(rows(details.cc), ["edsger@example.com"]);
+        assert!(details.date.contains("2025"), "{}", details.date);
     }
 
     #[test]

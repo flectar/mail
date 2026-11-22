@@ -260,6 +260,14 @@ export struct ProfileMemberRow {
 // Messages remain separate inside a conversation. The native side keeps the
 // bodies and renderer state; this lightweight model is safe to virtualize even
 // for long threads.
+// Who a message is from and to, and when, as the reader's details list them.
+export struct MessageDetails {
+    from: string,
+    to: [string],
+    cc: [string],
+    date: string,
+}
+
 export struct ThreadMessageRow {
     index: int,
     sender: string,
