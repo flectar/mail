@@ -21,6 +21,22 @@ fn font_ctx_with_color_emoji() -> (parley::FontContext, parley::fontique::Blob<u
 }
 
 #[test]
+fn issue_454_text_beside_a_block_in_body_counts_toward_the_height() {
+    // Blitz lays bare text after a block out in an anonymous block, which the
+    // surface must reach as it reaches the same text in a div.
+    let bare = renderer(
+        "<!doctype html><html><body><blockquote>Quote</blockquote>After 1<br>TAIL MARKER</body></html>",
+    );
+    let wrapped = renderer(
+        "<!doctype html><html><body><blockquote>Quote</blockquote><div>After 1<br>TAIL MARKER</div></body></html>",
+    );
+    let quote_only =
+        renderer("<!doctype html><html><body><blockquote>Quote</blockquote></body></html>");
+    assert_eq!(bare.content_height, wrapped.content_height);
+    assert!(bare.content_height > quote_only.content_height);
+}
+
+#[test]
 fn issue_23_missing_named_font_keeps_digits_out_of_emoji_fallback() {
     let (ctx, emoji) = font_ctx_with_color_emoji();
     let mut prepared = prepare_email_html_with_font_ctx(
