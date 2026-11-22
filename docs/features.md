@@ -205,13 +205,14 @@ waits for a slow server, or a slow connection to it, before it gives up. Every
 wait grows alike, from connecting and signing in to downloading attachments,
 and a change takes effect at once.
 
-An IMAP account downloads its messages in the background, the Inbox and the
-newest first, as far back as its **Mail history** goes, so they open at once
-and without a connection. **Download** in the account's card changes what comes
-ahead of time. **Headers only** leaves each message on the server until you open
-it, **Messages** is where every account starts, and **Messages and attachments**
-also downloads attachments up to 25 MB, one at a time, so they open offline too.
-Larger ones download when you open them, and each device keeps its own choice.
+An IMAP or JMAP account downloads its messages in the background, as far back
+as its **Mail history** goes, so they open at once and without a connection.
+**Download** in the account's card changes what comes ahead of time.
+**Headers only** leaves each message on the server until you open it,
+**Messages** is where every account starts, and **Messages and attachments**
+also downloads attachments up to 25 MB, one at a time, so they open offline
+too. Larger ones download when you open them, and each device keeps its own
+choice.
 
 A server can ask Flectar Mail to slow down, when an account has too many
 connections open or makes too many requests, or while another app is using a

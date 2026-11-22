@@ -114,7 +114,8 @@ pub fn next_attachment_to_prefetch(
         "SELECT a.id, COALESCE(m.internal_date, m.date) AS sent
          FROM attachments a JOIN messages m ON m.id = a.message_id
          WHERE m.account_id = ?1 AND m.is_draft = 0
-           AND a.file_path IS NULL AND a.imap_section IS NOT NULL
+           AND a.file_path IS NULL
+           AND (a.imap_section IS NOT NULL OR a.jmap_blob_id IS NOT NULL)
            AND (a.size IS NULL OR a.size <= ?3)
            AND (?2 IS NULL OR COALESCE(m.internal_date, m.date) >= ?2)
          ORDER BY sent DESC, a.id DESC
@@ -291,9 +292,10 @@ pub fn jmap_leftovers(conn: &Connection, account_id: i64) -> Result<Vec<JmapLeft
     Ok(leftovers)
 }
 
-/// A JMAP message whose attachments haven't been listed for its current blob.
+/// A JMAP message waiting in one of the background queues: for its
+/// attachments to be listed, or for its body (#253).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JmapAttachmentListing {
+pub struct JmapQueued {
     pub message_id: i64,
     pub remote_id: String,
     pub blob_id: String,
@@ -314,11 +316,44 @@ pub fn jmap_attachment_listing_queue(
     conn: &Connection,
     account_id: i64,
     limit: i64,
-) -> Result<Vec<JmapAttachmentListing>> {
+) -> Result<Vec<JmapQueued>> {
     let mut stmt = conn.prepare_cached(JMAP_ATTACHMENT_LISTING_QUEUE)?;
     let rows = stmt
         .query_map(params![account_id, limit], |row| {
-            Ok(JmapAttachmentListing {
+            Ok(JmapQueued {
+                message_id: row.get(0)?,
+                remote_id: row.get(1)?,
+                blob_id: row.get(2)?,
+                size: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Repeats the WHERE terms of `idx_messages_jmap_pending_body`, so the queue
+/// is read from that index. A body that failed waits as IMAP's do.
+const JMAP_BODY_DOWNLOAD_QUEUE: &str =
+    "SELECT m.id, m.jmap_id, m.jmap_blob_id, COALESCE(m.size, 0) FROM messages m
+     LEFT JOIN sync_failures sf ON sf.stage = 'content' AND sf.message_id = m.id
+     WHERE m.account_id = ?1 AND m.jmap_blob_id IS NOT NULL AND m.body_state = 'none'
+       AND m.jmap_id IS NOT NULL
+       AND (sf.id IS NULL OR sf.next_retry_at IS NULL OR sf.next_retry_at <= ?3)
+       AND (?4 IS NULL OR COALESCE(m.internal_date, m.date) >= ?4)
+     ORDER BY m.date DESC, m.id DESC LIMIT ?2";
+
+/// The newest messages of a JMAP account, inside its mail history from
+/// `since`, whose bodies download ahead of time.
+pub fn jmap_body_download_queue(
+    conn: &Connection,
+    account_id: i64,
+    since: Option<i64>,
+    limit: i64,
+) -> Result<Vec<JmapQueued>> {
+    let mut stmt = conn.prepare_cached(JMAP_BODY_DOWNLOAD_QUEUE)?;
+    let rows = stmt
+        .query_map(params![account_id, limit, now_ms(), since], |row| {
+            Ok(JmapQueued {
                 message_id: row.get(0)?,
                 remote_id: row.get(1)?,
                 blob_id: row.get(2)?,
@@ -1857,6 +1892,63 @@ mod tests {
         // Outside the history, an older one waits.
         assert_eq!(next(Some(2_000), &[new_file]), None);
         assert_eq!(next(None, &[new_file, old_file]), None);
+
+        // A JMAP server sends a part as its blob.
+        let jmap = message(7_000, false);
+        conn.execute(
+            "INSERT INTO attachments (message_id, filename, size, jmap_blob_id)
+             VALUES (?1, 'b.pdf', 10, 'blob-b')",
+            [jmap],
+        )
+        .unwrap();
+        let jmap_file = conn.last_insert_rowid();
+        assert_eq!(next(None, &[]), Some((jmap_file, 7_000)));
+    }
+
+    /// A JMAP account's bodies download newest first, inside its history,
+    /// and one that failed waits for its retry (#253).
+    #[test]
+    fn jmap_bodies_download_newest_first() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let message = |date: i64, blob: Option<&str>, state: &str| -> i64 {
+            conn.execute(
+                "INSERT INTO messages (account_id, folder_id, subject, from_addr, date, size,
+                                       jmap_id, jmap_blob_id, body_state)
+                 VALUES (1, 1, 'Mail', 'a@example.com', ?1, 100, 'remote-' || ?1, ?2, ?3)",
+                params![date, blob, state],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let old = message(1_000, Some("blob-old"), "none");
+        let new = message(5_000, Some("blob-new"), "none");
+        // Opening, already here, or not from a JMAP server.
+        message(6_000, Some("blob-open"), "fetching");
+        message(7_000, Some("blob-read"), "cached");
+        message(8_000, None, "none");
+        let queue = |since| -> Vec<i64> {
+            jmap_body_download_queue(&conn, 1, since, 10)
+                .unwrap()
+                .into_iter()
+                .map(|body| body.message_id)
+                .collect()
+        };
+
+        assert_eq!(queue(None), [new, old]);
+        assert_eq!(
+            jmap_body_download_queue(&conn, 1, None, 1).unwrap(),
+            [JmapQueued {
+                message_id: new,
+                remote_id: "remote-5000".into(),
+                blob_id: "blob-new".into(),
+                size: 100,
+            }]
+        );
+        // Outside the history, an older one waits.
+        assert_eq!(queue(Some(2_000)), [new]);
+        sync_failures::record_content(&conn, new, Some(now_ms() + 60_000), "omitted").unwrap();
+        assert_eq!(queue(None), [old]);
     }
 
     #[test]
