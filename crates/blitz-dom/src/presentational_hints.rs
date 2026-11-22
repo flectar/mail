@@ -366,6 +366,27 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                     let _ = write!(css, "font-size:{size};");
                 }
             }
+            // `<hr>` as Blink maps it: `color` and `noshade` make a solid
+            // rule filled with the colour, or for `noshade` with Blink's dark
+            // gray (#808080, darker than CSS `darkgray`), and `size` sets the
+            // height, or drops the bottom border at 1 or less.
+            "color" if *tag == local_name!("hr") => {
+                css.push_str("border-style:solid;");
+                if let Some(color) = parse_legacy_color(value) {
+                    let _ = write!(css, "border-color:{color};background-color:{color};");
+                }
+            }
+            "noshade" if *tag == local_name!("hr") && self::attr(elem, "color").is_none() => {
+                css.push_str("border-style:solid;border-color:#808080;background-color:#808080;");
+            }
+            "size" if *tag == local_name!("hr") => {
+                match parse_non_negative_integer(value).unwrap_or(0) {
+                    0 | 1 => css.push_str("border-bottom-width:0;"),
+                    size => {
+                        let _ = write!(css, "height:{}px;", size - 2);
+                    }
+                }
+            }
             "hidden" => css.push_str("display:none;"),
             _ => {}
         }

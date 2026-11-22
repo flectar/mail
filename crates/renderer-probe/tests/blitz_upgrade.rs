@@ -1731,3 +1731,43 @@ fn images_that_wont_load_lay_out_with_their_alt_text() {
     close(size("#e").width, 80.0);
     close(size("#e").height, 60.0);
 }
+
+#[test]
+fn rules_and_bevels_paint_as_blink_paints_them() {
+    // Blink shades an `inset`, `outset`, `groove` or `ridge` border whose
+    // colour is `currentcolor` from rgb(238, 238, 238), except on tables and
+    // their parts, so a default `<hr>` is pale. `<hr noshade>` fills with
+    // Blink's dark gray, `color` with the colour, and `size` sets the height.
+    let mut doc = document(
+        "<style>body{margin:0} hr{margin:0 0 10px}</style>
+         <hr id=a>
+         <hr id=b noshade size=4>
+         <hr id=c color=red size=1>
+         <hr id=d size=6>
+         <table id=t style='border:2px outset;border-spacing:0;color:rgb(0,0,255)'>
+         <tr><td style='width:20px;height:10px;padding:0'></td></tr></table>",
+    );
+    let pixels = paint(&mut doc);
+    let pixel = |x: usize, y: f32| {
+        let i = (y as usize * 400 + x) * 4;
+        [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+    };
+    let top = |selector| node(&doc, selector).final_layout().location.y;
+    let height = |selector| node(&doc, selector).final_layout().size.height;
+
+    assert_eq!(pixel(100, top("#a")), [154, 154, 154, 255]);
+    assert_eq!(pixel(100, top("#a") + 1.0), [238, 238, 238, 255]);
+    close(height("#b"), 4.0);
+    assert_eq!(pixel(100, top("#b") + 2.0), [128, 128, 128, 255]);
+    close(height("#c"), 1.0);
+    assert_eq!(pixel(100, top("#c")), [255, 0, 0, 255]);
+    close(height("#d"), 6.0);
+    // The table's bevel keeps its text colour: blue, darker at the bottom.
+    let bottom = top("#t") + height("#t") - 1.0;
+    let [r, g, b, _] = pixel(10, bottom);
+    assert!(
+        r == 0 && g == 0 && (150..200).contains(&b),
+        "{:?}",
+        [r, g, b]
+    );
+}

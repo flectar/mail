@@ -5,7 +5,8 @@ use kurbo::{BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _,
 use peniko::{Color, Fill};
 use smallvec::SmallVec;
 use style::color::AbsoluteColor;
-use style::values::computed::{BorderStyle, OutlineStyle};
+use style::values::computed::{BorderStyle, Display, OutlineStyle};
+use style::values::specified::box_::{DisplayInside, DisplayOutside};
 
 use crate::{color::ToColorColor as _, kurbo_css::Edge, render::ElementCx};
 
@@ -70,6 +71,16 @@ fn beveled_edge_color(color: Color, edge: Edge, inset: bool) -> Color {
     } else {
         lighten(color)
     }
+}
+
+/// Whether a box is a table, a table part or a caption (Blink's
+/// `IsDisplayTableType`).
+fn is_table_type(display: Display) -> bool {
+    display.inside() == DisplayInside::Table
+        || matches!(
+            display.outside(),
+            DisplayOutside::InternalTable | DisplayOutside::TableCaption
+        )
 }
 
 /// The (outer half, inner half) colours of a single edge of a `groove`/`ridge`
@@ -245,6 +256,17 @@ impl ElementCx<'_, '_> {
         // and inner halves of a `groove`/`ridge`).
         let mut borders: SmallVec<[(Color, BezPath); 8]> = SmallVec::new();
 
+        // Like Blink (`ComputedStyleUtils::BorderSideColor`), an `inset`,
+        // `outset`, `groove` or `ridge` edge resolves `currentcolor` against
+        // rgb(238, 238, 238) instead of the text colour, unless the box is a
+        // table or a table part. This is what makes a default `<hr>`, whose
+        // text colour is gray, pale.
+        let bevel_current_color = if is_table_type(style.clone_display()) {
+            current_color
+        } else {
+            AbsoluteColor::srgb_legacy(238, 238, 238, 1.0)
+        };
+
         for &edge in &[Edge::Top, Edge::Right, Edge::Bottom, Edge::Left] {
             let (color, edge_style) = match edge {
                 Edge::Top => (&border.border_top_color, border.border_top_style),
@@ -252,7 +274,14 @@ impl ElementCx<'_, '_> {
                 Edge::Bottom => (&border.border_bottom_color, border.border_bottom_style),
                 Edge::Left => (&border.border_left_color, border.border_left_style),
             };
-            let color = color.resolve_to_absolute(&current_color).as_srgb_color();
+            let current_color = match edge_style {
+                BorderStyle::Inset
+                | BorderStyle::Outset
+                | BorderStyle::Groove
+                | BorderStyle::Ridge => &bevel_current_color,
+                _ => &current_color,
+            };
+            let color = color.resolve_to_absolute(current_color).as_srgb_color();
 
             if color.components[3] <= 0.0 {
                 continue;

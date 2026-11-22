@@ -35,6 +35,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0015 selection line breaks and text highlights | A line whose end the selection goes past ends in a box as wide as a space in its last run's font, as in Blink, which shows that its line break is selected. That covers lines ending in a `<br>` (where Parley drew a narrower box), words wrapped within themselves, and the end of a paragraph that the selection continues beyond, which `get_text_selection_ranges_and_end` tells apart. `set_text_highlights` highlights parts of the text as find in page does, painted as Blink paints its matches, yellow and the active one orange, as tall as the text and over the selection, with the text in black. |
 | 0016 cell percentage padding and legacy word-break | A table cell's percentage padding resolves against the table's content width, as in Blink, rather than against its own column, so MJML's hero cell with `padding-bottom: 70%` is as tall as 70% of the table instead of nearly nothing. An auto-width table is laid out again at the width it took when any cell has percentage padding. Author CSS has its legacy `word-break: break-word`, which Stylo drops outside Gecko, rewritten to the `word-break: normal` and `overflow-wrap: anywhere` it stands for (section 5.2 of CSS Text 3), so long words in narrow columns break as they do in browsers. |
 | 0017 unavailable images | An `<img>` that won't load lays out with its alt text, as browsers lay out an image they can't show, on one line or wrapped inside a width or max-width it is given, in its own font. That covers images that fail to decode and ones the embedder fails through `BaseDocument::fail_image`, with `pending_image_urls` listing the images still waiting. An empty alt takes no room, and set sizes still apply. |
+| 0018 rules and bevelled borders | An `<hr>`'s `color`, `noshade` and `size` attributes map as Blink maps them, through presentational hints instead of Gecko's `hr[size="1"]` user-agent rule. `color` and `noshade` make a solid rule filled with the colour, or with Blink's dark gray (#808080) for `noshade`, and `size` sets the rule's height, or drops its bottom border at 1 or less. An `inset`, `outset`, `groove` or `ridge` border in `currentcolor` is shaded from rgb(238, 238, 238) instead of the text colour, as Blink's `BorderSideColor` does for anything but tables and their parts, so a default `<hr>` is as pale as in browsers. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
@@ -42,7 +43,7 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0017 are local. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0018 are local. Drop the backported parts
 when a release contains them.
 
 Copied text, find in the reader and accessible names leave out 0011's edge
@@ -103,8 +104,8 @@ overlap, locale-sensitive text, 0010's and 0011's table sizing, inline
 boxes, opacity, decorations and line breaks, 0012's captions, anonymous
 tables and bevels, 0013's image minimums and line breaks, 0014's table
 border attributes and spare width, 0015's selection line breaks and
-highlights, 0016's cell percentage padding and legacy word-break, and 0017's
-unavailable images. Application renderer tests cover float
+highlights, 0016's cell percentage padding and legacy word-break, 0017's
+unavailable images, and 0018's rules and bevels. Application renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.
 
