@@ -12,7 +12,9 @@ use crate::message_appearance::{AppearanceDocument, EmailAppearance};
 use anyrender::ImageRenderer;
 #[cfg(test)]
 use anyrender::render_to_buffer;
-use blitz_dom::{Document, DocumentConfig, Point as DomPoint, UserAgentStylesheet, local_name};
+use blitz_dom::{
+    BaseDocument, Document, DocumentConfig, Point as DomPoint, UserAgentStylesheet, local_name,
+};
 use blitz_html::HtmlDocument;
 #[cfg(test)]
 use blitz_paint::paint_scene;
@@ -1706,15 +1708,37 @@ fn content_surface_width(document: &HtmlDocument, viewport: f32) -> f32 {
     width.clamp(viewport, viewport.max(4096.0))
 }
 
+/// The nodes Blitz laid out, in document order. Unlike `Document::visit`,
+/// which follows the document's own children, this takes the anonymous blocks
+/// that hold text next to a block, whose boxes and lines count as much as an
+/// element's (#454).
+fn layout_nodes(document: &BaseDocument) -> Vec<NodeId> {
+    let mut nodes = Vec::new();
+    let mut pending = vec![document.root_node().id];
+    while let Some(id) = pending.pop() {
+        let Some(node) = document.get_node(id) else {
+            continue;
+        };
+        nodes.push(id);
+        if let Some(children) = node.layout_children.borrow().as_deref() {
+            pending.extend(children.iter().rev().copied());
+        }
+    }
+    nodes
+}
+
 fn content_surface_height(document: &HtmlDocument) -> f32 {
     let mut content_bottom = 0.0_f32;
 
-    document.visit(|_, node| {
+    for node in layout_nodes(document)
+        .into_iter()
+        .filter_map(|id| document.get_node(id))
+    {
         // Blitz stores box geometry only on document, element, and
         // anonymous-block nodes. Text and comment nodes are represented by
         // their parent's inline layout and must not be queried directly.
         if node.try_stylo_element_data().is_none() || !visible(node) {
-            return;
+            continue;
         }
         let is_viewport_box = node.data.is_element_with_tag_name(&local_name!("html"))
             || node.data.is_element_with_tag_name(&local_name!("body"));
@@ -1739,7 +1763,7 @@ fn content_surface_height(document: &HtmlDocument) -> f32 {
                 );
             }
         }
-    });
+    }
 
     (content_bottom + EMAIL_SURFACE_BOTTOM_PAD)
         .clamp(MIN_EMAIL_SURFACE_HEIGHT, MAX_EMAIL_SURFACE_HEIGHT)
@@ -2227,17 +2251,22 @@ fn collect_email_links(document: &HtmlDocument, logical_width: f32) -> Vec<Email
             })
             .or_insert(rect);
     };
-    document.visit(|id, node| {
+    // A link's text is laid out where its line is, which for text next to a
+    // block is an anonymous block that only the layout tree holds.
+    for id in layout_nodes(document) {
+        let Some(node) = document.get_node(id) else {
+            continue;
+        };
         if !visible(node)
             || document
                 .node_chain(id)
                 .iter()
                 .any(|id| document.get_node(*id).is_some_and(|n| !visible(n)))
         {
-            return;
+            continue;
         }
         let Some(element) = node.element_data() else {
-            return;
+            continue;
         };
         if let Some(anchor_id) = anchor(id) {
             let size = node.final_layout().size;
@@ -2267,7 +2296,7 @@ fn collect_email_links(document: &HtmlDocument, logical_width: f32) -> Vec<Email
                 }
             }
         }
-    });
+    }
     boxes
         .into_iter()
         .filter_map(|(id, (x0, y0, x1, y1))| {
