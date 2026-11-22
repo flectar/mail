@@ -1115,7 +1115,30 @@ fn collect_addrs(value: Option<&mail_parser::Address>) -> Vec<Address> {
     out
 }
 
-static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
+/// The URL schemes mail may link and load from.
+const MAIL_URL_SCHEMES: [&str; 6] = ["http", "https", "mailto", "tel", "cid", "data"];
+
+static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(mail_sanitizer);
+
+/// A `<body>`'s attributes, which are cleaned as a `<div>`'s, with its text
+/// colour, background and margins kept as well, which browsers render.
+static BODY_SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
+    let mut b = mail_sanitizer();
+    b.add_tag_attributes(
+        "div",
+        [
+            "text",
+            "background",
+            "leftmargin",
+            "topmargin",
+            "marginwidth",
+            "marginheight",
+        ],
+    );
+    b
+});
+
+fn mail_sanitizer() -> ammonia::Builder<'static> {
     let mut b = ammonia::Builder::default();
     b.add_generic_attributes([
         "style",
@@ -1145,16 +1168,44 @@ static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
     // Whether a collapsible section starts open, and the group of which only
     // one may be open at a time. DOMPurify keeps both too.
     .add_tag_attributes("details", ["open", "name"])
-    .url_schemes(std::collections::HashSet::from([
-        "http", "https", "mailto", "tel", "cid", "data",
-    ]))
+    // Presentational attributes that browsers render, as other mail
+    // clients' sanitizers keep them.
+    .add_tag_attributes("img", ["hspace", "vspace"])
+    .add_tag_attributes("table", ["background", "frame", "rules"])
+    .add_tag_attributes("thead", ["background"])
+    .add_tag_attributes("tbody", ["background"])
+    .add_tag_attributes("tfoot", ["background"])
+    .add_tag_attributes("tr", ["background"])
+    .add_tag_attributes("td", ["background", "nowrap"])
+    .add_tag_attributes("th", ["background", "nowrap"])
+    .add_tag_attributes("hr", ["noshade"])
+    .add_tag_attributes("br", ["clear"])
+    .add_tag_attributes("ol", ["type", "reversed"])
+    .add_tag_attributes("ul", ["type"])
+    .add_tag_attributes("li", ["type", "value"])
+    // A `background` is an image URL, which ammonia checks only in `src`.
+    .attribute_filter(|_element, attribute, value| {
+        (attribute != "background" || is_mail_url(value))
+            .then_some(std::borrow::Cow::Borrowed(value))
+    })
+    .url_schemes(std::collections::HashSet::from(MAIL_URL_SCHEMES))
     // CSS is needed by the native Blitz renderer for email typography and
     // layout. It is still inert here because executable script content stays
     // stripped and the renderer does not execute HTML.
     .clean_content_tags(std::collections::HashSet::from(["script"]))
     .link_rel(Some("noopener noreferrer"));
     b
-});
+}
+
+/// Whether ammonia would keep a URL in a `src`: one with a mail URL scheme,
+/// or a relative one.
+fn is_mail_url(value: &str) -> bool {
+    match url::Url::parse(value) {
+        Ok(url) => MAIL_URL_SCHEMES.contains(&url.scheme()),
+        Err(url::ParseError::RelativeUrlWithoutBase) => true,
+        Err(_) => false,
+    }
+}
 
 pub fn sanitize_html(html: &str) -> String {
     let Some(body) = html_document_section(html, "body") else {
@@ -1171,9 +1222,9 @@ pub fn sanitize_html(html: &str) -> String {
         .map(|section| SANITIZER.clean(section.content).to_string())
         .unwrap_or_default();
     let body_content = SANITIZER.clean(body.content).to_string();
-    let body_attributes = sanitize_container_attributes(body.attributes);
+    let body_attributes = sanitize_container_attributes(body.attributes, &BODY_SANITIZER);
     let html_attributes = html_document_section(html, "html")
-        .map(|section| sanitize_container_attributes(section.attributes))
+        .map(|section| sanitize_container_attributes(section.attributes, &SANITIZER))
         .unwrap_or_default();
 
     let capacity = "<html><head></head><body></body></html>".len()
@@ -1264,12 +1315,12 @@ fn html_tag_end(html: &str, start: usize) -> Option<usize> {
 /// Reuse Ammonia's attribute policy by cleaning the attributes on an allowed
 /// neutral element, then transplanting the serialized safe attributes onto
 /// html/body. Event handlers and other unknown attributes never pass through.
-fn sanitize_container_attributes(attributes: &str) -> String {
+fn sanitize_container_attributes(attributes: &str, sanitizer: &ammonia::Builder) -> String {
     if attributes.trim().is_empty() {
         return String::new();
     }
     let probe = format!("<div{attributes}></div>");
-    let cleaned = SANITIZER.clean(&probe).to_string();
+    let cleaned = sanitizer.clean(&probe).to_string();
     let Some(start) = find_html_tag(&cleaned, "div", 0, false) else {
         return String::new();
     };
@@ -4380,6 +4431,53 @@ mod tests {
             cleaned.contains(r#"<span dir="auto">"#),
             "cleaned: {cleaned}"
         );
+    }
+
+    #[test]
+    fn sanitizing_html_keeps_presentational_attributes_browsers_render() {
+        let cleaned = sanitize_html(
+            r##"<html><body text="#333333" background="https://example.com/bg.png" leftmargin="0" topmargin="0" marginwidth="0" marginheight="0" link="#00f" onload="x()">
+            <table background="cid:bg@mail" frame="box" rules="all" bordercolor="red"><tr background="https://e.com/r.png"><td nowrap background="data:image/png;base64,AAAA">a</td><th nowrap>b</th></tr></table>
+            <hr noshade size="1" color="#ccc"><br clear="all"><img src="https://e.com/i.png" hspace="10" vspace="5" align="left">
+            <ol type="a" start="3" reversed><li type="I" value="7">x</li></ol><ul type="square"><li>y</li></ul>
+            <div type="x" value="y" nowrap background="https://e.com/d.png">d</div>
+            </body></html>"##,
+        );
+        for kept in [
+            r##"<body text="#333333" background="https://example.com/bg.png" leftmargin="0" topmargin="0" marginwidth="0" marginheight="0">"##,
+            r#"<table background="cid:bg@mail" frame="box" rules="all">"#,
+            r#"<tr background="https://e.com/r.png">"#,
+            r#"<td nowrap="" background="data:image/png;base64,AAAA">"#,
+            r#"<th nowrap="">"#,
+            r##"<hr noshade="" size="1" color="#ccc">"##,
+            r#"<br clear="all">"#,
+            r#"hspace="10""#,
+            r#"vspace="5""#,
+            r#"<ol type="a" start="3" reversed="">"#,
+            r#"<li type="I" value="7">"#,
+            r#"<ul type="square">"#,
+            "<div>d</div>",
+        ] {
+            assert!(cleaned.contains(kept), "{kept} missing in {cleaned}");
+        }
+        for dropped in ["bordercolor", "onload", "link="] {
+            assert!(!cleaned.contains(dropped), "{dropped} kept in {cleaned}");
+        }
+    }
+
+    #[test]
+    fn background_urls_keep_only_mail_schemes() {
+        let cleaned = sanitize_html(
+            r#"<table background="javascript:alert(1)"><tr><td background="vbscript:x">a</td><td background="images/bg.png">b</td></tr></table>"#,
+        );
+        assert!(!cleaned.contains("javascript:"), "cleaned: {cleaned}");
+        assert!(!cleaned.contains("vbscript:"), "cleaned: {cleaned}");
+        assert!(
+            cleaned.contains(r#"<td background="images/bg.png">"#),
+            "cleaned: {cleaned}"
+        );
+        assert!(is_mail_url("cid:part1@mail"));
+        assert!(!is_mail_url("file:///etc/passwd"));
     }
 
     #[test]

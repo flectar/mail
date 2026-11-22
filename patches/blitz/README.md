@@ -53,7 +53,10 @@ Copied text, find in the reader and accessible names leave out 0011's edge
 placeholders (`blitz_dom::node::without_inline_edges`). Find in the reader highlights
 its matches through 0015's `set_text_highlights`. The reader's CPU renderer blurs
 0019's shadows with vello_cpu's filters, and `src/renderer/cpu_scene.rs` hands it
-only the blurs and drop shadows it runs, since it panics on colour matrices.
+only the blurs and drop shadows it runs, since it panics on colour matrices. The
+mail sanitizer keeps the presentational attributes these patches map, such as
+`background`, `clear`, `frame`, `rules`, `noshade`, `type`, `reversed` and `value`,
+as other mail clients' sanitizers do.
 
 Table-cell layout adjustments use temporary computed-style overrides. They do
 not mutate the author's primary style or its shared hint blocks. Each call
