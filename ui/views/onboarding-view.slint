@@ -10,6 +10,7 @@ import { ProviderButton } from "../components/provider-button.slint";
 import { OAuthSetupDialog } from "../dialogs/oauth-setup-dialog.slint";
 import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
+import { SyncUi } from "../device-sync.slint";
 
 export component OnboardingView inherits Rectangle {
     in property <bool> google-available: false;
@@ -66,6 +67,9 @@ export component OnboardingView inherits Rectangle {
     callback start-oauth(string);
     callback cancel-oauth();
     callback import-accounts();
+    // Join Flectar Mail Sync with a code from another device or the recovery
+    // code: "code" or "recovery".
+    callback join-sync(string);
     in property <string> privacy-policy-url;
     callback open-link(string);
 
@@ -229,6 +233,34 @@ export component OnboardingView inherits Rectangle {
                     has-icon: true;
                     enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving;
                     clicked => { root.oauth-setup-open = true; }
+                }
+                // A new device can get its accounts from Flectar Mail Sync
+                // instead of setting them up again.
+                Rectangle { height: 8px; }
+                Text {
+                    text: @tr("Already syncing on another device? Add this one to it.");
+                    color: root.muted-text;
+                    font-size: TypeScale.caption;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                // Stacked like the buttons above: translations of these labels
+                // run long.
+                Button {
+                    height: 40px;
+                    text: @tr("Enter code");
+                    icon: @image-url("../icons/lucide/outline/link.svg");
+                    has-icon: true;
+                    enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving && !SyncUi.busy;
+                    clicked => { root.join-sync("code"); }
+                }
+                Button {
+                    height: 40px;
+                    text: @tr("Recovery code");
+                    icon: @image-url("../icons/lucide/outline/key.svg");
+                    has-icon: true;
+                    enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving && !SyncUi.busy;
+                    clicked => { root.join-sync("recovery"); }
                 }
                 Rectangle { height: 8px; }
                 Text {
