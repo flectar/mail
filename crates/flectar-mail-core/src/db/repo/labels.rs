@@ -1,12 +1,33 @@
+use crate::autolabel::Category;
 use crate::error::{CoreError, Result};
 use crate::models::Label;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 const DEFAULT_AUTO_LABELS: [(&str, &str, &str, i64); 4] = [
-    ("Marketing", "#e0708a", "FlectarMailAutoMarketing", 1000),
-    ("News", "#5b9dd9", "FlectarMailAutoNews", 1001),
-    ("Social", "#7bc47f", "FlectarMailAutoSocial", 1002),
-    ("Pitch", "#c9a04e", "FlectarMailAutoPitch", 1003),
+    (
+        Category::Marketing.default_name(),
+        "#e0708a",
+        Category::Marketing.keyword(),
+        1000,
+    ),
+    (
+        Category::News.default_name(),
+        "#5b9dd9",
+        Category::News.keyword(),
+        1001,
+    ),
+    (
+        Category::Social.default_name(),
+        "#7bc47f",
+        Category::Social.keyword(),
+        1002,
+    ),
+    (
+        Category::Pitch.default_name(),
+        "#c9a04e",
+        Category::Pitch.keyword(),
+        1003,
+    ),
 ];
 
 fn from_row(row: &Row) -> rusqlite::Result<Label> {

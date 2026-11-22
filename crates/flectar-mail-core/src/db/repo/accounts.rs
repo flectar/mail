@@ -672,6 +672,7 @@ mod tests {
             source,
             delivery_status: Default::default(),
             delivery_error: None,
+            bcc: Vec::new(),
         };
         super::super::sender_identities::save_manual(
             &conn,
@@ -744,6 +745,7 @@ mod tests {
                 source: SenderIdentitySource::Manual,
                 delivery_status: Default::default(),
                 delivery_error: None,
+                bcc: Vec::new(),
             },
         )
         .unwrap();

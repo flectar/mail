@@ -5,6 +5,7 @@ import { AttachmentPreviewDialog } from "dialogs/attachment-preview-dialog.slint
 export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
+export { FolderRoles, FolderRoleRow } from "folder-roles.slint";
 export { Translation, TranslationLanguage } from "translation.slint";
 export { Ai, AiPromptRow } from "ai.slint";
 export { AiSummary } from "ai-summary.slint";
@@ -324,8 +325,6 @@ export global I18n {
 
     ui-message-settings(key, argument, second-argument, third-argument) => {
         if (key == "All accounts") { return @tr("All accounts"); }
-        if (key == "Important") { return @tr("Important"); }
-        if (key == "Other") { return @tr("Other"); }
         if (key == "Name this rule.") { return @tr("Name this rule."); }
         if (key == "Condition {}: give a size in KB.") { return @tr("Condition {}: give a size in KB.", argument); }
         if (key == "Condition {}: this isn't a valid regular expression.") { return @tr("Condition {}: this isn't a valid regular expression.", argument); }
@@ -571,6 +570,13 @@ export global I18n {
         if (key == "Could not update CardDAV sync: {}") { return @tr("Could not update CardDAV sync: {}", argument); }
         if (key == "CardDAV disconnected.") { return @tr("CardDAV disconnected."); }
         if (key == "Could not disconnect CardDAV: {}") { return @tr("Could not disconnect CardDAV: {}", argument); }
+        // Automatic Cc and Bcc (#252).
+        if (key == "Copies saved.") { return @tr("Copies saved."); }
+        if (key == "Could not save the copies: {}") { return @tr("Could not save the copies: {}", argument); }
+        // Special folders (#252): a role whose server marks no folder for it.
+        if (key == "No folder") { return @tr("special folder" => "No folder"); }
+        if (key == "Could not read the folders: {}") { return @tr("Could not read the folders: {}", argument); }
+        if (key == "Could not choose the folder: {}") { return @tr("Could not choose the folder: {}", argument); }
         return "";
     }
 

@@ -234,7 +234,7 @@ fn append_addresses<'a>(
     }
 }
 
-fn format_address(address: &flectar_mail_core::models::Address) -> String {
+pub(super) fn format_address(address: &flectar_mail_core::models::Address) -> String {
     let mut output = String::new();
     append_address(&mut output, address);
     output
@@ -652,6 +652,7 @@ mod tests {
             source: SenderIdentitySource::Provider,
             delivery_status: SenderDeliveryStatus::Unknown,
             delivery_error: None,
+            bcc: Vec::new(),
         }
     }
 

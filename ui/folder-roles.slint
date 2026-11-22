@@ -1,0 +1,188 @@
+import { ScrollView } from "std-widgets.slint";
+import { AccountRow, MailboxRole } from "models.slint";
+import { AppTheme } from "design-system.slint";
+import { TypeScale } from "typography.slint";
+import { IconButton } from "components/controls.slint";
+import { SettingsSelect } from "components/settings-components.slint";
+import { MailboxWords } from "mailbox-words.slint";
+
+// One role an IMAP account's folders can be chosen for (#252).
+export struct FolderRoleRow {
+    // "sent", "drafts", "trash", "spam" or "archive".
+    role: string,
+    // The folder the server suggests, then the account's folders.
+    choices: [string],
+    // The folder chosen in `choices`, or 0 for the server's.
+    selected: int,
+}
+
+// Special folders (src/folder_roles.rs): which folders an IMAP account's
+// Sent, Drafts, Trash, Spam and Archive are. The server suggests them, and
+// Settings can choose others.
+export global FolderRoles {
+    // The account whose folders `roles` shows, or -1.
+    in property <int> account-id: -1;
+    in property <bool> loading;
+    // Why the folders couldn't be read or a choice saved, or "".
+    in property <string> error;
+    in property <[FolderRoleRow]> roles;
+    // Read an account's folders into `roles`.
+    callback load(int);
+    // An account's role goes to its choice at an index of the role's
+    // `choices`.
+    callback choose(int, string, int);
+
+    public pure function role-name(role: string) -> string {
+        return role == "sent" ? MailboxWords.name(MailboxRole.sent)
+            : role == "drafts" ? MailboxWords.name(MailboxRole.drafts)
+            : role == "trash" ? MailboxWords.name(MailboxRole.trash)
+            : role == "spam" ? MailboxWords.name(MailboxRole.spam)
+            : role == "archive" ? MailboxWords.name(MailboxRole.archive)
+            : role;
+    }
+}
+
+// The choice of folder for one role: its name beside the select, or above
+// it on a phone.
+component FolderRoleChoice inherits Rectangle {
+    in property <bool> compact;
+    in property <int> account-id;
+    in property <FolderRoleRow> choice;
+
+    private property <string> name: FolderRoles.role-name(root.choice.role);
+
+    height: root.compact ? 26px + 36px : 36px;
+
+    Text {
+        x: 0px;
+        y: root.compact ? 0px : (36px - self.height) / 2;
+        width: root.compact ? parent.width : 112px;
+        height: 20px;
+        text: root.name;
+        color: AppTheme.body;
+        font-size: TypeScale.body;
+        font-weight: 600;
+        overflow: elide;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+    SettingsSelect {
+        x: root.compact ? 0px : 124px;
+        y: root.compact ? 26px : 0px;
+        width: parent.width - self.x;
+        choices: root.choice.choices;
+        selected-index: root.choice.selected;
+        accessible-label: root.name;
+        selection-changed(index, value) => {
+            FolderRoles.choose(root.account-id, root.choice.role, index);
+        }
+    }
+}
+
+export component FolderRolesDialog inherits Rectangle {
+    in property <bool> compact;
+    in property <AccountRow> account;
+    callback close();
+
+    // Up to the content's height; taller content scrolls.
+    out property <length> content-height: content.preferred-height;
+
+    private property <bool> loaded: FolderRoles.account-id == root.account.id && !FolderRoles.loading;
+
+    background: AppTheme.surface;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: AppTheme.border-subtle;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-color: #00000055;
+    clip: true;
+
+    // Takes the keyboard when it opens, so Escape closes it.
+    FocusScope {
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.close();
+                return accept;
+            }
+            reject
+        }
+
+        ScrollView {
+            width: parent.width;
+            height: parent.height;
+            content-width: self.visible-width;
+            mouse-drag-pan-enabled: root.compact;
+
+            content := VerticalLayout {
+                width: root.width;
+                padding-top: 20px;
+                padding-right: 18px;
+                padding-bottom: 20px;
+                padding-left: 18px;
+                spacing: 14px;
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 1px;
+                        Text {
+                            text: @tr("Special folders");
+                            color: AppTheme.title;
+                            font-size: TypeScale.heading;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: root.account.email;
+                            color: AppTheme.secondary;
+                            font-size: TypeScale.secondary;
+                            overflow: elide;
+                        }
+                    }
+                    IconButton {
+                        width: 36px;
+                        height: 36px;
+                        icon: @image-url("icons/lucide/outline/x.svg");
+                        icon-color: AppTheme.secondary;
+                        ghost: true;
+                        hover-background: AppTheme.accent-soft;
+                        tooltip-text: @tr("Close");
+                        clicked => { root.close(); }
+                    }
+                }
+
+                Text {
+                    text: @tr("Flectar Mail files mail in the folders your server marks for each purpose. Choose others if those aren't right.");
+                    color: AppTheme.muted;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+
+                if !root.loaded : Text {
+                    text: @tr("Reading the folders…");
+                    color: AppTheme.secondary;
+                    font-size: TypeScale.caption;
+                }
+
+                if root.loaded : VerticalLayout {
+                    spacing: root.compact ? 14px : 10px;
+                    for row in FolderRoles.roles : FolderRoleChoice {
+                        compact: root.compact;
+                        account-id: root.account.id;
+                        choice: row;
+                    }
+                }
+
+                if FolderRoles.error != "" && FolderRoles.account-id == root.account.id : Text {
+                    text: FolderRoles.error;
+                    color: AppTheme.destructive;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}

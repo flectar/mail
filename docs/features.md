@@ -6,6 +6,10 @@ A closer look at what the [README](../README.md) summarizes.
 - [Tabs](#tabs)
 - [Search](#search)
 - [Checking for mail](#checking-for-mail)
+- [Advanced account settings](#advanced-account-settings)
+- [Special folders](#special-folders)
+- [Sender addresses](#sender-addresses)
+- [Automatic Cc and Bcc](#automatic-cc-and-bcc)
 - [New-mail notifications](#new-mail-notifications)
 - [Profiles and account colors](#profiles-and-account-colors)
 - [Appearance](#appearance)
@@ -28,6 +32,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Read receipts](#read-receipts)
 - [Calendar invitations](#calendar-invitations)
 - [Translation](#translation)
+- [AI](#ai)
 - [AI agents](#ai-agents)
 - [Flectar Mail Sync](#flectar-mail-sync)
 - [Storage and backups](#storage-and-backups)
@@ -239,6 +244,52 @@ An SMTP server that signs in with another username, such as your provider's or
 company's relay, takes it in **SMTP username**, with its own **SMTP password**,
 which stays in the system keyring like the account's. Without one, the SMTP
 server signs in with the account's password.
+
+## Special folders
+
+An IMAP account keeps sent mail, drafts, deleted mail, spam and archived mail
+in the folders its server marks for each (RFC 6154), or else in the ones named
+for them, such as Sent or Trash. Where those aren't the right ones, as on a
+server that marks none or names them in another language, **Special folders**
+in the account's card in Settings → Accounts chooses others. **Sent**,
+**Drafts**, **Trash**, **Spam** and **Archive** each go to the folder chosen
+for them. The first choice, **Automatic**, keeps the server's folder, and reads
+**No folder** where the server has none. A folder holds one of them at a time,
+so choosing it for another frees it from the first.
+
+From then on, sent mail and drafts are saved in the chosen folders, and **Move
+to spam**, deleting and archiving move mail into them. The sidebar shows them
+under the names of what they hold. A chosen folder renamed in Flectar Mail keeps
+its place, one deleted gives it back to the server's folder, and with
+**Subscribed folders only** a chosen folder is listed though you haven't
+subscribed to it. Flectar Mail Sync takes the choices to your other devices.
+
+## Sender addresses
+
+An account can send from more addresses than the one it signs in with. Gmail's
+send-as addresses and a JMAP server's identities come from the provider, and for
+other servers you add the aliases they let you send from in the account's
+**Signatures** tab in Settings → Accounts, which also chooses the one new
+messages start from. An account keeps up to 1,000. Past ten, the composer's
+**From** and **Default sender identity** open a picker that finds an address by
+its name or address as you type, and Settings lists 50 at a time with a search
+for the others.
+
+## Automatic Cc and Bcc
+
+Every message you write from an account can start with copies to the same
+addresses, such as a colleague in Cc or your archive in Bcc. Set them under
+**Automatic Cc and Bcc** in the account's **Signatures** tab in Settings →
+Accounts. **Edit** on a sender address adds copies of its own, and an address a
+JMAP server gives also gets the Bcc the server keeps for it (RFC 8621).
+
+New messages, replies, replies to all and forwards start with the copies, in Cc
+and Bcc, where you see them and can take them out before sending. An address the
+message already goes to isn't added again. Choosing another sender swaps the
+copies for that sender's and keeps the addresses you typed, while a draft you
+open again keeps the ones it had. Read receipts, answers to invitations and
+other mail Flectar Mail sends for you get none. Flectar Mail Sync takes the
+copies to your other devices.
 
 ## New-mail notifications
 

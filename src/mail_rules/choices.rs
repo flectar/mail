@@ -1,10 +1,23 @@
 //! What the rule editor offers (#238): the fields, comparisons and actions
 //! in its order, and the folders and labels a rule's account can use.
 
+use crate::MailboxRole;
+use crate::mail_scope::label_role;
 use flectar_mail_core::models::{
     Account, FolderInfo, Label, MailProtocol, MailRule, RuleAction, RuleField, RuleHereWhy, RuleOp,
     ServerRules, ServerRulesState,
 };
+
+/// What a category the rule editor offers is called.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum TabName {
+    /// By the name the window gives the role in its language: Important,
+    /// Other, and the automatic categories that still have the names the app
+    /// gave them.
+    Role(MailboxRole),
+    /// By the name its label was given.
+    Text(String),
+}
 
 /// The fields the editor lists, in its order. Those that need the whole
 /// message come last.
@@ -154,16 +167,28 @@ impl Choices {
         names.join(" / ")
     }
 
-    /// The Inbox's categories a rule can show mail in, by key, with the
-    /// automatic categories' names: Important and Other come first, and the
-    /// app names them.
-    pub(super) fn tabs(&self) -> Vec<(String, Option<String>)> {
-        let mut tabs = vec![("important".to_owned(), None), ("other".to_owned(), None)];
+    /// The Inbox's categories a rule can show mail in, by key, with their
+    /// names: Important and Other come first, and the app names them, as it
+    /// names the automatic categories that keep their built-in names.
+    pub(super) fn tabs(&self) -> Vec<(String, TabName)> {
+        let mut tabs = vec![
+            (
+                "important".to_owned(),
+                TabName::Role(MailboxRole::Important),
+            ),
+            ("other".to_owned(), TabName::Role(MailboxRole::Other)),
+        ];
         tabs.extend(
             self.labels
                 .iter()
                 .filter(|label| label.is_auto)
-                .map(|label| (format!("label:{}", label.id), Some(label.name.clone()))),
+                .map(|label| {
+                    let name = match label_role(label) {
+                        MailboxRole::None => TabName::Text(label.name.clone()),
+                        role => TabName::Role(role),
+                    };
+                    (format!("label:{}", label.id), name)
+                }),
         );
         tabs
     }
@@ -562,6 +587,11 @@ mod tests {
             owner_account_id: owner,
             is_auto,
         };
+        // The categories the app seeds, whose keywords tell them apart.
+        let category = |id, name: &str, keyword: &str| Label {
+            keyword: keyword.into(),
+            ..label(id, name, None, true)
+        };
         let choices = Choices {
             accounts: vec![
                 account(1, MailProtocol::Imap),
@@ -577,7 +607,17 @@ mod tests {
                 label(1, "Mine", None, false),
                 label(2, "Work", Some(1), false),
                 label(3, "Other", Some(2), false),
-                label(4, "News", None, true),
+                category(4, "News", "FlectarMailAutoNews"),
+                category(5, "Marketing", "FlectarMailAutoMarketing"),
+                // Given a name of its own, a category keeps it.
+                category(6, "Offers", "FlectarMailAutoSocial"),
+                // A name alone makes no category.
+                label(7, "Pitch", None, true),
+                // Neither does a manual label, whatever its keyword.
+                Label {
+                    keyword: "FlectarMailAutoPitch".into(),
+                    ..label(8, "Pitch", None, false)
+                },
             ],
         };
         assert!(choices.account(0).is_none());
@@ -592,16 +632,30 @@ mod tests {
         assert!(choices.folders(None).is_empty());
         assert_eq!(
             choices.labels(first),
-            [(1, "Mine".to_owned()), (2, "Work".to_owned())]
+            [
+                (1, "Mine".to_owned()),
+                (2, "Work".to_owned()),
+                (8, "Pitch".to_owned())
+            ]
         );
-        assert_eq!(choices.labels(None), [(1, "Mine".to_owned())]);
-        // Important and Other, then the automatic categories.
+        assert_eq!(
+            choices.labels(None),
+            [(1, "Mine".to_owned()), (8, "Pitch".to_owned())]
+        );
+        // Important and Other, then the automatic categories: named by the
+        // app in its language while they have the names it gave them.
         assert_eq!(
             choices.tabs(),
             [
-                ("important".to_owned(), None),
-                ("other".to_owned(), None),
-                ("label:4".to_owned(), Some("News".to_owned())),
+                (
+                    "important".to_owned(),
+                    TabName::Role(MailboxRole::Important)
+                ),
+                ("other".to_owned(), TabName::Role(MailboxRole::Other)),
+                ("label:4".to_owned(), TabName::Role(MailboxRole::News)),
+                ("label:5".to_owned(), TabName::Role(MailboxRole::Marketing)),
+                ("label:6".to_owned(), TabName::Text("Offers".to_owned())),
+                ("label:7".to_owned(), TabName::Text("Pitch".to_owned())),
             ]
         );
         let show_in = |tab: &str| MailRule {

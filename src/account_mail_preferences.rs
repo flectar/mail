@@ -4,13 +4,20 @@ use flectar_mail_core::{
     Core,
     mail_security::{MailSecurity, OpenedMessage},
     models::{
-        AccountConfig, MessageFormat, SenderIdentity, SenderIdentitySource, Settings, Signature,
-        SignatureDefaults,
+        AccountConfig, AccountSettings, AutomaticCopies, MessageFormat, SenderIdentity,
+        SenderIdentitySource, Settings, Signature, SignatureDefaults,
     },
     sender_identities::{ManualIdentityPolicy, manual_identity_policy},
 };
 use slint::SharedString;
 use std::{cell::Cell, future::Future};
+
+thread_local! {
+    /// The account's sender addresses as Settings last listed them, with its
+    /// settings, which a search lists again from (#252).
+    static IDENTITIES: RefCell<Option<(AccountSettings, Vec<SenderIdentity>)>> =
+        const { RefCell::new(None) };
+}
 
 /// Async work is owned by a profile/account generation. A removed account or
 /// replaced core must never receive a late settings or decrypted-content result.
@@ -167,10 +174,19 @@ fn verified_identities(identities: &[SenderIdentity]) -> Vec<SenderIdentity> {
         .collect()
 }
 
-fn identity_rows(identities: &[SenderIdentity]) -> Vec<SenderIdentityRow> {
+fn identity_rows(
+    identities: &[SenderIdentity],
+    settings: &AccountSettings,
+) -> Vec<SenderIdentityRow> {
     identities
         .iter()
-        .map(|identity| SenderIdentityRow {
+        .map(|identity| {
+            let own = settings
+                .identity_copies
+                .get(&identity.email.trim().to_lowercase());
+            (identity, own)
+        })
+        .map(|(identity, own)| SenderIdentityRow {
             email: identity.email.clone().into(),
             name: identity
                 .display_name
@@ -185,8 +201,65 @@ fn identity_rows(identities: &[SenderIdentity]) -> Vec<SenderIdentityRow> {
             wildcard: identity.is_wildcard(),
             delivery: identity.delivery_status.as_str().into(),
             error: identity.delivery_error.clone().unwrap_or_default().into(),
+            cc: own
+                .map(|own| automatic_copies::text(&own.cc))
+                .unwrap_or_default()
+                .into(),
+            bcc: own
+                .map(|own| automatic_copies::text(&own.bcc))
+                .unwrap_or_default()
+                .into(),
+            provider_bcc: automatic_copies::text(&identity.bcc).into(),
         })
         .collect()
+}
+
+/// List the account's sender addresses that Settings' search matches, so
+/// many at most (#252).
+fn list_identities(ui: &AccountMailPreferences<'_>) {
+    IDENTITIES.with_borrow(|listed| {
+        let Some((settings, identities)) = listed else {
+            return;
+        };
+        let labels = identities
+            .iter()
+            .map(|identity| (identity_label(identity), identity.email.clone()))
+            .collect::<Vec<_>>();
+        let pairs = labels
+            .iter()
+            .map(|(label, email)| (label.as_str(), email.as_str()))
+            .collect::<Vec<_>>();
+        let (shown, matches) = sender_picker::matching(
+            &pairs,
+            &ui.get_sender_identity_query(),
+            sender_picker::LISTED_AT_MOST,
+        );
+        let shown = shown
+            .into_iter()
+            .map(|index| identities[index].clone())
+            .collect::<Vec<_>>();
+        ui.set_sender_identity_rows(ModelRc::new(VecModel::from(identity_rows(
+            &shown, settings,
+        ))));
+        ui.set_sender_identity_count(i32::try_from(identities.len()).unwrap_or(i32::MAX));
+        ui.set_sender_identity_match_count(i32::try_from(matches).unwrap_or(i32::MAX));
+    });
+}
+
+/// The copies every message written from the account starts with, as
+/// Settings shows them (#252).
+fn project_copies(ui: &AccountMailPreferences<'_>, copies: &AutomaticCopies) {
+    ui.set_copies_cc(automatic_copies::text(&copies.cc).into());
+    ui.set_copies_bcc(automatic_copies::text(&copies.bcc).into());
+}
+
+/// What Settings' Cc and Bcc fields `cc` and `bcc` hold, or why they hold
+/// something else.
+fn typed_copies(cc: &str, bcc: &str) -> Result<AutomaticCopies, String> {
+    Ok(AutomaticCopies {
+        cc: automatic_copies::parse(cc)?,
+        bcc: automatic_copies::parse(bcc)?,
+    })
 }
 
 fn policy_name(config: &AccountConfig) -> &'static str {
@@ -201,7 +274,10 @@ fn clear_sender_form(ui: &AccountMailPreferences<'_>) {
     ui.set_sender_form_email("".into());
     ui.set_sender_form_name("".into());
     ui.set_sender_form_reply_to("".into());
+    ui.set_sender_form_cc("".into());
+    ui.set_sender_form_bcc("".into());
     ui.set_sender_form_editing(false);
+    ui.set_sender_form_provider(false);
 }
 
 fn project_identities(
@@ -226,7 +302,8 @@ fn project_identities(
             .collect::<Vec<_>>(),
     )));
     ui.set_sender_identities(ModelRc::new(VecModel::from(choices)));
-    ui.set_sender_identity_rows(ModelRc::new(VecModel::from(identity_rows(identities))));
+    IDENTITIES.set(Some((config.settings.clone(), identities.to_vec())));
+    list_identities(&ui);
     ui.set_sender_identity_policy(policy_name(config).into());
     let configured = config.settings.default_sender_email.as_deref();
     let index = configured
@@ -405,7 +482,9 @@ pub(super) fn register(
                             ui.set_key_inventory("".into());
                             project(&app, &settings, config.id);
                             clear_sender_form(&ui);
+                            ui.set_sender_identity_query("".into());
                             project_identities(&app, config, &identities, warning.as_deref());
+                            project_copies(&ui, &config.settings.copies);
                             ui.invoke_edit_signature(-1);
                             ui.set_message_format_index(i32::from(
                                 config.settings.message_format == MessageFormat::PlainText,
@@ -585,11 +664,31 @@ pub(super) fn register(
         let name = optional(ui.get_sender_form_name());
         let reply_to = optional(ui.get_sender_form_reply_to());
         let editing = ui.get_sender_form_editing();
+        // An address the provider gives keeps its name and reply-to address.
+        let provider = ui.get_sender_form_provider();
+        let copies = match typed_copies(&ui.get_sender_form_cc(), &ui.get_sender_form_bcc()) {
+            Ok(copies) => copies,
+            Err(error) => {
+                ui.set_status(translated(
+                    &app,
+                    &UiMessage::detail("Could not save the copies: {}", error),
+                ));
+                return;
+            }
+        };
         work.spawn(
             &app,
             true,
             async move {
-                core.save_sender_identity(account_id, email, name, reply_to)
+                let email = if provider {
+                    email
+                } else {
+                    core.save_sender_identity(account_id, email, name, reply_to)
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .email
+                };
+                core.set_automatic_copies(account_id, Some(email), copies)
                     .await
                     .map_err(|error| error.to_string())?;
                 local_identities(&core, account_id).await
@@ -600,14 +699,18 @@ pub(super) fn register(
                     Ok((config, identities)) => {
                         clear_sender_form(&ui);
                         project_identities(&app, &config, &identities, None);
-                        ui.set_status(
-                            if editing {
-                                "Sender address saved."
-                            } else {
-                                "Sender address added. It can now be chosen in the composer."
-                            }
-                            .into(),
-                        );
+                        if provider {
+                            ui.set_status(translated(&app, &UiMessage::plain("Copies saved.")));
+                        } else {
+                            ui.set_status(
+                                if editing {
+                                    "Sender address saved."
+                                } else {
+                                    "Sender address added. It can now be chosen in the composer."
+                                }
+                                .into(),
+                            );
+                        }
                     }
                     Err(error) => ui.set_status(error.into()),
                 }
@@ -621,13 +724,16 @@ pub(super) fn register(
         let Some(row) = ui
             .get_sender_identity_rows()
             .iter()
-            .find(|row| row.manual && row.email == email)
+            .find(|row| !row.wildcard && row.email == email)
         else {
             return;
         };
+        ui.set_sender_form_provider(!row.manual);
         ui.set_sender_form_email(row.email);
         ui.set_sender_form_name(row.name);
         ui.set_sender_form_reply_to(row.reply_to);
+        ui.set_sender_form_cc(row.cc);
+        ui.set_sender_form_bcc(row.bcc);
         ui.set_sender_form_editing(true);
     });
     let weak = app.as_weak();
@@ -635,6 +741,71 @@ pub(super) fn register(
         if let Some(app) = weak.upgrade() {
             clear_sender_form(&app.global::<AccountMailPreferences>());
         }
+    });
+    let weak = app.as_weak();
+    ui.on_sender_identity_search(move |_| {
+        if let Some(app) = weak.upgrade() {
+            list_identities(&app.global::<AccountMailPreferences>());
+        }
+    });
+    let weak = app.as_weak();
+    ui.on_default_sender_search(move |query| {
+        let Some(app) = weak.upgrade() else { return };
+        let ui = app.global::<AccountMailPreferences>();
+        let choices = ui
+            .get_sender_identities()
+            .iter()
+            .map(|choice| (choice.label.to_string(), choice.email.to_string()))
+            .collect::<Vec<_>>();
+        let (rows, matches) = sender_picker::rows(&choices, &query);
+        ui.set_default_sender_matches(ModelRc::new(VecModel::from(rows)));
+        ui.set_default_sender_match_count(i32::try_from(matches).unwrap_or(i32::MAX));
+    });
+    let weak = app.as_weak();
+    let state_copies = state.clone();
+    let work = tasks.clone();
+    ui.on_save_copies(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let ui = app.global::<AccountMailPreferences>();
+        if ui.get_busy() || ui.get_account_id() <= 0 {
+            return;
+        }
+        let account_id = i64::from(ui.get_account_id());
+        let Some(core) = core(&state_copies) else {
+            return;
+        };
+        let copies = match typed_copies(&ui.get_copies_cc(), &ui.get_copies_bcc()) {
+            Ok(copies) => copies,
+            Err(error) => {
+                ui.set_status(translated(
+                    &app,
+                    &UiMessage::detail("Could not save the copies: {}", error),
+                ));
+                return;
+            }
+        };
+        work.spawn(
+            &app,
+            true,
+            async move {
+                core.set_automatic_copies(account_id, None, copies)
+                    .await
+                    .map_err(|error| error.to_string())
+            },
+            move |app, result| {
+                let ui = app.global::<AccountMailPreferences>();
+                match result {
+                    Ok(saved) => {
+                        project_copies(&ui, &saved);
+                        ui.set_status(translated(&app, &UiMessage::plain("Copies saved.")));
+                    }
+                    Err(error) => ui.set_status(translated(
+                        &app,
+                        &UiMessage::detail("Could not save the copies: {}", error),
+                    )),
+                }
+            },
+        );
     });
     let weak = app.as_weak();
     let state_remove_sender = state.clone();
