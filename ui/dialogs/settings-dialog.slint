@@ -3697,8 +3697,9 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    shortcuts-scroll := ScrollView {
-                        visible: root.settings_tab == "Shortcuts";
+                    // Built only while it shows, as each page always built makes
+                    // the account view's stack frame bigger.
+                    if root.settings_tab == "Shortcuts" : shortcuts-scroll := ScrollView {
                         width: parent.width; height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
                         content-width: self.visible-width;

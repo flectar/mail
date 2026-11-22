@@ -140,8 +140,8 @@ msgid ""
 "on this computer, so what you send stays here."
 msgstr ""
 
-#: ui/ai.slint:135 ui/dialogs/settings-dialog.slint:4334
-#: ui/ai.slint:135 ui/dialogs/settings-dialog.slint:4334 ui/translation.slint:328
+#: ui/ai.slint:135 ui/dialogs/settings-dialog.slint:4335
+#: ui/ai.slint:135 ui/dialogs/settings-dialog.slint:4335 ui/translation.slint:328
 msgid "Server address"
 msgstr ""
 
@@ -718,9 +718,9 @@ msgstr[1] ""
 
 #. Local mail has no archive or spam.
 #: ui/app.slint:283 ui/components/rule-editor.slint:70
-#: ui/app.slint:283 ui/components/rule-editor.slint:70 ui/dialogs/settings-dialog.slint:3716
-#: ui/app.slint:283 ui/components/rule-editor.slint:70 ui/dialogs/settings-dialog.slint:3716 ui/views/mail-list-pane.slint:1730
-#: ui/app.slint:283 ui/components/rule-editor.slint:70 ui/dialogs/settings-dialog.slint:3716 ui/views/mail-list-pane.slint:1730 ui/views/mail-reading-pane.slint:417
+#: ui/app.slint:283 ui/components/rule-editor.slint:70 ui/dialogs/settings-dialog.slint:3717
+#: ui/app.slint:283 ui/components/rule-editor.slint:70 ui/dialogs/settings-dialog.slint:3717 ui/views/mail-list-pane.slint:1730
+#: ui/app.slint:283 ui/components/rule-editor.slint:70 ui/dialogs/settings-dialog.slint:3717 ui/views/mail-list-pane.slint:1730 ui/views/mail-reading-pane.slint:417
 msgid "Archive"
 msgstr ""
 
@@ -3450,7 +3450,7 @@ msgstr ""
 
 #: ui/components/account-calendars.slint:275
 #: ui/components/account-calendars.slint:275
-#: ui/components/account-calendars.slint:275 ui/dialogs/settings-dialog.slint:4308
+#: ui/components/account-calendars.slint:275 ui/dialogs/settings-dialog.slint:4309
 msgid "Add CalDAV calendar"
 msgstr ""
 
@@ -3636,9 +3636,9 @@ msgid ""
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:406
-#: ui/components/account-mail-preferences.slint:406 ui/dialogs/settings-dialog.slint:4478
-#: ui/components/account-mail-preferences.slint:406 ui/dialogs/settings-dialog.slint:4478 ui/views/onboarding-view.slint:319
-#: ui/components/account-mail-preferences.slint:406 ui/dialogs/settings-dialog.slint:4478 ui/views/onboarding-view.slint:319
+#: ui/components/account-mail-preferences.slint:406 ui/dialogs/settings-dialog.slint:4479
+#: ui/components/account-mail-preferences.slint:406 ui/dialogs/settings-dialog.slint:4479 ui/views/onboarding-view.slint:319
+#: ui/components/account-mail-preferences.slint:406 ui/dialogs/settings-dialog.slint:4479 ui/views/onboarding-view.slint:319
 msgid "Email address"
 msgstr ""
 
@@ -3690,12 +3690,12 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130
 #: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130
 #: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415
-#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4566
-#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4566 ui/dialogs/settings-dialog.slint:4859
-#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4566 ui/dialogs/settings-dialog.slint:4859 ui/link-services.slint:120
-#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4566 ui/dialogs/settings-dialog.slint:4859 ui/link-services.slint:120 ui/network.slint:421
-#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4566 ui/dialogs/settings-dialog.slint:4859 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472
-#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4566 ui/dialogs/settings-dialog.slint:4859 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472 ui/views/mail-reading-pane.slint:2388
+#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4567
+#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4567 ui/dialogs/settings-dialog.slint:4860
+#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4567 ui/dialogs/settings-dialog.slint:4860 ui/link-services.slint:120
+#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4567 ui/dialogs/settings-dialog.slint:4860 ui/link-services.slint:120 ui/network.slint:421
+#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4567 ui/dialogs/settings-dialog.slint:4860 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472
+#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1382 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:130 ui/dialogs/settings-dialog.slint:3415 ui/dialogs/settings-dialog.slint:4567 ui/dialogs/settings-dialog.slint:4860 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:472 ui/views/mail-reading-pane.slint:2388
 msgid "Cancel"
 msgstr ""
 
@@ -3988,13 +3988,13 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382
 #: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213
 #: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213
-#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4454
-#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4454
-#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4454 ui/dialogs/when-dialog.slint:197
-#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4454 ui/dialogs/when-dialog.slint:197 ui/views/files-view.slint:505
-#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4454 ui/dialogs/when-dialog.slint:197 ui/views/files-view.slint:505 ui/views/files-view.slint:695
-#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4454 ui/dialogs/when-dialog.slint:197 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
-#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4454 ui/dialogs/when-dialog.slint:197 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
+#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4455
+#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4455
+#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4455 ui/dialogs/when-dialog.slint:197
+#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4455 ui/dialogs/when-dialog.slint:197 ui/views/files-view.slint:505
+#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4455 ui/dialogs/when-dialog.slint:197 ui/views/files-view.slint:505 ui/views/files-view.slint:695
+#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4455 ui/dialogs/when-dialog.slint:197 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
+#: ui/components/account-mail-preferences.slint:625 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1382 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4455 ui/dialogs/when-dialog.slint:197 ui/views/files-view.slint:505 ui/views/files-view.slint:695 ui/window-chrome.slint:201
 msgid "Close"
 msgstr ""
 
@@ -6088,7 +6088,7 @@ msgstr ""
 msgid "New rule"
 msgstr ""
 
-#: ui/components/rule-editor.slint:336 ui/dialogs/settings-dialog.slint:4739
+#: ui/components/rule-editor.slint:336 ui/dialogs/settings-dialog.slint:4740
 msgid "Edit rule"
 msgstr ""
 
@@ -6350,7 +6350,7 @@ msgstr ""
 msgid "New version available"
 msgstr ""
 
-#: ui/components/sidebar.slint:82 ui/dialogs/settings-dialog.slint:3956
+#: ui/components/sidebar.slint:82 ui/dialogs/settings-dialog.slint:3957
 msgid "Version {}"
 msgstr ""
 
@@ -6461,8 +6461,8 @@ msgstr ""
 #: ui/components/tab-overview.slint:70
 #: ui/components/tab-overview.slint:70 ui/dialogs/settings-dialog.slint:2154
 #: ui/components/tab-overview.slint:70 ui/dialogs/settings-dialog.slint:2154 ui/dialogs/settings-dialog.slint:3311
-#: ui/components/tab-overview.slint:70 ui/dialogs/settings-dialog.slint:2154 ui/dialogs/settings-dialog.slint:3311 ui/dialogs/settings-dialog.slint:4236
-#: ui/components/tab-overview.slint:70 ui/dialogs/settings-dialog.slint:2154 ui/dialogs/settings-dialog.slint:3311 ui/dialogs/settings-dialog.slint:4236
+#: ui/components/tab-overview.slint:70 ui/dialogs/settings-dialog.slint:2154 ui/dialogs/settings-dialog.slint:3311 ui/dialogs/settings-dialog.slint:4237
+#: ui/components/tab-overview.slint:70 ui/dialogs/settings-dialog.slint:2154 ui/dialogs/settings-dialog.slint:3311 ui/dialogs/settings-dialog.slint:4237
 msgid "Contacts"
 msgstr ""
 
@@ -6470,7 +6470,7 @@ msgstr ""
 #: ui/components/tab-overview.slint:72
 #: ui/components/tab-overview.slint:72
 #: ui/components/tab-overview.slint:72
-#: ui/components/tab-overview.slint:72 ui/dialogs/settings-dialog.slint:3708
+#: ui/components/tab-overview.slint:72 ui/dialogs/settings-dialog.slint:3709
 msgid "Mail"
 msgstr ""
 
@@ -6483,7 +6483,7 @@ msgstr ""
 
 #: ui/components/tab-overview.slint:200 ui/components/tab-overview.slint:224
 #: ui/components/tab-overview.slint:200 ui/components/tab-overview.slint:224
-#: ui/components/tab-overview.slint:200 ui/components/tab-overview.slint:224 ui/dialogs/settings-dialog.slint:3735
+#: ui/components/tab-overview.slint:200 ui/components/tab-overview.slint:224 ui/dialogs/settings-dialog.slint:3736
 msgid "Tabs"
 msgstr ""
 
@@ -6686,7 +6686,7 @@ msgstr ""
 msgid "Close tabs to the right"
 msgstr ""
 
-#: ui/components/zoom-controls.slint:20 ui/dialogs/settings-dialog.slint:3731
+#: ui/components/zoom-controls.slint:20 ui/dialogs/settings-dialog.slint:3732
 msgid "Zoom out"
 msgstr ""
 
@@ -6698,7 +6698,7 @@ msgstr ""
 msgid "Zoom percentage"
 msgstr ""
 
-#: ui/components/zoom-controls.slint:39 ui/dialogs/settings-dialog.slint:3730
+#: ui/components/zoom-controls.slint:39 ui/dialogs/settings-dialog.slint:3731
 msgid "Zoom in"
 msgstr ""
 
@@ -6722,7 +6722,7 @@ msgstr ""
 msgid "Yearly"
 msgstr ""
 
-#: ui/device-sync.slint:390 ui/dialogs/settings-dialog.slint:3844
+#: ui/device-sync.slint:390 ui/dialogs/settings-dialog.slint:3845
 msgid "Flectar Mail Sync"
 msgstr ""
 
@@ -6730,7 +6730,7 @@ msgstr ""
 msgid "All your devices, one subscription"
 msgstr ""
 
-#: ui/device-sync.slint:427 ui/dialogs/settings-dialog.slint:3848
+#: ui/device-sync.slint:427 ui/dialogs/settings-dialog.slint:3849
 msgid "Scheduled emails go out from any of your devices"
 msgstr ""
 
@@ -6742,7 +6742,7 @@ msgstr ""
 msgid "Accounts, sign-ins, signatures, profiles and preferences"
 msgstr ""
 
-#: ui/device-sync.slint:430 ui/dialogs/settings-dialog.slint:3851
+#: ui/device-sync.slint:430 ui/dialogs/settings-dialog.slint:3852
 msgid "End-to-end encrypted: not even Flectar Mail can read it"
 msgstr ""
 
@@ -6803,8 +6803,8 @@ msgid "{} a year"
 msgstr ""
 
 #: ui/device-sync.slint:624 ui/dialogs/settings-dialog.slint:87
-#: ui/device-sync.slint:624 ui/dialogs/settings-dialog.slint:87 ui/dialogs/settings-dialog.slint:4158
-#: ui/device-sync.slint:624 ui/dialogs/settings-dialog.slint:87 ui/dialogs/settings-dialog.slint:4158
+#: ui/device-sync.slint:624 ui/dialogs/settings-dialog.slint:87 ui/dialogs/settings-dialog.slint:4159
+#: ui/device-sync.slint:624 ui/dialogs/settings-dialog.slint:87 ui/dialogs/settings-dialog.slint:4159
 msgid "Sync"
 msgstr ""
 
@@ -7342,8 +7342,8 @@ msgstr ""
 msgid "Scan the QR code your other device shows."
 msgstr ""
 
-#: ui/device-sync.slint:1460 ui/dialogs/settings-dialog.slint:4384
-#: ui/device-sync.slint:1460 ui/dialogs/settings-dialog.slint:4384 ui/views/onboarding-view.slint:470
+#: ui/device-sync.slint:1460 ui/dialogs/settings-dialog.slint:4385
+#: ui/device-sync.slint:1460 ui/dialogs/settings-dialog.slint:4385 ui/views/onboarding-view.slint:470
 msgid "Connecting…"
 msgstr ""
 
@@ -7379,9 +7379,9 @@ msgid "Connect"
 msgstr ""
 
 #: ui/dialogs/attachment-preview-dialog.slint:39
-#: ui/dialogs/attachment-preview-dialog.slint:39 ui/dialogs/settings-dialog.slint:4018
-#: ui/dialogs/attachment-preview-dialog.slint:39 ui/dialogs/settings-dialog.slint:4018 ui/views/files-view.slint:502
-#: ui/dialogs/attachment-preview-dialog.slint:39 ui/dialogs/settings-dialog.slint:4018 ui/views/files-view.slint:502
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/dialogs/settings-dialog.slint:4019
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/dialogs/settings-dialog.slint:4019 ui/views/files-view.slint:502
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/dialogs/settings-dialog.slint:4019 ui/views/files-view.slint:502
 msgid "Download"
 msgstr ""
 
@@ -8845,12 +8845,12 @@ msgstr ""
 msgid "about version credits contributors license flectar"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:955 ui/dialogs/settings-dialog.slint:4111
-#: ui/dialogs/settings-dialog.slint:955 ui/dialogs/settings-dialog.slint:4111
+#: ui/dialogs/settings-dialog.slint:955 ui/dialogs/settings-dialog.slint:4112
+#: ui/dialogs/settings-dialog.slint:955 ui/dialogs/settings-dialog.slint:4112
 msgid "Privacy policy"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:956 ui/dialogs/settings-dialog.slint:4125
+#: ui/dialogs/settings-dialog.slint:956 ui/dialogs/settings-dialog.slint:4126
 msgid "Withdraw consent…"
 msgstr ""
 
@@ -8858,74 +8858,74 @@ msgstr ""
 msgid "updates new version release download check"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1324 ui/dialogs/settings-dialog.slint:4230
+#: ui/dialogs/settings-dialog.slint:1324 ui/dialogs/settings-dialog.slint:4231
 msgid "SETTINGS"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1327 ui/dialogs/settings-dialog.slint:4232
+#: ui/dialogs/settings-dialog.slint:1327 ui/dialogs/settings-dialog.slint:4233
 msgid "No settings found"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1328 ui/dialogs/settings-dialog.slint:1364
-#: ui/dialogs/settings-dialog.slint:1328 ui/dialogs/settings-dialog.slint:1364 ui/dialogs/settings-dialog.slint:4156
-#: ui/dialogs/settings-dialog.slint:1328 ui/dialogs/settings-dialog.slint:1364 ui/dialogs/settings-dialog.slint:4156
+#: ui/dialogs/settings-dialog.slint:1328 ui/dialogs/settings-dialog.slint:1364 ui/dialogs/settings-dialog.slint:4157
+#: ui/dialogs/settings-dialog.slint:1328 ui/dialogs/settings-dialog.slint:1364 ui/dialogs/settings-dialog.slint:4157
 msgid "General"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1329 ui/dialogs/settings-dialog.slint:2643
-#: ui/dialogs/settings-dialog.slint:1329 ui/dialogs/settings-dialog.slint:2643 ui/dialogs/settings-dialog.slint:4234
-#: ui/dialogs/settings-dialog.slint:1329 ui/dialogs/settings-dialog.slint:2643 ui/dialogs/settings-dialog.slint:4234 ui/dialogs/settings-dialog.slint:4697
-#: ui/dialogs/settings-dialog.slint:1329 ui/dialogs/settings-dialog.slint:2643 ui/dialogs/settings-dialog.slint:4234 ui/dialogs/settings-dialog.slint:4697
+#: ui/dialogs/settings-dialog.slint:1329 ui/dialogs/settings-dialog.slint:2643 ui/dialogs/settings-dialog.slint:4235
+#: ui/dialogs/settings-dialog.slint:1329 ui/dialogs/settings-dialog.slint:2643 ui/dialogs/settings-dialog.slint:4235 ui/dialogs/settings-dialog.slint:4698
+#: ui/dialogs/settings-dialog.slint:1329 ui/dialogs/settings-dialog.slint:2643 ui/dialogs/settings-dialog.slint:4235 ui/dialogs/settings-dialog.slint:4698
 msgid "Accounts"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1332 ui/dialogs/settings-dialog.slint:2412
-#: ui/dialogs/settings-dialog.slint:1332 ui/dialogs/settings-dialog.slint:2412 ui/dialogs/settings-dialog.slint:4237
+#: ui/dialogs/settings-dialog.slint:1332 ui/dialogs/settings-dialog.slint:2412 ui/dialogs/settings-dialog.slint:4238
 msgid "Rules"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1333 ui/dialogs/settings-dialog.slint:2353
-#: ui/dialogs/settings-dialog.slint:1333 ui/dialogs/settings-dialog.slint:2353 ui/dialogs/settings-dialog.slint:4238
+#: ui/dialogs/settings-dialog.slint:1333 ui/dialogs/settings-dialog.slint:2353 ui/dialogs/settings-dialog.slint:4239
 msgid "Translation"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1334 ui/dialogs/settings-dialog.slint:2384
-#: ui/dialogs/settings-dialog.slint:1334 ui/dialogs/settings-dialog.slint:2384 ui/dialogs/settings-dialog.slint:4239
+#: ui/dialogs/settings-dialog.slint:1334 ui/dialogs/settings-dialog.slint:2384 ui/dialogs/settings-dialog.slint:4240
 msgid "AI"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1335 ui/dialogs/settings-dialog.slint:3556
-#: ui/dialogs/settings-dialog.slint:1335 ui/dialogs/settings-dialog.slint:3556 ui/dialogs/settings-dialog.slint:4240
+#: ui/dialogs/settings-dialog.slint:1335 ui/dialogs/settings-dialog.slint:3556 ui/dialogs/settings-dialog.slint:4241
 msgid "Notifications"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1336 ui/dialogs/settings-dialog.slint:4164
-#: ui/dialogs/settings-dialog.slint:1336 ui/dialogs/settings-dialog.slint:4164
+#: ui/dialogs/settings-dialog.slint:1336 ui/dialogs/settings-dialog.slint:4165
+#: ui/dialogs/settings-dialog.slint:1336 ui/dialogs/settings-dialog.slint:4165
 msgid "Shortcuts"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1337 ui/dialogs/settings-dialog.slint:3464
-#: ui/dialogs/settings-dialog.slint:1337 ui/dialogs/settings-dialog.slint:3464 ui/dialogs/settings-dialog.slint:4242
+#: ui/dialogs/settings-dialog.slint:1337 ui/dialogs/settings-dialog.slint:3464 ui/dialogs/settings-dialog.slint:4243
 msgid "Storage"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1338 ui/dialogs/settings-dialog.slint:3437
-#: ui/dialogs/settings-dialog.slint:1338 ui/dialogs/settings-dialog.slint:3437 ui/dialogs/settings-dialog.slint:4243
+#: ui/dialogs/settings-dialog.slint:1338 ui/dialogs/settings-dialog.slint:3437 ui/dialogs/settings-dialog.slint:4244
 msgid "Network"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1339 ui/dialogs/settings-dialog.slint:3789
-#: ui/dialogs/settings-dialog.slint:1339 ui/dialogs/settings-dialog.slint:3789 ui/dialogs/settings-dialog.slint:4244
+#: ui/dialogs/settings-dialog.slint:1339 ui/dialogs/settings-dialog.slint:3790
+#: ui/dialogs/settings-dialog.slint:1339 ui/dialogs/settings-dialog.slint:3790 ui/dialogs/settings-dialog.slint:4245
 msgid "AI agents"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1340 ui/dialogs/settings-dialog.slint:3818
-#: ui/dialogs/settings-dialog.slint:1340 ui/dialogs/settings-dialog.slint:3818 ui/dialogs/settings-dialog.slint:4245
+#: ui/dialogs/settings-dialog.slint:1340 ui/dialogs/settings-dialog.slint:3819
+#: ui/dialogs/settings-dialog.slint:1340 ui/dialogs/settings-dialog.slint:3819 ui/dialogs/settings-dialog.slint:4246
 msgid "Services"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1341 ui/dialogs/settings-dialog.slint:3907
-#: ui/dialogs/settings-dialog.slint:1341 ui/dialogs/settings-dialog.slint:3907 ui/dialogs/settings-dialog.slint:4246
+#: ui/dialogs/settings-dialog.slint:1341 ui/dialogs/settings-dialog.slint:3908
+#: ui/dialogs/settings-dialog.slint:1341 ui/dialogs/settings-dialog.slint:3908 ui/dialogs/settings-dialog.slint:4247
 msgid "About"
 msgstr ""
 
@@ -9598,12 +9598,12 @@ msgid ""
 "you create one."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2769 ui/dialogs/settings-dialog.slint:4593
-#: ui/dialogs/settings-dialog.slint:2769 ui/dialogs/settings-dialog.slint:4593
+#: ui/dialogs/settings-dialog.slint:2769 ui/dialogs/settings-dialog.slint:4594
+#: ui/dialogs/settings-dialog.slint:2769 ui/dialogs/settings-dialog.slint:4594
 msgid "Edit profile"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2779 ui/dialogs/settings-dialog.slint:4925
+#: ui/dialogs/settings-dialog.slint:2779 ui/dialogs/settings-dialog.slint:4926
 msgid "Delete profile"
 msgstr ""
 
@@ -9673,7 +9673,7 @@ msgid "Account status: {}"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3018 ui/dialogs/settings-dialog.slint:3072
-#: ui/dialogs/settings-dialog.slint:3018 ui/dialogs/settings-dialog.slint:3072 ui/dialogs/settings-dialog.slint:4384
+#: ui/dialogs/settings-dialog.slint:3018 ui/dialogs/settings-dialog.slint:3072 ui/dialogs/settings-dialog.slint:4385
 msgid "Reconnect"
 msgstr ""
 
@@ -9893,13 +9893,13 @@ msgstr ""
 msgid "https://contacts.example.com/"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3414 ui/dialogs/settings-dialog.slint:4349
-#: ui/dialogs/settings-dialog.slint:3414 ui/dialogs/settings-dialog.slint:4349 ui/dialogs/settings-dialog.slint:4479
+#: ui/dialogs/settings-dialog.slint:3414 ui/dialogs/settings-dialog.slint:4350
+#: ui/dialogs/settings-dialog.slint:3414 ui/dialogs/settings-dialog.slint:4350 ui/dialogs/settings-dialog.slint:4480
 msgid "Username"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3414 ui/dialogs/settings-dialog.slint:4357
-#: ui/dialogs/settings-dialog.slint:3414 ui/dialogs/settings-dialog.slint:4357 ui/link-services.slint:186
+#: ui/dialogs/settings-dialog.slint:3414 ui/dialogs/settings-dialog.slint:4358
+#: ui/dialogs/settings-dialog.slint:3414 ui/dialogs/settings-dialog.slint:4358 ui/link-services.slint:186
 msgid "App password"
 msgstr ""
 
@@ -9917,14 +9917,14 @@ msgid ""
 "elsewhere."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3495 ui/dialogs/settings-dialog.slint:4874
+#: ui/dialogs/settings-dialog.slint:3495 ui/dialogs/settings-dialog.slint:4875
 msgid "One message"
 msgid_plural "{} messages"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/dialogs/settings-dialog.slint:3503 ui/dialogs/settings-dialog.slint:4836
-#: ui/dialogs/settings-dialog.slint:3503 ui/dialogs/settings-dialog.slint:4836 ui/dialogs/settings-dialog.slint:4902
+#: ui/dialogs/settings-dialog.slint:3503 ui/dialogs/settings-dialog.slint:4837
+#: ui/dialogs/settings-dialog.slint:3503 ui/dialogs/settings-dialog.slint:4837 ui/dialogs/settings-dialog.slint:4903
 msgid "Export mail…"
 msgstr ""
 
@@ -9998,7 +9998,7 @@ msgstr ""
 msgid "This does not delete anything from Gmail, Outlook, or your IMAP server."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3543 ui/dialogs/settings-dialog.slint:4840
+#: ui/dialogs/settings-dialog.slint:3543 ui/dialogs/settings-dialog.slint:4841
 msgid "Delete everything"
 msgstr ""
 
@@ -10046,637 +10046,637 @@ msgstr ""
 msgid "Show how many unread Important messages are in your Inbox."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3706
+#: ui/dialogs/settings-dialog.slint:3707
 msgid "Keyboard shortcuts"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3707
+#: ui/dialogs/settings-dialog.slint:3708
 msgid "Move through mail without leaving the keyboard."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3709
+#: ui/dialogs/settings-dialog.slint:3710
 msgid "Compose a new message"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3710
+#: ui/dialogs/settings-dialog.slint:3711
 msgid "Edit a message as new"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3711
+#: ui/dialogs/settings-dialog.slint:3712
 msgid "Show a message's source"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3712
+#: ui/dialogs/settings-dialog.slint:3713
 msgid "Take back a message just sent"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3714
+#: ui/dialogs/settings-dialog.slint:3715
 msgid "Check every account for new mail"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3715 ui/views/mail-list-pane.slint:862
+#: ui/dialogs/settings-dialog.slint:3716 ui/views/mail-list-pane.slint:862
 msgid "Search mail"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3717
+#: ui/dialogs/settings-dialog.slint:3718
 msgid "Move to a folder"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3718
+#: ui/dialogs/settings-dialog.slint:3719
 msgid "Copy to a folder"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3722
+#: ui/dialogs/settings-dialog.slint:3723
 msgid "Navigation"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3723
+#: ui/dialogs/settings-dialog.slint:3724
 msgid "Move between messages"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3724
+#: ui/dialogs/settings-dialog.slint:3725
 msgid "Open message"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3725
+#: ui/dialogs/settings-dialog.slint:3726
 msgid "Select message"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3726
+#: ui/dialogs/settings-dialog.slint:3727
 msgid "Switch between list and message"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3728
+#: ui/dialogs/settings-dialog.slint:3729
 msgid "Reading"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3729 ui/views/mail-reading-pane.slint:1423
-#: ui/dialogs/settings-dialog.slint:3729 ui/views/mail-reading-pane.slint:1423
+#: ui/dialogs/settings-dialog.slint:3730 ui/views/mail-reading-pane.slint:1423
+#: ui/dialogs/settings-dialog.slint:3730 ui/views/mail-reading-pane.slint:1423
 msgid "Find in message"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3732
+#: ui/dialogs/settings-dialog.slint:3733
 msgid "Reset zoom"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3733 ui/views/mail-reading-pane.slint:1859
+#: ui/dialogs/settings-dialog.slint:3734 ui/views/mail-reading-pane.slint:1859
 msgid "Caret browsing"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3739
+#: ui/dialogs/settings-dialog.slint:3740
 msgid "Next tab"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3740
+#: ui/dialogs/settings-dialog.slint:3741
 msgid "Previous tab"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3741
+#: ui/dialogs/settings-dialog.slint:3742
 msgid "Go to tab 1–8"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3742
+#: ui/dialogs/settings-dialog.slint:3743
 msgid "Go to last tab"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3745
+#: ui/dialogs/settings-dialog.slint:3746
 msgid "Quit Flectar Mail"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3819
+#: ui/dialogs/settings-dialog.slint:3820
 msgid ""
 "Optional paid services from Flectar. Flectar Mail stays free and works "
 "without them."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3824
+#: ui/dialogs/settings-dialog.slint:3825
 msgid "Flectar account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3824
+#: ui/dialogs/settings-dialog.slint:3825
 msgid "Not signed in"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3826
+#: ui/dialogs/settings-dialog.slint:3827
 msgid ""
 "A Flectar account is only needed for business email. Flectar Mail Sync works "
 "without one. Learn more at flectar.com/mail."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3831
+#: ui/dialogs/settings-dialog.slint:3832
 msgid "Sign in with Flectar"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3831
+#: ui/dialogs/settings-dialog.slint:3832
 msgid "Sign-in coming soon"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3845
+#: ui/dialogs/settings-dialog.slint:3846
 msgid "Your setup on every device"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3846
+#: ui/dialogs/settings-dialog.slint:3847
 msgid ""
 "Connect your phone and computers once. Your accounts, preferences, "
 "templates, snoozes and reply reminders stay the same on all of them, and any "
 "of them sends your scheduled emails."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3849
+#: ui/dialogs/settings-dialog.slint:3850
 msgid "Snoozes, reply reminders and templates everywhere"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3850
+#: ui/dialogs/settings-dialog.slint:3851
 msgid "Mail accounts, profiles, signatures and preferences"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3852
+#: ui/dialogs/settings-dialog.slint:3853
 msgid "No account needed: a recovery code restores it"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3854
+#: ui/dialogs/settings-dialog.slint:3855
 msgid ""
 "Your mail stays with your mail provider. Flectar Mail Sync carries your "
 "setup and sign-ins, and a scheduled message until it goes out."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3869
+#: ui/dialogs/settings-dialog.slint:3870
 msgid "Business email"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3870
+#: ui/dialogs/settings-dialog.slint:3871
 msgid "Mailboxes on your own domain"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3871
+#: ui/dialogs/settings-dialog.slint:3872
 msgid "Professional addresses such as you@yourcompany.com, hosted by Flectar."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3873
+#: ui/dialogs/settings-dialog.slint:3874
 msgid "Connect a domain you already own"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3874
+#: ui/dialogs/settings-dialog.slint:3875
 msgid "Create and manage mailboxes for your team"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3875
+#: ui/dialogs/settings-dialog.slint:3876
 msgid "New mailboxes appear in Flectar Mail automatically"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3877
+#: ui/dialogs/settings-dialog.slint:3878
 msgid "Billed per mailbox."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3889
+#: ui/dialogs/settings-dialog.slint:3890
 msgid "Plans and prices will be announced on flectar.com/mail."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3908
+#: ui/dialogs/settings-dialog.slint:3909
 msgid "Flectar Mail, its makers, and its community."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3924 ui/views/onboarding-view.slint:138
+#: ui/dialogs/settings-dialog.slint:3925 ui/views/onboarding-view.slint:138
 msgid "Flectar Mail logo"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3944
+#: ui/dialogs/settings-dialog.slint:3945
 msgid "A native mail client for a calm, private inbox."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3967
+#: ui/dialogs/settings-dialog.slint:3968
 msgid "Updates"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3967
+#: ui/dialogs/settings-dialog.slint:3968
 msgid "Flectar Mail looks for new versions once a day."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3977
+#: ui/dialogs/settings-dialog.slint:3978
 msgid "Check for new versions"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3978
+#: ui/dialogs/settings-dialog.slint:3979
 msgid "It asks GitHub, without any account or mail details."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4025 ui/dialogs/settings-dialog.slint:4056
+#: ui/dialogs/settings-dialog.slint:4026 ui/dialogs/settings-dialog.slint:4057
 msgid "Check now"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4067
+#: ui/dialogs/settings-dialog.slint:4068
 msgid "Credits"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4067
+#: ui/dialogs/settings-dialog.slint:4068
 msgid "Built by Flectar with help from the open-source community."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4076
+#: ui/dialogs/settings-dialog.slint:4077
 msgid "Flectar"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4077
+#: ui/dialogs/settings-dialog.slint:4078
 msgid "Company website"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4087
+#: ui/dialogs/settings-dialog.slint:4088
 msgid "Open-source contributors"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4088
+#: ui/dialogs/settings-dialog.slint:4089
 msgid "Meet the people who have contributed on GitHub"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4102
+#: ui/dialogs/settings-dialog.slint:4103
 msgid "Privacy"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4102
+#: ui/dialogs/settings-dialog.slint:4103
 msgid "How Flectar Mail handles your data."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4112
+#: ui/dialogs/settings-dialog.slint:4113
 msgid "Read it on flectar.com"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4124
+#: ui/dialogs/settings-dialog.slint:4125
 msgid ""
 "You agreed to this policy when you started Flectar Mail. Withdrawing consent "
 "closes the app until you agree again."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4132
+#: ui/dialogs/settings-dialog.slint:4133
 msgid "License"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4132
+#: ui/dialogs/settings-dialog.slint:4133
 msgid "AGPL-3.0-only."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4132
+#: ui/dialogs/settings-dialog.slint:4133
 msgid ""
 "Flectar Mail is released under the GNU Affero General Public License v3.0 "
 "only."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4138
+#: ui/dialogs/settings-dialog.slint:4139
 msgid "Third-party components retain their own licenses and notices."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4171
+#: ui/dialogs/settings-dialog.slint:4172
 msgid "Settings sections"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4183
+#: ui/dialogs/settings-dialog.slint:4184
 msgid "Close settings"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4205
+#: ui/dialogs/settings-dialog.slint:4206
 msgid "Close settings sections"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4259 ui/dialogs/settings-dialog.slint:4308
+#: ui/dialogs/settings-dialog.slint:4260 ui/dialogs/settings-dialog.slint:4309
 msgid "CalDAV settings"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4309
+#: ui/dialogs/settings-dialog.slint:4310
 msgid "Discover new calendars."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4309
+#: ui/dialogs/settings-dialog.slint:4310
 msgid ""
 "Works with iCloud, Fastmail, Nextcloud, and standards-compliant CalDAV "
 "servers."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4336
+#: ui/dialogs/settings-dialog.slint:4337
 msgid "https://calendar.example.com/"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4341
+#: ui/dialogs/settings-dialog.slint:4342
 msgid ""
 "To sync one calendar, such as a shared mailbox's, enter that calendar's own "
 "address."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4351 ui/dialogs/settings-dialog.slint:4472
-#: ui/dialogs/settings-dialog.slint:4351 ui/dialogs/settings-dialog.slint:4472
+#: ui/dialogs/settings-dialog.slint:4352 ui/dialogs/settings-dialog.slint:4473
+#: ui/dialogs/settings-dialog.slint:4352 ui/dialogs/settings-dialog.slint:4473
 msgid "Usually your email address"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4357
+#: ui/dialogs/settings-dialog.slint:4358
 msgid "New app password · Optional"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4359
+#: ui/dialogs/settings-dialog.slint:4360
 msgid "Leave blank to keep the current password"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4359 ui/dialogs/settings-dialog.slint:4481
+#: ui/dialogs/settings-dialog.slint:4360 ui/dialogs/settings-dialog.slint:4482
 msgid "Stored securely in your system keyring"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4402
+#: ui/dialogs/settings-dialog.slint:4403
 msgid "Edit mail account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4402 ui/dialogs/settings-dialog.slint:4450
-#: ui/dialogs/settings-dialog.slint:4402 ui/dialogs/settings-dialog.slint:4450
+#: ui/dialogs/settings-dialog.slint:4403 ui/dialogs/settings-dialog.slint:4451
+#: ui/dialogs/settings-dialog.slint:4403 ui/dialogs/settings-dialog.slint:4451
 msgid "Connect a mail account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4451
+#: ui/dialogs/settings-dialog.slint:4452
 msgid "Uses JMAP for mail sync and sending, with automatic discovery."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4451
+#: ui/dialogs/settings-dialog.slint:4452
 msgid "Downloads mail from a POP3 server to this device and sends through SMTP."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4451
+#: ui/dialogs/settings-dialog.slint:4452
 msgid "Uses separate IMAP and SMTP servers for mail sync and sending."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4471 ui/dialogs/settings-dialog.slint:4478
+#: ui/dialogs/settings-dialog.slint:4472 ui/dialogs/settings-dialog.slint:4479
 msgid "name@example.com"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4481 ui/views/onboarding-view.slint:336
-#: ui/dialogs/settings-dialog.slint:4481 ui/views/onboarding-view.slint:336
+#: ui/dialogs/settings-dialog.slint:4482 ui/views/onboarding-view.slint:336
+#: ui/dialogs/settings-dialog.slint:4482 ui/views/onboarding-view.slint:336
 msgid "Password, app password, or API token"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4481 ui/views/onboarding-view.slint:336
-#: ui/dialogs/settings-dialog.slint:4481 ui/views/onboarding-view.slint:336
+#: ui/dialogs/settings-dialog.slint:4482 ui/views/onboarding-view.slint:336
+#: ui/dialogs/settings-dialog.slint:4482 ui/views/onboarding-view.slint:336
 msgid "Password or app password"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4488 ui/views/onboarding-view.slint:349
+#: ui/dialogs/settings-dialog.slint:4489 ui/views/onboarding-view.slint:349
 msgid "IMAP"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4489 ui/views/onboarding-view.slint:357
+#: ui/dialogs/settings-dialog.slint:4490 ui/views/onboarding-view.slint:357
 msgid "POP3"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4490 ui/views/onboarding-view.slint:365
+#: ui/dialogs/settings-dialog.slint:4491 ui/views/onboarding-view.slint:365
 msgid "JMAP"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4494
+#: ui/dialogs/settings-dialog.slint:4495
 msgid "Server address · Optional"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4496
+#: ui/dialogs/settings-dialog.slint:4497
 msgid "Discovered from your email domain"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4503 ui/views/onboarding-view.slint:389
-#: ui/dialogs/settings-dialog.slint:4503 ui/views/onboarding-view.slint:389
+#: ui/dialogs/settings-dialog.slint:4504 ui/views/onboarding-view.slint:389
+#: ui/dialogs/settings-dialog.slint:4504 ui/views/onboarding-view.slint:389
 msgid "POP3 server"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4503 ui/views/onboarding-view.slint:389
-#: ui/dialogs/settings-dialog.slint:4503 ui/views/onboarding-view.slint:389
+#: ui/dialogs/settings-dialog.slint:4504 ui/views/onboarding-view.slint:389
+#: ui/dialogs/settings-dialog.slint:4504 ui/views/onboarding-view.slint:389
 msgid "IMAP server"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4503
+#: ui/dialogs/settings-dialog.slint:4504
 msgid "pop.example.com"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4503
+#: ui/dialogs/settings-dialog.slint:4504
 msgid "imap.example.com"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4504 ui/dialogs/settings-dialog.slint:4511
-#: ui/dialogs/settings-dialog.slint:4504 ui/dialogs/settings-dialog.slint:4511 ui/network.slint:151 ui/views/onboarding-view.slint:397
-#: ui/dialogs/settings-dialog.slint:4504 ui/dialogs/settings-dialog.slint:4511 ui/network.slint:151 ui/views/onboarding-view.slint:397
+#: ui/dialogs/settings-dialog.slint:4505 ui/dialogs/settings-dialog.slint:4512
+#: ui/dialogs/settings-dialog.slint:4505 ui/dialogs/settings-dialog.slint:4512 ui/network.slint:151 ui/views/onboarding-view.slint:397
+#: ui/dialogs/settings-dialog.slint:4505 ui/dialogs/settings-dialog.slint:4512 ui/network.slint:151 ui/views/onboarding-view.slint:397
 msgid "Port"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4510 ui/views/onboarding-view.slint:411
-#: ui/dialogs/settings-dialog.slint:4510 ui/views/onboarding-view.slint:411
+#: ui/dialogs/settings-dialog.slint:4511 ui/views/onboarding-view.slint:411
+#: ui/dialogs/settings-dialog.slint:4511 ui/views/onboarding-view.slint:411
 msgid "SMTP server"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4510
+#: ui/dialogs/settings-dialog.slint:4511
 msgid "smtp.example.com"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4514 ui/views/onboarding-view.slint:427
+#: ui/dialogs/settings-dialog.slint:4515 ui/views/onboarding-view.slint:427
 msgid ""
 "Proton Bridge: use the local servers, ports and password shown in Bridge, "
 "and match its encryption settings."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4572
+#: ui/dialogs/settings-dialog.slint:4573
 msgid "Save account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4572 ui/views/onboarding-view.slint:470
+#: ui/dialogs/settings-dialog.slint:4573 ui/views/onboarding-view.slint:470
 msgid "Connect account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4593 ui/dialogs/settings-dialog.slint:4649
-#: ui/dialogs/settings-dialog.slint:4593 ui/dialogs/settings-dialog.slint:4649
+#: ui/dialogs/settings-dialog.slint:4594 ui/dialogs/settings-dialog.slint:4650
+#: ui/dialogs/settings-dialog.slint:4594 ui/dialogs/settings-dialog.slint:4650
 msgid "Create profile"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4650
+#: ui/dialogs/settings-dialog.slint:4651
 msgid ""
 "Its color marks its accounts' mail, and choosing it shows only their mail."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4655
+#: ui/dialogs/settings-dialog.slint:4656
 msgid "Profile name"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4657
+#: ui/dialogs/settings-dialog.slint:4658
 msgid "Personal or Work"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4663 ui/views/mail-reading-pane.slint:2357
+#: ui/dialogs/settings-dialog.slint:4664 ui/views/mail-reading-pane.slint:2357
 msgid "Color"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4672
+#: ui/dialogs/settings-dialog.slint:4673
 msgid "Profile color {}"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4714
+#: ui/dialogs/settings-dialog.slint:4715
 msgid "Save profile"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4722
+#: ui/dialogs/settings-dialog.slint:4723
 msgid "Could not save this profile. Check the name and try again."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4760
+#: ui/dialogs/settings-dialog.slint:4761
 msgid "Choose a profile for {}"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4811
+#: ui/dialogs/settings-dialog.slint:4812
 msgid "Special folders of {}"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4829
+#: ui/dialogs/settings-dialog.slint:4830
 msgid "Delete all local data?"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4830
+#: ui/dialogs/settings-dialog.slint:4831
 msgid ""
 "This removes every account, downloaded message, calendar, contact, "
 "preference, and credential stored by Flectar Mail on this device."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4832
+#: ui/dialogs/settings-dialog.slint:4833
 msgid ""
 "Imported mail and the mail of any POP3 account are stored only on this "
 "device and will be deleted. Mail and events on Gmail, Outlook, and IMAP "
 "servers will not be deleted."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4834
+#: ui/dialogs/settings-dialog.slint:4835
 msgid ""
 "POP3 mail is stored only on this device and will be deleted. Mail and events "
 "on Gmail, Outlook, and IMAP servers will not be deleted."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4835
+#: ui/dialogs/settings-dialog.slint:4836
 msgid "Mail and events on Gmail, Outlook, and IMAP servers will not be deleted."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4836
+#: ui/dialogs/settings-dialog.slint:4837
 msgid "Export POP3 mail…"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4841
+#: ui/dialogs/settings-dialog.slint:4842
 msgid "Keep my data"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4855
+#: ui/dialogs/settings-dialog.slint:4856
 msgid "Withdraw privacy consent?"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4856
+#: ui/dialogs/settings-dialog.slint:4857
 msgid ""
 "Flectar Mail will stop and show the privacy consent screen the next time you "
 "open it."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4857
+#: ui/dialogs/settings-dialog.slint:4858
 msgid ""
 "Your local mail and settings stay on this device. You can delete them on the "
 "Storage page in Settings."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4858
+#: ui/dialogs/settings-dialog.slint:4859
 msgid "Withdraw consent"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4873
+#: ui/dialogs/settings-dialog.slint:4874
 msgid "Delete mail on this device?"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4875
+#: ui/dialogs/settings-dialog.slint:4876
 msgid "Delete the mail you imported and its folders from this device."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4876
+#: ui/dialogs/settings-dialog.slint:4877
 msgid "It exists only here. Export it first to keep a copy."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4881
+#: ui/dialogs/settings-dialog.slint:4882
 msgid "Delete mail"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4882
+#: ui/dialogs/settings-dialog.slint:4883
 msgid "Keep mail"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4896
+#: ui/dialogs/settings-dialog.slint:4897
 msgid "Remove account?"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4898
+#: ui/dialogs/settings-dialog.slint:4899
 msgid "Remove this account and its downloaded mail from this device."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4900
+#: ui/dialogs/settings-dialog.slint:4901
 msgid ""
 "This account's mail is stored only on this device. Export it first to keep a "
 "copy."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4901
+#: ui/dialogs/settings-dialog.slint:4902
 msgid "Messages on the mail server will not be deleted."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4906
+#: ui/dialogs/settings-dialog.slint:4907
 msgid "Remove account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4907
+#: ui/dialogs/settings-dialog.slint:4908
 msgid "Keep account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4921
+#: ui/dialogs/settings-dialog.slint:4922
 msgid "Delete profile?"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4923
+#: ui/dialogs/settings-dialog.slint:4924
 msgid ""
 "Accounts assigned to this profile will return to their individual or "
 "generated account colors."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4924
+#: ui/dialogs/settings-dialog.slint:4925
 msgid "Accounts and provider data are not changed."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4926
+#: ui/dialogs/settings-dialog.slint:4927
 msgid "Keep profile"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4940
+#: ui/dialogs/settings-dialog.slint:4941
 msgid "Remove calendar?"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4942
+#: ui/dialogs/settings-dialog.slint:4943
 msgid "Stop syncing it and remove its events from this device."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4943
+#: ui/dialogs/settings-dialog.slint:4944
 msgid "Events on the server will not be deleted."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:4945
+#: ui/dialogs/settings-dialog.slint:4946
 msgid "Keep calendar"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:5025
+#: ui/dialogs/settings-dialog.slint:5026
 msgid "Delete sync for every device?"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:5026
+#: ui/dialogs/settings-dialog.slint:5027
 msgid ""
 "Removes your encrypted setup from the sync server and turns sync off on all "
 "your devices."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:5027
+#: ui/dialogs/settings-dialog.slint:5028
 msgid ""
 "Each device keeps its own accounts and settings. Mail on your mail servers "
 "is not touched."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:5028
+#: ui/dialogs/settings-dialog.slint:5029
 msgid "Delete sync"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:5029
+#: ui/dialogs/settings-dialog.slint:5030
 msgid "Keep syncing"
 msgstr ""
 
