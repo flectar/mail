@@ -580,7 +580,6 @@ struct AccountPresentationSettings {
     active_profile: Option<String>,
     show_markers: bool,
     account_colors: HashMap<String, String>,
-    account_short_names: HashMap<String, String>,
 }
 
 impl AccountPresentationSettings {
@@ -590,7 +589,6 @@ impl AccountPresentationSettings {
             active_profile: settings.active_mail_profile.clone(),
             show_markers: settings.show_account_badges,
             account_colors: settings.account_colors.clone(),
-            account_short_names: settings.account_short_names.clone(),
         }
     }
 
@@ -636,14 +634,6 @@ impl AccountPresentationSettings {
         self.account_colors.contains_key(&account_id.to_string())
     }
 
-    fn account_label<'a>(&'a self, account_id: i64, fallback: &'a str) -> &'a str {
-        self.account_short_names
-            .get(&account_id.to_string())
-            .map(String::as_str)
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or(fallback)
-    }
-
     fn remove_account(&mut self, account_id: i64) {
         for profile in &mut self.profiles {
             profile.account_ids.retain(|id| *id != account_id);
@@ -652,9 +642,7 @@ impl AccountPresentationSettings {
         if self.active_profile().is_none() {
             self.active_profile = None;
         }
-        let key = account_id.to_string();
-        self.account_colors.remove(&key);
-        self.account_short_names.remove(&key);
+        self.account_colors.remove(&account_id.to_string());
     }
 }
 
@@ -5685,6 +5673,45 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Err(error) => UiMessage::detail("Could not update sync settings: {}", error),
             };
             // Reload either way so the choice shows what was saved.
+            let accounts = core.load_account_snapshot().await.ok();
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts,
+                    calendar_connections: None,
+                    carddav_connections: None,
+                    calendar_error: None,
+                    account_removal: None,
+                    clear_account_form: false,
+                    finishes_account_setup: false,
+                    finishes_oauth: false,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_name = Rc::clone(&state);
+    let runtime_for_name = runtime.clone();
+    let ui_task_tx_for_name = ui_task_tx.clone();
+    app.on_save_account_name(move |account_id, name| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_name.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Account names require local mail data."));
+            return;
+        };
+        let account_id = i64::from(account_id);
+        app.set_sync_status(UiMessage::plain("Saving the account name…"));
+        let updates = ui_task_tx_for_name.clone();
+        runtime_for_name.spawn(async move {
+            let message = match core.set_account_name(account_id, &name).await {
+                Ok(()) => UiMessage::plain("Account name saved."),
+                Err(error) => UiMessage::detail("Could not save the account name: {}", error),
+            };
+            // Reload either way so the field shows the saved name.
             let accounts = core.load_account_snapshot().await.ok();
             let _ = updates
                 .send(UiTaskUpdate {

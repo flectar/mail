@@ -840,6 +840,7 @@ mod tests {
             id: 7,
             email: "primary@example.com".into(),
             display_name: Some("Primary".into()),
+            name: None,
             avatar_url: None,
             provider: Provider::Gmail,
             auth_kind: AuthKind::Oauth2,

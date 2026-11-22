@@ -3045,6 +3045,7 @@ mod tests {
             id,
             email: format!("person{id}@example.com"),
             display_name: None,
+            name: None,
             avatar_url: None,
             provider: Provider::Generic,
             auth_kind: flectar_mail_core::models::AuthKind::Password,

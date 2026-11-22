@@ -64,6 +64,7 @@ fn gmail_mail_transport(address: &str, protocol: MailProtocol) -> Option<Account
         id: 0,
         email: address.trim().into(),
         display_name: None,
+        name: None,
         avatar_url: None,
         provider: Provider::Generic,
         auth_kind: flectar_mail_core::models::AuthKind::Password,
@@ -358,12 +359,7 @@ pub(super) fn apply_connected_accounts(
         .iter()
         .filter_map(|account| {
             let config = configs.get(&account.id)?;
-            let name = account
-                .display_name
-                .as_ref()
-                .filter(|name| !name.trim().is_empty())
-                .unwrap_or(&account.email)
-                .clone();
+            let name = account.label().to_owned();
             let avatar = avatars.get(&account.id);
             let calendars = account_calendars
                 .get(&account.id)
@@ -382,6 +378,13 @@ pub(super) fn apply_connected_accounts(
                 id: i32::try_from(account.id).ok()?,
                 drag_key: account.id.to_string().into(),
                 name: name.clone().into(),
+                custom_name: account.name.clone().unwrap_or_default().into(),
+                default_name: flectar_mail_core::models::account_label(
+                    None,
+                    account.display_name.as_deref(),
+                    &account.email,
+                )
+                .into(),
                 email: account.email.clone().into(),
                 provider: account.provider.as_str().to_owned().into(),
                 mail_protocol: account.mail_protocol.as_str().to_owned().into(),
@@ -975,6 +978,7 @@ mod mail_transport_suggestion_tests {
             id,
             email: email.into(),
             display_name: None,
+            name: None,
             avatar_url: None,
             provider: Provider::Generic,
             auth_kind: flectar_mail_core::models::AuthKind::Password,

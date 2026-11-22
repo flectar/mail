@@ -4743,6 +4743,7 @@ mod tests {
             id: 1,
             email: "me@example.test".into(),
             display_name: None,
+            name: None,
             avatar_url: None,
             provider: Provider::Generic,
             auth_kind: flectar_mail_core::models::AuthKind::Password,

@@ -1421,6 +1421,7 @@ fn smtp_config(port: u16, mode: ConnectionSecurity, certificate: &str) -> Accoun
         id: 1,
         email: "user@example.com".into(),
         display_name: None,
+        name: None,
         avatar_url: None,
         provider: Provider::Generic,
         auth_kind: AuthKind::Password,
@@ -2038,6 +2039,7 @@ async fn backup_import_preserves_transport_settings_and_rejects_private_keys() {
     let mut config = PortableAccountConfig {
         email: "user@example.com".into(),
         display_name: None,
+        name: None,
         provider: Provider::Generic,
         auth_kind: AuthKind::Password,
         mail_protocol: MailProtocol::Imap,
@@ -2078,6 +2080,7 @@ async fn another_gmail_spelling_does_not_edit_a_password_account() {
     core.import_account_configs(vec![PortableAccountConfig {
         email: "johndoe@gmail.com".into(),
         display_name: None,
+        name: None,
         provider: Provider::Generic,
         auth_kind: AuthKind::Password,
         mail_protocol: MailProtocol::Imap,
