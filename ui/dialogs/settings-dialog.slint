@@ -4954,7 +4954,7 @@ export component SettingsDialog inherits Rectangle {
             accent: root.accent;
             closed => {
                 SyncUi.dialog = "";
-                self.with-code = false;
+                self.with-code = !SyncUi.qr-pairing;
                 SyncUi.cancel-pairing();
             }
         }
