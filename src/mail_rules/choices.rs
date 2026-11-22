@@ -172,7 +172,10 @@ impl Choices {
     /// names the automatic categories that keep their built-in names.
     pub(super) fn tabs(&self) -> Vec<(String, TabName)> {
         let mut tabs = vec![
-            ("important".to_owned(), TabName::Role(MailboxRole::Important)),
+            (
+                "important".to_owned(),
+                TabName::Role(MailboxRole::Important),
+            ),
             ("other".to_owned(), TabName::Role(MailboxRole::Other)),
         ];
         tabs.extend(
@@ -644,7 +647,10 @@ mod tests {
         assert_eq!(
             choices.tabs(),
             [
-                ("important".to_owned(), TabName::Role(MailboxRole::Important)),
+                (
+                    "important".to_owned(),
+                    TabName::Role(MailboxRole::Important)
+                ),
                 ("other".to_owned(), TabName::Role(MailboxRole::Other)),
                 ("label:4".to_owned(), TabName::Role(MailboxRole::News)),
                 ("label:5".to_owned(), TabName::Role(MailboxRole::Marketing)),
