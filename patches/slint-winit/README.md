@@ -89,12 +89,15 @@ the window doesn't fit in the work area of the monitor that Windows put it on,
 it moves inside and shrinks as far as needed. The patch sets the outer frame
 itself, from the borders the window actually has, so the client area gets the
 size Slint asked for. Flectar Mail's window keeps only the side and bottom
-borders of the standard frame. A minimized window is left alone. A window shown
-again after it was hidden keeps the place the user gave it, unless it is on no
-monitor at all, for example after the monitor it was on was disconnected. The
-Windows packaging job's `scripts/test-clean-exit.py` fails when a window of the
-app doesn't fit the work area of its monitor. The runners' screen is 1024 by
-768 pixels.
+borders of the standard frame. A minimized window is left alone. Slint shows a
+hidden window again where the user left it, unless it is on no monitor at all,
+for example after the monitor it was on was disconnected. Flectar Mail destroys
+its window when it goes to the tray (`src/desktop.rs`), so the window is
+created again at its last place and checked like a new one. It comes back fully
+on screen after a resolution or monitor change, as Microsoft's guidance for
+redisplayed windows asks. The Windows packaging job's
+`scripts/test-clean-exit.py` fails when a window of the app doesn't fit the
+work area of its monitor. The runners' screen is 1024 by 768 pixels.
 
 `Cargo.toml.orig` is kept unchanged for provenance. The standalone lockfile is
 omitted, and the application lockfiles resolve the patched manifest.
