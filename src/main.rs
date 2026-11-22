@@ -46,6 +46,7 @@ mod files_controller;
 #[cfg(all(linux_desktop, feature = "flatpak"))]
 mod flatpak_secrets;
 mod folder_roles;
+mod folder_visibility;
 mod han_fallback;
 mod import_controller;
 mod invitation;
@@ -488,6 +489,34 @@ enum MailListUpdateKind {
 
 struct MailMetadataUpdate {
     result: Result<mail::MailMetadata, String>,
+}
+
+/// A folder and every folder in it, as the sidebar lists them.
+fn folder_tree_ids(mailboxes: &[MailboxEntry], folder_id: i64) -> Vec<i64> {
+    let parents = mailboxes
+        .iter()
+        .filter(|mailbox| mailbox.folder_id >= 0)
+        .map(|mailbox| (mailbox.folder_id, mailbox.parent_folder_id))
+        .collect::<HashMap<_, _>>();
+    std::iter::once(folder_id)
+        .chain(
+            parents
+                .keys()
+                .copied()
+                .filter(|&folder| folder != folder_id),
+        )
+        .filter(|&folder| {
+            let mut candidate = folder;
+            let mut visited = HashSet::new();
+            while candidate >= 0 && visited.insert(candidate) {
+                if candidate == folder_id {
+                    return true;
+                }
+                candidate = parents.get(&candidate).copied().unwrap_or(-1);
+            }
+            false
+        })
+        .collect()
 }
 
 struct FolderMutationUpdate {
@@ -3919,7 +3948,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let delete_folder_state = Rc::clone(&state);
     let delete_folder_runtime = runtime.clone();
-    let delete_folder_updates = folder_tx;
+    let delete_folder_updates = folder_tx.clone();
     app.on_delete_folder(move |folder_id| {
         let Some(core) = delete_folder_state.borrow().core.clone() else {
             return;
@@ -3927,33 +3956,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let folder_id = i64::from(folder_id);
         let (current_scope, removed_folders) = {
             let state = delete_folder_state.borrow();
-            let parents = state
-                .mailboxes
-                .iter()
-                .filter(|mailbox| mailbox.folder_id >= 0)
-                .map(|mailbox| (mailbox.folder_id, mailbox.parent_folder_id))
-                .collect::<HashMap<_, _>>();
-            // The folder and everything under it.
-            let removed_folders = std::iter::once(folder_id)
-                .chain(
-                    parents
-                        .keys()
-                        .copied()
-                        .filter(|&folder| folder != folder_id),
-                )
-                .filter(|&folder| {
-                    let mut candidate = folder;
-                    let mut visited = HashSet::new();
-                    while candidate >= 0 && visited.insert(candidate) {
-                        if candidate == folder_id {
-                            return true;
-                        }
-                        candidate = parents.get(&candidate).copied().unwrap_or(-1);
-                    }
-                    false
-                })
-                .collect::<Vec<_>>();
-            (state.scope, removed_folders)
+            (state.scope, folder_tree_ids(&state.mailboxes, folder_id))
         };
         let selected_folder_is_deleted = matches!(
             current_scope,
@@ -3983,6 +3986,48 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     reveal_parent_id: None,
                     issued_scope: current_scope,
                     removed_folders,
+                })
+                .await;
+        });
+    });
+    // Hiding a folder takes it and the folders in it from the sidebar, as
+    // deleting would, and a list showing one goes to the inbox (#253).
+    let hide_folder_state = Rc::clone(&state);
+    let hide_folder_runtime = runtime.clone();
+    let hide_folder_updates = folder_tx;
+    app.on_hide_folder(move |folder_id| {
+        let Some(core) = hide_folder_state.borrow().core.clone() else {
+            return;
+        };
+        let folder_id = i64::from(folder_id);
+        let (current_scope, hidden_folders) = {
+            let state = hide_folder_state.borrow();
+            (state.scope, folder_tree_ids(&state.mailboxes, folder_id))
+        };
+        let scope = if matches!(current_scope, Scope::Folder(id) if hidden_folders.contains(&id)) {
+            Scope::UNIFIED_INBOX
+        } else {
+            current_scope
+        };
+        let updates = hide_folder_updates.clone();
+        hide_folder_runtime.spawn(async move {
+            let result = core.set_folder_hidden(folder_id, true).await;
+            let metadata = if result.is_ok() {
+                core.load_mail_metadata(scope).await.ok()
+            } else {
+                None
+            };
+            let message = match result {
+                Ok(()) => UiMessage::plain("Folder hidden. Show it again in Settings → Accounts."),
+                Err(error) => UiMessage::detail("Could not hide folder: {}", error),
+            };
+            let _ = updates
+                .send(FolderMutationUpdate {
+                    message,
+                    metadata,
+                    reveal_parent_id: None,
+                    issued_scope: current_scope,
+                    removed_folders: hidden_folders,
                 })
                 .await;
         });
@@ -6692,6 +6737,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     read_receipts::install(&app, &state, &runtime);
     folder_roles::install(&app, &state, &runtime);
     message_source::install(&app, &state, &runtime, platform.documents.clone());
+    folder_visibility::install(&app, &state, &runtime);
     translation::install(&app, &state, &runtime);
     ai_features::install(&app, &state, &runtime);
     network::install(&app, &state, &runtime);

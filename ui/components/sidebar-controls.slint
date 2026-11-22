@@ -130,6 +130,8 @@ export component SidebarItem inherits SidebarRowSurface {
     in property <bool> can-create-child: false;
     in property <bool> can-rename: false;
     in property <bool> can-delete: false;
+    // The folder can be hidden from the sidebar (#253).
+    in property <bool> can-hide: false;
     in property <bool> can-empty-trash: false;
     // The row lists unread mail that "Mark all as read…" can mark (#234).
     in property <bool> can-mark-all-read: false;
@@ -154,6 +156,7 @@ export component SidebarItem inherits SidebarRowSurface {
     callback new-subfolder(int, int, string);
     callback rename-folder(int, string);
     callback delete-folder(int, string);
+    callback hide-folder(int);
     callback empty-trash(int);
     // The row's scope and the name it shows.
     callback mark-all-read(string, string);
@@ -215,7 +218,7 @@ export component SidebarItem inherits SidebarRowSurface {
 
     // Folder and label actions. Rows without any keep the area disabled.
     row-menu := ContextMenuArea {
-        enabled: root.interactive && (root.can-mark-all-read || root.folder-menu-enabled || root.can-empty-trash || root.label-manageable || root.saved-search);
+        enabled: root.interactive && (root.can-mark-all-read || root.folder-menu-enabled || root.can-hide || root.can-empty-trash || root.label-manageable || root.saved-search);
         width: parent.width;
         height: parent.height;
         Menu {
@@ -223,7 +226,7 @@ export component SidebarItem inherits SidebarRowSurface {
                 title: @tr("Mark all as read…");
                 activated => { root.mark-all-read(root.scope, root.label); }
             }
-            if root.can-mark-all-read && (root.folder-menu-enabled || root.can-empty-trash || root.label-manageable): MenuSeparator {}
+            if root.can-mark-all-read && (root.folder-menu-enabled || root.can-hide || root.can-empty-trash || root.label-manageable): MenuSeparator {}
             if root.folder-menu-enabled: MenuItem {
                 title: @tr("New subfolder");
                 enabled: root.can-create-child;
@@ -233,6 +236,10 @@ export component SidebarItem inherits SidebarRowSurface {
                 title: @tr("Rename folder");
                 enabled: root.can-rename;
                 activated => { root.rename-folder(root.folder-id, root.label); }
+            }
+            if root.can-hide: MenuItem {
+                title: @tr("Hide folder");
+                activated => { root.hide-folder(root.folder-id); }
             }
             if root.folder-menu-enabled: MenuItem {
                 title: @tr("Delete folder");

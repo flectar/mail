@@ -209,6 +209,8 @@ pub struct MailboxEntry {
     pub can_create_children: bool,
     pub can_rename: bool,
     pub can_delete: bool,
+    /// A folder the user can hide from the sidebar (#253).
+    pub can_hide: bool,
     pub label: String,
     /// Absent for account headings, which are not navigation targets.
     pub scope: Option<Scope>,
@@ -765,7 +767,7 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())?;
         let mut folders = self
             .core
-            .list_folders(None)
+            .list_shown_folders(None)
             .await
             .map_err(|error| error.to_string())?;
         let local_mail = self.load_local_mail_account().await?;
@@ -804,7 +806,7 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())?;
         let mut folders = self
             .core
-            .list_folders(None)
+            .list_shown_folders(None)
             .await
             .map_err(|error| error.to_string())?;
         let local_mail = self.load_local_mail_account().await?;
@@ -858,7 +860,7 @@ impl CoreMailSource {
         let mut shown = accounts.clone();
         let local_mail = self.load_local_mail_account().await?;
         let profile = with_local_mail(profile, local_mail);
-        let (scope, page) = match self.core.list_folders(None).await {
+        let (scope, page) = match self.core.list_shown_folders(None).await {
             Ok(mut folders) => {
                 retain_profile_accounts(profile.as_deref(), &mut shown, &mut folders);
                 let mut labels = self.core.list_labels().await.unwrap_or_default();
@@ -904,7 +906,7 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())?;
         let mut folders = self
             .core
-            .list_folders(None)
+            .list_shown_folders(None)
             .await
             .map_err(|error| error.to_string())?;
         let local_mail = self.load_local_mail_account().await?;
@@ -1825,6 +1827,26 @@ impl CoreMailSource {
     ) -> Result<(), String> {
         self.core
             .create_folder(account_id, parent_folder_id, name)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Hide a folder, with the folders in it, from the sidebar and the Move
+    /// to list, or show it again (#253).
+    pub async fn set_folder_hidden(&self, folder_id: i64, hidden: bool) -> Result<(), String> {
+        self.core
+            .set_folder_hidden(folder_id, hidden)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// An account's folders, to choose which show (#253).
+    pub async fn account_folders(
+        &self,
+        account_id: i64,
+    ) -> Result<Vec<flectar_mail_core::models::AccountFolder>, String> {
+        self.core
+            .account_folders(account_id)
             .await
             .map_err(|error| error.to_string())
     }
@@ -3620,10 +3642,12 @@ struct FolderTreeRoot<'a> {
     standard_mailbox: Option<StandardMailbox>,
 }
 
+/// `hides` says whether the account's folders can be hidden (#253).
 fn append_folder_tree<'a>(
     entries: &mut Vec<MailboxEntry>,
     root: FolderTreeRoot<'a>,
     account_label: &str,
+    hides: bool,
     children: &std::collections::HashMap<i64, Vec<&'a FolderInfo>>,
     visited: &mut std::collections::HashSet<i64>,
 ) {
@@ -3659,6 +3683,11 @@ fn append_folder_tree<'a>(
             can_create_children: folder.can_create_children,
             can_rename: folder.can_rename,
             can_delete: folder.can_delete,
+            // The Inbox and the folders with a role always show.
+            can_hide: hides
+                && !is_standard
+                && folder.role.is_none()
+                && !folder.path.eq_ignore_ascii_case("INBOX"),
             label,
             scope: Some(
                 standard_mailbox.map_or(Scope::Folder(folder.id), |mailbox| Scope::Account {
@@ -3707,6 +3736,7 @@ fn mailbox_entries(
             can_create_children: account.can_create_top_level_mailbox,
             can_rename: false,
             can_delete: false,
+            can_hide: false,
             label: account_label.clone(),
             scope: None,
             context: account_label.clone(),
@@ -3742,6 +3772,7 @@ fn mailbox_entries(
             can_create_children: true,
             can_rename: false,
             can_delete: false,
+            can_hide: false,
             label: String::new(),
             scope: None,
             context: String::new(),
@@ -3771,6 +3802,9 @@ fn append_mailboxes(
         .iter()
         .filter(|folder| folder.account_id == account_id)
         .collect::<Vec<_>>();
+    // Gmail's labels are its own, and local mail has no settings to show a
+    // hidden folder again (#253).
+    let hides = !gmail && !local;
     let role_folders = StandardMailbox::ALL
         .into_iter()
         .filter_map(|mailbox| {
@@ -3857,6 +3891,7 @@ fn append_mailboxes(
                         standard_mailbox: Some(mailbox),
                     },
                     account_label,
+                    hides,
                     &children,
                     visited,
                 );
@@ -3876,6 +3911,7 @@ fn append_mailboxes(
                 can_create_children: false,
                 can_rename: false,
                 can_delete: false,
+                can_hide: false,
                 label: mailbox.label().to_owned(),
                 scope: Some(Scope::Account {
                     account_id,
@@ -3912,6 +3948,7 @@ fn append_mailboxes(
                 standard_mailbox: None,
             },
             account_label,
+            hides,
             &children,
             &mut visited,
         );
@@ -3934,6 +3971,7 @@ fn append_mailboxes(
                     standard_mailbox: None,
                 },
                 account_label,
+                hides,
                 &children,
                 &mut visited,
             );
@@ -3999,6 +4037,7 @@ fn unified_mailbox_entries(badges: &[MailboxBadgeCounts]) -> Vec<MailboxEntry> {
             can_create_children: false,
             can_rename: false,
             can_delete: false,
+            can_hide: false,
             label: mailbox.label().to_owned(),
             scope: Some(Scope::Unified(mailbox)),
             context: "Unified".to_owned(),

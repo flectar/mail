@@ -9,6 +9,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Server settings for new accounts](#server-settings-for-new-accounts)
 - [Advanced account settings](#advanced-account-settings)
 - [Special folders](#special-folders)
+- [Hiding folders](#hiding-folders)
 - [Sender addresses](#sender-addresses)
 - [Automatic Cc and Bcc](#automatic-cc-and-bcc)
 - [New-mail notifications](#new-mail-notifications)
@@ -300,6 +301,18 @@ under the names of what they hold. A chosen folder renamed in Flectar Mail keeps
 its place, one deleted gives it back to the server's folder, and with
 **Subscribed folders only** a chosen folder is listed though you haven't
 subscribed to it. Flectar Mail Sync takes the choices to your other devices.
+
+## Hiding folders
+
+Folders an account never uses, such as one for notes or an old archive, can
+leave the sidebar. **Hide folder** in a folder's menu in the sidebar hides it,
+with the folders in it, and **Folders** in the account's card in Settings →
+Accounts lists every folder with a switch to show or hide it. A hidden folder
+also leaves the **Move to** list, and its mail still downloads and turns up in
+searches. The Inbox and the folders for sent mail, drafts and the like always
+show. A hidden folder renamed in Flectar Mail stays hidden, and Flectar Mail
+Sync hides it on your other devices too. This works for IMAP, JMAP and POP3
+accounts. Gmail keeps its labels.
 
 ## Sender addresses
 

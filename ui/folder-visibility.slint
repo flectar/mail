@@ -1,0 +1,234 @@
+import { ScrollView } from "std-widgets.slint";
+import { AccountRow } from "models.slint";
+import { AppTheme, LayoutMetrics } from "design-system.slint";
+import { TypeScale } from "typography.slint";
+import { IconButton, LineEdit, Switch } from "components/controls.slint";
+
+// One of an account's folders the Folders dialog lists (#253).
+export struct FolderShownRow {
+    id: int,
+    // Its name, after its parents' names when a search lists it.
+    name: string,
+    // How deep it sits in the folder tree, when no search narrows the list.
+    depth: int,
+    shown: bool,
+    // The Inbox and the folders for Sent and the like always show.
+    always-shown: bool,
+    // Hidden with a folder it's in.
+    inside-hidden: bool,
+}
+
+// Folders (src/folder_visibility.rs): which of an account's folders show in
+// the sidebar and the Move to list. A hidden folder's mail still downloads.
+export global FolderVisibility {
+    // The account whose folders `rows` lists, or -1.
+    in property <int> account-id: -1;
+    in property <bool> loading;
+    // Why the folders couldn't be read or a choice saved, or "".
+    in property <string> error;
+    in property <[FolderShownRow]> rows;
+    // How many folders match the search in all, of which `rows` lists the
+    // first.
+    in property <int> matches;
+    // How many folders the account has.
+    in property <int> total;
+    in-out property <string> query;
+    // Read an account's folders into `rows`.
+    callback load(int);
+    callback search(string);
+    // An account's folder shows, or is hidden.
+    callback set-shown(int, int, bool);
+}
+
+export component FoldersDialog inherits Rectangle {
+    in property <bool> compact;
+    in property <AccountRow> account;
+    callback close();
+
+    private property <bool> loaded: FolderVisibility.account-id == root.account.id && !FolderVisibility.loading;
+    // Many folders are found by searching, as the Move to list finds them.
+    private property <bool> searchable: FolderVisibility.total > 12;
+    private property <length> row-height: root.compact ? LayoutMetrics.touch-target : 36px;
+    // The list keeps the height it opens with, so the dialog doesn't jump
+    // while a search narrows it.
+    private property <int> opened-rows: 0;
+    private property <length> list-height: max(root.row-height, min(root.compact ? 7 : 9, max(1, root.opened-rows)) * root.row-height);
+
+    // Up to the content's height; taller content scrolls.
+    out property <length> content-height: content.preferred-height;
+
+    function keep-height() {
+        if root.loaded && root.opened-rows == 0 {
+            root.opened-rows = FolderVisibility.rows.length;
+        }
+    }
+    init => { root.keep-height(); }
+    changed loaded => { root.keep-height(); }
+
+    background: AppTheme.surface;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: AppTheme.border-subtle;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-color: #00000055;
+    clip: true;
+
+    // Takes the keyboard when it opens, so Escape closes it.
+    FocusScope {
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.close();
+                return accept;
+            }
+            reject
+        }
+
+        content := VerticalLayout {
+            width: root.width;
+            padding-top: 20px;
+            padding-right: 18px;
+            padding-bottom: 20px;
+            padding-left: 18px;
+            spacing: 14px;
+
+            HorizontalLayout {
+                spacing: 12px;
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 1px;
+                    Text {
+                        text: @tr("Folders");
+                        color: AppTheme.title;
+                        font-size: TypeScale.heading;
+                        font-weight: 700;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.account.email;
+                        color: AppTheme.secondary;
+                        font-size: TypeScale.secondary;
+                        overflow: elide;
+                    }
+                }
+                IconButton {
+                    width: 36px;
+                    height: 36px;
+                    icon: @image-url("icons/lucide/outline/x.svg");
+                    icon-color: AppTheme.secondary;
+                    ghost: true;
+                    hover-background: AppTheme.accent-soft;
+                    tooltip-text: @tr("Close");
+                    clicked => { root.close(); }
+                }
+            }
+
+            Text {
+                text: @tr("Choose which folders show in the sidebar and the Move to list. A hidden folder's mail still downloads, and the folders in it are hidden too.");
+                color: AppTheme.muted;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+
+            if !root.loaded : Text {
+                text: @tr("Reading the folders…");
+                color: AppTheme.secondary;
+                font-size: TypeScale.caption;
+            }
+
+            if root.loaded && root.searchable : LineEdit {
+                height: root.compact ? LayoutMetrics.touch-target : 36px;
+                text <=> FolderVisibility.query;
+                placeholder-text: @tr("Search folders");
+                input-label: @tr("Search folders");
+                show-leading-icon: true;
+                leading-icon: @image-url("icons/lucide/outline/search.svg");
+                leading-icon-color: AppTheme.muted;
+                edited(value) => { FolderVisibility.search(value); }
+            }
+
+            if root.loaded : VerticalLayout {
+                spacing: 4px;
+
+                // The switches' column.
+                HorizontalLayout {
+                    padding-right: 14px;
+                    Text {
+                        text: @tr("Show");
+                        color: AppTheme.muted;
+                        font-size: TypeScale.caption;
+                        font-weight: 600;
+                        horizontal-alignment: right;
+                        accessible-role: none;
+                    }
+                }
+
+                Rectangle {
+                    height: root.list-height;
+
+                    folder-list := ScrollView {
+                        accessible-role: list;
+                        accessible-label: @tr("Folders");
+                        accessible-item-count: FolderVisibility.rows.length;
+                        content-height: max(self.visible-height, FolderVisibility.rows.length * root.row-height);
+                        horizontal-scrollbar-policy: always-off;
+                        mouse-drag-pan-enabled: root.compact;
+
+                        for row[index] in FolderVisibility.rows : Rectangle {
+                            x: 0px;
+                            y: index * root.row-height;
+                            width: folder-list.visible-width;
+                            height: root.row-height;
+
+                            Text {
+                                x: (FolderVisibility.query == "" ? row.depth * 18px : 0px);
+                                width: max(0px, parent.width - self.x - 64px);
+                                height: parent.height;
+                                text: row.name;
+                                color: row.inside-hidden ? AppTheme.muted : AppTheme.heading;
+                                font-size: TypeScale.body;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                accessible-role: none;
+                            }
+                            // Clear of the scroll bar.
+                            Switch {
+                                x: parent.width - self.width - 14px;
+                                y: (parent.height - self.height) / 2;
+                                checked: row.shown && !row.inside-hidden;
+                                enabled: !row.always-shown && !row.inside-hidden;
+                                control-label: @tr("Show {}", row.name);
+                                toggled => { FolderVisibility.set-shown(root.account.id, row.id, self.checked); }
+                            }
+                        }
+                    }
+
+                    if FolderVisibility.rows.length == 0 : Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: @tr("No matching folders");
+                        color: AppTheme.muted;
+                        font-size: TypeScale.body;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if FolderVisibility.matches > FolderVisibility.rows.length : Text {
+                    text: @tr("Showing {} of {} folders. Type more to narrow them down.", FolderVisibility.rows.length, FolderVisibility.matches);
+                    color: AppTheme.muted;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+            }
+
+            if FolderVisibility.error != "" && FolderVisibility.account-id == root.account.id : Text {
+                text: FolderVisibility.error;
+                color: AppTheme.destructive;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
