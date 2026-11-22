@@ -1608,9 +1608,7 @@ export component AppWindow inherits Window {
 
     // Neutral, low-chrome surfaces keep the message content visually primary.
     // Interactive controls come from Slint's desktop widget set.
-    private property <bool> dark-mode: root.theme_mode == "dark" ? true
-        : root.theme_mode == "light" ? false
-        : Palette.color-scheme == ColorScheme.dark;
+    private property <bool> dark-mode: AppTheme.dark;
     private property <color> page-bg: AppTheme.page-bg;
     private property <color> surface: AppTheme.surface;
     private property <color> surface-raised: AppTheme.surface-raised;
