@@ -2102,13 +2102,25 @@ pub fn has_remote_images(html: &str) -> bool {
     crate::email_document::has_remote_images(html)
 }
 
+/// Put the reader's fallback fonts first in the document's head: the email's
+/// own `font-family` rules come after them and win, as they would over a
+/// browser's defaults.
 fn with_email_font_fallback(html: &str) -> String {
     let lower = html.to_ascii_lowercase();
-    if let Some(head_end) = lower.find("</head>") {
+    // The end of the `<head>` start tag, not of a `<header>`.
+    let head_start_end = lower.match_indices("<head").find_map(|(start, tag)| {
+        let after = start + tag.len();
+        let rest = &lower[after..];
+        if !rest.starts_with(|c: char| c == '>' || c == '/' || c.is_ascii_whitespace()) {
+            return None;
+        }
+        rest.find('>').map(|end| after + end + 1)
+    });
+    if let Some(head_start_end) = head_start_end {
         let mut output = String::with_capacity(html.len() + EMAIL_FONT_FALLBACK_STYLE.len());
-        output.push_str(&html[..head_end]);
+        output.push_str(&html[..head_start_end]);
         output.push_str(EMAIL_FONT_FALLBACK_STYLE);
-        output.push_str(&html[head_end..]);
+        output.push_str(&html[head_start_end..]);
         output
     } else if let Some(open_end) = lower.find("<body") {
         let mut output = String::with_capacity(html.len() + EMAIL_FONT_FALLBACK_STYLE.len());
@@ -2319,6 +2331,23 @@ mod tests {
         prepare_email_html, render_prepared_cpu, render_to_buffer,
     };
     use crate::mail::fixtures;
+
+    #[test]
+    fn email_font_rules_come_after_the_fallback_fonts() {
+        // The reader's fallback fonts are a default: the email's own rules for
+        // the same elements come later in the cascade and win.
+        for html in [
+            "<html><head><style>body{font-family:Georgia}</style></head><body>x</body></html>",
+            "<html><HEAD lang='en'><style>body{font-family:Georgia}</style></HEAD></html>",
+        ] {
+            let html = super::with_email_font_fallback(html);
+            let fallback = html.find("data-flectar-mail=\"font-fallback\"").unwrap();
+            assert!(fallback < html.find("Georgia").unwrap(), "{html}");
+        }
+        // A <header> isn't the head.
+        let html = super::with_email_font_fallback("<body><header>x</header></body>");
+        assert!(html.starts_with("<head>"), "{html}");
+    }
 
     #[test]
     fn email_font_ctx_prefers_helvetica_neue_for_sans_serif_when_installed() {
