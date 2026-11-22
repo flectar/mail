@@ -197,12 +197,34 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
             if let Some(padding) = attr(table, "cellpadding").and_then(parse_non_negative_integer) {
                 let _ = write!(css, "padding:{padding}px;");
             }
-            if table_border_width(table).is_some_and(|width| width > 0)
-                && attr(table, "rules").is_none()
-                && attr(table, "frame").is_none()
-            {
-                // No colour: cell borders follow the cell's `currentcolor`.
-                css.push_str("border-width:1px;border-style:inset;");
+            // Blink's cell borders: `rules` picks the sides, otherwise a
+            // nonzero `border` draws all four, solid when `bordercolor` is set
+            // and inset when not. `frame` only changes the table's own border.
+            // Cells take the table's border colour through their rows, as in
+            // Blink (its `TableCellBorderColorInherit`).
+            let borders = match table_rules(table) {
+                Some(Rules::All) => Some("border-width:1px;border-style:solid;"),
+                Some(Rules::Cols) => Some(
+                    "border-left-width:1px;border-right-width:1px;\
+                     border-left-style:solid;border-right-style:solid;",
+                ),
+                Some(Rules::Rows) => Some(
+                    "border-top-width:1px;border-bottom-width:1px;\
+                     border-top-style:solid;border-bottom-style:solid;",
+                ),
+                Some(Rules::None | Rules::Groups) => None,
+                None if table_border_width(table).is_some_and(|width| width > 0) => {
+                    Some(if has_border_color(table) {
+                        "border-width:1px;border-style:solid;"
+                    } else {
+                        "border-width:1px;border-style:inset;"
+                    })
+                }
+                None => None,
+            };
+            if let Some(borders) = borders {
+                css.push_str(borders);
+                css.push_str("border-color:inherit;");
             }
         }
     }
@@ -282,11 +304,10 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
             }
             "border" => {
                 if *tag == local_name!("table") {
+                    // The style comes with `frame`, `rules` and `bordercolor`
+                    // after the loop.
                     if let Some(width) = table_border_width(elem) {
                         let _ = write!(css, "border-width:{width}px;");
-                        if width > 0 {
-                            css.push_str("border-style:outset;");
-                        }
                     }
                 } else if *tag == local_name!("img")
                     || *tag == local_name!("object")
@@ -348,6 +369,10 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
             "hidden" => css.push_str("display:none;"),
             _ => {}
         }
+    }
+
+    if *tag == local_name!("table") {
+        table_border_style(elem, css);
     }
 
     // `body` margins: per axis, the first of these attributes that exists
@@ -440,6 +465,84 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
             _ => "",
         });
     }
+}
+
+/// A table's own border style, as Blink sets it. The sides `frame` names are
+/// solid and the others hidden, 1px wide unless `border` gives a width.
+/// Without `frame`, a nonzero `border` is outset, or solid with
+/// `bordercolor`, and `rules` alone hides the border, which then wins over
+/// the cells' borders along the table's edge. `rules` also collapses borders.
+fn table_border_style(table: &ElementData, css: &mut String) {
+    let border = table_border_width(table);
+    if let Some(sides) = frame_sides(table) {
+        if border.is_none() {
+            css.push_str("border-width:1px;");
+        }
+        let [top, right, bottom, left] = sides.map(|side| if side { "solid" } else { "hidden" });
+        let _ = write!(css, "border-style:{top} {right} {bottom} {left};");
+    } else if border.is_some_and(|width| width > 0) {
+        css.push_str(if has_border_color(table) {
+            "border-style:solid;"
+        } else {
+            "border-style:outset;"
+        });
+    } else if table_rules(table).is_some() {
+        css.push_str("border-style:hidden;");
+    }
+    if table_rules(table).is_some() {
+        css.push_str("border-collapse:collapse;");
+    }
+}
+
+/// The sides of a table that its `frame` attribute borders, as top, right,
+/// bottom and left, or `None` without a known value.
+fn frame_sides(table: &ElementData) -> Option<[bool; 4]> {
+    let value = attr(table, "frame")?;
+    let sides = [
+        ("void", [false, false, false, false]),
+        ("above", [true, false, false, false]),
+        ("below", [false, false, true, false]),
+        ("hsides", [true, false, true, false]),
+        ("vsides", [false, true, false, true]),
+        ("lhs", [false, false, false, true]),
+        ("rhs", [false, true, false, false]),
+        ("box", [true, true, true, true]),
+        ("border", [true, true, true, true]),
+    ];
+    sides
+        .into_iter()
+        .find(|(name, _)| value.eq_ignore_ascii_case(name))
+        .map(|(_, sides)| sides)
+}
+
+/// Which borders between cells a table's `rules` attribute draws.
+#[derive(Clone, Copy)]
+enum Rules {
+    None,
+    Groups,
+    Rows,
+    Cols,
+    All,
+}
+
+fn table_rules(table: &ElementData) -> Option<Rules> {
+    let value = attr(table, "rules")?;
+    [
+        ("none", Rules::None),
+        ("groups", Rules::Groups),
+        ("rows", Rules::Rows),
+        ("cols", Rules::Cols),
+        ("all", Rules::All),
+    ]
+    .into_iter()
+    .find(|(name, _)| value.eq_ignore_ascii_case(name))
+    .map(|(_, rules)| rules)
+}
+
+/// Whether a table has a `bordercolor`, which makes Blink draw its borders
+/// solid even when the colour doesn't parse.
+fn has_border_color(table: &ElementData) -> bool {
+    attr(table, "bordercolor").is_some_and(|value| !value.is_empty())
 }
 
 /// The table `border` attribute: a missing value or a parse error means 1px.

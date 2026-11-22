@@ -1526,3 +1526,71 @@ fn lines_break_where_chromium_breaks_them() {
         close(node(&doc, "#p").final_layout().size.height, 20.0 * lines);
     }
 }
+
+#[test]
+fn table_border_attributes_draw_borders_as_blink_does() {
+    // `bordercolor` makes the table's border and its cells' borders solid in
+    // that colour, where they were outset and inset bevels.
+    let mut doc = document(
+        "<table border=2 bordercolor='#ff0000' cellspacing=4><tr><td style='width:20px;height:20px'></td></tr></table>",
+    );
+    let pixels = paint(&mut doc);
+    let red = |pixel: &[u8; 4]| *pixel == [255, 0, 0, 255];
+    assert_eq!(bounds_where(&pixels, red), Some((0, 0, 33, 33)));
+    let cell_edge = (15 * 400 + 6) * 4;
+    assert_eq!(&pixels[cell_edge..cell_edge + 4], &[255, 0, 0, 255]);
+
+    // `frame=void` hides the table's own border, and `rules=rows` draws lines
+    // between rows only, in the table's border colour.
+    let mut doc = document(
+        "<table border=3 frame=void rules=rows style='color:rgb(0,0,255)'>
+         <tr><td style='width:20px;height:10px'></td></tr>
+         <tr><td style='width:20px;height:10px'></td></tr></table>",
+    );
+    let pixels = paint(&mut doc);
+    let (x0, y0, x1, y1) = bounds_where(&pixels, |pixel| pixel[2] > 128 && pixel[0] < 128).unwrap();
+    assert_eq!((x0, x1), (0, 19));
+    assert!(
+        y0 == y1 && (9..=11).contains(&y0),
+        "one rule between the rows: {y0}..{y1}"
+    );
+
+    // Cells take the table's border colour, not their own text colour.
+    let mut doc = document(
+        "<table border=1 style='border-color:rgb(0,160,0)'><tr>
+         <td style='width:20px;height:20px;color:rgb(0,0,255)'></td></tr></table>",
+    );
+    let pixels = paint(&mut doc);
+    assert!(bounds_where(&pixels, |pixel| pixel[2] > 64 && pixel[2] > pixel[1]).is_none());
+    assert!(
+        bounds_where(&pixels, |pixel| pixel[1] > 64
+            && pixel[0] < 64
+            && pixel[2] < 64)
+        .is_some()
+    );
+}
+
+#[test]
+fn wide_tables_share_spare_width_in_proportion_to_content() {
+    // A 300px table whose auto columns want 100px, 50px and nothing gives
+    // them 200px, 100px and none, as Chromium does (CSS Tables 3 §3.9.3),
+    // where grid tracks would each grow by 50px.
+    let doc = document(
+        "<table width=300 cellspacing=0><tr>
+         <td id=a><div style='width:100px;height:5px'></div></td>
+         <td id=b><div style='width:50px;height:5px'></div></td>
+         <td id=c></td></tr></table>",
+    );
+    close(node(&doc, "#a").final_layout().size.width, 200.0);
+    close(node(&doc, "#b").final_layout().size.width, 100.0);
+    close(node(&doc, "#c").final_layout().size.width, 0.0);
+}
+
+#[test]
+fn tables_without_columns_have_no_spacing() {
+    // As in Blink, an empty `<table cellspacing=10>` is only its border.
+    let doc = document("<table id=t cellspacing=10 style='border:2px solid'><tr></tr></table>");
+    let size = node(&doc, "#t").final_layout().size;
+    close(size.width, 4.0);
+    close(size.height, 4.0);
+}

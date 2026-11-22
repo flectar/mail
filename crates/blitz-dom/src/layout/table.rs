@@ -621,8 +621,13 @@ pub(crate) fn build_table_context(
         BorderCollapse::Separate => {
             // In the separated borders model, `border-spacing` also applies between
             // the table border and the outermost cells, in addition to between cells.
-            let spacing_x = border_spacing.width.px();
-            let spacing_y = border_spacing.height.px();
+            // A table without columns has no spacing at all, as in Blink, so an
+            // empty `<table cellspacing=10>` is no taller than its border.
+            let (spacing_x, spacing_y) = if column_count == 0 {
+                (0.0, 0.0)
+            } else {
+                (border_spacing.width.px(), border_spacing.height.px())
+            };
             let padding = style.padding().resolve_or_zero(None, resolve_calc_value);
             style.padding = taffy::Rect {
                 left: style_helpers::length(padding.left + spacing_x),
@@ -1906,7 +1911,8 @@ impl TableTreeWrapper<'_, '_> {
     /// When the authored widths fit, the width left over is shared between
     /// the auto columns as Chromium shares it (CSS Tables 3 §3.9.3): each grows
     /// from its min-content width toward its max-content width by the same
-    /// fraction of the way, rather than by equal amounts as grid tracks do.
+    /// fraction of the way, and past it in proportion to its max-content
+    /// width, rather than by equal amounts as grid tracks do.
     pub(crate) fn fold_authored_widths(&mut self, table_width: Option<f32>) {
         let ctx = Arc::clone(&self.ctx);
         let lengths = &ctx.column_lengths;
@@ -2007,6 +2013,27 @@ impl TableTreeWrapper<'_, '_> {
                         let share = left / total_room;
                         for column in (0..lengths.len()).filter(|&column| is_auto(column)) {
                             fold.floors[column] = minimums[column] + room[column] * share;
+                        }
+                    } else if left > total_room + 0.5
+                        && ctx.style.size.width.tag() != taffy::CompactLength::AUTO_TAG
+                    {
+                        // A table with an authored width wider than its
+                        // columns' max-content widths shares the excess in
+                        // proportion to those widths, so an empty column gets
+                        // none of it (section 3.9.3 of CSS Tables 3), where
+                        // grid tracks would grow by equal amounts. An
+                        // auto-width table is as wide as its columns, and
+                        // `width` is only the room it has.
+                        let widest = |column: usize| minimums[column] + room[column];
+                        let total: f32 = (0..lengths.len())
+                            .filter(|&column| is_auto(column))
+                            .map(widest)
+                            .sum();
+                        if total > 0.0 {
+                            let scale = 1.0 + (left - total_room) / total;
+                            for column in (0..lengths.len()).filter(|&column| is_auto(column)) {
+                                fold.floors[column] = widest(column) * scale;
+                            }
                         }
                     }
                 }
