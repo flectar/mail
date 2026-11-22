@@ -27,6 +27,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0007 unresolvable resource URLs | Skips images, stylesheets, form actions and `@import` rules whose URL cannot be resolved instead of panicking. The reader has no base URL, so a relative `<img src>` failed the whole message. |
 | 0008 offscreen culling bounds | Builds each element's cull box at its own origin, like its scaled scrollable overflow, and rescales every element's overflow after a scale change. Tiles far down a message no longer paint the elements above them, nor cull content whose overflow was measured at another scale. |
 | 0009 inside list markers before blocks | Keeps a `list-style-position: inside` marker in front of the list item's content when that content starts with a block or is empty, on an anonymous line of its own as in browsers. A `<summary>` that holds a heading, as GitHub's release mails have, lost its disclosure triangle. |
+| 0020 selection into text after a block | Collects the inline roots between the ends of a text selection from the layout tree, which holds the anonymous blocks that wrap text next to a block. A selection from a paragraph into the text after it ran backwards and selected nothing, so it was neither highlighted nor copied. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
@@ -34,7 +35,7 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 is local. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 and 0020 are local, and upstream main collects selection ranges as beta.4 does. Drop the backported parts
 when a release contains them.
 
 Table-cell layout adjustments use temporary computed-style overrides. They do

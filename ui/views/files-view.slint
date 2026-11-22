@@ -293,9 +293,6 @@ export component FilesView inherits Rectangle {
                 padding: 0px; spacing: 0px;
                 Rectangle {
                     height: root.compact ? LayoutMetrics.compact-header-height : LayoutMetrics.desktop-mail-toolbar-height;
-                    // Tooltips extend below the toolbar; keep them above the
-                    // list body, which is declared later in this layout.
-                    z: 1;
                     // The view's focus scope takes the first click, so the
                     // window-wide drag band below never sees it here.
                     if WindowChrome.controls-visible : WindowDragArea { width: parent.width; height: parent.height; }
