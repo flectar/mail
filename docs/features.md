@@ -359,6 +359,11 @@ that belong to it. Choose a profile in that menu to focus the mail view on its
 accounts: the unified inbox, search, counts, and sidebar show only their mail,
 while your tabs stay the same. **All accounts** shows everything again.
 
+Each account can also have a name of its own, such as Office or Shop. Type it
+in **Account name** under the account in Settings → Accounts. The sidebar, the
+unified inbox and every list of accounts then show it instead of the address,
+and it never appears on the mail you send.
+
 You can also override an individual account's color and show the effective
 color along the left edge of every message. The markers make accounts easy to
 tell apart while working in the unified inbox; the example below uses purple
