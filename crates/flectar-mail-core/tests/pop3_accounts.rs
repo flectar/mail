@@ -764,8 +764,9 @@ async fn a_message_another_device_scheduled_goes_out_from_here_as_it_is() {
     assert!(message.contains("Subject: Written yesterday"), "{message}");
     assert!(message.contains("Sent from the phone."), "{message}");
     assert!(!message.contains("Bcc:"), "{message}");
+    // Matched whole, as a send date such as 22 Nov 2026 contains 2 Nov 2026.
     assert!(
-        !message.contains("2 Nov 2026"),
+        !message.contains("Mon, 2 Nov 2026 09:00:00"),
         "dated when it went: {message}"
     );
     // The draft kept here became the sent message, in the local Sent folder.
