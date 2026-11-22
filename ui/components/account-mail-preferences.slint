@@ -191,8 +191,8 @@ export component AccountMailPreferencesPanel inherits Rectangle {
                     if identity.manual : HorizontalBox {
                         padding: 0px;
                         alignment: start;
-                        Button { text: @tr("Edit"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.edit-sender-identity(identity.email); } }
-                        Button { text: @tr("Remove"); destructive: true; enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.remove-sender-identity(identity.email); } }
+                        Button { min-width: max(64px, self.content-width); text: @tr("Edit"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.edit-sender-identity(identity.email); } }
+                        Button { min-width: max(64px, self.content-width); text: @tr("Remove"); destructive: true; enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.remove-sender-identity(identity.email); } }
                     }
                 }
                 if AccountMailPreferences.sender-identity-policy == "never" : Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Gmail decides which addresses you can send from. Add an address in Gmail settings under Accounts › Send mail as, then refresh sender identities."); color: AppTheme.secondary; wrap: word-wrap; }
@@ -211,8 +211,8 @@ export component AccountMailPreferencesPanel inherits Rectangle {
                     HorizontalBox {
                         padding: 0px;
                         alignment: start;
-                        Button { text: AccountMailPreferences.sender-form-editing ? @tr("Save sender address") : @tr("Add sender address"); primary: true; enabled: !AccountMailPreferences.busy && AccountMailPreferences.sender-form-email != ""; clicked => { AccountMailPreferences.save-sender-identity(); } }
-                        if AccountMailPreferences.sender-form-editing : Button { text: @tr("Cancel"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.clear-sender-form(); } }
+                        Button { min-width: max(64px, self.content-width); text: AccountMailPreferences.sender-form-editing ? @tr("Save sender address") : @tr("Add sender address"); primary: true; enabled: !AccountMailPreferences.busy && AccountMailPreferences.sender-form-email != ""; clicked => { AccountMailPreferences.save-sender-identity(); } }
+                        if AccountMailPreferences.sender-form-editing : Button { min-width: max(64px, self.content-width); text: @tr("Cancel"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.clear-sender-form(); } }
                     }
                 }
                 Rectangle { height: 1px; background: AppTheme.input-border; }
