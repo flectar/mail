@@ -1,4 +1,4 @@
-import { AccountMailPreferencesPanel } from "../components/account-mail-preferences.slint";
+import { AccountMailPreferences, AccountMailPreferencesPanel } from "../components/account-mail-preferences.slint";
 import { LargeFilesCard } from "../link-services.slint";
 import { TranslationPage } from "../translation.slint";
 import { AiPage } from "../ai.slint";
@@ -35,6 +35,7 @@ import { KeyboardKeys } from "../components/kbd.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { AccountProfilePicker, ProfileColorChoice, ProfileMemberChoice, ProfilePalette } from "../components/profile-controls.slint";
 import { FolderRoles, FolderRolesDialog } from "../folder-roles.slint";
+import { SenderPicker } from "../components/sender-picker.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
 import { InterfaceText, TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
@@ -4749,6 +4750,24 @@ export component SettingsDialog inherits Rectangle {
                 }
                 close => { root.close-account-profile-picker(); }
             }
+        }
+
+        // The default sender among many addresses (#252).
+        if AccountMailPreferences.default-sender-picker-open : SenderPicker {
+            width: parent.width;
+            height: parent.height;
+            z: 950;
+            compact: root.compact;
+            title: @tr("Default sender identity");
+            rows: AccountMailPreferences.default-sender-matches;
+            matches: AccountMailPreferences.default-sender-match-count;
+            query <=> AccountMailPreferences.default-sender-query;
+            search(value) => { AccountMailPreferences.default-sender-search(value); }
+            choose(index) => {
+                AccountMailPreferences.default-sender-picker-open = false;
+                AccountMailPreferences.default-sender-index = index;
+            }
+            close => { AccountMailPreferences.default-sender-picker-open = false; }
         }
 
         if root.folder-roles-id >= 0
