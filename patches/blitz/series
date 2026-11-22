@@ -6,3 +6,4 @@
 0007-skip-unresolvable-resource-urls.patch
 0008-correct-offscreen-culling-bounds.patch
 0009-inside-list-markers-before-blocks.patch
+0020-selection-into-text-after-a-block.patch
