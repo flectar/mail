@@ -235,9 +235,9 @@ const PER_DEVICE_ACCOUNT_SETTINGS: &[&str] = &[
     "security",
 ];
 
-/// Connection settings each device keeps to itself: the proxy, which goes
-/// with the device's network.
-const PER_DEVICE_CONNECTION_SETTINGS: &[&str] = &["proxy"];
+/// Connection settings each device keeps to itself, the proxy and how long
+/// to wait for the servers (#252), which go with the device's network.
+const PER_DEVICE_CONNECTION_SETTINGS: &[&str] = &["proxy", "serverTimeoutSecs"];
 
 /// The account's synced settings: all but the ones each device keeps to
 /// itself. Every field is there, null when empty.
@@ -628,6 +628,9 @@ pub(crate) struct Applied {
     pub threads_changed: Vec<i64>,
     /// Another device blocked a sender, or stopped blocking one.
     pub blocked_changed: bool,
+    /// Another device chose other folders for an account's roles, such as
+    /// Sent (#252): the folder list and every mail list show them again.
+    pub folders_changed: bool,
     /// Records taken on or left alone: see [`settle`].
     pub settled: Vec<RecordId>,
 }
@@ -1019,6 +1022,14 @@ fn apply_account(
             )?;
             if reconnect {
                 applied.follow_ups.push(FollowUp::RestartAccount(local_id));
+            }
+            // Folders chosen for roles on another device take them here at
+            // once, rather than at the next reading of the folder list.
+            if config.mail_protocol == MailProtocol::Imap
+                && settings_json.folder_roles != current.settings.folder_roles
+            {
+                repo::folders::apply_chosen_roles(conn, local_id, &settings_json.folder_roles)?;
+                applied.folders_changed = true;
             }
             local_id
         }
@@ -1470,6 +1481,7 @@ fn merged_account_settings(current: &AccountSettings, synced: &AccountSettings) 
         ..synced.clone()
     };
     merged.connection.proxy = current.connection.proxy.clone();
+    merged.connection.server_timeout_secs = current.connection.server_timeout_secs;
     merged
 }
 
@@ -1940,6 +1952,79 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sync_id_of(&conn, local), smaller);
+    }
+
+    /// Folders chosen for roles on another device take them here at once,
+    /// and going back to the server's suggestion travels too (#252).
+    #[test]
+    fn folders_chosen_for_roles_on_another_device_take_them_here() {
+        use crate::models::roles;
+        let conn = testutil::conn();
+        let sync_id = "ab".repeat(16);
+        let local = account(&conn, "me@example.com", &sync_id);
+        let sent =
+            repo::folders::upsert(&conn, local, "Sent", Some("/"), Some(roles::SENT)).unwrap();
+        let sent_items =
+            repo::folders::upsert(&conn, local, "Sent Items", Some("/"), None).unwrap();
+        let id = sync_id_bytes(&sync_id).unwrap();
+        let settings = repo::settings::get(&conn).unwrap();
+        let automatic = repo::accounts::get_config(&conn, local).unwrap().unwrap();
+        let mut chosen = automatic.clone();
+        chosen
+            .settings
+            .folder_roles
+            .insert(roles::SENT.into(), "Sent Items".into());
+        let record = |config: &crate::models::AccountConfig| {
+            entry(ACCOUNT, account_body(config, &settings, 0).unwrap())
+        };
+        assert_eq!(
+            record(&automatic).body["settings"]["folderRoles"],
+            json!({})
+        );
+
+        let applied = apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(record(&automatic)),
+                next: Some(record(&chosen)),
+            },
+        );
+        assert!(applied.folders_changed);
+        assert_eq!(
+            repo::folders::by_role(&conn, local, roles::SENT)
+                .unwrap()
+                .unwrap()
+                .id,
+            sent_items
+        );
+
+        let applied = apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(record(&chosen)),
+                next: Some(record(&automatic)),
+            },
+        );
+        assert!(applied.folders_changed);
+        assert_eq!(
+            repo::folders::by_role(&conn, local, roles::SENT)
+                .unwrap()
+                .unwrap()
+                .id,
+            sent
+        );
+        // Nothing else changed.
+        let applied = apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(record(&automatic)),
+                next: Some(record(&automatic)),
+            },
+        );
+        assert!(!applied.folders_changed);
     }
 
     fn template(conn: &Connection, name: &str, shortcut: Option<&str>, sync_id: &str) {
@@ -2761,11 +2846,18 @@ mod tests {
         config.settings.check_interval = CheckInterval::Minutes(30);
         config.settings.push = false;
         config.settings.connection.proxy = AccountProxy::Direct;
+        config.settings.connection.server_timeout_secs = Some(120);
         let body = account_body(&config, &Settings::default(), 0).unwrap();
         assert!(body["settings"].get("checkInterval").is_none(), "{body}");
         assert!(body["settings"].get("push").is_none(), "{body}");
         assert!(
             body["settings"]["connection"].get("proxy").is_none(),
+            "{body}"
+        );
+        assert!(
+            body["settings"]["connection"]
+                .get("serverTimeoutSecs")
+                .is_none(),
             "{body}"
         );
 
@@ -2774,10 +2866,12 @@ mod tests {
         synced.check_interval = CheckInterval::App;
         synced.push = true;
         synced.connection.proxy = AccountProxy::App;
+        synced.connection.server_timeout_secs = None;
         let merged = merged_account_settings(&config.settings, &synced);
         assert_eq!(merged.check_interval, CheckInterval::Minutes(30));
         assert!(!merged.push);
         assert_eq!(merged.connection.proxy, AccountProxy::Direct);
+        assert_eq!(merged.connection.server_timeout_secs, Some(120));
     }
 
     #[test]

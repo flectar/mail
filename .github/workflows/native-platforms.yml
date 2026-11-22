@@ -228,8 +228,10 @@ jobs:
       image: fedora:43
       # Turning on swap for the release build needs it (scripts/ci-swap.sh).
       # The memory cap keeps the build from swapping out the runner's agent
-      # on the 16 GiB host, as scripts/ci-build-scope.sh does elsewhere.
-      options: --privileged --memory=14g --memory-swap=-1
+      # on the 16 GiB host, as scripts/ci-build-scope.sh does elsewhere. The
+      # host's cgroups let scripts/ci-protect-runner.sh keep memory for the
+      # agent itself.
+      options: --privileged --cgroupns=host --memory=14g --memory-swap=-1
     env:
       SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
@@ -270,7 +272,9 @@ jobs:
       - name: Make room for the release build
         # The app crate's release build peaks near all the memory a hosted
         # runner has; see scripts/ci-swap.sh.
-        run: ./scripts/ci-swap.sh on
+        run: |
+          ./scripts/ci-protect-runner.sh
+          ./scripts/ci-swap.sh on
       - name: Build Fedora release executable
         env:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}

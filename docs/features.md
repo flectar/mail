@@ -6,6 +6,8 @@ A closer look at what the [README](../README.md) summarizes.
 - [Tabs](#tabs)
 - [Search](#search)
 - [Checking for mail](#checking-for-mail)
+- [Advanced account settings](#advanced-account-settings)
+- [Special folders](#special-folders)
 - [New-mail notifications](#new-mail-notifications)
 - [Profiles and account colors](#profiles-and-account-colors)
 - [Appearance](#appearance)
@@ -28,6 +30,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Read receipts](#read-receipts)
 - [Calendar invitations](#calendar-invitations)
 - [Translation](#translation)
+- [AI](#ai)
 - [AI agents](#ai-agents)
 - [Flectar Mail Sync](#flectar-mail-sync)
 - [Storage and backups](#storage-and-backups)
@@ -195,7 +198,10 @@ and when you ask. **Instant updates** lets an IMAP or JMAP server tell Flectar
 Mail of new mail as soon as it arrives. Turned off, the account checks at its
 interval, which saves battery and data, and helps with a server that drops
 waiting connections. An account that checks only when you ask doesn't wait for
-updates either.
+updates either. **Server timeout** sets how long an IMAP, POP3 or JMAP account
+waits for a slow server, or a slow connection to it, before it gives up. Every
+wait grows alike, from connecting and signing in to downloading attachments,
+and a change takes effect at once.
 
 A server can ask Flectar Mail to slow down, when an account has too many
 connections open or makes too many requests, or while another app is using a
@@ -236,6 +242,25 @@ An SMTP server that signs in with another username, such as your provider's or
 company's relay, takes it in **SMTP username**, with its own **SMTP password**,
 which stays in the system keyring like the account's. Without one, the SMTP
 server signs in with the account's password.
+
+## Special folders
+
+An IMAP account keeps sent mail, drafts, deleted mail, spam and archived mail
+in the folders its server marks for each (RFC 6154), or else in the ones named
+for them, such as Sent or Trash. Where those aren't the right ones, as on a
+server that marks none or names them in another language, **Special folders**
+in the account's card in Settings → Accounts chooses others. **Sent**,
+**Drafts**, **Trash**, **Spam** and **Archive** each go to the folder chosen
+for them. The first choice, **Automatic**, keeps the server's folder, and reads
+**No folder** where the server has none. A folder holds one of them at a time,
+so choosing it for another frees it from the first.
+
+From then on, sent mail and drafts are saved in the chosen folders, and **Move
+to spam**, deleting and archiving move mail into them. The sidebar shows them
+under the names of what they hold. A chosen folder renamed in Flectar Mail keeps
+its place, one deleted gives it back to the server's folder, and with
+**Subscribed folders only** a chosen folder is listed though you haven't
+subscribed to it. Flectar Mail Sync takes the choices to your other devices.
 
 ## New-mail notifications
 
@@ -923,9 +948,9 @@ provider as before.
 Turn it on in Settings → Sync. **Add a device** on a device that already syncs
 shows a QR code to scan with your phone, or a short code to type on the other
 device, and a device can also join with your recovery code. Each device keeps
-its own mail checking, how much mail history it downloads, its proxy, and
-settings that belong to the device itself, such as reduced motion and text
-size.
+its own mail checking, how much mail history it downloads, its proxy and server
+timeout, and settings that belong to the device itself, such as reduced motion
+and text size.
 
 Flectar Mail Sync is a paid service, with a free trial, that pays for the
 servers it runs on. Each contribution to Flectar Mail earns a free year of it,

@@ -287,6 +287,10 @@ pub struct MailConnectionSettings {
     /// password is saved apart, or is the account's when none is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub smtp_username: Option<String>,
+    /// How long to wait for the account's servers, in seconds, when it isn't
+    /// the standard [`crate::net::timeouts::STANDARD`] (#252).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_timeout_secs: Option<u32>,
 }
 
 impl MailConnectionSettings {
@@ -299,7 +303,16 @@ impl MailConnectionSettings {
             incoming_login: LoginMethod::Automatic,
             smtp_login: LoginMethod::Automatic,
             smtp_username: None,
+            server_timeout_secs: None,
         }
+    }
+
+    /// How long to wait for the account's servers before giving up (#252).
+    pub fn server_timeout(&self) -> std::time::Duration {
+        self.server_timeout_secs
+            .map_or(crate::net::timeouts::STANDARD, |seconds| {
+                std::time::Duration::from_secs(u64::from(seconds))
+            })
     }
 }
 
@@ -534,6 +547,12 @@ pub struct AccountSettings {
     /// listen either.
     #[serde(default = "push_default")]
     pub push: bool,
+    /// The folders of an IMAP account chosen by hand for roles such as Sent,
+    /// as their paths by role (#252). A role without one goes to the folder
+    /// the server suggests. Always written, empty too: Flectar Mail Sync
+    /// keeps the fields a record leaves out as a newer version's.
+    #[serde(default)]
+    pub folder_roles: std::collections::BTreeMap<String, String>,
 }
 
 const fn plain_text_replies_default() -> bool {
@@ -561,6 +580,7 @@ impl AccountSettings {
             subscribed_folders_only: false,
             check_interval: CheckInterval::App,
             push: push_default(),
+            folder_roles: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -2214,6 +2234,38 @@ pub struct Snippet {
     pub subject: Option<String>,
     pub body_text: String,
     pub usage_count: i64,
+}
+
+/// Which folders an IMAP account's roles such as Sent go to (#252).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountFolderRoles {
+    /// One per role that can be chosen, as
+    /// [`crate::db::repo::folders::CHOOSABLE_ROLES`] lists them.
+    pub roles: Vec<FolderRoleChoice>,
+    /// The folders a role can go to, by name, parents before their
+    /// children.
+    pub folders: Vec<FolderChoice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderRoleChoice {
+    pub role: String,
+    /// The folder the role goes to unless one is chosen: the one the
+    /// server suggests, if any and if it isn't chosen for another role.
+    pub suggested: Option<i64>,
+    /// The folder chosen by hand, if any and if it's there.
+    pub chosen: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderChoice {
+    pub id: i64,
+    /// The folder's name after its parents' names, outermost first, as
+    /// "Archive" and "2026".
+    pub names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

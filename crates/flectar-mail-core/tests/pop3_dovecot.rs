@@ -67,6 +67,7 @@ fn server(port: u16, security: ConnectionSecurity) -> pop3::Server<'static> {
         security,
         trusted_certificate_pem: "",
         login: flectar_mail_core::models::LoginMethod::Automatic,
+        timeout: flectar_mail_core::net::timeouts::STANDARD,
     }
 }
 

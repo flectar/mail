@@ -164,6 +164,8 @@ pub struct AccountHandle {
     restore_tx: Option<mpsc::Sender<RestoreRequest>>,
     /// Unset for local mail, which has no settings.
     settings_tx: Option<watch::Sender<crate::models::AccountSettings>>,
+    /// The account's server timeout, which its tasks wait by (#252).
+    server_timeout: std::time::Duration,
     tasks: Vec<tokio::task::AbortHandle>,
 }
 
@@ -337,7 +339,8 @@ impl AccountHandle {
         .map_err(|_| CoreError::Other("attachment reader queue is busy".into()))?
         .map_err(|_| CoreError::Other("attachment reader stopped".into()))?;
         tokio::time::timeout(
-            imap::ATTACHMENT_TIMEOUT + std::time::Duration::from_secs(10),
+            crate::net::timeouts::stretch(imap::ATTACHMENT_TIMEOUT, self.server_timeout)
+                + std::time::Duration::from_secs(10),
             rx,
         )
         .await
@@ -359,6 +362,7 @@ impl AccountHandle {
             send_tx: None,
             restore_tx: None,
             settings_tx: None,
+            server_timeout: crate::net::timeouts::STANDARD,
             tasks: Vec::new(),
         }
     }
@@ -381,6 +385,7 @@ mod account_handle_tests {
             send_tx: Some(send_tx),
             restore_tx: None,
             settings_tx: Some(settings_tx),
+            server_timeout: crate::net::timeouts::STANDARD,
             tasks: Vec::new(),
         };
 
@@ -411,94 +416,104 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
     let (tx, rx) = mpsc::channel(SYNC_COMMAND_QUEUE_CAPACITY);
     let (body_tx, body_rx) = mpsc::channel(PRIORITY_FETCH_QUEUE_CAPACITY);
     let (settings_tx, settings_rx) = watch::channel(config.settings.clone());
+    // Every task of the account waits for its servers as long as its server
+    // timeout says (#252).
+    let server_timeout = config.settings.connection.server_timeout();
     // API protocols own their submission queues. SMTP-based protocols get a
     // dedicated submission worker that never waits behind mailbox sync.
-    let (joins, send_tx, restore_tx) = match config.mail_protocol {
-        MailProtocol::Gmail => (
-            crate::sync::gmail::spawn(ctx, config, rx, body_rx, settings_rx),
-            None,
-            None,
-        ),
-        MailProtocol::Jmap => (
-            crate::jmap::sync::spawn(ctx, config, rx, body_rx, settings_rx),
-            None,
-            None,
-        ),
-        MailProtocol::Imap => {
-            let (send_tx, send_rx) = mpsc::channel(1);
-            // These carry idempotent wakeups rather than work. A single
-            // pending item represents every newer nudge and prevents bursts
-            // from retaining memory.
-            let (pool_tx, pool_rx) = mpsc::channel(1);
-            let (hist_tx, hist_rx) = mpsc::channel(1);
-            let mut joins = vec![
-                tokio::spawn(run_send_dispatcher(
-                    ctx.clone(),
-                    config.clone(),
-                    send_rx,
-                    tx.clone(),
-                )),
-                tokio::spawn(run_actor(
-                    ctx.clone(),
-                    config.clone(),
-                    rx,
-                    pool_tx.clone(),
-                    hist_tx,
-                    settings_rx.clone(),
-                )),
-                tokio::spawn(run_body_fetcher(ctx.clone(), config.clone(), body_rx)),
-                tokio::spawn(run_backfill_pool(
-                    ctx.clone(),
-                    config.clone(),
-                    pool_rx,
-                    settings_rx.clone(),
-                )),
-                tokio::spawn(run_history_backfill(
-                    ctx.clone(),
-                    config.clone(),
-                    hist_rx,
-                    pool_tx,
-                    settings_rx,
-                )),
-            ];
-            // Other IMAP servers may keep automatic replies in a Sieve
-            // script. Microsoft keeps them in the mailbox settings.
-            if config.provider == Provider::Generic {
-                joins.push(tokio::spawn(crate::sieve::watch(ctx, config)));
+    let (joins, send_tx, restore_tx) =
+        crate::net::timeouts::sync_scope(server_timeout, || match config.mail_protocol {
+            MailProtocol::Gmail => (
+                crate::sync::gmail::spawn(ctx, config, rx, body_rx, settings_rx),
+                None,
+                None,
+            ),
+            MailProtocol::Jmap => (
+                crate::jmap::sync::spawn(ctx, config, rx, body_rx, settings_rx),
+                None,
+                None,
+            ),
+            MailProtocol::Imap => {
+                let (send_tx, send_rx) = mpsc::channel(1);
+                // These carry idempotent wakeups rather than work. A single
+                // pending item represents every newer nudge and prevents bursts
+                // from retaining memory.
+                let (pool_tx, pool_rx) = mpsc::channel(1);
+                let (hist_tx, hist_rx) = mpsc::channel(1);
+                let mut joins = vec![
+                    crate::net::timeouts::spawn(run_send_dispatcher(
+                        ctx.clone(),
+                        config.clone(),
+                        send_rx,
+                        tx.clone(),
+                    )),
+                    crate::net::timeouts::spawn(run_actor(
+                        ctx.clone(),
+                        config.clone(),
+                        rx,
+                        pool_tx.clone(),
+                        hist_tx,
+                        settings_rx.clone(),
+                    )),
+                    crate::net::timeouts::spawn(run_body_fetcher(
+                        ctx.clone(),
+                        config.clone(),
+                        body_rx,
+                    )),
+                    crate::net::timeouts::spawn(run_backfill_pool(
+                        ctx.clone(),
+                        config.clone(),
+                        pool_rx,
+                        settings_rx.clone(),
+                    )),
+                    crate::net::timeouts::spawn(run_history_backfill(
+                        ctx.clone(),
+                        config.clone(),
+                        hist_rx,
+                        pool_tx,
+                        settings_rx,
+                    )),
+                ];
+                // Other IMAP servers may keep automatic replies in a Sieve
+                // script. Microsoft keeps them in the mailbox settings.
+                if config.provider == Provider::Generic {
+                    joins.push(crate::net::timeouts::spawn(crate::sieve::watch(
+                        ctx, config,
+                    )));
+                }
+                (joins, Some(send_tx), None)
             }
-            (joins, Some(send_tx), None)
-        }
-        MailProtocol::Pop3 => {
-            let (send_tx, send_rx) = mpsc::channel(1);
-            let (restore_tx, restore_rx) = mpsc::channel(PRIORITY_FETCH_QUEUE_CAPACITY);
-            let joins = vec![
-                tokio::spawn(run_send_dispatcher(
-                    ctx.clone(),
-                    config.clone(),
-                    send_rx,
-                    tx.clone(),
-                )),
-                tokio::spawn(crate::sync::pop3::run(
-                    ctx,
-                    config,
-                    crate::sync::pop3::Inputs {
-                        commands: rx,
-                        reads: body_rx,
-                        restores: restore_rx,
-                        settings: settings_rx,
-                    },
-                )),
-            ];
-            (joins, Some(send_tx), Some(restore_tx))
-        }
-        MailProtocol::Local => (
-            vec![tokio::spawn(crate::sync::local::run(
-                ctx, account_id, rx, body_rx,
-            ))],
-            None,
-            None,
-        ),
-    };
+            MailProtocol::Pop3 => {
+                let (send_tx, send_rx) = mpsc::channel(1);
+                let (restore_tx, restore_rx) = mpsc::channel(PRIORITY_FETCH_QUEUE_CAPACITY);
+                let joins = vec![
+                    crate::net::timeouts::spawn(run_send_dispatcher(
+                        ctx.clone(),
+                        config.clone(),
+                        send_rx,
+                        tx.clone(),
+                    )),
+                    crate::net::timeouts::spawn(crate::sync::pop3::run(
+                        ctx,
+                        config,
+                        crate::sync::pop3::Inputs {
+                            commands: rx,
+                            reads: body_rx,
+                            restores: restore_rx,
+                            settings: settings_rx,
+                        },
+                    )),
+                ];
+                (joins, Some(send_tx), Some(restore_tx))
+            }
+            MailProtocol::Local => (
+                vec![tokio::spawn(crate::sync::local::run(
+                    ctx, account_id, rx, body_rx,
+                ))],
+                None,
+                None,
+            ),
+        });
     AccountHandle {
         account_id,
         tx,
@@ -506,6 +521,7 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
         send_tx,
         restore_tx,
         settings_tx: Some(settings_tx),
+        server_timeout,
         tasks: joins
             .iter()
             .map(tokio::task::JoinHandle::abort_handle)
@@ -525,6 +541,7 @@ pub fn spawn_local(ctx: SyncCtx, account_id: i64) -> AccountHandle {
         send_tx: None,
         restore_tx: None,
         settings_tx: None,
+        server_timeout: crate::net::timeouts::STANDARD,
         tasks: vec![join.abort_handle()],
     }
 }
@@ -2287,17 +2304,22 @@ pub(crate) async fn discover_folders(
                 .map(|folder| folder.name.clone())
                 .collect::<HashSet<_>>(),
         );
-        let ruled = ctx
+        // The folders rules file into, and those chosen for roles such as
+        // Sent (#252).
+        let kept = ctx
             .db
             .read(move |conn| {
                 let mut paths = HashSet::new();
                 for folder_id in repo::rules::target_folders(conn, account_id)? {
                     paths.extend(repo::folders::get(conn, folder_id)?.map(|folder| folder.path));
                 }
+                if let Some(config) = repo::accounts::get_config(conn, account_id)? {
+                    paths.extend(config.settings.folder_roles.into_values());
+                }
                 Ok(paths)
             })
             .await?;
-        remote = crate::sync::folder_map::subscribed_only(remote, &subscribed, &ruled);
+        remote = crate::sync::folder_map::subscribed_only(remote, &subscribed, &kept);
     }
     let unlisted = ctx
         .db
@@ -2385,6 +2407,12 @@ pub(crate) async fn discover_folders(
             if listed_any {
                 repo::folders::mark_missing_on_server(&tx, account_id, &known_names)?;
             }
+            // Folders chosen by hand for a role keep it over the server's
+            // suggestions (#252).
+            let chosen = repo::accounts::get_config(&tx, account_id)?
+                .map(|config| config.settings.folder_roles)
+                .unwrap_or_default();
+            repo::folders::apply_chosen_roles(&tx, account_id, &chosen)?;
             tx.commit()?;
             Ok(unlisted)
         })
@@ -4419,7 +4447,7 @@ async fn drain_missing_bodies(
             let worker_queue = queue.clone();
             let worker_persisted = persisted.clone();
             let worker_settings = settings_rx.clone();
-            handles.spawn(async move {
+            handles.spawn(crate::net::timeouts::inherit(async move {
                 let _plan_page = plan_page;
                 body_worker(
                     worker_ctx,
@@ -4429,7 +4457,7 @@ async fn drain_missing_bodies(
                     worker_settings,
                 )
                 .await
-            });
+            }));
         }
         let mut worker_error = None;
         while let Some(result) = handles.join_next().await {

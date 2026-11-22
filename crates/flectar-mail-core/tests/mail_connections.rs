@@ -726,6 +726,33 @@ async fn smtp_without_a_sign_in_sends_no_credentials() {
     assert_eq!(task.await.unwrap()[1..], ["NOOP", "QUIT"]);
 }
 
+/// A server that never greets is given up on as late as the account's
+/// server timeout stretches the wait (#252).
+#[tokio::test(start_paused = true)]
+async fn imap_waits_for_a_silent_server_as_long_as_the_account_says() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let _silent = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        std::future::pending::<()>().await;
+        drop(tcp);
+    });
+    let patient = MailConnectionSettings {
+        server_timeout_secs: Some(120),
+        ..settings(ConnectionSecurity::None)
+    };
+    let started = tokio::time::Instant::now();
+    let error = imap::connect_with_settings("127.0.0.1", port, credentials(), &patient)
+        .await
+        .err()
+        .unwrap();
+    assert!(
+        error.to_string().contains("timed out after 120s"),
+        "{error}"
+    );
+    assert_eq!(started.elapsed(), std::time::Duration::from_secs(120));
+}
+
 #[tokio::test]
 async fn imap_starttls_on_custom_port() {
     let (port, task) = imap_server(true, false).await;

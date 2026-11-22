@@ -424,8 +424,9 @@ async fn a_pop3_account_downloads_files_and_sends_mail_on_this_device() {
     let sent = std::fs::read_to_string(second_export.join("Sent.mbox")).unwrap();
     assert!(sent.contains("Subject: From a POP3 account\n"), "{sent}");
 
-    // An edit keeps the account's own proxy, which Settings sets apart from
-    // the account's form, and checks the servers through it.
+    // An edit keeps the account's own proxy and server timeout, which
+    // Settings sets apart from the account's form, and checks the servers
+    // through that proxy.
     core.set_account_network(
         account.id,
         flectar_mail_core::net::proxy::AccountProxy::Direct,
@@ -433,6 +434,9 @@ async fn a_pop3_account_downloads_files_and_sends_mail_on_this_device() {
     )
     .await
     .unwrap();
+    core.set_account_server_timeout(account.id, 120)
+        .await
+        .unwrap();
     core.add_account_password(pop3_args(pop3_port, smtp_port))
         .await
         .unwrap();
@@ -440,6 +444,14 @@ async fn a_pop3_account_downloads_files_and_sends_mail_on_this_device() {
         core.account_network(account.id).await.unwrap().proxy,
         flectar_mail_core::net::proxy::AccountProxy::Direct
     );
+    let config = core
+        .list_account_configs()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|config| config.id == account.id)
+        .unwrap();
+    assert_eq!(config.settings.connection.server_timeout_secs, Some(120));
 }
 
 /// Queue a message from `account_id` and wait until it went out.
@@ -752,8 +764,9 @@ async fn a_message_another_device_scheduled_goes_out_from_here_as_it_is() {
     assert!(message.contains("Subject: Written yesterday"), "{message}");
     assert!(message.contains("Sent from the phone."), "{message}");
     assert!(!message.contains("Bcc:"), "{message}");
+    // Matched whole, as a send date such as 22 Nov 2026 contains 2 Nov 2026.
     assert!(
-        !message.contains("2 Nov 2026"),
+        !message.contains("Mon, 2 Nov 2026 09:00:00"),
         "dated when it went: {message}"
     );
     // The draft kept here became the sent message, in the local Sent folder.

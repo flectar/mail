@@ -15,13 +15,15 @@
 #
 # Hosted runners give the runner user a systemd session. Where there is
 # none, as in a container job, the command runs as it is; cap the container
-# itself instead (docker run --memory).
+# itself instead (docker run --memory). Either way scripts/ci-protect-runner.sh
+# also keeps memory for the runner's agent.
 set -euo pipefail
 
 if (($# == 0)); then
   echo "Usage: $0 COMMAND [ARG...]" >&2
   exit 2
 fi
+"$(dirname "$0")/ci-protect-runner.sh"
 total_kib=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
 high_kib=$((total_kib - 2 * 1024 * 1024))
 slice="user-$(id -u).slice"

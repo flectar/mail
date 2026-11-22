@@ -309,6 +309,7 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
         incoming_login: Default::default(),
         smtp_login: Default::default(),
         smtp_username: None,
+        server_timeout_secs: None,
     };
     credentials::store_async(
         ctx.credentials.clone(),
@@ -567,6 +568,7 @@ async fn deleted_mail_context(port: u16) -> (tempfile::TempDir, SyncCtx, Account
         incoming_login: Default::default(),
         smtp_login: Default::default(),
         smtp_username: None,
+        server_timeout_secs: None,
     };
     credentials::store_async(
         ctx.credentials.clone(),
@@ -2546,6 +2548,71 @@ async fn subscribed_folders_only_lists_and_syncs_just_those() {
         1,
         "only the subscribed-only listing reads subscriptions: {commands:?}"
     );
+}
+
+/// A folder chosen for a role such as Sent keeps it each time the folder
+/// list is read, and is listed with subscribed folders only though not
+/// subscribed (#252).
+#[tokio::test]
+async fn folders_chosen_for_roles_keep_them_when_folders_are_listed() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let server = serve(listener, commands, move |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1\r\n{tag} OK capability\r\n"),
+            "LSUB" => format!("* LSUB () \"/\" Projects\r\n{tag} OK lsub completed\r\n"),
+            "LIST" => format!(
+                "* LIST (\\HasNoChildren) \"/\" INBOX\r\n\
+                 * LIST (\\HasNoChildren \\Sent) \"/\" Sent\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Gesendet\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Projects\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Shared\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+    let (_dir, ctx, config, _inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    ctx.db
+        .write(move |conn| {
+            let mut config = repo::accounts::get_config(conn, account_id)?.unwrap();
+            config
+                .settings
+                .folder_roles
+                .insert(roles::SENT.into(), "Gesendet".into());
+            repo::accounts::set_settings(conn, account_id, &config.settings)
+        })
+        .await
+        .unwrap();
+    let mut session = connect(&ctx, &config).await.unwrap();
+    // Each reading gives the folders the server's roles first.
+    for _ in 0..2 {
+        discover_folders(&ctx, &config, &mut session, true)
+            .await
+            .unwrap();
+    }
+    imap::logout(session).await;
+    server.await.unwrap();
+    let (sent, mut paths) = ctx
+        .db
+        .read(move |conn| {
+            Ok((
+                repo::folders::by_role(conn, account_id, roles::SENT)?.map(|folder| folder.path),
+                repo::folders::list(conn, Some(account_id))?
+                    .into_iter()
+                    .map(|folder| folder.path)
+                    .collect::<Vec<_>>(),
+            ))
+        })
+        .await
+        .unwrap();
+    assert_eq!(sent.as_deref(), Some("Gesendet"));
+    paths.sort();
+    assert_eq!(paths, ["Gesendet", "INBOX", "Projects", "Sent"]);
 }
 
 /// The folders listed with subscribed folders only from a server that turns

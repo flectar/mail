@@ -34,6 +34,7 @@ import { Shortcuts } from "../shortcuts.slint";
 import { KeyboardKeys } from "../components/kbd.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { AccountProfilePicker, ProfileColorChoice, ProfileMemberChoice, ProfilePalette } from "../components/profile-controls.slint";
+import { FolderRoles, FolderRolesDialog } from "../folder-roles.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
 import { InterfaceText, TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
@@ -59,7 +60,7 @@ component AccountActions inherits HorizontalLayout {
     height: 32px;
     spacing: 6px;
     IconButton {
-        icon: root.reconnect ? @image-url("../icons/lucide/outline/sync.svg") : @image-url("../icons/lucide/outline/pencil.svg");
+        icon: root.reconnect ? @image-url("../icons/lucide/outline/sign-in.svg") : @image-url("../icons/lucide/outline/pencil.svg");
         icon-color: AppTheme.secondary;
         ghost: true;
         hover-background: AppTheme.muted-control-bg;
@@ -633,6 +634,11 @@ export component SettingsDialog inherits Rectangle {
     // The picker shows the account's live row, which changes as choices apply.
     private property <int> account-profile-picker-index: -1;
     private property <AccountRow> account-profile-picker-account: root.connected_accounts[root.account-profile-picker-index];
+    // The account whose special folders are open to choose, as the profile
+    // picker keeps its account (#252).
+    private property <int> folder-roles-id: -1;
+    private property <int> folder-roles-index: -1;
+    private property <AccountRow> folder-roles-account: root.connected_accounts[root.folder-roles-index];
     private property <string> profile-editor-error: "";
     callback save_theme(string);
     callback save_theme_preset(string);
@@ -688,6 +694,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_account_subscribed_folders_only(int, bool);
     callback save_account_check_interval(int, string);
     callback save_account_push(int, bool);
+    callback save_account_server_timeout(int, int);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
     callback connect_caldav(int, int, string, string, string);
@@ -793,6 +800,12 @@ export component SettingsDialog inherits Rectangle {
         @tr("6 months · Recommended"),
         @tr("1 year"),
         @tr("All mail"),
+    ];
+    private property <[string]> server-timeout-options: [
+        @tr("30 seconds"),
+        @tr("1 minute"),
+        @tr("2 minutes"),
+        @tr("5 minutes"),
     ];
     private property <[string]> check-interval-options: [
         @tr("Same as all accounts"),
@@ -1053,6 +1066,15 @@ export component SettingsDialog inherits Rectangle {
             : index == 4 ? "30" : index == 5 ? "60" : index == 6 ? "manual" : "app");
     }
 
+    pure function server-timeout-index(value: string) -> int {
+        return value == "60" ? 1 : value == "120" ? 2 : value == "300" ? 3 : 0;
+    }
+
+    function select-server-timeout(account-id: int, index: int) {
+        root.save_account_server_timeout(account-id,
+            index == 1 ? 60 : index == 2 ? 120 : index == 3 ? 300 : 30);
+    }
+
     pure function keep-on-server-index(value: string) -> int {
         return value == "untilDeleted" ? 1
             : value == "sevenDays" ? 2
@@ -1219,6 +1241,17 @@ export component SettingsDialog inherits Rectangle {
         root.account-profile-picker-open = false;
         root.account-profile-picker-id = -1;
         root.account-profile-picker-index = -1;
+    }
+
+    function open-folder-roles(account: AccountRow, index: int) {
+        root.folder-roles-id = account.id;
+        root.folder-roles-index = index;
+        FolderRoles.load(account.id);
+    }
+
+    function close-folder-roles() {
+        root.folder-roles-id = -1;
+        root.folder-roles-index = -1;
     }
 
     function add-caldav(account: AccountRow) {
@@ -2824,6 +2857,8 @@ export component SettingsDialog inherits Rectangle {
                                 private property <bool> has-subscriptions: account.mail_protocol == "imap";
                                 // IMAP IDLE and JMAP's event source; Gmail and POP3 servers don't push.
                                 private property <bool> has-push: account.mail_protocol == "imap" || account.mail_protocol == "jmap";
+                                // Gmail's servers keep the standard wait.
+                                private property <bool> has-timeout: account.mail_protocol == "imap" || account.mail_protocol == "pop3" || account.mail_protocol == "jmap";
                                 private property <bool> unencrypted: account.incoming_security == "none" || (!account.receive_only && account.smtp_security == "none");
                                 // A card shows the account's settings while it's the open one,
                                 // and always when it's the only account.
@@ -2863,13 +2898,14 @@ export component SettingsDialog inherits Rectangle {
                                 private property <length> history-end: history-row.y + history-row.height - self.select-end;
                                 private property <length> check-end: check-row.y + check-row.height - self.select-end;
                                 private property <length> checks-end: self.has-push ? push-row.y + push-row.height - self.switch-end : self.check-end;
-                                private property <length> sent-copy-end: self.has-sent-copy ? sent-copy-row.y + sent-copy-row.height - self.select-end : self.checks-end;
+                                private property <length> timeout-end: self.has-timeout ? timeout-row.y + timeout-row.height - self.select-end : self.checks-end;
+                                private property <length> sent-copy-end: self.has-sent-copy ? sent-copy-row.y + sent-copy-row.height - self.select-end : self.timeout-end;
                                 // Where the settings of the account's kind end.
                                 private property <length> kind-end: self.has-subscriptions
-                                    ? subscribed-row.y + subscribed-row.height - self.switch-end
+                                    ? folders-row.y + folders-row.height - self.plain-end
                                     : self.has-server-copies
                                         ? server-copies-note.y + server-copies-note.height
-                                        : self.checks-end;
+                                        : self.timeout-end;
                                 private property <length> contacts-end: root.compact ? self.kind-end : contacts-row.y + contacts-row.height - self.plain-end;
                                 private property <length> expanded-height: calendars.y + calendars.height + (root.compact ? 18px : 16px);
                                 height: self.expanded ? self.expanded-height : self.collapsed-height;
@@ -3082,10 +3118,24 @@ export component SettingsDialog inherits Rectangle {
                                             description-color: root.faint-text;
                                             toggled(checked) => { root.save_account_push(account.id, checked); }
                                         }
+                                        timeout-row := SettingsSelectRow {
+                                            visible: drop-target.has-timeout;
+                                            x: history-row.x;
+                                            y: drop-target.checks-end + drop-target.gap - drop-target.select-top;
+                                            width: history-row.width;
+                                            compact: root.compact;
+                                            title: @tr("Server timeout");
+                                            description: @tr("How long to wait for a slow server before giving up.");
+                                            choices: root.server-timeout-options;
+                                            selected-index: root.server-timeout-index(account.server_timeout);
+                                            title-color: root.body-text;
+                                            description-color: root.faint-text;
+                                            selected(index, value) => { root.select-server-timeout(account.id, index); }
+                                        }
                                         sent-copy-row := SettingsSelectRow {
                                             visible: drop-target.has-sent-copy;
                                             x: history-row.x;
-                                            y: drop-target.checks-end + drop-target.gap - drop-target.select-top;
+                                            y: drop-target.timeout-end + drop-target.gap - drop-target.select-top;
                                             width: history-row.width;
                                             compact: root.compact;
                                             title: @tr("Sent copies");
@@ -3114,10 +3164,44 @@ export component SettingsDialog inherits Rectangle {
                                             description-color: root.faint-text;
                                             toggled(checked) => { root.save_account_subscribed_folders_only(account.id, checked); }
                                         }
+                                        // Which folders Sent, Drafts and the rest are (#252).
+                                        folders-row := Rectangle {
+                                            visible: drop-target.has-subscriptions;
+                                            x: drop-target.content-x;
+                                            y: subscribed-row.y + subscribed-row.height - drop-target.switch-end + drop-target.gap - drop-target.plain-lead;
+                                            width: parent.width - self.x - 16px;
+                                            height: 12px + folders-label.height + folders-description.height;
+                                            folders-label := Text {
+                                                x: 0px; y: drop-target.plain-top;
+                                                width: parent.width - folders-button.width - 16px; height: max(20px, self.preferred-height);
+                                                text: @tr("Special folders");
+                                                color: root.body-text;
+                                                font-size: TypeScale.body;
+                                                font-weight: 600;
+                                                vertical-alignment: center;
+                                            }
+                                            folders-description := Text {
+                                                x: 0px; y: folders-label.y + folders-label.height + 1px;
+                                                width: folders-label.width; height: max(18px, self.preferred-height);
+                                                text: @tr("Sent, Drafts, Trash, Spam and Archive");
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                wrap: word-wrap;
+                                                vertical-alignment: center;
+                                            }
+                                            folders-button := Button {
+                                                x: parent.width - self.width;
+                                                y: drop-target.plain-control-y;
+                                                width: 136px;
+                                                height: 34px;
+                                                text: @tr("Choose…");
+                                                clicked => { root.open-folder-roles(account, account-index); }
+                                            }
+                                        }
                                         server-copies-row := SettingsSelectRow {
                                             visible: drop-target.has-server-copies;
                                             x: history-row.x;
-                                            y: drop-target.checks-end + drop-target.gap - drop-target.select-top;
+                                            y: drop-target.timeout-end + drop-target.gap - drop-target.select-top;
                                             width: history-row.width;
                                             compact: root.compact;
                                             title: @tr("Keep mail on the server");
@@ -4664,6 +4748,27 @@ export component SettingsDialog inherits Rectangle {
                     root.open-new-profile(account-id);
                 }
                 close => { root.close-account-profile-picker(); }
+            }
+        }
+
+        if root.folder-roles-id >= 0
+            && root.folder-roles-account.id == root.folder-roles-id : Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: #00000088;
+            z: 950;
+            accessible-role: groupbox;
+            accessible-label: @tr("Special folders of {}", root.folder-roles-account.email);
+
+            TouchArea { clicked => { root.close-folder-roles(); } }
+            FolderRolesDialog {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(480px, parent.width - 24px);
+                height: min(self.content-height, parent.height - 24px);
+                compact: root.compact;
+                account: root.folder-roles-account;
+                close => { root.close-folder-roles(); }
             }
         }
 
