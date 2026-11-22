@@ -574,6 +574,8 @@ fn new_window(app: &AppWindow) -> Option<Host> {
         }
     };
     copy_appearance(app, &window);
+    // At the size the last message's window had (#254).
+    crate::window_places::restore(crate::window_places::Kind::Composer, &window);
     window.set_attachment_picker_supported(app.get_document_apis_supported());
     let weak = window.as_weak();
     window.window().on_close_requested(move || {
@@ -1750,11 +1752,12 @@ impl ComposeSession {
             return;
         };
         self.watch_window(handle);
-        if let Err(error) = handle.show() {
-            host.ui().set_notice(
+        match handle.show() {
+            Ok(()) => crate::window_places::shown(crate::window_places::Kind::Composer, handle),
+            Err(error) => host.ui().set_notice(
                 UiMessage::detail("Could not open composer: {}", error),
                 true,
-            );
+            ),
         }
     }
 
@@ -1807,6 +1810,11 @@ impl ComposeSession {
                     }
                 }
                 _ => {}
+            }
+            if matches!(event, WindowEvent::Resized(_))
+                && let Some(window) = help.upgrade()
+            {
+                crate::window_places::changed(crate::window_places::Kind::Composer, &window);
             }
             if matches!(
                 event,

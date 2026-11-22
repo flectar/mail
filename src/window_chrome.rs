@@ -290,7 +290,11 @@ fn register_desktop_events(app: &AppWindow) {
                 macos::refresh(&app);
                 report_minimized(&app);
             }
+            winit::event::WindowEvent::Moved(_) => {
+                crate::window_places::changed(crate::window_places::Kind::Main, &app);
+            }
             winit::event::WindowEvent::Resized(size) => {
+                crate::window_places::changed(crate::window_places::Kind::Main, &app);
                 // AppKit lays the title bar out again on resize and full-screen
                 // transitions, which moves the traffic lights back.
                 #[cfg(target_os = "macos")]
