@@ -81,6 +81,7 @@ export { SavedSearchUi } from "saved-searches.slint";
 export { ServerSearchUi } from "server-search.slint";
 export { Numbers } from "numbers.slint";
 import { LocalMailUi } from "local-mail.slint";
+import { JoinDeviceDialog, SyncUi } from "device-sync.slint";
 export { AccountImport, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportMailRow, ImportProfileRow } from "dialogs/import-dialog.slint";
 export { AutoReplies } from "auto-replies.slint";
 import { AutoReplies } from "auto-replies.slint";
@@ -1387,6 +1388,9 @@ export component AppWindow inherits Window {
     in-out property <length> email-scroll-document-height: 0px;
     in-out property <length> email-scroll-y: 0px;
     private property <bool> settings-open: root.active_view == "settings";
+    // The join dialog was opened from the welcome screen, which has no
+    // Settings to show it in.
+    private property <bool> welcome-join;
     changed settings-open => {
         // Leaving Settings destroys the dialog before its own change handlers
         // run, so an unsaved palette and open forms are discarded here. The
@@ -3011,9 +3015,35 @@ export component AppWindow inherits Window {
             root.start_oauth(provider);
         }
         cancel-oauth => { root.cancel_oauth(); }
+        join-sync(method) => {
+            root.welcome-join = true;
+            SyncUi.join-method = method;
+            SyncUi.dialog = "join";
+        }
         import-accounts => { root.import_accounts(); }
         privacy-policy-url: root.privacy-policy-url;
         open-link(url) => { root.open_email_link(url); }
+    }
+    // Joining from the welcome screen: the dialog stays until it's closed,
+    // also once the accounts that arrive replace the welcome screen. Settings
+    // shows its own copy, and exists only once there is mail.
+    if root.welcome-join && SyncUi.dialog == "join" && !(root.has-mail && root.settings-open) : JoinDeviceDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        compact: root.compact-layout;
+        surface: root.surface;
+        panel-border-color: root.border-subtle;
+        title-color: root.title-color;
+        body-text: root.body-text;
+        secondary-text: root.secondary-text;
+        fill: root.page-bg;
+        closed => {
+            root.welcome-join = false;
+            SyncUi.dialog = "";
+            SyncUi.cancel-pairing();
+        }
     }
 
     // Keep the progressively painted shell inert until its callbacks have a

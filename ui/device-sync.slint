@@ -1285,7 +1285,7 @@ export component InviteDeviceDialog inherits SyncModal {
         label: @tr("QR code for adding a device");
     }
     if SyncUi.pairing-stage == "code" && root.with-code : Text {
-        text: @tr("On your other device, open Flectar Mail, go to Settings → Sync → Connect this device → Enter code, and type:");
+        text: @tr("On your other device, open Flectar Mail and choose Enter code, on the welcome screen or in Settings → Sync → Connect this device. Then type:");
         color: root.body-text;
         font-size: TypeScale.secondary;
         wrap: word-wrap;
