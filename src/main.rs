@@ -65,6 +65,7 @@ mod mail_work;
 mod mailto_links;
 mod memory;
 mod message_appearance;
+mod message_source;
 mod motion;
 mod move_picker;
 mod network;
@@ -6648,6 +6649,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     link_services::install(&app, &state, &runtime, platform.external_urls.clone());
     read_receipts::install(&app, &state, &runtime);
     folder_roles::install(&app, &state, &runtime);
+    message_source::install(&app, &state, &runtime, platform.documents.clone());
     translation::install(&app, &state, &runtime);
     ai_features::install(&app, &state, &runtime);
     network::install(&app, &state, &runtime);

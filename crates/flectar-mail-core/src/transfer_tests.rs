@@ -488,3 +488,32 @@ async fn forwarded_messages_attach_as_they_arrived_without_their_bcc() {
     drop(path);
     assert!(!kept.exists());
 }
+
+/// Show original shows the message as it arrived, every header field
+/// included, the Bcc of mail sent from here too (#253).
+#[tokio::test]
+async fn a_message_shows_its_original_with_every_header_field() {
+    let accounts = accounts(tempfile::tempdir().unwrap()).await;
+    let receipt = accounts.message(accounts.pop3, "Receipt").await.unwrap();
+    let raw_path: String = accounts
+        .core
+        .db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT raw_path FROM messages WHERE id = ?1",
+                params![receipt],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let mut original = b"Bcc: secret@example.org\r\n".to_vec();
+    original.extend_from_slice(&std::fs::read(&raw_path).unwrap());
+    std::fs::write(&raw_path, &original).unwrap();
+
+    assert_eq!(
+        accounts.core.message_original(receipt).await.unwrap(),
+        original
+    );
+    assert!(accounts.core.message_original(i64::MAX).await.is_err());
+}

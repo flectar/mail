@@ -516,6 +516,7 @@ pub(super) fn render_current(
         // "View plain text" is a message action, not a global display mode.
         app.set_text_mode(false);
         app.set_source_mode(false);
+        crate::message_source::hide(app);
         app.set_rendering_info_open(false);
     }
 
@@ -767,6 +768,7 @@ pub(super) fn select_thread_message(
     }
     app.set_text_mode(false);
     app.set_source_mode(false);
+    crate::message_source::hide(app);
     app.set_rendering_info_open(false);
     render_current(app, state, runtime)
 }
