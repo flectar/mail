@@ -133,55 +133,62 @@ impl LayoutChildren {
     }
 
     fn create_anonymous_block(&mut self, container_node_id: NodeId, doc: &mut BaseDocument) {
-        use style::selector_parser::PseudoElement;
-
-        const NAME: QualName = QualName {
-            prefix: None,
-            ns: ns!(html),
-            local: local_name!("div"),
-        };
-        let node_id = doc.create_node(NodeData::AnonymousBlock(Box::new(ElementData::new(
-            NAME,
-            Vec::new(),
-        ))));
-
-        // Set style data
-        let parent_style = doc.nodes[container_node_id].primary_styles().unwrap();
-        let read_guard = doc.guard.read();
-        let guards = StylesheetGuards::same(&read_guard);
-        let style = doc.stylist.style_for_anonymous::<&Node>(
-            &guards,
-            &PseudoElement::ServoAnonymousBox,
-            &parent_style,
-        );
-        let mut stylo_element_data = StyloElementData {
-            damage: ALL_DAMAGE,
-            ..Default::default()
-        };
-        drop(parent_style);
-
-        stylo_element_data.styles.primary = Some(style);
-        stylo_element_data.set_restyled();
-
-        *doc.nodes[node_id]
-            .stylo_element_data_mut()
-            .ensure_init_mut() = stylo_element_data;
-
-        if doc.nodes[container_node_id]
-            .flags
-            .contains(NodeFlags::IS_IN_DOCUMENT)
-        {
-            doc.nodes[node_id].flags.insert(NodeFlags::IS_IN_DOCUMENT);
-        }
-        doc.nodes[node_id].parent = Some(container_node_id);
-        doc.nodes[node_id]
-            .layout_parent
-            .set(Some(container_node_id));
-
+        let node_id = create_anonymous_box(doc, container_node_id);
         self.children.push(node_id);
         self.anonymous_block_id = Some(node_id);
         self.anonymous_blocks.push(node_id);
     }
+}
+
+/// A new anonymous block box in `container_node_id`, styled as an anonymous
+/// box that inherits from it. The caller gives it its children and owns it:
+/// it must be deallocated when the container is reconstructed.
+pub(crate) fn create_anonymous_box(doc: &mut BaseDocument, container_node_id: NodeId) -> NodeId {
+    use style::selector_parser::PseudoElement;
+
+    const NAME: QualName = QualName {
+        prefix: None,
+        ns: ns!(html),
+        local: local_name!("div"),
+    };
+    let node_id = doc.create_node(NodeData::AnonymousBlock(Box::new(ElementData::new(
+        NAME,
+        Vec::new(),
+    ))));
+
+    // Set style data
+    let parent_style = doc.nodes[container_node_id].primary_styles().unwrap();
+    let read_guard = doc.guard.read();
+    let guards = StylesheetGuards::same(&read_guard);
+    let style = doc.stylist.style_for_anonymous::<&Node>(
+        &guards,
+        &PseudoElement::ServoAnonymousBox,
+        &parent_style,
+    );
+    let mut stylo_element_data = StyloElementData {
+        damage: ALL_DAMAGE,
+        ..Default::default()
+    };
+    drop(parent_style);
+
+    stylo_element_data.styles.primary = Some(style);
+    stylo_element_data.set_restyled();
+
+    *doc.nodes[node_id]
+        .stylo_element_data_mut()
+        .ensure_init_mut() = stylo_element_data;
+
+    if doc.nodes[container_node_id]
+        .flags
+        .contains(NodeFlags::IS_IN_DOCUMENT)
+    {
+        doc.nodes[node_id].flags.insert(NodeFlags::IS_IN_DOCUMENT);
+    }
+    doc.nodes[node_id].parent = Some(container_node_id);
+    doc.nodes[node_id]
+        .layout_parent
+        .set(Some(container_node_id));
+    node_id
 }
 
 fn push_children_and_pseudos(layout_children: &mut ThinVec<NodeId>, node: &Node) {
@@ -571,7 +578,9 @@ fn collect_layout_children_with_wrap(
         }
 
         DisplayInside::Table => {
-            let (table_context, tlayout_children) = build_table_context(doc, container_node_id);
+            let (table_context, tlayout_children, anonymous_cells) =
+                build_table_context(doc, container_node_id);
+            out.anonymous_blocks.extend(anonymous_cells);
             #[allow(clippy::arc_with_non_send_sync)]
             let data = SpecialElementData::TableRoot(Arc::new(table_context));
             doc.nodes[container_node_id]

@@ -115,9 +115,20 @@ pub struct TableCell {
     has_authored_height: bool,
 }
 
-/// The primary style a cell's layout style was derived from, and that style.
+/// The primary style a cell's layout styles were derived from, and those styles.
 #[derive(Debug, Default)]
-struct CellLayoutStyle(AtomicRefCell<Option<(ServoArc<ComputedValues>, ServoArc<ComputedValues>)>>);
+struct CellLayoutStyle(AtomicRefCell<Option<CellLayoutStyles>>);
+
+#[derive(Debug, Clone)]
+struct CellLayoutStyles {
+    primary: ServoArc<ComputedValues>,
+    layout: ServoArc<ComputedValues>,
+    /// The layout style with an authored length `height` turned into a
+    /// minimum, which the cell is measured with (CSS 2.1 §17.5.3: a row is
+    /// as tall as its cells' heights and contents). Only cells with an
+    /// authored height have one.
+    measure: Option<ServoArc<ComputedValues>>,
+}
 
 impl Clone for CellLayoutStyle {
     fn clone(&self) -> Self {
@@ -128,16 +139,24 @@ impl Clone for CellLayoutStyle {
 impl TableCell {
     /// The cell's layout style for its current primary style. Only the cell's
     /// own layout sees it; painting and style sharing keep the primary style.
+    ///
+    /// When `measure` is set and the cell has an authored height, the style
+    /// treats that height as a minimum, so measuring the cell gives the taller
+    /// of its height and its content.
     fn layout_style(
         &self,
         primary: &ServoArc<ComputedValues>,
         is_fixed: bool,
+        measure: bool,
     ) -> ServoArc<ComputedValues> {
         let mut cached = self.layout_style.0.borrow_mut();
-        if let Some((base, style)) = cached.as_ref()
-            && ServoArc::ptr_eq(base, primary)
+        if let Some(styles) = cached.as_ref()
+            && ServoArc::ptr_eq(&styles.primary, primary)
         {
-            return style.clone();
+            return match (&styles.measure, measure) {
+                (Some(style), true) => style.clone(),
+                _ => styles.layout.clone(),
+            };
         }
         let mut style = primary.clone();
         if let Some(half) = self.collapsed_border {
@@ -159,8 +178,38 @@ impl TableCell {
             let position = ServoArc::make_mut(&mut style).mutate_position();
             position.width = style::values::generics::length::Size::Auto;
         }
-        *cached = Some((primary.clone(), style.clone()));
-        style
+        let measure_style = self.has_authored_height.then(|| {
+            use style::values::generics::length::Size;
+            let mut measure_style = style.clone();
+            let position = ServoArc::make_mut(&mut measure_style).mutate_position();
+            if let Size::LengthPercentage(height) = &position.height {
+                let keeps_min = match &position.min_height {
+                    Size::Auto => false,
+                    Size::LengthPercentage(min) => {
+                        match (min.0.to_length(), height.0.to_length()) {
+                            (Some(min), Some(height)) => min.px() >= height.px(),
+                            _ => true,
+                        }
+                    }
+                    _ => true,
+                };
+                if !keeps_min {
+                    position.min_height = Size::LengthPercentage(height.clone());
+                }
+                position.height = Size::Auto;
+            }
+            measure_style
+        });
+        let result = match (&measure_style, measure) {
+            (Some(measure_style), true) => measure_style.clone(),
+            _ => style.clone(),
+        };
+        *cached = Some(CellLayoutStyles {
+            primary: primary.clone(),
+            layout: style,
+            measure: measure_style,
+        });
+        result
     }
 }
 
@@ -366,6 +415,8 @@ struct TableCollector {
     /// Row groups as (first row, last row, borders).
     groups: Vec<(u16, u16, [BorderCandidate; 4])>,
     columns: usize,
+    /// The anonymous cells made for content of a row that isn't a cell.
+    anonymous_cells: Vec<NodeId>,
 }
 
 #[derive(Debug, Clone)]
@@ -429,10 +480,12 @@ fn percent_plus_length(
     dim.into()
 }
 
+/// The table's layout context, its layout children, and the anonymous boxes
+/// made for them, which the table owns.
 pub(crate) fn build_table_context(
     doc: &mut BaseDocument,
     table_root_node_id: NodeId,
-) -> (TableContext, Vec<NodeId>) {
+) -> (TableContext, Vec<NodeId>, Vec<NodeId>) {
     let wm = table_wm(doc, table_root_node_id);
     let root_node = &mut doc.nodes[table_root_node_id];
 
@@ -480,6 +533,7 @@ pub(crate) fn build_table_context(
         row_borders: Vec::new(),
         groups: Vec::new(),
         columns: 0,
+        anonymous_cells: Vec::new(),
     };
     // Only the first header group renders before the other rows and only the
     // first footer group after them; later ones are ordinary row groups in
@@ -515,6 +569,7 @@ pub(crate) fn build_table_context(
         groups,
         columns: mut column_count,
         oof_children,
+        anonymous_cells,
         ..
     } = collector;
 
@@ -817,7 +872,31 @@ pub(crate) fn build_table_context(
             column_floors,
         },
         layout_children,
+        anonymous_cells,
     )
+}
+
+/// Whether a row's child is in-flow content that isn't a cell, which the
+/// table wraps in an anonymous cell.
+fn is_stray_row_content(doc: &BaseDocument, node_id: NodeId) -> bool {
+    let node = &doc.nodes[node_id];
+    if !node.is_element() {
+        return false;
+    }
+    let Some(style) = node.primary_styles() else {
+        return false;
+    };
+    let display = style.clone_display();
+    display.outside() != DisplayOutside::None
+        && display.outside() != DisplayOutside::TableCaption
+        && !style.clone_position().is_absolutely_positioned()
+        && matches!(
+            display.inside(),
+            DisplayInside::Flow
+                | DisplayInside::FlowRoot
+                | DisplayInside::Flex
+                | DisplayInside::Grid
+        )
 }
 
 /// Collect `<col>` elements (and `display: table-column` elements) along with their
@@ -1226,9 +1305,22 @@ impl TableCollector {
                 }
 
                 let children = std::mem::take(&mut doc.nodes[node_id].children);
+                // Consecutive children that aren't cells share one anonymous
+                // cell (CSS 2.1 §17.2.1), in which they lay out as blocks: a
+                // responsive email's `display: block` cells stack.
+                let mut stray = Vec::new();
                 for child_id in children.iter().copied() {
-                    self.collect(doc, child_id);
+                    let child = &doc.nodes[child_id];
+                    if is_stray_row_content(doc, child_id) {
+                        stray.push(child_id);
+                    } else if child.is_element()
+                        || child.is_text_node() && !child.is_collapsible_whitespace_node()
+                    {
+                        self.push_stray_content(doc, node_id, &mut stray);
+                        self.collect(doc, child_id);
+                    }
                 }
+                self.push_stray_content(doc, node_id, &mut stray);
                 doc.nodes[node_id].children = children;
             }
             DisplayInside::TableCell => self.push_cell(doc, node_id, true),
@@ -1256,6 +1348,27 @@ impl TableCollector {
                 // Ignore
             }
         }
+    }
+
+    /// Lay out a row's run of `stray` children that aren't cells as one cell:
+    /// the child itself when it is alone, else an anonymous block around them.
+    fn push_stray_content(
+        &mut self,
+        doc: &mut BaseDocument,
+        row_id: NodeId,
+        stray: &mut Vec<NodeId>,
+    ) {
+        match stray.len() {
+            0 => {}
+            1 => self.collect(doc, stray[0]),
+            _ => {
+                let cell_id = super::construct::create_anonymous_box(doc, row_id);
+                doc.nodes[cell_id].children = std::mem::take(stray).into();
+                self.anonymous_cells.push(cell_id);
+                self.push_cell(doc, cell_id, false);
+            }
+        }
+        stray.clear();
     }
 
     fn push_cell(&mut self, doc: &mut BaseDocument, node_id: NodeId, use_spans: bool) {
@@ -1553,9 +1666,13 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
         let node_id = crate::taffy_node_id(dom_id);
         let measure_without_width =
             !self.ctx.is_fixed && cell.authored_width.tag() == taffy::CompactLength::LENGTH_TAG;
+        // Measured for its row, a cell is as tall as its content needs even
+        // when its authored height is smaller; laid out, it fills the row.
+        let measure = inputs.run_mode == taffy::RunMode::ComputeSize
+            && inputs.known_dimensions.height.is_none();
         let layout_style = self.doc.nodes[dom_id]
             .primary_styles()
-            .map(|primary| cell.layout_style(&primary, self.ctx.is_fixed));
+            .map(|primary| cell.layout_style(&primary, self.ctx.is_fixed, measure));
         let previous_style = std::mem::replace(
             &mut self.doc.nodes[dom_id].layout_data_mut().style_override,
             layout_style,
@@ -1665,21 +1782,32 @@ impl TableTreeWrapper<'_, '_> {
     /// table at `table_width`, its border-box width. `None` stands for the
     /// table's min-content width, which ignores them, as in browsers, so the
     /// table can narrow inside a constrained parent.
+    ///
+    /// When the authored widths fit, the width left over is shared between
+    /// the auto columns as Chromium shares it (CSS Tables 3 §3.9.3): each grows
+    /// from its min-content width toward its max-content width by the same
+    /// fraction of the way, rather than by equal amounts as grid tracks do.
     pub(crate) fn fold_authored_widths(&mut self, table_width: Option<f32>) {
         let ctx = Arc::clone(&self.ctx);
         let lengths = &ctx.column_lengths;
         let mut fold = AuthoredFold::default();
+        let has_auto_columns = || {
+            (0..lengths.len())
+                .any(|column| lengths[column].is_none() && ctx.column_percents[column].is_none())
+        };
         match table_width {
-            _ if !ctx.has_authored_lengths => {}
             None => {}
             Some(width) if width.is_infinite() => {
-                fold.amount = 1.0;
-                fold.floors = lengths.iter().map(|length| length.unwrap_or(0.0)).collect();
+                if ctx.has_authored_lengths {
+                    fold.amount = 1.0;
+                    fold.floors = lengths.iter().map(|length| length.unwrap_or(0.0)).collect();
+                }
             }
+            Some(_) if !ctx.has_authored_lengths && (lengths.len() < 2 || !has_auto_columns()) => {}
             Some(width) => {
                 // Measure the cells' own min-content widths first.
                 *ctx.fold.borrow_mut() = AuthoredFold::default();
-                let (minimums, spanning) = self.min_content_widths();
+                let (minimums, spanning) = self.content_widths(taffy::AvailableSpace::MinContent);
                 let available = width - ctx.column_extra;
                 // Per column, the width at no fold and how much a full fold
                 // adds. Percentage columns come before authored lengths.
@@ -1726,16 +1854,55 @@ impl TableTreeWrapper<'_, '_> {
                         }
                     })
                     .collect();
+
+                // With every authored width met, the auto columns share what is
+                // left in proportion to how far each can grow, when they can't
+                // all have their max-content widths.
+                if amount >= 1.0 && has_auto_columns() {
+                    let is_auto = |column: usize| {
+                        lengths[column].is_none() && ctx.column_percents[column].is_none()
+                    };
+                    let (maximums, _) = self.content_widths(taffy::AvailableSpace::MaxContent);
+                    let used: f32 = (0..lengths.len())
+                        .map(|column| {
+                            if is_auto(column) {
+                                minimums[column]
+                            } else {
+                                fold.floors[column].max(base[column])
+                            }
+                        })
+                        .sum();
+                    let room: Vec<f32> = (0..lengths.len())
+                        .map(|column| {
+                            if is_auto(column) {
+                                (maximums[column] - minimums[column]).max(0.0)
+                            } else {
+                                0.0
+                            }
+                        })
+                        .collect();
+                    let total_room: f32 = room.iter().sum();
+                    let left = available - used;
+                    if left > 0.0 && total_room > left + 0.5 {
+                        let share = left / total_room;
+                        for column in (0..lengths.len()).filter(|&column| is_auto(column)) {
+                            fold.floors[column] = minimums[column] + room[column] * share;
+                        }
+                    }
+                }
             }
         }
         *ctx.fold.borrow_mut() = fold;
     }
 
-    /// The min-content widths of each column's single-column cells, and of
-    /// each spanning cell with an authored length, measured as the grid
-    /// measures them, so the grid reuses the cached results.
+    /// The min-content (or max-content) widths of each column's single-column
+    /// cells, and of each spanning cell with an authored length, measured as
+    /// the grid measures them, so the grid reuses the cached results.
     #[allow(clippy::type_complexity)]
-    fn min_content_widths(&mut self) -> (Vec<f32>, Vec<(Range<usize>, f32, f32)>) {
+    fn content_widths(
+        &mut self,
+        sizing: taffy::AvailableSpace,
+    ) -> (Vec<f32>, Vec<(Range<usize>, f32, f32)>) {
         let mut minimums = vec![0.0f32; self.ctx.column_lengths.len()];
         let mut spanning = Vec::new();
         for index in 0..self.ctx.cells.len() {
@@ -1757,8 +1924,8 @@ impl TableTreeWrapper<'_, '_> {
                     },
                     parent_size: taffy::Size::NONE,
                     available_space: taffy::Size {
-                        width: taffy::AvailableSpace::MinContent,
-                        height: taffy::AvailableSpace::MinContent,
+                        width: sizing,
+                        height: sizing,
                     },
                     sizing_mode: taffy::SizingMode::InherentSize,
                     axis: taffy::RequestedAxis::Horizontal,

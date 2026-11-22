@@ -1186,3 +1186,57 @@ fn tall_images_keep_their_detail_within_the_pixel_budget() {
     let decoded = limits.decode(&png).unwrap();
     assert_eq!((decoded.pixel_width, decoded.pixel_height), (141, 70));
 }
+
+#[test]
+fn a_cell_height_is_the_minimum_of_its_row() {
+    // CSS 2.1 §17.5.3: a row is as tall as its cells' heights and contents, so
+    // a 1px cell grows to hold its content instead of spilling into the next
+    // row.
+    let doc = document(
+        "<table style='border-spacing:0'>
+         <tr><td id='short' style='height:1px'><div style='height:30px'></div></td></tr>
+         <tr><td id='next' style='height:10px'></td></tr></table>",
+    );
+    close(node(&doc, "#short").final_layout().size.height, 30.0);
+    close(node(&doc, "#next").final_layout().location.y, 30.0);
+}
+
+#[test]
+fn block_cells_of_a_row_stack_in_one_anonymous_cell() {
+    // A responsive email makes a row's cells blocks on a narrow screen. CSS 2.1
+    // §17.2.1 wraps consecutive non-cells of a row in one anonymous cell, in
+    // which they stack, comments between them notwithstanding.
+    let doc = document(
+        "<table style='width:200px;border-spacing:0'><tr>
+         <!-- one --><td id='a' style='display:block'>A</td>
+         <!-- two --><td id='b' style='display:block'>B</td></tr></table>",
+    );
+    let (a, b) = (node(&doc, "#a"), node(&doc, "#b"));
+    let (a_pos, b_pos) = (a.absolute_position(0.0, 0.0), b.absolute_position(0.0, 0.0));
+    close(a.final_layout().size.width, 200.0);
+    close(b_pos.x, a_pos.x);
+    close(b_pos.y, a_pos.y + a.final_layout().size.height);
+}
+
+#[test]
+fn auto_columns_share_width_in_proportion_to_their_range() {
+    // Chromium gives each auto column its min-content width plus the same
+    // fraction of the way to its max-content width (CSS Tables 3 §3.9.3):
+    // columns of 25..100px and 50..100px in 150px are 70px and 80px, where
+    // equal shares would make them 62.5px and 87.5px.
+    let boxes = |width: u32, count: usize| {
+        vec![
+            format!("<span style='display:inline-block;width:{width}px;height:5px'></span>");
+            count
+        ]
+        .join(" ")
+    };
+    let doc = document(&format!(
+        "<table style='width:150px;border-spacing:0;font-size:0'><tr>
+         <td id='a'>{}</td><td id='b'>{}</td></tr></table>",
+        boxes(25, 4),
+        boxes(50, 2)
+    ));
+    close(node(&doc, "#a").final_layout().size.width, 70.0);
+    close(node(&doc, "#b").final_layout().size.width, 80.0);
+}
