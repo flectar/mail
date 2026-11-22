@@ -1087,6 +1087,7 @@ export component MailReadingPane inherits FocusScope {
                                                             ghost: true;
                                                             hover-background: root.muted-control-bg;
                                                             tooltip-text: @tr("Edit label");
+                                                            tooltip-in-popup: true;
                                                             clicked => {
                                                                 root.label-editor-id = label.id;
                                                                 root.label-editor-is-auto = label.is_auto;
