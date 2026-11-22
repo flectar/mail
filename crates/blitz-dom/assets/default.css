@@ -366,6 +366,11 @@ plaintext {
 
 /* tables */
 
+/* The anonymous table around table parts outside a table (CSS 2.1 §17.2.1). */
+*|*::-servo-anonymous-table {
+    display: table;
+}
+
 table {
     display: table;
     border-spacing: 2px;

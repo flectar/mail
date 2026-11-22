@@ -26,6 +26,7 @@ impl ToColorColor for AbsoluteColor {
 
 /// The WCAG contrast ratio (>= 1) between two colours, matching Chrome's
 /// `color_utils::GetContrastRatio`.
+#[cfg(feature = "scrollbars")]
 pub(crate) fn contrast_ratio(a: Color, b: Color) -> f32 {
     // `relative_luminance` is defined on `OpaqueColor`; discard the alpha (which
     // it ignores anyway) with `split`.

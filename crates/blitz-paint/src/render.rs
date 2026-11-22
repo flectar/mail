@@ -21,8 +21,8 @@ use crate::text::DrawTextContext;
 use crate::{CustomWidgetSceneMap, SELECTION_COLOR};
 use anyrender::{PaintScene, Scene};
 use blitz_dom::node::{
-    ListItemLayout, ListItemLayoutPosition, Marker, NodeData, RasterImageData, TextInputData,
-    TextNodeData,
+    ListItemLayout, ListItemLayoutPosition, Marker, NodeData, RasterImageData, SpecialElementData,
+    TextInputData, TextNodeData,
 };
 use blitz_dom::{BaseDocument, ElementData, Node, NodeId, local_name};
 use blitz_traits::devtools::DevtoolSettings;
@@ -416,6 +416,17 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
         // Apply CSS transform property (where transforms are 2d)
 
         let mut cx = self.element_cx(node, *node.final_layout(), transform, custom_widget_scene);
+        // A table's box surrounds its grid, not its captions.
+        let table_box = table_box_extent(self.dom, node).map(|(top, height)| {
+            let mut layout = *node.final_layout();
+            layout.size.height = height;
+            self.element_cx(
+                node,
+                layout,
+                transform * Affine::translate((0.0, f64::from(top) * self.scale)),
+                custom_widget_scene,
+            )
+        });
 
         // If this element clips its overflow it establishes a scrollport: narrow the clip
         // rectangle passed to descendants to the visible (clipped) region so that content
@@ -455,8 +466,11 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             None,
         );
 
-        cx.draw_outline(scene);
-        cx.draw_outset_box_shadow(scene);
+        table_box.as_ref().unwrap_or(&cx).draw_outline(scene);
+        table_box
+            .as_ref()
+            .unwrap_or(&cx)
+            .draw_outset_box_shadow(scene);
 
         // clip-path clip ayer
         self.layer_manager.maybe_with_layer(
@@ -508,10 +522,11 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                     filter,
                     backdrop_filter,
                     |scene| {
-                        cx.draw_background(scene);
-                        cx.draw_inset_box_shadow(scene);
+                        let box_cx = table_box.as_ref().unwrap_or(&cx);
+                        box_cx.draw_background(scene);
+                        box_cx.draw_inset_box_shadow(scene);
                         cx.draw_table_row_backgrounds(scene);
-                        cx.draw_border(scene);
+                        table_box.as_ref().unwrap_or(&cx).draw_border(scene);
                         cx.stroke_devtools(scene);
 
                         // TODO: allow layers with opacity to be unclipped (overflow: visible)
@@ -1466,6 +1481,34 @@ impl<'dom, 'a> std::ops::Deref for ElementCx<'dom, 'a> {
     fn deref(&self) -> &Self::Target {
         self.context
     }
+}
+
+/// The top and height of a table's box, which surrounds its grid but not its
+/// captions (CSS 2.1 §17.4), when it has captions.
+fn table_box_extent(dom: &BaseDocument, node: &Node) -> Option<(f32, f32)> {
+    use style::values::computed::table::CaptionSide;
+    let SpecialElementData::TableRoot(table) = &node.element_data()?.special_data else {
+        return None;
+    };
+    if table.captions.is_empty() {
+        return None;
+    }
+    let (mut top, mut bottom) = (0.0f32, node.final_layout().size.height);
+    for &caption in &table.captions {
+        let Some(caption) = dom.get_node(caption) else {
+            continue;
+        };
+        let layout = caption.final_layout();
+        let below = caption
+            .primary_styles()
+            .is_some_and(|style| style.clone_caption_side() == CaptionSide::Bottom);
+        if below {
+            bottom = bottom.min(layout.location.y - layout.margin.top);
+        } else {
+            top = top.max(layout.location.y + layout.size.height + layout.margin.bottom);
+        }
+    }
+    (bottom > top).then_some((top, bottom - top))
 }
 
 fn insets_from_taffy_rect(input: taffy::Rect<f64>) -> Insets {

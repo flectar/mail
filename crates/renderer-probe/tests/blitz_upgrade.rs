@@ -913,7 +913,8 @@ fn copied_text_leaves_out_hidden_text() {
 fn collapsed_bevels_and_dashes_paint_like_browsers() {
     // `<table border=2>` collapses to a 2px `outset` table edge, which paints
     // as a groove (CSS 2.1 §17.6.3): a dark outer half over a light inner
-    // half, as in Chrome. A dashed edge starts and ends with a dash.
+    // half, as in Chrome, where black bevels between #545454 and #a8a8a8. A
+    // dashed edge starts and ends with a dash.
     let mut doc = document(
         "<table border='2' style='border-collapse:collapse'><tr><td style='width:60px;height:20px'></td></tr></table>
          <table style='border-collapse:collapse;margin-top:10px'><tr>
@@ -928,8 +929,8 @@ fn collapsed_bevels_and_dashes_paint_like_browsers() {
         let i = (y * 400 + x) * 4;
         [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
     };
-    assert_eq!(pixel(30, 0), [0, 0, 0, 255]);
-    assert_eq!(pixel(30, 1), [84, 84, 84, 255]);
+    assert_eq!(pixel(30, 0), [84, 84, 84, 255]);
+    assert_eq!(pixel(30, 1), [168, 168, 168, 255]);
 
     let red = [255, 0, 0, 255];
     let (top, _) = rows_with(&pixels, red).unwrap();
@@ -1397,4 +1398,51 @@ fn copied_text_leaves_out_inline_edges() {
         .len();
     doc.set_text_selection(p, 0, p, len);
     assert_eq!(doc.get_selected_text().as_deref(), Some("a bcd"));
+}
+
+#[test]
+fn captions_sit_above_the_grid_outside_the_table_border() {
+    // CSS 2.1 §17.4: a caption is as wide as the table, above its grid (below
+    // it with `caption-side: bottom`), and the table's border surrounds the
+    // grid alone.
+    let mut doc = document(
+        "<table style='border:4px solid rgb(255,0,0);border-spacing:0;width:100px'>
+         <caption id='top' style='height:20px'></caption>
+         <caption id='bottom' style='height:10px;caption-side:bottom'></caption>
+         <tr><td id='cell' style='height:30px'></td></tr></table>",
+    );
+    let (top, cell, bottom) = (
+        node(&doc, "#top"),
+        node(&doc, "#cell"),
+        node(&doc, "#bottom"),
+    );
+    close(top.final_layout().size.width, 100.0);
+    close(top.final_layout().location.y, 0.0);
+    close(cell.final_layout().location.y, 24.0);
+    close(bottom.final_layout().location.y, 58.0);
+    let pixels = paint(&mut doc);
+    let red = bounds_where(&pixels, |pixel| *pixel == [255, 0, 0, 255]).expect("border painted");
+    assert_eq!((red.1, red.3), (20, 57), "{red:?}");
+}
+
+#[test]
+fn table_parts_outside_a_table_get_an_anonymous_table() {
+    // CSS 2.1 §17.2.1: the rows of a table made `display: block` stack in an
+    // anonymous table, and cells without a table share an anonymous row.
+    let doc = document(
+        "<table style='display:block'><tr><td id='a'>A</td></tr><tr><td id='b'>B</td></tr></table>
+         <div><div id='c' style='display:table-cell'>C</div>
+         <div id='d' style='display:table-cell'>D</div></div>",
+    );
+    let position = |selector: &str| node(&doc, selector).absolute_position(0.0, 0.0);
+    let (a, b, c, d) = (
+        position("#a"),
+        position("#b"),
+        position("#c"),
+        position("#d"),
+    );
+    close(b.x, a.x);
+    assert!(b.y > a.y, "rows stack: {a:?} {b:?}");
+    close(d.y, c.y);
+    assert!(d.x > c.x, "cells share a row: {c:?} {d:?}");
 }

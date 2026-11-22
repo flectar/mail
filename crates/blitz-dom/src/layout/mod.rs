@@ -615,6 +615,11 @@ impl LayoutPassState<'_> {
                         };
                     }
 
+                    // Captions sit above and below the table's grid.
+                    if !table_wrapper.ctx.captions.is_empty() {
+                        output = table_wrapper.place_captions(inputs, output);
+                    }
+
                     // Absolutely positioned children take no part in the table grid. Their
                     // static position is the top-left of the table's content box.
                     let context = table_wrapper.ctx;

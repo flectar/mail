@@ -1,0 +1,572 @@
+diff --git a/crates/blitz-dom/assets/default.css b/crates/blitz-dom/assets/default.css
+index ad76a97..718f39e 100644
+--- a/crates/blitz-dom/assets/default.css
++++ b/crates/blitz-dom/assets/default.css
+@@ -366,6 +366,11 @@ plaintext {
+ 
+ /* tables */
+ 
++/* The anonymous table around table parts outside a table (CSS 2.1 §17.2.1). */
++*|*::-servo-anonymous-table {
++    display: table;
++}
++
+ table {
+     display: table;
+     border-spacing: 2px;
+diff --git a/crates/blitz-dom/src/layout/construct.rs b/crates/blitz-dom/src/layout/construct.rs
+index 2a027e0..3b589b4 100644
+--- a/crates/blitz-dom/src/layout/construct.rs
++++ b/crates/blitz-dom/src/layout/construct.rs
+@@ -75,21 +75,55 @@ pub(crate) struct LayoutChildren {
+     /// These are recorded on the container node so they can be deallocated the
+     /// next time it is reconstructed.
+     pub(crate) anonymous_blocks: ThinVec<NodeId>,
++    /// The currently-open anonymous table that table parts outside a table
++    /// are appended to.
++    pub(crate) anonymous_table_id: Option<NodeId>,
+ }
+ 
+ impl LayoutChildren {
+     /// Append a single layout child.
+     fn push(&mut self, child_id: NodeId, doc: &mut BaseDocument) {
+         self.maybe_push_anon_block(doc);
++        self.anonymous_table_id = None;
+         self.children.push(child_id);
+     }
+ 
+     /// Append all layout children in `slice`.
+     fn extend(&mut self, slice: &[NodeId], doc: &mut BaseDocument) {
+         self.maybe_push_anon_block(doc);
++        self.anonymous_table_id = None;
+         self.children.extend_from_slice(slice);
+     }
+ 
++    /// Append a table part found outside a table to the open anonymous table,
++    /// creating one if there is none (CSS 2.1 §17.2.1): a table's rows or
++    /// cells whose table is `display: block`, or `display: table-cell` boxes
++    /// without a table, lay out as a table rather than side by side.
++    fn push_table_part(
++        &mut self,
++        container_node_id: NodeId,
++        child_id: NodeId,
++        doc: &mut BaseDocument,
++    ) {
++        self.maybe_push_anon_block(doc);
++        let table_id = match self.anonymous_table_id {
++            Some(table_id) => table_id,
++            None => {
++                use style::selector_parser::PseudoElement;
++                let table_id = create_anonymous_box_for(
++                    doc,
++                    container_node_id,
++                    &PseudoElement::ServoAnonymousTable,
++                );
++                self.children.push(table_id);
++                self.anonymous_blocks.push(table_id);
++                self.anonymous_table_id = Some(table_id);
++                table_id
++            }
++        };
++        doc.nodes[table_id].children.push(child_id);
++    }
++
+     fn maybe_push_anon_block(&mut self, doc: &mut BaseDocument) {
+         fn block_is_only_whitespace(doc: &BaseDocument, node_id: NodeId) -> bool {
+             for child_id in doc.nodes[node_id].children.iter().copied() {
+@@ -124,6 +158,7 @@ impl LayoutChildren {
+         child_id: NodeId,
+         doc: &mut BaseDocument,
+     ) {
++        self.anonymous_table_id = None;
+         if self.anonymous_block_id.is_none() {
+             self.create_anonymous_block(container_node_id, doc);
+         }
+@@ -145,7 +180,16 @@ impl LayoutChildren {
+ /// it must be deallocated when the container is reconstructed.
+ pub(crate) fn create_anonymous_box(doc: &mut BaseDocument, container_node_id: NodeId) -> NodeId {
+     use style::selector_parser::PseudoElement;
++    create_anonymous_box_for(doc, container_node_id, &PseudoElement::ServoAnonymousBox)
++}
+ 
++/// A new anonymous box in `container_node_id`, styled as the anonymous box
++/// `pseudo` (an anonymous block or table) that inherits from it.
++fn create_anonymous_box_for(
++    doc: &mut BaseDocument,
++    container_node_id: NodeId,
++    pseudo: &style::selector_parser::PseudoElement,
++) -> NodeId {
+     const NAME: QualName = QualName {
+         prefix: None,
+         ns: ns!(html),
+@@ -160,11 +204,9 @@ pub(crate) fn create_anonymous_box(doc: &mut BaseDocument, container_node_id: No
+     let parent_style = doc.nodes[container_node_id].primary_styles().unwrap();
+     let read_guard = doc.guard.read();
+     let guards = StylesheetGuards::same(&read_guard);
+-    let style = doc.stylist.style_for_anonymous::<&Node>(
+-        &guards,
+-        &PseudoElement::ServoAnonymousBox,
+-        &parent_style,
+-    );
++    let style = doc
++        .stylist
++        .style_for_anonymous::<&Node>(&guards, pseudo, &parent_style);
+     let mut stylo_element_data = StyloElementData {
+         damage: ALL_DAMAGE,
+         ..Default::default()
+@@ -303,6 +345,8 @@ struct FlowClassification {
+     all_inline: bool,
+     all_out_of_flow: bool,
+     has_contents: bool,
++    /// An in-flow child is a table part, which needs an anonymous table.
++    has_table_parts: bool,
+ }
+ 
+ impl Default for FlowClassification {
+@@ -312,6 +356,7 @@ impl Default for FlowClassification {
+             all_inline: true,
+             all_out_of_flow: true,
+             has_contents: false,
++            has_table_parts: false,
+         }
+     }
+ }
+@@ -395,9 +440,13 @@ fn classify_flow_children(
+             classification.all_out_of_flow = false;
+             match display.outside() {
+                 DisplayOutside::None => {}
+-                DisplayOutside::Block
+-                | DisplayOutside::TableCaption
+-                | DisplayOutside::InternalTable => classification.all_inline = false,
++                DisplayOutside::InternalTable => {
++                    classification.all_inline = false;
++                    classification.has_table_parts = true;
++                }
++                DisplayOutside::Block | DisplayOutside::TableCaption => {
++                    classification.all_inline = false
++                }
+                 DisplayOutside::Inline => {
+                     classification.all_block = false;
+ 
+@@ -648,7 +697,10 @@ fn collect_layout_children_with_wrap(
+ 
+             // If the children are either all inline or all block then simply return the regular children
+             // as the layout children
+-            if classification.all_block & !classification.has_contents {
++            if classification.all_block
++                & !classification.has_contents
++                & !classification.has_table_parts
++            {
+                 push_non_whitespace_children_and_pseudos(
+                     &mut out.children,
+                     &doc.nodes[container_node_id],
+@@ -867,6 +919,8 @@ fn collect_complex_layout_children(
+     hide_whitespace: bool,
+     needs_wrap: fn(NodeKind, DisplayOutside) -> bool,
+ ) {
++    // Only flow containers wrap table parts in anonymous tables here.
++    let wraps_table_parts = !hide_whitespace;
+     doc.iter_children_and_pseudos_mut(container_node_id, |child_id, doc| {
+         // Get node kind (text, element, comment, etc)
+         let child_node_kind = doc.nodes[child_id].data.kind();
+@@ -901,6 +955,13 @@ fn collect_complex_layout_children(
+             });
+             collect_layout_children_with_wrap(doc, child_id, out, wrap)
+         }
++        // Table parts outside a table go into an anonymous table, through
++        // the white space between them, in flow containers. (Floated and
++        // absolutely positioned ones are blockified.)
++        else if wraps_table_parts && child_display.outside() == DisplayOutside::InternalTable {
++            out.push_table_part(container_node_id, child_id, doc);
++        } else if out.anonymous_table_id.is_some() && is_whitespace_node {
++        }
+         // Push nodes that need wrapping into the current "anonymous block container".
+         // If there is not an open one then we create one.
+         else if needs_wrap(child_node_kind, display_outside) {
+diff --git a/crates/blitz-dom/src/layout/mod.rs b/crates/blitz-dom/src/layout/mod.rs
+index 82273f1..f53aab7 100644
+--- a/crates/blitz-dom/src/layout/mod.rs
++++ b/crates/blitz-dom/src/layout/mod.rs
+@@ -615,6 +615,11 @@ impl LayoutPassState<'_> {
+                         };
+                     }
+ 
++                    // Captions sit above and below the table's grid.
++                    if !table_wrapper.ctx.captions.is_empty() {
++                        output = table_wrapper.place_captions(inputs, output);
++                    }
++
+                     // Absolutely positioned children take no part in the table grid. Their
+                     // static position is the top-left of the table's content box.
+                     let context = table_wrapper.ctx;
+diff --git a/crates/blitz-dom/src/layout/table.rs b/crates/blitz-dom/src/layout/table.rs
+index 5ce17a8..8653287 100644
+--- a/crates/blitz-dom/src/layout/table.rs
++++ b/crates/blitz-dom/src/layout/table.rs
+@@ -43,6 +43,9 @@ pub struct TableContext {
+     pub rows: Vec<TableRow>,
+     pub columns: Vec<TableColumn>,
+     pub oof_children: Vec<(NodeId, taffy::Position)>,
++    /// The table's captions, in document order, laid out above its grid (or
++    /// below it, for `caption-side: bottom`).
++    pub captions: Vec<NodeId>,
+     // Owns the calc allocations referenced by fixed percentage tracks.
+     _calc_values: Vec<style::values::computed::LengthPercentage>,
+     pub is_fixed: bool,
+@@ -400,6 +403,7 @@ const MAX_GRID_LINE: u16 = i16::MAX as u16 - 1;
+ struct TableCollector {
+     wm: WritingMode,
+     oof_children: Vec<(NodeId, taffy::Position)>,
++    captions: Vec<NodeId>,
+     collapse: bool,
+     /// Rows started so far; the current row is `row - 1`.
+     row: u16,
+@@ -523,6 +527,7 @@ pub(crate) fn build_table_context(
+     let mut collector = TableCollector {
+         wm,
+         oof_children: Vec::new(),
++        captions: Vec::new(),
+         collapse: border_collapse == BorderCollapse::Collapse,
+         row: 0,
+         col: 0,
+@@ -570,6 +575,7 @@ pub(crate) fn build_table_context(
+         columns: mut column_count,
+         oof_children,
+         anonymous_cells,
++        captions,
+         ..
+     } = collector;
+ 
+@@ -844,6 +850,7 @@ pub(crate) fn build_table_context(
+     let layout_children = cells
+         .iter()
+         .map(|cell| cell.node_id)
++        .chain(captions.iter().copied())
+         .chain(oof_children.iter().map(|(id, _)| *id))
+         .collect();
+     let root_node = &mut doc.nodes[table_root_node_id];
+@@ -856,6 +863,7 @@ pub(crate) fn build_table_context(
+             rows,
+             columns,
+             oof_children,
++            captions,
+             _calc_values: calc_values,
+             is_fixed,
+             computed_grid_info: AtomicRefCell::new(None),
+@@ -1329,7 +1337,7 @@ impl TableCollector {
+             | DisplayInside::Flex
+             | DisplayInside::Grid => {
+                 if display.outside() == DisplayOutside::TableCaption {
+-                    node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
++                    self.captions.push(node_id);
+                 } else {
+                     // CSS table fixup wraps an otherwise invalid child in
+                     // anonymous row/cell boxes. Floats blockify `display:
+@@ -1778,6 +1786,118 @@ fn wraps_text_only(doc: &BaseDocument, node_id: NodeId) -> bool {
+ }
+ 
+ impl TableTreeWrapper<'_, '_> {
++    /// Lays out the table's captions as wide as the table, stacked above its
++    /// grid in document order (or below it with `caption-side: bottom`), and
++    /// moves the grid down below the ones above (CSS 2.1 §17.4). `output` is
++    /// the grid's layout, which then also holds the captions.
++    pub(crate) fn place_captions(
++        &mut self,
++        inputs: taffy::LayoutInput,
++        mut output: taffy::LayoutOutput,
++    ) -> taffy::LayoutOutput {
++        use style::values::computed::table::CaptionSide;
++        let ctx = Arc::clone(&self.ctx);
++        let width = output.size.width;
++        let perform = inputs.run_mode == taffy::RunMode::PerformLayout;
++        let mut placed = Vec::new();
++        let (mut above, mut below) = (0.0f32, 0.0f32);
++        for &caption in &ctx.captions {
++            let Some(side) = self.doc.nodes[caption]
++                .primary_styles()
++                .map(|style| style.clone_caption_side())
++            else {
++                continue;
++            };
++            let (margin, border, padding) = {
++                let style = self.doc.nodes[caption].layout_style();
++                (
++                    style.margin().map(|margin| {
++                        margin
++                            .resolve_to_option(width, resolve_calc_value)
++                            .unwrap_or(0.0)
++                    }),
++                    style
++                        .border()
++                        .resolve_or_zero(Some(width), resolve_calc_value),
++                    style
++                        .padding()
++                        .resolve_or_zero(Some(width), resolve_calc_value),
++                )
++            };
++            let caption_width = (width - margin.left - margin.right).max(0.0);
++            let caption_output = self.doc.compute_child_layout(
++                crate::taffy_node_id(caption),
++                taffy::LayoutInput {
++                    run_mode: inputs.run_mode,
++                    sizing_mode: taffy::SizingMode::InherentSize,
++                    axis: taffy::RequestedAxis::Both,
++                    known_dimensions: taffy::Size {
++                        width: Some(caption_width),
++                        height: None,
++                    },
++                    known_dimensions_are_definite: taffy::Size {
++                        width: true,
++                        height: true,
++                    },
++                    parent_size: taffy::Size {
++                        width: Some(width),
++                        height: None,
++                    },
++                    available_space: taffy::Size {
++                        width: taffy::AvailableSpace::Definite(caption_width),
++                        height: taffy::AvailableSpace::MaxContent,
++                    },
++                    vertical_margins_are_collapsible: taffy::Line::FALSE,
++                },
++            );
++            let extent = margin.top + caption_output.size.height + margin.bottom;
++            match side {
++                CaptionSide::Top => above += extent,
++                CaptionSide::Bottom => below += extent,
++            }
++            placed.push((caption, side, margin, border, padding, caption_output));
++        }
++        if perform {
++            if above > 0.0 {
++                let grid_items = ctx
++                    .cells
++                    .iter()
++                    .map(|cell| cell.node_id)
++                    .collect::<Vec<_>>();
++                for node_id in grid_items {
++                    let node_id = crate::taffy_node_id(node_id);
++                    let mut layout = taffy::RoundTree::get_unrounded_layout(&*self.doc, node_id);
++                    layout.location.y += above;
++                    self.doc.set_unrounded_layout(node_id, &layout);
++                }
++            }
++            let (mut top, mut bottom) = (0.0, above + output.size.height);
++            for (caption, side, margin, border, padding, caption_output) in placed {
++                let y = match side {
++                    CaptionSide::Top => &mut top,
++                    CaptionSide::Bottom => &mut bottom,
++                };
++                let layout = taffy::Layout {
++                    location: taffy::Point {
++                        x: margin.left,
++                        y: *y + margin.top,
++                    },
++                    size: caption_output.size,
++                    scrollable_overflow_rect: caption_output.scrollable_overflow_rect,
++                    border,
++                    padding,
++                    margin,
++                    ..taffy::Layout::new()
++                };
++                self.doc
++                    .set_unrounded_layout(crate::taffy_node_id(caption), &layout);
++                *y += margin.top + caption_output.size.height + margin.bottom;
++            }
++        }
++        output.size.height += above + below;
++        output
++    }
++
+     /// Decides how far authored cell widths are minimums in a layout of the
+     /// table at `table_width`, its border-box width. `None` stands for the
+     /// table's min-content width, which ignores them, as in browsers, so the
+diff --git a/crates/blitz-paint/src/color.rs b/crates/blitz-paint/src/color.rs
+index ea54776..f2af068 100644
+--- a/crates/blitz-paint/src/color.rs
++++ b/crates/blitz-paint/src/color.rs
+@@ -26,6 +26,7 @@ impl ToColorColor for AbsoluteColor {
+ 
+ /// The WCAG contrast ratio (>= 1) between two colours, matching Chrome's
+ /// `color_utils::GetContrastRatio`.
++#[cfg(feature = "scrollbars")]
+ pub(crate) fn contrast_ratio(a: Color, b: Color) -> f32 {
+     // `relative_luminance` is defined on `OpaqueColor`; discard the alpha (which
+     // it ignores anyway) with `split`.
+diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
+index 378714d..cd67038 100644
+--- a/crates/blitz-paint/src/render.rs
++++ b/crates/blitz-paint/src/render.rs
+@@ -21,8 +21,8 @@ use crate::text::DrawTextContext;
+ use crate::{CustomWidgetSceneMap, SELECTION_COLOR};
+ use anyrender::{PaintScene, Scene};
+ use blitz_dom::node::{
+-    ListItemLayout, ListItemLayoutPosition, Marker, NodeData, RasterImageData, TextInputData,
+-    TextNodeData,
++    ListItemLayout, ListItemLayoutPosition, Marker, NodeData, RasterImageData, SpecialElementData,
++    TextInputData, TextNodeData,
+ };
+ use blitz_dom::{BaseDocument, ElementData, Node, NodeId, local_name};
+ use blitz_traits::devtools::DevtoolSettings;
+@@ -416,6 +416,17 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+         // Apply CSS transform property (where transforms are 2d)
+ 
+         let mut cx = self.element_cx(node, *node.final_layout(), transform, custom_widget_scene);
++        // A table's box surrounds its grid, not its captions.
++        let table_box = table_box_extent(self.dom, node).map(|(top, height)| {
++            let mut layout = *node.final_layout();
++            layout.size.height = height;
++            self.element_cx(
++                node,
++                layout,
++                transform * Affine::translate((0.0, f64::from(top) * self.scale)),
++                custom_widget_scene,
++            )
++        });
+ 
+         // If this element clips its overflow it establishes a scrollport: narrow the clip
+         // rectangle passed to descendants to the visible (clipped) region so that content
+@@ -455,8 +466,11 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+             None,
+         );
+ 
+-        cx.draw_outline(scene);
+-        cx.draw_outset_box_shadow(scene);
++        table_box.as_ref().unwrap_or(&cx).draw_outline(scene);
++        table_box
++            .as_ref()
++            .unwrap_or(&cx)
++            .draw_outset_box_shadow(scene);
+ 
+         // clip-path clip ayer
+         self.layer_manager.maybe_with_layer(
+@@ -508,10 +522,11 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+                     filter,
+                     backdrop_filter,
+                     |scene| {
+-                        cx.draw_background(scene);
+-                        cx.draw_inset_box_shadow(scene);
++                        let box_cx = table_box.as_ref().unwrap_or(&cx);
++                        box_cx.draw_background(scene);
++                        box_cx.draw_inset_box_shadow(scene);
+                         cx.draw_table_row_backgrounds(scene);
+-                        cx.draw_border(scene);
++                        table_box.as_ref().unwrap_or(&cx).draw_border(scene);
+                         cx.stroke_devtools(scene);
+ 
+                         // TODO: allow layers with opacity to be unclipped (overflow: visible)
+@@ -1468,6 +1483,34 @@ impl<'dom, 'a> std::ops::Deref for ElementCx<'dom, 'a> {
+     }
+ }
+ 
++/// The top and height of a table's box, which surrounds its grid but not its
++/// captions (CSS 2.1 §17.4), when it has captions.
++fn table_box_extent(dom: &BaseDocument, node: &Node) -> Option<(f32, f32)> {
++    use style::values::computed::table::CaptionSide;
++    let SpecialElementData::TableRoot(table) = &node.element_data()?.special_data else {
++        return None;
++    };
++    if table.captions.is_empty() {
++        return None;
++    }
++    let (mut top, mut bottom) = (0.0f32, node.final_layout().size.height);
++    for &caption in &table.captions {
++        let Some(caption) = dom.get_node(caption) else {
++            continue;
++        };
++        let layout = caption.final_layout();
++        let below = caption
++            .primary_styles()
++            .is_some_and(|style| style.clone_caption_side() == CaptionSide::Bottom);
++        if below {
++            bottom = bottom.min(layout.location.y - layout.margin.top);
++        } else {
++            top = top.max(layout.location.y + layout.size.height + layout.margin.bottom);
++        }
++    }
++    (bottom > top).then_some((top, bottom - top))
++}
++
+ fn insets_from_taffy_rect(input: taffy::Rect<f64>) -> Insets {
+     Insets {
+         x0: input.left,
+diff --git a/crates/blitz-paint/src/render/border.rs b/crates/blitz-paint/src/render/border.rs
+index da3370f..82dc461 100644
+--- a/crates/blitz-paint/src/render/border.rs
++++ b/crates/blitz-paint/src/render/border.rs
+@@ -7,11 +7,7 @@ use smallvec::SmallVec;
+ use style::color::AbsoluteColor;
+ use style::values::computed::{BorderStyle, OutlineStyle};
+ 
+-use crate::{
+-    color::{ToColorColor as _, contrast_ratio},
+-    kurbo_css::Edge,
+-    render::ElementCx,
+-};
++use crate::{color::ToColorColor as _, kurbo_css::Edge, render::ElementCx};
+ 
+ /// A darker version of a colour (mirrors WebKit/Blink's `Color::Dark`): the
+ /// brightest channel is reduced by a fixed amount and the others scaled to match,
+@@ -43,37 +39,36 @@ fn lighten(color: Color) -> Color {
+ /// The colour of a single edge of an `inset`/`outset` border.
+ ///
+ /// An `outset` border is raised: the top/left edges use the "lighter" shade and
+-/// the bottom/right edges the "darker" shade (`inset` is the reverse). The exact
+-/// shading matches Chrome's `CalculateInsetOutsetColor`:
++/// the bottom/right edges the "darker" shade (`inset` is the reverse). The
++/// shading matches Blink's `CalculateInsetOutsetColor`:
+ ///
+-/// * The darker edge is always darkened.
+-/// * The lighter edge keeps the base colour unchanged, *except* for colours dark
+-///   enough that the darkened edge wouldn't have enough contrast against the base
+-///   colour, which are lightened instead so the bevel stays visible.
++/// * A very dark colour (no brighter than `rgb(32, 32, 32)`) is lightened on
++///   its darker edge and lightened twice on its lighter one, so black bevels
++///   between `#545454` and `#a8a8a8`.
++/// * Otherwise the darker edge is darkened, and the lighter edge lightened
++///   unless the colour is very light (brighter than `rgb(235, 235, 235)`).
+ fn beveled_edge_color(color: Color, edge: Edge, inset: bool) -> Color {
+-    let top_or_left = matches!(edge, Edge::Top | Edge::Left);
+-    let should_darken = top_or_left == inset;
+-
+-    let dark_color = darken(color);
+-    if should_darken {
+-        return dark_color;
+-    }
++    // Relative luminances of rgb(32, 32, 32) and rgb(235, 235, 235).
++    const DARK_LUMINANCE: f32 = 0.014443844;
++    const LIGHT_LUMINANCE: f32 = 0.83077;
+ 
+-    // Lighter edge. Chrome uses the base colour as-is unless the colour is dark
+-    // enough that the darkened edge lacks contrast against it. The red/green
+-    // shortcut mirrors Chrome: for those colours the contrast is always
+-    // sufficient, so the base colour is used without a contrast check.
+-    let [r, g, _, _] = color.components;
+-    if r >= 150.0 / 255.0 || g >= 92.0 / 255.0 {
+-        return color;
++    let top_or_left = matches!(edge, Edge::Top | Edge::Left);
++    let darker_edge = top_or_left == inset;
++    let luminance = color.split().0.relative_luminance();
++    if luminance <= DARK_LUMINANCE {
++        let lighter = lighten(color);
++        return if darker_edge {
++            lighter
++        } else {
++            lighten(lighter)
++        };
+     }
+-
+-    // Lighten only when the darkened edge would be too low-contrast to read.
+-    const MIN_CONTRAST_RATIO: f32 = 1.75;
+-    if contrast_ratio(color, dark_color) < MIN_CONTRAST_RATIO {
+-        lighten(color)
+-    } else {
++    if darker_edge {
++        darken(color)
++    } else if luminance > LIGHT_LUMINANCE {
+         color
++    } else {
++        lighten(color)
+     }
+ }
+ 
