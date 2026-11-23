@@ -1915,3 +1915,23 @@ fn background_attributes_set_background_images() {
         ]
     );
 }
+
+#[test]
+fn a_line_that_breaks_at_a_soft_hyphen_ends_with_a_hyphen() {
+    // As in browsers, a line broken at a soft hyphen shows a hyphen, while
+    // one broken at a `<wbr>` shows nothing more.
+    let mut doc = document(
+        "<style>body{margin:0;font:20px/30px monospace;color:#000} div{width:70px}</style>
+         <div>aaaa&shy;bbbb</div><div>aaaa<wbr>bbbb</div>",
+    );
+    let pixels = paint(&mut doc);
+    let ink_end = |rows: std::ops::Range<usize>| {
+        (0..400)
+            .rev()
+            .find(|&x| rows.clone().any(|y| pixels[(y * 400 + x) * 4 + 3] > 128))
+            .expect("ink")
+    };
+    let hyphenated = ink_end(0..30);
+    let broken = ink_end(60..90);
+    assert!(hyphenated > broken + 5, "{hyphenated} vs {broken}");
+}

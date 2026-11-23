@@ -40,6 +40,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0020 selection into text after a block | Collects the inline roots between the ends of a text selection from the layout tree, which holds the anonymous blocks that wrap text next to a block. A selection from a paragraph into the text after it ran backwards and selected nothing, so it was neither highlighted nor copied. |
 | 0021 list numbering and markers | Lists are numbered as the HTML standard numbers them (section 4.4.8). An `<ol>` counts from its `start`, or when `reversed` down from its number of items, and an `<li>`'s `value` sets its own number, which the count goes on from. `reversed` never applied before, and `start="0"` overflowed. The `type` attributes of `<ol>`, `<ul>` and `<li>` map to `list-style-type` as Blink maps them. Markers come in the predefined counter styles of CSS Counter Styles 3, decimal, decimal-leading-zero, lower and upper roman, alpha and latin, and lower-greek, falling back to decimal outside a style's range and for the styles Blitz doesn't define, which drew a white square. An outside marker keeps the space after its `.`, as `::marker` has `white-space: pre`, so `1.` ends a space before the item's text as in browsers. |
 | 0022 background and clear attributes | The `background` attribute of `<body>`, a table or a table part is a background image (HTML rendering rules), resolved against the document's URL, which presentational hints now resolve their URLs against. `<br clear>` starts the line after the `<br>` below the floats it clears, as in browsers, through an empty out-of-flow box that the line breaker stops at, and the block grows to hold the lines it moves, which Parley's sum of line heights missed. A `<br clear>` at the end of a block adds only the clearance. |
+| 0023 soft hyphens | A line that breaks at a soft hyphen (U+00AD, `&shy;`) ends with a hyphen, as CSS Text 3 says and browsers show, U+2010 where the font has one, as in Blink, or else a hyphen-minus, in the font, colour and synthesis of the line's last text. Parley shapes the soft hyphen itself as nothing and gives Blitz no way to keep the hyphen's width in the line, so in right-aligned or centred text the hyphen hangs past the alignment edge. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
@@ -47,7 +48,7 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0022 are local, and upstream main collects selection ranges as beta.4 does. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0023 are local, and upstream main collects selection ranges as beta.4 does. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
 when a release contains them.
 
 Copied text, find in the reader and accessible names leave out 0011's edge
@@ -115,8 +116,8 @@ tables and bevels, 0013's image minimums and line breaks, 0014's table
 border attributes and spare width, 0015's selection line breaks and
 highlights, 0016's cell percentage padding and legacy word-break, 0017's
 unavailable images, 0018's rules and bevels, 0019's text shadows, 0021's
-lists, and 0022's `background` and `clear` attributes. Application renderer
-tests cover float
+lists, 0022's `background` and `clear` attributes, and 0023's soft hyphens.
+Application renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.
 
