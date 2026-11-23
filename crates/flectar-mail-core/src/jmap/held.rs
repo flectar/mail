@@ -151,24 +151,28 @@ pub(super) async fn submission_state(c: &ConnectedClient) -> Option<String> {
 }
 
 /// Whether the Email left Drafts: a submission's `onSuccessUpdateEmail`
-/// takes its `$draft` keyword away. A server may delete the submission
-/// itself once the message went out (RFC 8621 section 7; Cyrus does by
-/// default), so this is what shows that a sent Email was sent.
-pub(super) async fn left_drafts(c: &ConnectedClient, email_id: &str) -> Result<bool> {
+/// moves it out of the `drafts` mailbox and takes its `$draft` keyword away.
+/// A server may delete the submission itself once the message went out (RFC
+/// 8621 section 7; Cyrus does by default), so this is what shows that a sent
+/// Email was sent. A draft another app saved without `$draft` is still in
+/// Drafts.
+pub(super) async fn left_drafts(c: &ConnectedClient, email_id: &str, drafts: &str) -> Result<bool> {
     let mut request = c.request();
     request
         .get_email()
         .account_id(&c.account_id)
         .ids([email_id])
-        .properties([jmap_client::email::Property::Keywords]);
+        .properties([
+            jmap_client::email::Property::Keywords,
+            jmap_client::email::Property::MailboxIds,
+        ]);
     let mut response = c
         .send_single::<jmap_client::core::response::EmailGetResponse>(request)
         .await
         .map_err(client::map_error)?;
-    Ok(response
-        .take_list()
-        .first()
-        .is_some_and(|email| !email.keywords().contains(&"$draft")))
+    Ok(response.take_list().first().is_some_and(|email| {
+        !email.keywords().contains(&"$draft") && !email.mailbox_ids().contains(&drafts)
+    }))
 }
 
 /// Hand a scheduled message to the server to hold until `send_at`.

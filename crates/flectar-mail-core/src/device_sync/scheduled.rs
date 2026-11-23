@@ -1124,16 +1124,10 @@ fn waits_for_file(conn: &Connection, sync_id: &str) -> Result<bool> {
 
 /// Whether the draft's latest edit still waits to reach the mail server.
 fn draft_upload_waiting(conn: &Connection, draft_id: Option<i64>) -> Result<bool> {
-    let Some(draft_id) = draft_id else {
-        return Ok(false);
-    };
-    Ok(conn.query_row(
-        "SELECT EXISTS (SELECT 1 FROM pending_actions
-           WHERE kind = 'save_draft' AND state IN ('pending', 'inflight')
-             AND (message_id = ?1 OR json_extract(payload, '$.draftId') = ?1))",
-        params![draft_id],
-        |row| row.get(0),
-    )?)
+    match draft_id {
+        Some(draft_id) => repo::actions::draft_upload_waiting(conn, draft_id),
+        None => Ok(false),
+    }
 }
 
 /// A held send of `draft` for a shared send. Another device's draft goes

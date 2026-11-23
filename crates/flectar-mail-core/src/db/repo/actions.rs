@@ -759,6 +759,17 @@ pub fn has_pending_for_message(conn: &Connection, message_id: i64) -> Result<boo
     )?)
 }
 
+/// Whether the draft's latest edit still waits to reach the mail server.
+pub fn draft_upload_waiting(conn: &Connection, draft_id: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pending_actions
+           WHERE kind = 'save_draft' AND state IN ('pending', 'inflight')
+             AND (message_id = ?1 OR json_extract(payload, '$.draftId') = ?1))",
+        params![draft_id],
+        |row| row.get(0),
+    )?)
+}
+
 /// Whether local intent may recreate or submit an Email that disappeared
 /// remotely. Ordinary flag/move actions cannot resurrect a destroyed Email and
 /// therefore must not keep a stale local row alive.

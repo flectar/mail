@@ -3223,7 +3223,17 @@ async fn save_draft_action(
         return Ok(());
     }
     if let Some(existing) = existing_remote {
-        destroy_email_if_present(c, &existing).await?;
+        // An Email that left Drafts went out, from another of the user's
+        // devices: it stays as the message that was sent, never replaced.
+        // A send of this draft then finds it sent, and a save keeps the
+        // draft as a new Email.
+        if super::held::left_drafts(c, &existing, &draft_mailbox).await? {
+            if action.kind == "send" {
+                return Ok(());
+            }
+        } else {
+            destroy_email_if_present(c, &existing).await?;
+        }
     }
     if !action_is_inflight(ctx, action.id).await? {
         return Ok(());
@@ -3307,10 +3317,22 @@ pub(super) async fn send_action(
     let submission_accepted = action.payload["jmapSubmissionAccepted"]
         .as_bool()
         .unwrap_or(false);
+    // Another of the user's devices may have handed this message over
+    // already: it goes out only if the server shows it didn't.
+    if !submission_accepted
+        && action.payload["checkFirst"].as_bool() == Some(true)
+        && let Some(sent) = went_out(ctx, config, c, action, draft_id).await?
+    {
+        mark_send_prepared(ctx, action, &sent).await?;
+        mark_submission_accepted(ctx, action).await?;
+        return finish_sent_locally(ctx, config, draft_id).await;
+    }
     let remote_email =
         prepared_email(ctx, config, c, action, draft_id, submission_accepted).await?;
     let sent_mailbox =
         ensure_role_mailbox(ctx, config.id, c, roles::SENT, "Sent", Role::Sent).await?;
+    let drafts =
+        ensure_role_mailbox(ctx, config.id, c, roles::DRAFTS, "Drafts", Role::Drafts).await?;
 
     // A lost response must not cause a duplicate submission on retry, and
     // another of the user's devices may have sent the Email already: as its
@@ -3323,7 +3345,7 @@ pub(super) async fn send_action(
         || super::held::live_submission(c, &remote_email)
             .await?
             .is_some()
-        || super::held::left_drafts(c, &remote_email).await?;
+        || super::held::left_drafts(c, &remote_email, &drafts).await?;
     if !already_submitted {
         let (sender_email, identity_id) = draft_sending_identity(ctx, c, draft_id).await?;
         let (request, create_id) = submission_request(
@@ -3417,6 +3439,13 @@ pub(super) async fn prepared_email(
                         .into(),
                 )
             })?
+    } else if let Some(remote) = uploaded_draft(ctx, action, draft_id).await? {
+        // A send that checks first goes out as the server's Email of the
+        // draft, the one another device would have sent. The draft is there
+        // as it is here, and the server's submission state (RFC 8620
+        // `ifInState`) then settles a race with that device too.
+        mark_send_prepared(ctx, action, &remote).await?;
+        remote
     } else {
         // First make the current local content a remote draft, then durably
         // pin the exact Email id before submission. A retry after a crash must
@@ -3433,6 +3462,104 @@ pub(super) async fn prepared_email(
         remote
     };
     Ok(remote_email)
+}
+
+/// The server's Email of a draft whose send checks first, when it holds the
+/// draft as it is here: no upload of it waits.
+async fn uploaded_draft(
+    ctx: &SyncCtx,
+    action: &repo::actions::PendingAction,
+    draft_id: i64,
+) -> Result<Option<String>> {
+    if action.payload["checkFirst"].as_bool() != Some(true) {
+        return Ok(None);
+    }
+    ctx.db
+        .read(move |conn| {
+            if repo::actions::draft_upload_waiting(conn, draft_id)? {
+                return Ok(None);
+            }
+            Ok(repo::messages::get_row(conn, draft_id)?.and_then(|row| row.jmap_id))
+        })
+        .await
+}
+
+/// Whether the message of draft `draft_id` went out already, from another of
+/// the user's devices: the Email that shows it did. Every device submits a
+/// message with its Email moved out of Drafts and no longer a draft, so the
+/// Email the draft shares with the other devices shows a submission or has
+/// left Drafts, or another Email of the message's Message-ID is outside
+/// Drafts and no draft. A server that can't search for that leaves it
+/// unknown, and the send ends as one that may have gone out.
+async fn went_out(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    action: &repo::actions::PendingAction,
+    draft_id: i64,
+) -> Result<Option<String>> {
+    let action_id = action.id;
+    let pinned = action.payload["jmapPreparedEmailId"]
+        .as_str()
+        .map(str::to_owned);
+    let (message_id, shared, local) = ctx
+        .db
+        .read(move |conn| {
+            let row = repo::messages::get_row(conn, draft_id)?;
+            let shared =
+                repo::synced_sends::by_action(conn, action_id)?.and_then(|send| send.draft_ref);
+            Ok((
+                row.as_ref().and_then(|row| row.message_id.clone()),
+                shared,
+                row.and_then(|row| row.jmap_id),
+            ))
+        })
+        .await?;
+    let drafts =
+        ensure_role_mailbox(ctx, config.id, c, roles::DRAFTS, "Drafts", Role::Drafts).await?;
+    // The Email this send was made for, the one its schedule shares, and
+    // the draft's own.
+    let mut emails: Vec<String> = Vec::new();
+    for email in [pinned, shared, local].into_iter().flatten() {
+        if !emails.contains(&email) {
+            emails.push(email);
+        }
+    }
+    for email in emails {
+        if super::held::live_submission(c, &email).await?.is_some()
+            || super::held::left_drafts(c, &email, &drafts).await?
+        {
+            return Ok(Some(email));
+        }
+    }
+    let unknown = |why: String| {
+        CoreError::SendUncertain(format!(
+            "another of your devices may have sent this message already, and the mail server can't show whether it did ({why})"
+        ))
+    };
+    let message_id = message_id
+        .as_deref()
+        .map(|id| id.trim_matches(['<', '>', ' ']))
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| unknown("the draft has no Message-ID".into()))?
+        .to_owned();
+    let filter = jmap_client::core::query::Filter::and([
+        jmap_client::email::query::Filter::in_mailbox_other_than([drafts]),
+        jmap_client::email::query::Filter::not_keyword("$draft"),
+        jmap_client::email::query::Filter::header("Message-ID", Some(format!("<{message_id}>"))),
+    ]);
+    match c.email_query(filter).await {
+        Ok(found) => Ok(found.ids().first().cloned()),
+        Err(jmap_client::Error::Method(error))
+            if matches!(
+                error.error(),
+                MethodErrorType::UnsupportedFilter | MethodErrorType::InvalidArguments
+            ) =>
+        {
+            Err(unknown(error.to_string()))
+        }
+        Err(error) => Err(client::map_error(error)),
+    }
 }
 
 /// The sender of a draft and the server's identity that sends as it.

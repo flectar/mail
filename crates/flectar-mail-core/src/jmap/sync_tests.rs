@@ -132,6 +132,9 @@ struct MockJmap {
     forget_seen: bool,
     /// What a download of these blobs returns; any other is a short message.
     blobs: Vec<(&'static str, &'static str)>,
+    /// Email/query refuses to search headers, as a server may (RFC 8621
+    /// section 4.4.1).
+    no_header_search: bool,
 }
 
 impl Default for MockJmap {
@@ -151,6 +154,7 @@ impl Default for MockJmap {
             seen: Arc::default(),
             forget_seen: false,
             blobs: Vec::new(),
+            no_header_search: false,
         }
     }
 }
@@ -277,6 +281,7 @@ impl MockJmap {
                 return;
             }
             let get = line.starts_with("GET ");
+            let upload = line.starts_with("POST /upload/");
             let download = line.starts_with("GET /download/");
             // GET /download/{accountId}/{blobId}/{name}?accept={type} HTTP/1.1
             let blob = if download {
@@ -314,6 +319,15 @@ impl MockJmap {
                 }
             } else if get {
                 session.to_string()
+            } else if upload {
+                let mut calls = calls.lock().unwrap();
+                calls.push(("upload".to_owned(), json!(body.len())));
+                let uploads = calls.iter().filter(|(name, _)| name == "upload").count();
+                json!({
+                    "accountId": "mail-account", "type": "message/rfc822",
+                    "blobId": format!("uploaded-{uploads}"), "size": body.len()
+                })
+                .to_string()
             } else {
                 let request: Value = serde_json::from_slice(&body).unwrap();
                 // Like Fastmail, reject any capability the session does not
@@ -394,7 +408,30 @@ impl MockJmap {
                 let after = condition("after").map(|value| received(&value));
                 let before = condition("before").map(|value| received(&value));
                 let mailbox = condition("inMailbox");
+                let other_than = condition("inMailboxOtherThan");
                 let not_keyword = condition("notKeyword");
+                // Only Message-ID, as a value in angle brackets.
+                let header = condition("header");
+                if header.is_some() && self.no_header_search {
+                    return Err(json!({"type": "unsupportedFilter"}));
+                }
+                let message_id = header.as_ref().map(|header| {
+                    assert_eq!(header[0], "Message-ID");
+                    json!(header[1].as_str().unwrap().trim_matches(['<', '>']))
+                });
+                // In a mailbox other than those excluded.
+                let outside = |email: &Value| {
+                    other_than.as_ref().is_none_or(|excluded| {
+                        let excluded = excluded.as_array().unwrap();
+                        let mailboxes = email["mailboxIds"].as_object().unwrap();
+                        mailboxes.keys().any(|id| !excluded.contains(&json!(id)))
+                    })
+                };
+                let named = |email: &Value| {
+                    message_id
+                        .as_ref()
+                        .is_none_or(|id| email["messageId"].as_array().unwrap().contains(id))
+                };
                 let seen = self.seen.lock().unwrap().clone();
                 let limit = args["limit"]
                     .as_u64()
@@ -409,6 +446,8 @@ impl MockJmap {
                             && mailbox.as_ref().is_none_or(|mailbox| {
                                 email["mailboxIds"][mailbox.as_str().unwrap()] == true
                             })
+                            && outside(email)
+                            && named(email)
                             && not_keyword.as_ref().is_none_or(|keyword| {
                                 let keyword = keyword.as_str().unwrap();
                                 email["keywords"][keyword] != true
@@ -437,10 +476,29 @@ impl MockJmap {
                     }
                     updated.insert(id.clone(), Value::Null);
                 }
+                let destroyed = args["destroy"].as_array().cloned().unwrap_or_default();
                 json!({
                     "accountId": "mail-account", "oldState": "state-0", "newState": "state-1",
-                    "created": {}, "updated": updated, "destroyed": [],
+                    "created": {}, "updated": updated, "destroyed": destroyed,
                     "notCreated": {}, "notUpdated": {}, "notDestroyed": {}
+                })
+            }
+            // Each import is a new Email, named after its blob.
+            "Email/import" => {
+                let mut created = serde_json::Map::new();
+                for (create_id, import) in args["emails"].as_object().into_iter().flatten() {
+                    let blob = import["blobId"].as_str().unwrap();
+                    created.insert(
+                        create_id.clone(),
+                        json!({
+                            "id": format!("E-{blob}"), "blobId": blob,
+                            "threadId": "t-imported", "size": 100
+                        }),
+                    );
+                }
+                json!({
+                    "accountId": "mail-account", "oldState": "state-0", "newState": "state-1",
+                    "created": created, "notCreated": {}
                 })
             }
             "Email/get" => {
@@ -2101,6 +2159,16 @@ async fn counts_are_asked_only_for_mailboxes_that_changed() {
 /// submissions up to `max_delayed_send` seconds, and a draft to Alice that
 /// is the server's Email `E1`.
 async fn holding(max_delayed_send: u64) -> (tempfile::TempDir, SyncCtx, AccountConfig, Mock, i64) {
+    with_draft(MockJmap {
+        max_delayed_send,
+        ..MockJmap::default()
+    })
+    .await
+}
+
+/// A JMAP account with Drafts, Scheduled and Sent on `server`, and a draft
+/// to Alice that is the server's Email `E1`.
+async fn with_draft(server: MockJmap) -> (tempfile::TempDir, SyncCtx, AccountConfig, Mock, i64) {
     let (dir, ctx, config) = fixture().await;
     let mock = MockJmap {
         mailboxes: vec![
@@ -2110,8 +2178,7 @@ async fn holding(max_delayed_send: u64) -> (tempfile::TempDir, SyncCtx, AccountC
             mailbox("sent-remote", "Sent", Some("sent")),
         ],
         max_objects_in_get: 10,
-        max_delayed_send,
-        ..MockJmap::default()
+        ..server
     }
     .start()
     .await;
@@ -2416,6 +2483,214 @@ async fn a_cancelled_hold_does_not_stop_the_message_going_out() {
         folder_role_of(&ctx, draft).await.as_deref(),
         Some(roles::SENT)
     );
+}
+
+/// The draft's message as the server keeps Email `id`: in `mailbox`, with
+/// `keywords`.
+fn plans(id: &str, mailbox: &str, keywords: Value) -> Value {
+    let mut email = email(id, "t-plans");
+    email["mailboxIds"] = json!({ mailbox: true });
+    email["keywords"] = keywords;
+    email["messageId"] = json!(["plans@mail.example"]);
+    email
+}
+
+/// The draft's message, sent: in Sent and no longer a draft.
+fn plans_sent(id: &str) -> Value {
+    plans(id, "sent-remote", json!({"$seen": true}))
+}
+
+/// The draft's message, still a draft.
+fn plans_draft(id: &str) -> Value {
+    plans(id, "drafts-remote", json!({"$draft": true, "$seen": true}))
+}
+
+/// A send of the draft due now, with `payload` besides its draft.
+async fn send_of(ctx: &SyncCtx, draft: i64, mut payload: Value) -> i64 {
+    payload["draftId"] = json!(draft);
+    ctx.db
+        .write(move |conn| {
+            repo::actions::enqueue(
+                conn,
+                1,
+                "send",
+                Some(draft),
+                Some(40),
+                &payload,
+                Some(now_ms()),
+            )
+        })
+        .await
+        .unwrap()
+}
+
+/// The Emails the server was asked to destroy.
+fn destroyed(mock: &Mock) -> Vec<Value> {
+    mock.calls("Email/set")
+        .iter()
+        .flat_map(|call| call["destroy"].as_array().cloned().unwrap_or_default())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_send_that_checks_first_finds_the_message_another_device_sent() {
+    // The draft's own Email went out, and its server deleted the
+    // submission, as Cyrus does; or another Email of the message went out
+    // while this draft's stayed one.
+    for emails in [
+        vec![plans_sent("E1")],
+        vec![plans_draft("E1"), plans_sent("E7")],
+    ] {
+        let (_dir, ctx, config, mock, draft) = with_draft(MockJmap {
+            emails,
+            ..MockJmap::default()
+        })
+        .await;
+        let send = send_of(&ctx, draft, json!({"scheduled": true, "checkFirst": true})).await;
+        execute_actions(&ctx, &config, &mock.connected)
+            .await
+            .unwrap();
+        assert!(mock.calls("EmailSubmission/set").is_empty());
+        assert!(mock.calls("upload").is_empty());
+        assert!(destroyed(&mock).is_empty());
+        assert_eq!(action(&ctx, send).await.0, "done");
+        assert_eq!(
+            folder_role_of(&ctx, draft).await.as_deref(),
+            Some(roles::SENT)
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_send_that_checks_first_sends_the_servers_draft_once_nothing_went_out() {
+    let (_dir, ctx, config, mock, draft) = with_draft(MockJmap {
+        emails: vec![plans_draft("E1")],
+        ..MockJmap::default()
+    })
+    .await;
+    let send = send_of(&ctx, draft, json!({"scheduled": true, "checkFirst": true})).await;
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    // The Email another device would have sent, as it is, and only while no
+    // other submission was made since the checks.
+    let submitted = mock.calls("EmailSubmission/set");
+    assert_eq!(submitted.len(), 1);
+    let created = submitted[0]["create"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap();
+    assert_eq!(created["emailId"], "E1");
+    assert_eq!(submitted[0]["ifInState"], "submissions-0");
+    assert!(mock.calls("upload").is_empty());
+    assert!(destroyed(&mock).is_empty());
+    assert_eq!(action(&ctx, send).await.0, "done");
+}
+
+#[tokio::test]
+async fn a_send_that_cannot_check_ends_as_one_that_may_have_gone_out() {
+    let (_dir, ctx, config, mock, draft) = with_draft(MockJmap {
+        emails: vec![plans_draft("E1")],
+        no_header_search: true,
+        ..MockJmap::default()
+    })
+    .await;
+    let send = send_of(&ctx, draft, json!({"scheduled": true, "checkFirst": true})).await;
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert!(mock.calls("EmailSubmission/set").is_empty());
+    let (state, _, payload) = action(&ctx, send).await;
+    assert_eq!(state, "failed");
+    assert_eq!(payload["uncertain"], true);
+}
+
+#[tokio::test]
+async fn an_email_another_device_sent_is_never_replaced() {
+    // Sent: the send finds it went out, and makes no second one.
+    let (_dir, ctx, config, mock, draft) = with_draft(MockJmap {
+        emails: vec![plans_sent("E1")],
+        ..MockJmap::default()
+    })
+    .await;
+    let send = send_of(&ctx, draft, json!({})).await;
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert!(mock.calls("EmailSubmission/set").is_empty());
+    assert!(mock.calls("Email/import").is_empty());
+    assert!(destroyed(&mock).is_empty());
+    assert_eq!(action(&ctx, send).await.0, "done");
+    assert_eq!(
+        folder_role_of(&ctx, draft).await.as_deref(),
+        Some(roles::SENT)
+    );
+
+    // Saved: the draft becomes a new Email beside it.
+    let (_dir, ctx, config, mock, draft) = with_draft(MockJmap {
+        emails: vec![plans_sent("E1")],
+        ..MockJmap::default()
+    })
+    .await;
+    let save = ctx
+        .db
+        .write(move |conn| {
+            repo::actions::enqueue(
+                conn,
+                1,
+                "save_draft",
+                Some(draft),
+                Some(40),
+                &json!({"draftId": draft}),
+                None,
+            )
+        })
+        .await
+        .unwrap();
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert!(destroyed(&mock).is_empty());
+    assert_eq!(mock.calls("Email/import").len(), 1);
+    assert_eq!(action(&ctx, save).await.0, "done");
+    let remote = ctx
+        .db
+        .read(move |conn| Ok(repo::messages::get_row(conn, draft)?.unwrap().jmap_id))
+        .await
+        .unwrap();
+    assert_eq!(remote.as_deref(), Some("E-uploaded-1"));
+    assert_eq!(
+        folder_role_of(&ctx, draft).await.as_deref(),
+        Some(roles::DRAFTS)
+    );
+
+    // A draft another app saved without `$draft` is still one, in Drafts: a
+    // save replaces it.
+    let (_dir, ctx, config, mock, draft) = with_draft(MockJmap {
+        emails: vec![plans("E1", "drafts-remote", json!({"$seen": true}))],
+        ..MockJmap::default()
+    })
+    .await;
+    ctx.db
+        .write(move |conn| {
+            repo::actions::enqueue(
+                conn,
+                1,
+                "save_draft",
+                Some(draft),
+                Some(40),
+                &json!({"draftId": draft}),
+                None,
+            )
+        })
+        .await
+        .unwrap();
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert_eq!(destroyed(&mock), vec![json!("E1")]);
 }
 
 /// Inbox mail: a1 unread before the request, a2 already read, a3 unread
