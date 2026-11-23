@@ -4,6 +4,7 @@ mod cpu_scene;
 mod details;
 #[cfg(test)]
 mod details_tests;
+mod embedded;
 mod interaction;
 #[cfg(test)]
 mod regression;
@@ -23,6 +24,7 @@ use blitz_traits::net::NetWaker;
 use blitz_traits::{SmolStr, net::NetProvider, node_id::NodeId, shell::Viewport};
 use details::FindMatch;
 pub(crate) use details::set_default_summary;
+pub(crate) use embedded::{HEADER_VALUE, HeaderLines, set_header_lines};
 use keyboard_types::{Key, NamedKey};
 use parley::layout::PositionedLayoutItem;
 use semantics::*;
@@ -2083,6 +2085,7 @@ fn prepare_email_html_at_with_font_ctx(
         }
     }
     details::prepare(&mut document);
+    embedded::prepare(&mut document);
     let mut appearance = AppearanceDocument::new(appearance);
     appearance.resolve(&mut document);
     let links = collect_email_links(&document, width as f32 / scale);

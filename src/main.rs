@@ -1266,6 +1266,18 @@ fn apply_language(app: &AppWindow, preference: &str) {
     }
     sidebar_model::reload_mailbox_names(app);
     renderer::set_default_summary(&app.global::<I18n>().invoke_details_summary());
+    let line = |message: UiMessage| translated(app, &message).to_string();
+    renderer::set_header_lines(renderer::HeaderLines {
+        from: line(UiMessage::detail("From: {}", renderer::HEADER_VALUE)),
+        date: line(UiMessage::detail("Date: {}", renderer::HEADER_VALUE)),
+        subject: line(UiMessage::detail("Subject: {}", renderer::HEADER_VALUE)),
+        to: line(UiMessage::detail("To: {}", renderer::HEADER_VALUE)),
+        cc: line(UiMessage::detail("Cc: {}", renderer::HEADER_VALUE)),
+    });
+    attachment_controller::set_unnamed_message(&translated(
+        app,
+        &UiMessage::plain("Forwarded message"),
+    ));
     app.set_language_mode(language_mode.into());
     app.set_privacy_policy_url(privacy_policy_url(selected).into());
     app.invoke_app_language_changed(language_mode.into(), selected.into());

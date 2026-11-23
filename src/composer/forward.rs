@@ -4,9 +4,6 @@
 use super::*;
 use flectar_mail_core::models::{ActionTarget, ForwardedMessage};
 
-/// The longest name a forwarded message's file takes from its subject, in characters.
-const MAX_NAME_CHARS: usize = 64;
-
 impl Composers {
     /// Forward the message the reader shows as an attachment.
     pub(super) fn forward_shown_as_attachment(self: &Rc<Self>, app: &AppWindow) {
@@ -235,24 +232,9 @@ impl ComposeSession {
 fn file_names(messages: &[ForwardedMessage], fallback: &str) -> Vec<(i64, String)> {
     let mut names: Vec<(i64, String)> = Vec::with_capacity(messages.len());
     for message in messages {
-        let mut base = message
-            .subject
-            .chars()
-            .map(|character| match character {
-                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => ' ',
-                character if character.is_control() => ' ',
-                character => character,
-            })
-            .collect::<String>()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        if base.chars().count() > MAX_NAME_CHARS {
-            base = base.chars().take(MAX_NAME_CHARS).collect::<String>();
-            base = base.trim_end().to_owned();
-        }
-        let base = base.trim_matches('.').trim();
-        let base = if base.is_empty() { fallback } else { base };
+        // The same name a received forward without one gets (#455).
+        let base = flectar_mail_core::mime::message_file_stem(&message.subject);
+        let base = if base.is_empty() { fallback } else { &base };
         let mut name = format!("{base}.eml");
         let mut number = 2;
         while names
