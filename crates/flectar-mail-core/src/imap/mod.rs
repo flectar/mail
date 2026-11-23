@@ -649,18 +649,9 @@ async fn connect_inner(
     let stream = match security {
         ConnectionSecurity::Tls => tls_handshake(&connector, tcp, host, port).await?,
         ConnectionSecurity::Starttls => {
-            let mut client = async_imap::Client::new(tcp);
-            read_greeting(&mut client).await?;
             // Required upgrade: never send credentials if STARTTLS is rejected.
-            client
-                .run_command_and_check_ok("STARTTLS", None)
-                .await
-                .map_err(|e| {
-                    CoreError::Tls(format!(
-                        "IMAP STARTTLS was rejected: {e}. Check the server port and security mode."
-                    ))
-                })?;
-            tls_handshake(&connector, client.into_inner(), host, port).await?
+            let tcp = start_tls(tcp).await?;
+            tls_handshake(&connector, tcp, host, port).await?
         }
         ConnectionSecurity::None => MailStream::Plain(tcp),
     };
@@ -779,6 +770,79 @@ where
 
 /// Read the greeting, and the capabilities it announces if it does (RFC 9051
 /// 7.1 lets a greeting carry a CAPABILITY response code).
+/// The longest line read before TLS: the greeting and the answer to
+/// STARTTLS.
+const MAX_PRE_TLS_LINE: u64 = 8 * 1024;
+
+/// Ask the server to start TLS (RFC 9051 section 6.2.1) and return the
+/// connection once it agreed. The exchange is read on a buffer of its own,
+/// so anything the server sent after its answer is seen: a correct server
+/// sends nothing until the handshake, and bytes that arrive before it could
+/// come from someone on the path, who could have them read as the server's
+/// first words inside TLS (RFC 2595 section 2.2). POP3 and ManageSieve
+/// refuse them too.
+async fn start_tls(tcp: TcpStream) -> Result<TcpStream> {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    async fn line(reader: &mut BufReader<TcpStream>) -> Result<String> {
+        let mut line = String::new();
+        let read = (&mut *reader)
+            .take(MAX_PRE_TLS_LINE)
+            .read_line(&mut line)
+            .await
+            .map_err(|error| CoreError::Imap(format!("IMAP STARTTLS: {error}")))?;
+        if read == 0 || !line.ends_with('\n') {
+            return Err(CoreError::Imap(
+                "The server closed the connection, or sent an overlong line, before TLS.".into(),
+            ));
+        }
+        Ok(line)
+    }
+    fn starts_with(line: &str, prefix: &str) -> bool {
+        line.get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+    }
+    let mut reader = BufReader::new(tcp);
+    // A PREAUTH greeting is refused too: STARTTLS isn't allowed once signed
+    // in, and nothing should go unencrypted.
+    let greeting = line(&mut reader).await?;
+    if !starts_with(&greeting, "* OK") {
+        return Err(CoreError::Imap(format!(
+            "The server didn't greet as IMAP expects: {}",
+            greeting.trim_end()
+        )));
+    }
+    reader
+        .get_mut()
+        .write_all(b"a1 STARTTLS\r\n")
+        .await
+        .map_err(|error| CoreError::Imap(format!("IMAP STARTTLS: {error}")))?;
+    loop {
+        let answer = line(&mut reader).await?;
+        if starts_with(&answer, "a1 ") {
+            if !starts_with(&answer, "a1 OK") {
+                return Err(CoreError::Tls(format!(
+                    "IMAP STARTTLS was rejected: {}. Check the server port and security mode.",
+                    answer.trim_end()
+                )));
+            }
+            break;
+        }
+        // Untagged data may come first, but never a literal.
+        if !answer.starts_with("* ") || answer.trim_end().ends_with('}') {
+            return Err(CoreError::Imap(format!(
+                "IMAP STARTTLS got an unexpected answer: {}",
+                answer.trim_end()
+            )));
+        }
+    }
+    if !reader.buffer().is_empty() {
+        return Err(CoreError::Tls(
+            "Data arrived before the TLS handshake, which a correct server never sends. The connection may be tampered with.".into(),
+        ));
+    }
+    Ok(reader.into_inner())
+}
+
 async fn read_greeting<T>(client: &mut async_imap::Client<T>) -> Result<Option<SignInCapabilities>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
@@ -2436,6 +2500,68 @@ pub fn uid_set(uids: &[u32]) -> String {
         i += 1;
     }
     parts.join(",")
+}
+
+#[cfg(test)]
+mod start_tls_tests {
+    use super::start_tls;
+    use crate::error::CoreError;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::{TcpListener, TcpStream};
+
+    /// A server that greets, then answers STARTTLS with `answer` in a
+    /// single write.
+    async fn upgrade(answer: &'static [u8]) -> crate::error::Result<TcpStream> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut stream = BufReader::new(tcp);
+            stream.write_all(b"* OK IMAP4rev1 ready\r\n").await.unwrap();
+            let mut command = String::new();
+            stream.read_line(&mut command).await.unwrap();
+            assert_eq!(command, "a1 STARTTLS\r\n");
+            stream.write_all(answer).await.unwrap();
+            // Hold the connection open while the client looks.
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        });
+        start_tls(TcpStream::connect(address).await.unwrap()).await
+    }
+
+    #[tokio::test]
+    async fn bytes_before_the_handshake_end_the_connection() {
+        let error = upgrade(b"a1 OK Begin TLS\r\n* CAPABILITY IMAP4rev1 AUTH=PLAIN\r\n")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, CoreError::Tls(_)), "{error}");
+        assert!(
+            error.to_string().contains("before the TLS handshake"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_agreement_alone_leaves_the_connection_to_tls() {
+        assert!(
+            upgrade(b"* CAPABILITY IMAP4rev1\r\na1 OK Begin TLS\r\n")
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refusal_or_a_literal_ends_the_connection() {
+        let refused = upgrade(b"a1 NO not now\r\n").await.unwrap_err();
+        assert!(
+            refused.to_string().contains("STARTTLS was rejected"),
+            "{refused}"
+        );
+        assert!(
+            upgrade(b"* 1 FETCH (BODY[] {5}\r\nhello)\r\na1 OK\r\n")
+                .await
+                .is_err()
+        );
+    }
 }
 
 #[cfg(test)]
