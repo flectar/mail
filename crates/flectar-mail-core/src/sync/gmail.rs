@@ -865,6 +865,16 @@ impl GmailApi {
         .await
     }
 
+    /// The draft as Gmail holds it now, with the id of its message, which
+    /// changes with every edit.
+    async fn get_draft(&self, draft_id: &str) -> Result<Value> {
+        self.get_json(&format!(
+            "{GMAIL_API}/drafts/{}?format=minimal",
+            urlencode(draft_id)
+        ))
+        .await
+    }
+
     /// Re-check the exact identity at provider I/O time. A cached alias may
     /// have been revoked after the composer opened; Gmail must remain the
     /// authority on whether the From address is still usable.
@@ -3894,6 +3904,7 @@ async fn send_draft_as_is(
     ctx: &SyncCtx,
     config: &AccountConfig,
     api: &GmailApi,
+    action_id: i64,
     draft_id: i64,
 ) -> Result<()> {
     let (provider_draft_id, message_id) = ctx
@@ -3922,6 +3933,27 @@ async fn send_draft_as_is(
     }
     let provider_draft_id =
         provider_draft_id.ok_or_else(|| CoreError::NotFound("Gmail draft".into()))?;
+    // Gmail sends the draft as it is when asked, which may be a version the
+    // device that scheduled it is still editing: it goes out only as the
+    // version the schedule shares.
+    let shared = ctx
+        .db
+        .read(move |conn| {
+            Ok(repo::synced_sends::by_action(conn, action_id)?.and_then(|send| send.draft_ref))
+        })
+        .await?;
+    let draft = match api.get_draft(&provider_draft_id).await {
+        Ok(draft) => draft,
+        // Gone: sent meanwhile, as its Message-ID shows, or deleted.
+        Err(error @ CoreError::NotFound(_)) => {
+            return match api.find_sent_by_message_id(&message_id).await? {
+                Some(sent) => finalize_sent_draft(ctx, config, draft_id, sent, &message_id).await,
+                None => Err(error),
+            };
+        }
+        Err(error) => return Err(error),
+    };
+    shared_version(&draft, shared.as_deref())?;
     let sent = match api.send_draft(&provider_draft_id).await {
         Ok(sent) => sent,
         Err(error) => {
@@ -3942,6 +3974,26 @@ async fn send_draft_as_is(
         }
     };
     finalize_sent_draft(ctx, config, draft_id, sent, &message_id).await
+}
+
+/// Whether Gmail's `draft` holds the version its shared schedule names,
+/// `shared`: its message, which changes with every edit. One that changed
+/// since waits for its new version to be shared, and one no longer shared
+/// stays with the device that scheduled it.
+fn shared_version(draft: &Value, shared: Option<&str>) -> Result<()> {
+    let current = draft
+        .get("message")
+        .and_then(|message| message.get("id"))
+        .and_then(Value::as_str);
+    match shared {
+        Some(shared) if current == Some(shared) => Ok(()),
+        Some(_) => Err(CoreError::Other(
+            "the draft changed after it was scheduled; it waits for its new version".into(),
+        )),
+        None => Err(CoreError::Other(
+            "the scheduled draft is no longer shared with this device".into(),
+        )),
+    }
 }
 
 async fn finalize_sent_draft(
@@ -4156,7 +4208,7 @@ async fn apply_action(
                 .as_i64()
                 .ok_or_else(|| CoreError::Other("send omitted draftId".into()))?;
             if action.payload["asIs"].as_bool() == Some(true) {
-                return send_draft_as_is(ctx, config, api, draft_id).await;
+                return send_draft_as_is(ctx, config, api, action.id, draft_id).await;
             }
             return send_remote_draft(ctx, config, api, draft_id).await;
         }
@@ -5387,6 +5439,16 @@ mod tests {
             })
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn another_devices_draft_goes_out_only_as_the_version_its_schedule_shares() {
+        let draft = json!({"id": "r-1", "message": {"id": "G1", "threadId": "T1"}});
+        assert!(shared_version(&draft, Some("G1")).is_ok());
+        // Edited since, perhaps still being edited where it was scheduled.
+        assert!(shared_version(&draft, Some("G0")).is_err());
+        // No longer shared with this device.
+        assert!(shared_version(&draft, None).is_err());
     }
 
     #[test]

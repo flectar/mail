@@ -2808,6 +2808,14 @@ async fn execute_action(
             let remote_id = action.payload["jmapEmailId"]
                 .as_str()
                 .ok_or_else(|| CoreError::Jmap("draft deletion has no JMAP Email id".into()))?;
+            // Sent from another of the user's devices meanwhile: what went
+            // out stays.
+            let drafts =
+                ensure_role_mailbox(ctx, config.id, c, roles::DRAFTS, "Drafts", Role::Drafts)
+                    .await?;
+            if super::held::left_drafts(c, remote_id, &drafts).await? {
+                return Ok(());
+            }
             destroy_email_if_present(c, remote_id).await
         }
         "snooze" | "unsnooze" | "show_in" => Ok(()),

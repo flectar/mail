@@ -6390,8 +6390,9 @@ impl Core {
     }
 
     /// Stop a draft's scheduled send. The message stays a draft, to edit or
-    /// schedule again. Returns whether a send was waiting.
-    pub async fn cancel_scheduled_send(&self, draft_id: i64) -> Result<bool> {
+    /// schedule again. Says whether a send was waiting, and whether another
+    /// of the user's devices may still send it.
+    pub async fn cancel_scheduled_send(&self, draft_id: i64) -> Result<CancelledSend> {
         // One the mail server holds is cancelled there.
         if let Some(action) = self
             .db
@@ -6400,34 +6401,18 @@ impl Core {
         {
             self.unhold_send(action).await?;
             self.forget_reply_reminder(draft_id).await;
-            return Ok(true);
+            return Ok(CancelledSend::Cancelled);
         }
+        let group = self.group_view().await;
         let (cancelled, thread, shared) = self
             .db
             .write(move |conn| {
                 let tx = conn.transaction()?;
                 let cancelled = repo::actions::cancel_draft_send(&tx, draft_id, now_ms())?;
-                // Cancelled on every device.
+                // Cancelled on every device that hears of it.
                 let shared = match cancelled {
-                    Some(action) => match repo::synced_sends::by_action(&tx, action)? {
-                        Some(send) if send.state == repo::synced_sends::SCHEDULED => {
-                            repo::synced_sends::set_state(
-                                &tx,
-                                &send.sync_id,
-                                repo::synced_sends::CANCELLED,
-                                None,
-                                now_ms(),
-                            )?;
-                            repo::synced_sends::set_action(&tx, &send.sync_id, None)?;
-                            // Another device's message kept here is the
-                            // user's draft now: it stays when the send is
-                            // forgotten.
-                            repo::synced_sends::set_shadow(&tx, &send.sync_id, None)?;
-                            true
-                        }
-                        _ => false,
-                    },
-                    None => false,
+                    Some(action) => device_sync::stop_shared_send(&tx, action, &group, now_ms())?,
+                    None => None,
                 };
                 let thread = repo::messages::get_row(&tx, draft_id)?.and_then(|row| row.thread_id);
                 tx.commit()?;
@@ -6439,13 +6424,18 @@ impl Core {
                 thread_ids: vec![thread],
             });
         }
-        if shared {
+        if shared.is_some() {
             self.device_sync_now();
         }
-        if cancelled {
-            self.forget_reply_reminder(draft_id).await;
+        if !cancelled {
+            return Ok(CancelledSend::NotScheduled);
         }
-        Ok(cancelled)
+        self.forget_reply_reminder(draft_id).await;
+        Ok(if shared == Some(true) {
+            CancelledSend::MayStillGoOut
+        } else {
+            CancelledSend::Cancelled
+        })
     }
 
     /// Move a scheduled send to `send_at`. Another device's message changes
@@ -7196,18 +7186,21 @@ impl Core {
         Ok(draft)
     }
 
-    pub async fn delete_draft(&self, draft_id: i64) -> Result<()> {
+    /// Delete a draft, and stop its scheduled send. Says whether a send was
+    /// waiting, and whether another of the user's devices may still send it.
+    pub async fn delete_draft(&self, draft_id: i64) -> Result<CancelledSend> {
         // Deleting the Email would not stop the mail server's hold on it
         // (RFC 8621 §7): the hold is cancelled first.
-        if let Some(action) = self
+        let held = self
             .db
             .read(move |conn| repo::actions::held_send_of(conn, draft_id))
-            .await?
-        {
+            .await?;
+        if let Some(action) = held {
             self.unhold_send(action).await?;
         }
         self.forget_reply_reminder(draft_id).await;
-        let (thread_id, nudge_account, staged_paths) = self
+        let group = self.group_view().await;
+        let (thread_id, nudge_account, staged_paths, stopped, shared) = self
             .db
             .write(move |conn| {
                 let row = conn
@@ -7253,11 +7246,30 @@ impl Core {
                         "the draft is currently being submitted and cannot be deleted".into(),
                     ));
                 }
+                let sends = {
+                    let mut statement = conn.prepare(
+                        "SELECT id FROM pending_actions
+                         WHERE message_id=?1 AND kind='send' AND state='pending'",
+                    )?;
+                    statement
+                        .query_map([draft_id], |row| row.get::<_, i64>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                };
                 conn.execute(
                     "UPDATE pending_actions SET state='cancelled',finished_at=?2
                      WHERE message_id=?1 AND kind='send' AND state='pending'",
                     rusqlite::params![draft_id, now_ms()],
                 )?;
+                // Cancelled on every device that hears of it.
+                let mut stopped = (!sends.is_empty()).then_some(CancelledSend::Cancelled);
+                let mut shared = false;
+                for action in sends {
+                    let may_go_out = device_sync::stop_shared_send(conn, action, &group, now_ms())?;
+                    shared |= may_go_out.is_some();
+                    if may_go_out == Some(true) {
+                        stopped = Some(CancelledSend::MayStillGoOut);
+                    }
+                }
 
                 let mut nudge_account = None;
                 let mut staged_paths = Vec::new();
@@ -7344,7 +7356,7 @@ impl Core {
                 if let Some(tid) = row.1 {
                     repo::threads::recompute(conn, tid)?;
                 }
-                Ok((row.1, nudge_account, staged_paths))
+                Ok((row.1, nudge_account, staged_paths, stopped, shared))
             })
             .await?;
         for path in staged_paths {
@@ -7358,7 +7370,14 @@ impl Core {
         if let Some(account_id) = nudge_account {
             self.nudge(Some(account_id), || SyncCmd::RunActions).await;
         }
-        Ok(())
+        if shared {
+            self.device_sync_now();
+        }
+        Ok(match (held, stopped) {
+            (_, Some(stopped)) => stopped,
+            (Some(_), None) => CancelledSend::Cancelled,
+            (None, None) => CancelledSend::NotScheduled,
+        })
     }
 
     pub async fn queue_send(&self, args: QueueSendArgs) -> Result<QueueSendResult> {
@@ -13348,8 +13367,87 @@ mod held_send_tests {
 
         // It can: the server cancels it.
         worker(&core, 1, true).await;
-        assert!(core.cancel_scheduled_send(draft).await.unwrap());
+        assert_eq!(
+            core.cancel_scheduled_send(draft).await.unwrap(),
+            CancelledSend::Cancelled
+        );
         assert!(core.scheduled_sends().await.unwrap().is_empty());
+    }
+
+    /// A draft scheduled to go out from any of the user's devices: its send
+    /// held here, and its shared record.
+    async fn shared(core: &Core) -> (i64, i64, String) {
+        core.db
+            .write(|conn| {
+                crate::db::testutil::seed_account(conn);
+                conn.execute(
+                    "INSERT INTO messages (id, account_id, folder_id, message_id, subject,
+                                           from_addr, date, is_read, is_draft)
+                     VALUES (71, 1, 1, 'later@test.dev', 'Later', 'me@test.dev', 1, 1, 1)",
+                    [],
+                )?;
+                let send_at = now_ms() + 3_600_000;
+                let action = repo::actions::enqueue(
+                    conn,
+                    1,
+                    "send",
+                    Some(71),
+                    None,
+                    &serde_json::json!({"draftId": 71, "scheduled": true, "sendAt": send_at}),
+                    Some(repo::actions::HELD),
+                )?;
+                let sync_id = repo::synced_sends::create(
+                    conn,
+                    1,
+                    "later@test.dev",
+                    send_at,
+                    "aa",
+                    action,
+                    now_ms(),
+                )?;
+                Ok((71, action, sync_id))
+            })
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn stopping_a_send_the_other_devices_cant_hear_of_says_it_may_still_go_out() {
+        // Without Flectar Mail Sync, the cancel reaches no other device.
+        for delete in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+            let (draft, action, sync_id) = shared(&core).await;
+            let stopped = if delete {
+                core.delete_draft(draft).await.unwrap()
+            } else {
+                core.cancel_scheduled_send(draft).await.unwrap()
+            };
+            assert_eq!(stopped, CancelledSend::MayStillGoOut);
+            assert!(core.scheduled_sends().await.unwrap().is_empty());
+            // Cancelled for the others, and still linked here, so the end
+            // another device reports reaches this device.
+            let send = core
+                .db
+                .read(move |conn| repo::synced_sends::get(conn, &sync_id))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                (send.state.as_str(), send.action_id),
+                (repo::synced_sends::CANCELLED, Some(action))
+            );
+        }
+
+        // Nothing waits for a second try.
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+        let (draft, _, _) = shared(&core).await;
+        core.cancel_scheduled_send(draft).await.unwrap();
+        assert_eq!(
+            core.cancel_scheduled_send(draft).await.unwrap(),
+            CancelledSend::NotScheduled
+        );
     }
 }
 

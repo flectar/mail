@@ -52,6 +52,34 @@ const MAX_EVENTS_BACKOFF: Duration = Duration::from_secs(5 * 60);
 /// The longest wait before trying a sync again after runs that failed.
 const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(15 * 60);
 
+/// What this device knows of its sync group: which device it is, whether
+/// Flectar Mail Sync can be reached, and whether the group has other
+/// devices.
+pub(crate) struct GroupView {
+    me: Option<String>,
+    reach: scheduled::Reach,
+    others: bool,
+}
+
+/// Cancel on every device the shared send, if any, that the user stopped
+/// here as `action`. Returns whether another device may still send it, or
+/// `None` when it was no shared send.
+pub(crate) fn stop_shared_send(
+    conn: &rusqlite::Connection,
+    action: i64,
+    group: &GroupView,
+    now: i64,
+) -> Result<Option<bool>> {
+    scheduled::stop(
+        conn,
+        action,
+        group.me.as_deref(),
+        group.reach,
+        group.others,
+        now,
+    )
+}
+
 /// How long to wait before syncing again after `failures` runs in a row
 /// failed: none after a run that worked, then a check's interval, doubled
 /// each time, up to a quarter of an hour. A server that is down, or turns
@@ -1348,6 +1376,35 @@ impl Core {
     pub(crate) fn sync_device(&self) -> Option<String> {
         let client = self.sync_service().client()?;
         Some(hex(&client.identity().device_id()))
+    }
+
+    /// What this device knows of its sync group as the user stops a shared
+    /// send here (see [`stop_shared_send`]).
+    pub(crate) async fn group_view(&self) -> GroupView {
+        let Some(client) = self.sync_service().client() else {
+            return GroupView {
+                me: None,
+                reach: scheduled::Reach::Unreachable,
+                others: true,
+            };
+        };
+        let me = hex(&client.identity().device_id());
+        let reach = match lock(&self.sync_service().status).state {
+            DeviceSyncState::PaymentRequired => scheduled::Reach::PaymentRequired,
+            DeviceSyncState::Error(_) => scheduled::Reach::Unreachable,
+            _ => scheduled::Reach::Usable,
+        };
+        let others = client
+            .state()
+            .await
+            .devices
+            .keys()
+            .any(|device| hex(device) != me);
+        GroupView {
+            me: Some(me),
+            reach,
+            others,
+        }
     }
 
     /// This device's id in hex, when a send it schedules now can be shared

@@ -468,6 +468,12 @@ pub(super) fn put(
         // Taken back as this device leaves: its cancel came back, and the
         // send stays this device's own.
         CANCELLED if taken_back(conn, action)? => {}
+        // Stopped here while another device may still send it (see
+        // `stop`): its cancel came back, and the link stays until that
+        // device's result arrives.
+        CANCELLED
+            if before.state == CANCELLED
+                && action_state(conn, action)?.is_some_and(|(state, _)| state == "cancelled") => {}
         // Sent or cancelled on another device: this device's send stops.
         SENT | CANCELLED => {
             repo::actions::try_cancel(conn, action)?;
@@ -515,6 +521,47 @@ pub(super) fn put(
         }
     }
     Ok(thread)
+}
+
+/// Cancel, on every device, the shared send that the user stopped here as
+/// `action`, if it is one. Returns whether another device may still send
+/// it: it holds the claim on it or said it may be sending it, or it can't
+/// hear of the cancel in time, as this device can't reach Flectar Mail
+/// Sync, or waits for the group's payment while the device that scheduled
+/// it sends it on its own. Such a send stays linked to `action`, so its end
+/// still reaches this device and the draft's conversation.
+pub(crate) fn stop(
+    conn: &Connection,
+    action: i64,
+    me: Option<&str>,
+    reach: Reach,
+    others: bool,
+    now: i64,
+) -> Result<Option<bool>> {
+    let Some(send) = synced_sends::by_action(conn, action)?.filter(|send| send.state == SCHEDULED)
+    else {
+        return Ok(None);
+    };
+    synced_sends::set_state(conn, &send.sync_id, CANCELLED, None, now)?;
+    // Another device's message kept here is the user's draft now: it stays
+    // when the send is forgotten.
+    synced_sends::set_shadow(conn, &send.sync_id, None)?;
+    let may_go_out = match me {
+        // No longer syncing: nothing reaches the other devices.
+        None => true,
+        Some(me) => {
+            others_may_send(&send, me, now)
+                || match reach {
+                    Reach::Usable => false,
+                    Reach::Unreachable => others,
+                    Reach::PaymentRequired => send.origin != me,
+                }
+        }
+    };
+    if !may_go_out {
+        synced_sends::set_action(conn, &send.sync_id, None)?;
+    }
+    Ok(Some(may_go_out))
 }
 
 /// Whether this device's send goes out as the mail server keeps the draft.
@@ -702,6 +749,14 @@ pub(crate) fn drive(
                     driven.nudge(send.account_id);
                     driven.thread(thread_of_action(conn, action)?);
                 }
+                continue;
+            }
+            // Stopped here while another device may still send it (see
+            // `stop`): the link stays until that device's result arrives.
+            if send.state == CANCELLED
+                && let Some(action) = send.action_id
+                && action_state(conn, action)?.is_some_and(|(state, _)| state == "cancelled")
+            {
                 continue;
             }
             // Another device ended the schedule while this one was sending
@@ -2089,6 +2144,76 @@ mod tests {
         synced_sends::reschedule(&conn, &sync_id, AT + 10, 5).unwrap();
         let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
         assert_eq!(send.sending.as_deref(), Some(ORIGIN));
+    }
+
+    #[test]
+    fn a_send_stopped_here_while_another_device_may_send_it_stays_linked() {
+        // Nobody else holds it, and the others hear of the cancel.
+        let conn = setup("E1");
+        let (sync_id, action) = scheduled_here(&conn);
+        repo::actions::try_cancel(&conn, action).unwrap();
+        let stopped = stop(&conn, action, Some(ORIGIN), Reach::Usable, true, AT - 1).unwrap();
+        assert_eq!(stopped, Some(false));
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!((send.state.as_str(), send.action_id), (CANCELLED, None));
+
+        // Another device holds the claim on it, or said it may be sending
+        // it; this device can't reach the others; or the group waits for a
+        // payment while the device that scheduled it sends it on its own.
+        let cases = [
+            (Some((HELPER, AT + CLAIM_MS)), None, Reach::Usable, ORIGIN),
+            (None, Some(HELPER), Reach::Usable, ORIGIN),
+            (None, None, Reach::Unreachable, ORIGIN),
+            (None, None, Reach::PaymentRequired, HELPER),
+        ];
+        for (claim, sending, reach, me) in cases {
+            let conn = setup("E1");
+            let (sync_id, action) = scheduled_here(&conn);
+            server_has_turn(&conn, &sync_id, claim, sending);
+            repo::actions::try_cancel(&conn, action).unwrap();
+            let stopped = stop(&conn, action, Some(me), reach, true, AT - 1).unwrap();
+            assert_eq!(stopped, Some(true), "{claim:?} {sending:?} {reach:?}");
+            let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+            assert_eq!(
+                (send.state.as_str(), send.action_id),
+                (CANCELLED, Some(action))
+            );
+            // It stays linked while that device's result may come, as its
+            // cancel comes back merged with another device's change too...
+            drive(&conn, ORIGIN, AT, Reach::Usable).unwrap();
+            let merged = Shared {
+                state: CANCELLED,
+                sending: Some(HELPER),
+                ..shared(None, Some((HELPER, AT + CLAIM_MS)))
+            };
+            put(&conn, &sync_id, &merged, AT).unwrap();
+            let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+            assert_eq!(send.action_id, Some(action));
+            // ...and it went out: the draft's conversation here hears so.
+            let sent = Shared {
+                state: SENT,
+                ..shared(None, None)
+            };
+            assert_eq!(put(&conn, &sync_id, &sent, AT + 1).unwrap(), Some(5));
+            let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+            assert_eq!((send.state.as_str(), send.action_id), (SENT, None));
+        }
+
+        // Waiting for the payment, the device that scheduled it stops it:
+        // no other device can claim it meanwhile.
+        let conn = setup("E1");
+        let (_, action) = scheduled_here(&conn);
+        repo::actions::try_cancel(&conn, action).unwrap();
+        let stopped = stop(
+            &conn,
+            action,
+            Some(ORIGIN),
+            Reach::PaymentRequired,
+            true,
+            AT - 1,
+        )
+        .unwrap();
+        assert_eq!(stopped, Some(false));
     }
 
     #[test]

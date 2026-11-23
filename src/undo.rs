@@ -178,6 +178,13 @@ pub(super) fn tell(app: &AppWindow, message: UiMessage) {
     with_undo(|undo| undo.show(app, Shown::Note, message, "", Some(ANSWER_NOTICE_FOR)));
 }
 
+/// Tell of something the user must not miss: it stays until they close it
+/// or another notice replaces it, so on a phone it shows once the composer
+/// that covers the window closes.
+pub(super) fn warn(app: &AppWindow, message: UiMessage) {
+    with_undo(|undo| undo.show(app, Shown::Note, message, "", None));
+}
+
 /// What the notice says of a batch.
 fn gesture_message(batch: UndoableBatch) -> UiMessage {
     let count = batch.count;
