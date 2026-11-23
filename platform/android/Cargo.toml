@@ -15,8 +15,8 @@ fontique = { path = "../../crates/fontique" }
 # Remove when Slint releases its Android pointer scroll fix; see
 # patches/slint-android-activity/README.md.
 i-slint-backend-android-activity = { path = "../../crates/i-slint-backend-android-activity" }
-# jmap-client makes its own HTTP clients, which can't take the app's proxy; see
-# patches/jmap-client/README.md.
+# jmap-client makes its own HTTP clients, which can't take the app's proxy and
+# TLS settings; see patches/jmap-client/README.md.
 jmap-client = { path = "../../crates/jmap-client" }
 
 [profile.release]

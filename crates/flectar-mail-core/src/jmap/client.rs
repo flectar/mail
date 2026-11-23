@@ -687,6 +687,7 @@ async fn connect_authenticated(
     };
     Client::new()
         .proxy(net::proxy::reqwest_proxy(owner))
+        .tls_config(net::tls::http_config())
         .credentials(credentials)
         .timeout(net::timeouts::scaled(REQUEST_TIMEOUT))
         // Public cross-host redirects are resolved before authentication.

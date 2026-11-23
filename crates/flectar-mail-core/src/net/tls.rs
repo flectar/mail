@@ -1,6 +1,6 @@
-//! TLS trust for mail connections: the operating system's certificate
-//! verifier, certificates a user imported for one account, and the
-//! development switch that disables verification.
+//! TLS trust for every connection the app makes, mail protocols and HTTP:
+//! the operating system's certificate verifier, certificates a user imported
+//! for one account, and the development switch that disables verification.
 
 use crate::error::{CoreError, Result};
 use rustls::client::WebPkiServerVerifier;
@@ -215,33 +215,42 @@ impl ServerCertVerifier for AccountVerifier {
     }
 }
 
-fn client_config(verifier: Arc<dyn ServerCertVerifier>) -> Result<Arc<rustls::ClientConfig>> {
-    let config = rustls::ClientConfig::builder_with_provider(provider())
+fn client_config(verifier: Arc<dyn ServerCertVerifier>) -> rustls::ClientConfig {
+    rustls::ClientConfig::builder_with_provider(provider())
         .with_safe_default_protocol_versions()
-        .map_err(|e| CoreError::Tls(e.to_string()))?
+        // ring implements both TLS 1.2 and TLS 1.3.
+        .expect("the TLS provider supports the default protocol versions")
         .dangerous()
         .with_custom_certificate_verifier(verifier)
-        .with_no_client_auth();
-    Ok(Arc::new(config))
+        .with_no_client_auth()
 }
 
-fn system_connector() -> Result<TlsConnector> {
-    static CONFIG: LazyLock<std::result::Result<Arc<rustls::ClientConfig>, String>> =
-        LazyLock::new(|| {
-            let verifier = if insecure() {
-                tracing::warn!(
-                    "FLECTAR_MAIL_TLS_INSECURE=1: TLS certificate verification is DISABLED"
-                );
-                Arc::new(NoVerify(provider()))
-            } else {
-                system_verifier()
-            };
-            client_config(verifier).map_err(|e| e.to_string())
-        });
-    CONFIG
-        .clone()
-        .map(TlsConnector::from)
-        .map_err(CoreError::Tls)
+/// TLS for the app's HTTP clients, with the certificate checks of mail
+/// connections. reqwest takes a preconfigured config as it is, so the
+/// HTTP/2 and HTTP/1.1 it offers in its own configs are offered here.
+pub(crate) fn http_config() -> rustls::ClientConfig {
+    let mut config = client_config(system_verifier());
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    config
+}
+
+/// The start of every HTTP client of the app: reqwest's builder with these
+/// certificate checks (`http_config`).
+pub fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder().tls_backend_preconfigured(http_config())
+}
+
+fn system_connector() -> TlsConnector {
+    static CONFIG: LazyLock<Arc<rustls::ClientConfig>> = LazyLock::new(|| {
+        let verifier = if insecure() {
+            tracing::warn!("FLECTAR_MAIL_TLS_INSECURE=1: TLS certificate verification is DISABLED");
+            Arc::new(NoVerify(provider()))
+        } else {
+            system_verifier()
+        };
+        Arc::new(client_config(verifier))
+    });
+    TlsConnector::from(CONFIG.clone())
 }
 
 /// Parse a bounded PEM bundle and reject private keys or non-certificate data.
@@ -276,7 +285,7 @@ pub fn trusted_certificates(pem: &str) -> Result<Vec<rustls::pki_types::Certific
 /// certificates the user imported for this account.
 pub fn connector(pem: &str) -> Result<TlsConnector> {
     if pem.is_empty() {
-        return system_connector();
+        return Ok(system_connector());
     }
     let imported = trusted_certificates(pem)?;
     let mut roots = rustls::RootCertStore::empty();
@@ -292,8 +301,8 @@ pub fn connector(pem: &str) -> Result<TlsConnector> {
         system: system_verifier(),
         imported_roots,
         imported,
-    }))?;
-    Ok(TlsConnector::from(config))
+    }));
+    Ok(TlsConnector::from(Arc::new(config)))
 }
 
 /// What the user can do about a failed handshake, for the end of an error
@@ -363,6 +372,15 @@ mod tests {
 
     fn certificate(error: CertificateError) -> std::io::Error {
         failed(rustls::Error::InvalidCertificate(error))
+    }
+
+    #[test]
+    fn http_clients_offer_http2_and_http1_with_these_checks() {
+        assert_eq!(
+            http_config().alpn_protocols,
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()]
+        );
+        client_builder().build().unwrap();
     }
 
     #[test]
