@@ -43,6 +43,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0023 soft hyphens | A line that breaks at a soft hyphen (U+00AD, `&shy;`) ends with a hyphen, as CSS Text 3 says and browsers show, U+2010 where the font has one, as in Blink, or else a hyphen-minus, in the font, colour and synthesis of the line's last text. Parley shapes the soft hyphen itself as nothing and gives Blitz no way to keep the hyphen's width in the line, so in right-aligned or centred text the hyphen hangs past the alignment edge. |
 | 0024 images without a source | An `<img>` whose `src` is missing, empty or doesn't resolve, such as a relative URL in mail without a base URL, is broken, as the HTML standard's "update the image data" has it, and lays out with its alt text like 0017's images that won't load, where it took no room. |
 | 0025 percentage columns and cell max-width | An auto-width table whose columns all have percentages is as wide as its widest column needs at its percentage, within its room, as Blink estimates it, and the columns share that width in proportion to their percentages, so a lone `width: 87.5%` column fills its table instead of leaving the rest empty. A cell always fills its column, as in Blink, where a length `max-width` only limits what the cell asks of the column and a percentage one is ignored, so a cell with `max-width: 33.333%` no longer shrinks to a third of its column. |
+| 0026 blocks inside inline elements | An inline element that holds a block, such as a link around an image and its caption, is split around the block as CSS 2.1 section 9.2.1.1 has it and browsers show it. The block becomes a child of the container, between anonymous blocks that hold the inline content around it with the element's parts before and after the block, so the element's text before the block shares a line with the text before the element, and its text after the block shares one with what follows, such as a `<br>`, which made an empty line. The element's padding and border are on its first and last lines instead of around the block. One that holds only blocks still lays out as a block box, as before, which matches browsers and keeps a box for the reader's links. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
@@ -50,7 +51,7 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0025 are local, and upstream main collects selection ranges as beta.4 does. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0026 are local, and upstream main collects selection ranges as beta.4 does. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
 when a release contains them.
 
 Copied text, find in the reader and accessible names leave out 0011's edge
@@ -120,7 +121,8 @@ border attributes and spare width, 0015's selection line breaks and
 highlights, 0016's cell percentage padding and legacy word-break, 0017's
 unavailable images, 0018's rules and bevels, 0019's text shadows, 0021's
 lists, 0022's `background` and `clear` attributes, 0023's soft hyphens, 0024's
-images without a source, and 0025's percentage columns and cell `max-width`.
+images without a source, 0025's percentage columns and cell `max-width`, and
+0026's blocks inside inline elements.
 Application renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.

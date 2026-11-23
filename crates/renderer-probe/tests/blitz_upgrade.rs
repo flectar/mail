@@ -2003,3 +2003,89 @@ fn cells_fill_their_columns_and_ignore_percentage_max_widths() {
     close(width("#b"), 100.0);
     close(width("#c"), 350.0);
 }
+
+#[test]
+fn an_inline_that_holds_a_block_splits_around_it() {
+    // As in browsers (CSS 2.1 section 9.2.1.1), the block sits between the
+    // inline content before and after it, and the inline's parts share lines
+    // with that content: text before a link and the link's text before the
+    // block share a line, as do its text after the block and a `<br>` after
+    // the link. The link's padding and border stay on its own lines, and a
+    // `<br>` right after a link that holds only a block makes an empty line,
+    // where the link keeps the box of the block.
+    let doc = document(
+        "<style>body{font:20px/30px sans-serif} .c{width:300px} .b{height:50px}</style>
+         <div class=c id=c1><a href='#'><div class=b id=b1></div>tail</a><br>text</div>
+         <div class=c id=c2>before <a href='#'>link <div class=b id=b2></div>tail</a> after</div>
+         <div class=c id=c3><a href='#' style='padding:0 10px;border:2px solid blue'><div class=b id=b3></div></a>text</div>
+         <div class=c id=c4><span>a <a href='#'>b <div class=b id=b4></div> c</a> d</span> e</div>
+         <div class=c id=c5><a href='#' id=a5><div class=b id=b5></div></a><br>text</div>",
+    );
+    let layout = |selector| *node(&doc, selector).final_layout();
+    close(layout("#b1").location.y, 0.0);
+    close(layout("#c1").size.height, 110.0);
+    for (block, container) in [("#b2", "#c2"), ("#b3", "#c3"), ("#b4", "#c4")] {
+        close(layout(block).location.y, 30.0);
+        close(layout(container).size.height, 110.0);
+    }
+    close(layout("#b3").location.x, 0.0);
+    close(layout("#b3").size.width, 300.0);
+    close(layout("#c5").size.height, 110.0);
+    close(layout("#a5").size.height, 50.0);
+}
+
+#[test]
+fn each_part_of_a_split_inline_has_its_own_line_box() {
+    // Hit testing and selection find a text's line box through its layout
+    // parent, which for a link's text before the block is the anonymous
+    // block before it, and for its text after the block the one after it.
+    let doc = document(
+        "<div id=c style='width:300px'>before <a id=a href='#'>link <div id=b>block</div>tail</a> after</div>",
+    );
+    let children = node(&doc, "#c").layout_children.borrow().clone().unwrap();
+    assert_eq!(children.len(), 3);
+    let text = |id| {
+        let node = doc.get_node(id).unwrap();
+        let layout = node.element_data().unwrap().inline_layout_data.as_ref();
+        layout.unwrap().text.trim().to_string()
+    };
+    assert_eq!(text(children[0]), "before link");
+    assert_eq!(children[1], node(&doc, "#b").id);
+    assert_eq!(text(children[2]), "tail after");
+    let link = node(&doc, "#a");
+    let root_of = |id| doc.get_node(id).unwrap().inline_root_ancestor().unwrap().id;
+    assert_eq!(root_of(link.children[0]), children[0]);
+    assert_eq!(root_of(link.children[2]), children[2]);
+}
+
+#[test]
+fn restyling_a_split_inline_lays_out_both_of_its_parts() {
+    let mut doc = document(
+        "<div id=c style='width:300px;font:20px/30px sans-serif'><a id=a href='#'>link<div id=b style='height:50px'></div>tail</a></div>",
+    );
+    close(node(&doc, "#b").final_layout().location.y, 30.0);
+    close(node(&doc, "#c").final_layout().size.height, 110.0);
+    let link = node(&doc, "#a").id;
+    doc.set_style_property(link, "line-height", "60px");
+    doc.resolve(0.0);
+    close(node(&doc, "#b").final_layout().location.y, 60.0);
+    close(node(&doc, "#c").final_layout().size.height, 170.0);
+}
+
+#[test]
+fn a_split_inline_has_its_edges_only_where_it_starts_and_ends() {
+    // As in browsers, the block cuts the link's box: its left border is on
+    // the line before the block, its right border on the line after it, and
+    // no border goes around the block.
+    let mut doc = document(
+        "<style>body{font:20px/30px sans-serif}</style><div style='width:300px'><a href='#'
+         style='padding:0 10px;border:2px solid #00f'><div style='height:50px;background:#f00'></div></a>text</div>",
+    );
+    let pixels = paint(&mut doc);
+    let at = |x: usize, y: usize| <[u8; 4]>::try_from(&pixels[(y * 400 + x) * 4..][..4]).unwrap();
+    assert_eq!(at(0, 15), [0, 0, 255, 255], "start edge before the block");
+    assert_ne!(at(11, 15), [0, 0, 255, 255], "cut after the start");
+    assert_eq!(at(1, 55), [255, 0, 0, 255], "the block without a border");
+    assert_eq!(at(11, 95), [0, 0, 255, 255], "end edge after the block");
+    assert_ne!(at(0, 95), [0, 0, 255, 255], "cut before the end");
+}

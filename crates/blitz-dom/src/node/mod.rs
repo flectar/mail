@@ -18,7 +18,7 @@ pub use custom_widget::{
     ComputedStyles, CustomWidgetData, CustomWidgetStatus, ProxyRenderContext, Widget,
 };
 pub use element::{
-    CanvasData, DocumentData, ElementData, ImageData, ImageResourceData, LayoutData,
+    CanvasData, DocumentData, ElementData, ImageData, ImageResourceData, InlineSlice, LayoutData,
     ListItemLayout, ListItemLayoutPosition, Marker, RasterImageData, SpecialElementData,
     SpecialElementType, Status,
 };

@@ -24,9 +24,9 @@ use crate::{
         CONSTRUCT_BOX, CONSTRUCT_DESCENDENT, CONSTRUCT_FC, sort_layout_children_by_order,
     },
     node::{
-        GeneratedText, INLINE_END_EDGE, INLINE_START_EDGE, ListItemLayout, ListItemLayoutPosition,
-        Marker, NodeFlags, NodeKind, SpecialElementData, TextBrush, TextInputData, TextLayout,
-        is_inline_edge_char,
+        GeneratedText, INLINE_END_EDGE, INLINE_START_EDGE, InlineSlice, ListItemLayout,
+        ListItemLayoutPosition, Marker, NodeFlags, NodeKind, SpecialElementData, TextBrush,
+        TextInputData, TextLayout, is_inline_edge_char,
     },
     qual_name, stylo_to_parley,
     traversal::{iter_children, iter_children_and_pseudos},
@@ -127,14 +127,14 @@ impl LayoutChildren {
 
     fn maybe_push_anon_block(&mut self, doc: &mut BaseDocument) {
         fn block_is_only_whitespace(doc: &BaseDocument, node_id: NodeId) -> bool {
-            for child_id in doc.nodes[node_id].children.iter().copied() {
-                let child = &doc.nodes[child_id];
-                if !child.is_collapsible_whitespace_node() {
-                    return false;
-                }
-            }
-
-            true
+            let slices = doc.nodes[node_id]
+                .element_data()
+                .map(|element| &element.inline_slices[..])
+                .unwrap_or_default();
+            doc.nodes[node_id]
+                .children
+                .iter()
+                .all(|child_id| holds_only_whitespace(doc, slices, *child_id))
         }
 
         // If anonymous block node only contains whitespace then delete it
@@ -174,6 +174,221 @@ impl LayoutChildren {
         self.anonymous_block_id = Some(node_id);
         self.anonymous_blocks.push(node_id);
     }
+
+    /// Record the part of a split inline element that the open anonymous
+    /// block holds.
+    fn push_slice(&mut self, slice: InlineSlice, doc: &mut BaseDocument) {
+        if let Some(element) = self
+            .anonymous_block_id
+            .and_then(|anon_id| doc.nodes[anon_id].element_data_mut())
+        {
+            element.inline_slices.push(slice);
+        }
+    }
+}
+
+/// An inline element's boxes in order: its `::before`, its children and its
+/// `::after`.
+fn inline_box_children(node: &Node) -> impl Iterator<Item = NodeId> + '_ {
+    node.before()
+        .into_iter()
+        .chain(node.children.iter().copied())
+        .chain(node.after())
+}
+
+/// The boxes of `node` in an anonymous block holding `slices`: all of them,
+/// unless a block splits the element and the anonymous block holds a part.
+fn sliced_box_children<'a>(
+    node: &'a Node,
+    slices: &[InlineSlice],
+) -> impl Iterator<Item = NodeId> + 'a {
+    let (start, end) = slices
+        .iter()
+        .find(|slice| slice.element == node.id)
+        .map_or((0, usize::MAX), |slice| (slice.start, slice.end));
+    inline_box_children(node)
+        .skip(start)
+        .take(end.saturating_sub(start))
+}
+
+/// Whether a box in an anonymous block lays out to nothing: collapsible white
+/// space, or a part of a split element that holds only that and neither edge
+/// of the element, as an empty line box has no height (CSS 2.1 section 9.4.2).
+fn holds_only_whitespace(doc: &BaseDocument, slices: &[InlineSlice], node_id: NodeId) -> bool {
+    let node = &doc.nodes[node_id];
+    if node.is_collapsible_whitespace_node() {
+        return true;
+    }
+    let Some(slice) = slices.iter().find(|slice| slice.element == node_id) else {
+        return false;
+    };
+    let (start_edge, end_edge) = node
+        .primary_styles()
+        .map(|style| inline_edge_widths(&style))
+        .unwrap_or_default();
+    if (slice.first && start_edge != 0.0) || (slice.last && end_edge != 0.0) {
+        return false;
+    }
+    sliced_box_children(node, slices).all(|child_id| {
+        doc.nodes[child_id].data.kind() == NodeKind::Comment
+            || holds_only_whitespace(doc, slices, child_id)
+    })
+}
+
+/// Whether `node` is an inline element that holds an in-flow block, which
+/// splits it in two around the block (CSS 2.1 section 9.2.1.1).
+fn holds_block_inline(node: &Node) -> bool {
+    let Some(element) = node.element_data() else {
+        return false;
+    };
+    let display = node.display_style().unwrap_or(Display::inline());
+    display.outside() == DisplayOutside::Inline
+        && display.inside() == DisplayInside::Flow
+        && !is_inline_box_element(&element.name.local)
+        && node.is_or_contains_block()
+}
+
+/// Whether the container splits the inline element `node_id` around the
+/// blocks it holds. One with nothing else to lay out on lines, such as a link
+/// around a block image, lays out as browsers lay it out as a block box,
+/// which keeps a box of its own for the reader's links and anchors.
+fn splits_around_block(doc: &BaseDocument, node_id: NodeId) -> bool {
+    let node = &doc.nodes[node_id];
+    holds_block_inline(node) && holds_inline_content(doc, node)
+}
+
+/// Whether an inline element holds anything but blocks: content for its
+/// lines, or an edge of its own.
+fn holds_inline_content(doc: &BaseDocument, node: &Node) -> bool {
+    let (start_edge, end_edge) = node
+        .primary_styles()
+        .map(|style| inline_edge_widths(&style))
+        .unwrap_or_default();
+    if start_edge != 0.0 || end_edge != 0.0 {
+        return true;
+    }
+    inline_box_children(node).any(|child_id| {
+        let child = &doc.nodes[child_id];
+        match child.data.kind() {
+            NodeKind::Comment => false,
+            NodeKind::Text => !child.is_collapsible_whitespace_node(),
+            _ => {
+                if child
+                    .display_style()
+                    .is_some_and(|display| display.inside() == DisplayInside::None)
+                {
+                    false
+                } else if holds_block_inline(child) {
+                    holds_inline_content(doc, child)
+                } else {
+                    !child.is_or_contains_block()
+                }
+            }
+        }
+    })
+}
+
+/// A part of a split inline element whose boxes are being collected.
+struct OpenSlice {
+    element: NodeId,
+    start: usize,
+    first: bool,
+    /// The box being collected, which for all but the innermost part is the
+    /// split element inside it.
+    current: usize,
+}
+
+/// Collect an inline element that holds an in-flow block as CSS 2.1 section
+/// 9.2.1.1 lays it out, as browsers do. Each block inside it is a layout child
+/// of the container, between anonymous blocks that hold the inline content
+/// around the block, with the parts of the element before and after the
+/// block, which the anonymous blocks record as slices. So text before the
+/// element and its own text before the block share a line, as do its text
+/// after the block and the content after the element, and the element's
+/// padding and borders stay on its lines instead of going around the block.
+fn push_split_inline(
+    doc: &mut BaseDocument,
+    container_node_id: NodeId,
+    element_id: NodeId,
+    out: &mut LayoutChildren,
+) {
+    out.push_wrapped(container_node_id, element_id, doc);
+    collect_split_inline(doc, container_node_id, element_id, out, &mut Vec::new());
+}
+
+fn collect_split_inline(
+    doc: &mut BaseDocument,
+    container_node_id: NodeId,
+    element_id: NodeId,
+    out: &mut LayoutChildren,
+    open: &mut Vec<OpenSlice>,
+) {
+    flush_pseudo_elements(doc, element_id);
+    open.push(OpenSlice {
+        element: element_id,
+        start: 0,
+        first: true,
+        current: 0,
+    });
+    let boxes: Vec<NodeId> = inline_box_children(&doc.nodes[element_id]).collect();
+    for (index, child_id) in boxes.iter().copied().enumerate() {
+        let child = &doc.nodes[child_id];
+        if !child.is_or_contains_block() {
+            continue;
+        }
+        let is_block = child
+            .display_style()
+            .is_some_and(|display| display.outside() == DisplayOutside::Block);
+        open.last_mut().unwrap().current = index;
+        if holds_block_inline(child) {
+            collect_split_inline(doc, container_node_id, child_id, out, open);
+            continue;
+        }
+        if !is_block {
+            continue;
+        }
+        // The block ends the parts of the open elements before it...
+        let innermost = open.len() - 1;
+        for (depth, part) in open.iter().enumerate() {
+            let end = if depth == innermost {
+                index
+            } else {
+                part.current + 1
+            };
+            out.push_slice(
+                InlineSlice {
+                    element: part.element,
+                    start: part.start,
+                    end,
+                    first: part.first,
+                    last: false,
+                },
+                doc,
+            );
+        }
+        out.push(child_id, doc);
+        // ...and their parts after it go into a new anonymous block.
+        for (depth, part) in open.iter_mut().enumerate() {
+            part.start = if depth == innermost {
+                index + 1
+            } else {
+                part.current
+            };
+            part.first = false;
+        }
+        out.push_wrapped(container_node_id, open[0].element, doc);
+    }
+    let part = open.pop().unwrap();
+    out.push_slice(
+        InlineSlice {
+            element: element_id,
+            start: part.start,
+            end: boxes.len(),
+            first: part.first,
+            last: true,
+        },
+        doc,
+    );
 }
 
 /// A new anonymous block box in `container_node_id`, styled as an anonymous
@@ -257,6 +472,9 @@ struct WrapContext {
     /// The container whose style anonymous blocks inherit from.
     container_node_id: NodeId,
     needs_wrap: fn(NodeKind, DisplayOutside) -> bool,
+    /// The container is a flow container, which splits inline elements that
+    /// hold blocks.
+    splits_inlines: bool,
 }
 
 fn block_item_needs_wrap(child_node_kind: NodeKind, display_outside: DisplayOutside) -> bool {
@@ -285,6 +503,10 @@ fn push_hoisted_child(
         return;
     }
     if let Some(wrap_ctx) = wrap {
+        if wrap_ctx.splits_inlines && splits_around_block(doc, child_id) {
+            push_split_inline(doc, wrap_ctx.container_node_id, child_id, out);
+            return;
+        }
         let child_node_kind = child.data.kind();
         let display_outside = if child.is_or_contains_block() {
             DisplayOutside::Block
@@ -451,8 +673,15 @@ fn classify_flow_children(
                 DisplayOutside::Inline => {
                     classification.all_block = false;
 
-                    // We need the "complex" tree fixing when an inline contains a block
-                    if child.is_or_contains_block() {
+                    // We need the "complex" tree fixing when an inline contains a block,
+                    // unless the block split it and this is the anonymous block of a part.
+                    let holds_part = node.element_data().is_some_and(|element| {
+                        element
+                            .inline_slices
+                            .iter()
+                            .any(|slice| slice.element == child_id)
+                    });
+                    if child.is_or_contains_block() && !holds_part {
                         classification.all_inline = false;
                     }
                 }
@@ -660,6 +889,7 @@ fn collect_layout_children_with_wrap(
                 let wrap = Some(WrapContext {
                     container_node_id,
                     needs_wrap: text_item_needs_wrap,
+                    splits_inlines: false,
                 });
                 return push_hoisted_children_and_pseudos(doc, container_node_id, out, wrap);
             }
@@ -942,6 +1172,7 @@ fn collect_complex_layout_children(
             let wrap = Some(WrapContext {
                 container_node_id,
                 needs_wrap,
+                splits_inlines: wraps_table_parts,
             });
             collect_layout_children_with_wrap(doc, child_id, out, wrap)
         }
@@ -951,6 +1182,11 @@ fn collect_complex_layout_children(
         else if wraps_table_parts && child_display.outside() == DisplayOutside::InternalTable {
             out.push_table_part(container_node_id, child_id, doc);
         } else if out.anonymous_table_id.is_some() && is_whitespace_node {
+        }
+        // An inline element that holds a block splits around it, in flow
+        // containers.
+        else if wraps_table_parts && splits_around_block(doc, child_id) {
+            push_split_inline(doc, container_node_id, child_id, out);
         }
         // Push nodes that need wrapping into the current "anonymous block container".
         // If there is not an open one then we create one.
@@ -1050,12 +1286,18 @@ pub(crate) fn find_inline_layout_embedded_boxes(
 ) {
     flush_inline_pseudos_recursive(doc, inline_context_root_node_id);
 
+    let slices = doc.nodes[inline_context_root_node_id]
+        .element_data()
+        .map(|element| element.inline_slices.clone())
+        .unwrap_or_default();
     iter_children_and_pseudos!(doc.nodes[inline_context_root_node_id], |child_id| {
         find_inline_layout_embedded_boxes_recursive(
             &mut doc.nodes,
             inline_context_root_node_id,
             child_id,
             layout_children,
+            &slices,
+            inline_context_root_node_id,
         );
     });
 
@@ -1081,11 +1323,30 @@ pub(crate) fn find_inline_layout_embedded_boxes(
         parent_id: NodeId,
         node_id: NodeId,
         layout_children: &mut ThinVec<NodeId>,
+        slices: &[InlineSlice],
+        root_id: NodeId,
     ) {
+        // A split element's layout parent is the first anonymous block that
+        // holds a part of it, where it starts.
+        let holds_part = |part_id: NodeId| {
+            nodes.get(part_id).is_some_and(|part| {
+                part.element_data().is_some_and(|element| {
+                    element
+                        .inline_slices
+                        .iter()
+                        .any(|slice| slice.element == node_id)
+                })
+            })
+        };
+        let keeps_parent = slices.iter().any(|slice| slice.element == node_id)
+            && nodes[node_id].layout_parent.get().is_some_and(holds_part);
+
         let node = &mut nodes[node_id];
 
         // Set layout_parent for node.
-        node.layout_parent.set(Some(parent_id));
+        if !keeps_parent {
+            node.layout_parent.set(Some(parent_id));
+        }
 
         match &node.data {
             NodeData::Element(element_data) | NodeData::AnonymousBlock(element_data) => {
@@ -1110,6 +1371,8 @@ pub(crate) fn find_inline_layout_embedded_boxes(
                                 parent_id,
                                 child_id,
                                 layout_children,
+                                slices,
+                                root_id,
                             );
                         });
                     }
@@ -1120,6 +1383,24 @@ pub(crate) fn find_inline_layout_embedded_boxes(
                             layout_children.push(node_id);
                         } else if *tag_name == local_name!("br") {
                             node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
+                        } else if slices.iter().any(|slice| slice.element == node_id) {
+                            // The element's other parts are in other
+                            // anonymous blocks, so the content of this part
+                            // reaches its inline root through `layout_parent`
+                            // directly.
+                            node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
+                            let children: Vec<NodeId> =
+                                sliced_box_children(&nodes[node_id], slices).collect();
+                            for child_id in children {
+                                find_inline_layout_embedded_boxes_recursive(
+                                    nodes,
+                                    root_id,
+                                    child_id,
+                                    layout_children,
+                                    slices,
+                                    root_id,
+                                );
+                            }
                         } else {
                             node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
                             iter_children_and_pseudos!(nodes[node_id], |child_id| {
@@ -1128,6 +1409,8 @@ pub(crate) fn find_inline_layout_embedded_boxes(
                                     node_id,
                                     child_id,
                                     layout_children,
+                                    slices,
+                                    root_id,
                                 );
                             });
                         }
@@ -1210,6 +1493,11 @@ pub(crate) fn build_inline_layout_into(
     // The marker is a separate box, so words in the content don't continue from it.
     let mut text_transformer = TextTransformer::default();
     text_transformer.word_break(&builder);
+    // The parts of split inline elements an anonymous block holds.
+    let slices: &[InlineSlice] = root_node
+        .element_data()
+        .map(|element| &element.inline_slices[..])
+        .unwrap_or_default();
     let mut edges = InlineEdges {
         content_started: !builder.text().is_empty(),
         breaks_anywhere: root_node_style
@@ -1224,6 +1512,7 @@ pub(crate) fn build_inline_layout_into(
             &mut text_transformer,
             &mut edges,
             nodes,
+            slices,
             before_id,
             &text_transform,
         );
@@ -1234,6 +1523,7 @@ pub(crate) fn build_inline_layout_into(
             &mut text_transformer,
             &mut edges,
             nodes,
+            slices,
             child_id,
             &text_transform,
         );
@@ -1244,6 +1534,7 @@ pub(crate) fn build_inline_layout_into(
             &mut text_transformer,
             &mut edges,
             nodes,
+            slices,
             after_id,
             &text_transform,
         );
@@ -1265,6 +1556,7 @@ pub(crate) fn build_inline_layout_into(
         text_transformer: &mut TextTransformer,
         edges: &mut InlineEdges,
         nodes: &crate::NodeTree,
+        slices: &[InlineSlice],
         node_id: NodeId,
         parent_text_transform: &CaseTransform,
     ) {
@@ -1339,6 +1631,7 @@ pub(crate) fn build_inline_layout_into(
                                 text_transformer,
                                 edges,
                                 nodes,
+                                slices,
                                 child_id,
                                 &text_transform,
                             );
@@ -1437,6 +1730,16 @@ pub(crate) fn build_inline_layout_into(
                                 })
                                 .unwrap_or_default();
 
+                            // A part of an element that a block splits has
+                            // the element's start edge only if it starts the
+                            // element, and its end edge only if it ends it.
+                            let (first, last) = slices
+                                .iter()
+                                .find(|slice| slice.element == node_id)
+                                .map_or((true, true), |slice| (slice.first, slice.last));
+                            let start_edge = if first { start_edge } else { 0.0 };
+                            let end_edge = if last { end_edge } else { 0.0 };
+
                             // A space held back from content before this
                             // element precedes it, outside its box.
                             edges.flush_held_space(builder);
@@ -1448,34 +1751,14 @@ pub(crate) fn build_inline_layout_into(
                                 edges.end_depth += 1;
                             }
 
-                            if let Some(before_id) = node.before() {
+                            for child_id in sliced_box_children(node, slices) {
                                 build_inline_layout_recursive(
                                     builder,
                                     text_transformer,
                                     edges,
                                     nodes,
-                                    before_id,
-                                    &text_transform,
-                                );
-                            }
-
-                            for child_id in node.children.iter().copied() {
-                                build_inline_layout_recursive(
-                                    builder,
-                                    text_transformer,
-                                    edges,
-                                    nodes,
+                                    slices,
                                     child_id,
-                                    &text_transform,
-                                );
-                            }
-                            if let Some(after_id) = node.after() {
-                                build_inline_layout_recursive(
-                                    builder,
-                                    text_transformer,
-                                    edges,
-                                    nodes,
-                                    after_id,
                                     &text_transform,
                                 );
                             }

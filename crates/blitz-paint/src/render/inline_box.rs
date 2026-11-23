@@ -61,6 +61,8 @@ struct Decorated {
     /// Padding and border above and below the content area.
     top: f64,
     bottom: f64,
+    /// Padding and border left and right of the content area.
+    sides: f64,
 }
 
 /// What the runs and boxes of one line contribute to one element.
@@ -226,7 +228,7 @@ fn decoration(doc: &BaseDocument, id: NodeId, depth: u16, scale: f64) -> Option<
     }
     let margins = style.get_margin();
     let padding = style.get_padding();
-    let [border_top, _, border_bottom, _] = border_widths(&style);
+    let [border_top, border_right, border_bottom, border_left] = border_widths(&style);
     let rtl = !style.writing_mode.is_bidi_ltr();
     let (margin_start, margin_end) = if rtl {
         (margin(&margins.margin_right), margin(&margins.margin_left))
@@ -240,6 +242,11 @@ fn decoration(doc: &BaseDocument, id: NodeId, depth: u16, scale: f64) -> Option<
         margin_end: margin_end * scale,
         top: (length(&padding.padding_top.0) + border_top) * scale,
         bottom: (length(&padding.padding_bottom.0) + border_bottom) * scale,
+        sides: (length(&padding.padding_left.0)
+            + length(&padding.padding_right.0)
+            + border_left
+            + border_right)
+            * scale,
     })
 }
 
@@ -355,11 +362,22 @@ pub(crate) fn inline_fragments(
         }
     }
 
+    // An anonymous block holds a part of an element that a block splits, which
+    // has the element's start or end only if it starts or ends the element.
+    let slices = doc
+        .get_node(root)
+        .and_then(|node| node.element_data())
+        .map(|element| &element.inline_slices[..])
+        .unwrap_or_default();
     let mut fragments = Vec::new();
     for (node_id, lines) in extents {
         let Some(Some(decoration)) = decorated.get(&node_id).copied() else {
             continue;
         };
+        let (starts_here, ends_here) = slices
+            .iter()
+            .find(|slice| slice.element == node_id)
+            .map_or((true, true), |slice| (slice.first, slice.last));
         let first = fragments.len();
         for extent in &lines {
             let Some((baseline, ascent, descent)) = extent.own_metrics.or(extent.metrics) else {
@@ -416,27 +434,39 @@ pub(crate) fn inline_fragments(
         // element, so its start edge is on the first fragment.
         let parts = &mut fragments[first..];
         let width: f64 = parts.iter().map(|fragment| fragment.rect.width()).sum();
+        // A part of a split element goes on in another anonymous block, so
+        // its strip runs on past a cut side, far enough to keep the edge and
+        // the corners there outside the clip.
+        let height = parts
+            .iter()
+            .map(|fragment| fragment.rect.height())
+            .fold(0.0, f64::max);
+        let beyond = decoration.sides + decoration.margin_start.max(decoration.margin_end) + height;
+        let lead = if starts_here { 0.0 } else { beyond };
+        let trail = if ends_here { 0.0 } else { beyond };
         let mut offset = 0.0;
         let count = parts.len();
         for (index, fragment) in parts.iter_mut().enumerate() {
-            fragment.strip_width = width;
+            fragment.strip_width = lead + width + trail;
             fragment.strip_offset = if decoration.rtl {
-                width - offset - fragment.rect.width()
+                trail + width - offset - fragment.rect.width()
             } else {
-                offset
+                lead + offset
             };
             offset += fragment.rect.width();
             // Only a fragment with its element's start or end edge leaves that
             // side open. An element's only fragment is never cut.
-            if count == 1 {
+            let starts = index == 0 && starts_here;
+            let ends = index + 1 == count && ends_here;
+            if count == 1 && starts_here && ends_here {
                 fragment.open_left = true;
                 fragment.open_right = true;
             } else if decoration.rtl {
-                fragment.open_right |= index == 0;
-                fragment.open_left |= index + 1 == count;
+                fragment.open_right |= starts;
+                fragment.open_left |= ends;
             } else {
-                fragment.open_left |= index == 0;
-                fragment.open_right |= index + 1 == count;
+                fragment.open_left |= starts;
+                fragment.open_right |= ends;
             }
         }
     }

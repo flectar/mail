@@ -76,6 +76,10 @@ pub struct ElementData {
     /// does not exclude inline_layout_data
     pub list_item_data: Option<Box<ListItemLayout>>,
 
+    /// The parts of split inline elements that this anonymous block holds
+    /// (anonymous blocks only).
+    pub inline_slices: ThinVec<InlineSlice>,
+
     /// The element's template contents (\<template\> elements only)
     pub template_contents: Option<NodeId>,
     // /// Whether the node is a [HTML integration point] (https://html.spec.whatwg.org/multipage/#html-integration-point)
@@ -317,6 +321,7 @@ impl Clone for ElementData {
             template_contents: self.template_contents,
 
             // Runtime state: reset to defaults.
+            inline_slices: ThinVec::new(),
             stylo_element_data: Default::default(),
             selector_flags: Cell::new(ElementSelectorFlags::empty()),
             guard: self.guard.clone(),
@@ -333,6 +338,24 @@ impl Clone for ElementData {
             transform: None,
         }
     }
+}
+
+/// The part of an inline element that an anonymous block holds, where a block
+/// inside the element splits it in two (CSS 2.1 section 9.2.1.1): the inline
+/// content before the block and the content after it go into the anonymous
+/// blocks around it, each with its part of the element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InlineSlice {
+    /// The split element.
+    pub element: NodeId,
+    /// The range of the element's boxes in the part, counting its `::before`,
+    /// its children and its `::after` in that order.
+    pub start: usize,
+    pub end: usize,
+    /// Whether the part holds the element's start, with its start edge, and
+    /// its end, with its end edge.
+    pub first: bool,
+    pub last: bool,
 }
 
 #[derive(Copy, Clone, Default)]
@@ -419,6 +442,7 @@ impl ElementData {
             style_attribute: Default::default(),
             inline_layout_data: None,
             list_item_data: None,
+            inline_slices: ThinVec::new(),
             special_data: SpecialElementData::None,
             template_contents: None,
             background_images: ThinVec::new(),
