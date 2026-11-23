@@ -7798,15 +7798,6 @@ impl Core {
         Ok(path_str)
     }
 
-    /// Extract an attachment and write it to a caller-chosen destination (the
-    /// "download" / save-as path). Reuses `get_attachment` so extraction and
-    /// filename handling stay in one place.
-    pub async fn save_attachment(&self, attachment_id: i64, dest: String) -> Result<()> {
-        let src = self.get_attachment(attachment_id).await?;
-        tokio::fs::copy(&src, &dest).await?;
-        Ok(())
-    }
-
     /// Compose "To" autocomplete. `account_id` Some scopes suggestions to the
     /// sending account's own contacts; None returns contacts across all accounts
     /// (the "show contacts from all accounts" setting).
