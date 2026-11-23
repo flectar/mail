@@ -2104,6 +2104,7 @@ dependencies = [
  "jmap-client",
  "keyring",
  "lettre",
+ "libc",
  "mail-builder",
  "mail-parser",
  "once_cell",
