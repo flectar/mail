@@ -2342,8 +2342,11 @@ async fn store_resources(
                     _ => Default::default(),
                 };
 
+                // Only mail Gmail labels as sent says whom the user wrote to.
+                // A From with the user's own address is easy to forge.
                 if inserted
                     && is_outgoing
+                    && label_set.contains("SENT")
                     && settings.collect_outgoing_contacts
                     && resource.internal_date >= outgoing_learning_since
                 {
@@ -2361,6 +2364,7 @@ async fn store_resources(
                         }
                     }
                 } else if inserted
+                    && !is_outgoing
                     && !turned_away
                     && !sorted.unwanted
                     && settings.collect_incoming_contacts
