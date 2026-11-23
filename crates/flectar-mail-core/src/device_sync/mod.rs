@@ -1252,24 +1252,13 @@ impl Core {
             tracing::warn!(%error, "could not store new Flectar Mail Sync keys");
         }
 
-        let mut removed = Vec::new();
         for follow_up in applied.follow_ups {
-            let result = match follow_up {
-                FollowUp::RemoveAccount(account_id) => {
-                    removed.push(account_id);
-                    self.remove_account(account_id).await
-                }
-                FollowUp::RestartAccount(account_id) => {
-                    self.restart_actor(account_id).await;
-                    Ok(())
-                }
-            };
-            if let Err(error) = result {
-                tracing::warn!(%error, "could not apply an account change from another device");
+            match follow_up {
+                FollowUp::RestartAccount(account_id) => self.restart_actor(account_id).await,
             }
         }
         if applied.accounts_changed {
-            self.bus.emit(CoreEvent::AccountsChanged { removed });
+            self.bus.emit(CoreEvent::AccountsChanged);
         }
         if applied.settings_changed {
             self.bus.emit(CoreEvent::SettingsChanged);

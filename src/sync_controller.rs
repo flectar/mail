@@ -148,7 +148,6 @@ impl SyncController {
         state: &Rc<RefCell<InboxState>>,
         runtime: &tokio::runtime::Handle,
         ui_tasks: &UiSender<UiTaskUpdate>,
-        calendar_month: NaiveDate,
         updates: DeviceSyncUpdates,
     ) {
         if let Some(status) = updates.status {
@@ -164,14 +163,7 @@ impl SyncController {
             crate::block_sender::reload();
         }
         if updates.accounts_changed || updates.accounts_reread {
-            reload_accounts(
-                state,
-                runtime,
-                ui_tasks,
-                calendar_month,
-                updates.removed_accounts,
-                updates.accounts_changed,
-            );
+            reload_accounts(state, runtime, ui_tasks, updates.accounts_changed);
         }
     }
 
@@ -1141,69 +1133,19 @@ fn show_preferences(
     }
 }
 
-/// Another device added, changed or removed accounts. Removed ones leave
-/// the window as a removal here does; the others are listed again.
+/// Another device added or changed accounts: they are listed again. Sync
+/// never removes an account here.
 fn reload_accounts(
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,
     ui_tasks: &UiSender<UiTaskUpdate>,
-    calendar_month: NaiveDate,
-    removed: Vec<i64>,
     announce: bool,
 ) {
-    let (core, removals) = {
-        let state = state.borrow();
-        let Some(core) = state.core.clone() else {
-            return;
-        };
-        let removals: Vec<_> = removed
-            .into_iter()
-            .filter(|account_id| {
-                state
-                    .connected_accounts
-                    .iter()
-                    .any(|account| account.id == *account_id)
-            })
-            .map(|account_id| {
-                (
-                    account_id,
-                    RemovalView::of(&state, account_id, calendar_month),
-                )
-            })
-            .collect();
-        (core, removals)
+    let Some(core) = state.borrow().core.clone() else {
+        return;
     };
     let updates = ui_tasks.clone();
     runtime.spawn(async move {
-        for (account_id, view) in removals {
-            let accounts = core.load_account_snapshot().await.ok();
-            // A removal that failed leaves the account listed.
-            let removed = accounts.as_ref().is_some_and(|snapshot| {
-                !snapshot
-                    .accounts
-                    .iter()
-                    .any(|account| account.id == account_id)
-            });
-            if !removed {
-                continue;
-            }
-            let removal =
-                read_account_removal(&core, account_id, true, accounts.as_ref(), view).await;
-            let _ = updates
-                .send(UiTaskUpdate {
-                    message: UiMessage::plain("Account removed on another device."),
-                    accounts,
-                    account_removal: Some(removal),
-                    calendar_connections: core.load_calendar_connections().await.ok(),
-                    carddav_connections: core.load_carddav_connections().await.ok(),
-                    calendar_error: None,
-                    clear_account_form: false,
-                    finishes_account_setup: false,
-                    finishes_oauth: false,
-                    close_to_tray: None,
-                })
-                .await;
-        }
         let _ = updates
             .send(UiTaskUpdate {
                 // Read again after lost events, only one from another device

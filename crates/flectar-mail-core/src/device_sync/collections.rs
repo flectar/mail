@@ -609,10 +609,6 @@ fn profile_accounts<'a>(
 /// Work the app must do after the transaction that applied records.
 #[derive(Debug, Clone)]
 pub(crate) enum FollowUp {
-    /// Another device removed the account. It left sync with the change, and
-    /// its removal is recorded: one that doesn't finish now finishes at the
-    /// next start.
-    RemoveAccount(i64),
     /// Another device changed how the account connects.
     RestartAccount(i64),
 }
@@ -1520,24 +1516,6 @@ fn merged_account_settings(current: &AccountSettings, synced: &AccountSettings) 
     merged
 }
 
-/// Whether the account is POP3 and removes downloaded mail from the
-/// server, so some of its mail exists only on this device.
-fn keeps_mail_only_here(conn: &Connection, account_id: i64) -> Result<bool> {
-    use crate::models::KeepOnServer;
-    Ok(
-        repo::accounts::get_config(conn, account_id)?.is_some_and(|config| {
-            config.mail_protocol == MailProtocol::Pop3
-                && matches!(
-                    config.settings.keep_on_server,
-                    KeepOnServer::SevenDays
-                        | KeepOnServer::FourteenDays
-                        | KeepOnServer::ThirtyDays
-                        | KeepOnServer::UntilDownloaded
-                )
-        }),
-    )
-}
-
 /// After a run's records are applied: each record taken on or left alone
 /// keeps the hash of the item as this device now has it, from `local`, a
 /// snapshot taken after applying. An item this device keeps its own way,
@@ -1563,6 +1541,10 @@ fn apply_delete(
     applied: &mut Applied,
 ) -> Result<()> {
     match previous.collection.as_str() {
+        // Removed on another device. Sync alone never removes an account,
+        // its sign-in or its mail here: the account stays, synced no more,
+        // for the user to remove here too if they want. Added again on any
+        // device, it syncs again (see `apply_account`).
         ACCOUNT => {
             if let Some(local_id) = conn
                 .query_row(
@@ -1572,29 +1554,10 @@ fn apply_delete(
                 )
                 .optional()?
             {
-                if keeps_mail_only_here(conn, local_id)? {
-                    // Its mail left the mail server, so only this device has
-                    // it: the account stays here, synced no more.
-                    conn.execute(
-                        "UPDATE accounts SET sync_id = NULL WHERE id = ?1",
-                        params![local_id],
-                    )?;
-                } else {
-                    // Recorded with the change itself: quitting before the
-                    // removal finishes, or a removal that fails, must never
-                    // bring the account back on every device.
-                    conn.execute(
-                        "UPDATE accounts SET sync_id = NULL WHERE id = ?1",
-                        params![local_id],
-                    )?;
-                    conn.execute(
-                        "INSERT INTO cross_store_operations (kind, account_id, created_at)
-                         VALUES ('remove_account', ?1, ?2)
-                         ON CONFLICT(kind, account_id) DO NOTHING",
-                        params![local_id, crate::models::now_ms()],
-                    )?;
-                    applied.follow_ups.push(FollowUp::RemoveAccount(local_id));
-                }
+                conn.execute(
+                    "UPDATE accounts SET sync_id = NULL WHERE id = ?1",
+                    params![local_id],
+                )?;
                 applied.accounts_changed = true;
             }
         }
@@ -3066,7 +3029,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pop3_account_whose_mail_left_the_server_stays_when_removed_elsewhere() {
+    fn an_account_removed_elsewhere_stays_here_synced_no_more() {
         let conn = testutil::conn();
         let removed = |sync: &str| {
             let mut incoming = BTreeMap::new();
@@ -3087,42 +3050,30 @@ mod tests {
             .unwrap()
         };
 
-        let pop = account(&conn, "pop@example.com", &"b".repeat(32));
-        conn.execute(
-            "UPDATE accounts SET mail_protocol = 'pop3',
-                    settings_json = json_set(settings_json, '$.keepOnServer', 'sevenDays')
-             WHERE id = ?1",
-            params![pop],
-        )
-        .unwrap();
-        let applied = removed(&"b".repeat(32));
-        assert!(applied.follow_ups.is_empty(), "its mail stays here");
-        let sync_id: Option<String> = conn
-            .query_row(
-                "SELECT sync_id FROM accounts WHERE id = ?1",
-                params![pop],
-                |row| row.get(0),
+        for (email, protocol, sync_id) in [
+            ("imap@example.com", "imap", "c".repeat(32)),
+            ("pop@example.com", "pop3", "b".repeat(32)),
+        ] {
+            let local = account(&conn, email, &sync_id);
+            conn.execute(
+                "UPDATE accounts SET mail_protocol = ?2 WHERE id = ?1",
+                params![local, protocol],
             )
             .unwrap();
-        assert_eq!(sync_id, None, "synced no more");
-
-        // One whose mail is on the server goes, even if the app quits first.
-        let imap = account(&conn, "imap@example.com", &"c".repeat(32));
-        let applied = removed(&"c".repeat(32));
-        assert!(matches!(
-            applied.follow_ups.as_slice(),
-            [FollowUp::RemoveAccount(id)] if *id == imap
-        ));
-        let (sync_id, pending): (Option<String>, i64) = conn
-            .query_row(
-                "SELECT sync_id, (SELECT COUNT(*) FROM cross_store_operations
-                                  WHERE kind = 'remove_account' AND account_id = ?1)
-                 FROM accounts WHERE id = ?1",
-                params![imap],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!((sync_id, pending), (None, 1));
+            let applied = removed(&sync_id);
+            assert!(applied.follow_ups.is_empty(), "nothing goes");
+            assert!(applied.accounts_changed);
+            let (sync_id, pending): (Option<String>, i64) = conn
+                .query_row(
+                    "SELECT sync_id, (SELECT COUNT(*) FROM cross_store_operations
+                                      WHERE account_id = ?1)
+                     FROM accounts WHERE id = ?1",
+                    params![local],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!((sync_id, pending), (None, 0), "it stays, synced no more");
+        }
     }
 
     #[test]

@@ -326,12 +326,19 @@ async fn two_devices_share_accounts_and_preferences() {
     laptop.device_sync_run().await.unwrap();
     assert!(!laptop.get_settings().await.unwrap().conversation_view);
 
-    // An account removed on the laptop goes from the phone too.
+    // An account removed on the laptop stays on the phone, synced no more:
+    // sync alone never removes an account, its sign-in or its mail.
     let laptop_account = laptop.list_accounts().await.unwrap()[0].id;
     laptop.remove_account(laptop_account).await.unwrap();
     laptop.device_sync_run().await.unwrap();
     phone.device_sync_run().await.unwrap();
-    assert!(phone.list_accounts().await.unwrap().is_empty());
+    assert_eq!(phone.list_accounts().await.unwrap().len(), 1);
+    phone.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    assert!(
+        laptop.list_accounts().await.unwrap().is_empty(),
+        "nor does it come back"
+    );
 
     // The laptop removes the phone. Only the server tells the phone, which
     // can't check it: the phone stops syncing and keeps everything, its
@@ -350,6 +357,7 @@ async fn two_devices_share_accounts_and_preferences() {
     assert_eq!(status.state, DeviceSyncState::Removed);
     assert!(status.server_url.is_some(), "still set up");
     assert_eq!(phone.get_settings().await.unwrap().theme, "carbon");
+    assert_eq!(phone.list_accounts().await.unwrap().len(), 1);
 }
 
 /// Pair `joining` into `existing`'s group with a short code.
