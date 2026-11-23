@@ -16892,7 +16892,15 @@ mod invitation_tests {
         let from = from.to_string();
         let id = core
             .db
-            .write(move |conn| Ok(db::testutil::seed_message(conn, &from, "Invitation", false).1))
+            .write(move |conn| {
+                let id = db::testutil::seed_message(conn, &from, "Invitation", false).1;
+                // From the person it says, as the receiving server confirmed.
+                conn.execute(
+                    "UPDATE messages SET sender_verification = 'domain' WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(id)
+            })
             .await
             .unwrap();
         sync::ingest::store_calendar_events(
@@ -17443,11 +17451,17 @@ mod invitation_tests {
         let moved = calendar
             .replace("SEQUENCE:0", "SEQUENCE:1")
             .replace("20261120T090000Z", "20261122T090000Z");
-        let update = arriving(&core, "bob@example.com", &moved, false).await;
+        let update = arriving(&core, "bob@example.com", &moved, true).await;
         assert_eq!(
             card(&core, update).await.starts_at,
             calendar::parse_dt("20261122T090000Z").unwrap().0
         );
+        // One the receiving server didn't confirm as the organizer's, which
+        // anyone could forge, leaves the calendar as it was.
+        let forged = calendar
+            .replace("SEQUENCE:0", "SEQUENCE:2")
+            .replace("20261120T090000Z", "20261123T090000Z");
+        arriving(&core, "bob@example.com", &forged, false).await;
         assert!(!card(&core, update).await.out_of_date);
     }
 

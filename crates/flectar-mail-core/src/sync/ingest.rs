@@ -455,7 +455,7 @@ pub(crate) async fn store_calendar_events(
             .await?;
     }
     let ids: Vec<i64> = messages.iter().map(|(id, _)| *id).collect();
-    let (own, kept_out, adding, known) = ctx
+    let (own, kept_out, adding, known, senders) = ctx
         .db
         .read(move |conn| {
             let adding = repo::settings::get(conn)?.add_invitations;
@@ -468,6 +468,7 @@ pub(crate) async fn store_calendar_events(
                 repo::messages::kept_from_calendar(conn, &ids)?,
                 adding,
                 known,
+                repo::messages::senders(conn, &ids)?,
             ))
         })
         .await?;
@@ -485,6 +486,11 @@ pub(crate) async fn store_calendar_events(
         .write(move |conn| {
             let tx = conn.transaction()?;
             for (message_id, calendars) in &messages {
+                // Changes to an event the calendar has come only from its
+                // organizer, as the receiving server confirmed.
+                let (from, verified) = senders
+                    .get(message_id)
+                    .map_or(("", false), |(from, verified)| (from.as_str(), *verified));
                 for calendar in calendars {
                     repo::calendar::apply_invitation(
                         &tx,
@@ -493,6 +499,10 @@ pub(crate) async fn store_calendar_events(
                         calendar,
                         &own,
                         new_events(*message_id),
+                        repo::calendar::Originator {
+                            email: from,
+                            trusted: verified,
+                        },
                     )?;
                 }
             }
