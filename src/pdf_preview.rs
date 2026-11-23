@@ -171,7 +171,7 @@ fn worker() -> Result<(), Box<dyn std::error::Error>> {
     let executable = std::env::current_exe()?;
     let library = library_path(&executable)?;
     let pdfium = Pdfium::new(Pdfium::bind_to_library(library)?);
-    #[cfg(linux_desktop)]
+    #[cfg(any(linux_desktop, target_os = "macos"))]
     sandbox()?;
     let document = pdfium.load_pdf_from_byte_slice(&data, None)?;
     let count = u32::try_from(document.pages().len())?;
@@ -300,6 +300,46 @@ fn sandbox() -> Result<(), Box<dyn std::error::Error>> {
     .try_into()?;
     seccompiler::apply_filter(&filter)?;
     Ok(())
+}
+
+// PDFium is loaded and the document read, so the worker needs nothing from
+// the system but memory and the output pipe it already holds. The built-in
+// pure computation profile denies opening files, networking, starting
+// processes and reaching other processes' services. Fonts can't be read
+// either, so PDFs that rely on installed fonts render with PDFium's built-in
+// ones. A worker that can't be sandboxed stops before it parses anything.
+#[cfg(target_os = "macos")]
+pub(crate) fn sandbox() -> Result<(), Box<dyn std::error::Error>> {
+    use std::ffi::{CStr, c_char, c_int};
+    // These come from sandbox.h. Apple deprecated them, but the named profiles
+    // still work, and they need no entitlements or separate helper app.
+    unsafe extern "C" {
+        static kSBXProfilePureComputation: c_char;
+        fn sandbox_init(profile: *const c_char, flags: u64, error: *mut *mut c_char) -> c_int;
+        fn sandbox_free_error(error: *mut c_char);
+    }
+    const SANDBOX_NAMED: u64 = 1;
+    let mut error = std::ptr::null_mut();
+    // SAFETY: the profile is a NUL terminated name that the system library
+    // exports, and an error message is freed the way sandbox.h says.
+    unsafe {
+        if sandbox_init(
+            &raw const kSBXProfilePureComputation,
+            SANDBOX_NAMED,
+            &mut error,
+        ) == 0
+        {
+            return Ok(());
+        }
+        let message = if error.is_null() {
+            "unknown error".to_string()
+        } else {
+            let message = CStr::from_ptr(error).to_string_lossy().into_owned();
+            sandbox_free_error(error);
+            message
+        };
+        Err(format!("Could not sandbox the PDF renderer: {message}").into())
+    }
 }
 
 #[cfg(desktop)]
