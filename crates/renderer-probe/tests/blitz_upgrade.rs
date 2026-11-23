@@ -2215,3 +2215,19 @@ fn collapsed_borders_follow_the_rows_below_a_caption() {
         "{rows:?}"
     );
 }
+
+#[test]
+fn a_details_lays_out_its_summary_first_and_hides_the_rest_while_closed() {
+    // As its shadow tree has it in browsers, a closed `<details>` shows only
+    // its summary, text included, and an open one shows its summary first,
+    // wherever it is, and everything else after it in one block.
+    let doc = document(
+        "<style>body{font:16px/20px sans-serif}</style>
+         <details id=a><summary id=s>Sum</summary>Hidden bare text</details>
+         <details id=b open>Before <summary id=t>Sum</summary> after</details>",
+    );
+    let layout = |selector| *node(&doc, selector).final_layout();
+    close(layout("#a").size.height, layout("#s").size.height);
+    close(layout("#t").location.y, 0.0);
+    close(layout("#b").size.height, layout("#t").size.height + 20.0);
+}
