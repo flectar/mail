@@ -2210,5 +2210,8 @@ fn collapsed_borders_follow_the_rows_below_a_caption() {
     let pixels = paint(&mut doc);
     let blue = |y: usize| pixels[(y * 400 + 25) * 4..][..4] == [0, 0, 255, 255];
     let rows: Vec<usize> = (0..80).filter(|&y| blue(y)).collect();
-    assert!(!rows.is_empty() && rows.iter().all(|&y| y >= 39), "{rows:?}");
+    assert!(
+        !rows.is_empty() && rows.iter().all(|&y| y >= 39),
+        "{rows:?}"
+    );
 }
