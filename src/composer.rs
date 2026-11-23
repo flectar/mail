@@ -4133,11 +4133,8 @@ impl ComposeSession {
         let ui = host.ui();
         let core = composers.core();
         let account_id = i64::from(ui.get_account_id());
-        let recipient = ui
-            .get_to()
-            .split([',', ';', '\n'])
-            .map(str::trim)
-            .filter(|item| !item.is_empty())
+        let to = ui.get_to();
+        let recipient = crate::mail::recipient_entries(&to)
             .find_map(|item| crate::mail::parse_address(item).ok())
             .map_or_else(placeholders::Person::default, |address| {
                 let name = address.name.clone().or_else(|| {
