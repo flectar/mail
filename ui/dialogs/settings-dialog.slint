@@ -725,6 +725,10 @@ export component SettingsDialog inherits Rectangle {
 
     // Flectar Mail Sync's confirmation before deleting it everywhere.
     private property <bool> sync-delete-confirmation: false;
+    // And before removing a device: which one.
+    private property <bool> sync-remove-confirmation: false;
+    private property <string> sync-remove-id;
+    private property <string> sync-remove-name;
 
     private property <[string]> density-options: [
         @tr("list density" => "Comfortable"),
@@ -3801,6 +3805,11 @@ export component SettingsDialog inherits Rectangle {
                             accent: root.accent;
                             accent-soft: root.accent-soft;
                             confirm-delete => { root.sync-delete-confirmation = true; }
+                            confirm-remove(id, name) => {
+                                root.sync-remove-id = id;
+                                root.sync-remove-name = name;
+                                root.sync-remove-confirmation = true;
+                            }
                         }
                     }
 
@@ -5222,5 +5231,25 @@ export component SettingsDialog inherits Rectangle {
             body-color: root.body-text;
             muted-color: root.secondary-text;
             confirmed => { SyncUi.delete-everywhere(); }
+        }
+
+        // Built only while it asks, like the Sync dialogs above.
+        if root.sync-remove-confirmation : ConfirmationDialog {
+            width: parent.width;
+            height: parent.height;
+            open <=> root.sync-remove-confirmation;
+            title: @tr("Remove device?");
+            subject: root.sync-remove-name != "" ? root.sync-remove-name : @tr("Unnamed device");
+            description: @tr("Removing a device stops it from reading anything new.");
+            detail: SyncUi.synced-accounts == "" ? ""
+                : @tr("It may still be signed in to {}. If it's lost or not yours, change those passwords, and remove Flectar Mail's access in each account's security settings.", SyncUi.synced-accounts);
+            confirm-label: @tr("Remove");
+            icon: @image-url("../icons/lucide/outline/trash.svg");
+            surface: root.surface;
+            dialog-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-color: root.body-text;
+            muted-color: root.secondary-text;
+            confirmed => { SyncUi.remove-device(root.sync-remove-id); }
         }
 }

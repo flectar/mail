@@ -115,6 +115,9 @@ pub struct DeviceSyncStatus {
     /// sign-ins here until the user shares them
     /// ([`Core::device_sync_share_held_sign_ins`]).
     pub held_sign_ins: bool,
+    /// The addresses of the accounts that sync. Every device of the group
+    /// has them, and may still be signed in to them once it is removed.
+    pub synced_accounts: Vec<String>,
 }
 
 impl Default for DeviceSyncStatus {
@@ -126,6 +129,7 @@ impl Default for DeviceSyncStatus {
             devices: Vec::new(),
             billing: None,
             held_sign_ins: false,
+            synced_accounts: Vec::new(),
         }
     }
 }
@@ -1389,12 +1393,21 @@ impl Core {
             return;
         };
         let state = client.state().await;
-        let (mirror, held_sign_ins) = self
+        let (mirror, held_sign_ins, synced_accounts) = self
             .db
             .read(|conn| {
+                let synced_accounts = conn
+                    .prepare(
+                        "SELECT email FROM accounts
+                         WHERE sync_id IS NOT NULL AND email IS NOT NULL
+                         ORDER BY sort_order, id",
+                    )?
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<Vec<String>>>()?;
                 Ok((
                     store::load_mirror(conn)?,
                     !crate::db::repo::sign_ins::held(conn)?.is_empty(),
+                    synced_accounts,
                 ))
             })
             .await
@@ -1438,6 +1451,7 @@ impl Core {
             let mut status = lock(&self.sync_service().status);
             status.devices = devices;
             status.held_sign_ins = held_sign_ins;
+            status.synced_accounts = synced_accounts;
         }
         self.emit_sync_status();
     }

@@ -187,6 +187,7 @@ impl SyncController {
         ui.set_last_synced_today(today);
         ui.set_server_url(status.server_url.as_deref().unwrap_or_default().into());
         ui.set_held_sign_ins(status.held_sign_ins);
+        ui.set_synced_accounts(status.synced_accounts.join(", ").into());
         self.devices.reconcile_by(
             status
                 .devices

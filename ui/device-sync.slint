@@ -63,6 +63,9 @@ export global SyncUi {
     // Accounts this device had before it joined keep their passwords and
     // sign-ins here until the user shares them.
     in property <bool> held-sign-ins;
+    // The addresses of the accounts that sync, which every device of the
+    // group has, as one line.
+    in property <string> synced-accounts;
 
     // What Flectar's server charges, shown while sync is off: the days of
     // free trial, and the monthly and yearly prices, such as "€4". Empty
@@ -582,6 +585,8 @@ export component SyncSettingsPage inherits VerticalBox {
     in property <color> accent;
     in property <color> accent-soft;
     callback confirm-delete();
+    // Removing a device asks first.
+    callback confirm-remove(string /* id */, string /* name */);
 
     private property <bool> on: SyncUi.state == "idle" || SyncUi.state == "syncing" || SyncUi.state == "error" || SyncUi.state == "payment";
     // Sign-ins from before this device joined wait for the user's word.
@@ -864,7 +869,7 @@ export component SyncSettingsPage inherits VerticalBox {
                 accent: root.accent;
                 accent-soft: root.accent-soft;
                 separator: root.card-border-color;
-                remove => { SyncUi.remove-device(device.id); }
+                remove => { root.confirm-remove(device.id, device.name); }
             }
         }
         if root.compact : Button {
