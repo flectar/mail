@@ -249,7 +249,9 @@ pub(crate) fn http_config() -> rustls::ClientConfig {
 }
 
 /// The start of every HTTP client of the app: reqwest's builder with these
-/// certificate checks (`http_config`).
+/// certificate checks (`http_config`). On Android only these checks work,
+/// so clippy.toml rejects reqwest's own constructors everywhere else.
+#[allow(clippy::disallowed_methods)]
 pub fn client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder().tls_backend_preconfigured(http_config())
 }

@@ -522,7 +522,9 @@ async fn check_server_attachment_search(
     user: &str,
     secret: &str,
 ) {
-    let http = reqwest::Client::new();
+    let http = flectar_mail_core::net::tls::client_builder()
+        .build()
+        .unwrap();
     let session: serde_json::Value = http
         .get(format!("{base}/jmap/session"))
         .basic_auth(user, Some(secret))

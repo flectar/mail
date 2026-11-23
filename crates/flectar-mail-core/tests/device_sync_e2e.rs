@@ -132,8 +132,13 @@ async fn start_server_with(env: &[(&str, &str)]) -> Option<Server> {
         binary,
         dir,
     };
+    let http = flectar_mail_core::net::tls::client_builder()
+        .build()
+        .unwrap();
     for _ in 0..100 {
-        if reqwest::get(format!("{}/healthz", server.url))
+        if http
+            .get(format!("{}/healthz", server.url))
+            .send()
             .await
             .is_ok_and(|response| response.status().is_success())
         {
