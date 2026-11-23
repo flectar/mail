@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import tomllib
 import unittest
@@ -697,6 +698,41 @@ class ReleaseTests(unittest.TestCase):
                 **os.environ, "PATH": f"{root / 'bin'}:{os.environ['PATH']}", "VERSION": "stale",
                 "FLECTAR_SKIP_BUILD": "0", "FLECTAR_APP_FEATURES": "",
             }
+            # These name local AppImage tools; the test sets them itself.
+            for name in ("LINUXDEPLOY", "PATCHELF", "APPIMAGETOOL", "APPIMAGE_RUNTIME"):
+                environment.pop(name, None)
+            # A stand-in patchelf release, which a stand-in curl serves, and
+            # which this copy of the packager pins instead of the real one.
+            patchelf_release = root / "patchelf-release.tar.gz"
+            patchelf_binary = root / "patchelf-binary"
+            patchelf_binary.write_text("#!/bin/sh\necho patchelf stand-in\n")
+            patchelf_binary.chmod(0o755)
+            with tarfile.open(patchelf_release, "w:gz") as archive:
+                archive.add(patchelf_binary, arcname="./bin/patchelf")
+            packager = root / "scripts/build-appimage.sh"
+            pinned, count = re.subn(
+                r"(?m)^(\s*patchelf_sha256=)[0-9a-f]{64}$",
+                rf"\g<1>{hashlib.sha256(patchelf_release.read_bytes()).hexdigest()}",
+                packager.read_text(),
+            )
+            self.assertEqual(count, 2)
+            packager.write_text(pinned)
+            urls = root / "curl-urls.txt"
+            curl = root / "bin/curl"
+            curl.write_text(
+                "#!/usr/bin/env python3\n"
+                "import os, pathlib, shutil, sys\n"
+                "arguments = sys.argv[1:]\n"
+                "url = next(a for a in arguments if a.startswith('https://'))\n"
+                f"with open({str(urls)!r}, 'a') as log:\n"
+                "    log.write(url + '\\n')\n"
+                "output = pathlib.Path(arguments[arguments.index('--output') + 1])\n"
+                "if '/NixOS/patchelf/' in url and not os.environ.get('CURL_SERVES_JUNK'):\n"
+                f"    shutil.copyfile({str(patchelf_release)!r}, output)\n"
+                "else:\n"
+                "    output.write_bytes(b'not the pinned file')\n"
+            )
+            curl.chmod(0o755)
             for machine, debian, pdfium in (
                 ("x86_64", "amd64", "linux-x64"), ("aarch64", "arm64", "linux-arm64"),
             ):
@@ -727,13 +763,20 @@ class ReleaseTests(unittest.TestCase):
 
                     # Exercise the AppImage shell packager up to its tool boundary,
                     # without downloading deployment tools or compiling the
-                    # application. The tools sit where the packager caches the
-                    # downloads for this architecture.
+                    # application. Stand-ins for the tools and the runtime sit
+                    # where the packager caches the downloads for this
+                    # architecture, and the variables that name local tools
+                    # point at them. Only the stand-in patchelf release goes
+                    # through the pinned download.
                     tools = root / "target/appimage/tools"
                     tools.mkdir(parents=True, exist_ok=True)
                     deploy = tools / f"linuxdeploy-{machine}.AppImage"
                     deploy.write_text('''#!/usr/bin/env python3
-import pathlib, shutil, sys
+import json, os, pathlib, shutil, subprocess, sys
+patchelf = os.environ.get("PATCHELF")
+version = subprocess.run([patchelf], capture_output=True, text=True, check=True).stdout.strip() if patchelf else None
+with open(pathlib.Path(__file__).parent / "tool-runs.txt", "a") as runs:
+    runs.write(json.dumps(["linuxdeploy", patchelf, os.environ.get("NO_STRIP"), version]) + "\\n")
 appdir = pathlib.Path(sys.argv[sys.argv.index("--appdir") + 1])
 library = pathlib.Path(sys.argv[sys.argv.index("--library") + 1])
 assert library.name == "libxkbcommon-x11.so.0"
@@ -744,21 +787,44 @@ for name in ("libxkbcommon-x11.so.0", "libxkbcommon.so.0"):
                     pack = tools / f"appimagetool-{machine}.AppImage"
                     pack.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
-appdir = pathlib.Path(sys.argv[1])
-pathlib.Path(sys.argv[2]).write_text(json.dumps({
+with open(pathlib.Path(__file__).parent / "tool-runs.txt", "a") as runs:
+    runs.write(json.dumps(["appimagetool"]) + "\\n")
+arguments = sys.argv[1:]
+runtime = pathlib.Path(arguments.pop(arguments.index("--runtime-file") + 1))
+arguments.remove("--runtime-file")
+appdir, output = map(pathlib.Path, arguments)
+output.write_text(json.dumps({
     "version": os.environ.get("VERSION"),
+    "runtime": runtime.read_text(),
     "desktop": (appdir / "com.flectar.mail.desktop").read_text(),
     "metainfo": (appdir / "usr/share/metainfo/com.flectar.mail.metainfo.xml").read_text(),
 }))
 ''')
                     deploy.chmod(0o755)
                     pack.chmod(0o755)
+                    runtime = tools / f"runtime-{machine}"
+                    runtime.write_text(f"{machine} runtime")
+                    stand_ins = {"LINUXDEPLOY": str(deploy), "APPIMAGETOOL": str(pack), "APPIMAGE_RUNTIME": str(runtime)}
                     result = subprocess.run(
                         ["bash", str(root / "scripts/build-appimage.sh")], cwd=root,
-                        env=environment, capture_output=True, text=True,
+                        env={**environment, **stand_ins}, capture_output=True, text=True,
                     )
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertRegex(
+                        urls.read_text(),
+                        rf"^https://github\.com/NixOS/patchelf/releases/download/([^/]+)/patchelf-\1-{machine}\.tar\.gz\n$",
+                    )
+                    urls.unlink()
+                    # linuxdeploy runs the patchelf unpacked from the pinned
+                    # release, never the old one it bundles, and strips nothing.
+                    unpacked = tools / f"patchelf-{machine}/bin/patchelf"
+                    runs = [json.loads(line) for line in (tools / "tool-runs.txt").read_text().splitlines()]
+                    self.assertEqual(runs, [
+                        ["linuxdeploy", str(unpacked), "1", "patchelf stand-in"], ["appimagetool"],
+                    ])
                     packaged = json.loads((root / "target/appimage/flectar-mail.AppImage").read_text())
+                    # The runtime is always given, never left to appimagetool.
+                    self.assertEqual(packaged["runtime"], f"{machine} runtime")
                     self.assertEqual(packaged["version"], "0.1.0-alpha.1")
                     self.assertIn("X-AppImage-Version=0.1.0-alpha.1\n", packaged["desktop"])
                     self.assertIn(f"X-AppImage-Arch={machine}\n", packaged["desktop"])
@@ -781,6 +847,37 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
                         ["verify", str(root / "target/appimage/flectar-mail.AppDir")],
                         ["verify", str(root / "target/appimage/.flectar-mail.AppImage.new")],
                     ])
+
+                    # Without stand-ins the packager downloads each tool from its
+                    # pinned release. A file that misses its checksum is never
+                    # run or embedded, whether downloaded or already cached.
+                    # Each round names the tools before one, so that one is
+                    # the download that fails.
+                    (tools / "tool-runs.txt").unlink()
+                    (tools / f"patchelf-{machine}.tar.gz").write_bytes(b"damaged")
+                    stand_ins["PATCHELF"] = str(unpacked)
+                    # Reuse the executable rather than count another build.
+                    (root / "target/release/flectar-mail").chmod(0o755)
+                    downloads = (
+                        ("LINUXDEPLOY", rf"linuxdeploy/linuxdeploy/releases/download/[^/]+/linuxdeploy-{machine}\.AppImage"),
+                        ("PATCHELF", rf"NixOS/patchelf/releases/download/([^/]+)/patchelf-\1-{machine}\.tar\.gz"),
+                        ("APPIMAGETOOL", rf"AppImage/appimagetool/releases/download/[^/]+/appimagetool-{machine}\.AppImage"),
+                        ("APPIMAGE_RUNTIME", rf"AppImage/type2-runtime/releases/download/[^/]+/runtime-{machine}"),
+                    )
+                    for index, (name, url) in enumerate(downloads):
+                        earlier = {key: stand_ins[key] for key, _ in downloads[:index]}
+                        result = subprocess.run(
+                            ["bash", str(root / "scripts/build-appimage.sh")], cwd=root,
+                            env={**environment, **earlier, "FLECTAR_SKIP_BUILD": "1", "CURL_SERVES_JUNK": "1"},
+                            capture_output=True, text=True,
+                        )
+                        self.assertNotEqual(result.returncode, 0, name)
+                        self.assertIn("does not match its pinned SHA-256 checksum", result.stderr, name)
+                        self.assertRegex(urls.read_text(), rf"^https://github\.com/{url}\n$")
+                        urls.unlink()
+                        self.assertFalse((tools / "tool-runs.txt").exists(), name)
+                    self.assertNotIn("/continuous/", (root / "scripts/build-appimage.sh").read_text())
+                    self.assertEqual([path.name for path in tools.glob("*.new")], [])
 
             # Both normal package commands must include the optional runtime
             # choice, even though their builds disable Cargo's default features.

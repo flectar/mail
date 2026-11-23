@@ -199,6 +199,23 @@ jobs:
           FLECTAR_SKIP_BUILD: "1"
         run: ./scripts/build-appimage.sh
 
+      # Only a running AppImage shows that the pinned tools and runtime made
+      # one that starts and opens its window with the libraries it bundles.
+      - name: Start the AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set +e
+          timeout 15s xvfb-run -a target/appimage/flectar-mail.AppImage \
+            > target/appimage/launch.log 2>&1
+          status=$?
+          set -e
+          if [[ "$status" -ne 124 ]]; then
+            cat target/appimage/launch.log
+            echo "AppImage launch smoke test exited unexpectedly with status $status" >&2
+            exit 1
+          fi
+
       - name: Build Debian package
         env:
           FLECTAR_SKIP_BUILD: "1"
