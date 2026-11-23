@@ -432,7 +432,7 @@ impl Core {
 
     fn emit_sync_status(&self) {
         let status = lock(&self.sync_service().status).clone();
-        self.bus.emit(CoreEvent::DeviceSync(status));
+        self.bus.emit(CoreEvent::DeviceSync(Box::new(status)));
     }
 
     fn set_sync_state(&self, state: DeviceSyncState) {
