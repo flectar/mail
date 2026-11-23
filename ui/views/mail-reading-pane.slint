@@ -215,6 +215,7 @@ component ThreadMessageHeader inherits Rectangle {
     in property <length> sender-height: 23px;
     in property <length> detail-height: 24px;
     callback open;
+    callback copy-text(string);
 
     height: 17px + root.sender-height + root.detail-height;
     border-radius: 8px;
@@ -333,6 +334,24 @@ component ThreadMessageHeader inherits Rectangle {
         enabled: root.thread-interactive || root.selected;
         mouse-cursor: pointer;
         clicked => { root.activate(); }
+    }
+
+    // The sender's address, as mail apps offer it on a right-click.
+    ContextMenuArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.address != "";
+
+        Menu {
+            MenuItem {
+                title: @tr("Copy email address");
+                activated => { root.copy-text(root.address); }
+            }
+            MenuItem {
+                title: @tr("Copy name and email address");
+                activated => { root.copy-text(EmailReader.mailbox-text(root.sender, root.address)); }
+            }
+        }
     }
 
     details-popup := PopupWindow {
@@ -879,6 +898,12 @@ export component MailReadingPane inherits FocusScope {
     private property <bool> label-editor-is-global: false;
     private property <string> new-label-name: "";
     private property <color> new-label-color: #4a86e8;
+    function copy-to-clipboard(text: string) {
+        clipboard-source.text = text;
+        clipboard-source.select-all();
+        clipboard-source.copy();
+    }
+
     changed clipboard-request-id => {
         if root.clipboard-request-id > 0 {
             clipboard-source.text = root.clipboard_request;
@@ -1458,6 +1483,7 @@ export component MailReadingPane inherits FocusScope {
                                     secondary-text: root.secondary-text;
                                     sender-height: root.thread-sender-height;
                                     detail-height: root.thread-detail-height;
+                                    copy-text(text) => { root.copy-to-clipboard(text); }
                                 }
 
                                 for row in root.thread-messages : ThreadMessageHeader {
@@ -1491,6 +1517,7 @@ export component MailReadingPane inherits FocusScope {
                                     sender-height: root.thread-sender-height;
                                     detail-height: root.thread-detail-height;
                                     open => { root.select_thread_message(row.index); }
+                                    copy-text(text) => { root.copy-to-clipboard(text); }
                                 }
 
                                 // Renderer controls are part of the expanded
