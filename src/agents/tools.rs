@@ -158,8 +158,9 @@ agents mark messages, and the user can undo it.",
         name: "move_messages",
         title: "Move messages",
         description: "Moves messages to the archive, to Trash or to another folder of their \
-account. Nothing is deleted for good. Only works when the user lets agents move messages, and \
-the user can undo it.",
+account, only between the account's own folders and never into or out of one other people may \
+share. Nothing is deleted for good. Only works when the user lets agents move messages, and the \
+user can undo it.",
         input_schema: move_messages,
         effect: Effect {
             read_only: false,

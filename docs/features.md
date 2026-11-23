@@ -982,8 +982,10 @@ own draft until you edit it, and never anyone else's.
 
 Three more switches let agents mark messages read or flagged, move them to the
 archive, to Trash or to another folder, and add or take off your labels. They
-can change messages only in folders they can read, and never delete anything
-for good. Together they can change 100 messages a minute.
+can change messages only in folders they can read, move them only between an
+account's own folders, never into or out of one other people may share, and
+never delete anything for good. Together they can change 100 messages a
+minute.
 
 With Ask to send on, an agent can ask to send a draft. It opens in a window of
 its own, with a note naming the agent, and it's sent only if you send it. One

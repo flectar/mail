@@ -9,19 +9,19 @@ use super::{
 };
 use flectar_mail_core::{
     Core,
-    agents::is_end_to_end_encrypted,
+    agents::{is_end_to_end_encrypted, own_folder_ids},
     ai::clean_untrusted,
     db::repo::agent_activity::{LabelChange, NewAgentActivity},
     error::CoreError,
     models::{
         ActionKind, ActionParams, ActionTarget, Address, AgentAccess, AgentOutcome, FolderInfo,
-        MessageCursor, MessageDetail, MessageSearchCursor, MessageSummary, PerformActionArgs,
-        SaveDraftArgs, now_ms,
+        MailProtocol, MessageCursor, MessageDetail, MessageSearchCursor, MessageSummary,
+        PerformActionArgs, SaveDraftArgs, now_ms,
     },
 };
 use serde_json::{Map, Value, json};
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     hash::{BuildHasher, Hasher},
     io,
     path::Path,
@@ -325,6 +325,9 @@ struct Scope {
     every_account: bool,
     accounts: Vec<ScopeAccount>,
     folders: Vec<FolderInfo>,
+    /// Of the accounts' folders, those that are their own rather than shared
+    /// by other people, as far as Flectar Mail can tell.
+    own_folders: HashSet<i64>,
 }
 
 /// An account agents may see: a connected one, or the mail kept only on
@@ -336,6 +339,7 @@ struct ScopeAccount {
     /// What the user calls the account, else its owner's name.
     name: Option<String>,
     provider: &'static str,
+    protocol: MailProtocol,
 }
 
 impl Scope {
@@ -360,6 +364,7 @@ impl Scope {
                     .clone()
                     .or_else(|| account.display_name.clone()),
                 provider: account.provider.as_str(),
+                protocol: account.mail_protocol,
             })
             .collect::<Vec<_>>();
         if let Some(account_id) = local.filter(|account_id| access.shows_account(*account_id)) {
@@ -368,11 +373,21 @@ impl Scope {
                 address: None,
                 name: Some("Mail on this device".into()),
                 provider: "local",
+                protocol: MailProtocol::Local,
             });
         }
-        let folders = core
-            .list_folders(None)
-            .await?
+        let all_folders = core.list_folders(None).await?;
+        let own_folders = accounts
+            .iter()
+            .flat_map(|account| {
+                let folders = all_folders
+                    .iter()
+                    .filter(|folder| folder.account_id == account.id)
+                    .collect::<Vec<_>>();
+                own_folder_ids(account.protocol, &folders)
+            })
+            .collect();
+        let folders = all_folders
             .into_iter()
             .filter(|folder| {
                 folder.selectable
@@ -386,6 +401,7 @@ impl Scope {
             every_account,
             accounts,
             folders,
+            own_folders,
         })
     }
 
@@ -397,6 +413,13 @@ impl Scope {
 
     fn folder(&self, folder_id: i64) -> Option<&FolderInfo> {
         self.folders.iter().find(|folder| folder.id == folder_id)
+    }
+
+    /// Whether `folder_id` is its account's own folder, so agents may move
+    /// mail into it or out of it. A folder other people may share could
+    /// carry the user's mail off to them.
+    fn owns(&self, folder_id: i64) -> bool {
+        self.own_folders.contains(&folder_id)
     }
 
     /// Every folder agents may read.
@@ -1267,11 +1290,13 @@ async fn send_draft(
 }
 
 /// The messages a change applies to, every one a message agents can read,
-/// or no change at all.
+/// or no change at all. Messages `moving` also have to be in their account's
+/// own folders only.
 async fn messages_to_change(
     core: &Core,
     scope: &Scope,
     arguments: Arguments<'_>,
+    moving: bool,
 ) -> Result<Vec<MessageDetail>, Failure> {
     let ids = arguments.ids("message_ids")?.unwrap_or_default();
     if ids.is_empty() || ids.len() > MAX_CHANGED_MESSAGES {
@@ -1288,6 +1313,12 @@ async fn messages_to_change(
         let folder_ids = core.agent_folder_ids(id).await?;
         if !scope.shows_message(&message, &folder_ids) {
             return Err(Failure::Refused(NOT_SHARED.to_owned()));
+        }
+        if moving && !folder_ids.iter().all(|folder_id| scope.owns(*folder_id)) {
+            return Err(Failure::Refused(format!(
+                "Agents move mail only between an account's own folders, and message {id} is \
+                 in one other people may share. The user can move it in Flectar Mail."
+            )));
         }
         messages.push(message);
     }
@@ -1342,7 +1373,7 @@ async fn mark_messages(
     if read.is_none() && flagged.is_none() {
         return Err(Failure::Failed("Pass read, flagged or both.".into()));
     }
-    let messages = messages_to_change(core, scope, arguments).await?;
+    let messages = messages_to_change(core, scope, arguments, false).await?;
     limit_changes(limiter, messages.len())?;
     let ids = messages
         .iter()
@@ -1398,9 +1429,10 @@ async fn move_messages(
     if !access.can_move {
         return Err(Failure::Refused(turned_off("Moving messages")));
     }
-    let messages = messages_to_change(core, scope, arguments).await?;
+    let messages = messages_to_change(core, scope, arguments, true).await?;
     // Archive and Trash are each account's own. Another folder must be one
-    // agents can read, in the messages' account.
+    // agents can read, in the messages' account, and its own: a folder other
+    // people share could carry the user's mail off to them.
     let (kind, folder) = match (arguments.string("to")?, arguments.integer("folder_id")?) {
         (Some("archive"), None) => (ActionKind::Archive, None),
         (Some("trash"), None) => (ActionKind::Trash, None),
@@ -1412,6 +1444,13 @@ async fn move_messages(
                 return Err(Failure::Failed(format!(
                     "{} holds folders, not messages.",
                     folder.display_name
+                )));
+            }
+            if !scope.owns(folder.id) {
+                return Err(Failure::Refused(format!(
+                    "Agents move mail only between an account's own folders, and folder \
+                     {folder_id} may be one other people share. The user can move mail there \
+                     in Flectar Mail."
                 )));
             }
             if messages
@@ -1486,7 +1525,7 @@ async fn label_messages(
             "A label can't be added and removed at once.".into(),
         ));
     }
-    let messages = messages_to_change(core, scope, arguments).await?;
+    let messages = messages_to_change(core, scope, arguments, false).await?;
     let labels = core.list_labels().await?;
     for label_id in add.iter().chain(&remove) {
         let label = labels
@@ -2023,12 +2062,14 @@ mod tests {
                 address: Some("me@example.com".into()),
                 name: None,
                 provider: "gmail",
+                protocol: MailProtocol::Gmail,
             }],
             folders: vec![
                 folder(1, Some("inbox")),
                 folder(2, Some("archive")),
                 folder(3, Some("all")),
             ],
+            own_folders: HashSet::from([1, 2, 3, 4, 5, 6]),
         };
         let mail = message("");
         assert!(scope.shows_message(&mail, &[1]));

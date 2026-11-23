@@ -8,12 +8,12 @@ use crate::db::repo;
 use crate::db::repo::agent_activity::{NewAgentActivity, Undo};
 use crate::error::Result;
 use crate::models::{
-    ActionKind, ActionParams, ActionTarget, Address, AgentAccess, AgentActivity, MessageCursor,
-    MessageDetail, MessagePage, MessageSearchCursor, MessageSearchPage, PerformActionArgs,
-    SaveDraftArgs, now_ms,
+    ActionKind, ActionParams, ActionTarget, Address, AgentAccess, AgentActivity, FolderInfo,
+    MailProtocol, MessageCursor, MessageDetail, MessagePage, MessageSearchCursor,
+    MessageSearchPage, PerformActionArgs, SaveDraftArgs, now_ms, roles,
 };
 use crate::search::{Filter, ParsedQuery};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 impl Core {
     /// Messages matching `query` in any of `folder_ids`, newest first, that
@@ -256,6 +256,91 @@ impl Core {
     }
 }
 
+/// Which of an account's `folders` that hold mail are its own rather than
+/// other people's or shared with the user, as far as Flectar Mail can tell,
+/// for agents moving mail. On IMAP that takes working out; with every other
+/// protocol each folder is the account's own. Gmail labels belong to one
+/// account, Flectar Mail reads only the JMAP account the user signed in to,
+/// which JMAP keeps apart from the accounts of mailboxes others share, and
+/// POP3 folders and mail on this device exist only here.
+pub fn own_folder_ids(protocol: MailProtocol, folders: &[&FolderInfo]) -> HashSet<i64> {
+    match protocol {
+        MailProtocol::Imap => own_imap_folder_ids(folders),
+        MailProtocol::Gmail | MailProtocol::Jmap | MailProtocol::Pop3 | MailProtocol::Local => {
+            folders
+                .iter()
+                .filter(|folder| folder.selectable)
+                .map(|folder| folder.id)
+                .collect()
+        }
+    }
+}
+
+/// An IMAP server lists other users' and shared folders with the account's
+/// own (RFC 2342 namespaces), and Flectar Mail doesn't ask which are which:
+/// imap-proto can't read the NAMESPACE answer. Those folders sit under a
+/// namespace root such as "Other Users/" or "Shared Folders/", which holds no
+/// mail, so a folder counts when every folder above it holds mail. A folder of
+/// the account's own under a folder that holds none doesn't count either,
+/// which is the safe way to be wrong. The Inbox and what's inside it are
+/// always the account's own. A server that keeps the account's folders inside
+/// the Inbox, as its special folders show, can keep shared ones at the top, so
+/// there only those count.
+fn own_imap_folder_ids(folders: &[&FolderInfo]) -> HashSet<i64> {
+    let in_inbox = |folder: &FolderInfo| {
+        let Some(rest) = folder
+            .path
+            .get(..5)
+            .filter(|start| start.eq_ignore_ascii_case("INBOX"))
+            .map(|_| &folder.path[5..])
+        else {
+            return false;
+        };
+        rest.is_empty()
+            || folder
+                .delimiter
+                .as_deref()
+                .is_some_and(|delimiter| !delimiter.is_empty() && rest.starts_with(delimiter))
+    };
+    let kept_in_inbox = folders.iter().any(|folder| {
+        folder
+            .role
+            .as_deref()
+            .is_some_and(|role| role != roles::INBOX)
+            && in_inbox(folder)
+            && !folder.path.eq_ignore_ascii_case("INBOX")
+    });
+    let holding_mail = folders
+        .iter()
+        .filter(|folder| folder.selectable)
+        .map(|folder| folder.path.as_str())
+        .collect::<HashSet<_>>();
+    let under_folders_only = |folder: &FolderInfo| {
+        let Some(delimiter) = folder.delimiter.as_deref().filter(|d| !d.is_empty()) else {
+            return true;
+        };
+        let mut path = folder.path.as_str();
+        while let Some((parent, _)) = path.rsplit_once(delimiter) {
+            if parent.is_empty() {
+                break;
+            }
+            if !holding_mail.contains(parent) {
+                return false;
+            }
+            path = parent;
+        }
+        true
+    };
+    folders
+        .iter()
+        .filter(|folder| {
+            folder.selectable
+                && (in_inbox(folder) || (!kept_in_inbox && under_folders_only(folder)))
+        })
+        .map(|folder| folder.id)
+        .collect()
+}
+
 /// Whether a message is end-to-end encrypted, with OpenPGP or S/MIME, judged
 /// from what sync stored and without decrypting anything.
 pub fn is_end_to_end_encrypted(message: &MessageDetail) -> bool {
@@ -292,6 +377,82 @@ mod tests {
             mime_type: Some(mime_type.into()),
             size: Some(10),
             is_inline: false,
+        }
+    }
+
+    fn folder(id: i64, path: &str, delimiter: &str, role: Option<&str>) -> FolderInfo {
+        FolderInfo {
+            id,
+            account_id: 1,
+            parent_id: None,
+            display_name: path.into(),
+            is_jmap: false,
+            path: path.into(),
+            delimiter: Some(delimiter.into()),
+            role: role.map(str::to_owned),
+            selectable: true,
+            can_create_children: true,
+            can_rename: true,
+            can_delete: true,
+        }
+    }
+
+    /// A namespace root or other folder that holds no mail.
+    fn container(id: i64, path: &str, delimiter: &str) -> FolderInfo {
+        FolderInfo {
+            selectable: false,
+            ..folder(id, path, delimiter, None)
+        }
+    }
+
+    fn own(protocol: MailProtocol, folders: &[FolderInfo]) -> Vec<i64> {
+        let folders = folders.iter().collect::<Vec<_>>();
+        let mut ids = own_folder_ids(protocol, &folders)
+            .into_iter()
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids
+    }
+
+    #[test]
+    fn agents_move_mail_only_between_folders_the_account_owns() {
+        // Dovecot and Cyrus keep the account's folders at the top, other
+        // users' and shared ones under a namespace root that holds no mail,
+        // listed or not.
+        let at_top = [
+            folder(1, "INBOX", "/", Some(roles::INBOX)),
+            folder(2, "INBOX/Receipts", "/", None),
+            folder(3, "Sent", "/", Some(roles::SENT)),
+            folder(4, "Work", "/", None),
+            folder(5, "Work/Clients", "/", None),
+            container(6, "shared", "/"),
+            container(7, "shared/bob", "/"),
+            folder(8, "shared/bob/Drop", "/", None),
+            folder(9, "Public Folders/Drop", "/", None),
+            container(10, "Shared Folders", "/"),
+            // Named like a special folder, so taken for one.
+            folder(11, "Shared Folders/Trash", "/", Some(roles::TRASH)),
+        ];
+        assert_eq!(own(MailProtocol::Imap, &at_top), [1, 2, 3, 4, 5]);
+        // Courier and older Cyrus keep them inside the Inbox, and shared
+        // folders, another user's Inbox among them, can sit at the top.
+        let in_inbox = [
+            folder(1, "INBOX", ".", Some(roles::INBOX)),
+            folder(2, "INBOX.Sent", ".", Some(roles::SENT)),
+            folder(3, "INBOX.Receipts", ".", None),
+            folder(4, "announcements", ".", None),
+            container(5, "user", "."),
+            folder(6, "user.bob", ".", None),
+        ];
+        assert_eq!(own(MailProtocol::Imap, &in_inbox), [1, 2, 3]);
+        // Elsewhere every folder that holds mail is the account's own.
+        for protocol in [
+            MailProtocol::Gmail,
+            MailProtocol::Jmap,
+            MailProtocol::Pop3,
+            MailProtocol::Local,
+        ] {
+            assert_eq!(own(protocol, &in_inbox), [1, 2, 3, 4, 6]);
         }
     }
 
