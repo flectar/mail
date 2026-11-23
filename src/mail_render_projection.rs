@@ -153,6 +153,43 @@ pub(super) fn clear_reader_projection(app: &AppWindow) {
     app.set_has_selection(false);
 }
 
+/// Who a message is from and to, each with their address, and when it was
+/// sent, as the reader's details list them.
+pub(super) fn message_details(email: &MailMessage) -> MessageDetails {
+    let line = |name: Option<&str>, address: &str| -> slint::SharedString {
+        match name
+            .map(str::trim)
+            .filter(|name| !name.is_empty() && !name.eq_ignore_ascii_case(address))
+        {
+            Some(name) => format!("{name} <{address}>").into(),
+            None => address.into(),
+        }
+    };
+    let lines = |people: &[flectar_mail_core::models::Address]| {
+        ModelRc::new(VecModel::from(
+            people
+                .iter()
+                .map(|person| line(person.name.as_deref(), &person.email))
+                .collect::<Vec<_>>(),
+        ))
+    };
+    let date = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(email.date_ms)
+        .filter(|_| email.date_ms > 0)
+        .map(|date| {
+            date_format::current().date_time(
+                date_format::DateStyle::WeekdayMedium,
+                date.with_timezone(&Local).naive_local(),
+            )
+        })
+        .unwrap_or_default();
+    MessageDetails {
+        from: line(Some(&email.sender), &email.address),
+        to: lines(&email.to_people),
+        cc: lines(&email.cc_people),
+        date: date.into(),
+    }
+}
+
 pub(super) fn apply_email(
     app: &AppWindow,
     email: MailMessage,
@@ -165,6 +202,7 @@ pub(super) fn apply_email(
     app.set_selected_subject(email.subject.clone().into());
     app.set_selected_time(message_time(email.date_ms, &Local::now()).into());
     app.set_selected_to(email.to.clone().into());
+    app.set_selected_details(message_details(&email));
     app.set_selected_label(email.label.clone().into());
     app.set_selected_is_draft(
         email.folder == "Drafts" || email.send_at.is_some() || email.label == "DRAFT",
