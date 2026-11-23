@@ -868,18 +868,37 @@ struct SoftwareReader {
     state: Rc<RefCell<InboxState>>,
     renderer: Rc<RefCell<GpuEmailRenderer>>,
     pixels: RefCell<Vec<Rgb8Pixel>>,
+    /// The window's size in physical pixels.
+    size: (u32, u32),
     _cache: tempfile::TempDir,
 }
 
 impl SoftwareReader {
-    const SIZE: (u32, u32) = (2560, 1800);
-
     fn new(messages: Vec<MailMessage>) -> Self {
+        Self::build(messages, (2560, 1800), 2.0, false)
+    }
+
+    /// A phone's window, 1080x2400 at 420 dpi, which has its final size
+    /// before the mail view appears and never resizes it.
+    fn phone(messages: Vec<MailMessage>) -> Self {
+        Self::build(messages, (1080, 2400), 2.625, true)
+    }
+
+    fn build(
+        messages: Vec<MailMessage>,
+        (width, height): (u32, u32),
+        scale_factor: f32,
+        sized_first: bool,
+    ) -> Self {
         let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
         slint::platform::set_platform(Box::new(Headless(window.clone(), Rc::default()))).unwrap();
         let app = AppWindow::new().unwrap();
         app.window()
-            .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 2.0 });
+            .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor });
+        if sized_first {
+            app.window()
+                .set_size(slint::PhysicalSize::new(width, height));
+        }
         app.set_startup_ready(true);
         app.set_startup_hydrated(true);
         app.set_connected_accounts(ModelRc::new(VecModel::from(vec![AccountRow {
@@ -887,7 +906,6 @@ impl SoftwareReader {
             ..Default::default()
         }])));
         app.set_active_view("mail".into());
-        let (width, height) = Self::SIZE;
         app.window()
             .set_size(slint::PhysicalSize::new(width, height));
         app.show().unwrap();
@@ -925,6 +943,7 @@ impl SoftwareReader {
             state: Rc::new(RefCell::new(state)),
             renderer,
             pixels: RefCell::new(vec![Rgb8Pixel::default(); (width * height) as usize]),
+            size: (width, height),
             _cache: cache,
         }
     }
@@ -949,7 +968,7 @@ impl SoftwareReader {
         }
         self.app.window().request_redraw();
         self.window.draw_if_needed(|r| {
-            r.render(&mut self.pixels.borrow_mut(), Self::SIZE.0 as usize);
+            r.render(&mut self.pixels.borrow_mut(), self.size.0 as usize);
         });
     }
 
@@ -970,6 +989,68 @@ impl SoftwareReader {
             self.paint();
         }
     }
+}
+
+/// A message a few tiles tall: a red block across half the width, on blue.
+fn blocks_message() -> MailMessage {
+    let mut message = mail::fixture_messages().remove(0);
+    message.folder = "Inbox".into();
+    message.body_pending = false;
+    message.html = Some(
+        "<body style='margin:0;background:#00f'>\
+         <div style='width:50%;height:600px;background:#f00'></div>\
+         <p style='height:1200px'>End of message</p></body>"
+            .into(),
+    );
+    message
+}
+
+/// Until the window reports the reading pane's width, tiles are painted for
+/// the fallback width, and the ratio they're drawn at must follow it: against
+/// a width of 0 it scaled them up hundreds of times.
+#[test]
+fn an_unreported_reader_width_keeps_the_fallback_ratio() {
+    let view = SoftwareReader::new(vec![blocks_message()]);
+    let app = &view.app;
+    app.set_email_viewport_width(0.0);
+    view.render();
+    sync_reader_metadata(app, &view.renderer);
+    let (fallback, _) = email_viewport_size(app);
+    let expected = (view.renderer.borrow().layout_width / fallback as f32).max(1.0);
+    let ratio = app.global::<EmailReader>().get_width_ratio();
+    assert!(
+        (ratio - expected).abs() < 0.01,
+        "width ratio {ratio}, expected {expected}"
+    );
+    app.hide().unwrap();
+}
+
+/// A phone's window has its final size before the mail view appears and never
+/// resizes it. The reader must still learn the reading pane's width: without
+/// it each tile was drawn hundreds of times too large, and the body showed
+/// only the color of its first pixel.
+#[test]
+fn readers_that_never_resize_draw_tiles_at_their_painted_size() {
+    let view = SoftwareReader::phone(vec![blocks_message()]);
+    view.render();
+    sync_reader_metadata(&view.app, &view.renderer);
+    view.paint();
+    let app = &view.app;
+    let width = app.get_email_viewport_width();
+    assert!(width > 0.0, "the reader never learned the pane's width");
+    let ratio = app.global::<EmailReader>().get_width_ratio();
+    let scale = app.window().scale_factor();
+    let tiles = app.get_email_tiles();
+    assert!(tiles.row_count() > 1, "the message spans several tiles");
+    for tile in tiles.iter() {
+        let drawn = tile.height * width * ratio * scale;
+        let painted = tile.image.size().height as f32;
+        assert!(
+            (drawn - painted).abs() <= 2.0,
+            "a tile painted {painted} px tall is drawn {drawn} px tall"
+        );
+    }
+    app.hide().unwrap();
 }
 
 #[test]
