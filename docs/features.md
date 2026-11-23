@@ -568,6 +568,12 @@ from this device or from the server, and a copy of mail sent from here leaves
 out who it was blind copied to. A forward waits for its files, these and the
 original's attachments, before it can be sent.
 
+A message that carries another message inside it, as some mail apps forward
+one and as a bounce returns one, shows that message below its own text, under
+the sender, date, subject and recipients it had. One sent as an attachment
+stays a file. Either way it's listed with the files as an `.eml` file named
+after its subject, and so are the files it carries.
+
 **Email templates** keep a subject and message to start from, which the
 composer's template list inserts at the cursor. **Insert placeholder** in a
 template's editor adds placeholders, such as `{{recipient.first_name}}`,
