@@ -111,6 +111,10 @@ pub struct DeviceSyncStatus {
     /// What the group pays. `None` on a server that doesn't charge, or
     /// before the server was asked.
     pub billing: Option<SyncBilling>,
+    /// Accounts this device had before it joined keep their passwords and
+    /// sign-ins here until the user shares them
+    /// ([`Core::device_sync_share_held_sign_ins`]).
+    pub held_sign_ins: bool,
 }
 
 impl Default for DeviceSyncStatus {
@@ -121,6 +125,7 @@ impl Default for DeviceSyncStatus {
             last_synced_at: None,
             devices: Vec::new(),
             billing: None,
+            held_sign_ins: false,
         }
     }
 }
@@ -509,6 +514,11 @@ impl Core {
                     None => Vec::new(),
                 };
                 store::create_row(&tx, &server_url, &chain, adopting, now_ms())?;
+                // Joined a group: the sign-ins of the accounts this device
+                // already had wait for the user's word.
+                if adopting {
+                    crate::db::repo::sign_ins::hold_existing(&tx)?;
+                }
                 tx.commit()?;
                 Ok(threads)
             })
@@ -1379,9 +1389,14 @@ impl Core {
             return;
         };
         let state = client.state().await;
-        let mirror = self
+        let (mirror, held_sign_ins) = self
             .db
-            .read(|conn| store::load_mirror(conn))
+            .read(|conn| {
+                Ok((
+                    store::load_mirror(conn)?,
+                    !crate::db::repo::sign_ins::held(conn)?.is_empty(),
+                ))
+            })
             .await
             .unwrap_or_default();
         let entries: BTreeMap<RecordId, Entry> = mirror
@@ -1419,7 +1434,11 @@ impl Core {
             })
             .collect();
         devices.sort_by(|a, b| b.this_device.cmp(&a.this_device).then(a.name.cmp(&b.name)));
-        lock(&self.sync_service().status).devices = devices;
+        {
+            let mut status = lock(&self.sync_service().status);
+            status.devices = devices;
+            status.held_sign_ins = held_sign_ins;
+        }
         self.emit_sync_status();
     }
 
@@ -1836,8 +1855,6 @@ impl Core {
         Ok(code.to_words())
     }
 
-    /// Stop syncing on this device and leave the group. The app's data
-    /// stays here; the other devices keep syncing.
     /// Sync passwords and sign-ins, or stop, on every device of the group:
     /// the setting syncs too. Off, their records go from the server; on,
     /// each device reads its credential store again and shares them.
@@ -1860,6 +1877,20 @@ impl Core {
         Ok(())
     }
 
+    /// Share the passwords and sign-ins of the accounts this device had
+    /// before it joined, like those of accounts added since. Until the user
+    /// asks for it here, they stay on this device.
+    pub async fn device_sync_share_held_sign_ins(&self) -> Result<()> {
+        self.db
+            .write(|conn| crate::db::repo::sign_ins::release_holds(conn))
+            .await?;
+        self.refresh_sync_devices().await;
+        self.device_sync_now();
+        Ok(())
+    }
+
+    /// Stop syncing on this device and leave the group. The app's data
+    /// stays here; the other devices keep syncing.
     pub async fn device_sync_turn_off(&self) -> Result<()> {
         // The keys go too: a store that can't change now, such as a locked
         // keyring, leaves everything as it is.

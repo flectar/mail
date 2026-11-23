@@ -90,6 +90,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/071_account_authentication.sql")),
     Migration::Plain(include_str!("migrations/072_sealed_deletions.sql")),
     Migration::Plain(include_str!("migrations/073_sync_turned_away.sql")),
+    Migration::Plain(include_str!("migrations/074_sign_in_holds.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -457,6 +458,7 @@ mod tests {
             "sender_identities",
             "server_rules",
             "sign_in_arrivals",
+            "sign_in_holds",
             "sign_in_shares",
             "snippets",
             "snoozes",

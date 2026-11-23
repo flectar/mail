@@ -60,6 +60,9 @@ export global SyncUi {
     in property <bool> qr-pairing: false;
     // Passwords and sign-ins sync too, on every device of the group.
     in-out property <bool> sync-sign-ins: true;
+    // Accounts this device had before it joined keep their passwords and
+    // sign-ins here until the user shares them.
+    in property <bool> held-sign-ins;
 
     // What Flectar's server charges, shown while sync is off: the days of
     // free trial, and the monthly and yearly prices, such as "€4". Empty
@@ -126,6 +129,8 @@ export global SyncUi {
     callback turn-off();
     callback delete-everywhere();
     callback set-sync-sign-ins(bool /* on */);
+    // Share the sign-ins of the accounts this device had before it joined.
+    callback share-sign-ins();
     callback sync-now();
     // The settings page opened.
     callback opened();
@@ -579,6 +584,8 @@ export component SyncSettingsPage inherits VerticalBox {
     callback confirm-delete();
 
     private property <bool> on: SyncUi.state == "idle" || SyncUi.state == "syncing" || SyncUi.state == "error" || SyncUi.state == "payment";
+    // Sign-ins from before this device joined wait for the user's word.
+    private property <bool> asking-sign-ins: SyncUi.held-sign-ins && SyncUi.sync-sign-ins;
     private property <bool> paused: SyncUi.state == "payment";
     // The offer applies to Flectar's server, not to one typed in.
     private property <bool> offered: SyncUi.can-buy && SyncUi.server == "" && (SyncUi.offer-monthly != "" || SyncUi.offer-yearly != "");
@@ -900,21 +907,39 @@ export component SyncSettingsPage inherits VerticalBox {
         compact: root.compact;
         title: @tr("Passwords and sign-ins");
         description: @tr("Your other devices are signed in to your accounts at once.");
-        note: @tr("End-to-end encrypted, for all your devices. Anyone with your recovery code can sign in to your accounts.");
+        note: root.asking-sign-ins
+            ? @tr("Accounts that were on this device before you connected it keep their passwords and sign-ins here until you share them. Share them only if every device above is yours.")
+            : @tr("End-to-end encrypted, for all your devices. Anyone with your recovery code can sign in to your accounts.");
         icon: @image-url("icons/lucide/outline/key.svg");
         icon-color: root.accent;
-        actions-width: 38px;
-        actions-height: 22px;
+        actions-width: root.asking-sign-ins ? 160px : 38px;
+        actions-height: root.asking-sign-ins ? 32px : 22px;
         surface: root.surface;
         card-border-color: root.card-border-color;
         heading: root.heading;
         secondary-text: root.secondary-text;
         faint-text: root.faint-text;
-        Switch {
+        if !root.asking-sign-ins : Switch {
             checked <=> SyncUi.sync-sign-ins;
             enabled: !SyncUi.busy;
             control-label: @tr("Sync passwords and sign-ins");
             toggled => { SyncUi.set-sync-sign-ins(SyncUi.sync-sign-ins); }
+        }
+        if root.asking-sign-ins : Button {
+            min-width: max(110px, self.content-width);
+            horizontal-stretch: 1;
+            text: @tr("Share");
+            enabled: !SyncUi.busy;
+            clicked => { SyncUi.share-sign-ins(); }
+        }
+        if root.asking-sign-ins : VerticalLayout {
+            alignment: center;
+            Switch {
+                checked <=> SyncUi.sync-sign-ins;
+                enabled: !SyncUi.busy;
+                control-label: @tr("Sync passwords and sign-ins");
+                toggled => { SyncUi.set-sync-sign-ins(SyncUi.sync-sign-ins); }
+            }
         }
     }
 

@@ -152,7 +152,8 @@ pub(crate) fn clear(conn: &Connection) -> Result<()> {
         "DELETE FROM device_sync;
          DELETE FROM device_sync_mirror;
          DELETE FROM device_sync_outbox;
-         DELETE FROM device_sync_local;",
+         DELETE FROM device_sync_local;
+         DELETE FROM sign_in_holds;",
     )?;
     Ok(())
 }

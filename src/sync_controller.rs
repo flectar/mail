@@ -118,6 +118,8 @@ impl SyncController {
         ui.on_delete_everywhere(move || delete.delete_everywhere());
         let sign_ins = actions.clone();
         ui.on_set_sync_sign_ins(move |on| sign_ins.set_sync_sign_ins(on));
+        let share = actions.clone();
+        ui.on_share_sign_ins(move || share.share_sign_ins());
         let opened = actions.clone();
         ui.on_opened(move || opened.opened());
         let subscribe = actions.clone();
@@ -184,6 +186,7 @@ impl SyncController {
         ui.set_last_synced(last_synced.into());
         ui.set_last_synced_today(today);
         ui.set_server_url(status.server_url.as_deref().unwrap_or_default().into());
+        ui.set_held_sign_ins(status.held_sign_ins);
         self.devices.reconcile_by(
             status
                 .devices
@@ -583,6 +586,21 @@ impl Actions {
                     ui.set_sync_sign_ins(!on);
                     show_failure(ui, "sign-ins", &error_text(&error));
                 }
+            },
+        );
+    }
+
+    /// Share the sign-ins of the accounts this device had before it joined,
+    /// as the user asked.
+    fn share_sign_ins(&self) {
+        let Some(core) = self.core() else {
+            return;
+        };
+        self.run(
+            async move { core.device_sync_share_held_sign_ins().await },
+            |ui, _, result| match result {
+                Ok(()) => show_failure(ui, "", ""),
+                Err(error) => show_failure(ui, "sign-ins", &error_text(&error)),
             },
         );
     }
