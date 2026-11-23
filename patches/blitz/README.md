@@ -60,7 +60,8 @@ its matches through 0015's `set_text_highlights`. The reader's CPU renderer blur
 only the blurs and drop shadows it runs, since it panics on colour matrices. The
 mail sanitizer keeps the presentational attributes these patches map, such as
 `background`, `clear`, `frame`, `rules`, `noshade`, `type`, `reversed` and `value`,
-as other mail clients' sanitizers do.
+and elements ammonia's defaults leave out, such as `section` and `main`, as
+other mail clients' sanitizers do.
 
 Table-cell layout adjustments use temporary computed-style overrides. They do
 not mutate the author's primary style or its shared hint blocks. Each call

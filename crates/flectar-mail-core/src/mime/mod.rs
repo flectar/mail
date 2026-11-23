@@ -1167,6 +1167,10 @@ fn mail_sanitizer() -> ammonia::Builder<'static> {
         "html", "head", "body", "meta", "title", "table", "thead", "tbody", "tfoot", "tr", "td",
         "th", "center", "font", "img", "style",
     ])
+    // Elements that browsers render, which ammonia's defaults leave out and
+    // other mail clients' sanitizers keep. Dropping one drops its box and its
+    // style with it.
+    .add_tags(["section", "main", "address", "big", "nobr", "dir", "menu"])
     .add_tag_attributes("meta", ["name", "content", "http-equiv"])
     .add_tag_attributes("img", ["src", "alt", "width", "height"])
     .add_tag_attributes("font", ["face", "size", "color"])
@@ -4465,6 +4469,24 @@ mod tests {
         }
         for dropped in ["bordercolor", "onload", "link="] {
             assert!(!cleaned.contains(dropped), "{dropped} kept in {cleaned}");
+        }
+    }
+
+    #[test]
+    fn sanitizing_html_keeps_the_boxes_browsers_render() {
+        let cleaned = sanitize_html(
+            r#"<main style="max-width:600px"><section class="hero" style="padding:24px">Hi <big>big</big> <nobr>no break</nobr></section><address>Street 1</address><dir><li>a</li></dir><menu><li>b</li></menu></main>"#,
+        );
+        for kept in [
+            r#"<main style="max-width:600px">"#,
+            r#"<section class="hero" style="padding:24px">"#,
+            "<big>big</big>",
+            "<nobr>no break</nobr>",
+            "<address>Street 1</address>",
+            "<dir><li>a</li></dir>",
+            "<menu><li>b</li></menu>",
+        ] {
+            assert!(cleaned.contains(kept), "{kept} missing in {cleaned}");
         }
     }
 
