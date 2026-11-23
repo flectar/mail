@@ -3874,7 +3874,6 @@ dependencies = [
  "email_address",
  "futures-io",
  "futures-util",
- "hostname",
  "idna",
  "nom 8.0.0",
  "percent-encoding",
