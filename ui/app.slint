@@ -720,6 +720,10 @@ export global I18n {
         if (key == "Updating sync settings…") { return @tr("Updating sync settings…"); }
         if (key == "Sync settings updated.") { return @tr("Sync settings updated."); }
         if (key == "Could not update sync settings: {}") { return @tr("Could not update sync settings: {}", argument); }
+        if (key == "Account names require local mail data.") { return @tr("Account names require local mail data."); }
+        if (key == "Saving the account name…") { return @tr("Saving the account name…"); }
+        if (key == "Account name saved.") { return @tr("Account name saved."); }
+        if (key == "Could not save the account name: {}") { return @tr("Could not save the account name: {}", argument); }
         if (key == "Mail history requires local mail data.") { return @tr("Mail history requires local mail data."); }
         if (key == "Updating mail history…") { return @tr("Updating mail history…"); }
         if (key == "Remote images are unavailable in this minimal build.") { return @tr("Remote images are unavailable in this minimal build."); }
@@ -1154,6 +1158,7 @@ export component AppWindow inherits Window {
     callback save_account_check_interval(int, string);
     callback save_account_push(int, bool);
     callback save_account_server_timeout(int, int);
+    callback save_account_name(int, string);
     callback save_account_download(int, string);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
@@ -2586,6 +2591,7 @@ export component AppWindow inherits Window {
             save_account_check_interval(account-id, value) => { root.save_account_check_interval(account-id, value); }
             save_account_push(account-id, enabled) => { root.save_account_push(account-id, enabled); }
             save_account_server_timeout(account-id, seconds) => { root.save_account_server_timeout(account-id, seconds); }
+            save_account_name(account-id, name) => { root.save_account_name(account-id, name); }
             save_account_download(account-id, value) => { root.save_account_download(account-id, value); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
             connect_caldav(account-id, connection-id, url, username, password) => { root.connect_caldav(account-id, connection-id, url, username, password); }

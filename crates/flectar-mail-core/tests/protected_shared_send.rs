@@ -112,6 +112,7 @@ fn imap_account(email: &str) -> PortableAccountConfig {
     PortableAccountConfig {
         email: email.into(),
         display_name: Some("Work".into()),
+        name: None,
         provider: Provider::Generic,
         auth_kind: AuthKind::Password,
         mail_protocol: MailProtocol::Imap,

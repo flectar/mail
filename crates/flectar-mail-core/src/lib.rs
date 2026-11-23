@@ -421,6 +421,7 @@ fn password_account_config(args: &AddPasswordAccountArgs, id: i64) -> AccountCon
         id,
         email: args.email.clone(),
         display_name: None,
+        name: None,
         avatar_url: None,
         provider: Provider::Generic,
         auth_kind: AuthKind::Password,
@@ -1750,7 +1751,7 @@ impl Core {
                     {
                         continue;
                     }
-                    repo::accounts::insert_with_sync_state(
+                    let id = repo::accounts::insert_with_sync_state(
                         &transaction,
                         &repo::accounts::NewAccount {
                             email: config.email.trim(),
@@ -1770,12 +1771,29 @@ impl Core {
                         &config.settings,
                         "needs_reauth",
                     )?;
+                    let name = config.name.as_deref().and_then(clean_account_name);
+                    repo::accounts::set_name(&transaction, id, name.as_deref())?;
                     imported += 1;
                 }
                 transaction.commit()?;
                 Ok(imported)
             })
             .await
+    }
+
+    /// Give an account the name lists of accounts show instead of its
+    /// address, such as "Work", or take it away with a blank name. People the
+    /// account writes to never see it.
+    pub async fn set_account_name(&self, account_id: i64, name: &str) -> Result<()> {
+        let name = clean_account_name(name);
+        self.db
+            .write(move |conn| repo::accounts::set_name(conn, account_id, name.as_deref()))
+            .await?;
+        // Lists of accounts, such as the sidebar's, show the new name, and
+        // the user's other devices get it.
+        self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        self.device_sync_now();
+        Ok(())
     }
 
     pub async fn reorder_account(&self, source_id: i64, target_id: i64, after: bool) -> Result<()> {
@@ -3308,7 +3326,6 @@ impl Core {
                 retire_active_mail_profile(&mut settings);
                 let account_key = account_id.to_string();
                 settings.account_colors.remove(&account_key);
-                settings.account_short_names.remove(&account_key);
                 settings.account_themes.remove(&account_key);
                 settings.signature_defaults.remove(&account_key);
                 settings
@@ -15312,6 +15329,7 @@ mod account_backup_import_tests {
         PortableAccountConfig {
             email: email.into(),
             display_name: Some("Portable account".into()),
+            name: None,
             provider: Provider::Generic,
             auth_kind: AuthKind::Password,
             mail_protocol: MailProtocol::Imap,
@@ -17893,7 +17911,7 @@ mod body_read_again_tests {
         --b--\r\n";
 
     /// A message of account 1 kept before #455 with only its own text, and
-    /// marked to be read again as migration 68 marks one. `raw_path` is
+    /// marked to be read again as migration 69 marks one. `raw_path` is
     /// where its original is kept, if anywhere.
     async fn kept(core: &Core, raw_path: Option<String>) -> i64 {
         core.db

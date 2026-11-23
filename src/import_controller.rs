@@ -1568,6 +1568,7 @@ mod tests {
             id,
             email: email.into(),
             display_name: None,
+            name: None,
             avatar_url: None,
             provider: Provider::Generic,
             auth_kind: AuthKind::Password,
