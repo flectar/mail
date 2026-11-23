@@ -1556,11 +1556,10 @@ async fn persist_emails(
                             stale_paths.push(path);
                         }
                     }
-                    // A changed message is read again from its preview
-                    // until its new body arrives.
-                    let verification_code = (!is_outgoing && !is_draft)
-                        .then(|| crate::verification_code::find(&subject, &snippet))
-                        .flatten();
+                    // A changed message offers no code until its new body
+                    // arrives: a code comes only from a confirmed sender, and
+                    // the server's verdict comes with the body.
+                    let verification_code: Option<String> = None;
                     // JMAP messages carry no IMAP UID; an adopted one drops
                     // the UID its earlier copy had in another folder.
                     tx.execute(
@@ -2424,6 +2423,15 @@ async fn persist_bodies(ctx: &SyncCtx, account_id: i64, bodies: Vec<DownloadedBo
                     "UPDATE messages SET jmap_attachments_blob_id=?2 WHERE id=?1",
                     params![message_id, body.blob_id],
                 )?;
+                // First, as a code in the body is offered only from a
+                // confirmed sender.
+                if let Some(headers) = &body.headers {
+                    repo::messages::set_sender_verification(
+                        &tx,
+                        message_id,
+                        headers.sender_verification,
+                    )?;
+                }
                 // The paperclip stays the server's call (RFC 8621 hasAttachment).
                 repo::messages::store_body(
                     &tx,
@@ -2435,11 +2443,6 @@ async fn persist_bodies(ctx: &SyncCtx, account_id: i64, bodies: Vec<DownloadedBo
                     Some(&body.snippet),
                 )?;
                 if let Some(headers) = &body.headers {
-                    repo::messages::set_sender_verification(
-                        &tx,
-                        message_id,
-                        headers.sender_verification,
-                    )?;
                     repo::messages::fill_list_headers(
                         &tx,
                         message_id,

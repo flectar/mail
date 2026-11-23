@@ -79,7 +79,8 @@ const SUMMARY_SELECT: &str = "
               JOIN messages ml_m ON ml_m.id = ml.message_id
               WHERE ml_m.thread_id = t.id) AS label_ids,
            (SELECT m.verification_code
-              FROM messages m WHERE m.thread_id = t.id ORDER BY m.date DESC LIMIT 1)
+              FROM messages m WHERE m.thread_id = t.id
+              ORDER BY COALESCE(m.internal_date, m.date) DESC LIMIT 1)
              AS verification_code,
            (SELECT json_array(f.id, f.filename, f.mime_type, f.size)
               FROM messages fm JOIN attachments f ON f.message_id = fm.id
@@ -924,6 +925,35 @@ mod tests {
         recompute(&conn, thread_id).unwrap();
 
         assert!(get_summary(&conn, thread_id).unwrap().unwrap().has_replied);
+    }
+
+    #[test]
+    fn summary_takes_the_code_the_server_received_last() {
+        let conn = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&conn);
+        let (thread_id, real) =
+            crate::db::testutil::seed_message(&conn, "noreply@acme.test", "Your code", true);
+        conn.execute(
+            "UPDATE messages SET verification_code = '111111', internal_date = 2000 WHERE id = ?1",
+            [real],
+        )
+        .unwrap();
+        // A Date its sender set in the future doesn't make a message newer.
+        conn.execute(
+            "INSERT INTO messages (thread_id, account_id, folder_id, uid, message_id, subject,
+             from_addr, date, internal_date, verification_code)
+             VALUES (?1, 1, 1, 2, 'forged-code', 'Re: Your code', 'x@evil.test', 9999, 1500, '999999')",
+            [thread_id],
+        )
+        .unwrap();
+        assert_eq!(
+            get_summary(&conn, thread_id)
+                .unwrap()
+                .unwrap()
+                .verification_code
+                .as_deref(),
+            Some("111111")
+        );
     }
 
     #[test]

@@ -430,9 +430,12 @@ pub fn set_jmap_remote(
 pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> {
     // The body may arrive later; until then the subject and preview are
     // all there is to read, and storing the body reads it again.
-    let verification_code = (!m.is_outgoing && !m.is_draft)
-        .then(|| crate::verification_code::find(&m.subject, &m.snippet))
-        .flatten();
+    // A code is offered only from a sender the receiving server confirmed:
+    // anyone can send mail that looks like a code into a thread.
+    let verification_code =
+        (!m.is_outgoing && !m.is_draft && m.sender_verification != SenderVerification::None)
+            .then(|| crate::verification_code::find(&m.subject, &m.snippet))
+            .flatten();
     conn.execute(
         "INSERT INTO messages (account_id, thread_id, folder_id, uid, message_id, gm_msgid, gm_thrid,
             subject, from_name, from_addr, to_json, cc_json, bcc_json, date, internal_date,
@@ -867,7 +870,7 @@ pub fn store_body(
     let received: Option<(String, String)> = conn
         .query_row(
             "SELECT subject, snippet FROM messages
-             WHERE id = ?1 AND is_outgoing = 0 AND is_draft = 0",
+             WHERE id = ?1 AND is_outgoing = 0 AND is_draft = 0 AND sender_verification != ''",
             [id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -2114,7 +2117,7 @@ mod tests {
             list_unsubscribe_post: None,
             list_id: None,
             sender_addr: None,
-            sender_verification: SenderVerification::None,
+            sender_verification: SenderVerification::Domain,
             receipt_to: Vec::new(),
             receipt_confirm: false,
             receipt_handled: false,
@@ -2148,6 +2151,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(code(previewed).as_deref(), Some("482913"));
+        // A sender the receiving server didn't confirm offers none, in its
+        // preview or its body: anyone can send a code into a thread.
+        let mut unconfirmed = received(
+            "Re: Your Acme code",
+            "Your verification code is 111111",
+            false,
+        );
+        unconfirmed.sender_verification = SenderVerification::None;
+        let unconfirmed = insert(&conn, &unconfirmed, 10).unwrap();
+        assert_eq!(code(unconfirmed), None);
+        store_body(
+            &conn,
+            unconfirmed,
+            Some("Your verification code is 111111"),
+            None,
+            None,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(code(unconfirmed), None);
         // Sent mail never offers a code, even one it quotes.
         let sent = insert(
             &conn,
