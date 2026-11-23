@@ -2198,3 +2198,17 @@ fn an_auto_table_widens_to_its_columns_within_its_container() {
     assert!(width("#a") < 400.0, "{}", width("#a"));
     close(width("#b"), 100.0);
 }
+
+#[test]
+fn collapsed_borders_follow_the_rows_below_a_caption() {
+    // A caption above the table moves its rows down, and the borders the
+    // table paints for them in the collapsing model go with them.
+    let mut doc = document(
+        "<table style='border-collapse:collapse'><caption style='height:40px'></caption>
+         <tr><td style='border:2px solid #00f;width:50px;height:20px'></td></tr></table>",
+    );
+    let pixels = paint(&mut doc);
+    let blue = |y: usize| pixels[(y * 400 + 25) * 4..][..4] == [0, 0, 255, 255];
+    let rows: Vec<usize> = (0..80).filter(|&y| blue(y)).collect();
+    assert!(!rows.is_empty() && rows.iter().all(|&y| y >= 39), "{rows:?}");
+}

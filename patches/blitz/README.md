@@ -46,6 +46,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0026 blocks inside inline elements | An inline element that holds a block, such as a link around an image and its caption, is split around the block as CSS 2.1 section 9.2.1.1 has it and browsers show it. The block becomes a child of the container, between anonymous blocks that hold the inline content around it with the element's parts before and after the block, so the element's text before the block shares a line with the text before the element, and its text after the block shares one with what follows, such as a `<br>`, which made an empty line. The element's padding and border are on its first and last lines instead of around the block. One that holds only blocks still lays out as a block box, as before, which matches browsers and keeps a box for the reader's links. |
 | 0027 table baselines | A table's first baseline is its first row's and its last baseline its last row's, as CSS 2.1 section 10.8.1 and Blink have it, which is where an inline table sits in its line. A row's baseline is the lowest first baseline of its cells aligned on their baseline that hold content, and without one, as with the `middle` cells of most tables, the bottom of the row less the least padding and border below a cell's content, as Blink's row layout finds it. Before, the first cell's first line set it whatever the cell's alignment, so a line with an inline table lacked its descent, and a caption above the table didn't lower it. A table's `valign` maps to its `vertical-align` as in Blink, so `valign="top"` sets an inline table at the top of its line. |
 | 0028 table widths | A table is at least as wide as its captions' min-content widths with their margins, as in Blink, so a caption longer than the columns widens the table instead of breaking its words onto lines of their own. A fixed-layout table sizes its columns as Blink does (CSS 2.1 section 17.5.2.1). A percentage column takes its percentage and its cells' padding and border, and percentage columns scale down together when they overflow the table, where they ran past its edge. Length and percentage columns scale up to fill the table when no auto column takes the rest, auto columns share what is left, and length columns wider than the table widen it. An auto-width table narrower than its columns' minimums widens to them, as in browsers. Only where that would overflow its container do text-only cells break their long words, once the table has taken all the room it has, where before they broke whenever the columns overflowed the table's own width. |
+| 0029 collapsed borders below captions | A table with `border-collapse: collapse` paints its cells' borders where its rows are below a caption above it, as the rows move down past the caption. They were painted where the rows would be without the caption, over it. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
@@ -53,7 +54,7 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0028 are local, and upstream main collects selection ranges as beta.4 does. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0029 are local, and upstream main collects selection ranges as beta.4 does. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
 when a release contains them.
 
 Copied text, find in the reader and accessible names leave out 0011's edge
@@ -124,7 +125,8 @@ highlights, 0016's cell percentage padding and legacy word-break, 0017's
 unavailable images, 0018's rules and bevels, 0019's text shadows, 0021's
 lists, 0022's `background` and `clear` attributes, 0023's soft hyphens, 0024's
 images without a source, 0025's percentage columns and cell `max-width`, 0026's
-blocks inside inline elements, 0027's table baselines, and 0028's table widths.
+blocks inside inline elements, 0027's table baselines, 0028's table widths, and 0029's collapsed borders below
+captions.
 Application renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.

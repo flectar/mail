@@ -2018,6 +2018,13 @@ impl TableTreeWrapper<'_, '_> {
                     layout.location.y += above;
                     self.doc.set_unrounded_layout(node_id, &layout);
                 }
+                // Collapsed borders are painted along the rows, which move too.
+                if let Some(info) = ctx.computed_grid_info.borrow_mut().as_mut() {
+                    for line in &mut info.rows.positions {
+                        line.start += above;
+                        line.end += above;
+                    }
+                }
             }
             let (mut top, mut bottom) = (0.0, above + output.size.height);
             for (caption, side, margin, border, padding, caption_output) in placed {
