@@ -312,6 +312,15 @@ class PackagingTests(unittest.TestCase):
                 self.assertEqual(info["MinimumOSVersion"], "17.0")
                 self.assertEqual(info["CFBundleSupportedPlatforms"], ["iPhoneSimulator" if simulator else "iPhoneOS"])
 
+    def test_ios_framework_version_is_the_staged_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "Info.plist"
+            framework.write(path, False)
+            info = plistlib.loads(path.read_bytes())
+            build = stage.RELEASE.removeprefix("chromium/")
+            self.assertEqual(info["CFBundleVersion"], build)
+            self.assertEqual(info["CFBundleShortVersionString"], f"{build}.0.0")
+
 
 if __name__ == "__main__":
     unittest.main()
