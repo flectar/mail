@@ -12094,9 +12094,9 @@ fn name_draft(conn: &rusqlite::Connection, draft_id: i64) -> Result<(String, boo
         .map_or("localhost", |(_, domain)| domain)
         .to_owned();
     let unnamed = conn.execute(
-        "UPDATE messages SET message_id = printf('%d.%s@%s', ?2, lower(hex(randomblob(8))), ?3)
+        "UPDATE messages SET message_id = printf('%s@%s', lower(hex(randomblob(16))), ?2)
          WHERE id = ?1 AND (message_id IS NULL OR trim(message_id) = '')",
-        rusqlite::params![draft_id, now_ms().saturating_mul(1000), domain],
+        rusqlite::params![draft_id, domain],
     )? > 0;
     let message_id: String = conn.query_row(
         "SELECT trim(message_id, '<> ') FROM messages WHERE id = ?1",

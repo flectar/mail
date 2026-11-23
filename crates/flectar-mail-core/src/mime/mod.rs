@@ -3620,12 +3620,9 @@ pub fn build_read_receipt(receipt: &ReadReceipt) -> Result<(String, Vec<u8>)> {
     use mail_builder::headers::content_type::ContentType;
     use mail_builder::mime::{BodyPart, MimePart};
     check_addresses(std::iter::once(receipt.recipient).chain(receipt.to))?;
-    let msg_id = format!(
-        "{}.{}@{}",
-        chrono::Utc::now().timestamp_micros(),
-        rand_token(),
-        receipt.reporting_domain
-    );
+    let msg_id = new_message_id(receipt.reporting_domain)
+        .trim_matches(['<', '>'])
+        .to_owned();
     let original_id = receipt.original_message_id.and_then(plain_message_id);
     // Section 3: "manual-action" even when the user set the client to send
     // on its own; MDN-sent-manually only for one they agreed to.
@@ -3770,14 +3767,7 @@ fn build_message_with_attachments<'a>(
     let stable_id = out.message_id.and_then(plain_message_id);
     let msg_id = stable_id
         .map(|value| format!("<{value}>"))
-        .unwrap_or_else(|| {
-            format!(
-                "<{}.{}@{}>",
-                chrono::Utc::now().timestamp_micros(),
-                rand_token(),
-                out.message_id_domain
-            )
-        });
+        .unwrap_or_else(|| new_message_id(out.message_id_domain));
 
     let addresses = |items: &'a [Address]| {
         mail_builder::headers::address::Address::new_list(
@@ -4001,6 +3991,18 @@ fn check_addresses<'a>(addresses: impl IntoIterator<Item = &'a Address>) -> Resu
         ))),
         None => Ok(()),
     }
+}
+
+/// A new Message-ID for `domain`, in angle brackets. Its left part is random:
+/// one made from the time would tell every recipient when the message was
+/// written, which a scheduled message is often meant not to.
+fn new_message_id(domain: &str) -> String {
+    use rand::Rng;
+    let mut rng = rand::rng();
+    let token: String = (0..26)
+        .map(|_| char::from_digit(rng.random_range(0..36), 36).unwrap_or('0'))
+        .collect();
+    format!("<{token}@{domain}>")
 }
 
 pub(crate) fn rand_token() -> String {
@@ -5057,6 +5059,24 @@ mod tests {
         let mut message = outgoing("plain", None);
         message.to = &to;
         assert!(build_message(&message).is_ok());
+    }
+
+    #[test]
+    fn new_message_ids_say_nothing_about_when_a_message_was_written() {
+        let (first, _) = build_message(&outgoing("plain", None)).unwrap();
+        let (second, _) = build_message(&outgoing("plain", None)).unwrap();
+        assert_ne!(first, second);
+        for id in [first, second] {
+            let local = id
+                .trim_matches(['<', '>'])
+                .split('@')
+                .next()
+                .unwrap()
+                .to_owned();
+            assert_eq!(local.len(), 26, "{id}");
+            assert!(!local.contains('.'), "{id}");
+            assert!(id.ends_with("@example.com>"), "{id}");
+        }
     }
 
     #[test]
