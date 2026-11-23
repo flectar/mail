@@ -153,6 +153,27 @@ pub(super) fn clear_reader_projection(app: &AppWindow) {
     app.set_has_selection(false);
 }
 
+/// A name and address as one mailbox for the clipboard, as a header writes it
+/// (RFC 5322 section 3.4): a name that isn't plain words is quoted, so it
+/// pastes back as one recipient. Non-ASCII names stay as they are (RFC 6532).
+pub(super) fn mailbox_text(name: &str, address: &str) -> String {
+    let address = address.trim();
+    let name = name.chars().filter(|c| !c.is_control()).collect::<String>();
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    if name.is_empty() || name.eq_ignore_ascii_case(address) {
+        return address.to_owned();
+    }
+    // `atext` from RFC 5322 section 3.2.3, plus RFC 6532's UTF-8.
+    let plain_word =
+        |c: char| c.is_ascii_alphanumeric() || !c.is_ascii() || "!#$%&'*+-/=?^_`{|}~".contains(c);
+    if name.chars().all(|c| c == ' ' || plain_word(c)) {
+        format!("{name} <{address}>")
+    } else {
+        let quoted = name.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{quoted}\" <{address}>")
+    }
+}
+
 /// Who a message is from and to, each with their address, and when it was
 /// sent, as the reader's details list them.
 pub(super) fn message_details(email: &MailMessage) -> MessageDetails {
@@ -465,9 +486,11 @@ pub(super) fn sync_reader_metadata(app: &AppWindow, renderer: &Rc<RefCell<GpuEma
         }
         return;
     }
-    reader.set_width_ratio(
-        (renderer.layout_width / app.get_email_viewport_width().max(1.0)).max(1.0),
-    );
+    // Against the width the tiles were painted for, as `apply_email` does: a
+    // viewport the window hasn't reported yet would scale them up by
+    // hundreds, showing only their first pixel.
+    let (width, _) = email_viewport_size(app);
+    reader.set_width_ratio((renderer.layout_width / width as f32).max(1.0));
     let (start, end) = renderer.selection_carets();
     reader.set_selection_start(start);
     reader.set_selection_end(end);
@@ -484,5 +507,52 @@ pub(super) fn sync_reader_metadata(app: &AppWindow, renderer: &Rc<RefCell<GpuEma
     let plain = renderer.plain_text();
     if !plain.is_empty() {
         app.set_selected_plain_text(plain.into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mailbox_text;
+
+    #[test]
+    fn copied_mailboxes_quote_names_that_are_not_plain_words() {
+        assert_eq!(
+            mailbox_text("Ada Lovelace", "ada@example.com"),
+            "Ada Lovelace <ada@example.com>"
+        );
+        assert_eq!(
+            mailbox_text("Doe, Jane", "jane@example.com"),
+            "\"Doe, Jane\" <jane@example.com>"
+        );
+        assert_eq!(
+            mailbox_text("J. Doe", "j@example.com"),
+            "\"J. Doe\" <j@example.com>"
+        );
+        assert_eq!(
+            mailbox_text("Say \"hi\" \\o/", "x@example.com"),
+            "\"Say \\\"hi\\\" \\\\o/\" <x@example.com>"
+        );
+        assert_eq!(
+            mailbox_text("José Müller", "jose@example.com"),
+            "José Müller <jose@example.com>"
+        );
+        assert_eq!(
+            mailbox_text("O'Brien", "ob@example.com"),
+            "O'Brien <ob@example.com>"
+        );
+    }
+
+    #[test]
+    fn copied_mailboxes_without_a_name_are_the_address() {
+        assert_eq!(mailbox_text("", "ada@example.com"), "ada@example.com");
+        assert_eq!(mailbox_text("  ", "ada@example.com"), "ada@example.com");
+        assert_eq!(
+            mailbox_text("ADA@example.com", "ada@example.com"),
+            "ada@example.com"
+        );
+        assert_eq!(
+            mailbox_text("Ada\r\n Lovelace", "ada@example.com"),
+            "Ada Lovelace <ada@example.com>"
+        );
     }
 }

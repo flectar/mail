@@ -3659,6 +3659,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             }
         },
     ));
+    app.global::<EmailReader>()
+        .on_mailbox_text(|name, address| mailbox_text(&name, &address).into());
     let body_state = Rc::clone(&state);
     let pending = body_pending.clone();
     let generation = body_generation.clone();

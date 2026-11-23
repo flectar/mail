@@ -417,6 +417,11 @@ To temporarily show the sender's original colors, use the contrast icon between
 Find and Reader mode in the desktop message toolbar, or choose **Show original
 colors** from the message's three-dot menu on any screen size.
 
+A message's subject can be selected and copied like its text, and right-clicking
+it offers **Copy** for the whole subject. Right-click the sender for **Copy email
+address** or **Copy name and email address**, and click the sender to see whom
+the message went to, where every address can be selected and copied too.
+
 Turn on **Reduce motion** in Settings → General → Interface, or leave it on
 System to follow Animation effects on Windows, Reduce motion on macOS and iOS,
 the desktop's reduced motion setting on Linux, Remove animations on Android, or
