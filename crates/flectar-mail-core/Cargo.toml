@@ -91,6 +91,9 @@ tempfile = "3"
 ring = "0.17"
 # Reads settings from Thunderbird profile exports; flate2 is already linked.
 zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# The registrable domain of a mail server, for autoconfig's MX step: the
+# Public Suffix List keeps it from looking under a suffix such as co.uk.
+psl = "2"
 
 # Used only by build.rs, which cargo-machete does not scan.
 [package.metadata.cargo-machete]

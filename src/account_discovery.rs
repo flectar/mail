@@ -215,9 +215,11 @@ fn apply(app: &AppWindow, email: &str, domain: &str, found: Option<&Discovery>) 
         match discovery.source {
             Source::Provider => "provider",
             Source::Database => "database",
+            Source::MailHost => "mail-host",
         }
         .into(),
     );
+    notice.set_mail_host(discovery.mail_host.as_deref().unwrap_or_default().into());
     notice.set_trusted(discovery.trusted);
     notice.set_confirmed(false);
     notice.set_state("found".into());
@@ -348,6 +350,7 @@ mod tests {
         let discovery = Discovery {
             source: Source::Provider,
             trusted: true,
+            mail_host: None,
             provider_name: None,
             imap: Some(MailServer {
                 username: Some("ada".into()),
