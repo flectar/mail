@@ -86,6 +86,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/067_jmap_body_downloads.sql")),
     Migration::Plain(include_str!("migrations/068_account_names.sql")),
     Migration::Plain(include_str!("migrations/069_bodies_to_read_again.sql")),
+    Migration::Plain(include_str!("migrations/070_account_authentication.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -394,6 +395,7 @@ mod tests {
     fn fresh_schema_has_the_canonical_mail_contract() {
         let conn = fresh();
         let expected = [
+            "account_authentication",
             "accounts",
             "agent_activity",
             "agent_activity_actions",

@@ -43,6 +43,10 @@ pub struct ParsedHeaders {
     pub via: Option<String>,
     /// Strongest authentication result reported by the receiving MTA.
     pub sender_verification: SenderVerification,
+    /// The message carries an Authentication-Results field at all. Whether
+    /// its receiving server adds one to every message decides whether the
+    /// topmost one is the server's (see `repo::messages::vouched`).
+    pub authentication_results: bool,
     /// Where a read receipt was asked to go (RFC 8098
     /// Disposition-Notification-To). Empty when the message asks for none,
     /// or for one this client must not send.
@@ -2362,18 +2366,6 @@ fn sender_verification(
     results: &[AuthenticationResult<'_>],
     from: Option<&Address>,
 ) -> SenderVerification {
-    if let Some(bimi) = results.iter().find(|result| {
-        result.method.eq_ignore_ascii_case("bimi") && result.result.eq_ignore_ascii_case("pass")
-    }) {
-        return if auth_property(bimi, "policy.authority")
-            .is_some_and(|value| value.eq_ignore_ascii_case("pass"))
-        {
-            SenderVerification::Brand
-        } else {
-            SenderVerification::Bimi
-        };
-    }
-
     let Some(from_domain) = from
         .map(|address| domain_of(&address.email))
         .filter(|domain| !domain.is_empty())
@@ -2387,6 +2379,25 @@ fn sender_verification(
             && auth_property(result, "header.from")
                 .is_some_and(|domain| domains_aligned(domain, from_domain))
     });
+    // A logo means something only for mail that passed DMARC for its From
+    // domain, which BIMI asks receivers to check before they look for one.
+    // A bimi=pass on its own is anyone's claim.
+    if dmarc_pass
+        && let Some(bimi) = results.iter().find(|result| {
+            result.method.eq_ignore_ascii_case("bimi")
+                && result.result.eq_ignore_ascii_case("pass")
+                && auth_property(result, "header.d")
+                    .is_none_or(|domain| domains_aligned(domain, from_domain))
+        })
+    {
+        return if auth_property(bimi, "policy.authority")
+            .is_some_and(|value| value.eq_ignore_ascii_case("pass"))
+        {
+            SenderVerification::Brand
+        } else {
+            SenderVerification::Bimi
+        };
+    }
     let aligned_dkim_pass = results.iter().any(|result| {
         result.method.eq_ignore_ascii_case("dkim")
             && result.result.eq_ignore_ascii_case("pass")
@@ -2579,6 +2590,7 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
     // Remove comments before splitting clauses because they may contain
     // semicolons and text resembling method=result authentication claims.
     let authentication_header = first_raw_header(msg, "Authentication-Results").unwrap_or_default();
+    let authentication_results_field = !authentication_header.is_empty();
     let authentication_header = without_comments(&authentication_header);
     let authentication_results = authentication_results(&authentication_header);
     let sender_verification = sender_verification(&authentication_results, from.as_ref());
@@ -2648,6 +2660,7 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
         list_id: raw_header(msg, "List-Id").and_then(|raw| list_id(&raw)),
         via,
         sender_verification,
+        authentication_results: authentication_results_field,
         receipt_to,
         receipt_confirm,
         disposition_report,
@@ -4340,12 +4353,42 @@ mod tests {
     #[test]
     fn bimi_authority_pass_is_a_verified_brand() {
         let raw = concat!(
-            "Authentication-Results: mx.example; bimi=pass header.d=brand.example ",
-            "header.selector=default policy.authority=pass\r\n",
+            "Authentication-Results: mx.example; dmarc=pass header.from=brand.example; ",
+            "bimi=pass header.d=brand.example header.selector=default policy.authority=pass\r\n",
             "From: Brand <hello@brand.example>\r\nSubject: hi\r\n\r\nbody"
         );
         let headers = parse_message(raw.as_bytes()).unwrap().headers;
         assert_eq!(headers.sender_verification, SenderVerification::Brand);
+    }
+
+    #[test]
+    fn bimi_without_an_aligned_dmarc_pass_verifies_nothing() {
+        for results in [
+            "bimi=pass header.d=brand.example policy.authority=pass",
+            "bimi=pass header.d=attacker.example policy.authority=pass; dmarc=fail header.from=brand.example",
+            "dmarc=pass header.from=brand.example; bimi=pass header.d=attacker.example policy.authority=pass",
+        ] {
+            let raw = format!(
+                "Authentication-Results: attacker.example; {results}\r\n\
+                 From: Brand <hello@brand.example>\r\nSubject: hi\r\n\r\nbody"
+            );
+            let headers = parse_message(raw.as_bytes()).unwrap().headers;
+            assert!(
+                !matches!(
+                    headers.sender_verification,
+                    SenderVerification::Brand | SenderVerification::Bimi
+                ),
+                "{results}"
+            );
+            assert!(headers.authentication_results);
+        }
+        let raw = "From: Brand <hello@brand.example>\r\nSubject: hi\r\n\r\nbody";
+        assert!(
+            !parse_message(raw.as_bytes())
+                .unwrap()
+                .headers
+                .authentication_results
+        );
     }
 
     #[test]

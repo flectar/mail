@@ -120,6 +120,17 @@ impl Importer {
             .unwrap_or_default();
         let is_outgoing =
             self.own_addresses.contains(&from_email) || delivery.folder_role == Some(roles::SENT);
+        // Mail the account received tells whether its server stamps what it
+        // receives, and so whether the sender's verification can be trusted.
+        if !is_outgoing {
+            repo::messages::note_authentication_results(
+                conn,
+                self.account_id,
+                headers.authentication_results,
+            )?;
+        }
+        let sender_verification =
+            repo::messages::vouched(conn, self.account_id, headers.sender_verification)?;
         let thread_id = super::threading::resolve_thread(conn, self.account_id, headers, date_ms)?;
         let message = NewMessage {
             account_id: self.account_id,
@@ -148,7 +159,7 @@ impl Importer {
             list_unsubscribe_post: headers.list_unsubscribe_post.clone(),
             list_id: headers.list_id.clone(),
             sender_addr: headers.via.clone(),
-            sender_verification: headers.sender_verification,
+            sender_verification,
             receipt_to: headers.receipt_to.clone(),
             receipt_confirm: headers.receipt_confirm,
             receipt_handled: delivery.receipt_handled,
@@ -348,7 +359,9 @@ pub(crate) fn store_body(
             .any(|attachment| !attachment.is_inline),
         Some(&parsed.snippet),
     )?;
-    repo::messages::set_sender_verification(conn, message_id, parsed.headers.sender_verification)?;
+    let verification =
+        repo::messages::vouched_for_message(conn, message_id, parsed.headers.sender_verification)?;
+    repo::messages::set_sender_verification(conn, message_id, verification)?;
     repo::messages::fill_list_headers(
         conn,
         message_id,
