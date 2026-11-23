@@ -3510,14 +3510,33 @@ fn compose_args(
 }
 
 fn parse_recipients(value: &str) -> Result<Vec<Address>, String> {
-    value
-        // Recipient rows wrap onto multiple lines, and pasted lists often put
-        // one address per line: accept newlines as separators like `,`/`;`.
-        .split([',', ';', '\n'])
+    recipient_entries(value).map(parse_address).collect()
+}
+
+/// The entries of a recipient field. Commas, semicolons and line breaks
+/// separate them: rows wrap onto several lines, and pasted lists often put
+/// one address per line. A separator inside a quoted name, as in
+/// `"Doe, Jane" <jane@example.com>` (RFC 5322 section 3.2.4), doesn't.
+pub(crate) fn recipient_entries(field: &str) -> impl Iterator<Item = &str> {
+    let mut entries = Vec::new();
+    let (mut start, mut quoted, mut escaped) = (0, false, false);
+    for (index, character) in field.char_indices() {
+        match character {
+            _ if escaped => escaped = false,
+            '\\' if quoted => escaped = true,
+            '"' => quoted = !quoted,
+            ',' | ';' | '\n' if !quoted => {
+                entries.push(&field[start..index]);
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    entries.push(&field[start..]);
+    entries
+        .into_iter()
         .map(str::trim)
-        .filter(|recipient| !recipient.is_empty())
-        .map(parse_address)
-        .collect()
+        .filter(|entry| !entry.is_empty())
 }
 
 pub(crate) fn parse_address(value: &str) -> Result<Address, String> {
@@ -3534,10 +3553,30 @@ pub(crate) fn parse_address(value: &str) -> Result<Address, String> {
     Ok(Address {
         name: name
             .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned),
+            .map(unquoted_name)
+            .filter(|name| !name.is_empty()),
         email: email.to_owned(),
     })
+}
+
+/// A display name without the quotes and backslashes a header puts around
+/// it, as copied from a message: `"Doe, Jane"` is `Doe, Jane`.
+fn unquoted_name(name: &str) -> String {
+    let Some(inner) = name
+        .strip_prefix('"')
+        .and_then(|name| name.strip_suffix('"'))
+    else {
+        return name.to_owned();
+    };
+    let mut unquoted = String::with_capacity(inner.len());
+    let mut characters = inner.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            '\\' => unquoted.extend(characters.next()),
+            _ => unquoted.push(character),
+        }
+    }
+    unquoted.trim().to_owned()
 }
 
 const fn standard_mailbox_view(mailbox: StandardMailbox) -> View {
@@ -5492,6 +5531,21 @@ mod tests {
         assert_eq!(parsed[0].name.as_deref(), Some("Ada"));
         assert_eq!(parsed[1].email, "grace@example.com");
         assert_eq!(parsed[2].email, "alan@example.com");
+        assert!(parsed[2].name.is_none());
+    }
+
+    #[test]
+    fn quoted_names_keep_their_separators() {
+        let parsed = super::parse_recipients(
+            "\"Doe, Jane\" <jane@example.com>; \"Say \\\"hi\\\"; bye\" <x@example.com>, bob@example.com",
+        )
+        .unwrap();
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].name.as_deref(), Some("Doe, Jane"));
+        assert_eq!(parsed[0].email, "jane@example.com");
+        assert_eq!(parsed[1].name.as_deref(), Some("Say \"hi\"; bye"));
+        assert_eq!(parsed[1].email, "x@example.com");
+        assert_eq!(parsed[2].email, "bob@example.com");
         assert!(parsed[2].name.is_none());
     }
 

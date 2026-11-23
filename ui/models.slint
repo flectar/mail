@@ -648,6 +648,8 @@ export global EmailReader {
     callback retry-images();
     in-out property <int> failed-images;
     pure callback link-at(float, float) -> string;
+    // A name and address as one mailbox, quoted as a header would quote it.
+    pure callback mailbox-text(string, string) -> string;
     callback command(string);
     callback find(string, int);
     // Opens or closes the section that a "section" row of `items` stands for.

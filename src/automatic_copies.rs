@@ -16,12 +16,9 @@ pub(crate) struct Added {
 }
 
 /// The entries of an address field as typed: separated by commas,
-/// semicolons or lines.
+/// semicolons or lines outside quoted names.
 fn entries(field: &str) -> impl Iterator<Item = &str> {
-    field
-        .split([',', ';', '\n'])
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
+    crate::mail::recipient_entries(field)
 }
 
 /// An entry's address in lowercase, from "Name <address>" or the address.
