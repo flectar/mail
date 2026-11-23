@@ -1,0 +1,120 @@
+diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
+index 51fb497..73be7ec 100644
+--- a/crates/blitz-dom/src/document.rs
++++ b/crates/blitz-dom/src/document.rs
+@@ -1565,7 +1565,7 @@ impl BaseDocument {
+         }
+     }
+ 
+-    fn mark_images_unavailable(&mut self, waiting: &[(NodeId, ImageType)]) {
++    pub(crate) fn mark_images_unavailable(&mut self, waiting: &[(NodeId, ImageType)]) {
+         for &(id, kind) in waiting {
+             if !matches!(kind, ImageType::Image) {
+                 continue;
+diff --git a/crates/blitz-dom/src/mutator.rs b/crates/blitz-dom/src/mutator.rs
+index afc5272..ab4b135 100644
+--- a/crates/blitz-dom/src/mutator.rs
++++ b/crates/blitz-dom/src/mutator.rs
+@@ -1156,53 +1156,58 @@ impl<'doc> DocumentMutator<'doc> {
+ 
+     fn load_image(&mut self, target_id: NodeId) {
+         let node = &self.doc.nodes[target_id];
+-        if let Some(raw_src) = node.attr(local_name!("src")) {
+-            if !raw_src.is_empty()
+-                && let Some(src) = self.doc.resolve_url(raw_src)
+-            {
+-                let src_string = src.as_str();
+-
+-                // Check cache first
+-                if let Some(cached_image) = self.doc.image_cache.get(src_string) {
+-                    #[cfg(feature = "tracing")]
+-                    tracing::info!("Loading image {src_string} from cache");
+-                    let node = &mut self.doc.nodes[target_id];
+-                    node.element_data_mut().unwrap().special_data =
+-                        SpecialElementData::Image(Box::new(cached_image.clone()));
+-                    node.clear_layout_cache();
+-                    node.insert_damage(ALL_DAMAGE);
+-                    return;
+-                }
++        let src = node
++            .attr(local_name!("src"))
++            .filter(|raw_src| !raw_src.is_empty())
++            .and_then(|raw_src| self.doc.resolve_url(raw_src));
++        let Some(src) = src else {
++            // Without a source it can load, because `src` is missing, empty or
++            // doesn't resolve, the image is broken, as the HTML standard's
++            // "update the image data" has it, and lays out with its alt text.
++            self.doc
++                .mark_images_unavailable(&[(target_id, ImageType::Image)]);
++            return;
++        };
++        let src_string = src.as_str();
+ 
+-                // Check if there's already a pending request for this URL
+-                if let Some(waiting_list) = self.doc.pending_images.get_mut(src_string) {
+-                    #[cfg(feature = "tracing")]
+-                    tracing::info!("Image {src_string} already pending, queueing node {target_id}");
+-                    waiting_list.push((target_id, ImageType::Image));
+-                    return;
+-                }
++        // Check cache first
++        if let Some(cached_image) = self.doc.image_cache.get(src_string) {
++            #[cfg(feature = "tracing")]
++            tracing::info!("Loading image {src_string} from cache");
++            let node = &mut self.doc.nodes[target_id];
++            node.element_data_mut().unwrap().special_data =
++                SpecialElementData::Image(Box::new(cached_image.clone()));
++            node.clear_layout_cache();
++            node.insert_damage(ALL_DAMAGE);
++            return;
++        }
+ 
+-                // Start fetch and track as pending
+-                #[cfg(feature = "tracing")]
+-                tracing::info!("Fetching image {src_string}");
+-                self.doc
+-                    .pending_images
+-                    .insert(src_string.to_string(), vec![(target_id, ImageType::Image)]);
+-
+-                self.doc.net_provider.fetch(
+-                    self.doc.id(),
+-                    self.doc.build_request(src),
+-                    ResourceHandler::boxed(
+-                        self.doc.tx.clone(),
+-                        self.doc.id(),
+-                        None, // Don't pass node_id, we'll handle it via pending_images
+-                        self.doc.shell_provider.clone(),
+-                        ImageHandler::new(ImageType::Image)
+-                            .with_limits(self.doc.image_decode_limits),
+-                    ),
+-                );
+-            }
++        // Check if there's already a pending request for this URL
++        if let Some(waiting_list) = self.doc.pending_images.get_mut(src_string) {
++            #[cfg(feature = "tracing")]
++            tracing::info!("Image {src_string} already pending, queueing node {target_id}");
++            waiting_list.push((target_id, ImageType::Image));
++            return;
+         }
++
++        // Start fetch and track as pending
++        #[cfg(feature = "tracing")]
++        tracing::info!("Fetching image {src_string}");
++        self.doc
++            .pending_images
++            .insert(src_string.to_string(), vec![(target_id, ImageType::Image)]);
++
++        self.doc.net_provider.fetch(
++            self.doc.id(),
++            self.doc.build_request(src),
++            ResourceHandler::boxed(
++                self.doc.tx.clone(),
++                self.doc.id(),
++                None, // Don't pass node_id, we'll handle it via pending_images
++                self.doc.shell_provider.clone(),
++                ImageHandler::new(ImageType::Image).with_limits(self.doc.image_decode_limits),
++            ),
++        );
+     }
+ 
+     fn load_iframe(&mut self, target_id: NodeId) {

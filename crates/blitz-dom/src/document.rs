@@ -1565,7 +1565,7 @@ impl BaseDocument {
         }
     }
 
-    fn mark_images_unavailable(&mut self, waiting: &[(NodeId, ImageType)]) {
+    pub(crate) fn mark_images_unavailable(&mut self, waiting: &[(NodeId, ImageType)]) {
         for &(id, kind) in waiting {
             if !matches!(kind, ImageType::Image) {
                 continue;

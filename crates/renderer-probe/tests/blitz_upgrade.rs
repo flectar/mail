@@ -1935,3 +1935,26 @@ fn a_line_that_breaks_at_a_soft_hyphen_ends_with_a_hyphen() {
     let broken = ink_end(60..90);
     assert!(hyphenated > broken + 5, "{hyphenated} vs {broken}");
 }
+
+#[test]
+fn images_without_a_usable_source_lay_out_with_their_alt_text() {
+    // An image whose `src` is missing, empty or doesn't resolve (here a
+    // relative URL in a document without a base) is broken, as browsers
+    // treat it, so it takes the room of its alt text. With an empty alt it
+    // takes none.
+    let doc = document(
+        "<style>body{margin:0} img{display:block;font:20px/30px sans-serif}</style>
+         <img id=a alt='Logo'><img id=b src='' alt='Logo'>
+         <img id=c src='images/logo.png' alt='Logo'><img id=d src='' alt=''>",
+    );
+    let size = |selector| node(&doc, selector).final_layout().size;
+    for selector in ["#a", "#b", "#c"] {
+        assert!(
+            size(selector).width > 30.0,
+            "{selector} {:?}",
+            size(selector)
+        );
+        close(size(selector).height, 30.0);
+    }
+    assert_eq!((size("#d").width, size("#d").height), (0.0, 0.0));
+}
