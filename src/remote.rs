@@ -467,7 +467,7 @@ async fn pinned_public_client(url: &reqwest::Url) -> Option<reqwest::Client> {
 
 #[cfg(feature = "remote-content")]
 fn image_client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
+    flectar_mail_core::net::tls::client_builder()
         .user_agent("Flectar Mail bounded remote image loader/0.1")
         .connect_timeout(Duration::from_secs(4))
         .timeout(Duration::from_secs(12))
@@ -1037,7 +1037,7 @@ mod tests {
                 stream.write_all(&body).unwrap();
             });
             let actual = rt.block_on(async {
-                let response = reqwest::Client::builder()
+                let response = flectar_mail_core::net::tls::client_builder()
                     .no_proxy()
                     .timeout(std::time::Duration::from_secs(2))
                     .build()

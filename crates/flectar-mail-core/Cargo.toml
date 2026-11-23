@@ -42,9 +42,6 @@ mail-builder = "0.4"
 # TLS
 tokio-rustls = "0.26"
 rustls = "0.23"
-# The operating system verifies server certificates, as for reqwest. Mozilla's
-# bundled roots are the fallback when a Linux system has no CA bundle.
-rustls-platform-verifier = "0.7"
 webpki = { package = "rustls-webpki", version = "0.103" }
 webpki-roots = "1"
 futures = "0.3"
@@ -105,6 +102,12 @@ cfg_aliases = "0.2"
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# This is `not(platform_trust)`. The operating system verifies server
+# certificates, as for reqwest. Mozilla's bundled roots are the fallback when a
+# Linux system has no CA bundle.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+rustls-platform-verifier = "0.7"
 
 # Cargo cannot evaluate build.rs aliases; this is `rename_noreplace`.
 [target.'cfg(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios"))'.dependencies]

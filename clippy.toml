@@ -1,0 +1,10 @@
+# HTTP clients start from flectar_mail_core::net::tls::client_builder, which
+# checks certificates as mail connections do. On Android only those checks
+# work: reqwest's own verifier isn't set up there and panics on the first
+# HTTPS request.
+disallowed-methods = [
+    { path = "reqwest::Client::new", reason = "checks certificates without the app's TLS", replacement = "flectar_mail_core::net::tls::client_builder().build()" },
+    { path = "reqwest::Client::builder", reason = "checks certificates without the app's TLS", replacement = "flectar_mail_core::net::tls::client_builder" },
+    { path = "reqwest::ClientBuilder::new", reason = "checks certificates without the app's TLS", replacement = "flectar_mail_core::net::tls::client_builder" },
+    { path = "reqwest::get", reason = "checks certificates without the app's TLS", replacement = "flectar_mail_core::net::tls::client_builder" },
+]

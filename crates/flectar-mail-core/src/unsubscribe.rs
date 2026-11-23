@@ -93,7 +93,7 @@ const ONE_CLICK_FORM: &str = "--flectar-one-click\r\nContent-Disposition: form-d
 /// are followed (the endpoint must not require them) and no cookies are sent.
 pub async fn post_one_click(url: &str) -> Result<()> {
     let url = validated_public_https_url(url)?;
-    let mut client = reqwest::Client::builder()
+    let mut client = crate::net::tls::client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(20))
