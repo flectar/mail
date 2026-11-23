@@ -1163,7 +1163,7 @@ impl Core {
                         .filter(|(id, _)| {
                             !hashes.contains_key(*id) && !run.outbox.contains_key(*id)
                         })
-                        .filter_map(|(id, mirrored)| Some((*id, mirrored.entry.clone()?)))
+                        .filter_map(|(id, mirrored)| Some((*id, mirrored.content.entry()?.clone())))
                         .collect();
                     let applied = collections::apply(
                         &tx,
@@ -1307,7 +1307,7 @@ impl Core {
             .unwrap_or_default();
         let entries: BTreeMap<RecordId, Entry> = mirror
             .into_iter()
-            .filter_map(|(id, mirrored)| Some((id, mirrored.entry?)))
+            .filter_map(|(id, mirrored)| Some((id, mirrored.content.into_entry()?)))
             .collect();
         let records = collections::device_records(&entries);
         let this = client.identity().device_id();

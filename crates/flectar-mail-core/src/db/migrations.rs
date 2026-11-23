@@ -88,6 +88,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/069_bodies_to_read_again.sql")),
     Migration::Plain(include_str!("migrations/070_app_key_sync.sql")),
     Migration::Plain(include_str!("migrations/071_account_authentication.sql")),
+    Migration::Plain(include_str!("migrations/072_sealed_deletions.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -2047,6 +2048,42 @@ mod tests {
                 .next()
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn sealed_deletions_leave_the_server_s_bare_ones_behind() {
+        let mut conn = staged(71);
+        conn.execute_batch(
+            "INSERT INTO device_sync_mirror
+               (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body)
+             VALUES (x'01010101010101010101010101010101', 3, 5, 0,
+                     x'07070707070707070707070707070707', 'pref', 1, '{}'),
+                    (x'02020202020202020202020202020202', 4, 5, 0,
+                     x'07070707070707070707070707070707', NULL, NULL, NULL),
+                    (x'03030303030303030303030303030303', 5, NULL, NULL, NULL, NULL, NULL, NULL);",
+        )
+        .unwrap();
+        upgrade_to(&mut conn, 72).unwrap();
+        let rows: Vec<(Vec<u8>, i64, String, bool)> = conn
+            .prepare("SELECT record_id, seq, collection, compacted FROM device_sync_mirror")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(rows, vec![(vec![1; 16], 3, "pref".to_owned(), false)]);
+        // A deletion now names its collection and has a stamp of its own.
+        assert!(
+            conn.execute(
+                "INSERT INTO device_sync_mirror (record_id, seq, stamp_ms, stamp_counter,
+                   stamp_device, collection) VALUES (x'04040404040404040404040404040404', 6,
+                   NULL, NULL, NULL, NULL)",
+                [],
+            )
+            .is_err()
         );
     }
 }

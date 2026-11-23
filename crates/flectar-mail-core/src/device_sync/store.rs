@@ -8,7 +8,7 @@
 use super::merge;
 use crate::error::{CoreError, Result};
 use flectar_mail_sync_client::{
-    ChainOp, Clock, Entry, Mirrored, Pending, Remote, Secrets, Stamp, Store, StoreError,
+    ChainOp, Clock, Content, Entry, Mirrored, Pending, Remote, Secrets, Stamp, Store, StoreError,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
@@ -149,48 +149,58 @@ pub(crate) fn set_error(conn: &Connection, error: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn stamp(ms: Option<i64>, counter: Option<i64>, device: Option<Vec<u8>>) -> Option<Stamp> {
-    Some(Stamp {
-        ms: to_u64(ms?),
-        counter: u32::try_from(counter?).unwrap_or(0),
-        device: device?.try_into().ok()?,
+fn stamp(ms: i64, counter: i64, device: Vec<u8>) -> Result<Stamp> {
+    Ok(Stamp {
+        ms: to_u64(ms),
+        counter: u32::try_from(counter).unwrap_or(0),
+        device: device
+            .try_into()
+            .map_err(|_| CoreError::Other("a stored sync stamp is damaged".into()))?,
     })
 }
 
-fn entry(collection: Option<String>, schema: Option<i64>, body: Option<String>) -> Option<Entry> {
-    Some(Entry {
-        collection: collection?,
-        schema: u32::try_from(schema?).unwrap_or(0),
-        body: serde_json::from_str(&body?).ok()?,
+/// A stored version: its item, or with neither schema nor body, its
+/// deletion.
+fn content(collection: String, schema: Option<i64>, body: Option<String>) -> Result<Content> {
+    Ok(match (schema, body) {
+        (Some(schema), Some(body)) => Content::Entry(Entry {
+            collection,
+            schema: u32::try_from(schema).unwrap_or(0),
+            body: serde_json::from_str(&body)?,
+        }),
+        _ => Content::Deleted { collection },
     })
 }
 
 pub(crate) fn load_mirror(conn: &Connection) -> Result<BTreeMap<RecordId, Mirrored>> {
     let mut statement = conn.prepare(
-        "SELECT record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body
+        "SELECT record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body,
+                compacted
          FROM device_sync_mirror",
     )?;
     let rows = statement.query_map([], |row| {
         Ok((
             row.get::<_, Vec<u8>>(0)?,
             row.get::<_, i64>(1)?,
-            row.get::<_, Option<i64>>(2)?,
-            row.get::<_, Option<i64>>(3)?,
-            row.get::<_, Option<Vec<u8>>>(4)?,
-            row.get::<_, Option<String>>(5)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, Vec<u8>>(4)?,
+            row.get::<_, String>(5)?,
             row.get::<_, Option<i64>>(6)?,
             row.get::<_, Option<String>>(7)?,
+            row.get::<_, bool>(8)?,
         ))
     })?;
     let mut mirror = BTreeMap::new();
     for row in rows {
-        let (id, seq, ms, counter, device, collection, schema, body) = row?;
+        let (id, seq, ms, counter, device, collection, schema, body, compacted) = row?;
         mirror.insert(
             record_id(id)?,
             Mirrored {
                 seq: to_u64(seq),
-                stamp: stamp(ms, counter, device),
-                entry: entry(collection, schema, body),
+                stamp: stamp(ms, counter, device)?,
+                content: content(collection, schema, body)?,
+                compacted,
             },
         );
     }
@@ -218,37 +228,28 @@ pub(crate) fn load_outbox(conn: &Connection) -> Result<BTreeMap<RecordId, Pendin
     for row in rows {
         let (id, base_seq, ms, counter, device, collection, schema, body) = row?;
         let record_id = record_id(id)?;
-        let Some(stamp) = stamp(Some(ms), Some(counter), Some(device)) else {
-            continue;
-        };
-        let entry = match body {
-            Some(body) => Some(Entry {
-                collection,
-                schema: u32::try_from(schema).unwrap_or(0),
-                body: serde_json::from_str(&body)?,
-            }),
-            None => None,
-        };
+        // A deletion keeps 0 for its schema.
+        let schema = body.as_ref().map(|_| schema);
         outbox.insert(
             record_id,
             Pending {
                 record_id,
                 base_seq: to_u64(base_seq),
-                stamp,
-                entry,
+                stamp: stamp(ms, counter, device)?,
+                content: content(collection, schema, body)?,
             },
         );
     }
     Ok(outbox)
 }
 
-fn save_outbox_entry(conn: &Connection, pending: &Pending, collection: &str) -> Result<()> {
-    let (schema, body) = match &pending.entry {
-        Some(entry) => (
+fn save_outbox_entry(conn: &Connection, pending: &Pending) -> Result<()> {
+    let (schema, body) = match &pending.content {
+        Content::Entry(entry) => (
             i64::from(entry.schema),
             Some(serde_json::to_string(&entry.body)?),
         ),
-        None => (0, None),
+        Content::Deleted { .. } => (0, None),
     };
     conn.execute(
         "INSERT OR REPLACE INTO device_sync_outbox
@@ -260,7 +261,7 @@ fn save_outbox_entry(conn: &Connection, pending: &Pending, collection: &str) -> 
             to_i64(pending.stamp.ms),
             i64::from(pending.stamp.counter),
             &pending.stamp.device[..],
-            collection,
+            pending.content.collection(),
             schema,
             body
         ],
@@ -332,14 +333,17 @@ pub(crate) fn mirrored_entry(conn: &Connection, id: &RecordId) -> Result<Option<
             params![&id[..]],
             |row| {
                 Ok((
-                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(0)?,
                     row.get::<_, Option<i64>>(1)?,
                     row.get::<_, Option<String>>(2)?,
                 ))
             },
         )
         .optional()?;
-    Ok(row.and_then(|(collection, schema, body)| entry(collection, schema, body)))
+    Ok(match row {
+        Some((collection, schema, body)) => content(collection, schema, body)?.into_entry(),
+        None => None,
+    })
 }
 
 /// Whether a local change to the record waits to reach the server.
@@ -382,7 +386,7 @@ pub(crate) fn track(
         // leave it alone until this device updates.
         if mirror
             .get(id)
-            .and_then(|mirrored| mirrored.entry.as_ref())
+            .and_then(|mirrored| mirrored.content.entry())
             .is_some_and(|mirrored| {
                 mirrored.collection == entry.collection && mirrored.schema > entry.schema
             })
@@ -392,7 +396,7 @@ pub(crate) fn track(
         // The item may only now match what the server has, after a merge.
         let unchanged = mirror
             .get(id)
-            .and_then(|mirrored| mirrored.entry.as_ref())
+            .and_then(|mirrored| mirrored.content.entry())
             .is_some_and(|mirrored| body_hash(mirrored) == hash)
             && !outbox.contains_key(id);
         if !unchanged {
@@ -402,29 +406,30 @@ pub(crate) fn track(
                     record_id: *id,
                     base_seq: outbox.get(id).map_or_else(|| base_seq(id), |p| p.base_seq),
                     stamp: clock.now(),
-                    entry: Some(entry.clone()),
+                    content: Content::Entry(entry.clone()),
                 },
-                &entry.collection,
             )?;
             queued += 1;
         }
         set_local_hash(conn, id, Some(hash))?;
     }
     for id in hashes.keys().filter(|id| !local.contains_key(*id)) {
+        // The deletion names the collection of what it deletes: as the
+        // server has it, or as it waits to go up.
         let collection = mirror
             .get(id)
-            .and_then(|mirrored| mirrored.entry.as_ref())
-            .map(|entry| entry.collection.clone())
-            .unwrap_or_default();
+            .map(|mirrored| mirrored.content.collection())
+            .or_else(|| outbox.get(id).map(|pending| pending.content.collection()))
+            .unwrap_or_default()
+            .to_owned();
         save_outbox_entry(
             conn,
             &Pending {
                 record_id: *id,
                 base_seq: outbox.get(id).map_or_else(|| base_seq(id), |p| p.base_seq),
                 stamp: clock.now(),
-                entry: None,
+                content: Content::Deleted { collection },
             },
-            &collection,
         )?;
         set_local_hash(conn, id, None)?;
         queued += 1;
@@ -509,8 +514,9 @@ impl RunStore {
         // many.
         let mut insert = conn.prepare(
             "INSERT OR REPLACE INTO device_sync_mirror
-               (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+               (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body,
+                compacted)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?;
         let mut remove = conn.prepare("DELETE FROM device_sync_mirror WHERE record_id = ?1")?;
         for id in self.loaded_mirror.keys() {
@@ -522,23 +528,23 @@ impl RunStore {
             if self.loaded_mirror.get(id) == Some(mirrored) {
                 continue;
             }
-            let (collection, schema, body) = match &mirrored.entry {
-                Some(entry) => (
-                    Some(entry.collection.as_str()),
+            let (schema, body) = match &mirrored.content {
+                Content::Entry(entry) => (
                     Some(i64::from(entry.schema)),
                     Some(serde_json::to_string(&entry.body)?),
                 ),
-                None => (None, None, None),
+                Content::Deleted { .. } => (None, None),
             };
             insert.execute(params![
                 &id[..],
                 to_i64(mirrored.seq),
-                mirrored.stamp.map(|stamp| to_i64(stamp.ms)),
-                mirrored.stamp.map(|stamp| i64::from(stamp.counter)),
-                mirrored.stamp.map(|stamp| stamp.device.to_vec()),
-                collection,
+                to_i64(mirrored.stamp.ms),
+                i64::from(mirrored.stamp.counter),
+                &mirrored.stamp.device[..],
+                mirrored.content.collection(),
                 schema,
-                body
+                body,
+                mirrored.compacted
             ])?;
         }
         let mut remove = conn.prepare("DELETE FROM device_sync_outbox WHERE record_id = ?1")?;
@@ -551,18 +557,7 @@ impl RunStore {
             if self.loaded_outbox.get(&pending.record_id) == Some(pending) {
                 continue;
             }
-            let collection = pending
-                .entry
-                .as_ref()
-                .map(|entry| entry.collection.clone())
-                .or_else(|| {
-                    self.mirror
-                        .get(&pending.record_id)
-                        .and_then(|mirrored| mirrored.entry.as_ref())
-                        .map(|entry| entry.collection.clone())
-                })
-                .unwrap_or_default();
-            save_outbox_entry(conn, pending, &collection)?;
+            save_outbox_entry(conn, pending)?;
         }
         Ok(())
     }
@@ -596,41 +591,54 @@ impl Store for RunStore {
     fn apply(&mut self, changes: &[Remote], cursor: u64) -> std::result::Result<(), StoreError> {
         for change in changes {
             let id = change.record_id;
-            let base = self.mirror.get(&id).cloned();
-            let base_entry = base.as_ref().and_then(|mirrored| mirrored.entry.clone());
+            let base_entry = self
+                .mirror
+                .get(&id)
+                .and_then(|mirrored| mirrored.content.entry().cloned());
             self.mirror.insert(
                 id,
                 Mirrored {
                     seq: change.seq,
-                    stamp: change
-                        .stamp
-                        .or(base.as_ref().and_then(|mirrored| mirrored.stamp)),
-                    entry: change.entry.clone(),
+                    stamp: change.stamp,
+                    content: change.content.clone(),
+                    compacted: false,
                 },
             );
             let pending = self.outbox.get(&id).cloned();
-            match (&change.entry, pending) {
-                // A deletion from another device wins over local edits.
-                (None, _) => {
+            match (&change.content, pending) {
+                // Another device sealed its deletion, which wins over local
+                // edits.
+                (Content::Deleted { .. }, _) => {
                     self.outbox.remove(&id);
                     self.take(id, base_entry, None);
                 }
-                (Some(remote), None) => self.take(id, base_entry, Some(remote.clone())),
-                // A local deletion wins over the other device's edit.
-                (Some(_), Some(Pending { entry: None, .. })) => {
+                (Content::Entry(remote), None) => self.take(id, base_entry, Some(remote.clone())),
+                // A local deletion wins over the other device's edit. It
+                // must be newer than the edit, or the other devices would
+                // refuse it as a rollback.
+                (
+                    Content::Entry(_),
+                    Some(Pending {
+                        content: Content::Deleted { .. },
+                        ..
+                    }),
+                ) => {
                     if let Some(pending) = self.outbox.get_mut(&id) {
                         pending.base_seq = change.seq;
+                        if pending.stamp < change.stamp {
+                            pending.stamp = self.clock.now();
+                        }
                     }
                 }
                 (
-                    Some(remote),
+                    Content::Entry(remote),
                     Some(Pending {
-                        entry: Some(local),
+                        content: Content::Entry(local),
                         stamp,
                         ..
                     }),
                 ) => {
-                    let remote_newer = change.stamp.is_none_or(|remote_stamp| remote_stamp > stamp);
+                    let remote_newer = change.stamp > stamp;
                     if local.collection != remote.collection {
                         self.outbox.remove(&id);
                         self.take(id, base_entry, Some(remote.clone()));
@@ -661,7 +669,7 @@ impl Store for RunStore {
                                 record_id: id,
                                 base_seq: change.seq,
                                 stamp: self.clock.now(),
-                                entry: Some(merged.clone()),
+                                content: Content::Entry(merged.clone()),
                             },
                         );
                         self.take(id, base_entry, Some(merged));
@@ -686,8 +694,9 @@ impl Store for RunStore {
                 change.record_id,
                 Mirrored {
                     seq: *seq,
-                    stamp: Some(change.stamp),
-                    entry: change.entry.clone(),
+                    stamp: change.stamp,
+                    content: change.content.clone(),
+                    compacted: false,
                 },
             );
             match self.outbox.get_mut(&change.record_id) {
@@ -711,23 +720,6 @@ impl Store for RunStore {
         Ok(())
     }
 
-    fn forget(&mut self, record_ids: &[RecordId]) -> std::result::Result<(), StoreError> {
-        for id in record_ids {
-            let previous = self.mirror.remove(id).and_then(|mirrored| mirrored.entry);
-            // Deleted elsewhere while this device was away: the deletion wins
-            // over local edits; items created here and never uploaded stay.
-            if self
-                .outbox
-                .get(id)
-                .is_none_or(|pending| pending.base_seq > 0)
-            {
-                self.outbox.remove(id);
-                self.take(*id, previous, None);
-            }
-        }
-        Ok(())
-    }
-
     fn requeue(
         &mut self,
         record_id: &RecordId,
@@ -737,20 +729,53 @@ impl Store for RunStore {
             pending.base_seq = base_seq;
             return Ok(());
         }
-        if let Some(mirrored) = self.mirror.get(record_id)
-            && let Some(stamp) = mirrored.stamp
-        {
+        if let Some(mirrored) = self.mirror.get(record_id) {
             self.outbox.insert(
                 *record_id,
                 Pending {
                     record_id: *record_id,
                     base_seq,
-                    stamp,
-                    entry: mirrored.entry.clone(),
+                    stamp: mirrored.stamp,
+                    content: mirrored.content.clone(),
                 },
             );
         }
         Ok(())
+    }
+
+    fn compacted(&mut self, record_id: &RecordId, seq: u64) -> std::result::Result<(), StoreError> {
+        let Some(mirrored) = self.mirror.get_mut(record_id) else {
+            return Ok(());
+        };
+        if !mirrored.content.is_deleted() {
+            return Ok(());
+        }
+        mirrored.seq = seq;
+        mirrored.compacted = true;
+        if let Some(pending) = self.outbox.get_mut(record_id) {
+            pending.base_seq = seq;
+        }
+        Ok(())
+    }
+
+    fn compactable(
+        &mut self,
+        before_ms: u64,
+        limit: usize,
+    ) -> std::result::Result<Vec<(RecordId, u64)>, StoreError> {
+        Ok(self
+            .mirror
+            .iter()
+            .filter(|(id, mirrored)| {
+                mirrored.content.is_deleted()
+                    && !mirrored.compacted
+                    && mirrored.seq > 0
+                    && mirrored.stamp.ms < before_ms
+                    && !self.outbox.contains_key(*id)
+            })
+            .take(limit)
+            .map(|(id, mirrored)| (*id, mirrored.seq))
+            .collect())
     }
 
     fn save_chain(&mut self, chain: &[ChainOp]) -> std::result::Result<(), StoreError> {
@@ -785,9 +810,10 @@ mod tests {
         let (kept, changed, sent) = ([1u8; 16], [2u8; 16], [3u8; 16]);
         for id in [kept, changed] {
             conn.execute(
-                "INSERT INTO device_sync_mirror (record_id, seq, collection, schema, body)
-                 VALUES (?1, 1, 'pref', 1, '{}')",
-                params![&id[..]],
+                "INSERT INTO device_sync_mirror
+                   (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body)
+                 VALUES (?1, 1, 1, 0, ?2, 'pref', 1, '{}')",
+                params![&id[..], &[7u8; 16][..]],
             )
             .unwrap();
         }
@@ -802,9 +828,8 @@ mod tests {
                 record_id: sent,
                 base_seq: 0,
                 stamp,
-                entry: Some(pref("carbon")),
+                content: Content::Entry(pref("carbon")),
             },
-            "pref",
         )
         .unwrap();
         let clock = Arc::new(Clock::new([7; 16], None));
@@ -840,5 +865,191 @@ mod tests {
         track(&conn, &local, &clock).unwrap();
         local.clear();
         assert!(untracked(&conn, &local).unwrap(), "a deletion counts too");
+    }
+
+    fn stamp(ms: u64, device: u8) -> Stamp {
+        Stamp {
+            ms,
+            counter: 0,
+            device: [device; 16],
+        }
+    }
+
+    fn deleted() -> Content {
+        Content::Deleted {
+            collection: "pref".into(),
+        }
+    }
+
+    /// A run over a device that mirrors `id` at seq 3 as `content`.
+    fn run_with(conn: &Connection, id: RecordId, content: Content) -> (RunStore, Arc<Clock>) {
+        create_row(conn, "https://sync.test", &[], false, 1).unwrap();
+        let clock = Arc::new(Clock::new([7; 16], None));
+        let row = load_row(conn).unwrap().unwrap();
+        let mut run = RunStore::load(conn, &row, Arc::clone(&clock)).unwrap();
+        run.mirror.insert(
+            id,
+            Mirrored {
+                seq: 3,
+                stamp: stamp(10, 8),
+                content,
+                compacted: false,
+            },
+        );
+        (run, clock)
+    }
+
+    #[test]
+    fn a_deletion_keeps_its_stamp_and_collection() {
+        let conn = testutil::conn();
+        let id = [4u8; 16];
+        let (mut run, clock) = run_with(&conn, id, Content::Entry(pref("carbon")));
+        run.apply(
+            &[Remote {
+                record_id: id,
+                seq: 5,
+                stamp: stamp(20, 8),
+                content: deleted(),
+            }],
+            5,
+        )
+        .unwrap();
+        assert!(run.incoming[&id].next.is_none());
+        run.save(&conn, &clock, 2).unwrap();
+        let mirrored = &load_mirror(&conn).unwrap()[&id];
+        assert_eq!(
+            (
+                mirrored.seq,
+                mirrored.stamp,
+                &mirrored.content,
+                mirrored.compacted
+            ),
+            (5, stamp(20, 8), &deleted(), false)
+        );
+
+        // The server holds a bare tombstone in its place: the deletion stands.
+        let row = load_row(&conn).unwrap().unwrap();
+        let mut run = RunStore::load(&conn, &row, Arc::clone(&clock)).unwrap();
+        run.compacted(&id, 6).unwrap();
+        run.save(&conn, &clock, 3).unwrap();
+        let mirrored = &load_mirror(&conn).unwrap()[&id];
+        assert_eq!((mirrored.seq, mirrored.stamp), (6, stamp(20, 8)));
+        assert!(mirrored.compacted && mirrored.content.is_deleted());
+    }
+
+    #[test]
+    fn a_local_deletion_that_wins_is_newer_than_the_edit_it_beat() {
+        let conn = testutil::conn();
+        let id = [4u8; 16];
+        let (mut run, clock) = run_with(&conn, id, Content::Entry(pref("carbon")));
+        run.outbox.insert(
+            id,
+            Pending {
+                record_id: id,
+                base_seq: 3,
+                stamp: stamp(15, 7),
+                content: deleted(),
+            },
+        );
+        // The engine's clock observes every stamp it opens.
+        let edit = stamp(30, 8);
+        clock.observe(&edit);
+        run.apply(
+            &[Remote {
+                record_id: id,
+                seq: 6,
+                stamp: edit,
+                content: Content::Entry(pref("snow")),
+            }],
+            6,
+        )
+        .unwrap();
+        let pending = &run.outbox[&id];
+        assert!(pending.content.is_deleted());
+        assert_eq!(pending.base_seq, 6);
+        assert!(pending.stamp > edit, "or the others refuse it");
+        assert!(run.incoming.is_empty(), "the item stays deleted here");
+    }
+
+    #[test]
+    fn what_goes_back_up_is_the_mirrored_version_deletions_too() {
+        let conn = testutil::conn();
+        let (kept, gone) = ([4u8; 16], [5u8; 16]);
+        let (mut run, _) = run_with(&conn, kept, Content::Entry(pref("carbon")));
+        run.mirror.insert(
+            gone,
+            Mirrored {
+                seq: 4,
+                stamp: stamp(12, 9),
+                content: deleted(),
+                compacted: false,
+            },
+        );
+        run.requeue(&kept, 8).unwrap();
+        run.requeue(&gone, 9).unwrap();
+        assert_eq!(
+            run.outbox[&kept],
+            Pending {
+                record_id: kept,
+                base_seq: 8,
+                stamp: stamp(10, 8),
+                content: Content::Entry(pref("carbon")),
+            }
+        );
+        assert_eq!(
+            run.outbox[&gone],
+            Pending {
+                record_id: gone,
+                base_seq: 9,
+                stamp: stamp(12, 9),
+                content: deleted(),
+            }
+        );
+        assert!(run.incoming.is_empty(), "nothing changes here");
+    }
+
+    #[test]
+    fn only_old_sealed_deletions_are_compacted() {
+        let conn = testutil::conn();
+        let (live, old, recent, compacted, waiting) =
+            ([1u8; 16], [2u8; 16], [3u8; 16], [4u8; 16], [5u8; 16]);
+        let (mut run, _) = run_with(&conn, live, Content::Entry(pref("carbon")));
+        for (id, ms, done) in [
+            (old, 10, false),
+            (recent, 500, false),
+            (compacted, 10, true),
+            (waiting, 10, false),
+        ] {
+            run.mirror.insert(
+                id,
+                Mirrored {
+                    seq: 2,
+                    stamp: stamp(ms, 9),
+                    content: deleted(),
+                    compacted: done,
+                },
+            );
+        }
+        run.outbox.insert(
+            waiting,
+            Pending {
+                record_id: waiting,
+                base_seq: 2,
+                stamp: stamp(600, 7),
+                content: Content::Entry(pref("snow")),
+            },
+        );
+        assert_eq!(run.compactable(100, 10).unwrap(), vec![(old, 2)]);
+    }
+
+    #[test]
+    fn a_local_deletion_names_what_it_deletes() {
+        let conn = testutil::conn();
+        create_row(&conn, "https://sync.test", &[], false, 1).unwrap();
+        let clock = Clock::new([7; 16], None);
+        let id = [4u8; 16];
+        track(&conn, &BTreeMap::from([(id, pref("carbon"))]), &clock).unwrap();
+        track(&conn, &BTreeMap::new(), &clock).unwrap();
+        assert_eq!(load_outbox(&conn).unwrap()[&id].content, deleted());
     }
 }

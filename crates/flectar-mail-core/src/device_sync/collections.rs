@@ -377,7 +377,9 @@ pub(crate) fn snapshot(
             continue;
         };
         let accounts = profile_accounts(
-            mirror.get(&id).and_then(|mirrored| mirrored.entry.as_ref()),
+            mirror
+                .get(&id)
+                .and_then(|mirrored| mirrored.content.entry()),
             profile
                 .account_ids
                 .iter()
@@ -520,7 +522,7 @@ pub(crate) fn snapshot(
     }
 
     for (id, record) in &mut records {
-        if let Some(mirrored) = mirror.get(id).and_then(|mirrored| mirrored.entry.as_ref()) {
+        if let Some(mirrored) = mirror.get(id).and_then(|mirrored| mirrored.content.entry()) {
             keep_unknown_fields(record, mirrored);
         }
     }
@@ -534,7 +536,10 @@ pub(crate) fn snapshot(
         .collect();
     for id in too_large {
         tracing::debug!("an item is too large to sync");
-        match mirror.get(&id).and_then(|mirrored| mirrored.entry.clone()) {
+        match mirror
+            .get(&id)
+            .and_then(|mirrored| mirrored.content.entry().cloned())
+        {
             Some(mirrored) => records.insert(id, mirrored),
             None => records.remove(&id),
         };
@@ -1707,7 +1712,7 @@ mod tests {
     use super::*;
     use crate::db::testutil;
     use crate::models::{AuthKind, Provider};
-    use flectar_mail_sync_client::Clock;
+    use flectar_mail_sync_client::{Clock, Content};
 
     fn account(conn: &Connection, email: &str, sync_id: &str) -> i64 {
         let id = repo::accounts::insert(
@@ -1739,7 +1744,7 @@ mod tests {
     }
 
     /// What the server has for `id`: a record, or a deletion.
-    fn mirror_row(conn: &Connection, id: &RecordId, entry: Option<&Entry>) {
+    fn mirror_row(conn: &Connection, id: &RecordId, entry: &Entry) {
         conn.execute(
             "INSERT OR REPLACE INTO device_sync_mirror
                (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body)
@@ -1747,10 +1752,29 @@ mod tests {
             params![
                 &id[..],
                 &[9u8; 16][..],
-                entry.map(|entry| entry.collection.clone()),
-                entry.map(|entry| i64::from(entry.schema)),
-                entry.map(|entry| entry.body.to_string())
+                entry.collection,
+                i64::from(entry.schema),
+                entry.body.to_string()
             ],
+        )
+        .unwrap();
+    }
+
+    fn test_stamp() -> flectar_mail_sync_client::Stamp {
+        flectar_mail_sync_client::Stamp {
+            ms: 1,
+            counter: 0,
+            device: [9; 16],
+        }
+    }
+
+    /// The server has the record, deleted by a member.
+    fn mirror_deletion(conn: &Connection, id: &RecordId, collection: &str) {
+        conn.execute(
+            "INSERT OR REPLACE INTO device_sync_mirror
+               (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection)
+             VALUES (?1, 1, 1, 0, ?2, ?3)",
+            params![&id[..], &[9u8; 16][..], collection],
         )
         .unwrap();
     }
@@ -1811,12 +1835,13 @@ mod tests {
             profile,
             Mirrored {
                 seq: 1,
-                stamp: None,
-                entry: Some(entry(
+                stamp: test_stamp(),
+                content: Content::Entry(entry(
                     PROFILE,
                     json!({"id": "profile-1", "name": "Work", "color": "#8b5cf6",
                            "accounts": [missing, known]}),
                 )),
+                compacted: false,
             },
         );
         let records = snapshot(&conn, &names, &mirror, ([1; 16], json!({}))).unwrap();
@@ -1832,7 +1857,7 @@ mod tests {
             schema: 2,
             body: json!({"key": "theme", "value": "dark", "since": "v2"}),
         };
-        mirror_row(&conn, &id, Some(&newer));
+        mirror_row(&conn, &id, &newer);
         let mut local = BTreeMap::new();
         local.insert(id, entry(PREF, json!({"key": "theme", "value": "light"})));
         let clock = Clock::new([1; 16], None);
@@ -1850,8 +1875,9 @@ mod tests {
                 id,
                 Mirrored {
                     seq: 1,
-                    stamp: None,
-                    entry: Some(mirrored.clone()),
+                    stamp: test_stamp(),
+                    content: Content::Entry(mirrored.clone()),
+                    compacted: false,
                 },
             );
         }
@@ -1905,7 +1931,7 @@ mod tests {
         let mut names = Names::default();
         names.insert(pref_name("timeFormat"), id);
         let newer = entry(PREF, json!({"key": "timeFormat", "value": "decimal"}));
-        mirror_row(&conn, &id, Some(&newer));
+        mirror_row(&conn, &id, &newer);
         let mut mirror = BTreeMap::new();
         let local = snapshot(&conn, &names, &mirror, ([1; 16], json!({}))).unwrap();
         let incoming = BTreeMap::from([(
@@ -1920,8 +1946,9 @@ mod tests {
             id,
             Mirrored {
                 seq: 1,
-                stamp: None,
-                entry: Some(newer),
+                stamp: test_stamp(),
+                content: Content::Entry(newer),
+                compacted: false,
             },
         );
         let after = snapshot(&conn, &names, &mirror, ([1; 16], json!({}))).unwrap();
@@ -1950,7 +1977,7 @@ mod tests {
         // This device's id is the larger one: it adopts the other device's.
         let conn = testutil::conn();
         let local = account(&conn, "me@example.com", &larger);
-        mirror_row(&conn, &sync_id_bytes(&larger).unwrap(), None);
+        mirror_deletion(&conn, &sync_id_bytes(&larger).unwrap(), ACCOUNT);
         let mut waiting = BTreeMap::new();
         waiting.insert(sync_id_bytes(&smaller).unwrap(), remote(&conn, local));
         apply(
@@ -1967,7 +1994,7 @@ mod tests {
         // device adopts it.
         let conn = testutil::conn();
         let local = account(&conn, "me@example.com", &smaller);
-        mirror_row(&conn, &sync_id_bytes(&smaller).unwrap(), None);
+        mirror_deletion(&conn, &sync_id_bytes(&smaller).unwrap(), ACCOUNT);
         let mut waiting = BTreeMap::new();
         waiting.insert(sync_id_bytes(&larger).unwrap(), remote(&conn, local));
         apply(
@@ -2079,7 +2106,7 @@ mod tests {
         template(&conn, "Thanks", Some("ty"), &sync_id);
         let id = sync_id_bytes(&sync_id).unwrap();
         let synced = own_record(&conn, id, None);
-        mirror_row(&conn, &id, Some(&synced));
+        mirror_row(&conn, &id, &synced);
         let clock = Clock::new([1; 16], None);
         super::super::store::set_local_hash(&conn, &id, Some(body_hash(&synced))).unwrap();
 
@@ -2794,7 +2821,7 @@ mod tests {
         // In step with the server.
         let ours = local(&conn)[&id].clone();
         set_local_hash(&conn, &id, Some(body_hash(&ours))).unwrap();
-        mirror_row(&conn, &id, Some(&ours));
+        mirror_row(&conn, &id, &ours);
         let clock = Clock::new([1; 16], None);
         let take = |previous: &Entry, next: &Entry| {
             let mut incoming = BTreeMap::new();
@@ -2807,7 +2834,7 @@ mod tests {
             );
             let before = local(&conn);
             apply(&conn, &incoming, &BTreeMap::new(), &before, &before).unwrap();
-            mirror_row(&conn, &id, Some(next));
+            mirror_row(&conn, &id, next);
         };
 
         // Another device found it stale: this one says so too, instead of
@@ -2913,7 +2940,7 @@ mod tests {
         );
         // This device has what the group has, so it sends nothing back.
         assert_eq!(local(&conn), Some(next.clone()));
-        mirror_row(&conn, &id, Some(&next));
+        mirror_row(&conn, &id, &next);
         let clock = Clock::new([1; 16], None);
         let ours = local(&conn).map(|entry| (id, entry)).into_iter().collect();
         assert_eq!(super::super::store::track(&conn, &ours, &clock).unwrap(), 0);
