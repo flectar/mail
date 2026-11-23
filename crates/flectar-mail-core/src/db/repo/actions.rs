@@ -431,14 +431,54 @@ pub fn try_claim(conn: &Connection, id: i64) -> Result<bool> {
 /// executing) back to pending so they get retried. An `inflight` row can only be
 /// orphaned at startup because no actor is running yet; left as-is it would be
 /// invisible to `due()` and stick forever (e.g. a send stuck on "Sending…").
+///
+/// A send whose message reached its end (see [`note_end_of_data`]) may have
+/// gone out, though: the app stopped before the server's reply came, and
+/// until that reply the server may have taken the message or not (RFC 5321
+/// section 4.5.3.2.6). Sending it again could deliver it twice, so it ends
+/// as one that may have gone out, as when that reply is lost.
 /// Returns how many were recovered.
 pub fn recover_inflight(conn: &Connection) -> Result<usize> {
+    let now = now_ms();
+    let uncertain = conn.execute(
+        "UPDATE pending_actions
+         SET state = 'failed', last_error = ?2, finished_at = ?1,
+             payload = json_set(payload, '$.uncertain', json('true'))
+         WHERE state = 'inflight' AND kind = 'send'
+           AND json_extract(payload, '$.smtpEndOfData') = 1",
+        params![
+            now,
+            "the mail server may have accepted the message, but the app stopped before its reply came; check Sent before sending it again"
+        ],
+    )?;
     let n = conn.execute(
         "UPDATE pending_actions SET state = 'pending', not_before = ?1
          WHERE state = 'inflight'",
-        params![now_ms()],
+        params![now],
     )?;
-    Ok(n)
+    Ok(uncertain + n)
+}
+
+/// Note that the end of a send's message is about to go out: from there
+/// the mail server may take it, whatever happens to this device.
+pub fn note_end_of_data(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions SET payload = json_set(payload, '$.smtpEndOfData', json('true'))
+         WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
+
+/// Forget [`note_end_of_data`] of a try whose message didn't go out after
+/// all, as the server refused it at its end.
+pub fn forget_end_of_data(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions SET payload = json_remove(payload, '$.smtpEndOfData')
+         WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
 }
 
 /// Make a still-pending action due immediately ("send now" / skip the undo
@@ -1113,5 +1153,58 @@ mod tests {
         )
         .unwrap();
         assert!(has_pending_remote_creation(&conn, message_id).unwrap());
+    }
+
+    #[test]
+    fn a_send_stopped_after_the_end_of_its_message_is_not_sent_again_by_itself() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let under_way = |kind: &str| {
+            let id = enqueue(
+                &conn,
+                1,
+                kind,
+                None,
+                None,
+                &serde_json::json!({"draftId": 9}),
+                Some(1_000),
+            )
+            .unwrap();
+            assert!(try_claim(&conn, id).unwrap());
+            id
+        };
+        // The app stopped while each was under way: one before the end of
+        // its message went out, one after, and one in a try after the
+        // server refused the message at its end.
+        let (before, after, retried) = (under_way("send"), under_way("send"), under_way("send"));
+        note_end_of_data(&conn, after).unwrap();
+        note_end_of_data(&conn, retried).unwrap();
+        forget_end_of_data(&conn, retried).unwrap();
+        let archive = under_way("archive");
+
+        assert_eq!(recover_inflight(&conn).unwrap(), 4);
+        // These never went out: they run again.
+        for id in [before, retried, archive] {
+            assert_eq!(get(&conn, id).unwrap().unwrap().state, "pending");
+        }
+        // The server may have taken this one: it ends as possibly sent,
+        // never to go out again by itself.
+        let ended = get(&conn, after).unwrap().unwrap();
+        assert_eq!(ended.state, "failed");
+        assert_eq!(ended.payload["uncertain"], true);
+        let error: String = conn
+            .query_row(
+                "SELECT last_error FROM pending_actions WHERE id = ?1",
+                [after],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(error.contains("check Sent"), "{error}");
+        assert!(
+            due(&conn, 1, i64::MAX - 1, 10)
+                .unwrap()
+                .iter()
+                .all(|action| action.id != after)
+        );
     }
 }
