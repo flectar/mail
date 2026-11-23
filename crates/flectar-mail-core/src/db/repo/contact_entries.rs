@@ -384,6 +384,122 @@ pub fn save(conn: &Connection, record: &ContactRecord) -> Result<i64> {
 /// Delete a saved contact, or forget a mail-derived suggestion. A synced
 /// contact stays hidden until the server confirms its deletion. Like an
 /// edit, deleting a saved contact must be based on its current revision.
+/// The saved contact an imported card is already: the one with its UID,
+/// else one with any of its email addresses.
+pub fn duplicate_of(conn: &Connection, card: &Card) -> Result<Option<i64>> {
+    if let Some(uid) = vcard::uid(card.document())
+        && let Some(id) = conn
+            .query_row(
+                "SELECT id FROM contact_entries WHERE uid = ?1 ORDER BY id LIMIT 1",
+                [&uid],
+                |row| row.get(0),
+            )
+            .optional()?
+    {
+        return Ok(Some(id));
+    }
+    for email in &card.record().details.emails {
+        if let Some(id) = conn
+            .query_row(
+                "SELECT contact_id FROM contact_values
+                 WHERE kind = 'EMAIL' AND value = ?1 COLLATE NOCASE
+                 ORDER BY contact_id LIMIT 1",
+                [email.value.trim()],
+                |row| row.get(0),
+            )
+            .optional()?
+        {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
+/// A saved contact with what an imported card adds to it: addresses and
+/// numbers it doesn't have, tags, and the fields it leaves empty. `None`
+/// when the card adds nothing.
+pub fn merged(saved: &ContactRecord, imported: &ContactRecord) -> Option<ContactRecord> {
+    let mut merged = saved.clone();
+    for (field, value) in [
+        (&mut merged.company, &imported.company),
+        (&mut merged.job_title, &imported.job_title),
+        (&mut merged.website, &imported.website),
+        (&mut merged.birthday, &imported.birthday),
+        (&mut merged.postal_address, &imported.postal_address),
+        (&mut merged.notes, &imported.notes),
+    ] {
+        if field.trim().is_empty() && !value.trim().is_empty() {
+            field.clone_from(value);
+        }
+    }
+    let mut tags = merged
+        .tags
+        .split(',')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let known_tags = tags.len();
+    for tag in imported.tags.split(',').map(str::trim) {
+        if !tag.is_empty() && !tags.iter().any(|known| known.eq_ignore_ascii_case(tag)) {
+            tags.push(tag.to_owned());
+        }
+    }
+    if tags.len() > known_tags {
+        merged.tags = tags.join(", ");
+    }
+    let digits = |number: &str| {
+        number
+            .chars()
+            .filter(char::is_ascii_digit)
+            .collect::<String>()
+    };
+    for email in &imported.details.emails {
+        if !merged
+            .details
+            .emails
+            .iter()
+            .any(|known| known.value.trim().eq_ignore_ascii_case(email.value.trim()))
+        {
+            // The saved contact keeps its preferred address.
+            merged.details.emails.push(ContactValue {
+                key: String::new(),
+                preference: ContactValue::NO_PREFERENCE,
+                ..email.clone()
+            });
+        }
+    }
+    for phone in &imported.details.phones {
+        if !merged
+            .details
+            .phones
+            .iter()
+            .any(|known| digits(&known.value) == digits(&phone.value))
+        {
+            merged.details.phones.push(ContactValue {
+                key: String::new(),
+                preference: ContactValue::NO_PREFERENCE,
+                ..phone.clone()
+            });
+        }
+    }
+    (!same_fields(saved, &merged)).then(|| {
+        merged.refresh_primary_values();
+        merged
+    })
+}
+
+/// Every saved contact's document, by name, as one vCard file of them.
+pub fn export(conn: &Connection) -> Result<(String, usize)> {
+    let mut statement =
+        conn.prepare("SELECT document FROM contact_entries ORDER BY name COLLATE NOCASE, id")?;
+    let documents = statement
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let count = documents.len();
+    Ok((documents.concat(), count))
+}
+
 pub fn delete(conn: &Connection, id: i64, revision: i64) -> Result<()> {
     if id < 0 {
         conn.execute("DELETE FROM contacts WHERE id = ?1", [-id])?;

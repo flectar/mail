@@ -30,6 +30,7 @@ mod compose_editor;
 mod compose_paste;
 mod compose_quote;
 mod composer;
+mod contact_import;
 mod contacts;
 mod data_controller;
 mod date_format;
@@ -6722,6 +6723,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         platform.external_urls.clone(),
     );
     mail_setup::register(&app, &runtime, &platform.documents);
+    contact_import::install(
+        &app,
+        &state,
+        &contact_state,
+        &runtime,
+        &platform.documents,
+        platform.paths.temp_dir(),
+    );
 
     let suggestion_app = app.as_weak();
     let suggestion_state = Rc::clone(&state);

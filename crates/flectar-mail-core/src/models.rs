@@ -1446,6 +1446,52 @@ pub struct CardDavConnection {
     pub last_error: Option<String>,
 }
 
+/// Why a contacts file can't be imported at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ContactFileProblem {
+    /// Larger than [`crate::carddav::import::MAX_FILE_BYTES`].
+    TooLarge,
+    /// More cards than [`crate::carddav::import::MAX_CARDS`].
+    TooManyContacts,
+}
+
+/// What importing a contacts file would do, or why it can't.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ContactImportPreview {
+    /// Contacts not saved yet.
+    pub new: usize,
+    /// Contacts already saved, with the same UID or an email address in
+    /// common, or repeated in the file.
+    pub duplicates: usize,
+    /// Cards with nothing to call the contact by, or that are malformed.
+    pub unreadable: usize,
+    pub problem: Option<ContactFileProblem>,
+}
+
+/// What importing does with a contact that is already saved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportedDuplicates {
+    /// Keep the saved contact as it is.
+    Skip,
+    /// Add to the saved contact what it doesn't have yet: new addresses and
+    /// numbers, and fields it leaves empty.
+    Merge,
+    /// Save the imported card as another contact.
+    Add,
+}
+
+/// What importing a contacts file did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ContactImportOutcome {
+    pub added: usize,
+    pub merged: usize,
+    /// Duplicates left as they were, and saved contacts that can't change,
+    /// such as those of a read-only address book.
+    pub skipped: usize,
+    pub unreadable: usize,
+}
+
 // Deliberately no `Debug`: it would print the CardDAV app password.
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

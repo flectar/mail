@@ -2,6 +2,7 @@
 
 pub mod discovery;
 pub mod http;
+pub mod import;
 pub mod sync;
 pub mod task;
 pub mod vcard;
