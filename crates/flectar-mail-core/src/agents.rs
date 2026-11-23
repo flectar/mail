@@ -8,29 +8,67 @@ use crate::db::repo;
 use crate::db::repo::agent_activity::{NewAgentActivity, Undo};
 use crate::error::Result;
 use crate::models::{
-    ActionKind, ActionParams, ActionTarget, Address, AgentAccess, AgentActivity, MessageDetail,
-    MessageSearchCursor, MessageSearchPage, PerformActionArgs, SaveDraftArgs, now_ms,
+    ActionKind, ActionParams, ActionTarget, Address, AgentAccess, AgentActivity, MessageCursor,
+    MessageDetail, MessagePage, MessageSearchCursor, MessageSearchPage, PerformActionArgs,
+    SaveDraftArgs, now_ms,
 };
+use crate::search::{Filter, ParsedQuery};
 use std::collections::BTreeMap;
 
 impl Core {
-    /// Messages matching `query` in any of `folder_ids`, newest first.
+    /// Messages matching `query` in any of `folder_ids`, newest first, that
+    /// an agent may read when it may read the folders `readable`. See
+    /// [`Self::agent_folder_ids`].
     pub async fn search_messages_in_folders(
         &self,
         query: String,
         folder_ids: Vec<i64>,
+        readable: Vec<i64>,
         cursor: Option<MessageSearchCursor>,
         limit: i64,
     ) -> Result<MessageSearchPage> {
         let mut parsed = crate::search::parse(&query);
         parsed.folder_ids = Some(folder_ids);
+        parsed.agent_readable = Some(readable);
         self.search_messages_parsed(parsed, cursor, limit).await
     }
 
-    /// The folders `message_id` is in, as mail lists show it.
-    pub async fn message_folder_ids(&self, message_id: i64) -> Result<Vec<i64>> {
+    /// The messages in `folder_id`, newest first, that an agent may read
+    /// when it may read the folders `readable`, and only the unread ones with
+    /// `unread_only`. See [`Self::agent_folder_ids`].
+    pub async fn agent_folder_messages(
+        &self,
+        folder_id: i64,
+        readable: Vec<i64>,
+        unread_only: bool,
+        cursor: Option<MessageCursor>,
+        limit: i64,
+    ) -> Result<MessagePage> {
+        let query = ParsedQuery {
+            filters: if unread_only {
+                vec![Filter::Unread]
+            } else {
+                Vec::new()
+            },
+            folder_ids: Some(vec![folder_id]),
+            agent_readable: Some(readable),
+            ..ParsedQuery::default()
+        };
+        let limit = limit.clamp(1, 100);
         self.db
-            .read(move |conn| repo::messages::folder_ids(conn, message_id))
+            .read(move |conn| repo::search::scoped_message_page(conn, &query, cursor, limit))
+            .await
+    }
+
+    /// The folders that decide whether an agent may read `message_id`: its
+    /// folder and every other folder or label it's in, except Gmail's All
+    /// Mail, which every Gmail message is in. An agent may read the message
+    /// only when it may read each of them, so a folder or label hidden from
+    /// agents, as Spam and Trash are until the user shows them, wins over any
+    /// other the message is in.
+    pub async fn agent_folder_ids(&self, message_id: i64) -> Result<Vec<i64>> {
+        self.db
+            .read(move |conn| repo::messages::agent_folder_ids(conn, message_id))
             .await
     }
 
@@ -258,30 +296,251 @@ mod tests {
     }
 
     #[test]
-    fn a_message_is_in_its_folder_and_for_gmail_its_labels() {
+    fn every_folder_a_message_is_in_decides_for_agents_but_gmail_all_mail() {
         let conn = testutil::conn();
         testutil::seed_account(&conn);
-        conn.execute(
-            "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Work', NULL)",
-            [],
+        conn.execute_batch(
+            "INSERT INTO folders (id, account_id, path, role) VALUES
+                (2, 1, 'Work', NULL), (3, 1, 'All Mail', 'all');",
         )
         .unwrap();
         let (_, message_id) = testutil::seed_message(&conn, "a@example.com", "Plans", false);
         conn.execute(
-            "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 2)",
+            "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 2), (?1, 3)",
             [message_id],
         )
         .unwrap();
-        // Outside Gmail a message is in its own folder only, as lists show it.
-        assert_eq!(repo::messages::folder_ids(&conn, message_id).unwrap(), [1]);
+        let folders = || repo::messages::agent_folder_ids(&conn, message_id).unwrap();
+        // Each folder a message is in counts, as a JMAP message is in each of
+        // its mailboxes, and a server's own All Mail is a folder like any
+        // other.
+        assert_eq!(folders(), [1, 2, 3]);
+        // Gmail's All Mail has every message, Spam and Trash too, so it
+        // decides nothing; labels do.
         conn.execute(
             "UPDATE accounts SET provider = 'gmail', mail_protocol = 'gmail' WHERE id = 1",
             [],
         )
         .unwrap();
-        let mut folders = repo::messages::folder_ids(&conn, message_id).unwrap();
-        folders.sort();
-        assert_eq!(folders, [1, 2]);
+        assert_eq!(folders(), [1, 2]);
+        // A message only in All Mail is in no folder an agent could read it in.
+        conn.execute(
+            "UPDATE messages SET folder_id = 3 WHERE id = ?1",
+            [message_id],
+        )
+        .unwrap();
+        conn.execute(
+            "DELETE FROM message_folders WHERE message_id = ?1 AND folder_id = 2",
+            [message_id],
+        )
+        .unwrap();
+        assert!(folders().is_empty());
+    }
+
+    /// A Gmail account as sync stores it: Inbox, the synthetic Archive and
+    /// All Mail, Spam, Trash and a user label, with every message in All Mail.
+    /// Returns the ids of a message in the Inbox, one in Spam, one in the Inbox
+    /// under the label, one archived, and one sync placed only in All Mail.
+    fn seed_gmail(conn: &rusqlite::Connection) -> [i64; 5] {
+        testutil::seed_account(conn);
+        conn.execute_batch(
+            "UPDATE accounts SET provider = 'gmail', mail_protocol = 'gmail' WHERE id = 1;
+             INSERT INTO folders (id, account_id, path, role) VALUES
+                (2, 1, '[Gmail]/Archive', 'archive'),
+                (3, 1, '[Gmail]/All Mail', 'all'),
+                (4, 1, 'SPAM', 'spam'),
+                (5, 1, 'TRASH', 'trash'),
+                (6, 1, 'Taxes', NULL);",
+        )
+        .unwrap();
+        // Each message, oldest first: its folder, its labels besides All Mail,
+        // and whether it's read.
+        let shapes: [(i64, &[i64], bool); 5] = [
+            (1, &[1], true),
+            (4, &[4], false),
+            (1, &[1, 6], true),
+            (2, &[2], false),
+            (3, &[], true),
+        ];
+        let mut ids = [0; 5];
+        for (index, (folder, labels, read)) in shapes.into_iter().enumerate() {
+            let (_, id) = testutil::seed_message(conn, "a@example.com", "quarterly plans", false);
+            conn.execute(
+                "UPDATE messages SET folder_id = ?2, date = ?3, is_read = ?4 WHERE id = ?1",
+                rusqlite::params![id, folder, 1000 + index as i64, read],
+            )
+            .unwrap();
+            for label in labels.iter().chain(&[3]) {
+                conn.execute(
+                    "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, ?2)",
+                    [id, *label],
+                )
+                .unwrap();
+            }
+            repo::search::index_message(conn, id).unwrap();
+            ids[index] = id;
+        }
+        ids
+    }
+
+    /// The folders an agent may read under `access`, as the app works them
+    /// out: selectable folders `AgentAccess::shows_folder` keeps.
+    async fn readable(core: &Core, access: &AgentAccess) -> Vec<i64> {
+        core.list_folders(None)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|folder| folder.selectable && access.shows_folder(folder))
+            .map(|folder| folder.id)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn on_gmail_spam_and_hidden_labels_stay_hidden_from_agents_everywhere() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(crate::config::Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let [inbox, spam, labeled, archived, all_only] =
+            core.db.write(|conn| Ok(seed_gmail(conn))).await.unwrap();
+        let mut access = AgentAccess {
+            enabled: true,
+            ..AgentAccess::default()
+        };
+        let sorted = |mut ids: Vec<i64>| {
+            ids.sort_unstable();
+            ids
+        };
+        // Every way an agent comes to mail agrees with the rule for one
+        // message: each folder that decides it is one the agent may read.
+        let check = async |access: &AgentAccess, expected: &[i64]| {
+            let readable = readable(&core, access).await;
+            for id in [inbox, spam, labeled, archived, all_only] {
+                let folders = core.agent_folder_ids(id).await.unwrap();
+                let shown = !folders.is_empty() && folders.iter().all(|id| readable.contains(id));
+                assert_eq!(shown, expected.contains(&id), "message {id} in {folders:?}");
+            }
+            let found = core
+                .search_messages_in_folders(
+                    "quarterly".into(),
+                    readable.clone(),
+                    readable.clone(),
+                    None,
+                    50,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                sorted(found.messages.iter().map(|message| message.id).collect()),
+                expected
+            );
+            // All Mail lists only what agents may read, as does a search in it.
+            if readable.contains(&3) {
+                let listed = core
+                    .agent_folder_messages(3, readable.clone(), false, None, 50)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    sorted(listed.messages.iter().map(|message| message.id).collect()),
+                    expected
+                );
+                let found = core
+                    .search_messages_in_folders(
+                        "quarterly".into(),
+                        vec![3],
+                        readable.clone(),
+                        None,
+                        50,
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    sorted(found.messages.iter().map(|message| message.id).collect()),
+                    expected
+                );
+            }
+        };
+
+        // Spam and Trash stay out until the user shows them, though every
+        // message is in All Mail, and so does mail sync left only there.
+        check(&access, &[inbox, labeled, archived]).await;
+        // Hiding a label hides its mail, though it's in the Inbox too.
+        access.hidden_folders = vec![6];
+        check(&access, &[inbox, archived]).await;
+        let inbox_list = core
+            .agent_folder_messages(1, readable(&core, &access).await, false, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(
+            inbox_list
+                .messages
+                .iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>(),
+            [inbox]
+        );
+        // An agent that names Spam in its search finds nothing there.
+        let readable_now = readable(&core, &access).await;
+        let named = core
+            .search_messages_in_folders(
+                "in:spam quarterly".into(),
+                readable_now.clone(),
+                readable_now,
+                None,
+                50,
+            )
+            .await
+            .unwrap();
+        assert!(named.messages.is_empty());
+        // Hiding the synthetic Archive hides archived mail, while hiding All
+        // Mail only takes that folder away: the Inbox still shows.
+        access.hidden_folders = vec![2, 3];
+        check(&access, &[inbox, labeled]).await;
+        // Once the user shows Spam, its mail is there for agents.
+        access.hidden_folders.clear();
+        access.shown_folders = vec![4];
+        check(&access, &[inbox, spam, labeled, archived]).await;
+
+        // Unread only, newest first, a page at a time.
+        access.shown_folders.clear();
+        let readable_now = readable(&core, &access).await;
+        let first = core
+            .agent_folder_messages(3, readable_now.clone(), false, None, 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            first
+                .messages
+                .iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>(),
+            [archived, labeled]
+        );
+        let rest = core
+            .agent_folder_messages(3, readable_now.clone(), false, first.next_cursor, 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            rest.messages
+                .iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>(),
+            [inbox]
+        );
+        assert!(rest.next_cursor.is_none());
+        // The spam is unread too, but stays hidden.
+        let unread = core
+            .agent_folder_messages(3, readable_now, true, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(
+            unread
+                .messages
+                .iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>(),
+            [archived]
+        );
     }
 
     #[tokio::test]

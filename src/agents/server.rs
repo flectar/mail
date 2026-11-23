@@ -8,15 +8,15 @@ use super::{
     protocol::{self, Request, Response},
 };
 use flectar_mail_core::{
-    Core, MessagePageRequest,
+    Core,
     agents::is_end_to_end_encrypted,
     ai::clean_untrusted,
     db::repo::agent_activity::{LabelChange, NewAgentActivity},
     error::CoreError,
     models::{
         ActionKind, ActionParams, ActionTarget, Address, AgentAccess, AgentOutcome, FolderInfo,
-        ListOrder, MessageCursor, MessageDetail, MessageSearchCursor, MessageSummary,
-        PerformActionArgs, SaveDraftArgs, View, now_ms,
+        MessageCursor, MessageDetail, MessageSearchCursor, MessageSummary, PerformActionArgs,
+        SaveDraftArgs, now_ms,
     },
 };
 use serde_json::{Map, Value, json};
@@ -399,6 +399,11 @@ impl Scope {
         self.folders.iter().find(|folder| folder.id == folder_id)
     }
 
+    /// Every folder agents may read.
+    fn readable(&self) -> Vec<i64> {
+        self.folders.iter().map(|folder| folder.id).collect()
+    }
+
     /// The names of the folders among `folder_ids` that agents may see.
     fn visible_folder_names(&self, folder_ids: &[i64]) -> Vec<String> {
         folder_ids
@@ -408,10 +413,14 @@ impl Scope {
             .collect()
     }
 
-    /// Whether agents may read `message`, which is in `folder_ids`.
+    /// Whether agents may read `message`, given the folders that decide it
+    /// (`Core::agent_folder_ids`). Each of them has to be one agents may
+    /// read, so a folder or label hidden from agents, as Spam and Trash are
+    /// until the user shows them, wins over any other the message is in.
     fn shows_message(&self, message: &MessageDetail, folder_ids: &[i64]) -> bool {
         self.account(message.account_id).is_some()
-            && folder_ids.iter().any(|id| self.folder(*id).is_some())
+            && !folder_ids.is_empty()
+            && folder_ids.iter().all(|id| self.folder(*id).is_some())
     }
 }
 
@@ -647,33 +656,14 @@ async fn list_messages(
         return Err(Failure::Refused(NOT_SHARED.to_owned()));
     };
     let limit = arguments.limit(20)?;
-    let (messages, next_cursor) = if arguments.boolean("unread_only")? {
-        let cursor = search_cursor(arguments.string("cursor")?)?;
-        let page = core
-            .search_messages_in_folders("is:unread".into(), vec![folder_id], cursor, limit)
-            .await?;
-        (page.messages, page.next_cursor.map(encode_search_cursor))
-    } else {
-        let cursor = list_cursor(arguments.string("cursor")?)?;
-        let page = core
-            .list_messages(
-                View::All,
-                None,
-                Some(folder.account_id),
-                None,
-                Some(folder_id),
-                MessagePageRequest {
-                    cursor,
-                    limit,
-                    order: ListOrder::NewestFirst,
-                },
-            )
-            .await?;
-        (page.messages, page.next_cursor.map(encode_list_cursor))
-    };
+    let unread_only = arguments.boolean("unread_only")?;
+    let cursor = list_cursor(arguments.string("cursor")?)?;
+    let page = core
+        .agent_folder_messages(folder_id, scope.readable(), unread_only, cursor, limit)
+        .await?;
     Ok(message_list(
-        &messages,
-        next_cursor,
+        &page.messages,
+        page.next_cursor.map(encode_list_cursor),
         Some(folder.account_id),
         Some(folder_id),
     ))
@@ -707,7 +697,13 @@ async fn search_messages(
         .collect::<Vec<_>>();
     let cursor = search_cursor(arguments.string("cursor")?)?;
     let page = core
-        .search_messages_in_folders(query.to_owned(), folder_ids, cursor, arguments.limit(20)?)
+        .search_messages_in_folders(
+            query.to_owned(),
+            folder_ids,
+            scope.readable(),
+            cursor,
+            arguments.limit(20)?,
+        )
         .await?;
     Ok(message_list(
         &page.messages,
@@ -823,7 +819,7 @@ async fn read_message(
         .stored_message(message_id)
         .await
         .map_err(|_| Failure::Failed("There's no message with that id.".into()))?;
-    let folder_ids = core.message_folder_ids(message_id).await?;
+    let folder_ids = core.agent_folder_ids(message_id).await?;
     if !scope.shows_message(&message, &folder_ids) {
         return Err(Failure::Refused(NOT_SHARED.to_owned()));
     }
@@ -850,7 +846,7 @@ async fn read_conversation(
     let conversation_id = arguments.required_integer("conversation_id")?;
     let mut messages = Vec::new();
     for message in core.stored_thread_messages(conversation_id).await? {
-        let folder_ids = core.message_folder_ids(message.id).await?;
+        let folder_ids = core.agent_folder_ids(message.id).await?;
         if !scope.shows_message(&message, &folder_ids) {
             continue;
         }
@@ -1047,7 +1043,7 @@ async fn create_draft(
                 .stored_message(message_id)
                 .await
                 .map_err(|_| Failure::Failed("There's no message with that id.".into()))?;
-            let folder_ids = core.message_folder_ids(message_id).await?;
+            let folder_ids = core.agent_folder_ids(message_id).await?;
             if !scope.shows_message(&message, &folder_ids) {
                 return Err(Failure::Refused(NOT_SHARED.to_owned()));
             }
@@ -1275,7 +1271,7 @@ async fn messages_to_change(
             .stored_message(id)
             .await
             .map_err(|_| Failure::Failed(format!("There's no message with id {id}.")))?;
-        let folder_ids = core.message_folder_ids(id).await?;
+        let folder_ids = core.agent_folder_ids(id).await?;
         if !scope.shows_message(&message, &folder_ids) {
             return Err(Failure::Refused(NOT_SHARED.to_owned()));
         }
@@ -1969,6 +1965,57 @@ mod tests {
             receipt_request: None,
             returned_receipts: Vec::new(),
         }
+    }
+
+    fn folder(id: i64, role: Option<&str>) -> FolderInfo {
+        FolderInfo {
+            id,
+            account_id: 1,
+            parent_id: None,
+            display_name: format!("Folder {id}"),
+            is_jmap: false,
+            path: format!("Folder {id}"),
+            delimiter: None,
+            role: role.map(str::to_owned),
+            selectable: true,
+            can_create_children: true,
+            can_rename: true,
+            can_delete: true,
+        }
+    }
+
+    #[test]
+    fn a_message_shows_only_when_agents_may_read_every_folder_it_is_in() {
+        // A Gmail account whose Inbox, Archive and All Mail agents may read,
+        // but not Spam (4), Trash (5) or the label the user hid (6).
+        let scope = Scope {
+            every_account: true,
+            accounts: vec![ScopeAccount {
+                id: 1,
+                address: Some("me@example.com".into()),
+                name: None,
+                provider: "gmail",
+            }],
+            folders: vec![
+                folder(1, Some("inbox")),
+                folder(2, Some("archive")),
+                folder(3, Some("all")),
+            ],
+        };
+        let mail = message("");
+        assert!(scope.shows_message(&mail, &[1]));
+        assert!(scope.shows_message(&mail, &[2]));
+        // The hidden label, or Spam, wins over the Inbox.
+        assert!(!scope.shows_message(&mail, &[1, 6]));
+        assert!(!scope.shows_message(&mail, &[1, 4]));
+        assert!(!scope.shows_message(&mail, &[5]));
+        // All Mail never decides, so mail sync left only there stays out.
+        assert!(!scope.shows_message(&mail, &[]));
+        let elsewhere = MessageDetail {
+            account_id: 2,
+            ..message("")
+        };
+        assert!(!scope.shows_message(&elsewhere, &[1]));
     }
 
     #[test]
