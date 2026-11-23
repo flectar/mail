@@ -210,14 +210,12 @@ mod unix {
 #[cfg(windows)]
 mod windows {
     use super::endpoint_name;
-    use std::{io, os::windows::io::AsRawHandle, path::Path, time::Duration};
+    use crate::platform::windows_security::{Peer, pipe_server};
+    use std::{io, path::Path, time::Duration};
     use tokio::net::windows::named_pipe::{
         ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
     };
-    use windows_sys::Win32::{
-        Foundation::{ERROR_PIPE_BUSY, HANDLE},
-        System::Pipes::GetNamedPipeServerProcessId,
-    };
+    use windows_sys::Win32::Foundation::ERROR_PIPE_BUSY;
 
     /// How long the bridge waits while every pipe instance is busy.
     const BUSY_ATTEMPTS: u32 = 40;
@@ -290,21 +288,7 @@ mod windows {
                 Err(error) => return Err(error),
             }
         };
-        let mut server_process = 0;
-        // SAFETY: `client` is an open pipe handle and `server_process` a
-        // valid output location.
-        if unsafe {
-            GetNamedPipeServerProcessId(client.as_raw_handle() as HANDLE, &mut server_process)
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        if !crate::platform::windows_security::process_is_current_user(server_process)? {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "the pipe belongs to another user",
-            ));
-        }
+        pipe_server(&client, Peer::SameUser)?;
         Ok(client)
     }
 }

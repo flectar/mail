@@ -1,21 +1,33 @@
 //! One desktop process per profile.
 //!
-//! The first process owns the profile and listens on a private local endpoint:
-//! a Unix socket guarded by an advisory lock, or a named pipe whose first
-//! instance is exclusive on Windows. A later launch asks that process to show
-//! its window, passing on any mail links it was opened with, and exits. So
-//! opening Flectar Mail from a launcher or a `mailto:` link while it runs in
-//! the tray uses the existing window instead of starting a second sync engine
-//! on the same database. A sign-in launch that finds the application already
-//! running exits without disturbing it.
+//! The process that locks `instance.lock` in the profile's data directory owns
+//! the profile and listens on a private local endpoint: a Unix socket, or on
+//! Windows a named pipe only this user can open. A later launch asks that
+//! process to show its window, passing on any mail links it was opened with,
+//! and exits. So opening Flectar Mail from a launcher or a `mailto:` link while
+//! it runs in the tray uses the existing window instead of starting a second
+//! sync engine on the same database. A sign-in launch that finds the
+//! application already running exits without disturbing it.
 //!
-//! Both the lock and the pipe are released by the kernel when the owner exits,
-//! even after a crash, so a stale endpoint never blocks a later launch.
+//! Other users can't lock a file in this user's data directory, so they can't
+//! keep a launch from owning the profile. Pipe names are shared by every user
+//! of the computer, so on Windows the owner listens under a new random name
+//! each run, and a later launch talks only to this user's process in this
+//! session.
+//!
+//! Both the lock and the endpoint are released by the kernel when the owner
+//! exits, even after a crash, so a stale endpoint never blocks a later launch.
 
 use crate::mailto_links::MAX_LAUNCH_LINKS;
 use flectar_mail_core::mailto;
 use sha2::{Digest, Sha256};
-use std::{io, path::Path, sync::Arc, time::Duration};
+use std::{
+    fs::{File, TryLockError},
+    io,
+    path::Path,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{io::AsyncReadExt, runtime::Handle, task::JoinHandle};
 
 /// The only request: show and focus the main window. The first line may add
@@ -128,10 +140,27 @@ pub(crate) fn acquire(runtime: &Handle, data_dir: &Path, request: Request) -> io
 /// profiles and, for named pipes, across users.
 pub(crate) fn profile_key(data_dir: &Path) -> String {
     let digest = Sha256::digest(data_dir.as_os_str().as_encoded_bytes());
-    digest[..12]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex(&digest[..12])
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Lock the profile for this process, or `None` while another process holds
+/// the lock. The kernel drops it when the process exits.
+fn lock(data_dir: &Path) -> io::Result<Option<File>> {
+    let lock = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(data_dir.join("instance.lock"))?;
+    match lock.try_lock() {
+        Ok(()) => Ok(Some(lock)),
+        Err(TryLockError::WouldBlock) => Ok(None),
+        Err(TryLockError::Error(error)) => Err(error),
+    }
 }
 
 async fn read_request(stream: impl tokio::io::AsyncRead + Unpin) -> Option<Vec<u8>> {
@@ -206,12 +235,13 @@ fn handle_request(request: Option<Vec<u8>>, show: &(dyn Fn(Activation) + Send + 
 #[cfg(unix)]
 mod imp {
     use super::{
-        CONNECT_ATTEMPTS, CONNECT_RETRY, ShowCallback, handle_request, profile_key, read_request,
+        CONNECT_ATTEMPTS, CONNECT_RETRY, ShowCallback, handle_request, lock, profile_key,
+        read_request,
     };
     use std::{
         fs::File,
         io,
-        os::unix::{fs::MetadataExt, io::AsRawFd, net::UnixListener},
+        os::unix::{fs::MetadataExt, net::UnixListener},
         path::{Path, PathBuf},
         sync::Arc,
     };
@@ -279,20 +309,9 @@ mod imp {
     }
 
     pub(super) fn claim(data_dir: &Path) -> io::Result<Option<Endpoint>> {
-        let lock = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(data_dir.join("instance.lock"))?;
-        // SAFETY: `lock` is an open descriptor owned by this function.
-        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            let error = io::Error::last_os_error();
-            return match error.raw_os_error() {
-                Some(libc::EWOULDBLOCK) => Ok(None),
-                _ => Err(error),
-            };
-        }
+        let Some(lock) = lock(data_dir)? else {
+            return Ok(None);
+        };
 
         let mut endpoint = Endpoint {
             _lock: lock,
@@ -349,24 +368,35 @@ mod imp {
 #[cfg(windows)]
 mod imp {
     use super::{
-        CONNECT_ATTEMPTS, CONNECT_RETRY, ShowCallback, handle_request, profile_key, read_request,
+        CONNECT_ATTEMPTS, CONNECT_RETRY, ShowCallback, handle_request, hex, lock, profile_key,
+        read_request,
     };
-    use crate::platform::windows_security::CurrentUserOnly;
-    use std::{io, path::Path, sync::Arc};
+    use crate::platform::windows_security::{CurrentUserOnly, Peer, pipe_server};
+    use std::{fs::File, io, path::Path, sync::Arc};
     use tokio::{
         io::AsyncWriteExt,
-        net::windows::named_pipe::{ClientOptions, NamedPipeServer, ServerOptions},
+        net::windows::named_pipe::{
+            ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
+        },
         task::JoinHandle,
     };
     use windows_sys::Win32::{
-        Foundation::{ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY},
-        UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow},
+        Foundation::ERROR_PIPE_BUSY, Security::Cryptography::ProcessPrng,
+        UI::WindowsAndMessaging::AllowSetForegroundWindow,
     };
+
+    /// Where the owner keeps the name of the pipe it listens on.
+    const PIPE_FILE: &str = "instance.pipe";
+    /// The random part of a pipe's name.
+    const NONCE_BYTES: usize = 16;
 
     pub(super) struct Endpoint {
         name: String,
         security: Arc<CurrentUserOnly>,
         server: Option<NamedPipeServer>,
+        /// Held for the life of the process; the kernel drops the lock when
+        /// the process exits.
+        _lock: File,
     }
 
     impl Endpoint {
@@ -399,12 +429,28 @@ mod imp {
         }
     }
 
-    fn pipe_name(data_dir: &Path) -> String {
-        format!(r"\\.\pipe\com.flectar.mail-{}", profile_key(data_dir))
+    /// Anyone may create a pipe under a name no one holds, so a name another
+    /// user knew in advance would let them take this user's launches. Each
+    /// owner listens under a new random name, kept in the data directory.
+    fn pipe_name(data_dir: &Path, nonce: &str) -> String {
+        format!(
+            r"\\.\pipe\com.flectar.mail-{}-{nonce}",
+            profile_key(data_dir)
+        )
+    }
+
+    fn new_nonce() -> String {
+        let mut bytes = [0u8; NONCE_BYTES];
+        // SAFETY: `bytes` holds the `NONCE_BYTES` the call writes. It always
+        // succeeds.
+        unsafe { ProcessPrng(bytes.as_mut_ptr(), bytes.len()) };
+        hex(&bytes)
     }
 
     /// Only this user can open the pipe. The default security descriptor
     /// would let every user, and anonymous clients, open it for reading.
+    /// Clients open it both ways, like the agents' pipe, whose clients ask it
+    /// who serves it in the same way.
     fn pipe(name: &str, security: &CurrentUserOnly, first: bool) -> io::Result<NamedPipeServer> {
         let mut attributes = security.attributes();
         // SAFETY: `attributes` points at a security descriptor that `security`
@@ -413,39 +459,39 @@ mod imp {
             ServerOptions::new()
                 .first_pipe_instance(first)
                 .reject_remote_clients(true)
-                .access_outbound(false)
                 .create_with_security_attributes_raw(name, (&raw mut attributes).cast())
         }
     }
 
     pub(super) fn claim(data_dir: &Path) -> io::Result<Option<Endpoint>> {
-        let name = pipe_name(data_dir);
+        let Some(lock) = lock(data_dir)? else {
+            return Ok(None);
+        };
+        let nonce = new_nonce();
+        let name = pipe_name(data_dir, &nonce);
         let security = Arc::new(CurrentUserOnly::new()?);
-        match pipe(&name, &security, true) {
-            Ok(server) => Ok(Some(Endpoint {
-                name,
-                security,
-                server: Some(server),
-            })),
-            // Another process already created the first instance.
-            Err(error) if error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => Ok(None),
-            Err(error) => Err(error),
-        }
+        let server = pipe(&name, &security, true)?;
+        // Only once the pipe exists, so the name leads to this process.
+        std::fs::write(data_dir.join(PIPE_FILE), &nonce)?;
+        Ok(Some(Endpoint {
+            name,
+            security,
+            server: Some(server),
+            _lock: lock,
+        }))
     }
 
     pub(super) async fn forward(data_dir: &Path, request: &[u8]) -> io::Result<()> {
-        let name = pipe_name(data_dir);
         let mut attempt = 0;
-        let mut client = loop {
-            match ClientOptions::new().read(false).open(&name) {
-                Ok(client) => break client,
+        // The owner names its pipe just after taking the lock; give a
+        // starting owner a moment.
+        let (mut client, owner) = loop {
+            match connect(data_dir) {
+                Ok(connected) => break connected,
                 Err(error)
                     if attempt + 1 < CONNECT_ATTEMPTS
-                        && matches!(
-                            error.raw_os_error(),
-                            Some(code) if code == ERROR_PIPE_BUSY as i32
-                                || code == ERROR_FILE_NOT_FOUND as i32
-                        ) =>
+                        && (error.kind() == io::ErrorKind::NotFound
+                            || error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32)) =>
                 {
                     attempt += 1;
                     tokio::time::sleep(CONNECT_RETRY).await;
@@ -454,11 +500,24 @@ mod imp {
             }
         };
         // This launch was started by the user and may bring a window to the
-        // foreground; pass that right on to the running instance.
+        // foreground; pass that right on to the running instance alone.
         // SAFETY: plain Win32 call without pointers.
-        unsafe { AllowSetForegroundWindow(ASFW_ANY) };
+        unsafe { AllowSetForegroundWindow(owner) };
         client.write_all(request).await?;
         client.shutdown().await
+    }
+
+    /// The owner's pipe and the id of its process. A name an earlier run left
+    /// behind may lead to another user's pipe by now, so the request goes
+    /// only to a process of this user in this session.
+    fn connect(data_dir: &Path) -> io::Result<(NamedPipeClient, u32)> {
+        let nonce = std::fs::read_to_string(data_dir.join(PIPE_FILE))?;
+        if nonce.len() != NONCE_BYTES * 2 || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(io::ErrorKind::NotFound.into());
+        }
+        let client = ClientOptions::new().open(pipe_name(data_dir, &nonce))?;
+        let owner = pipe_server(&client, Peer::SameSession)?;
+        Ok((client, owner))
     }
 }
 
@@ -559,6 +618,47 @@ mod tests {
             acquire(runtime.handle(), second.path(), show(None)).unwrap(),
             Acquired::Primary(_)
         ));
+    }
+
+    /// The lock in the data directory, which only this user's processes can
+    /// take, decides who owns the profile, not what listens on the endpoint.
+    #[test]
+    fn the_process_holding_the_lock_owns_the_profile() {
+        let runtime = runtime();
+        let directory = tempfile::tempdir().unwrap();
+        let held = lock(directory.path()).unwrap().unwrap();
+        assert!(matches!(
+            acquire(runtime.handle(), directory.path(), Request::Nothing).unwrap(),
+            Acquired::Forwarded
+        ));
+        drop(held);
+        assert!(matches!(
+            acquire(runtime.handle(), directory.path(), Request::Nothing).unwrap(),
+            Acquired::Primary(_)
+        ));
+    }
+
+    /// Another user could create a pipe under a name known in advance and
+    /// take this user's launches, so no two owners use the same one.
+    #[cfg(windows)]
+    #[test]
+    fn each_owner_listens_under_a_new_pipe_name() {
+        let runtime = runtime();
+        let directory = tempfile::tempdir().unwrap();
+        let named = || std::fs::read_to_string(directory.path().join("instance.pipe")).unwrap();
+        let Acquired::Primary(first) =
+            acquire(runtime.handle(), directory.path(), show(None)).unwrap()
+        else {
+            panic!("the first launch must own the profile");
+        };
+        let first_name = named();
+        drop(first);
+        let Acquired::Primary(_second) =
+            acquire(runtime.handle(), directory.path(), show(None)).unwrap()
+        else {
+            panic!("the next launch must own the profile");
+        };
+        assert_ne!(named(), first_name);
     }
 
     #[test]
