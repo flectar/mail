@@ -15,13 +15,13 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 
-/// Dev/self-hosted escape hatch: FLECTAR_MAIL_TLS_INSECURE=1 disables certificate
-/// verification (e.g. self-signed Dovecot). Off by default; never set it for
-/// real accounts.
+/// Test escape hatch: FLECTAR_MAIL_TLS_INSECURE=1 disables certificate
+/// verification (e.g. a self-signed Dovecot in an end-to-end test). Release
+/// builds ignore it, so nothing in the environment can turn the checks off
+/// for real accounts; those trust a server's own certificate per account.
 pub fn insecure() -> bool {
-    std::env::var("FLECTAR_MAIL_TLS_INSECURE")
-        .map(|v| v == "1")
-        .unwrap_or(false)
+    cfg!(debug_assertions)
+        && std::env::var("FLECTAR_MAIL_TLS_INSECURE").is_ok_and(|value| value == "1")
 }
 
 /// The crypto provider of every mail connection. Several rustls backends can
