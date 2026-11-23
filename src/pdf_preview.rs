@@ -138,6 +138,8 @@ pub fn run_worker_if_requested() -> Option<i32> {
 fn worker() -> Result<(), Box<dyn std::error::Error>> {
     use pdfium_render::prelude::*;
     use std::io::{Read, Write};
+    #[cfg(unix)]
+    close_inherited_descriptors()?;
     // Resource limits affect this child only. The parent's wall-clock deadline
     // additionally covers native code that stalls without consuming CPU time.
     #[cfg(unix)]
@@ -206,6 +208,35 @@ fn worker() -> Result<(), Box<dyn std::error::Error>> {
     }
     output.write_all(&pixels)?;
     output.flush()?;
+    Ok(())
+}
+
+/// Closes every file descriptor above stderr that the worker inherited. The
+/// sandbox still lets it read and write descriptors it holds, so a socket or
+/// file the app opened without close-on-exec would stay within its reach.
+/// The worker needs only stdin, stdout and stderr.
+#[cfg(all(unix, desktop))]
+fn close_inherited_descriptors() -> std::io::Result<()> {
+    #[cfg(linux_desktop)]
+    {
+        // close_range(2), from Linux 5.9 on, closes them in one call.
+        if unsafe { libc::syscall(libc::SYS_close_range, 3, libc::c_uint::MAX, 0) } == 0 {
+            return Ok(());
+        }
+    }
+    let listing = if cfg!(linux_desktop) {
+        "/proc/self/fd"
+    } else {
+        "/dev/fd"
+    };
+    let open: Vec<libc::c_int> = std::fs::read_dir(listing)?
+        .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok())
+        .filter(|&descriptor| descriptor > 2)
+        .collect();
+    for descriptor in open {
+        // The listing's own descriptor is among them, already closed.
+        unsafe { libc::close(descriptor) };
+    }
     Ok(())
 }
 
