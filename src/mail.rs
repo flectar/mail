@@ -94,7 +94,12 @@ pub struct MailMessage {
     pub reply_reminder_at: Option<i64>,
     /// That time came with no reply.
     pub reply_reminder_due: bool,
+    /// Everyone the message went to, on one line: see [`recipients_line`].
     pub to: String,
+    /// Its To and Cc recipients, as the message names them, for the
+    /// reader's details. Mail-list pages know only the To recipients.
+    pub to_people: Vec<Address>,
+    pub cc_people: Vec<Address>,
     pub label: String,
     pub unread: bool,
     pub starred: bool,
@@ -162,6 +167,8 @@ impl MailMessage {
             reply_reminder_at: None,
             reply_reminder_due: false,
             to: email.to.to_owned(),
+            to_people: Vec::new(),
+            cc_people: Vec::new(),
             label: email.label.to_owned(),
             unread: email.unread,
             starred: email.starred,
@@ -4255,6 +4262,8 @@ fn summary_to_message(
         reply_reminder_at: thread.reply_reminder_at,
         reply_reminder_due: thread.reply_reminder_due,
         to: String::new(),
+        to_people: Vec::new(),
+        cc_people: Vec::new(),
         label: if thread.unread_count > 0 {
             "UNREAD".to_owned()
         } else {
@@ -4287,16 +4296,29 @@ fn summary_to_message(
     })
 }
 
+/// What a message calls someone: their name where it gives one, else their
+/// address.
+pub(crate) fn display_name(person: &Address) -> &str {
+    person
+        .name
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(&person.email)
+}
+
+/// Everyone a message went to, on one line, its To recipients before its Cc
+/// ones, as in "Ada, Grace, alan@example.com".
+fn recipients_line(to: &[Address], cc: &[Address]) -> String {
+    to.iter()
+        .chain(cc)
+        .map(display_name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// A row's people, named as "A", "A, B" or "A, B +N", and the first one's
 /// address, which names the row's avatar.
 fn display_people(people: &[&Address]) -> (String, String) {
-    fn display_name(person: &Address) -> &str {
-        person
-            .name
-            .as_deref()
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or(&person.email)
-    }
     let address = people
         .first()
         .map(|person| person.email.clone())
@@ -4366,11 +4388,9 @@ fn message_summary_to_message(
         send_uncertain: false,
         reply_reminder_at: message.reply_reminder_at,
         reply_reminder_due: message.reply_reminder_due,
-        to: message
-            .to
-            .first()
-            .map(|address| address.email.clone())
-            .unwrap_or_default(),
+        to: recipients_line(&message.to, &[]),
+        to_people: message.to.clone(),
+        cc_people: Vec::new(),
         label: if message.is_draft {
             "DRAFT".to_owned()
         } else if !message.is_read {
@@ -4482,11 +4502,9 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
         send_uncertain: row.send_uncertain && scheduled,
         reply_reminder_at: row.reply_reminder_at,
         reply_reminder_due: row.reply_reminder_due,
-        to: message
-            .to
-            .first()
-            .map(|address| address.email.clone())
-            .unwrap_or_default(),
+        to: recipients_line(&message.to, &message.cc),
+        to_people: message.to.clone(),
+        cc_people: message.cc.clone(),
         label: if message.is_draft {
             "DRAFT".to_owned()
         } else if message.is_outgoing {
@@ -4761,9 +4779,9 @@ mod tests {
     use super::{
         ComposeMessage, MailTarget, SidebarBadges, compose_args, display_thread_subject,
         mailbox_entries, mailbox_entries_with_counts, markdown_to_html, markdown_to_plain_text,
-        message_summary_to_message, readable_message_html, resolve_scope, server_only_folders,
-        sidebar_badges, summary_to_message, unified_mailbox_entries, validated_startup_scope,
-        with_local_mail,
+        message_summary_to_message, readable_message_html, recipients_line, resolve_scope,
+        server_only_folders, sidebar_badges, summary_to_message, unified_mailbox_entries,
+        validated_startup_scope, with_local_mail,
     };
     use crate::mail_scope::{LabelKind, Scope, StandardMailbox};
     use flectar_mail_core::models::{
@@ -5149,6 +5167,25 @@ mod tests {
         let row = message_summary_to_message(sent, &[test_account()], "Sent").unwrap();
         assert_eq!(row.sender, "maya@example.com, alex@example.com");
         assert_eq!(row.address, "maya@example.com");
+    }
+
+    #[test]
+    fn the_reader_names_everyone_a_message_went_to() {
+        let person = |name: Option<&str>, email: &str| Address {
+            name: name.map(str::to_owned),
+            email: email.into(),
+        };
+        assert_eq!(
+            recipients_line(
+                &[
+                    person(Some("Ada"), "ada@example.com"),
+                    person(Some(" "), "grace@example.com"),
+                ],
+                &[person(Some("Alan Turing"), "alan@example.com")],
+            ),
+            "Ada, grace@example.com, Alan Turing"
+        );
+        assert_eq!(recipients_line(&[], &[]), "");
     }
 
     #[test]
