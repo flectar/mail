@@ -201,9 +201,12 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          # Pinned by digest, and the tag names the server commit it was built
+          # from. Update both together when the tests need a newer server.
+          SYNC_SERVER_IMAGE: ghcr.io/flectar/mail-sync-server:sha-c73b1c8@sha256:4fdbc47342eceb9e6323a5ca3ca52e18c493d7c213d7b5c43392ca98a14bf69a
         run: |
           if echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin \
-            && docker create --name sync-server ghcr.io/flectar/mail-sync-server:main > /dev/null; then
+            && docker create --name sync-server "$SYNC_SERVER_IMAGE" > /dev/null; then
             docker cp sync-server:/usr/local/bin/flectar-mail-sync-server "$RUNNER_TEMP/"
             docker rm sync-server > /dev/null
             echo "FLECTAR_MAIL_SYNC_SERVER=$RUNNER_TEMP/flectar-mail-sync-server" >> "$GITHUB_ENV"

@@ -253,7 +253,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     # Build against the oldest supported Fedora; test this exact artifact below.
     container:
-      image: fedora:43
+      # Images are pinned by digest, and the tag only names the release.
+      # Update both together.
+      image: fedora:43@sha256:f01112b9a1f1d0504ad962d9adfa401425033f8ab067e0a821904ebdde5b8ca5
       # Turning on swap for the release build needs it (scripts/ci-swap.sh).
       # The memory cap keeps the build from swapping out the runner's agent
       # on the 16 GiB host, as scripts/ci-build-scope.sh does elsewhere. The
@@ -336,7 +338,7 @@ jobs:
     name: RPM repository (throwaway key)
     runs-on: ubuntu-24.04
     container:
-      image: fedora:43
+      image: fedora:43@sha256:f01112b9a1f1d0504ad962d9adfa401425033f8ab067e0a821904ebdde5b8ca5
     steps:
       - name: Install signing and repository tools
         run: dnf install -y createrepo_c gnupg2 rpm-sign
@@ -380,7 +382,7 @@ jobs:
     # only release tags, and only once a maintainer approves.
     environment: rpm-release
     container:
-      image: fedora:43
+      image: fedora:43@sha256:f01112b9a1f1d0504ad962d9adfa401425033f8ab067e0a821904ebdde5b8ca5
     steps:
       - name: Install signing and repository tools
         run: dnf install -y createrepo_c gnupg2 rpm-sign
@@ -432,13 +434,14 @@ jobs:
       fail-fast: false
       matrix:
         # Every distribution the RPM supports. Enterprise Linux 9 is not one:
-        # its glibc 2.34 predates symbols the executable needs.
+        # its glibc 2.34 predates symbols the executable needs. Each image is
+        # pinned by digest, like the build container's.
         distro:
-          - { name: Fedora 43, image: 'fedora:43', id: fedora-43 }
-          - { name: Fedora 44, image: 'fedora:44', id: fedora-44 }
-          - { name: openSUSE Tumbleweed, image: 'opensuse/tumbleweed', id: opensuse-tumbleweed }
-          - { name: openSUSE Leap 16.0, image: 'opensuse/leap:16.0', id: opensuse-leap-16.0 }
-          - { name: AlmaLinux 10, image: 'almalinux:10', id: almalinux-10 }
+          - { name: Fedora 43, image: 'fedora:43@sha256:f01112b9a1f1d0504ad962d9adfa401425033f8ab067e0a821904ebdde5b8ca5', id: fedora-43 }
+          - { name: Fedora 44, image: 'fedora:44@sha256:15da97ed9aa94dd3d92c3925eb89520f6c80e07ea7ee24cba848d1f8b6912b3e', id: fedora-44 }
+          - { name: openSUSE Tumbleweed, image: 'opensuse/tumbleweed:latest@sha256:f26ddcca0da4c43ceb68118dff95ded51cde50effadbf95a8f94536920abe47d', id: opensuse-tumbleweed }
+          - { name: openSUSE Leap 16.0, image: 'opensuse/leap:16.0@sha256:a4115e2f5aea9712a7c73974fd94000a034fc3051ef29b5f7722fbf04070dd9d', id: opensuse-leap-16.0 }
+          - { name: AlmaLinux 10, image: 'almalinux:10@sha256:ccf217024b3d5e268cc208d1edb384a1edee6359370cf6ea1ecbc42254e57375', id: almalinux-10 }
         arch: [x64, arm64]
         include:
           - arch: x64
@@ -1005,8 +1008,16 @@ jobs:
           key: native-ios-arm64
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install Xcode project generator
-        run: brew install xcodegen
+      - name: Install pinned Xcode project generator
+        run: |
+          archive="$RUNNER_TEMP/xcodegen.zip"
+          curl --fail --location --silent --show-error --retry 3 \
+            https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip --output "$archive"
+          echo "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806  $archive" | shasum -a 256 --check
+          # The binary finds its setting presets in the share folder beside it.
+          unzip -q "$archive" -d "$RUNNER_TEMP"
+          test -d "$RUNNER_TEMP/xcodegen/share/xcodegen/SettingPresets"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
 
       # Unsigned, so people can sideload it with their own Apple ID.
       - name: Build the IPA
