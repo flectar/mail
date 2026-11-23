@@ -972,6 +972,40 @@ impl SoftwareReader {
     }
 }
 
+/// A message a few tiles tall: a red block across half the width, on blue.
+fn blocks_message() -> MailMessage {
+    let mut message = mail::fixture_messages().remove(0);
+    message.folder = "Inbox".into();
+    message.body_pending = false;
+    message.html = Some(
+        "<body style='margin:0;background:#00f'>\
+         <div style='width:50%;height:600px;background:#f00'></div>\
+         <p style='height:1200px'>End of message</p></body>"
+            .into(),
+    );
+    message
+}
+
+/// Until the window reports the reading pane's width, tiles are painted for
+/// the fallback width, and the ratio they're drawn at must follow it: against
+/// a width of 0 it scaled them up hundreds of times.
+#[test]
+fn an_unreported_reader_width_keeps_the_fallback_ratio() {
+    let view = SoftwareReader::new(vec![blocks_message()]);
+    let app = &view.app;
+    app.set_email_viewport_width(0.0);
+    view.render();
+    sync_reader_metadata(app, &view.renderer);
+    let (fallback, _) = email_viewport_size(app);
+    let expected = (view.renderer.borrow().layout_width / fallback as f32).max(1.0);
+    let ratio = app.global::<EmailReader>().get_width_ratio();
+    assert!(
+        (ratio - expected).abs() < 0.01,
+        "width ratio {ratio}, expected {expected}"
+    );
+    app.hide().unwrap();
+}
+
 #[test]
 fn tall_messages_paint_with_the_software_renderer() {
     let mut message = mail::fixture_messages().remove(0);

@@ -486,9 +486,11 @@ pub(super) fn sync_reader_metadata(app: &AppWindow, renderer: &Rc<RefCell<GpuEma
         }
         return;
     }
-    reader.set_width_ratio(
-        (renderer.layout_width / app.get_email_viewport_width().max(1.0)).max(1.0),
-    );
+    // Against the width the tiles were painted for, as `apply_email` does: a
+    // viewport the window hasn't reported yet would scale them up by
+    // hundreds, showing only their first pixel.
+    let (width, _) = email_viewport_size(app);
+    reader.set_width_ratio((renderer.layout_width / width as f32).max(1.0));
     let (start, end) = renderer.selection_carets();
     reader.set_selection_start(start);
     reader.set_selection_end(end);
