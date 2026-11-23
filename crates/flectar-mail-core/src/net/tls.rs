@@ -34,31 +34,45 @@ fn provider() -> Arc<CryptoProvider> {
     PROVIDER.clone()
 }
 
+#[cfg(any(platform_trust, test))]
+mod platform;
+#[cfg(platform_trust)]
+pub use platform::{PlatformTrust, PlatformTrustError, use_platform_trust};
+
 /// The operating system's certificate verifier, which checks certificates the
 /// way the system's own mail and browser apps do: Security.framework and the
 /// Keychain on Apple platforms, the CryptoAPI chain engine on Windows, the
-/// system TrustManager on Android, and the system CA bundle elsewhere.
-/// Certificates installed by an administrator, a company network or
-/// antivirus software that inspects encrypted connections are trusted as
-/// they are by those apps. Built once, because on Linux it reads the CA
-/// bundle from disk.
+/// system CA bundle elsewhere, and on Android the TrustManager, through the
+/// checks the platform layer installs (`use_platform_trust`). Certificates
+/// installed by an administrator, a company network or antivirus software
+/// that inspects encrypted connections are trusted as they are by those apps.
+/// Built once, because on Linux it reads the CA bundle from disk.
 fn system_verifier() -> Arc<dyn ServerCertVerifier> {
-    static VERIFIER: LazyLock<Arc<dyn ServerCertVerifier>> = LazyLock::new(|| {
-        match rustls_platform_verifier::Verifier::new(provider()) {
-            Ok(verifier) => Arc::new(verifier),
-            Err(error) => {
-                // Only a system CA bundle can be missing, on a minimal Linux
-                // install without ca-certificates. Mozilla's roots keep public
-                // mail servers reachable there.
-                tracing::warn!(%error, "no system certificate store; trusting the bundled Mozilla roots");
-                bundled_verifier()
-            }
-        }
-    });
+    static VERIFIER: LazyLock<Arc<dyn ServerCertVerifier>> = LazyLock::new(os_verifier);
     VERIFIER.clone()
 }
 
+#[cfg(not(platform_trust))]
+fn os_verifier() -> Arc<dyn ServerCertVerifier> {
+    match rustls_platform_verifier::Verifier::new(provider()) {
+        Ok(verifier) => Arc::new(verifier),
+        Err(error) => {
+            // Only a system CA bundle can be missing, on a minimal Linux
+            // install without ca-certificates. Mozilla's roots keep public
+            // mail servers reachable there.
+            tracing::warn!(%error, "no system certificate store; trusting the bundled Mozilla roots");
+            bundled_verifier()
+        }
+    }
+}
+
+#[cfg(platform_trust)]
+fn os_verifier() -> Arc<dyn ServerCertVerifier> {
+    platform::installed(provider())
+}
+
 /// A verifier that trusts Mozilla's root program as bundled with the app.
+#[cfg(not(platform_trust))]
 fn bundled_verifier() -> Arc<dyn ServerCertVerifier> {
     let roots = rustls::RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),

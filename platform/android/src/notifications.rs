@@ -400,11 +400,9 @@ pub(super) fn window_host(
 /// What opens the mail store without the activity, from `context`.
 fn background_services(env: &mut JNIEnv, context: &JObject) -> Result<EngineServices, String> {
     crate::observability::install();
+    crate::trust::install(env, context)
+        .map_err(|error| format!("Android certificate checks: {error}"))?;
     let vm = env.get_java_vm().map_err(|error| error.to_string())?;
-    // SAFETY: the live process VM and a Context reference that Java keeps
-    // valid for this native call; the verifier keeps the Application.
-    unsafe { crate::tls::initialize(vm.get_java_vm_pointer().cast(), context.as_raw().cast()) }
-        .map_err(|error| format!("Android TLS verification: {error}"))?;
     crate::proxy::install(vm);
     let directory = |env: &mut JNIEnv, method: &str| -> Result<PathBuf, String> {
         let file = env

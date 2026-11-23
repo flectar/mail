@@ -44,8 +44,6 @@ flectar-mail = { path = "../..", default-features = false, features = ["remote-c
 async-trait = "0.1"
 base64 = "0.23"
 jni = "0.21"
-jni-verifier = { package = "jni", version = "0.22" }
-rustls-platform-verifier = "0.7"
 serde_json = "1"
 slint = { version = "1.19.0", default-features = false, features = [
     "std",

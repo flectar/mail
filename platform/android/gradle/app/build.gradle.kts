@@ -86,9 +86,6 @@ tasks.named("preBuild").configure {
 }
 
 dependencies {
-    implementation("rustls:rustls-platform-verifier:0.1.1")
-    // The verifier AAR does not declare its Kotlin runtime dependency.
-    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.21")
     // AuthorizationClient is Google's supported API for authorizing an
     // Android application to Gmail and other Google user data.
     implementation("com.google.android.gms:play-services-auth:21.6.0")
