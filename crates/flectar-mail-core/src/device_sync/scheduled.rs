@@ -465,6 +465,9 @@ pub(super) fn put(
         return Ok(thread);
     }
     match shared.state {
+        // Taken back as this device leaves: its cancel came back, and the
+        // send stays this device's own.
+        CANCELLED if taken_back(conn, action)? => {}
         // Sent or cancelled on another device: this device's send stops.
         SENT | CANCELLED => {
             repo::actions::try_cancel(conn, action)?;
@@ -484,8 +487,14 @@ pub(super) fn put(
             )?;
         }
         _ => {
-            // Scheduled again after it failed or was cancelled.
+            // Scheduled again after it failed or was cancelled. One this
+            // device took back is the group's again.
             if before.state != SCHEDULED {
+                conn.execute(
+                    "UPDATE pending_actions SET payload = json_remove(payload, '$.takenBack')
+                     WHERE id = ?1",
+                    params![action],
+                )?;
                 match action_state(conn, action)?
                     .map(|(state, _)| state)
                     .as_deref()
@@ -538,7 +547,12 @@ pub(super) fn remove(conn: &Connection, sync_id: &str) -> Result<Option<i64>> {
         .optional()?
         .unwrap_or(false);
     if held {
-        repo::actions::try_cancel(conn, action)?;
+        if taken_back(conn, action)? {
+            // Forgotten by the others as well: it goes out from here.
+            release_taken_back(conn, &send, action)?;
+        } else {
+            repo::actions::try_cancel(conn, action)?;
+        }
     }
     thread_of_action(conn, action)
 }
@@ -677,6 +691,19 @@ pub(crate) fn drive(
     let mut driven = Driven::default();
     for mut send in synced_sends::all(conn)? {
         if send.state != SCHEDULED {
+            // Taken back from the group as this device leaves: it goes out
+            // from here once the other devices heard so.
+            if let Some(action) = send.action_id
+                && send.state == CANCELLED
+                && action_state(conn, action)?.is_some_and(|(state, _)| state == "pending")
+                && taken_back(conn, action)?
+            {
+                if heard(conn, &send.sync_id)? && release_taken_back(conn, &send, action)? {
+                    driven.nudge(send.account_id);
+                    driven.thread(thread_of_action(conn, action)?);
+                }
+                continue;
+            }
             // Another device ended the schedule while this one was sending
             // it: it went out, or it didn't.
             if let Some(action) = send.action_id
@@ -1172,7 +1199,7 @@ pub(crate) enum Departure {
     Alone,
     /// The group goes on, and this device took them back as it left (see
     /// [`take_back`]): they go out from here, but for one another device
-    /// holds the claim on.
+    /// may still send.
     TakenBack,
     /// The group goes on and keeps them, as when another device removed
     /// this one: it sends those it can, and this device the rest.
@@ -1184,49 +1211,132 @@ pub(crate) enum Departure {
 pub(crate) struct TakenBack {
     sync_id: String,
     action_id: Option<i64>,
-    send_at: i64,
-}
-
-impl TakenBack {
-    pub(crate) fn sync_id(&self) -> &str {
-        &self.sync_id
-    }
 }
 
 /// Take this device's own shared sends back from the group as it leaves:
-/// cancelled for the other devices, they go out from here at their time.
-/// One another device holds the claim on stays with that device.
+/// cancelled for the other devices, they go out from here once those heard
+/// so (see [`release_taken_back`]). Until then each stays held, and a try
+/// to send it waits (see [`repo::actions::try_claim`]), so it can't go out
+/// while another device may still send it. One another device may be
+/// sending stays with the group: that device said so, holds the claim on
+/// it, or held it until less than [`TAKEOVER_DELAY_MS`] ago.
 pub(crate) fn take_back(conn: &Connection, me: &str, now: i64) -> Result<Vec<TakenBack>> {
     let mut taken = Vec::new();
     for send in synced_sends::all(conn)? {
-        if send.origin != me || send.state != SCHEDULED || claimed_elsewhere(&send, now) {
+        if send.origin != me
+            || send.state != SCHEDULED
+            || others_may_send(&send, me, now - TAKEOVER_DELAY_MS)
+        {
             continue;
         }
         synced_sends::set_state(conn, &send.sync_id, CANCELLED, None, now)?;
         if let Some(action) = send.action_id {
-            move_held(conn, action, HELD, send.send_at)?;
-            synced_sends::set_action(conn, &send.sync_id, None)?;
+            hold(conn, action)?;
+            conn.execute(
+                "UPDATE pending_actions SET payload = json_set(payload, '$.takenBack', json('true'))
+                 WHERE id = ?1",
+                params![action],
+            )?;
         }
         taken.push(TakenBack {
             sync_id: send.sync_id,
             action_id: send.action_id,
-            send_at: send.send_at,
         });
     }
     Ok(taken)
 }
 
-/// The other devices did not hear that this device took its sends back:
-/// they wait for the group again. A send already forgotten here stays this
-/// device's.
+/// Whether this device took the send back from the group as it leaves.
+fn taken_back(conn: &Connection, action: i64) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT json_extract(payload, '$.takenBack') = 1 FROM pending_actions WHERE id = ?1",
+            params![action],
+            |row| row.get::<_, Option<bool>>(0),
+        )
+        .optional()?
+        .flatten()
+        .unwrap_or(false))
+}
+
+/// Whether the other devices heard that this device took a send back: the
+/// server's copy of its record no longer has it scheduled, or never had it,
+/// and no change of this device's to it waits to reach the server.
+fn heard(conn: &Connection, sync_id: &str) -> Result<bool> {
+    let Some(id) = super::collections::sync_id_bytes(sync_id) else {
+        return Ok(true);
+    };
+    if store::has_pending(conn, &id)? {
+        return Ok(false);
+    }
+    let entry: Option<Entry> = store::mirrored_entry(conn, &id)?;
+    Ok(entry
+        .as_ref()
+        .filter(|entry| entry.collection == super::collections::SCHEDULED)
+        .and_then(|entry| parse(&entry.body))
+        .is_none_or(|record| record.state != SCHEDULED))
+}
+
+/// Whether the other devices heard of every send this device took back.
+pub(crate) fn heard_all(conn: &Connection, taken: &[TakenBack]) -> Result<bool> {
+    for send in taken {
+        if !heard(conn, &send.sync_id)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Let a send this device took back go out from here: at its time, as the
+/// other devices heard that it did. Where the server's copy shows another
+/// device saying it may be sending it, that device may have handed it over
+/// before it heard: the send then waits until that submission can no
+/// longer be under way, as a takeover does, and checks first that it
+/// didn't go out. Returns whether it was waiting.
+fn release_taken_back(conn: &Connection, send: &SyncedSend, action: i64) -> Result<bool> {
+    let elsewhere = send
+        .sending
+        .as_deref()
+        .is_some_and(|device| device != send.origin);
+    let at = if elsewhere {
+        let end = match (send.claimed_by.as_deref(), send.claim_until) {
+            (Some(device), Some(until)) if device != send.origin => until,
+            _ => send.send_at.saturating_add(CLAIM_MS),
+        };
+        send.send_at.max(end.saturating_add(TAKEOVER_DELAY_MS))
+    } else {
+        send.send_at
+    };
+    let released = conn.execute(
+        "UPDATE pending_actions
+         SET not_before = CASE WHEN not_before = ?3 THEN ?2 ELSE not_before END,
+             payload = CASE WHEN ?4 THEN json_set(json_remove(payload, '$.takenBack'),
+                                                  '$.checkFirst', json('true'))
+                            ELSE json_remove(payload, '$.takenBack') END
+         WHERE id = ?1 AND state = 'pending' AND json_extract(payload, '$.takenBack') = 1",
+        params![action, at, HELD, elsewhere],
+    )? > 0;
+    synced_sends::set_action(conn, &send.sync_id, None)?;
+    Ok(released)
+}
+
+/// The other devices did not hear that this device took these sends back:
+/// they wait for the group again. One the others heard of stays this
+/// device's, as does one already forgotten or ended here.
 pub(crate) fn give_back(conn: &Connection, taken: &[TakenBack], now: i64) -> Result<()> {
     for send in taken {
-        if synced_sends::get(conn, &send.sync_id)?.is_none() {
+        if synced_sends::get(conn, &send.sync_id)?.is_none_or(|record| record.state != CANCELLED)
+            || heard(conn, &send.sync_id)?
+        {
             continue;
         }
         synced_sends::set_state(conn, &send.sync_id, SCHEDULED, None, now)?;
         if let Some(action) = send.action_id {
-            move_held(conn, action, send.send_at, HELD)?;
+            conn.execute(
+                "UPDATE pending_actions SET payload = json_remove(payload, '$.takenBack')
+                 WHERE id = ?1",
+                params![action],
+            )?;
             synced_sends::set_action(conn, &send.sync_id, Some(action))?;
         }
     }
@@ -1250,6 +1360,17 @@ fn claimed_elsewhere(send: &SyncedSend, now: i64) -> bool {
         .as_deref()
         .is_some_and(|device| device != send.origin)
         && send.claim_until.is_some_and(|until| until > now)
+}
+
+/// Whether a device other than `me` may still send a shared send: it said
+/// it may be sending it, or holds a claim on it that ends after `after`.
+fn others_may_send(send: &SyncedSend, me: &str, after: i64) -> bool {
+    send.sending.as_deref().is_some_and(|device| device != me)
+        || (send
+            .claimed_by
+            .as_deref()
+            .is_some_and(|device| device != me)
+            && send.claim_until.is_some_and(|until| until > after))
 }
 
 /// Whether the other devices can send it without this one: from the mail
@@ -1279,23 +1400,35 @@ fn group_can_send(conn: &Connection, send: &SyncedSend) -> Result<bool> {
 pub(crate) fn detach(conn: &Connection, departure: Departure, now: i64) -> Result<Vec<i64>> {
     let mut threads = Vec::new();
     for send in synced_sends::all(conn)? {
-        if let Some(action) = send.action_id
-            && send.state == SCHEDULED
-        {
-            let elsewhere = sends_as_is(conn, action)?
-                || match departure {
-                    Departure::Alone => false,
-                    Departure::TakenBack => claimed_elsewhere(&send, now),
-                    Departure::Kept => {
-                        claimed_elsewhere(&send, now) || group_can_send(conn, &send)?
-                    }
-                };
-            if elsewhere {
-                repo::actions::try_cancel(conn, action)?;
+        if let Some(action) = send.action_id {
+            let taken = taken_back(conn, action)?;
+            let waiting = if taken && (departure != Departure::Kept || heard(conn, &send.sync_id)?)
+            {
+                // Taken back as this device left, and the others heard so.
+                release_taken_back(conn, &send, action)?;
+                true
+            } else if send.state == SCHEDULED || taken {
+                let elsewhere = sends_as_is(conn, action)?
+                    || match departure {
+                        Departure::Alone => false,
+                        // Left to the group as this device took the rest back.
+                        Departure::TakenBack => {
+                            others_may_send(&send, &send.origin, now - TAKEOVER_DELAY_MS)
+                        }
+                        Departure::Kept => {
+                            claimed_elsewhere(&send, now) || group_can_send(conn, &send)?
+                        }
+                    };
+                if elsewhere {
+                    repo::actions::try_cancel(conn, action)?;
+                } else {
+                    move_held(conn, action, HELD, send.send_at)?;
+                }
+                true
             } else {
-                move_held(conn, action, HELD, send.send_at)?;
-            }
-            if let Some(thread) = thread_of_action(conn, action)? {
+                false
+            };
+            if waiting && let Some(thread) = thread_of_action(conn, action)? {
                 threads.push(thread);
             }
         }
@@ -1406,14 +1539,7 @@ mod tests {
             None => Value::Null,
         };
         body["sending"] = json!(sending);
-        let id = super::super::collections::sync_id_bytes(sync_id).unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO device_sync_mirror
-               (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body)
-             VALUES (?1, 1, 1, 0, ?2, 'scheduled', 1, ?3)",
-            params![&id[..], &[0u8; 16][..], body.to_string()],
-        )
-        .unwrap();
+        mirror(conn, sync_id, &body);
         // This device takes the server's version.
         let shared = Shared {
             send_at: send.send_at,
@@ -1423,6 +1549,29 @@ mod tests {
             ..shared(send.draft_ref.as_deref(), None)
         };
         synced_sends::put_shared(conn, sync_id, &shared, 0).unwrap();
+    }
+
+    /// The server holds `body` as the record.
+    fn mirror(conn: &Connection, sync_id: &str, body: &Value) {
+        let id = super::super::collections::sync_id_bytes(sync_id).unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO device_sync_mirror
+               (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body)
+             VALUES (?1, 1, 1, 0, ?2, 'scheduled', 1, ?3)",
+            params![&id[..], &[0u8; 16][..], body.to_string()],
+        )
+        .unwrap();
+    }
+
+    /// The server took this device's version of the record, as it is here.
+    fn server_took(conn: &Connection, sync_id: &str) {
+        let send = synced_sends::get(conn, sync_id).unwrap().unwrap();
+        let body = body(
+            &send,
+            "0123456789abcdef0123456789abcdef",
+            Carried::default(),
+        );
+        mirror(conn, sync_id, &body);
     }
 
     fn not_before(conn: &Connection, action: i64) -> i64 {
@@ -2180,6 +2329,7 @@ mod tests {
     fn a_device_that_leaves_takes_its_sends_back_unless_another_holds_the_claim() {
         let conn = setup("E1");
         let (own, action) = scheduled_here(&conn);
+        server_took(&conn, &own);
         let claimed_action = repo::actions::enqueue(
             &conn,
             1,
@@ -2198,26 +2348,153 @@ mod tests {
 
         let taken = take_back(&conn, ORIGIN, now).unwrap();
         assert_eq!(taken.len(), 1);
-        assert_eq!(taken[0].sync_id(), own);
+        assert_eq!(taken[0].sync_id, own);
         let send = synced_sends::get(&conn, &own).unwrap().unwrap();
         assert_eq!(send.state, CANCELLED, "the other devices forget it");
-        assert_eq!(send.action_id, None);
-        assert_eq!(not_before(&conn, action), AT, "it goes out from here");
+        // Until they heard so, they may still send it: it waits here.
+        assert_eq!(send.action_id, Some(action));
+        assert_eq!(not_before(&conn, action), HELD);
         assert_eq!(not_before(&conn, claimed_action), HELD);
 
         // The other devices did not hear of it: it waits for them again.
+        assert!(!heard_all(&conn, &taken).unwrap());
         give_back(&conn, &taken, now + 1).unwrap();
         let send = synced_sends::get(&conn, &own).unwrap().unwrap();
         assert_eq!(send.state, SCHEDULED);
         assert_eq!(send.action_id, Some(action));
         assert_eq!(not_before(&conn, action), HELD);
+        assert_eq!(payload_of(&conn, action).get("takenBack"), None);
 
-        // They did: the one another device claimed is that device's to send.
-        take_back(&conn, ORIGIN, now).unwrap();
+        // They did: it goes out from here at its time, and the one another
+        // device claimed is that device's to send.
+        let taken = take_back(&conn, ORIGIN, now).unwrap();
+        server_took(&conn, &own);
+        assert!(heard_all(&conn, &taken).unwrap());
         detach(&conn, Departure::TakenBack, now).unwrap();
         assert_eq!(not_before(&conn, action), AT);
+        assert_eq!(payload_of(&conn, action).get("checkFirst"), None);
         assert_eq!(action_state(&conn, claimed_action), "cancelled");
         assert!(!synced_sends::any(&conn).unwrap());
+    }
+
+    #[test]
+    fn a_device_that_leaves_leaves_to_the_group_what_another_device_may_still_send() {
+        let now = AT + CLAIM_MS + 60_000;
+        // Another device said it may be sending it; held a claim on it until
+        // less than the takeover delay ago; or held one long enough ago and
+        // never said so.
+        let cases = [
+            (None, Some(HELPER), false),
+            (Some((HELPER, now - TAKEOVER_DELAY_MS + 1)), None, false),
+            (Some((HELPER, now - TAKEOVER_DELAY_MS)), None, true),
+        ];
+        for (claim, sending, taken) in cases {
+            let conn = setup("E1");
+            let (sync_id, action) = scheduled_here(&conn);
+            server_has_turn(&conn, &sync_id, claim, sending);
+            let back = take_back(&conn, ORIGIN, now).unwrap();
+            assert_eq!(back.len(), usize::from(taken), "{claim:?} {sending:?}");
+            let state = synced_sends::get(&conn, &sync_id).unwrap().unwrap().state;
+            assert_eq!(state == SCHEDULED, !taken);
+            assert_eq!(not_before(&conn, action), HELD);
+            // Left to the group, it stays a draft here.
+            detach(&conn, Departure::TakenBack, now).unwrap();
+            let expected = if taken { "pending" } else { "cancelled" };
+            assert_eq!(action_state(&conn, action), expected);
+        }
+    }
+
+    #[test]
+    fn a_send_taken_back_goes_out_only_once_the_other_devices_heard_so() {
+        let conn = setup("E1");
+        let (sync_id, action) = scheduled_here(&conn);
+        server_took(&conn, &sync_id);
+        // Past its time, it would go out at once.
+        let now = AT + 5;
+        let taken = take_back(&conn, ORIGIN, now).unwrap();
+        assert_eq!(taken.len(), 1);
+
+        // Due or not, it waits while the others may still send it.
+        conn.execute(
+            "UPDATE pending_actions SET not_before = 0 WHERE id = ?1",
+            params![action],
+        )
+        .unwrap();
+        assert!(!repo::actions::try_claim(&conn, action).unwrap());
+        assert_eq!(not_before(&conn, action), HELD);
+        assert!(
+            drive(&conn, ORIGIN, now, Reach::Usable)
+                .unwrap()
+                .nudge
+                .is_empty()
+        );
+        assert_eq!(not_before(&conn, action), HELD);
+
+        // Its cancel comes back merged with another device's change: the
+        // send stays this device's.
+        let merged = Shared {
+            state: CANCELLED,
+            ..shared(None, Some((HELPER, AT - 1)))
+        };
+        put(&conn, &sync_id, &merged, now).unwrap();
+        assert_eq!(action_state(&conn, action), "pending");
+
+        // The server took it: the send goes out from here, at its time.
+        server_took(&conn, &sync_id);
+        assert_eq!(
+            drive(&conn, ORIGIN, now, Reach::Usable).unwrap().nudge,
+            vec![1]
+        );
+        assert_eq!(not_before(&conn, action), AT);
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.action_id, None);
+        let payload = payload_of(&conn, action);
+        assert_eq!(payload.get("takenBack"), None);
+        assert_eq!(payload.get("checkFirst"), None);
+    }
+
+    #[test]
+    fn a_send_taken_back_from_a_device_that_may_have_sent_it_waits_and_checks_first() {
+        let conn = setup("E1");
+        let (sync_id, action) = scheduled_here(&conn);
+        server_took(&conn, &sync_id);
+        let now = AT + 5;
+        take_back(&conn, ORIGIN, now).unwrap();
+        // The server had taken another device's word that it may be sending
+        // it, which this one hears only as its cancel merges.
+        let merged = Shared {
+            state: CANCELLED,
+            sending: Some(HELPER),
+            ..shared(None, Some((HELPER, AT + CLAIM_MS)))
+        };
+        put(&conn, &sync_id, &merged, now).unwrap();
+        server_took(&conn, &sync_id);
+        drive(&conn, ORIGIN, now, Reach::Usable).unwrap();
+        assert_eq!(not_before(&conn, action), AT + CLAIM_MS + TAKEOVER_DELAY_MS);
+        assert_eq!(payload_of(&conn, action)["checkFirst"], json!(true));
+
+        // It went out from that device: nothing goes out from here.
+        let conn = setup("E1");
+        let (sync_id, action) = scheduled_here(&conn);
+        server_took(&conn, &sync_id);
+        take_back(&conn, ORIGIN, now).unwrap();
+        let sent = Shared {
+            state: SENT,
+            ..shared(None, None)
+        };
+        put(&conn, &sync_id, &sent, now).unwrap();
+        server_took(&conn, &sync_id);
+        drive(&conn, ORIGIN, now, Reach::Usable).unwrap();
+        assert_eq!(action_state(&conn, action), "cancelled");
+
+        // Scheduled again elsewhere meanwhile: it is the group's again.
+        let conn = setup("E1");
+        let (sync_id, action) = scheduled_here(&conn);
+        server_took(&conn, &sync_id);
+        take_back(&conn, ORIGIN, now).unwrap();
+        put(&conn, &sync_id, &shared(None, None), now).unwrap();
+        assert_eq!(payload_of(&conn, action).get("takenBack"), None);
+        assert_eq!(not_before(&conn, action), HELD);
     }
 
     #[test]

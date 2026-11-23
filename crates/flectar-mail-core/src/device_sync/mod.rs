@@ -1843,24 +1843,14 @@ impl Core {
         if taken.is_empty() {
             return scheduled::Departure::TakenBack;
         }
-        let reached = matches!(self.run_device_sync(true).await, Ok(true));
-        let ids: Vec<RecordId> = taken
-            .iter()
-            .filter_map(|send| collections::sync_id_bytes(send.sync_id()))
-            .collect();
-        let heard = reached
-            && self
-                .db
-                .read(move |conn| {
-                    for id in &ids {
-                        if store::has_pending(conn, id)? {
-                            return Ok(false);
-                        }
-                    }
-                    Ok(true)
-                })
-                .await
-                .unwrap_or(false);
+        // Each waits, held, until the server shows the others heard of it.
+        let _ = self.run_device_sync(true).await;
+        let asked = taken.clone();
+        let heard = self
+            .db
+            .read(move |conn| scheduled::heard_all(conn, &asked))
+            .await
+            .unwrap_or(false);
         if heard {
             // Their files go too.
             self.remove_unneeded_files(&me, client).await;
