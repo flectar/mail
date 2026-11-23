@@ -175,8 +175,11 @@ pub fn default_provider() -> std::sync::Arc<dyn DocumentProvider> {
     std::sync::Arc::new(DesktopDocuments)
 }
 pub(crate) fn safe_name(name: &str) -> String {
-    if flectar_mail_core::files::validate_name(name).is_ok() {
-        name.into()
+    // Bidirectional controls would make the saved file read as another, an
+    // `.exe` as `invoice_exe.pdf`.
+    let name = flectar_mail_core::mime::without_bidi_controls(name);
+    if flectar_mail_core::files::validate_name(&name).is_ok() {
+        name.into_owned()
     } else {
         "download".into()
     }
@@ -352,6 +355,15 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+
+    #[test]
+    fn saved_names_keep_no_bidirectional_controls() {
+        assert_eq!(safe_name("invoice_\u{202E}fdp.exe"), "invoice_fdp.exe");
+        assert_eq!(safe_name("\u{2067}report\u{2069}.pdf"), "report.pdf");
+        assert_eq!(safe_name("\u{202E}"), "download");
+        // Joiners belong to the name.
+        assert_eq!(safe_name("می\u{200C}خواهم.txt"), "می\u{200C}خواهم.txt");
+    }
 
     #[test]
     fn download_dialog_starts_in_the_configured_directory() {

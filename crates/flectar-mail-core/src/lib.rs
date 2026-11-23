@@ -7759,8 +7759,8 @@ impl Core {
 
         let mut safe_name = safe_filename(
             &filename
-                .map(|name| crate::mime::decode_encoded_words(&name))
                 .or(parsed_name)
+                .map(|name| crate::mime::shown_attachment_name(&name))
                 .unwrap_or_else(|| format!("attachment-{attachment_id}")),
         );
         // Invites and other body parts often carry no filename; give the temp

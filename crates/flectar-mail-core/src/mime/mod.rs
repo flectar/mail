@@ -196,6 +196,40 @@ pub struct PlannedAttachment {
     pub message: Option<u16>,
 }
 
+/// `text` without Unicode's bidirectional controls (its `Bidi_Control`
+/// characters). They make a name read as something else, with a
+/// right-to-left override `invoice_\u{202E}fdp.exe` shows as
+/// `invoice_exe.pdf`. Right-to-left names read the same without them, since
+/// the bidirectional algorithm orders their letters by itself. Joiners stay,
+/// as Persian text and emoji need them.
+pub fn without_bidi_controls(text: &str) -> std::borrow::Cow<'_, str> {
+    fn is_bidi_control(c: char) -> bool {
+        matches!(
+            c,
+            '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+        )
+    }
+    if text.contains(is_bidi_control) {
+        text.chars()
+            .filter(|&c| !is_bidi_control(c))
+            .collect::<String>()
+            .into()
+    } else {
+        text.into()
+    }
+}
+
+/// An attachment's stored name the way the app shows it and saves it under.
+/// Rows synced before encoded-words were decoded get decoded here.
+pub fn shown_attachment_name(stored: &str) -> String {
+    without_bidi_controls(&decode_encoded_words(stored)).into_owned()
+}
+
+/// A sender's or recipient's display name the way it is stored.
+pub(crate) fn display_name(name: &str) -> Option<String> {
+    Some(without_bidi_controls(name).trim().to_owned()).filter(|name| !name.is_empty())
+}
+
 /// Decode RFC 2047 encoded-words (`=?charset?enc?text?=`) embedded in a header
 /// parameter value. IMAP BODYSTRUCTURE hands back `name`/`filename` parameters
 /// verbatim, and many mailers place encoded-words there (even though RFC 2231
@@ -489,7 +523,7 @@ fn envelope_headers(envelope: &async_imap::imap_proto::Envelope<'_>) -> Embedded
                 let mailbox = address.mailbox.as_deref()?;
                 let host = address.host.as_deref()?;
                 Some(Address {
-                    name: Some(text(address.name.as_deref())).filter(|name| !name.is_empty()),
+                    name: display_name(&text(address.name.as_deref())),
                     email: format!(
                         "{}@{}",
                         String::from_utf8_lossy(mailbox),
@@ -1084,6 +1118,50 @@ mod selective_section_tests {
     }
 
     #[test]
+    fn names_lose_bidirectional_controls() {
+        assert_eq!(
+            shown_attachment_name("invoice_\u{202E}fdp.exe"),
+            "invoice_fdp.exe"
+        );
+        // `4oCu` is the Base64 of the UTF-8 bytes for U+202E.
+        assert_eq!(shown_attachment_name("=?utf-8?B?4oCu?=fdp.exe"), "fdp.exe");
+        for control in [
+            '\u{061C}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}',
+            '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+        ] {
+            assert_eq!(without_bidi_controls(&format!("a{control}b")), "ab");
+        }
+        // Joiners belong to Persian words and emoji.
+        let persian = "\u{645}\u{6CC}\u{200C}\u{62E}\u{648}\u{627}\u{647}\u{645}";
+        assert_eq!(without_bidi_controls(persian), persian);
+        assert!(matches!(
+            without_bidi_controls("plain"),
+            std::borrow::Cow::Borrowed("plain")
+        ));
+        assert_eq!(display_name(" \u{202E} "), None);
+
+        let parsed = parse_message(
+            "From: \"PayPal \u{202E}ecivres\" <x@example.com>\r\n\
+             To: \"\u{2067}Ana\u{2069}\" <ana@example.com>\r\n\
+             Subject: Hi\r\n\
+             Content-Type: multipart/mixed; boundary=b\r\n\
+             \r\n\
+             --b\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             Hello\r\n\
+             --b--\r\n"
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.headers.from.unwrap().name.as_deref(),
+            Some("PayPal ecivres")
+        );
+        assert_eq!(parsed.headers.to[0].name.as_deref(), Some("Ana"));
+    }
+
+    #[test]
     fn decode_encoded_words_covers_common_shapes() {
         // Plain ASCII is returned untouched (fast path).
         assert_eq!(decode_encoded_words("report.pdf"), "report.pdf");
@@ -1239,7 +1317,7 @@ pub struct ParsedBody {
 
 fn addr_from(a: &mail_parser::Addr) -> Option<Address> {
     a.address().map(|e| Address {
-        name: a.name().map(|n| n.to_string()),
+        name: a.name().and_then(display_name),
         email: e.to_string(),
     })
 }
