@@ -6,6 +6,7 @@
 use super::{
     endpoint,
     protocol::{self, Request, Response},
+    tools::{MAX_DRAFT_CHARS, MAX_RECIPIENT_CHARS, MAX_RECIPIENTS, MAX_SUBJECT_CHARS},
 };
 use flectar_mail_core::{
     Core,
@@ -45,11 +46,6 @@ const MAX_DESCRIPTION_CHARS: usize = 2_000;
 const CHANGES_PER_MINUTE: usize = 100;
 /// The most messages one call changes.
 const MAX_CHANGED_MESSAGES: usize = 100;
-/// The most recipients one field of an agent's draft takes.
-const MAX_RECIPIENTS: usize = 50;
-/// The longest subject and text an agent's draft takes.
-const MAX_SUBJECT_CHARS: usize = 998;
-const MAX_DRAFT_CHARS: usize = 100_000;
 
 const ACCESS_OFF: &str =
     "Agent access is off. The user can turn it on in Flectar Mail, in Settings, AI agents.";
@@ -528,6 +524,11 @@ impl<'a> Arguments<'a> {
                 let text = value.as_str().ok_or_else(|| {
                     Failure::Failed(format!("{name} must be a list of addresses."))
                 })?;
+                if text.chars().count() > MAX_RECIPIENT_CHARS {
+                    return Err(Failure::Failed(format!(
+                        "{name} takes addresses of {MAX_RECIPIENT_CHARS} characters at most."
+                    )));
+                }
                 // A line break in a name or address could start a header of its own.
                 if text.chars().any(char::is_control) {
                     return Err(Failure::Failed(format!("{text} isn't an address.")));
@@ -1948,6 +1949,81 @@ mod tests {
                 .addresses("to")
                 .is_err()
         );
+        let long = json!({ "to": [format!("{}@example.com", "a".repeat(MAX_RECIPIENT_CHARS))] });
+        assert!(
+            Arguments(long.as_object().unwrap())
+                .addresses("to")
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_longest_draft_an_agent_may_write_fits_in_one_request() {
+        // Every limit the tools advertise at its most, in the characters JSON
+        // takes most bytes for: six for a control character, which only the
+        // text may hold, and four for an emoji.
+        let longest = |count: usize, character: char| {
+            std::iter::repeat_n(character, count).collect::<String>()
+        };
+        let recipient = format!(
+            "{} <a@example.com>",
+            longest(MAX_RECIPIENT_CHARS - 16, '\u{1F600}')
+        );
+        assert_eq!(recipient.chars().count(), MAX_RECIPIENT_CHARS);
+        let recipients = vec![recipient; MAX_RECIPIENTS];
+        let arguments = json!({
+            "account_id": i64::MAX,
+            "reply_to_message_id": i64::MAX,
+            "to": recipients,
+            "cc": recipients,
+            "bcc": recipients,
+            "subject": longest(MAX_SUBJECT_CHARS, '\u{1F600}'),
+            "text": longest(MAX_DRAFT_CHARS, '\u{1}'),
+        });
+        let request = Request {
+            protocol: protocol::PROTOCOL,
+            version: env!("CARGO_PKG_VERSION").into(),
+            agent: "Test agent".into(),
+            tool: "create_draft".into(),
+            arguments: arguments.as_object().unwrap().clone(),
+        };
+        let mut wire = Vec::new();
+        protocol::write_line(&mut wire, &request).await.unwrap();
+        assert!(
+            wire.len() as u64 <= protocol::MAX_REQUEST,
+            "{} bytes",
+            wire.len()
+        );
+
+        // The app reads it whole, and its own checks take every part.
+        let read: Request = protocol::read_line(wire.as_slice(), protocol::MAX_REQUEST)
+            .await
+            .unwrap();
+        let arguments = Arguments(&read.arguments);
+        assert!(draft_text(arguments).ok().flatten().is_some());
+        assert!(draft_subject(arguments).ok().flatten().is_some());
+        for field in ["to", "cc", "bcc"] {
+            assert_eq!(
+                arguments
+                    .addresses(field)
+                    .ok()
+                    .flatten()
+                    .map(|list| list.len()),
+                Some(MAX_RECIPIENTS)
+            );
+        }
+        // Those are the limits the tools advertise.
+        for tool in ["create_draft", "update_draft"] {
+            let schema = (super::super::tools::find(tool).unwrap().input_schema)();
+            let properties = &schema["properties"];
+            assert_eq!(properties["text"]["maxLength"], MAX_DRAFT_CHARS);
+            assert_eq!(properties["subject"]["maxLength"], MAX_SUBJECT_CHARS);
+            assert_eq!(properties["to"]["maxItems"], MAX_RECIPIENTS);
+            assert_eq!(properties["bcc"]["items"]["maxLength"], MAX_RECIPIENT_CHARS);
+        }
+        let mut longer = read.arguments.clone();
+        longer.insert("text".into(), json!(longest(MAX_DRAFT_CHARS + 1, 'a')));
+        assert!(draft_text(Arguments(&longer)).is_err());
     }
 
     #[test]
