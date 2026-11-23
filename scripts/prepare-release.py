@@ -76,7 +76,7 @@ def prepare(source: Path, destination: Path, version: str, repository: str, date
 def release_notes(version: str) -> str:
     android = (
         "An Android arm64 APK (Android 8.0+) is included. "
-        "Starting with alpha 8, previews and stable releases share one signing "
+        "Starting with beta 1, previews and stable releases share one signing "
         "identity, so newer versions can update the app without uninstalling it. "
         "Alpha 6 and alpha 7 used different keys and cannot update to this identity. "
         "Android OAuth requires separate registrations tied to the APK signing "

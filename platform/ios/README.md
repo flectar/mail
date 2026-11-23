@@ -29,7 +29,7 @@ for each architecture Xcode asks for and embeds PDFium as a framework.
 archive packaged as `target/ios/flectar-mail-ios-arm64.ipa`, stamped with the
 `Cargo.toml` version. `CFBundleShortVersionString` takes only numbers, so
 prereleases share it, and `CFBundleVersion` follows the Android version
-sequence (`0.1.0-alpha.8` is build `1000008`), which AltStore and SideStore
+sequence (`0.1.0-beta.1` is build `1001001`), which AltStore and SideStore
 compare to offer updates.
 
 ## Accounts and sign-in

@@ -161,7 +161,7 @@ attestations. With GitHub CLI installed, verify a download with
 
 ## Android
 
-Starting with alpha 8, Android alpha, beta, release-candidate, and stable builds
+Starting with beta 1, Android alpha, beta, release-candidate, and stable builds
 use one package (`com.flectar.mail`) and one persistent signing identity. Later
 versions can update the app in place and retain local data. Alpha 6 and alpha 7
 used different keys and cannot update to this signing identity.
