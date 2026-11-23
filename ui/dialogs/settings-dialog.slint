@@ -27,6 +27,7 @@ import { Button } from "../components/button.slint";
 import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
 import { IconButton, LineEdit, RadioButton, Switch } from "../components/controls.slint";
 import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
+import { AccountDiscovery, AccountDiscoveryNotice } from "../account-discovery.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, SettingsTextRow, ShortcutRow, ShortcutSection } from "../components/settings-components.slint";
@@ -1117,6 +1118,7 @@ export component SettingsDialog inherits Rectangle {
 
     private property <bool> account_form_valid: root.account_email != ""
         && root.account_password != ""
+        && AccountDiscovery.ready
         && (root.account_protocol == "jmap" || (
             root.incoming_host != ""
             && root.incoming_port != ""
@@ -1178,11 +1180,15 @@ export component SettingsDialog inherits Rectangle {
             root.incoming_port = MailPorts.incoming(protocol, root.incoming_security);
         }
         root.account_protocol = protocol;
+        // Settings found for the address may list this protocol's server.
+        root.suggest-servers(root.account_email);
     }
 
     function open_new_mail_account() {
         root.account_editing = false;
         root.account_email = "";
+        AccountDiscovery.state = "";
+        AccountDiscovery.confirmed = false;
         root.account_username = "";
         root.account_password = "";
         root.account_protocol = "imap";
@@ -4642,6 +4648,7 @@ export component SettingsDialog inherits Rectangle {
                                     FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Email address"); value <=> root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.suggest-servers(value); } }
                                     FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Username"); value <=> root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; }
                                 }
+                                if !root.account_editing : AccountDiscoveryNotice { enabled: !root.account_setup_in_progress; text-color: root.secondary-text; }
                                 FormField { enabled: !root.account_setup_in_progress; height: 57px; label: root.account_protocol == "jmap" ? @tr("Password, app password, or API token") : @tr("Password or app password"); value <=> root.account_password; placeholder: @tr("Stored securely in your system keyring"); input-type: password; label-color: root.secondary-text; }
                                 // POP3 mail exists only on this device, so an account
                                 // never switches to or from POP3.
