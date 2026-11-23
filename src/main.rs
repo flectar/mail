@@ -7299,9 +7299,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let updates_for_carddav = ui_task_tx.clone();
     let app_for_carddav = app.as_weak();
     app.on_connect_carddav(move |account_id, url, username, password| {
+        let Some(app) = app_for_carddav.upgrade() else {
+            return;
+        };
+        if app.get_carddav_connecting() {
+            return;
+        }
         let Some(core) = state_for_carddav.borrow().core.clone() else {
             return;
         };
+        app.set_carddav_connecting(true);
         let updates = updates_for_carddav.clone();
         let app = app_for_carddav.clone();
         runtime_for_carddav.spawn(async move {
@@ -7318,13 +7325,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Ok(_) => UiMessage::plain("CardDAV connected and initial sync started."),
                 Err(error) => UiMessage::detail("Could not connect CardDAV: {}", error),
             };
-            if connected {
-                let _ = app.upgrade_in_event_loop(|app| {
+            let _ = app.upgrade_in_event_loop(move |app| {
+                app.set_carddav_connecting(false);
+                // Close the dialog only when it still shows this account.
+                if connected && app.get_carddav_account_id() == account_id {
                     app.set_carddav_account_id(-1);
                     app.set_carddav_password("".into());
                     app.set_carddav_manage_existing(false);
-                });
-            }
+                }
+            });
             let connections = core.load_carddav_connections().await.ok();
             let _ = updates
                 .send(UiTaskUpdate {
@@ -8007,6 +8016,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     });
     memory::watch_pressure(&runtime);
+    let idle_renderer = Rc::downgrade(&email_renderer);
+    memory::on_ui_idle(move || {
+        if let Some(renderer) = idle_renderer.upgrade()
+            && let Ok(mut renderer) = renderer.try_borrow_mut()
+        {
+            renderer.release_paint_buffers();
+        }
+    });
 
     if start_hidden {
         app.invoke_suspend_rendering(true);

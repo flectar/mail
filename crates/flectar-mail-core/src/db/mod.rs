@@ -633,6 +633,7 @@ pub(crate) mod testutil {
 #[cfg(test)]
 mod connection_profile_tests {
     use super::Db;
+    use rusqlite::Connection;
     use rusqlite::config::DbConfig;
 
     #[tokio::test]
@@ -853,6 +854,22 @@ mod connection_profile_tests {
             .unwrap();
 
         assert_eq!(cache_size, -2_048);
+    }
+
+    #[test]
+    fn bundled_sqlite_allocates_cache_pages_as_queries_need_them() {
+        let conn = Connection::open_in_memory().unwrap();
+        let options = conn
+            .prepare("PRAGMA compile_options")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+
+        // Set through LIBSQLITE3_FLAGS in .cargo/config.toml.
+        let initsz = "DEFAULT_PCACHE_INITSZ=0";
+        assert!(options.iter().any(|built| built == initsz), "{options:?}");
     }
 }
 

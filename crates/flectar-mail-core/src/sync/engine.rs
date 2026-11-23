@@ -1815,7 +1815,7 @@ pub async fn status_for_account(db: &Db, account_id: i64) -> Result<SyncStatus> 
 
 pub(super) async fn emit_sync_status(ctx: &SyncCtx, account_id: i64) {
     if let Ok(status) = status_for_account(&ctx.db, account_id).await {
-        ctx.bus.emit(CoreEvent::SyncStatus(status));
+        ctx.bus.emit(CoreEvent::SyncStatus(Box::new(status)));
     }
 }
 
