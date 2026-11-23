@@ -2540,6 +2540,35 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn preview_contact_import(
+        &self,
+        file: Vec<u8>,
+    ) -> Result<flectar_mail_core::models::ContactImportPreview, String> {
+        self.core
+            .preview_contact_import(file)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn import_contacts(
+        &self,
+        file: Vec<u8>,
+        account_id: Option<i64>,
+        duplicates: flectar_mail_core::models::ImportedDuplicates,
+    ) -> Result<flectar_mail_core::models::ContactImportOutcome, String> {
+        self.core
+            .import_contacts(file, account_id, duplicates)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn export_contacts(&self) -> Result<(String, usize), String> {
+        self.core
+            .export_contacts()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn contact_destination(&self, account_id: i64) -> Result<Option<String>, String> {
         self.core
             .list_addressbooks(Some(account_id))

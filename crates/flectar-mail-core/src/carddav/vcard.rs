@@ -23,7 +23,7 @@ pub fn usable_email(value: &str) -> bool {
         && value.parse::<lettre::Address>().is_ok()
 }
 
-fn unescape(value: &str) -> String {
+pub(super) fn unescape(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut chars = value.chars();
     while let Some(ch) = chars.next() {
@@ -40,7 +40,7 @@ fn unescape(value: &str) -> String {
     out
 }
 
-fn escape(value: &str) -> String {
+pub(super) fn escape(value: &str) -> String {
     let capacity = value
         .chars()
         .map(|ch| match ch {
@@ -78,7 +78,7 @@ fn structured_name(name: &str) -> String {
     format!(";{};;;", escape(name))
 }
 
-fn split_escaped(value: &str, delimiter: char) -> Vec<&str> {
+pub(super) fn split_escaped(value: &str, delimiter: char) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut escaped = false;
     let mut start = 0;
@@ -141,7 +141,7 @@ fn physical_lines(input: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-fn unfold(input: &str) -> Vec<Cow<'_, str>> {
+pub(super) fn unfold(input: &str) -> Vec<Cow<'_, str>> {
     let mut lines: Vec<Cow<'_, str>> = Vec::new();
     for line in physical_lines(input) {
         if (line.starts_with(' ') || line.starts_with('\t')) && !lines.is_empty() {
@@ -168,14 +168,14 @@ fn unfold(input: &str) -> Vec<Cow<'_, str>> {
     joined
 }
 
-fn contains_ascii_case(value: &str, needle: &str) -> bool {
+pub(super) fn contains_ascii_case(value: &str, needle: &str) -> bool {
     value
         .as_bytes()
         .windows(needle.len())
         .any(|candidate| candidate.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
-fn decoded_value<'a>(head: &str, raw: &'a str) -> Cow<'a, str> {
+pub(super) fn decoded_value<'a>(head: &str, raw: &'a str) -> Cow<'a, str> {
     if !contains_ascii_case(head, "QUOTED-PRINTABLE") {
         return Cow::Borrowed(raw);
     }
@@ -226,7 +226,7 @@ fn property_name(line: &str) -> Option<&str> {
     )
 }
 
-fn render(lines: Vec<Cow<'_, str>>) -> String {
+pub(super) fn render(lines: Vec<Cow<'_, str>>) -> String {
     if lines.is_empty() {
         return "\r\n".into();
     }

@@ -439,6 +439,14 @@ contacts are stored and synced. To sync an account's contacts with a CardDAV
 server, open its card in Settings → Accounts and choose **Connect** under
 Contacts.
 
+To bring contacts from another address book, a phone or Google Contacts,
+export them there as a vCard file and choose **Import contacts…** in the menu
+next to the contacts search. Flectar Mail reads vCard 2.1, 3.0 and 4.0 files,
+tells how many contacts are new and how many you already have, and lets you
+leave the ones you have as they are, add what's new to them, or import them
+again as copies. With an account's contacts open, new contacts go to its
+address book. **Export contacts…** saves every contact to one vCard file.
+
 ## Signatures and OpenPGP
 
 Settings → Accounts → Signatures & OpenPGP provides named signatures, separate

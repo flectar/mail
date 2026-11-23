@@ -19,6 +19,20 @@ books can hold entries with the same address and they stay separate.
 `contacts` keeps only per-address mail history for suggestions and ranking.
 Mail never changes a saved contact.
 
+## Import and export
+
+A vCard file brought from elsewhere may hold many cards, come from vCard 2.1,
+and lack UIDs or names. `carddav::import` turns each card into a vCard 3.0 or
+4.0 document like the others. Quoted-printable values are decoded to UTF-8,
+vCard 2.1's bare types become `TYPE` parameters, a missing UID is generated,
+and a missing FN is taken from N, the organization, an email address or a
+phone number. Every other property is kept. A card counts as already saved
+when an entry has its UID or any of its email addresses. The user chooses
+whether such cards are left out, merged into that entry (addresses, numbers
+and tags it lacks, and fields it leaves empty), or saved again as copies with
+new UIDs. New entries join the address book of the account in view when it
+has one that takes them. Export writes every entry's document into one file.
+
 ## Synchronization
 
 A `carddav_objects` row links an entry to a server resource. It holds the
