@@ -248,18 +248,27 @@ fn append_address(output: &mut String, address: &flectar_mail_core::models::Addr
         .filter(|name| !name.is_empty())
     {
         Some(name) => {
-            let name = if name.contains([',', ';', '<', '>', '\r', '\n']) {
-                std::borrow::Cow::Owned(
-                    name.chars()
-                        .filter(|character| {
-                            !matches!(character, ',' | ';' | '<' | '>' | '\r' | '\n')
-                        })
-                        .collect::<String>(),
-                )
+            // A name never spans lines. One with a character that would end
+            // or split the entry goes in quotes, which the field reads back
+            // (RFC 5322 section 3.2.4), so a name from received mail can't
+            // make the field send to fewer people than it shows.
+            let name: String = name
+                .chars()
+                .filter(|character| !character.is_control())
+                .collect();
+            let name = name.trim();
+            if name.contains([',', ';', '<', '>', '"', '\\']) {
+                output.push('"');
+                for character in name.chars() {
+                    if matches!(character, '"' | '\\') {
+                        output.push('\\');
+                    }
+                    output.push(character);
+                }
+                output.push('"');
             } else {
-                std::borrow::Cow::Borrowed(name)
-            };
-            output.push_str(name.trim());
+                output.push_str(name);
+            }
             output.push_str(" <");
             output.push_str(&address.email);
             output.push('>');
