@@ -81,6 +81,9 @@ jobs:
           toolchain: stable
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        # Release tags run this workflow as their quality gate, and they build
+        # without caches (native-platforms.yml).
+        if: github.ref_type != 'tag'
         with:
           key: quality-default
           # Every pull request can restore caches saved on main. Caches saved by
@@ -261,6 +264,7 @@ jobs:
           components: clippy
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           key: quality-${{ matrix.name }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -327,6 +331,7 @@ jobs:
           toolchain: stable
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           key: quality-embeddings
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -356,6 +361,7 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           key: quality-flatpak-secrets
           workspaces: packaging/flatpak/secret-portal-test
@@ -383,6 +389,7 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           cache-targets: false
           key: quality-rustsec

@@ -73,6 +73,11 @@ jobs:
       source_date_epoch: ${{ steps.source.outputs.source_date_epoch }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          # A release tag must name a commit on main, and checking that takes
+          # main's history. File contents come only for the checked-out commit.
+          fetch-depth: 0
+          filter: blob:none
       - name: Use the source commit timestamp
         id: source
         run: |
@@ -89,9 +94,11 @@ jobs:
       - name: Check release metadata and packaging
         id: version
         env:
-          IS_TAG_PUSH: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+          # Every run on a tag gets the release checks, dispatched ones too,
+          # since the Android job signs those with the release key.
+          IS_TAG: ${{ github.ref_type == 'tag' }}
         run: |
-          if [[ "$IS_TAG_PUSH" == true ]]; then
+          if [[ "$IS_TAG" == true ]]; then
             bash scripts/check-release.sh --tag "$GITHUB_REF_NAME"
           else
             bash scripts/check-release.sh
@@ -149,6 +156,10 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        # Release tags build from scratch. Whatever a cache holds runs in the
+        # job that restores it, and any job of a tag's run can replace the
+        # files that the release publishes.
+        if: github.ref_type != 'tag'
         with:
           cache-on-failure: true
           key: native-linux-${{ matrix.arch }}
@@ -265,6 +276,7 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           cache-on-failure: true
           key: native-fedora-43-rpm-${{ matrix.arch }}
@@ -547,6 +559,7 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           cache-on-failure: true
           key: native-windows-${{ matrix.arch }}
@@ -748,6 +761,7 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           cache-on-failure: true
           key: native-macos-${{ matrix.architecture }}
@@ -813,14 +827,12 @@ jobs:
         with:
           toolchain: stable
           targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: platform/android -> ../../target
-          cache-on-failure: true
-          key: native-android-arm64
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # The release key signs whatever this job builds, on every run and not
+      # only on tags, so it never restores a cache that another run saved.
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          cache-disabled: true
 
       - name: Configure Android NDK compiler
         run: |
@@ -919,6 +931,7 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-ios
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           cache-on-failure: true
           key: native-ios-arm64

@@ -30,7 +30,9 @@ def load_script(name):
     return module
 
 
-metadata = load_script("release-metadata").metadata
+release_metadata = load_script("release-metadata")
+metadata = release_metadata.metadata
+on_main = release_metadata.on_main
 release_assets = load_script("prepare-release")
 prepare = release_assets.prepare
 android_signing = load_script("verify-android-signing")
@@ -55,6 +57,20 @@ def workspace_keys(manifest):
 
     walk([], manifest)
     return found
+
+
+def git(root, *args):
+    """Run git in a test repository, away from the user's git configuration."""
+    environment = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com",
+    }
+    result = subprocess.run(
+        ["git", "-C", str(root), *args], env=environment, capture_output=True, text=True, check=True,
+    )
+    return result.stdout.strip()
 
 
 class ReleaseTests(unittest.TestCase):
@@ -796,6 +812,39 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
             with self.subTest(version=version, tag=tag), self.assertRaises(ValueError):
                 metadata(version, tag)
 
+    def test_release_tags_must_be_on_main(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory, "repository")
+            root.mkdir()
+            git(root, "init", "--quiet", "--initial-branch=main")
+            git(root, "commit", "--quiet", "--allow-empty", "--message=base")
+            base = git(root, "rev-parse", "HEAD")
+            with self.assertRaisesRegex(ValueError, "Fetch main"):
+                on_main(cwd=root)
+            git(root, "update-ref", "refs/remotes/origin/main", base)
+            on_main(cwd=root)
+            # Main may move on after the tag.
+            git(root, "commit", "--quiet", "--allow-empty", "--message=later")
+            git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+            on_main(base, cwd=root)
+
+            git(root, "checkout", "--quiet", "-b", "side", base)
+            git(root, "commit", "--quiet", "--allow-empty", "--message=side")
+            with self.assertRaisesRegex(ValueError, "not on main"):
+                on_main(cwd=root)
+            # A tag named like main's remote-tracking branch wins over it for
+            # git's short names, so the check must not use one.
+            git(root, "tag", "origin/main")
+            self.assertEqual(git(root, "rev-parse", "origin/main"), git(root, "rev-parse", "HEAD"))
+            with self.assertRaisesRegex(ValueError, "not on main"):
+                on_main(cwd=root)
+
+            # A shallow checkout cannot tell, so it refuses rather than guess.
+            shallow = Path(directory, "shallow")
+            git(directory, "clone", "--quiet", "--depth=1", "--branch=main", root.as_uri(), str(shallow))
+            with self.assertRaisesRegex(ValueError, "whole history"):
+                on_main(cwd=shallow)
+
     def test_store_versions_order_like_android_version_codes(self):
         versions = (
             "0.1.0-alpha.8", "0.1.0-alpha.999", "0.1.0-beta.1", "0.1.0-beta.999",
@@ -1328,9 +1377,18 @@ for name in ("FlectarMail", "Frameworks/PDFium.framework/PDFium"):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Add a 0.2.0-beta.1 release", result.stderr)
             metainfo.write_text(listing.format('<release version="0.2.0-beta.1" date="2026-03-01"/>'))
+            # The tagged commit must also be on main.
+            git(root, "init", "--quiet", "--initial-branch=main")
+            git(root, "add", ".")
+            git(root, "commit", "--quiet", "--message=release")
+            git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
             result = subprocess.run(command, cwd=root, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("prerelease=true", result.stdout)
+            git(root, "commit", "--quiet", "--allow-empty", "--message=off main")
+            result = subprocess.run(command, cwd=root, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not on main", result.stderr)
 
     def publish(self, *, tag="v0.1.0-beta.1", existing="missing", fail_upload=False):
         with tempfile.TemporaryDirectory() as directory:
