@@ -5,6 +5,7 @@ import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
 import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
+import { AccountDiscovery, AccountDiscoveryNotice } from "../account-discovery.slint";
 import { LineEdit, TextLink } from "../components/controls.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { OAuthSetupDialog } from "../dialogs/oauth-setup-dialog.slint";
@@ -75,6 +76,7 @@ export component OnboardingView inherits Rectangle {
 
     private property <bool> account-form-valid: root.account-email != ""
         && root.account-password != ""
+        && AccountDiscovery.ready
         && (root.account-protocol == "jmap" || (
             root.incoming-host != ""
             && root.incoming-port != ""
@@ -82,6 +84,8 @@ export component OnboardingView inherits Rectangle {
 
     function open-new-mail-account() {
         root.account-email = "";
+        AccountDiscovery.state = "";
+        AccountDiscovery.confirmed = false;
         root.account-username = "";
         root.account-password = "";
         root.account-protocol = "imap";
@@ -108,6 +112,8 @@ export component OnboardingView inherits Rectangle {
             root.incoming-port = MailPorts.incoming(protocol, root.incoming-security);
         }
         root.account-protocol = protocol;
+        // Settings found for the address may list this protocol's server.
+        root.suggest-account-settings(root.account-email);
     }
 
     background: root.page-bg;
@@ -330,6 +336,7 @@ export component OnboardingView inherits Rectangle {
                     value <=> root.account-username;
                     placeholder: @tr("Username (defaults to email)");
                 }
+                AccountDiscoveryNotice { enabled: !root.account-setup-in-progress; text-color: root.muted-text; }
                 FormField {
                     enabled: !root.account-setup-in-progress;
                     height: 60px;

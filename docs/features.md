@@ -6,6 +6,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Tabs](#tabs)
 - [Search](#search)
 - [Checking for mail](#checking-for-mail)
+- [Server settings for new accounts](#server-settings-for-new-accounts)
 - [Advanced account settings](#advanced-account-settings)
 - [Special folders](#special-folders)
 - [Sender addresses](#sender-addresses)
@@ -228,6 +229,19 @@ turns down a connection for having too many open, Flectar Mail opens one fewer
 for downloading in the background from then on. When many accounts start
 together, they take turns connecting, and a few at a time download their older
 mail.
+
+## Server settings for new accounts
+
+When you type the address of a new IMAP, POP3 or JMAP account, Flectar Mail
+looks up its servers. It asks the address's domain for its own configuration
+file, over HTTPS first and then over plain HTTP, and otherwise looks the domain
+up in the public provider database at autoconfig.thunderbird.net. Only the
+domain is sent, never the whole address. Servers it finds fill in the form as
+long as you haven't changed them, and the form says where they came from.
+Settings that came over plain HTTP could have been changed on the way, so
+**Connect account** waits until you check the server names and tick **I checked
+these servers and trust them**. Your other accounts on the same domain, and
+Gmail's servers for a Gmail address, fill in the form without a lookup.
 
 ## Advanced account settings
 
