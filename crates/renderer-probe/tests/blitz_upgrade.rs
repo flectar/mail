@@ -1958,3 +1958,48 @@ fn images_without_a_usable_source_lay_out_with_their_alt_text() {
     }
     assert_eq!((size("#d").width, size("#d").height), (0.0, 0.0));
 }
+
+#[test]
+fn percentage_columns_share_auto_tables_as_blink_does() {
+    // An auto-width table whose columns all have percentages is as wide as
+    // its widest column needs at its percentage, within its room, as Blink
+    // estimates it, and the columns share it in proportion to their
+    // percentages, spare width included.
+    let doc = document(
+        "<style>body{margin:0;font:16px/20px sans-serif} table{border-spacing:0} div div{height:10px}</style>
+         <div style='width:400px'><table><tr><td id=a style='width:87.5%'>a long line of
+         text that is wider than the table can be at its widest</td></tr></table></div>
+         <table id=b><tr><td width='50%'><div style='width:40px'></div></td></tr></table>
+         <table><tr><td id=c1 width='30%'><div style='width:30px'></div></td>
+         <td id=c2 width='30%'><div style='width:30px'></div></td></tr></table>
+         <table><tr><td id=d1 width='25%'><div style='width:50px'></div></td>
+         <td id=d2 width='75%'><div style='width:30px'></div></td></tr></table>",
+    );
+    let width = |selector| node(&doc, selector).final_layout().size.width;
+    close(width("#a"), 400.0);
+    close(width("#b"), 80.0);
+    close(width("#c1"), 50.0);
+    close(width("#c2"), 50.0);
+    close(width("#d1"), 50.0);
+    close(width("#d2"), 150.0);
+}
+
+#[test]
+fn cells_fill_their_columns_and_ignore_percentage_max_widths() {
+    // As in Blink, a cell always fills its column: a length `max-width` only
+    // limits what the cell asks of the column, and a percentage one is
+    // ignored.
+    let doc = document(
+        "<style>body{margin:0;font:16px/20px sans-serif} table{border-spacing:0}</style>
+         <table style='width:400px'><tr><td id=a style='width:200px;max-width:33.333%'>a</td>
+         <td>b</td></tr></table>
+         <table><tr><td id=b style='max-width:100px'>a length max-width keeps this
+         cell within a hundred pixels</td><td>b</td></tr></table>
+         <table style='width:400px'><tr><td id=c style='max-width:100px'>short</td>
+         <td style='width:50px'>b</td></tr></table>",
+    );
+    let width = |selector| node(&doc, selector).final_layout().size.width;
+    close(width("#a"), 200.0);
+    close(width("#b"), 100.0);
+    close(width("#c"), 350.0);
+}

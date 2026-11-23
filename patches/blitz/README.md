@@ -42,6 +42,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0022 background and clear attributes | The `background` attribute of `<body>`, a table or a table part is a background image (HTML rendering rules), resolved against the document's URL, which presentational hints now resolve their URLs against. `<br clear>` starts the line after the `<br>` below the floats it clears, as in browsers, through an empty out-of-flow box that the line breaker stops at, and the block grows to hold the lines it moves, which Parley's sum of line heights missed. A `<br clear>` at the end of a block adds only the clearance. |
 | 0023 soft hyphens | A line that breaks at a soft hyphen (U+00AD, `&shy;`) ends with a hyphen, as CSS Text 3 says and browsers show, U+2010 where the font has one, as in Blink, or else a hyphen-minus, in the font, colour and synthesis of the line's last text. Parley shapes the soft hyphen itself as nothing and gives Blitz no way to keep the hyphen's width in the line, so in right-aligned or centred text the hyphen hangs past the alignment edge. |
 | 0024 images without a source | An `<img>` whose `src` is missing, empty or doesn't resolve, such as a relative URL in mail without a base URL, is broken, as the HTML standard's "update the image data" has it, and lays out with its alt text like 0017's images that won't load, where it took no room. |
+| 0025 percentage columns and cell max-width | An auto-width table whose columns all have percentages is as wide as its widest column needs at its percentage, within its room, as Blink estimates it, and the columns share that width in proportion to their percentages, so a lone `width: 87.5%` column fills its table instead of leaving the rest empty. A cell always fills its column, as in Blink, where a length `max-width` only limits what the cell asks of the column and a percentage one is ignored, so a cell with `max-width: 33.333%` no longer shrinks to a third of its column. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
@@ -49,7 +50,7 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0024 are local, and upstream main collects selection ranges as beta.4 does. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0025 are local, and upstream main collects selection ranges as beta.4 does. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
 when a release contains them.
 
 Copied text, find in the reader and accessible names leave out 0011's edge
@@ -117,8 +118,8 @@ tables and bevels, 0013's image minimums and line breaks, 0014's table
 border attributes and spare width, 0015's selection line breaks and
 highlights, 0016's cell percentage padding and legacy word-break, 0017's
 unavailable images, 0018's rules and bevels, 0019's text shadows, 0021's
-lists, 0022's `background` and `clear` attributes, 0023's soft hyphens, and
-0024's images without a source.
+lists, 0022's `background` and `clear` attributes, 0023's soft hyphens, 0024's
+images without a source, and 0025's percentage columns and cell `max-width`.
 Application renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.

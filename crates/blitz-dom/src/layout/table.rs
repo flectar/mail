@@ -72,6 +72,9 @@ pub struct TableContext {
     column_lengths: Vec<Option<f32>>,
     /// Per column in auto layout, the authored percentage, as a fraction.
     column_percents: Vec<Option<f32>>,
+    /// Per column, the padding and border of a content-box cell whose
+    /// percentage the column takes, which the percentage leaves out.
+    column_percent_extras: Vec<f32>,
     /// The table's padding, border and spacing between columns: the part of
     /// its border-box width no column gets.
     column_extra: f32,
@@ -209,6 +212,16 @@ impl TableCell {
             border.border_right_style = BorderStyle::Solid;
             border.border_bottom_style = BorderStyle::Solid;
             border.border_left_style = BorderStyle::Solid;
+        }
+        // Blink measures a cell within a length `max-width` and ignores a
+        // percentage one.
+        {
+            use style::values::computed::MaxSize;
+            if let MaxSize::LengthPercentage(max) = &style.get_position().max_width
+                && max.0.has_percentage()
+            {
+                ServoArc::make_mut(&mut style).mutate_position().max_width = MaxSize::None;
+            }
         }
         // The column track carries an authored length, so the cell measures its
         // content. Like browsers, auto layout treats that width as preferred,
@@ -808,6 +821,7 @@ pub(crate) fn build_table_context(
             None => (hint.length, None),
         })
         .unzip();
+    let column_percent_extras = column_hints.iter().map(|hint| hint.percent_extra).collect();
 
     // When every column has an authored length in a table of definite width,
     // browsers grow those columns in proportion to the authored widths.
@@ -924,6 +938,7 @@ pub(crate) fn build_table_context(
             has_percent_padding,
             column_lengths,
             column_percents,
+            column_percent_extras,
             column_extra,
             column_gap,
             has_authored_lengths,
@@ -1514,6 +1529,10 @@ impl TableCollector {
         let authored_width = style.size.width;
         let has_authored_height = style.size.height.tag() == taffy::CompactLength::LENGTH_TAG;
         style.size.width = style_helpers::auto();
+        // A cell always fills its column, as in Blink, where a length
+        // `max-width` only limits what the cell asks of the column (see
+        // `layout_style`).
+        style.max_size.width = style_helpers::auto();
         // Cells always fill their row. An authored height is a minimum, which
         // the row already honours through the cell's measured size.
         style.size.height = style_helpers::auto();
@@ -2028,6 +2047,38 @@ impl TableTreeWrapper<'_, '_> {
             (0..lengths.len())
                 .any(|column| lengths[column].is_none() && ctx.column_percents[column].is_none())
         };
+        // An auto-width table whose columns all have percentages is as wide
+        // as its widest column needs at its percentage, within its room, as
+        // Blink estimates it, and the columns share that width in proportion
+        // to their percentages, spare width included (section 3.9.3 of CSS
+        // Tables 3). Grid tracks would size the table to its content and
+        // leave what the percentages don't add up to empty.
+        let percent_total: Option<f32> = ctx.column_percents.iter().copied().sum();
+        if let (Some(room), Some(total)) = (table_width, percent_total)
+            && ctx.style.size.width.tag() == taffy::CompactLength::AUTO_TAG
+            && total > 0.0
+            && total <= 1.0 + f32::EPSILON
+        {
+            *ctx.fold.borrow_mut() = AuthoredFold::default();
+            let (maximums, _) = self.content_widths(taffy::AvailableSpace::MaxContent);
+            let wanted = maximums
+                .iter()
+                .zip(&ctx.column_percents)
+                .zip(&ctx.column_percent_extras)
+                .map(|((&max, percent), &extra)| match percent {
+                    Some(percent) if *percent > 0.0 => (max - extra).max(0.0) / percent,
+                    _ => 0.0,
+                })
+                .fold(maximums.iter().sum::<f32>(), f32::max);
+            let width = (wanted + ctx.column_extra).min(room) - ctx.column_extra;
+            fold.floors = ctx
+                .column_percents
+                .iter()
+                .map(|percent| width.max(0.0) * percent.unwrap_or(0.0) / total)
+                .collect();
+            *ctx.fold.borrow_mut() = fold;
+            return;
+        }
         match table_width {
             None => {}
             Some(width) if width.is_infinite() => {
