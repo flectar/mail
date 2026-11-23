@@ -1339,6 +1339,17 @@ fn collect_addrs(value: Option<&mail_parser::Address>) -> Vec<Address> {
     out
 }
 
+/// Whether `url` is a `data:` URL, read the way URL parsers read it: they
+/// skip spaces and control characters before it and tabs and newlines in it.
+fn is_data_url(url: &str) -> bool {
+    url.chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .skip_while(|c| *c <= ' ')
+        .take(5)
+        .map(|c| c.to_ascii_lowercase())
+        .eq("data:".chars())
+}
+
 static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
     let mut b = ammonia::Builder::default();
     b.add_generic_attributes([
@@ -1362,7 +1373,8 @@ static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
         "html", "head", "body", "meta", "title", "table", "thead", "tbody", "tfoot", "tr", "td",
         "th", "center", "font", "img", "style",
     ])
-    .add_tag_attributes("meta", ["name", "content", "http-equiv"])
+    // Not `http-equiv`, which can refresh or redirect the page it is in.
+    .add_tag_attributes("meta", ["name", "content"])
     .add_tag_attributes("img", ["src", "alt", "width", "height"])
     .add_tag_attributes("font", ["face", "size", "color"])
     .add_tag_attributes("a", ["href", "title"])
@@ -1372,6 +1384,12 @@ static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
     .url_schemes(std::collections::HashSet::from([
         "http", "https", "mailto", "tel", "cid", "data",
     ]))
+    // `data:` is for pictures a message carries. As a link target it is a
+    // page the message wrote, which a browser shows at an address that
+    // names no site, so links keep their text and lose such targets.
+    .attribute_filter(|_, attribute, value| {
+        (attribute != "href" || !is_data_url(value)).then(|| value.into())
+    })
     // CSS is needed by the native Blitz renderer for email typography and
     // layout. It is still inert here because executable script content stays
     // stripped and the renderer does not execute HTML.
@@ -4559,6 +4577,32 @@ mod tests {
         assert!(!cleaned.contains("<script"), "cleaned: {cleaned}");
         assert!(!cleaned.contains("alert(1)"), "cleaned: {cleaned}");
         assert!(cleaned.contains("<p>Mail</p>"), "cleaned: {cleaned}");
+    }
+
+    #[test]
+    fn sanitizing_html_drops_data_links_and_refreshes() {
+        let cleaned = sanitize_html(
+            "<html><head><meta http-equiv=\"refresh\" content=\"0;url=https://evil.example\">\
+             <meta name=\"viewport\" content=\"width=device-width\"></head><body>\
+             <a href=\"data:text/html,<p>Sign in</p>\">One</a>\
+             <a href=\" \tDa\nTa:text/html,x\">Two</a>\
+             <a href=\"https://example.com/data:x\">Three</a>\
+             <img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"Logo\"></body></html>",
+        );
+        // Without `http-equiv` the refresh's content is inert text.
+        assert!(!cleaned.contains("http-equiv"), "cleaned: {cleaned}");
+        assert!(cleaned.contains("name=\"viewport\""), "cleaned: {cleaned}");
+        assert!(!cleaned.contains("text/html"), "cleaned: {cleaned}");
+        assert!(cleaned.contains(">One</a>"), "cleaned: {cleaned}");
+        assert!(cleaned.contains(">Two</a>"), "cleaned: {cleaned}");
+        assert!(
+            cleaned.contains("href=\"https://example.com/data:x\""),
+            "cleaned: {cleaned}"
+        );
+        assert!(
+            cleaned.contains("src=\"data:image/png;base64,iVBORw0KGgo=\""),
+            "cleaned: {cleaned}"
+        );
     }
 
     #[test]
