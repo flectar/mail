@@ -3415,8 +3415,8 @@ pub(super) async fn send_action(
     if !submission_accepted {
         mark_submission_accepted(ctx, action).await?;
     }
-    ensure_submitted_email_state(c, &remote_email, &sent_mailbox).await?;
-
+    // The server took the message: from here it went out, whatever fails.
+    file_sent_email(c, &remote_email, &sent_mailbox).await;
     finish_sent_locally(ctx, config, draft_id).await
 }
 
@@ -3808,11 +3808,12 @@ fn submission_request<'a>(
     (request, create_id)
 }
 
-pub(super) async fn ensure_submitted_email_state(
-    c: &ConnectedClient,
-    remote_email: &str,
-    sent_mailbox: &str,
-) -> Result<()> {
+/// File a sent Email in Sent, no longer a draft, as its submission asked
+/// the server to (`onSuccessUpdateEmail`), for a server that didn't. The
+/// message went out either way, so a failure here is only logged, never
+/// one of the send: the next sync shows the Email where the server keeps
+/// it.
+pub(super) async fn file_sent_email(c: &ConnectedClient, remote_email: &str, sent_mailbox: &str) {
     let mut request = c.request();
     request
         .set_email()
@@ -3821,11 +3822,16 @@ pub(super) async fn ensure_submitted_email_state(
         .mailbox_ids([sent_mailbox])
         .keyword("$draft", false)
         .keyword("$seen", true);
-    let mut response: EmailSetResponse = c.send_single(request).await.map_err(client::map_error)?;
-    match response.updated(remote_email) {
-        Ok(_) => Ok(()),
-        Err(jmap_client::Error::Set(error)) if error.type_ == SetErrorType::NotFound => Ok(()),
-        Err(error) => Err(client::map_error(error)),
+    let filed = match c.send_single::<EmailSetResponse>(request).await {
+        Ok(mut response) => match response.updated(remote_email) {
+            Ok(_) => Ok(()),
+            Err(jmap_client::Error::Set(error)) if error.type_ == SetErrorType::NotFound => Ok(()),
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
+    };
+    if let Err(error) = filed {
+        tracing::warn!(email_id = remote_email, %error, "could not file a sent message in Sent");
     }
 }
 
@@ -3877,7 +3883,7 @@ async fn mark_send_prepared(
         .await
 }
 
-async fn mark_submission_accepted(
+pub(super) async fn mark_submission_accepted(
     ctx: &SyncCtx,
     action: &repo::actions::PendingAction,
 ) -> Result<()> {

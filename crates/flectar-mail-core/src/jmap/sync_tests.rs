@@ -135,6 +135,10 @@ struct MockJmap {
     /// Email/query refuses to search headers, as a server may (RFC 8621
     /// section 4.4.1).
     no_header_search: bool,
+    /// Email/set refuses every update.
+    refuse_updates: bool,
+    /// EmailSubmission/set sends at once what it was asked to hold.
+    ignore_holds: bool,
 }
 
 impl Default for MockJmap {
@@ -155,6 +159,8 @@ impl Default for MockJmap {
             forget_seen: false,
             blobs: Vec::new(),
             no_header_search: false,
+            refuse_updates: false,
+            ignore_holds: false,
         }
     }
 }
@@ -470,7 +476,12 @@ impl MockJmap {
             }
             "Email/set" => {
                 let mut updated = serde_json::Map::new();
+                let mut not_updated = serde_json::Map::new();
                 for (id, patch) in args["update"].as_object().into_iter().flatten() {
+                    if self.refuse_updates {
+                        not_updated.insert(id.clone(), json!({"type": "forbidden"}));
+                        continue;
+                    }
                     if patch["keywords/$seen"] == true && !self.forget_seen {
                         self.seen.lock().unwrap().push(id.clone());
                     }
@@ -480,7 +491,7 @@ impl MockJmap {
                 json!({
                     "accountId": "mail-account", "oldState": "state-0", "newState": "state-1",
                     "created": {}, "updated": updated, "destroyed": destroyed,
-                    "notCreated": {}, "notUpdated": {}, "notDestroyed": {}
+                    "notCreated": {}, "notUpdated": not_updated, "notDestroyed": {}
                 })
             }
             // Each import is a new Email, named after its blob.
@@ -617,7 +628,9 @@ impl MockJmap {
                     let hold_for = submission["envelope"]["mailFrom"]["parameters"]["HOLDFOR"]
                         .as_str()
                         .and_then(|seconds| seconds.parse::<i64>().ok())
-                        .filter(|seconds| *seconds <= self.max_delayed_send as i64)
+                        .filter(|seconds| {
+                            !self.ignore_holds && *seconds <= self.max_delayed_send as i64
+                        })
                         .unwrap_or(0);
                     let send_at = chrono::Utc::now() + chrono::Duration::seconds(hold_for);
                     let id = format!("S{}", submissions.len() + 1);
@@ -2479,6 +2492,81 @@ async fn a_cancelled_hold_does_not_stop_the_message_going_out() {
     assert_eq!(mock.calls("EmailSubmission/set").len(), 1);
     assert_eq!(mock.submissions.lock().unwrap()[1]["undoStatus"], "final");
     assert_eq!(action(&ctx, send).await.0, "done");
+    assert_eq!(
+        folder_role_of(&ctx, draft).await.as_deref(),
+        Some(roles::SENT)
+    );
+}
+
+#[tokio::test]
+async fn a_message_the_server_sent_instead_of_holding_counts_as_sent() {
+    let (_dir, ctx, config, mock, draft) = with_draft(MockJmap {
+        max_delayed_send: 30 * 86_400,
+        ignore_holds: true,
+        ..MockJmap::default()
+    })
+    .await;
+    let send = scheduled_on_server(&ctx, draft, now_ms() + 3_600_000).await;
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert_eq!(mock.calls("EmailSubmission/set").len(), 1);
+    // It went out at once: it is sent, and while it is filed nothing takes
+    // it back or sends it again.
+    let (state, _, payload) = action(&ctx, send).await;
+    assert_eq!(state, "done");
+    assert_eq!(payload["jmapSubmissionAccepted"], true);
+    assert_eq!(
+        folder_role_of(&ctx, draft).await.as_deref(),
+        Some(roles::SENT)
+    );
+
+    // A later try of one, after its server deleted the submission as Cyrus
+    // does, hands nothing over again.
+    let (_dir, ctx, config, mock, draft) = holding(30 * 86_400).await;
+    let send = scheduled_on_server(&ctx, draft, now_ms() + 3_600_000).await;
+    ctx.db
+        .write(move |conn| {
+            conn.execute(
+                "UPDATE pending_actions
+                 SET payload = json_set(payload, '$.jmapSubmissionAccepted', json('true'))
+                 WHERE id = ?1",
+                [send],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert!(mock.calls("EmailSubmission/set").is_empty());
+    assert_eq!(action(&ctx, send).await.0, "done");
+    assert_eq!(
+        folder_role_of(&ctx, draft).await.as_deref(),
+        Some(roles::SENT)
+    );
+}
+
+#[tokio::test]
+async fn a_message_the_server_took_is_sent_even_where_filing_it_fails() {
+    let (_dir, ctx, config, mock, draft) = with_draft(MockJmap {
+        refuse_updates: true,
+        ..MockJmap::default()
+    })
+    .await;
+    let send = send_of(&ctx, draft, json!({"jmapPreparedEmailId": "E1"})).await;
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert_eq!(mock.calls("EmailSubmission/set").len(), 1);
+    // The server refused to file it in Sent. The message went out all the
+    // same: the send is done, with nothing left to retry or take back.
+    let filed = mock.calls("Email/set");
+    assert!(filed.iter().any(|call| call["update"].get("E1").is_some()));
+    let (state, _, payload) = action(&ctx, send).await;
+    assert_eq!(state, "done");
+    assert_eq!(payload["jmapSubmissionAccepted"], true);
     assert_eq!(
         folder_role_of(&ctx, draft).await.as_deref(),
         Some(roles::SENT)

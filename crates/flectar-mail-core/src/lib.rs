@@ -6593,8 +6593,12 @@ impl Core {
                 .read(move |conn| {
                     Ok(conn
                         .query_row(
-                            "SELECT kind, state, last_error, not_before
-                             FROM pending_actions WHERE id = ?1",
+                            &format!(
+                                "SELECT kind, state, last_error, not_before,
+                                        {}
+                                 FROM pending_actions WHERE id = ?1",
+                                repo::actions::SEND_TAKEN
+                            ),
                             rusqlite::params![action_id],
                             |row| {
                                 Ok((
@@ -6602,13 +6606,14 @@ impl Core {
                                     row.get::<_, String>(1)?,
                                     row.get::<_, Option<String>>(2)?,
                                     row.get::<_, Option<i64>>(3)?,
+                                    row.get::<_, bool>(4)?,
                                 ))
                             },
                         )
                         .optional()?)
                 })
                 .await?;
-            let Some((kind, state, last_error, not_before)) = status else {
+            let Some((kind, state, last_error, not_before, taken)) = status else {
                 return Err(CoreError::NotFound("send action".into()));
             };
             if kind != "send" {
@@ -6619,6 +6624,9 @@ impl Core {
 
             match state.as_str() {
                 "done" => return Ok(()),
+                // The mail server took it, so it went out: what is left
+                // only files it, and a failure there is no failure to send.
+                _ if taken => return Ok(()),
                 "failed" => {
                     return Err(CoreError::Other(
                         last_error.unwrap_or_else(|| "message delivery failed".into()),
@@ -7233,11 +7241,16 @@ impl Core {
                     return Err(CoreError::NotFound("draft".into()));
                 }
 
+                // Or its mail server took it, and only filing it is left.
                 let send_inflight = conn.query_row(
-                    "SELECT EXISTS(
-                       SELECT 1 FROM pending_actions
-                       WHERE message_id=?1 AND kind='send' AND state='inflight'
-                     )",
+                    &format!(
+                        "SELECT EXISTS(
+                           SELECT 1 FROM pending_actions
+                           WHERE message_id=?1 AND kind='send'
+                             AND (state='inflight' OR (state='pending' AND {}))
+                         )",
+                        repo::actions::SEND_TAKEN
+                    ),
                     rusqlite::params![draft_id],
                     |query_row| query_row.get::<_, bool>(0),
                 )?;
@@ -7541,19 +7554,23 @@ impl Core {
                     dispatch_at
                 };
                 // One send per draft: queueing it again moves the waiting
-                // send to the new time instead of sending it twice.
-                let queued: Option<(i64, String)> = conn
+                // send to the new time instead of sending it twice. One the
+                // mail server took is still on its way.
+                let queued: Option<(i64, String, bool)> = conn
                     .query_row(
-                        "SELECT id, state FROM pending_actions
-                         WHERE message_id = ?1 AND kind = 'send'
-                           AND state IN ('pending', 'inflight', 'failed')
-                         ORDER BY id DESC LIMIT 1",
+                        &format!(
+                            "SELECT id, state, {} FROM pending_actions
+                             WHERE message_id = ?1 AND kind = 'send'
+                               AND state IN ('pending', 'inflight', 'failed')
+                             ORDER BY id DESC LIMIT 1",
+                            repo::actions::SEND_TAKEN
+                        ),
                         rusqlite::params![draft_id],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                     )
                     .optional()?;
-                if let Some((action_id, state)) = queued {
-                    if state == "inflight" {
+                if let Some((action_id, state, taken)) = queued {
+                    if state == "inflight" || taken {
                         return Err(CoreError::Other("this message is being sent".into()));
                     }
                     // Shared with the other devices before, it is this
@@ -12194,20 +12211,25 @@ fn schedule_shared_send(
         "scheduled": true,
         "sendAt": send_at,
     });
-    let queued: Option<(i64, String)> = conn
+    // One the mail server took is still on its way.
+    let queued: Option<(i64, String, bool)> = conn
         .query_row(
-            "SELECT id, state FROM pending_actions
-             WHERE message_id = ?1 AND kind = 'send' AND state IN ('pending', 'inflight', 'failed')
-             ORDER BY id DESC LIMIT 1",
+            &format!(
+                "SELECT id, state, {} FROM pending_actions
+                 WHERE message_id = ?1 AND kind = 'send'
+                   AND state IN ('pending', 'inflight', 'failed')
+                 ORDER BY id DESC LIMIT 1",
+                repo::actions::SEND_TAKEN
+            ),
             rusqlite::params![draft_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
     let action_id = match queued {
-        Some((_, state)) if state == "inflight" => {
+        Some((_, state, taken)) if state == "inflight" || taken => {
             return Err(CoreError::Other("this message is being sent".into()));
         }
-        Some((action_id, _)) => {
+        Some((action_id, _, _)) => {
             conn.execute(
                 "UPDATE pending_actions SET state = 'pending', not_before = ?2, payload = ?3,
                         attempts = 0, last_error = NULL, finished_at = NULL
@@ -15131,6 +15153,61 @@ mod draft_action_race_tests {
             .await
             .unwrap();
     }
+
+    #[tokio::test]
+    async fn a_send_the_server_took_is_neither_taken_back_nor_sent_again() {
+        // The mail server took it, and filing it waits to be tried again.
+        let (core, _temp, draft_id, action_id) = jmap_draft_with_send("pending").await;
+        core.db
+            .write(move |conn| {
+                let account = repo::accounts::get_config(conn, 1)?.unwrap();
+                repo::sender_identities::ensure_primary(conn, &account)?;
+                conn.execute(
+                    "UPDATE pending_actions
+                     SET payload = json_set(payload, '$.jmapSubmissionAccepted', json('true'))
+                     WHERE id = ?1",
+                    [action_id],
+                )?;
+                repo::actions::bump_attempt(
+                    conn,
+                    action_id,
+                    now_ms() + 60_000,
+                    "JMAP request failed",
+                )
+            })
+            .await
+            .unwrap();
+
+        core.wait_for_send(action_id).await.unwrap();
+        assert!(!core.cancel_send(action_id).await.unwrap());
+        assert_eq!(
+            core.cancel_scheduled_send(draft_id).await.unwrap(),
+            CancelledSend::NotScheduled
+        );
+        let error = core.delete_draft(draft_id).await.unwrap_err();
+        assert!(error.to_string().contains("currently being submitted"));
+        let error = core
+            .queue_send(QueueSendArgs {
+                draft_id,
+                send_at: None,
+                remind_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("being sent"), "{error}");
+
+        // It still goes on to be filed, as sent.
+        core.db
+            .read(move |conn| {
+                let action = repo::actions::get(conn, action_id)?.unwrap();
+                assert_eq!(action.state, "pending");
+                assert_eq!(action.payload["jmapSubmissionAccepted"], true);
+                assert!(repo::messages::get_row(conn, draft_id)?.is_some());
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -15217,6 +15294,43 @@ mod send_confirmation_tests {
                 assert_eq!(
                     repo::actions::get(conn, action_id)?.map(|action| action.state),
                     Some("cancelled".into())
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_send_the_server_took_counts_as_sent_while_it_is_filed() {
+        let (core, _temp, action_id) = send_action().await;
+        // The JMAP server accepted the submission; filing the message in
+        // Sent failed, and waits to be tried again.
+        core.db
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE pending_actions
+                     SET payload = json_set(payload, '$.jmapSubmissionAccepted', json('true'))
+                     WHERE id = ?1",
+                    [action_id],
+                )?;
+                repo::actions::bump_attempt(
+                    conn,
+                    action_id,
+                    now_ms() + 60_000,
+                    "JMAP request failed: connection reset",
+                )
+            })
+            .await
+            .unwrap();
+
+        core.wait_for_send(action_id).await.unwrap();
+        assert!(!core.cancel_send(action_id).await.unwrap());
+        core.db
+            .read(move |conn| {
+                assert_eq!(
+                    repo::actions::get(conn, action_id)?.map(|action| action.state),
+                    Some("pending".into())
                 );
                 Ok(())
             })

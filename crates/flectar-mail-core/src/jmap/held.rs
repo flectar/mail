@@ -13,8 +13,8 @@
 
 use super::client::{self, ConnectedClient};
 use super::sync::{
-    draft_sending_identity, ensure_role_mailbox, ensure_submitted_email_state, finish_sent_locally,
-    map_submission_error, prepared_email, send_action,
+    draft_sending_identity, ensure_role_mailbox, file_sent_email, finish_sent_locally,
+    map_submission_error, mark_submission_accepted, prepared_email, send_action,
 };
 use crate::db::repo;
 use crate::error::{CoreError, Result};
@@ -188,6 +188,12 @@ async fn hold(
     let draft_id = action.payload["draftId"]
         .as_i64()
         .ok_or_else(|| CoreError::Jmap("send action has no draftId".into()))?;
+    // It went out at once on an earlier try, and a server may have deleted
+    // that submission since (RFC 8621 section 7): what is left files it.
+    if action.payload["jmapSubmissionAccepted"].as_bool() == Some(true) {
+        let remote_email = prepared_email(ctx, config, c, action, draft_id, true).await?;
+        return sent(ctx, config, c, Some(draft_id), &remote_email).await;
+    }
     // As the last session said.
     let (scheduled, max_delayed_send) = ctx
         .db
@@ -280,8 +286,11 @@ async fn hold(
             Ok(Finish::Waiting)
         }
         Some(status) if status.undo == UndoStatus::Canceled => Ok(Finish::Cancelled),
-        // It went out now.
-        _ => sent(ctx, config, c, Some(draft_id), &remote_email).await,
+        // It went out now: from here no one takes it back or sends it again.
+        _ => {
+            mark_submission_accepted(ctx, action).await?;
+            sent(ctx, config, c, Some(draft_id), &remote_email).await
+        }
     }
 }
 
@@ -378,7 +387,7 @@ async fn sent(
 ) -> Result<Finish> {
     let sent_mailbox =
         ensure_role_mailbox(ctx, config.id, c, roles::SENT, "Sent", Role::Sent).await?;
-    ensure_submitted_email_state(c, email_id, &sent_mailbox).await?;
+    file_sent_email(c, email_id, &sent_mailbox).await;
     if let Some(draft_id) = draft_id {
         finish_sent_locally(ctx, config, draft_id).await?;
     }

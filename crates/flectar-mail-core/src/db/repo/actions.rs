@@ -12,6 +12,12 @@ pub const HELD: i64 = i64::MAX;
 /// the next device that claims it never sends at the same time.
 pub const CLAIM_MARGIN_MS: i64 = 60_000;
 
+/// SQL over `pending_actions`: the action is a send its mail server took,
+/// as a JMAP server that accepted its submission. The message went out, and
+/// what is left only files it, so no one takes it back or sends it again,
+/// and it never counts as not sent.
+pub const SEND_TAKEN: &str = "(json_extract(payload, '$.jmapSubmissionAccepted') IS 1)";
+
 #[derive(Debug, Clone)]
 pub struct PendingAction {
     pub id: i64,
@@ -251,12 +257,16 @@ pub fn scheduled_sends(conn: &Connection) -> Result<Vec<crate::models::Scheduled
 }
 
 /// Stop the draft's waiting or failed send. Returns the action it stopped.
+/// One its mail server took went out, and stays (see [`SEND_TAKEN`]).
 pub fn cancel_draft_send(conn: &Connection, draft_id: i64, now_ms: i64) -> Result<Option<i64>> {
     let action: Option<i64> = conn
         .query_row(
-            "SELECT id FROM pending_actions
-             WHERE message_id = ?1 AND kind = 'send' AND state IN ('pending', 'failed')
-             ORDER BY id DESC LIMIT 1",
+            &format!(
+                "SELECT id FROM pending_actions
+                 WHERE message_id = ?1 AND kind = 'send' AND state IN ('pending', 'failed')
+                   AND NOT {SEND_TAKEN}
+                 ORDER BY id DESC LIMIT 1"
+            ),
             params![draft_id],
             |row| row.get(0),
         )
@@ -501,7 +511,6 @@ pub fn expedite(conn: &Connection, id: i64) -> Result<Option<i64>> {
         .optional()?)
 }
 
-/// Transition pending -> cancelled; returns false if it was no longer pending.
 /// A send the account's JMAP server holds to release at its time: the
 /// EmailSubmission it made, and the Email it sends.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -666,10 +675,14 @@ pub fn withdraw_unsend(conn: &Connection, id: i64) -> Result<bool> {
     )? == 1)
 }
 
+/// Transition pending -> cancelled; returns false if it was no longer
+/// pending, or is a send its mail server took already (see [`SEND_TAKEN`]).
 pub fn try_cancel(conn: &Connection, id: i64) -> Result<bool> {
     let n = conn.execute(
-        "UPDATE pending_actions SET state = 'cancelled', finished_at = ?2
-         WHERE id = ?1 AND state = 'pending'",
+        &format!(
+            "UPDATE pending_actions SET state = 'cancelled', finished_at = ?2
+             WHERE id = ?1 AND state = 'pending' AND NOT {SEND_TAKEN}"
+        ),
         params![id, now_ms()],
     )?;
     Ok(n > 0)
