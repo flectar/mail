@@ -85,6 +85,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/066_sender_identity_bcc.sql")),
     Migration::Plain(include_str!("migrations/067_jmap_body_downloads.sql")),
     Migration::Plain(include_str!("migrations/068_account_names.sql")),
+    Migration::Plain(include_str!("migrations/069_bodies_to_read_again.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -405,6 +406,7 @@ mod tests {
             "attachment_text_fts",
             "attachments",
             "blocked_senders",
+            "bodies_to_read_again",
             "contact_accounts",
             "contact_entries",
             "contact_values",

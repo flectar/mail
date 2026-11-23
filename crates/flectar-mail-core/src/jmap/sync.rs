@@ -2256,10 +2256,10 @@ struct DownloadedBody {
 }
 
 /// Keeps what the server sent for `batch`. A message whose text didn't all
-/// come, and a small read receipt, whose report part is no text, download
-/// whole instead, as when they're opened. One the server didn't send as it
-/// is here waits as a body that failed does, while header sync catches up
-/// with it.
+/// come, a small read receipt, whose report part is no text, and a message
+/// that carries one its body shows download whole instead, as when they're
+/// opened. One the server didn't send as it is here waits as a body that
+/// failed does, while header sync catches up with it.
 async fn store_bodies(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -2287,9 +2287,17 @@ async fn store_bodies(
             part.content_type()
                 .is_some_and(crate::mime::is_disposition_report_part)
         });
-        let text = if receipt
-            && u64::try_from(message.size)
-                .is_ok_and(|size| size <= crate::sync::engine::WHOLE_RECEIPT_LIMIT)
+        // A message carrying one its body shows downloads whole too (#455):
+        // body values leave out the messages inside (RFC 8621 section 4.1.4).
+        let shows_message = attachments.iter().any(|part| {
+            part.content_type().is_some_and(|media_type| {
+                crate::mime::shows_in_body(media_type, part.content_disposition())
+            })
+        });
+        let text = if shows_message
+            || receipt
+                && u64::try_from(message.size)
+                    .is_ok_and(|size| size <= crate::sync::engine::WHOLE_RECEIPT_LIMIT)
         {
             None
         } else {

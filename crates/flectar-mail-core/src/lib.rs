@@ -4316,11 +4316,85 @@ impl Core {
         self.load_body(message_id, None).await
     }
 
+    /// Read a kept body again when it was read before the body showed the
+    /// messages a message carries (#455): from the original kept on this
+    /// device, or else from the server, while the kept body still shows.
+    /// Mail with neither keeps the body it has.
+    async fn read_body_again(&self, message_id: i64) {
+        let Ok(Some((account_id, raw_path))) = self
+            .db
+            .read(move |conn| repo::messages::body_to_read_again(conn, message_id))
+            .await
+        else {
+            return;
+        };
+        if let Some(raw_path) = raw_path {
+            match self
+                .read_original(
+                    account_id,
+                    message_id,
+                    &raw_path,
+                    MAX_CACHED_MESSAGE_BYTES,
+                    "cached message",
+                )
+                .await
+            {
+                Ok(raw) => {
+                    let parsed = crate::sync::ingest::parse_or_text(&raw);
+                    let stored = self
+                        .db
+                        .write(move |conn| {
+                            let tx = conn.transaction()?;
+                            let mut thread_ids = crate::sync::ingest::store_body(
+                                &tx, message_id, &raw_path, &parsed,
+                            )?;
+                            repo::messages::body_read_again(&tx, message_id)?;
+                            if let Some(thread_id) = repo::messages::get_row(&tx, message_id)?
+                                .and_then(|row| row.thread_id)
+                            {
+                                repo::threads::recompute(&tx, thread_id)?;
+                                if !thread_ids.contains(&thread_id) {
+                                    thread_ids.push(thread_id);
+                                }
+                            }
+                            tx.commit()?;
+                            Ok(thread_ids)
+                        })
+                        .await;
+                    match stored {
+                        Ok(thread_ids) => self.bus.emit(CoreEvent::MailUpdated { thread_ids }),
+                        Err(error) => {
+                            tracing::warn!(message_id, %error, "could not read a kept body again");
+                        }
+                    }
+                    return;
+                }
+                Err(error) => {
+                    tracing::debug!(message_id, %error, "the original of a kept body is unavailable");
+                }
+            }
+        }
+        let protocol = self.account_protocol(account_id).await;
+        let result = self
+            .db
+            .write(move |conn| match protocol {
+                Ok(MailProtocol::Imap | MailProtocol::Gmail | MailProtocol::Jmap) => {
+                    repo::messages::fetch_body_again(conn, message_id)
+                }
+                _ => repo::messages::body_read_again(conn, message_id),
+            })
+            .await;
+        if let Err(error) = result {
+            tracing::warn!(message_id, %error, "could not ask for a kept body again");
+        }
+    }
+
     async fn load_body(
         &self,
         message_id: i64,
         preview_thread: Option<i64>,
     ) -> Result<MessageDetail> {
+        self.read_body_again(message_id).await;
         let (mut detail, cached_raw_path) = self
             .db
             .read(move |conn| {
@@ -17933,6 +18007,146 @@ mod answer_route_tests {
             route(Some(read_only), "TENTATIVE"),
             AnswerRoute::Mail { store: false }
         );
+    }
+}
+
+#[cfg(test)]
+mod body_read_again_tests {
+    use super::*;
+
+    const FORWARD: &str = "From: sender@example.com\r\n\
+        To: me@test.dev\r\n\
+        Subject: Inline forward\r\n\
+        MIME-Version: 1.0\r\n\
+        Content-Type: multipart/mixed; boundary=b\r\n\
+        \r\n\
+        --b\r\n\
+        Content-Type: text/plain\r\n\
+        \r\n\
+        Outer body.\r\n\
+        --b\r\n\
+        Content-Type: message/rfc822\r\n\
+        Content-Disposition: inline\r\n\
+        \r\n\
+        From: original@example.com\r\n\
+        Subject: Original message\r\n\
+        \r\n\
+        Forwarded body.\r\n\
+        --b--\r\n";
+
+    /// A message of account 1 kept before #455 with only its own text, and
+    /// marked to be read again as migration 69 marks one. `raw_path` is
+    /// where its original is kept, if anywhere.
+    async fn kept(core: &Core, raw_path: Option<String>) -> i64 {
+        core.db
+            .write(move |conn| {
+                db::testutil::seed_account(conn);
+                let (_, id) = db::testutil::seed_message(conn, "sender@example.com", "Fwd", false);
+                conn.execute(
+                    "UPDATE messages SET body_state = 'cached', raw_path = ?2,
+                         mime_plan_json = '{\"version\":3}'
+                     WHERE id = ?1",
+                    rusqlite::params![id, raw_path],
+                )?;
+                conn.execute(
+                    "INSERT INTO message_bodies (message_id, text_body) VALUES (?1, 'Outer body.')",
+                    [id],
+                )?;
+                conn.execute(
+                    "INSERT INTO attachments (message_id, part_id, mime_type, size, is_inline)
+                     VALUES (?1, '0', 'message/rfc822', 80, 1)",
+                    [id],
+                )?;
+                conn.execute(
+                    "INSERT INTO bodies_to_read_again (message_id) VALUES (?1)",
+                    [id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn marked(core: &Core, id: i64) -> bool {
+        core.db
+            .read(move |conn| Ok(repo::messages::body_to_read_again(conn, id)?.is_some()))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_kept_body_is_read_again_from_its_original_when_opened() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let original = temp.path().join("kept.eml");
+        std::fs::write(&original, FORWARD).unwrap();
+        let id = kept(&core, Some(original.to_string_lossy().into_owned())).await;
+
+        let detail = core.get_body(id).await.unwrap();
+        let text = detail.text_body.unwrap();
+        assert!(
+            text.starts_with("Outer body.\n\n---------- Forwarded message"),
+            "{text}"
+        );
+        assert!(text.ends_with("Forwarded body."), "{text}");
+        assert!(detail.html_body.unwrap().contains("Forwarded body."));
+        assert_eq!(detail.body_state, "cached");
+        let [file] = detail.attachments.as_slice() else {
+            panic!("{:?}", detail.attachments);
+        };
+        assert_eq!(file.filename.as_deref(), Some("Original message.eml"));
+        assert!(!marked(&core, id).await);
+    }
+
+    #[tokio::test]
+    async fn a_kept_body_without_an_original_is_fetched_again() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let id = kept(&core, None).await;
+
+        let detail = core.get_body(id).await.unwrap();
+        // The kept body shows while the server sends it again.
+        assert_eq!(detail.text_body.as_deref(), Some("Outer body."));
+        assert_ne!(detail.body_state, "cached");
+        assert!(!marked(&core, id).await);
+        let plan = core
+            .db
+            .read(move |conn| repo::messages::mime_plan(conn, id))
+            .await
+            .unwrap();
+        assert!(plan.is_none());
+    }
+
+    #[tokio::test]
+    async fn mail_kept_only_here_keeps_its_body_when_the_original_is_gone() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let id = kept(
+            &core,
+            Some(temp.path().join("gone.eml").to_string_lossy().into_owned()),
+        )
+        .await;
+        core.db
+            .write(|conn| {
+                conn.execute(
+                    "UPDATE accounts SET mail_protocol = 'pop3' WHERE id = 1",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        let detail = core.get_body(id).await.unwrap();
+        assert_eq!(detail.text_body.as_deref(), Some("Outer body."));
+        assert_eq!(detail.body_state, "cached");
+        assert!(!marked(&core, id).await);
     }
 }
 
