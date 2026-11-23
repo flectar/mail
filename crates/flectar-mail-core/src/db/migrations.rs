@@ -89,6 +89,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/070_app_key_sync.sql")),
     Migration::Plain(include_str!("migrations/071_account_authentication.sql")),
     Migration::Plain(include_str!("migrations/072_sealed_deletions.sql")),
+    Migration::Plain(include_str!("migrations/073_sync_turned_away.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

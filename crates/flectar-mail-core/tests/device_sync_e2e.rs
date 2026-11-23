@@ -333,7 +333,9 @@ async fn two_devices_share_accounts_and_preferences() {
     phone.device_sync_run().await.unwrap();
     assert!(phone.list_accounts().await.unwrap().is_empty());
 
-    // The laptop removes the phone, which stops syncing but keeps its data.
+    // The laptop removes the phone. Only the server tells the phone, which
+    // can't check it: the phone stops syncing and keeps everything, its
+    // sync keys and state too.
     let phone_id = phone
         .device_sync_status()
         .devices
@@ -344,7 +346,9 @@ async fn two_devices_share_accounts_and_preferences() {
         .clone();
     laptop.device_sync_remove_device(phone_id).await.unwrap();
     phone.device_sync_run().await.unwrap();
-    assert_eq!(phone.device_sync_status().state, DeviceSyncState::Removed);
+    let status = phone.device_sync_status();
+    assert_eq!(status.state, DeviceSyncState::Removed);
+    assert!(status.server_url.is_some(), "still set up");
     assert_eq!(phone.get_settings().await.unwrap().theme, "carbon");
 }
 
@@ -1470,10 +1474,15 @@ async fn a_large_imap_message_waits_in_a_file_until_a_device_sends_it() {
         "its send started: {state} {due}"
     );
 
-    // Found again, the laptop hears it was removed: the phone sends this one.
+    // Found again, the laptop hears it was removed, from the server alone.
+    // It keeps its send, as when the server can't be reached: due past its
+    // time, it goes out only if the mail server shows the phone didn't send
+    // it.
     laptop.device_sync_run().await.unwrap();
     assert_eq!(laptop.device_sync_status().state, DeviceSyncState::Removed);
-    assert_eq!(send_of(&laptop).await.unwrap().0, "cancelled");
+    let (state, due) = send_of(&laptop).await.unwrap();
+    assert_eq!(state, "pending");
+    assert!(due >= send_at, "not before its time: {due}");
 }
 
 /// Whether `needle` appears in any of the database's files.

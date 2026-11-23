@@ -26,8 +26,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use collections::{FollowUp, Names};
 use flectar_mail_sync_client::{
-    Billing, BillingStatus, Clock, Entry, Error as SyncError, Event, Http, Invitation, JoinAttempt,
-    Joining, Plan, Secrets, SyncClient,
+    Billing, BillingStatus, Claim, Clock, Entry, Error as SyncError, Event, Http, Invitation,
+    JoinAttempt, Joining, Plan, Secrets, SyncClient,
 };
 use futures::StreamExt;
 use std::collections::BTreeMap;
@@ -51,6 +51,10 @@ const PULL_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const MAX_EVENTS_BACKOFF: Duration = Duration::from_secs(5 * 60);
 /// The longest wait before trying a sync again after runs that failed.
 const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(15 * 60);
+/// How long a device the server turned away waits before it asks again
+/// (see [`Claim`]), besides at each start. Its own scheduled mail still
+/// goes out meanwhile.
+const TURNED_AWAY_RETRY: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// How long to wait before syncing again after `failures` runs in a row
 /// failed: none after a run that worked, then a check's interval, doubled
@@ -76,9 +80,12 @@ pub enum DeviceSyncState {
     Syncing,
     /// The last attempt failed; the loop tries again.
     Error(String),
-    /// Another device removed this one from the group.
+    /// Another device removed this one from the group. While only the
+    /// server says so, this device keeps its keys and everything it syncs,
+    /// and asks again now and then.
     Removed,
-    /// The group was deleted from another device.
+    /// The group was deleted from another device. As with [`Self::Removed`],
+    /// the server's word alone changes nothing on this device.
     Deleted,
     /// The free trial or subscription ended on a server that charges. This
     /// device still downloads; its changes wait for a payment.
@@ -477,18 +484,40 @@ impl Core {
 
     /// Start using `client`: keep its state, listen for live events, sync.
     async fn adopt_client(&self, client: SyncClient, adopting: bool) -> Result<()> {
+        // A group the server turned this device away from still has its
+        // client, whose run could otherwise write to the new group's state.
+        let run = self.sync_service().run_lock.lock().await;
         let secrets = client.secrets().await;
         self.store_sync_secrets(&secrets).await?;
         let server_url = client.identity().server_url().to_owned();
         let chain = client.chain().await;
-        self.db
+        let threads = self
+            .db
             .write(move |conn| {
                 let tx = conn.transaction()?;
+                // A group the server turned this device away from is left
+                // now that the user set sync up again, as a confirmed
+                // removal or deletion would have left it.
+                let threads = match store::load_row(&tx)? {
+                    Some(row) => {
+                        let departure = match row.turned_away {
+                            Some(Claim::GroupDeleted) => scheduled::Departure::Alone,
+                            Some(Claim::Removed) | None => scheduled::Departure::Kept,
+                        };
+                        scheduled::detach(&tx, departure, now_ms())?
+                    }
+                    None => Vec::new(),
+                };
                 store::create_row(&tx, &server_url, &chain, adopting, now_ms())?;
                 tx.commit()?;
-                Ok(())
+                Ok(threads)
             })
             .await?;
+        if !threads.is_empty() {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: threads,
+            });
+        }
         let client = Arc::new(client);
         *lock(&self.sync_service().client) = Some(Arc::clone(&client));
         *self.sync_service().names.lock().await = Names::default();
@@ -497,6 +526,7 @@ impl Core {
             status.server_url = Some(client.identity().server_url().to_owned());
             status.state = DeviceSyncState::Idle;
         }
+        drop(run);
         self.start_sync_events(client);
         self.refresh_sync_devices().await;
         self.sync_service().wake.notify_one();
@@ -578,10 +608,15 @@ impl Core {
                 }
                 continue;
             }
-            if !woken && tokio::time::Instant::now() < retry_at {
+            let turned_away = self.turned_away();
+            if (!woken || turned_away) && tokio::time::Instant::now() < retry_at {
+                if turned_away {
+                    // Its own scheduled mail goes out from here meanwhile.
+                    self.drive_scheduled_sends().await;
+                }
                 continue;
             }
-            let pull = woken || last_pull.elapsed() >= PULL_INTERVAL;
+            let pull = woken || turned_away || last_pull.elapsed() >= PULL_INTERVAL;
             match self.run_device_sync(pull).await {
                 Ok(true) => last_pull = tokio::time::Instant::now(),
                 Ok(false) => {}
@@ -598,7 +633,12 @@ impl Core {
             } else {
                 0
             };
-            retry_at = tokio::time::Instant::now() + retry_backoff(failures);
+            retry_at = tokio::time::Instant::now()
+                + if self.turned_away() {
+                    TURNED_AWAY_RETRY
+                } else {
+                    retry_backoff(failures)
+                };
             self.drive_scheduled_sends().await;
         }
     }
@@ -612,8 +652,11 @@ impl Core {
             return;
         };
         let me = hex(&client.identity().device_id());
-        self.share_scheduled_messages(&me, &client).await;
-        self.remove_unneeded_files(&me, &client).await;
+        // A server that turned this device away takes nothing from it.
+        if !self.turned_away() {
+            self.share_scheduled_messages(&me, &client).await;
+            self.remove_unneeded_files(&me, &client).await;
+        }
         // Whether another device may send a send this one can't ask about.
         let others = client
             .state()
@@ -624,7 +667,9 @@ impl Core {
         for _ in 0..3 {
             let reach = match lock(&self.sync_service().status).state {
                 DeviceSyncState::PaymentRequired => scheduled::Reach::PaymentRequired,
-                DeviceSyncState::Error(_) => scheduled::Reach::Unreachable,
+                DeviceSyncState::Error(_) | DeviceSyncState::Removed | DeviceSyncState::Deleted => {
+                    scheduled::Reach::Unreachable
+                }
                 _ => scheduled::Reach::Usable,
             };
             let driven = {
@@ -967,15 +1012,30 @@ impl Core {
             let mut status = lock(&self.sync_service().status);
             status.server_url = Some(row.server_url.clone());
             status.last_synced_at = row.last_synced_at;
-            status.state = match row.last_error {
-                Some(error) => DeviceSyncState::Error(error),
-                None => DeviceSyncState::Idle,
+            status.state = match (row.turned_away, row.last_error) {
+                (Some(Claim::Removed), _) => DeviceSyncState::Removed,
+                (Some(Claim::GroupDeleted), _) => DeviceSyncState::Deleted,
+                (None, Some(error)) => DeviceSyncState::Error(error),
+                (None, None) => DeviceSyncState::Idle,
             };
         }
-        self.start_sync_events(client);
+        // Turned away, it listens again once a sync gets through.
+        if row.turned_away.is_none() {
+            self.start_sync_events(Arc::clone(&client));
+        }
         self.refresh_sync_devices().await;
         self.sync_service().wake.notify_one();
         Ok(())
+    }
+
+    /// Whether the server turned this device away, unconfirmed by the
+    /// chain: sync waits, keeping everything.
+    fn turned_away(&self) -> bool {
+        self.sync_service().client().is_some()
+            && matches!(
+                lock(&self.sync_service().status).state,
+                DeviceSyncState::Removed | DeviceSyncState::Deleted
+            )
     }
 
     /// Listen to the group's live events and sync when another device
@@ -1134,7 +1194,10 @@ impl Core {
             return Ok(false);
         }
 
-        self.set_sync_state(DeviceSyncState::Syncing);
+        // Turned away, the page keeps saying why while the device asks again.
+        if !self.turned_away() {
+            self.set_sync_state(DeviceSyncState::Syncing);
+        }
         let report = match client.sync(&mut run).await {
             Ok(report) => report,
             Err(error) => return self.sync_failed(error).await,
@@ -1223,6 +1286,10 @@ impl Core {
             });
         }
 
+        // Turned away before, the device listens again.
+        if lock(&service.events_task).is_none() {
+            self.start_sync_events(Arc::clone(&client));
+        }
         {
             service
                 .refused_uploads
@@ -1254,10 +1321,11 @@ impl Core {
 
     async fn sync_failed<T: Default>(&self, error: SyncError) -> Result<T> {
         match error {
-            // The group goes on without this device, and keeps its
-            // scheduled mail. A login the server refused for another
-            // reason, such as a changed server address, is an error: the
-            // keys stay, and a later sync tries again.
+            // The chain this device verified shows it left the group, which
+            // goes on without it and keeps its scheduled mail. A login the
+            // server refused for another reason, such as a changed server
+            // address, is an error: the keys stay, and a later sync tries
+            // again.
             SyncError::Removed => {
                 self.drop_sync_state_locked(DeviceSyncState::Removed, scheduled::Departure::Kept)
                     .await?;
@@ -1265,6 +1333,23 @@ impl Core {
             SyncError::GroupDeleted => {
                 self.drop_sync_state_locked(DeviceSyncState::Deleted, scheduled::Departure::Alone)
                     .await?;
+            }
+            // Only the server says so: a removed device can't read its
+            // removal, and a deleted group's chain is gone, but a server
+            // that lies would say the same. Sync stops and shows why, and
+            // everything stays: the keys, what waits to upload, the shared
+            // scheduled mail. The device asks again now and then, and the
+            // user may set sync up again.
+            SyncError::Unconfirmed(claim) => {
+                let _ = self
+                    .db
+                    .write(move |conn| store::set_turned_away(conn, claim))
+                    .await;
+                self.sync_service().stop_events();
+                self.set_sync_state(match claim {
+                    Claim::Removed => DeviceSyncState::Removed,
+                    Claim::GroupDeleted => DeviceSyncState::Deleted,
+                });
             }
             SyncError::PaymentRequired => {
                 self.sync_service()
@@ -1280,7 +1365,12 @@ impl Core {
                     .db
                     .write(move |conn| store::set_error(conn, Some(&stored)))
                     .await;
-                self.set_sync_state(DeviceSyncState::Error(message));
+                // Turned away, a retry that fails another way changes
+                // nothing: the page keeps saying why sync stopped, and the
+                // device asks again much later.
+                if !self.turned_away() {
+                    self.set_sync_state(DeviceSyncState::Error(message));
+                }
             }
         }
         Ok(T::default())
@@ -1355,7 +1445,10 @@ impl Core {
     pub(crate) fn shared_send_device(&self) -> Option<String> {
         let service = self.sync_service();
         let client = service.client()?;
-        if lock(&service.status).state == DeviceSyncState::PaymentRequired {
+        if matches!(
+            lock(&service.status).state,
+            DeviceSyncState::PaymentRequired | DeviceSyncState::Removed | DeviceSyncState::Deleted
+        ) {
             return None;
         }
         Some(hex(&client.identity().device_id()))

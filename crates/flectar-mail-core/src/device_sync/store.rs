@@ -8,7 +8,8 @@
 use super::merge;
 use crate::error::{CoreError, Result};
 use flectar_mail_sync_client::{
-    ChainOp, Clock, Content, Entry, Mirrored, Pending, Remote, Secrets, Stamp, Store, StoreError,
+    ChainOp, Claim, Clock, Content, Entry, Mirrored, Pending, Remote, Secrets, Stamp, Store,
+    StoreError,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
@@ -28,6 +29,8 @@ pub(crate) struct SyncRow {
     pub adopting: bool,
     pub last_synced_at: Option<i64>,
     pub last_error: Option<String>,
+    /// The server turned this device away, unconfirmed by the chain.
+    pub turned_away: Option<Claim>,
 }
 
 fn to_i64(value: u64) -> i64 {
@@ -78,26 +81,34 @@ pub(crate) fn load_row(conn: &Connection) -> Result<Option<SyncRow>> {
     let row = conn
         .query_row(
             "SELECT server_url, chain, cursor, seen, clock_ms, clock_counter, adopting,
-                    last_synced_at, last_error
+                    last_synced_at, last_error, turned_away
              FROM device_sync WHERE id = 1",
             [],
             |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
+                    (
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ),
                     row.get::<_, bool>(6)?,
                     row.get::<_, Option<i64>>(7)?,
                     row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                 ))
             },
         )
         .optional()?;
-    let Some((server_url, chain, cursor, seen, ms, counter, adopting, last_synced_at, last_error)) =
-        row
+    let Some((
+        (server_url, chain, cursor, seen, ms, counter),
+        adopting,
+        last_synced_at,
+        last_error,
+        turned_away,
+    )) = row
     else {
         return Ok(None);
     };
@@ -110,6 +121,11 @@ pub(crate) fn load_row(conn: &Connection) -> Result<Option<SyncRow>> {
         adopting,
         last_synced_at,
         last_error,
+        turned_away: match turned_away.as_deref() {
+            Some("removed") => Some(Claim::Removed),
+            Some("deleted") => Some(Claim::GroupDeleted),
+            _ => None,
+        },
     }))
 }
 
@@ -145,6 +161,20 @@ pub(crate) fn set_error(conn: &Connection, error: Option<&str>) -> Result<()> {
     conn.execute(
         "UPDATE device_sync SET last_error = ?1 WHERE id = 1",
         params![error],
+    )?;
+    Ok(())
+}
+
+/// The server turned this device away, saying `claim`, which the chain
+/// this device verified doesn't show. A sync that gets through clears it.
+pub(crate) fn set_turned_away(conn: &Connection, claim: Claim) -> Result<()> {
+    let claim = match claim {
+        Claim::Removed => "removed",
+        Claim::GroupDeleted => "deleted",
+    };
+    conn.execute(
+        "UPDATE device_sync SET turned_away = ?1 WHERE id = 1",
+        params![claim],
     )?;
     Ok(())
 }
@@ -494,7 +524,7 @@ impl RunStore {
         let floor = clock.floor();
         conn.execute(
             "UPDATE device_sync SET cursor = ?1, seen = ?2, clock_ms = ?3, clock_counter = ?4,
-                    last_synced_at = ?5, last_error = NULL
+                    last_synced_at = ?5, last_error = NULL, turned_away = NULL
              WHERE id = 1",
             params![
                 to_i64(self.cursor),
@@ -1051,5 +1081,22 @@ mod tests {
         track(&conn, &BTreeMap::from([(id, pref("carbon"))]), &clock).unwrap();
         track(&conn, &BTreeMap::new(), &clock).unwrap();
         assert_eq!(load_outbox(&conn).unwrap()[&id].content, deleted());
+    }
+
+    #[test]
+    fn a_sync_that_gets_through_ends_a_server_s_refusal() {
+        let conn = testutil::conn();
+        create_row(&conn, "https://sync.test", &[], false, 1).unwrap();
+        assert_eq!(load_row(&conn).unwrap().unwrap().turned_away, None);
+        set_turned_away(&conn, Claim::GroupDeleted).unwrap();
+        let row = load_row(&conn).unwrap().unwrap();
+        assert_eq!(row.turned_away, Some(Claim::GroupDeleted));
+        set_turned_away(&conn, Claim::Removed).unwrap();
+        let row = load_row(&conn).unwrap().unwrap();
+        assert_eq!(row.turned_away, Some(Claim::Removed));
+        let clock = Arc::new(Clock::new([7; 16], None));
+        let run = RunStore::load(&conn, &row, Arc::clone(&clock)).unwrap();
+        run.save(&conn, &clock, 2).unwrap();
+        assert_eq!(load_row(&conn).unwrap().unwrap().turned_away, None);
     }
 }
