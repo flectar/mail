@@ -15122,7 +15122,7 @@ mod read_receipt_answer_tests {
         let (_, message_id) = db::testutil::seed_message(conn, "ana@example.com", "Plan", false);
         conn.execute(
             "UPDATE messages SET receipt_to = ?2, receipt_confirm = ?3,
-                 sender_verification = 'domain'
+                 sender_verification = 'domain', to_json = '[{\"email\":\"me@test.dev\"}]'
              WHERE id = ?1",
             rusqlite::params![
                 message_id,
@@ -15282,6 +15282,62 @@ mod read_receipt_answer_tests {
 
     /// An account that only receives mail can't send a receipt, so nothing
     /// asks for one, and an answer sends nothing (#252).
+    #[tokio::test]
+    async fn a_bcc_copy_asks_and_trash_or_a_blocked_sender_asks_nothing() {
+        let (_temp, core) = core_with_identity().await;
+        async fn request(core: &Core, message_id: i64) -> Option<crate::models::ReceiptRequest> {
+            core.db
+                .read(move |conn| repo::messages::detail(conn, message_id))
+                .await
+                .unwrap()
+                .receipt_request
+        }
+        // Not in To or Cc: the sender would learn the user got a copy.
+        let bcc = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "UPDATE messages SET to_json = '[{\"email\":\"team@example.com\"}]'
+                     WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        assert!(request(&core, bcc).await.unwrap().needs_confirmation);
+
+        let trashed = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, path, role) VALUES (9, 1, 'Trash', 'trash')",
+                    [],
+                )?;
+                conn.execute("UPDATE messages SET folder_id = 9 WHERE id = ?1", [id])?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        assert!(request(&core, trashed).await.is_none());
+
+        let blocked = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "INSERT INTO blocked_senders (address, blocked_at) VALUES ('ana@example.com', 1)",
+                    [],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        assert!(request(&core, blocked).await.is_none());
+    }
+
     #[tokio::test]
     async fn an_account_that_only_receives_is_asked_for_no_receipt() {
         let (_temp, core) = core_with_identity().await;

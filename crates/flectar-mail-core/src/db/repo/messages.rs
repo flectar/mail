@@ -1412,6 +1412,10 @@ fn receipt_request_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<Rece
         && row.get::<_, i64>("is_outgoing")? == 0
         && row.get::<_, i64>("is_draft")? == 0
         && !row.get::<_, bool>("in_spam")?
+        // Mail the user deleted, or from someone they blocked, tells its
+        // sender nothing.
+        && !row.get::<_, bool>("in_trash")?
+        && !row.get::<_, bool>("sender_blocked")?
         // Lists, newsletters, robots and reports: a receipt would only tell a
         // mass sender, or no one, that the address reads its mail.
         && row.get::<_, i64>("is_automated")? == 0;
@@ -1466,6 +1470,18 @@ fn drop_unanswerable_receipt_requests(
                 .any(|address| addresses.contains(&address.email))
         }) {
             detail.receipt_request = None;
+            continue;
+        }
+        // A copy the user got without being in To or Cc, as a Bcc copy is,
+        // asks first. A receipt would tell the sender they received it, which
+        // the other recipients weren't meant to know.
+        let addressed = detail.to.iter().chain(&detail.cc).any(|address| {
+            addresses
+                .as_ref()
+                .is_some_and(|mine| mine.contains(&address.email))
+        });
+        if !addressed && let Some(request) = &mut detail.receipt_request {
+            request.needs_confirmation = true;
         }
     }
     Ok(())
@@ -1510,6 +1526,9 @@ const DETAIL_MESSAGE_COLS: &str = "
     EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = 'spam')
         OR EXISTS (SELECT 1 FROM message_folders mf JOIN folders f ON f.id = mf.folder_id
                    WHERE mf.message_id = m.id AND f.role = 'spam') AS in_spam,
+    EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = 'trash')
+        OR EXISTS (SELECT 1 FROM message_folders mf JOIN folders f ON f.id = mf.folder_id
+                   WHERE mf.message_id = m.id AND f.role = 'trash') AS in_trash,
     EXISTS (SELECT 1 FROM blocked_senders b WHERE b.address = LOWER(m.from_addr))
         AS sender_blocked";
 
