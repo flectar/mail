@@ -687,6 +687,7 @@ async fn connect_authenticated(
     };
     Client::new()
         .proxy(net::proxy::reqwest_proxy(owner))
+        .tls_config(net::tls::http_config())
         .credentials(credentials)
         .timeout(net::timeouts::scaled(REQUEST_TIMEOUT))
         // Public cross-host redirects are resolved before authentication.
@@ -1361,7 +1362,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn transport_failures_say_what_went_wrong() {
-        let http = reqwest::Client::builder()
+        let http = crate::net::tls::client_builder()
             .timeout(std::time::Duration::from_millis(200))
             .build()
             .unwrap();
@@ -1433,7 +1434,13 @@ pub(crate) mod tests {
 
     async fn status_error(status: &'static str, headers: &'static str) -> CoreError {
         let url = answer_once(status, headers).await;
-        let response = reqwest::Client::new().get(&url).send().await.unwrap();
+        let response = crate::net::tls::client_builder()
+            .build()
+            .unwrap()
+            .get(&url)
+            .send()
+            .await
+            .unwrap();
         let error = match asked_to_wait(response) {
             Ok(response) => Client::handle_error(response).await.unwrap_err(),
             Err(error) => error,

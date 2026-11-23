@@ -301,10 +301,11 @@ pub fn try_refused_proxies_again() {
 }
 
 /// A reqwest client builder for `owner`, whose connections go through the
-/// proxy `owner`'s settings choose. The choice is made again for every new
-/// connection, so a change in Settings applies without a new client.
+/// proxy `owner`'s settings choose and check certificates as mail
+/// connections do. The proxy is chosen again for every new connection, so a
+/// change in Settings applies without a new client.
 pub fn http_builder(owner: Owner) -> reqwest::ClientBuilder {
-    reqwest::Client::builder().proxy(reqwest_proxy(owner))
+    crate::net::tls::client_builder().proxy(reqwest_proxy(owner))
 }
 
 /// The proxy rule of `owner`'s HTTP clients, for clients built elsewhere.

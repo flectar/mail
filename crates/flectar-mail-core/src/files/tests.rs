@@ -482,7 +482,9 @@ async fn streamed_upload_pins_length_and_reports_progress_across_tasks() {
         .unwrap();
     let (base, requests) = server(vec![(201, String::new(), String::new())]).await;
     tokio::spawn(async move {
-        reqwest::Client::new()
+        crate::net::tls::client_builder()
+            .build()
+            .unwrap()
             .put(base)
             .header("Content-Length", length)
             .body(body)

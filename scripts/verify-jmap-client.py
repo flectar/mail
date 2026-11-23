@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reconstruct the pinned jmap-client crate with its proxy option."""
+"""Reconstruct the pinned jmap-client crate with its proxy and TLS options."""
 
 import hashlib
 import io
@@ -67,7 +67,7 @@ def main():
         local = [p for p in packages if p["name"] == CRATE]
         if len(local) != 1 or local[0]["version"] != version or "source" in local[0]:
             raise RuntimeError(f"{lockfile}: {CRATE} must resolve to the local crate")
-    print("jmap-client source checksum, proxy patch, manifests, and lockfiles verified.")
+    print("jmap-client source checksum, patches, manifests, and lockfiles verified.")
 
 
 if __name__ == "__main__":

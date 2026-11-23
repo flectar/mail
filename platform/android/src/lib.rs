@@ -117,9 +117,7 @@ fn android_main(app: slint::android::AndroidApp) {
         Ok(play) => flectar_mail::platform::installed_by_play(play),
         Err(error) => tracing::warn!(%error, "could not tell which store installed the app"),
     }
-    // SAFETY: AndroidApp owns these live VM and Activity references.
-    unsafe { tls::initialize(app.vm_as_ptr().cast(), app.activity_as_ptr().cast()) }
-        .expect("failed to initialize Android TLS certificate verification");
+    trust::install_for_window(&app).expect("failed to set up Android's certificate checks");
     // SAFETY: AndroidApp owns the live process VM.
     match unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) } {
         Ok(vm) => proxy::install(vm),
@@ -183,7 +181,7 @@ mod notifications;
 #[cfg(target_os = "android")]
 mod oauth;
 #[cfg(target_os = "android")]
-mod tls;
+mod trust;
 
 #[cfg(target_os = "android")]
 mod documents;

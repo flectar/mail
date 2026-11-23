@@ -1,0 +1,100 @@
+diff --git a/crates/jmap-client/src/client.rs b/crates/jmap-client/src/client.rs
+index 91f3bc97..963024a2 100644
+--- a/crates/jmap-client/src/client.rs
++++ b/crates/jmap-client/src/client.rs
+@@ -64,6 +64,7 @@ pub struct Client {
+     timeout: Duration,
+     pub(crate) accept_invalid_certs: bool,
+     proxy: Option<reqwest::Proxy>,
++    tls: TlsConfig,
+ 
+     #[cfg(feature = "websockets")]
+     pub(crate) authorization: String,
+@@ -78,6 +79,7 @@ pub struct ClientBuilder {
+     accept_invalid_certs: bool,
+     timeout: Duration,
+     proxy: Option<reqwest::Proxy>,
++    tls: TlsConfig,
+ }
+ 
+ impl Default for ClientBuilder {
+@@ -98,6 +100,7 @@ impl ClientBuilder {
+             forwarded_for: None,
+             accept_invalid_certs: false,
+             proxy: None,
++            tls: TlsConfig::default(),
+         }
+     }
+ 
+@@ -189,6 +192,15 @@ impl ClientBuilder {
+         self
+     }
+ 
++    /// Make every TLS connection with this configuration, which replaces the
++    /// one reqwest would build. Its certificate verifier decides which
++    /// servers are trusted, so `accept_invalid_certs` has no effect then.
++    #[cfg(feature = "rustls")]
++    pub fn tls_config(mut self, config: rustls::ClientConfig) -> Self {
++        self.tls = Some(config);
++        self
++    }
++
+     /// Connects to the JMAP API Session URL.
+     ///
+     /// Setting up [Credentials](struct.ClientBuilder.html#method.credentials) must be done before calling this function.
+@@ -220,7 +232,7 @@ impl ClientBuilder {
+         let session_url = format!("{}/.well-known/jmap", url);
+         let session: Session = serde_json::from_slice(
+             &Client::handle_error(
+-                with_proxy(HttpClient::builder(), &self.proxy)
++                with_tls(with_proxy(HttpClient::builder(), &self.proxy), &self.tls)
+                     .timeout(self.timeout)
+                     .danger_accept_invalid_certs(self.accept_invalid_certs)
+                     .redirect(redirect::Policy::custom(move |attempt| {
+@@ -270,6 +282,7 @@ impl ClientBuilder {
+             session_updated: true.into(),
+             accept_invalid_certs: self.accept_invalid_certs,
+             proxy: self.proxy,
++            tls: self.tls,
+             trusted_hosts,
+             #[cfg(feature = "websockets")]
+             authorization,
+@@ -317,9 +330,10 @@ impl Client {
+         &self.headers
+     }
+ 
+-    /// A builder for an HTTP client of this JMAP client, with its proxy.
++    /// A builder for an HTTP client of this JMAP client, with its proxy and
++    /// TLS configuration.
+     pub(crate) fn http_builder(&self) -> HttpClientBuilder {
+-        with_proxy(HttpClient::builder(), &self.proxy)
++        with_tls(with_proxy(HttpClient::builder(), &self.proxy), &self.tls)
+     }
+ 
+     pub(crate) fn redirect_policy(&self) -> redirect::Policy {
+@@ -485,6 +499,25 @@ fn with_proxy(builder: HttpClientBuilder, proxy: &Option<reqwest::Proxy>) -> Htt
+     }
+ }
+ 
++/// The TLS configuration a caller chose, which needs rustls.
++#[cfg(feature = "rustls")]
++type TlsConfig = Option<rustls::ClientConfig>;
++#[cfg(not(feature = "rustls"))]
++type TlsConfig = ();
++
++#[cfg(feature = "rustls")]
++fn with_tls(builder: HttpClientBuilder, tls: &TlsConfig) -> HttpClientBuilder {
++    match tls {
++        Some(tls) => builder.tls_backend_preconfigured(tls.clone()),
++        None => builder,
++    }
++}
++
++#[cfg(not(feature = "rustls"))]
++fn with_tls(builder: HttpClientBuilder, _tls: &TlsConfig) -> HttpClientBuilder {
++    builder
++}
++
+ #[cfg(test)]
+ mod tests {
+     use crate::core::response::{Response, TaggedMethodResponse};
