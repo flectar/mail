@@ -4008,6 +4008,72 @@ mod content_batch_tests {
     use crate::db::testutil;
 
     #[test]
+    fn issue_455_selective_content_shows_a_forwarded_message_below_the_body() {
+        use async_imap::imap_proto::{AttributeValue, Response};
+        let response = b"* 1 FETCH (UID 7 BODYSTRUCTURE ((\"text\" \"plain\" NIL NIL NIL \"7bit\" 12 1 NIL NIL NIL NIL)\
+            (\"message\" \"rfc822\" NIL NIL NIL \"7bit\" 300 (\"Tue, 17 Nov 2026 12:00:00 +0900\" \"Original message\" \
+            ((NIL NIL \"original\" \"example.com\")) NIL NIL NIL NIL NIL NIL NIL) \
+            ((\"text\" \"plain\" (\"charset\" \"utf-8\") NIL NIL \"quoted-printable\" 18 1 NIL NIL NIL NIL)\
+            (\"text\" \"html\" (\"charset\" \"utf-8\") NIL NIL \"7bit\" 30 1 NIL NIL NIL NIL) \"alternative\" (\"boundary\" \"alt\") NIL NIL NIL) \
+            6 NIL (\"inline\" NIL) NIL NIL) \"mixed\" (\"boundary\" \"b\") NIL NIL NIL))\r\n";
+        let (_, Response::Fetch(_, attributes)) = Response::parse(response).unwrap() else {
+            panic!("not a FETCH response");
+        };
+        let plan = attributes
+            .iter()
+            .find_map(|attribute| match attribute {
+                AttributeValue::BodyStructure(structure) => {
+                    Some(crate::mime::plan_bodystructure(structure))
+                }
+                _ => None,
+            })
+            .unwrap();
+        let section = |section: &str, header: &str, body: &str| imap::FetchedSection {
+            section: section.into(),
+            mime_header: format!("{header}\r\n\r\n").into_bytes(),
+            body: body.as_bytes().to_vec(),
+        };
+        let content = decode_selective_content(
+            PlannedBodyFetch {
+                message_id: 1,
+                uid: 7,
+                plan,
+            },
+            vec![
+                section("1", "Content-Type: text/plain", "Outer body."),
+                section(
+                    "2.1",
+                    "Content-Type: text/plain; charset=utf-8\r\n\
+                     Content-Transfer-Encoding: quoted-printable",
+                    "Forwarded=20body.",
+                ),
+                section(
+                    "2.2",
+                    "Content-Type: text/html; charset=utf-8",
+                    "<p>Forwarded <b>body</b>.</p>",
+                ),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            content.text_body.as_deref(),
+            Some(
+                "Outer body.\n\n---------- Forwarded message ----------\n\
+                 From: original@example.com\n\
+                 Date: Tue, 17 Nov 2026 12:00:00 +0900\n\
+                 Subject: Original message\n\n\
+                 Forwarded body."
+            )
+        );
+        let html = content.html_body.unwrap();
+        let outer = html.find("Outer body.").unwrap();
+        let block = html.find("flectar-embedded-message").unwrap();
+        let body = html.find("<p>Forwarded <b>body</b>.</p>").unwrap();
+        assert!(outer < block && block < body, "{html}");
+        assert!(content.snippet.starts_with("Outer body."));
+    }
+
+    #[test]
     fn content_retries_escalate_at_exact_boundaries_and_reset_when_cleared() {
         let mut conn = testutil::conn();
         testutil::seed_account(&conn);
@@ -4190,8 +4256,10 @@ mod content_batch_tests {
                     charset: Some("utf-8".into()),
                     transfer_encoding: "8bit".into(),
                     size,
+                    message: None,
                 }],
                 attachments: Vec::new(),
+                messages: Vec::new(),
             },
         }
     }
@@ -5088,6 +5156,9 @@ fn decode_selective_content(
     let mut plain = Vec::new();
     let mut html = Vec::new();
     let mut calendar_parts = Vec::new();
+    // The text of each message the body shows (#455), as `plain` and `html`
+    // are the message's own.
+    let mut shown = vec![(Vec::new(), Vec::new()); item.plan.messages.len()];
     for planned in &item.plan.text_sections {
         let section = fetched_by_section.get(&planned.section).ok_or_else(|| {
             CoreError::Mime(format!(
@@ -5097,15 +5168,27 @@ fn decode_selective_content(
         })?;
         let decoded =
             crate::mime::decode_planned_text_section(planned, &section.mime_header, &section.body)?;
+        let (texts, htmls) = match planned
+            .message
+            .and_then(|index| shown.get_mut(usize::from(index)))
+        {
+            Some((texts, htmls)) => (texts, htmls),
+            None => (&mut plain, &mut html),
+        };
         match decoded.kind {
-            crate::mime::TextSectionKind::Plain => plain.push(decoded.content),
-            crate::mime::TextSectionKind::Html => html.push(decoded.content),
+            crate::mime::TextSectionKind::Plain => texts.push(decoded.content),
+            crate::mime::TextSectionKind::Html => htmls.push(decoded.content),
             crate::mime::TextSectionKind::Calendar => calendar_parts.push(decoded.content),
         }
     }
 
     let text_body = (!plain.is_empty()).then(|| plain.join("\n\n"));
     let html_body = (!html.is_empty()).then(|| html.join("\n"));
+    let (text_body, html_body) = crate::mime::with_messages(
+        text_body,
+        html_body,
+        &crate::mime::planned_messages(&item.plan.messages, shown),
+    );
     let snippet = crate::mime::make_body_snippet(text_body.as_deref(), html_body.as_deref());
     Ok(DecodedSelectiveContent {
         message_id: item.message_id,
