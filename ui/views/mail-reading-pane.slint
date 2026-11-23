@@ -8,6 +8,7 @@ import { Button } from "../components/button.slint";
 import { IconButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
 import { DetailEmptyState } from "../components/detail-empty-state.slint";
 import { EmailLinkContextArea } from "../components/email-link-context-area.slint";
+import { SelectableText } from "../components/selectable-text.slint";
 import { FileTypeIcon } from "../components/file-type-icon.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { LabelChip } from "../components/label-chip.slint";
@@ -175,11 +176,10 @@ component MessageDetailRow inherits HorizontalLayout {
     VerticalLayout {
         horizontal-stretch: 1;
         spacing: 3px;
-        for value in root.values : Text {
+        for value in root.values : SelectableText {
             text: value;
             color: root.value-color;
             font-size: TypeScale.secondary;
-            wrap: word-wrap;
         }
     }
 }
@@ -1335,7 +1335,8 @@ export component MailReadingPane inherits FocusScope {
                             enabled: MotionSettings.enabled && root.content-reveal > 0;
                         }
 
-                        Text {
+                        // Selectable and copyable, like the message body.
+                        SelectableText {
                             // The two navigation panes and separators occupy
                             // 622px; the reading pane adds 24px padding on
                             // each side. Referencing the window avoids a
@@ -1344,15 +1345,14 @@ export component MailReadingPane inherits FocusScope {
                             width: root.compact ? max(0px, root.window-width - 24px)
                                 : root.full-width ? max(0px, root.window-width - 48px)
                                 : max(0px, root.window-width - 734px);
-                            // Up to three lines; longer subjects end in an ellipsis.
-                            height: min(self.preferred-height, 3 * (self.font-metrics.ascent - self.font-metrics.descent));
+                            height: self.preferred-height;
+                            // Up to three lines, as Thunderbird clamps it.
+                            max-lines: 3;
                             text: root.display-subject;
                             color: root.title-color;
                             font-size: root.compact ? TypeScale.title-small : TypeScale.title;
                             font-weight: 600;
                             letter-spacing: -0.3px;
-                            wrap: word-wrap;
-                            overflow: elide;
                         }
 
                         Rectangle { height: 8px; }
