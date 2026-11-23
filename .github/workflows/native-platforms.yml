@@ -308,13 +308,60 @@ jobs:
           path: target/rpm/flectar-mail.rpm
           if-no-files-found: error
 
+  # One job signs both architectures with one key, builds the dnf and zypper
+  # repository and replaces the RPM artifacts with the signed files, so the
+  # release attaches what the repository serves. Pull requests and every
+  # other run that publishes nothing use rpm-repo, which never gets the
+  # signing key and signs with a throwaway one. Release tags use rpm-release.
   rpm-repo:
     needs: [metadata, rpm]
-    # One job signs both architectures with one key, builds the dnf and
-    # zypper repository and replaces the RPM artifacts with the signed
-    # files, so the release attaches what the repository serves.
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    name: RPM repository (throwaway key)
+    runs-on: ubuntu-24.04
+    container:
+      image: fedora:43
+    steps:
+      - name: Install signing and repository tools
+        run: dnf install -y createrepo_c gnupg2 rpm-sign
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: flectar-mail-rpm-*
+          path: target/rpm-unsigned
+      - name: Sign the RPMs with a throwaway key and build the repository
+        run: |
+          ./scripts/build-rpm-repo.sh target/rpm-repo \
+            target/rpm-unsigned/flectar-mail-rpm-x64/flectar-mail.rpm \
+            target/rpm-unsigned/flectar-mail-rpm-arm64/flectar-mail.rpm
+          mkdir -p target/rpm-signed/x64 target/rpm-signed/arm64
+          cp target/rpm-repo/*.x86_64.rpm target/rpm-signed/x64/flectar-mail.rpm
+          cp target/rpm-repo/*.aarch64.rpm target/rpm-signed/arm64/flectar-mail.rpm
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flectar-mail-rpm-x64
+          path: target/rpm-signed/x64/flectar-mail.rpm
+          if-no-files-found: error
+          overwrite: true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flectar-mail-rpm-arm64
+          path: target/rpm-signed/arm64/flectar-mail.rpm
+          if-no-files-found: error
+          overwrite: true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rpm-repository
+          path: target/rpm-repo
+          if-no-files-found: error
+
+  rpm-release:
+    needs: [metadata, rpm]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     name: Signed RPM repository
     runs-on: ubuntu-24.04
+    # The signing key is a secret of this environment alone, which deploys
+    # only release tags, and only once a maintainer approves.
+    environment: rpm-release
     container:
       image: fedora:43
     steps:
@@ -329,8 +376,8 @@ jobs:
         env:
           RPM_SIGNING_KEY: ${{ secrets.RPM_SIGNING_KEY }}
           RPM_SIGNING_PASSPHRASE: ${{ secrets.RPM_SIGNING_PASSPHRASE }}
-          # A release must carry the real key; other runs may use a throwaway one.
-          FLECTAR_REQUIRE_SIGNING_KEY: ${{ github.event_name == 'push' && github.ref_type == 'tag' && '1' || '0' }}
+          # A release must carry the real key.
+          FLECTAR_REQUIRE_SIGNING_KEY: "1"
         run: |
           ./scripts/build-rpm-repo.sh target/rpm-repo \
             target/rpm-unsigned/flectar-mail-rpm-x64/flectar-mail.rpm \
@@ -357,7 +404,11 @@ jobs:
           if-no-files-found: error
 
   rpm-test:
-    needs: rpm-repo
+    # Installs from whichever of the two built this run's repository.
+    needs: [rpm-repo, rpm-release]
+    if: >-
+      !cancelled() &&
+      (needs.rpm-repo.result == 'success' || needs.rpm-release.result == 'success')
     name: RPM runtime (${{ matrix.distro.name }}, ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -962,13 +1013,13 @@ jobs:
       !cancelled() && github.event_name == 'push' && github.ref_type == 'tag' &&
       needs.metadata.result == 'success' && needs.quality.result == 'success' &&
       needs.linux.result == 'success' && needs.rpm.result == 'success' &&
-      needs.rpm-repo.result == 'success' && needs.rpm-test.result == 'success' &&
+      needs.rpm-release.result == 'success' && needs.rpm-test.result == 'success' &&
       needs.flatpak.result == 'success' && needs.flathub.result == 'success' &&
       needs.windows.result == 'success' &&
       needs.microsoft-store.result == 'success' &&
       needs.macos.result == 'success' && needs.android.result == 'success' &&
       needs.ios.result == 'success'
-    needs: [metadata, quality, linux, rpm, rpm-repo, rpm-test, flatpak, flathub, windows, microsoft-store, macos, android, ios]
+    needs: [metadata, quality, linux, rpm, rpm-release, rpm-test, flatpak, flathub, windows, microsoft-store, macos, android, ios]
     runs-on: ubuntu-24.04
     permissions:
       actions: read
