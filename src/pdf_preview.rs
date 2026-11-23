@@ -2,6 +2,8 @@
 //! worker with cooperative cancellation. Both load only the packaged PDFium
 //! library on first preview and return one bounded RGBA page.
 //! No PDF scripts, links, forms actions, or document attachments are executed.
+//! The desktop renderer runs in a sandbox, built from Landlock and seccomp on
+//! Linux, Apple's sandbox on macOS and an AppContainer on Windows.
 #[cfg(desktop)]
 use std::sync::Arc;
 
@@ -9,6 +11,9 @@ pub(crate) const MAX_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_EDGE: u32 = 2880;
 #[cfg(desktop)]
 const MAGIC: &[u8; 4] = b"FPD1";
+/// The argument that starts the desktop executable as the PDF worker.
+#[cfg(desktop)]
+const WORKER: &str = "--render-pdf-page";
 
 #[derive(Debug)]
 pub(crate) struct Page {
@@ -37,26 +42,26 @@ pub(crate) async fn render(data: Arc<Vec<u8>>, index: u32, zoom: u32) -> Result<
     if !library.is_file() {
         return Err("The PDF preview component is missing from this installation. Download the file to view it locally.".into());
     }
-    let mut command = tokio::process::Command::new(executable);
-    command
-        .arg("--render-pdf-page")
+    // Do not pass credentials, profile paths, PATH or dynamic-loader
+    // overrides to PDFium.
+    #[cfg(not(target_os = "windows"))]
+    let mut child = tokio::process::Command::new(&executable)
+        .arg(WORKER)
         .env_clear()
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
-        .kill_on_drop(true);
-    // Windows needs SystemRoot to resolve native system libraries. Do not pass
-    // credentials, profile paths, PATH or dynamic-loader overrides to PDFium.
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    // Without its sandbox the worker doesn't start at all.
     #[cfg(target_os = "windows")]
-    {
-        if let Some(root) = std::env::var_os("SystemRoot") {
-            command.env("SystemRoot", root);
-        }
-        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-    let mut child = command.spawn().map_err(|e| e.to_string())?;
-    #[cfg(target_os = "windows")]
-    let _job = WindowsJob::constrain(child.id().ok_or("PDF worker has no process ID")?)?;
+    let mut child = windows_worker::Worker::spawn(&executable, &[&executable, &library], WORKER)
+        .map_err(|error| {
+            tracing::warn!(%error, "Could not start the sandboxed PDF renderer");
+            "Unable to preview this PDF safely on this device. Download it to view locally."
+                .to_string()
+        })?;
     let work = async {
         let mut input = child.stdin.take().ok_or("Missing PDF input pipe")?;
         input
@@ -72,6 +77,7 @@ pub(crate) async fn render(data: Arc<Vec<u8>>, index: u32, zoom: u32) -> Result<
             .await
             .map_err(|e| e.to_string())?;
         input.write_all(&data).await.map_err(|e| e.to_string())?;
+        input.flush().await.map_err(|e| e.to_string())?;
         drop(input);
         let mut output = child.stdout.take().ok_or("Missing PDF output pipe")?;
         let mut header = [0u8; 16];
@@ -110,6 +116,9 @@ pub(crate) async fn render(data: Arc<Vec<u8>>, index: u32, zoom: u32) -> Result<
 #[cfg(any(test, mobile))]
 #[path = "pdf_preview_mobile.rs"]
 mod mobile;
+#[cfg(target_os = "windows")]
+#[path = "pdf_preview_windows.rs"]
+mod windows_worker;
 #[cfg(mobile)]
 pub use mobile::cancel_active;
 #[cfg(mobile)]
@@ -119,7 +128,7 @@ pub(crate) use mobile::render;
 /// The reserved argument alone enables the worker; documents arrive only via stdin.
 #[cfg(desktop)]
 pub fn run_worker_if_requested() -> Option<i32> {
-    if std::env::args_os().nth(1).as_deref() != Some(std::ffi::OsStr::new("--render-pdf-page")) {
+    if std::env::args_os().nth(1).as_deref() != Some(std::ffi::OsStr::new(WORKER)) {
         return None;
     }
     Some(if worker().is_ok() { 0 } else { 1 })
@@ -364,51 +373,6 @@ fn library_path(executable: &std::path::Path) -> Result<std::path::PathBuf, Stri
         }
     }
     Ok(directory.join(name))
-}
-
-#[cfg(target_os = "windows")]
-struct WindowsJob(std::os::windows::io::OwnedHandle);
-#[cfg(target_os = "windows")]
-impl WindowsJob {
-    fn constrain(pid: u32) -> Result<Self, String> {
-        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-        use windows_sys::Win32::System::{JobObjects::*, Threading::*};
-        // Both handles are immediately owned, including every error path.
-        // Assignment happens before sending any document bytes to the child.
-        unsafe {
-            let raw = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-            if raw.is_null() {
-                return Err(std::io::Error::last_os_error().to_string());
-            }
-            let job = Self(OwnedHandle::from_raw_handle(raw));
-            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-                | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
-                | JOB_OBJECT_LIMIT_PROCESS_MEMORY
-                | JOB_OBJECT_LIMIT_PROCESS_TIME;
-            limits.BasicLimitInformation.ActiveProcessLimit = 1;
-            limits.BasicLimitInformation.PerProcessUserTimeLimit = 15 * 10_000_000;
-            limits.ProcessMemoryLimit = 768 * 1024 * 1024;
-            if SetInformationJobObject(
-                job.0.as_raw_handle(),
-                JobObjectExtendedLimitInformation,
-                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-                std::mem::size_of_val(&limits) as u32,
-            ) == 0
-            {
-                return Err(std::io::Error::last_os_error().to_string());
-            }
-            let raw = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
-            if raw.is_null() {
-                return Err(std::io::Error::last_os_error().to_string());
-            }
-            let process = OwnedHandle::from_raw_handle(raw);
-            if AssignProcessToJobObject(job.0.as_raw_handle(), process.as_raw_handle()) == 0 {
-                return Err(std::io::Error::last_os_error().to_string());
-            }
-            Ok(job)
-        }
-    }
 }
 
 #[cfg(test)]
