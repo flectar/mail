@@ -26,11 +26,9 @@ const SAVE_DELAY: Duration = Duration::from_secs(1);
 /// minimum sizes still apply to what is inside it.
 const MIN_SIZE: f32 = 200.0;
 const MAX_SIZE: f32 = 100_000.0;
-/// How often, and for how long, a window waits for its native window to be
-/// maximized on Windows.
-#[cfg(target_os = "windows")]
+/// How often, and for how long, a window that comes back maximized waits for
+/// its native window.
 const MAXIMIZE_POLL: Duration = Duration::from_millis(50);
-#[cfg(target_os = "windows")]
 const MAXIMIZE_DEADLINE: Duration = Duration::from_secs(10);
 
 /// Which window a place is for.
@@ -132,8 +130,7 @@ struct Windows {
     /// Reads the window once the event that moved it is handled, as Slint
     /// updates its maximized state only then.
     read: Timer,
-    /// On Windows, the window is maximized once it is shown.
-    #[cfg(target_os = "windows")]
+    /// The window is maximized once it is shown.
     maximize_when_shown: Cell<bool>,
 }
 
@@ -194,36 +191,31 @@ pub(crate) fn restore<C: ComponentHandle + 'static>(kind: Kind, component: &C) {
     {
         set_position(window, x, y);
     }
+    // A window created maximized comes up wrong: on Windows winit shows it at
+    // once, before its first frame, and keeps the frame it made for the size
+    // as the one it is restored to, which is too tall for a window that draws
+    // its own title bar, and X11 window managers leave a window that isn't
+    // mapped yet as it is. It is maximized once it is shown instead, as a
+    // window back from the tray is.
     if place.maximized {
-        // winit shows a window it creates maximized at once, before its first
-        // frame, and keeps the frame it made for the size as the one the window
-        // is restored to, which is too tall for a window that draws its own
-        // title bar. On Windows the window is maximized once it is shown.
-        #[cfg(target_os = "windows")]
         places.windows(kind).maximize_when_shown.set(true);
-        #[cfg(not(target_os = "windows"))]
-        window.set_maximized(true);
     }
 }
 
-/// A window of `kind` was just shown. One that comes back maximized on
-/// Windows is maximized once its native window is there, which Slint creates
-/// on the event loop.
+/// A window of `kind` was just shown. One that comes back maximized is
+/// maximized once its native window is there, which Slint creates on the
+/// event loop.
 pub(crate) fn shown<C: ComponentHandle + 'static>(kind: Kind, component: &C) {
-    #[cfg(target_os = "windows")]
     if places().is_some_and(|places| places.windows(kind).maximize_when_shown.replace(false)) {
         maximize_once_there(
             component.as_weak(),
             std::time::Instant::now() + MAXIMIZE_DEADLINE,
         );
     }
-    #[cfg(not(target_os = "windows"))]
-    let _ = (kind, component);
 }
 
 /// Maximize the window once it has a native window, holding no strong
 /// reference to it meanwhile, so one that never opens is freed.
-#[cfg(target_os = "windows")]
 fn maximize_once_there<C: ComponentHandle + 'static>(
     weak: slint::Weak<C>,
     deadline: std::time::Instant,
