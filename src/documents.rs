@@ -343,8 +343,24 @@ impl DocumentProvider for DesktopDocuments {
             flectar_mail_core::files::save_cached_file(&path, file.path())
                 .await
                 .map_err(|e| e.to_string())?;
+            #[cfg(windows)]
+            mark_of_the_web(file.path());
             Ok(true)
         })
+    }
+}
+
+/// Marks a saved file as downloaded from the internet, the way browsers mark
+/// their downloads, so Windows warns before it runs a program from a message
+/// and Office opens its documents in Protected View. Drives without
+/// alternate data streams, such as most USB sticks, keep files unmarked.
+#[cfg(windows)]
+fn mark_of_the_web(path: &Path) {
+    let mut stream = path.as_os_str().to_owned();
+    stream.push(":Zone.Identifier");
+    // Zone 3 is the internet.
+    if let Err(error) = std::fs::write(&stream, "[ZoneTransfer]\r\nZoneId=3\r\n") {
+        tracing::debug!(%error, "saved file left without a mark of the web");
     }
 }
 
@@ -363,6 +379,22 @@ mod tests {
         assert_eq!(safe_name("\u{202E}"), "download");
         // Joiners belong to the name.
         assert_eq!(safe_name("می\u{200C}خواهم.txt"), "می\u{200C}خواهم.txt");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn saved_files_are_marked_as_downloaded() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("invoice.pdf");
+        std::fs::write(&file, b"%PDF-1.7").unwrap();
+        mark_of_the_web(&file);
+        let mut stream = file.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        assert_eq!(
+            std::fs::read_to_string(stream).unwrap(),
+            "[ZoneTransfer]\r\nZoneId=3\r\n"
+        );
+        assert_eq!(std::fs::read(&file).unwrap(), b"%PDF-1.7");
     }
 
     #[test]
