@@ -3293,145 +3293,145 @@ msgstr ""
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:2737
+#: ui/app.slint:2744
 msgid "Drop to start a new message"
 msgstr ""
 
-#: ui/app.slint:2745 ui/components/email-composer.slint:1280
+#: ui/app.slint:2752 ui/components/email-composer.slint:1280
 msgid "Pictures go in the text, and other files are attached."
 msgstr ""
 
-#: ui/app.slint:2811
+#: ui/app.slint:2818
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2811 ui/views/files-view.slint:575
+#: ui/app.slint:2818 ui/views/files-view.slint:575
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:2815
+#: ui/app.slint:2822
 msgid "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2816
+#: ui/app.slint:2823
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2818
+#: ui/app.slint:2825
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2819
+#: ui/app.slint:2826
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2820 ui/app.slint:2846 ui/components/calendar.slint:1262
-#: ui/app.slint:2820 ui/app.slint:2846 ui/components/calendar.slint:1262
+#: ui/app.slint:2827 ui/app.slint:2853 ui/components/calendar.slint:1262
+#: ui/app.slint:2827 ui/app.slint:2853 ui/components/calendar.slint:1262
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:2821 ui/dialogs/settings-dialog.slint:2601
+#: ui/app.slint:2828 ui/dialogs/settings-dialog.slint:2601
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2821 ui/views/files-view.slint:657
-#: ui/app.slint:2821 ui/views/files-view.slint:657
+#: ui/app.slint:2828 ui/views/files-view.slint:657
+#: ui/app.slint:2828 ui/views/files-view.slint:657
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2843
+#: ui/app.slint:2850
 msgid "Mark all as read?"
 msgstr ""
 
-#: ui/app.slint:2845
+#: ui/app.slint:2852
 msgid "All unread messages in {} will be marked as read."
 msgstr ""
 
-#: ui/app.slint:2847
+#: ui/app.slint:2854
 msgid "Mark all as read"
 msgstr ""
 
-#: ui/app.slint:2865
+#: ui/app.slint:2872
 msgid "Run this rule on the Inbox?"
 msgstr ""
 
-#: ui/app.slint:2867
+#: ui/app.slint:2874
 msgid "It matches one message there now."
 msgid_plural "It matches {n} messages there now."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:2869
+#: ui/app.slint:2876
 msgid "One more can only be checked once its body is downloaded."
 msgid_plural "{n} more can only be checked once their bodies are downloaded."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:2870
+#: ui/app.slint:2877
 msgid "Undo takes it back."
 msgstr ""
 
-#: ui/app.slint:2871
+#: ui/app.slint:2878
 msgid "Run rule"
 msgstr ""
 
-#: ui/app.slint:2890
+#: ui/app.slint:2897
 msgid "Replace changes made elsewhere?"
 msgstr ""
 
-#: ui/app.slint:2891
+#: ui/app.slint:2898
 msgid "Run replies before your filters?"
 msgstr ""
 
-#: ui/app.slint:2894
+#: ui/app.slint:2901
 msgid ""
 "The automatic replies script Flectar Mail keeps on your server was changed "
 "outside Flectar Mail."
 msgstr ""
 
-#: ui/app.slint:2895
+#: ui/app.slint:2902
 msgid ""
 "Your server runs this filter script of yours. Flectar Mail would run the "
 "automatic replies first, then your script, unchanged."
 msgstr ""
 
-#: ui/app.slint:2897
+#: ui/app.slint:2904
 msgid "Saving replaces those changes with what you set here."
 msgstr ""
 
-#: ui/app.slint:2898
+#: ui/app.slint:2905
 msgid "Your filters keep running, also once replies are off."
 msgstr ""
 
-#: ui/app.slint:2899
+#: ui/app.slint:2906
 msgid "Replace changes"
 msgstr ""
 
-#: ui/app.slint:2899
+#: ui/app.slint:2906
 msgid "Run both"
 msgstr ""
 
-#: ui/app.slint:3128
+#: ui/app.slint:3135
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:3134
+#: ui/app.slint:3141
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:3147
+#: ui/app.slint:3154
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:3150
+#: ui/app.slint:3157
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:3155
+#: ui/app.slint:3162
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:3163 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:3170 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 

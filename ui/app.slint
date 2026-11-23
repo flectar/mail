@@ -2011,6 +2011,13 @@ export component AppWindow inherits Window {
             available-height: parent.height;
 
         MailView {
+            // `changed` misses the sizes a new mail view starts with. A phone's
+            // window never resizes, so they're the only ones its reader gets.
+            init => {
+                root.email-viewport-width = self.email-viewport-width;
+                root.email-viewport-height = self.email-viewport-height;
+                root.email-scroll-document-height = self.email-scroll-document-height;
+            }
             changed email-viewport-width => { root.email-viewport-width = self.email-viewport-width; }
             changed email-viewport-height => { root.email-viewport-height = self.email-viewport-height; }
             changed email-scroll-document-height => { root.email-scroll-document-height = self.email-scroll-document-height; }
