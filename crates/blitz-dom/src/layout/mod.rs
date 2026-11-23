@@ -633,8 +633,14 @@ impl LayoutPassState<'_> {
                     let mut table_wrapper = TableTreeWrapper {
                         doc: self,
                         ctx: context,
+                        fixed_style: None,
                     };
                     table_wrapper.fold_authored_widths(table_width);
+                    let captions_min_width = if table_wrapper.ctx.captions.is_empty() {
+                        0.0
+                    } else {
+                        table_wrapper.captions_min_width(inputs.parent_size.width)
+                    };
 
                     let mut output = table_wrapper.layout_grid(node_id, inputs);
 
@@ -668,12 +674,35 @@ impl LayoutPassState<'_> {
                         } else {
                             output
                         };
-                        if !is_fixed
+                        // Laid out without a width, the grid may size its columns
+                        // for the space the table's `max-width` keeps it from, so
+                        // it is laid out again at the width the table took.
+                        if !measuring
                             && table_wrapper
                                 .required_width()
                                 .is_some_and(|required| required > laid_out.size.width + 0.5)
                         {
+                            laid_out = table_wrapper.layout_grid(node_id, layout);
+                        }
+                        // Text-only cells give up their long words' widths only
+                        // when the columns would overflow the table's container.
+                        // Within it, the table widens to them, as in browsers.
+                        let room = inputs
+                            .available_space
+                            .width
+                            .into_option()
+                            .or(inputs.parent_size.width)
+                            .unwrap_or(f32::INFINITY);
+                        if !is_fixed
+                            && table_wrapper.required_width().is_some_and(|required| {
+                                required > laid_out.size.width + 0.5 && required > room + 0.5
+                            })
+                        {
                             *table_wrapper.ctx.relax_text_minimums.borrow_mut() = true;
+                            // It takes all the room it has before its words break.
+                            if room > laid_out.size.width + 0.5 {
+                                layout.known_dimensions.width = Some(room);
+                            }
                             laid_out = table_wrapper.layout_grid(node_id, layout);
                         }
                         if let Some(required) = table_wrapper.required_width() {
@@ -681,6 +710,11 @@ impl LayoutPassState<'_> {
                                 layout.known_dimensions.width = Some(required);
                                 laid_out = table_wrapper.layout_grid(node_id, layout);
                             }
+                        }
+                        // Nor is it narrower than its captions, as in Blink.
+                        if captions_min_width > laid_out.size.width + 0.5 {
+                            layout.known_dimensions.width = Some(captions_min_width);
+                            laid_out = table_wrapper.layout_grid(node_id, layout);
                         }
                         output = if measuring {
                             // Measured at a width, the table keeps the baselines
@@ -693,6 +727,7 @@ impl LayoutPassState<'_> {
                         };
                     }
 
+                    output.size.width = output.size.width.max(captions_min_width);
                     // Captions sit above and below the table's grid.
                     if !table_wrapper.ctx.captions.is_empty() {
                         output = table_wrapper.place_captions(inputs, output);

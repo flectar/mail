@@ -34,6 +34,20 @@ use super::resolve_calc_value;
 pub struct TableTreeWrapper<'a, 'doc> {
     pub(crate) doc: &'a mut LayoutPassState<'doc>,
     pub(crate) ctx: Arc<TableContext>,
+    /// A fixed-layout table's grid style with the column widths of the
+    /// current layout (see [`TableTreeWrapper::size_fixed_columns`]).
+    pub(crate) fixed_style: Option<taffy::Style<Atom>>,
+}
+
+/// How a column of a fixed-layout table gets its width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FixedColumn {
+    /// An authored length, which the table is at least as wide as.
+    Length,
+    /// An authored percentage of the table, with its cell's padding and border.
+    Percent,
+    /// No authored width.
+    Auto,
 }
 
 #[derive(Debug)]
@@ -90,6 +104,9 @@ pub struct TableContext {
     /// Per column, the `min-width` of its `<col>` (0 without one), which its
     /// single-column cells measure at least as wide as in auto layout.
     pub(crate) column_floors: Vec<f32>,
+    /// Per column of a fixed-layout table, how it gets its width, and the
+    /// padding and border of the cell a percentage column takes it from.
+    fixed_columns: Vec<(FixedColumn, f32)>,
 }
 
 /// How far authored column widths are minimums in one layout of an auto table.
@@ -852,6 +869,7 @@ pub(crate) fn build_table_context(
     // Percentages exclude inner spacing and include a content-box cell's padding/border.
     let mut calc_values = Vec::new();
     let mut column_floors = vec![0.0; column_count];
+    let mut fixed_columns = Vec::new();
     let inner_spacing = if border_collapse == BorderCollapse::Separate {
         border_spacing.width.px() * column_count.saturating_sub(1) as f32
     } else {
@@ -871,22 +889,25 @@ pub(crate) fn build_table_context(
                         None
                     }
                 });
-            let track = if let Some((percent, extra)) = percent {
-                percent_plus_length(&mut calc_values, percent, extra - percent * inner_spacing)
+            let (track, kind) = if let Some((percent, extra)) = percent {
+                let track =
+                    percent_plus_length(&mut calc_values, percent, extra - percent * inner_spacing);
+                (track, (FixedColumn::Percent, extra))
             } else if let Some(column) = explicit {
-                column
+                (column, (FixedColumn::Length, 0.0))
             } else if hint.length.is_none() && hint.calc.is_none() {
-                style_helpers::minmax(style_helpers::length(0.0), style_helpers::fr(1.0))
+                let track =
+                    style_helpers::minmax(style_helpers::length(0.0), style_helpers::fr(1.0));
+                (track, (FixedColumn::Auto, 0.0))
             } else {
-                hint.track(
-                    true,
-                    Growth {
-                        lengths: false,
-                        percents: false,
-                    },
-                )
+                let growth = Growth {
+                    lengths: false,
+                    percents: false,
+                };
+                (hint.track(true, growth), (FixedColumn::Length, 0.0))
             };
             style.grid_template_columns[index] = track.into();
+            fixed_columns.push(kind);
         } else if let Some(column) = column_sizes.get(index) {
             if column.max.into_raw().tag() != taffy::CompactLength::PERCENT_TAG
                 && !column.max.is_auto()
@@ -947,6 +968,7 @@ pub(crate) fn build_table_context(
             column_gap,
             has_authored_lengths,
             fold: AtomicRefCell::new(AuthoredFold::default()),
+            fixed_columns,
             column_floors,
         },
         layout_children,
@@ -1726,7 +1748,7 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
     type CustomIdent = Atom;
 
     fn get_core_container_style(&self, _node_id: taffy::NodeId) -> &taffy::Style<Atom> {
-        &self.ctx.style
+        self.fixed_style.as_ref().unwrap_or(&self.ctx.style)
     }
 
     fn resolve_calc_value(&self, calc_ptr: *const (), parent_size: f32) -> f32 {
@@ -1871,6 +1893,47 @@ fn wraps_text_only(doc: &BaseDocument, node_id: NodeId) -> bool {
 }
 
 impl TableTreeWrapper<'_, '_> {
+    /// The widest min-content width of the table's captions, with their
+    /// margins, which the table is never narrower than, as in Blink
+    /// (`ComputeCaptionConstraint`).
+    pub(crate) fn captions_min_width(&mut self, parent_width: Option<f32>) -> f32 {
+        let ctx = Arc::clone(&self.ctx);
+        let mut width = 0.0f32;
+        for &caption in &ctx.captions {
+            if self.doc.nodes[caption].primary_styles().is_none() {
+                continue;
+            }
+            let margin = self.doc.nodes[caption]
+                .layout_style()
+                .margin()
+                .resolve_or_zero(parent_width, resolve_calc_value);
+            let output = self.doc.compute_child_layout(
+                crate::taffy_node_id(caption),
+                taffy::LayoutInput {
+                    run_mode: taffy::RunMode::ComputeSize,
+                    sizing_mode: taffy::SizingMode::InherentSize,
+                    axis: taffy::RequestedAxis::Horizontal,
+                    known_dimensions: taffy::Size::NONE,
+                    known_dimensions_are_definite: taffy::Size {
+                        width: false,
+                        height: false,
+                    },
+                    parent_size: taffy::Size {
+                        width: parent_width,
+                        height: None,
+                    },
+                    available_space: taffy::Size {
+                        width: taffy::AvailableSpace::MinContent,
+                        height: taffy::AvailableSpace::MaxContent,
+                    },
+                    vertical_margins_are_collapsible: taffy::Line::FALSE,
+                },
+            );
+            width = width.max(output.size.width + margin.left + margin.right);
+        }
+        width
+    }
+
     /// Lays out the table's captions as wide as the table, stacked above its
     /// grid in document order (or below it with `caption-side: bottom`), and
     /// moves the grid down below the ones above (CSS 2.1 §17.4). `output` is
@@ -2075,6 +2138,7 @@ impl TableTreeWrapper<'_, '_> {
                 .flatten()
         });
         self.set_cell_padding_basis(width);
+        self.size_fixed_columns(width);
         let output = taffy::compute_grid_layout(self, node_id, inputs);
         if width.is_some()
             || !self.ctx.has_percent_padding
@@ -2091,6 +2155,143 @@ impl TableTreeWrapper<'_, '_> {
             ..inputs
         };
         taffy::compute_grid_layout(self, node_id, inputs)
+    }
+
+    /// Sizes a fixed-layout table's columns as Blink does
+    /// (`SynchronizeAssignableTableInlineSizeAndColumnsFixed`, CSS 2.1 section
+    /// 17.5.2.1). The table is at least as wide as its length columns and its
+    /// other columns' padding and border. Length columns take their widths,
+    /// scaled up to the space the percentages leave when there is no auto
+    /// column. Percentage columns take theirs with their cells' padding and
+    /// border, scaled down to the space left, or up without auto columns.
+    /// Auto columns share the rest, and columns of zero width get some only
+    /// when all of them are. A table of `width` gets them as length tracks.
+    fn size_fixed_columns(&mut self, width: Option<f32>) {
+        self.fixed_style = None;
+        let ctx = &self.ctx;
+        let Some(width) = width.filter(|_| ctx.is_fixed && !ctx.fixed_columns.is_empty()) else {
+            return;
+        };
+        let box_edges = ctx
+            .style
+            .padding
+            .resolve_or_zero(None, resolve_calc_value)
+            .horizontal_axis_sum()
+            + ctx
+                .style
+                .border
+                .resolve_or_zero(None, resolve_calc_value)
+                .horizontal_axis_sum();
+        // Track percentages resolve against the grid's content box, which
+        // gives a percentage column its share of the assignable width.
+        let content = (width - box_edges).max(0.0);
+        let sizes: Vec<f32> = ctx
+            .style
+            .grid_template_columns
+            .iter()
+            .map(|component| match component {
+                taffy::GridTemplateComponent::Single(track) => track
+                    .max
+                    .definite_value(Some(content), resolve_calc_value)
+                    .unwrap_or(0.0),
+                _ => 0.0,
+            })
+            .collect();
+        let columns = || ctx.fixed_columns.iter().zip(&sizes).enumerate();
+        let is_fixed = |kind: FixedColumn, size: f32| kind == FixedColumn::Length && size > 0.0;
+        let is_zero = |kind: FixedColumn, size: f32| kind == FixedColumn::Length && size <= 0.0;
+        let minimum: f32 = columns()
+            .map(|(_, (&(kind, extra), &size))| match kind {
+                FixedColumn::Length => size.max(0.0),
+                FixedColumn::Percent => extra,
+                FixedColumn::Auto => 0.0,
+            })
+            .sum();
+        let target = (width - ctx.column_extra).max(minimum).max(0.0);
+        let (mut total_fixed, mut total_percent) = (0.0f32, 0.0f32);
+        let (mut fixed_count, mut percent_count, mut auto_count, mut zero_count) = (0, 0, 0, 0);
+        for (_, (&(kind, _), &size)) in columns() {
+            match kind {
+                FixedColumn::Percent => {
+                    percent_count += 1;
+                    total_percent += size;
+                }
+                _ if is_fixed(kind, size) => {
+                    fixed_count += 1;
+                    total_fixed += size;
+                }
+                _ if is_zero(kind, size) => zero_count += 1,
+                _ => auto_count += 1,
+            }
+        }
+        let mut widths = vec![0.0f32; sizes.len()];
+        let mut assigned = 0.0f32;
+        let mut last = None;
+        // A group scales to `room` when it is too big for it, or too small
+        // with no auto column to take the rest.
+        let scale = |total: f32, room: f32, count: usize| {
+            if total > room || (total < room && auto_count == 0) {
+                (total > 0.0)
+                    .then(|| room / total)
+                    .ok_or(room / count as f32)
+            } else {
+                Ok(1.0)
+            }
+        };
+        if fixed_count > 0 {
+            let room = (target - total_percent).max(0.0);
+            let factor = if total_fixed > target || (total_fixed < room && auto_count == 0) {
+                (total_fixed > 0.0)
+                    .then(|| room / total_fixed)
+                    .ok_or(target / fixed_count as f32)
+            } else {
+                Ok(1.0)
+            };
+            for (index, (&(kind, _), &size)) in columns() {
+                if is_fixed(kind, size) {
+                    widths[index] = factor.map_or_else(|share| share, |factor| factor * size);
+                    assigned += widths[index];
+                    last = Some(index);
+                }
+            }
+        }
+        if assigned < target {
+            if percent_count > 0 {
+                let factor = scale(total_percent, target - assigned, percent_count);
+                let mut percent_assigned = 0.0;
+                for (index, (&(kind, _), &size)) in columns() {
+                    if kind == FixedColumn::Percent {
+                        widths[index] = factor.map_or_else(|share| share, |factor| factor * size);
+                        percent_assigned += widths[index];
+                        last = Some(index);
+                    }
+                }
+                assigned += percent_assigned;
+            }
+            let rest = target - assigned;
+            let only_zero = zero_count == sizes.len();
+            for (index, (&(kind, _), &size)) in columns() {
+                let share = if only_zero {
+                    is_zero(kind, size).then(|| rest / zero_count as f32)
+                } else {
+                    (kind == FixedColumn::Auto).then(|| rest / auto_count.max(1) as f32)
+                };
+                if let Some(share) = share {
+                    widths[index] = share;
+                    assigned += share;
+                    last = Some(index);
+                }
+            }
+            if let Some(last) = last {
+                widths[last] += target - assigned;
+            }
+        }
+        let mut style = ctx.style.clone();
+        for (component, width) in style.grid_template_columns.iter_mut().zip(widths) {
+            *component =
+                taffy::GridTemplateComponent::Single(style_helpers::length(width.max(0.0)));
+        }
+        self.fixed_style = Some(style);
     }
 
     /// Resolves the cells' percentage padding against the table's content

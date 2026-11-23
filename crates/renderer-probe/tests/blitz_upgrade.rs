@@ -2122,3 +2122,79 @@ fn an_inline_tables_baseline_is_below_its_captions() {
     // table's top is at the top of the line, which the caption fills.
     close(node(&doc, "#t").final_layout().location.y, 0.0);
 }
+
+#[test]
+fn a_table_is_never_narrower_than_its_captions() {
+    // As in Blink, a caption's min-content width, here its longest word, is
+    // a minimum of the table's width, so the caption doesn't break inside
+    // its words to fit columns that are narrower.
+    let doc = document(
+        "<style>body{font:20px/30px sans-serif} table{border-spacing:0}</style>
+         <table id=t><caption>Wide caption</caption><tr><td>A</td></tr></table>
+         <div id=w style='display:inline-block'>caption</div>",
+    );
+    let table = node(&doc, "#t").final_layout().size.width;
+    let word = node(&doc, "#w").final_layout().size.width;
+    assert!(table >= word - 0.5, "{table} < {word}");
+}
+
+#[test]
+fn fixed_layout_columns_share_the_table_as_blink_does() {
+    // As in Blink, percentages with their cells' padding scale down to fit
+    // the table, length and percentage columns scale up to fill it when no
+    // auto column takes the rest, and length columns wider than the table
+    // widen it (CSS 2.1 section 17.5.2.1).
+    let doc = document(
+        "<style>table{width:400px;table-layout:fixed;border-spacing:0}</style>
+         <table><tr><td id=a1 style='width:25%;padding-right:16px;border-right:1px solid'></td>
+         <td id=b1 style='width:75%;padding-left:16px'></td></tr></table>
+         <table><tr><td id=a2 style='width:100px'></td><td id=b2 style='width:100px'></td></tr></table>
+         <table><tr><td id=a3 style='width:100px'></td><td id=b3></td><td id=c3></td></tr></table>
+         <table id=t4><tr><td style='width:300px'></td><td style='width:200px'></td></tr></table>
+         <table><tr><td id=a5 style='width:20%'></td><td id=b5 style='width:30%'></td></tr></table>
+         <table><tr><td id=a6 style='width:100px'></td><td id=b6 style='width:50%'></td><td id=c6></td></tr></table>",
+    );
+    let width = |selector| node(&doc, selector).final_layout().size.width;
+    for (selector, expected) in [
+        ("#a1", 108.1),
+        ("#b1", 291.9),
+        ("#a2", 200.0),
+        ("#b2", 200.0),
+        ("#a3", 100.0),
+        ("#b3", 150.0),
+        ("#c3", 150.0),
+        ("#t4", 500.0),
+        ("#a5", 160.0),
+        ("#b5", 240.0),
+        ("#a6", 100.0),
+        ("#b6", 200.0),
+        ("#c6", 100.0),
+    ] {
+        close(width(selector), expected);
+    }
+}
+
+#[test]
+fn an_auto_table_widens_to_its_columns_within_its_container() {
+    // As in browsers, a table narrower than its columns' minimums widens to
+    // them. Only where they would overflow its container do text-only cells
+    // break their words instead, once the table takes all the room it has.
+    let doc = document(
+        "<style>body{font:16px/20px sans-serif} html,body{overflow-wrap:break-word}
+         table{border-spacing:0}</style>
+         <div style='width:400px'><table id=a style='width:60px'><tr><td>Alimentari</td>
+         <td>Riuniti</td></tr></table></div>
+         <div style='width:100px'><table id=b style='width:60px'><tr><td>Alimentari</td>
+         <td>Riuniti</td></tr></table></div>
+         <span id=w style='display:inline-block'>Alimentari</span>",
+    );
+    let width = |selector| node(&doc, selector).final_layout().size.width;
+    assert!(
+        width("#a") > width("#w") + 20.0,
+        "{} {}",
+        width("#a"),
+        width("#w")
+    );
+    assert!(width("#a") < 400.0, "{}", width("#a"));
+    close(width("#b"), 100.0);
+}
