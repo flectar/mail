@@ -2089,3 +2089,36 @@ fn a_split_inline_has_its_edges_only_where_it_starts_and_ends() {
     assert_eq!(at(11, 95), [0, 0, 255, 255], "end edge after the block");
     assert_ne!(at(0, 95), [0, 0, 255, 255], "cut before the end");
 }
+
+#[test]
+fn an_inline_table_sits_on_its_first_rows_baseline() {
+    // As in Blink, a row's baseline is its baseline-aligned cells' first
+    // baseline, and without one, as with the `middle` cells of most tables,
+    // the bottom of the row, so the line's descent goes below the table. A
+    // table's `valign` sets its own `vertical-align`, as in Blink.
+    let doc = document(
+        "<style>body{font:20px/30px sans-serif} table{display:inline-table;border-spacing:0}</style>
+         <div id=a><table id=ta><tr><td>First<br>Second</td></tr></table></div>
+         <div id=b><table id=tb><tr><td style='vertical-align:baseline'>First<br>Second</td></tr></table></div>
+         <div id=c><table id=tc valign=top><tr><td>First<br>Second</td></tr></table></div>",
+    );
+    let layout = |selector| *node(&doc, selector).final_layout();
+    for table in ["#ta", "#tb", "#tc"] {
+        close(layout(table).size.height, 60.0);
+    }
+    assert!(layout("#a").size.height > 63.0, "{:?}", layout("#a").size);
+    close(layout("#b").size.height, 60.0);
+    close(layout("#c").size.height, 60.0);
+}
+
+#[test]
+fn an_inline_tables_baseline_is_below_its_captions() {
+    let doc = document(
+        "<style>body{font:20px/30px sans-serif} table{display:inline-table;border-spacing:0}</style>
+         <div id=a style='font:40px/60px sans-serif'>x <table id=t style='font:20px/30px sans-serif'>
+         <caption>Caption</caption><tr><td style='vertical-align:baseline'>A</td></tr></table></div>",
+    );
+    // The row's baseline is the table's, 30px below its top here, so the
+    // table's top is at the top of the line, which the caption fills.
+    close(node(&doc, "#t").final_layout().location.y, 0.0);
+}

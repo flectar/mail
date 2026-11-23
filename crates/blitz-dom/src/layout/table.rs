@@ -65,6 +65,9 @@ pub struct TableContext {
     /// What the cells' percentage padding resolves against in the current
     /// layout of the grid (see [`TableTreeWrapper::layout_grid`]).
     cell_padding_basis: AtomicRefCell<Option<f32>>,
+    /// Per cell, the first baseline of its latest layout, from its top, which
+    /// the table's baselines come from (see [`TableTreeWrapper::row_baseline`]).
+    cell_baselines: AtomicRefCell<Vec<Option<f32>>>,
     /// Whether any cell has percentage padding.
     has_percent_padding: bool,
     /// Per column in auto layout, the authored length its cells ask for, unless
@@ -935,6 +938,7 @@ pub(crate) fn build_table_context(
             rtl,
             relax_text_minimums: AtomicRefCell::new(false),
             cell_padding_basis: AtomicRefCell::new(None),
+            cell_baselines: AtomicRefCell::new(Vec::new()),
             has_percent_padding,
             column_lengths,
             column_percents,
@@ -1739,7 +1743,8 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
         node_id: taffy::NodeId,
         inputs: taffy::tree::LayoutInput,
     ) -> taffy::LayoutOutput {
-        let cell = &self.ctx.cells[usize::from(node_id)];
+        let index = usize::from(node_id);
+        let cell = &self.ctx.cells[index];
         let dom_id = cell.node_id;
         let node_id = crate::taffy_node_id(dom_id);
         let measure_without_width =
@@ -1769,6 +1774,11 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
             inputs.known_dimensions_are_definite.height = false;
         }
         let mut output = self.doc.compute_child_layout(node_id, inputs);
+        if inputs.run_mode == taffy::RunMode::PerformLayout {
+            let mut baselines = self.ctx.cell_baselines.borrow_mut();
+            baselines.resize(self.ctx.cells.len(), None);
+            baselines[index] = output.baselines.first;
+        }
 
         // A column's `min-width` floors the content widths of its cells, and so
         // does the part of an authored width this layout keeps as a minimum.
@@ -1970,6 +1980,9 @@ impl TableTreeWrapper<'_, '_> {
             }
         }
         output.size.height += above + below;
+        // The table's baselines are its rows', below the captions above it.
+        output.baselines.first = output.baselines.first.map(|baseline| baseline + above);
+        output.baselines.last = output.baselines.last.map(|baseline| baseline + above);
         output
     }
 
@@ -1978,6 +1991,78 @@ impl TableTreeWrapper<'_, '_> {
     /// it against their column, and then the table is laid out again at the
     /// width it took.
     pub(crate) fn layout_grid(
+        &mut self,
+        node_id: taffy::NodeId,
+        inputs: taffy::LayoutInput,
+    ) -> taffy::LayoutOutput {
+        let mut output = self.layout_grid_tracks(node_id, inputs);
+        // A table's first baseline is its first row's, and its last baseline
+        // its last row's (CSS 2.1 section 10.8.1), as Blink sets them.
+        if inputs.run_mode == taffy::RunMode::PerformLayout {
+            let rows = self.ctx.cells.iter().map(|cell| cell.row);
+            let (first, last) = (rows.clone().min(), rows.max());
+            output.baselines = taffy::Baselines {
+                first: first.and_then(|row| self.row_baseline(row)),
+                last: last.and_then(|row| self.row_baseline(row)),
+            };
+        }
+        output
+    }
+
+    /// The baseline of a row, from the table's top, as Blink's row layout
+    /// (`RowBaselineTabulator`) finds it. It is the lowest first baseline of
+    /// the row's cells aligned on their baseline that have content (CSS 2.1
+    /// section 17.5.3), and without any, the row's bottom less the least
+    /// padding and border below a cell's content. An empty row's is its top.
+    fn row_baseline(&self, row: u16) -> Option<f32> {
+        let baselines = self.ctx.cell_baselines.borrow();
+        let (mut top, mut bottom) = (f32::INFINITY, f32::NEG_INFINITY);
+        let (mut ascent, mut descent): (Option<f32>, Option<f32>) = (None, None);
+        for (index, cell) in self.ctx.cells.iter().enumerate() {
+            if cell.row != row {
+                continue;
+            }
+            let node = &self.doc.nodes[cell.node_id];
+            let layout = node.unrounded_layout();
+            top = top.min(layout.location.y);
+            if cell.rowspan <= 1 {
+                bottom = bottom.max(layout.location.y + layout.size.height);
+            }
+            // Values other than top, middle and bottom align a cell on its
+            // baseline. A cell without a line has its content's bottom as
+            // its baseline.
+            let on_baseline = node.primary_styles().is_some_and(|style| {
+                stylo_taffy::convert::table_cell_vertical_align(&style).is_none()
+            });
+            let has_content = node.flags.is_inline_root()
+                || node
+                    .layout_children
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|children| !children.is_empty());
+            if on_baseline && has_content {
+                let baseline =
+                    baselines.get(index).copied().flatten().unwrap_or(
+                        layout.size.height - layout.padding.bottom - layout.border.bottom,
+                    );
+                ascent = Some(ascent.map_or(baseline, |ascent| ascent.max(baseline)));
+            } else if ascent.is_none() {
+                let edge = layout.padding.bottom + layout.border.bottom;
+                descent = Some(descent.map_or(edge, |descent| descent.min(edge)));
+            }
+        }
+        if !top.is_finite() {
+            return None;
+        }
+        Some(match (ascent, descent) {
+            (Some(ascent), _) => top + ascent,
+            (None, Some(descent)) if bottom.is_finite() => top.max(bottom - descent),
+            _ => top,
+        })
+    }
+
+    /// Lays out the table's grid tracks and cells.
+    fn layout_grid_tracks(
         &mut self,
         node_id: taffy::NodeId,
         inputs: taffy::LayoutInput,

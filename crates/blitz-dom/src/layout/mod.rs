@@ -683,7 +683,11 @@ impl LayoutPassState<'_> {
                             }
                         }
                         output = if measuring {
-                            taffy::LayoutOutput::from_outer_size(laid_out.size)
+                            // Measured at a width, the table keeps the baselines
+                            // its layout found, which a line it is in sits on.
+                            let mut measured = taffy::LayoutOutput::from_outer_size(laid_out.size);
+                            measured.baselines = laid_out.baselines;
+                            measured
                         } else {
                             laid_out
                         };

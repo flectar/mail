@@ -261,8 +261,13 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                 value,
                 css,
             ),
+            // Blink maps a table part's `valign` and also a table's, which
+            // places an inline table in its line, to `vertical-align`, other
+            // values than its four keywords as CSS, of which only keywords
+            // are taken here.
             "valign"
                 if is_cell
+                    || *tag == local_name!("table")
                     || *tag == local_name!("tr")
                     || *tag == local_name!("tbody")
                     || *tag == local_name!("thead")
@@ -275,6 +280,10 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                     "middle" => "middle",
                     "bottom" => "bottom",
                     "baseline" => "baseline",
+                    "sub" => "sub",
+                    "super" => "super",
+                    "text-top" => "text-top",
+                    "text-bottom" => "text-bottom",
                     _ => continue,
                 };
                 let _ = write!(css, "vertical-align:{keyword};");
