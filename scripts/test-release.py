@@ -1257,6 +1257,110 @@ for name in ("FlectarMail", "Frameworks/PDFium.framework/PDFium"):
             self.assertIn("must be unsigned", result.stderr)
             self.assertFalse((root / "signed/flectar-mail-ios-arm64.ipa").exists())
 
+    def test_macos_app_signs_with_the_hardened_runtime(self):
+        # Run the real script with stand-ins for the macOS tools.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in (
+                "scripts/package-macos.sh", "platform/macos/Info.plist.in",
+                "platform/macos/com.flectar.mail.login.plist", "platform/macos/flectar-mail.entitlements",
+                "LICENSE", "THIRD_PARTY_NOTICES.md",
+                "resources/fonts/google-sans-flex/OFL.txt", "resources/fonts/google-sans-flex/README.md",
+                "resources/fonts/noto-emoji/OFL.txt", "resources/fonts/noto-emoji/README.md",
+            ):
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(SCRIPTS.parent / name, root / name)
+            shutil.copytree(SCRIPTS.parent / "LICENSES", root / "LICENSES")
+            (root / "Cargo.toml").write_text('[package]\nname = "flectar-mail"\nversion = "0.1.0-beta.1"\n')
+            binary = root / "flectar-mail"
+            binary.write_bytes(b"binary")
+            binary.chmod(0o755)
+            calls = root / "calls.jsonl"
+            (root / "scripts/stage-pdfium.py").write_text(
+                "import pathlib, sys\n"
+                "destination = pathlib.Path(sys.argv[2])\n"
+                "destination.mkdir(parents=True, exist_ok=True)\n"
+                "(destination / 'libpdfium.dylib').write_bytes(b'library')\n"
+            )
+            (root / "scripts/test-pdf-preview.py").write_text(
+                "import json, sys\n"
+                f"with open({str(calls)!r}, 'a') as log:\n"
+                "    log.write(json.dumps(['test-pdf-preview', *sys.argv[1:]]) + '\\n')\n"
+            )
+            tools = root / "bin"
+            tools.mkdir()
+            (tools / "plutil").write_text(
+                "#!/usr/bin/env python3\n"
+                "import plistlib, sys\n"
+                "assert sys.argv[1] == '-lint'\n"
+                "with open(sys.argv[2], 'rb') as stream:\n"
+                "    plistlib.load(stream)\n"
+            )
+            (tools / "iconutil").write_text(
+                "#!/usr/bin/env python3\n"
+                "import pathlib, sys\n"
+                "pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'icons')\n"
+            )
+            (tools / "ditto").write_text(
+                "#!/usr/bin/env python3\n"
+                "import pathlib, shutil, sys\n"
+                "if '-c' in sys.argv:\n"
+                "    pathlib.Path(sys.argv[-1]).write_bytes(b'archive')\n"
+                "else:\n"
+                "    shutil.copytree(sys.argv[-2], sys.argv[-1], symlinks=True)\n"
+            )
+            (tools / "hdiutil").write_text(
+                "#!/usr/bin/env python3\n"
+                "import pathlib, sys\n"
+                "if sys.argv[1] == 'create':\n"
+                "    pathlib.Path(sys.argv[-1]).write_bytes(b'disk image')\n"
+            )
+            # Describes a signature as `codesign --display` does, with the
+            # runtime flag when the last signing of that path asked for it.
+            (tools / "codesign").write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "arguments = sys.argv[1:]\n"
+                f"log = {str(calls)!r}\n"
+                "with open(log, 'a') as stream:\n"
+                "    stream.write(json.dumps(['codesign', *arguments]) + '\\n')\n"
+                "if '--display' in arguments:\n"
+                "    with open(log) as stream:\n"
+                "        signings = [c for c in map(json.loads, stream) if '--sign' in c and c[-1] == arguments[-1]]\n"
+                "    runtime = 'runtime' in signings[-1] and not os.environ.get('FAKE_NO_RUNTIME')\n"
+                "    flags = '0x10002(adhoc,runtime)' if runtime else '0x2(adhoc)'\n"
+                "    print(f'CodeDirectory v=20500 size=99 flags={flags} hashes=1+7', file=sys.stderr)\n"
+            )
+            for tool in tools.iterdir():
+                tool.chmod(0o755)
+            environment = {**os.environ, "PATH": f"{tools}:{os.environ['PATH']}"}
+            command = ["bash", "scripts/package-macos.sh", str(binary), str(root / "out"), "arm64"]
+            result = subprocess.run(command, cwd=root, env=environment, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            app = str(root / "out/Flectar Mail.app")
+            entitlements = str(root / "platform/macos/flectar-mail.entitlements")
+            log = [json.loads(line) for line in calls.read_text().splitlines()]
+            self.assertEqual(log, [
+                ["codesign", "--force", "--sign", "-", f"{app}/Contents/Frameworks/libpdfium.dylib"],
+                ["codesign", "--force", "--options", "runtime", "--entitlements", entitlements, "--sign", "-", app],
+                ["codesign", "--display", "--verbose=2", app],
+                # The PDF worker must still load PDFium under the hardened runtime.
+                ["test-pdf-preview", f"{app}/Contents/MacOS/flectar-mail"],
+                ["codesign", "--verify", "--deep", "--strict", app],
+            ])
+            # The only exception lets the worker load the ad-hoc signed PDFium.
+            # Dynamic linker variables, JIT and unsigned memory stay off.
+            with open(entitlements, "rb") as stream:
+                self.assertEqual(plistlib.load(stream), {"com.apple.security.cs.disable-library-validation": True})
+
+            calls.unlink()
+            result = subprocess.run(
+                command, cwd=root, env={**environment, "FAKE_NO_RUNTIME": "1"}, capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not signed with the hardened runtime", result.stderr)
+            self.assertNotIn("test-pdf-preview", calls.read_text())
+
     @staticmethod
     def write_ios_ipa(path, version, **changes):
         """A minimal IPA of `version`, as scripts/package-ios.sh stamps it."""
