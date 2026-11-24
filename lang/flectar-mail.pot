@@ -4203,9 +4203,7 @@ msgid "Checking again {}"
 msgstr ""
 
 #: ui/components/account-status.slint:111
-msgid ""
-"The server didn't accept the saved sign-in. Sign in again to keep getting "
-"mail."
+msgid "Sign in again on this device to keep getting mail."
 msgstr ""
 
 #: ui/components/account-status.slint:121
@@ -6988,11 +6986,10 @@ msgstr ""
 
 #: ui/device-sync.slint:633
 msgid ""
-"Keep your accounts and their sign-ins, preferences, templates, snoozes and "
-"reply reminders the same on all your devices, and let any of them send your "
-"scheduled emails. Everything is end-to-end encrypted, so not even Flectar "
-"Mail can read it. Your mail, contacts and calendars keep syncing with your "
-"mail provider."
+"Keep your accounts, preferences, templates, snoozes and reply reminders the "
+"same on all your devices, and let any of them send your scheduled emails. "
+"Everything is end-to-end encrypted, so not even Flectar Mail can read it. "
+"Your mail, contacts and calendars keep syncing with your mail provider."
 msgstr ""
 
 #: ui/device-sync.slint:641
@@ -7064,8 +7061,9 @@ msgstr ""
 
 #: ui/device-sync.slint:668
 msgid ""
-"You get a recovery code to keep somewhere safe. Your passwords and sign-ins "
-"sync too, so your other devices are ready at once."
+"You get a recovery code to keep somewhere safe. Passwords sync too, and "
+"Google and Microsoft sign-ins and app keys go to your devices of the same "
+"kind."
 msgstr ""
 
 #: ui/device-sync.slint:677
@@ -7270,13 +7268,14 @@ msgid "Passwords and sign-ins"
 msgstr ""
 
 #: ui/device-sync.slint:902
-msgid "Your other devices are signed in to your accounts at once."
+msgid "End-to-end encrypted, for all your devices."
 msgstr ""
 
 #: ui/device-sync.slint:903
 msgid ""
-"End-to-end encrypted, for all your devices. Anyone with your recovery code "
-"can sign in to your accounts."
+"Passwords go to all your devices. Google and Microsoft sign-ins and app keys "
+"go to your devices of the same kind. Anyone with your recovery code can sign "
+"in to your accounts."
 msgstr ""
 
 #: ui/device-sync.slint:916
