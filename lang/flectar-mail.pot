@@ -4401,8 +4401,8 @@ msgstr ""
 
 #: ui/components/app-icon-picker.slint:116
 msgid ""
-"The new icon appears after you leave Flectar Mail. Some launchers remove the "
-"old icon from the home screen."
+"The new icon appears after you leave Flectar Mail. Some launchers take a few "
+"minutes to show it, and some remove the old icon from the home screen."
 msgstr ""
 
 #: ui/components/app-icon-picker.slint:117

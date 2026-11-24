@@ -136,6 +136,13 @@ const UI_IDLE_DELAY: Duration = Duration::from_secs(3);
 thread_local! {
     /// Restarted by every call to [`release_free_heap_when_idle`].
     static UI_IDLE: slint::Timer = slint::Timer::default();
+    static IDLE_RELEASE: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
+}
+
+/// Register, on the UI thread, the working memory the app frees once the
+/// window goes idle: what the next input or paint can allocate again.
+pub(crate) fn on_ui_idle(release: impl Fn() + 'static) {
+    IDLE_RELEASE.with_borrow_mut(|current| *current = Some(Box::new(release)));
 }
 
 /// Return free heap pages once the window has gone [`UI_IDLE_DELAY`] without
@@ -157,7 +164,13 @@ pub(crate) fn release_free_heap_when_idle() {
 /// Macs keeps freed pages until relief (xzone returns them itself), and scudo
 /// releases only while the app keeps freeing. Windows heaps decommit free
 /// blocks on their own, so the heap optimization stays with the rarer releases.
+/// The [`on_ui_idle`] release runs first, so the trim returns its pages too.
 fn release_after_ui_work() {
+    IDLE_RELEASE.with_borrow(|release| {
+        if let Some(release) = release {
+            release();
+        }
+    });
     #[cfg(mobile)]
     crate::platform::purge_allocator(Purge::Fast);
     #[cfg(glibc)]
@@ -258,7 +271,8 @@ pub(crate) fn trim_working_set() {
 mod tests {
     use super::{
         DISPATCH_CRITICAL, DISPATCH_NORMAL, DISPATCH_WARN, MemoryPressure, REPEAT_INTERVAL,
-        UI_IDLE, UI_IDLE_DELAY, dispatch_pressure, release_free_heap_when_idle, should_handle,
+        UI_IDLE, UI_IDLE_DELAY, dispatch_pressure, on_ui_idle, release_free_heap_when_idle,
+        should_handle,
     };
     use std::{
         cell::Cell,
@@ -340,13 +354,20 @@ mod tests {
             slint::platform::update_timers_and_animations();
         };
         let pending = || UI_IDLE.with(slint::Timer::running);
+        let released = Rc::new(Cell::new(0));
+        on_ui_idle({
+            let released = released.clone();
+            move || released.set(released.get() + 1)
+        });
 
         release_free_heap_when_idle();
         advance(UI_IDLE_DELAY / 2);
         release_free_heap_when_idle();
         advance(UI_IDLE_DELAY / 2);
         assert!(pending(), "more activity restarts the countdown");
+        assert_eq!(released.get(), 0);
         advance(UI_IDLE_DELAY / 2);
         assert!(!pending(), "the release runs once the window stays idle");
+        assert_eq!(released.get(), 1, "the app's idle release runs with it");
     }
 }

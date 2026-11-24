@@ -663,6 +663,17 @@ impl GpuEmailRenderer {
         self.tiles.len() != before
     }
 
+    /// Once painting stops, give back the CPU painter's working memory. Its
+    /// render context keeps every buffer at the size the busiest tile needed.
+    /// Resizing builds a new context and keeps the converted images and
+    /// prepared glyphs, so the next tile only allocates the buffers again.
+    pub fn release_paint_buffers(&mut self) {
+        let (width, height) = self.cpu_size;
+        if let Some(painter) = self.cpu_painter.as_mut() {
+            painter.resize(width, height);
+        }
+    }
+
     /// The tiles held now, for the view after `release_caches`.
     pub fn retained_tiles(&self) -> Vec<RenderedEmailTile> {
         self.tiles.values().cloned().collect()

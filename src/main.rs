@@ -8019,6 +8019,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     });
     memory::watch_pressure(&runtime);
+    let idle_renderer = Rc::downgrade(&email_renderer);
+    memory::on_ui_idle(move || {
+        if let Some(renderer) = idle_renderer.upgrade()
+            && let Ok(mut renderer) = renderer.try_borrow_mut()
+        {
+            renderer.release_paint_buffers();
+        }
+    });
 
     if start_hidden {
         app.invoke_suspend_rendering(true);

@@ -7,6 +7,14 @@ target-dir = "target"
 # Larger builders can opt into more parallelism with Cargo's -j option.
 jobs = 1
 
+# Bundled SQLite otherwise allocates 20 cache pages in one block on a
+# connection's first read. Releasing the cache frees the block, but the
+# scheduler's reads every few seconds allocate it again. Chromium builds its
+# SQLite the same way. Chromium also turns off the lookaside pool, but that
+# made SQLite's speedtest1 lookups by rowid about 50% slower here.
+[env]
+LIBSQLITE3_FLAGS = "-DSQLITE_DEFAULT_PCACHE_INITSZ=0"
+
 # Slint's desktop guide recommends matching Linux's larger main-thread stack on
 # Windows. This prevents stack overflows in debug builds with deep UI trees.
 [target.x86_64-pc-windows-msvc]
