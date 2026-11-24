@@ -2607,6 +2607,11 @@ export component AppWindow inherits Window {
             save_oauth_app(google-id, google-secret, microsoft-id) => {
                 root.save_oauth_app(google-id, google-secret, microsoft-id);
             }
+            oauth-setup-open <=> root.oauth_setup_open;
+            oauth-settings-error <=> root.oauth_settings_error;
+            save-oauth-apps(google-id, google-secret, microsoft-id) => {
+                root.save_oauth_apps(google-id, google-secret, microsoft-id);
+            }
             set-remote-images(enabled) => { root.set-remote-images(enabled); }
             make_account_transfer(value) => root.make_account_transfer(value);
             read_account_transfer(value) => root.read_account_transfer(value);
