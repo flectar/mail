@@ -3787,6 +3787,14 @@ fn build_message_with_attachments<'a>(
 
     if !out.to.is_empty() {
         builder = builder.to(addresses(out.to));
+    } else if out.cc.is_empty() && !out.bcc.is_empty() {
+        // Sent only to Bcc, the message says its recipients aren't shown
+        // (RFC 5322 appendix A.1.3) rather than leave out the To field that
+        // spam filters expect.
+        builder = builder.header(
+            "To",
+            mail_builder::headers::raw::Raw::new("undisclosed-recipients:;"),
+        );
     }
     if !out.cc.is_empty() {
         builder = builder.cc(addresses(out.cc));
@@ -4659,6 +4667,55 @@ mod tests {
                 .unwrap()
                 .contains("Disposition-Notification-To")
         );
+    }
+
+    #[test]
+    fn a_message_only_to_bcc_says_its_recipients_are_undisclosed() {
+        let people = [Address {
+            name: Some("Grace".into()),
+            email: "grace@example.com".into(),
+        }];
+        let to_header = |message: OutgoingMessage| {
+            let (_, raw) = build_message(&message).unwrap();
+            let text = String::from_utf8(raw).unwrap();
+            text.lines()
+                .find(|line| line.starts_with("To: "))
+                .map(str::to_owned)
+        };
+        let blind = || OutgoingMessage {
+            bcc: &people,
+            ..outgoing("Hi", None)
+        };
+        assert_eq!(
+            to_header(blind()).as_deref(),
+            Some("To: undisclosed-recipients:;")
+        );
+        let (_, raw) = build_message(&blind()).unwrap();
+        let headers = parse_header_block(&raw).unwrap();
+        assert!(
+            headers.to.is_empty(),
+            "the group holds no one: {:?}",
+            headers.to
+        );
+        assert_eq!(headers.bcc.len(), 1);
+
+        // Anyone in To or Cc is shown instead, and a message to no one says nothing.
+        assert_eq!(
+            to_header(OutgoingMessage {
+                cc: &people,
+                ..blind()
+            }),
+            None
+        );
+        assert_eq!(
+            to_header(OutgoingMessage {
+                to: &people,
+                ..blind()
+            })
+            .as_deref(),
+            Some("To: \"Grace\" <grace@example.com>")
+        );
+        assert_eq!(to_header(outgoing("Hi", None)), None);
     }
 
     fn outgoing<'a>(text: &'a str, html: Option<&'a str>) -> OutgoingMessage<'a> {
