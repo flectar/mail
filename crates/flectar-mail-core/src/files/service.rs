@@ -12,7 +12,13 @@ pub enum Output {
 }
 pub enum Preview {
     Text(String),
-    Data(Vec<u8>, String),
+    /// A file's bytes, its declared media type and its name. The host decides
+    /// from the type and name, never from the bytes alone, how to show it.
+    Data {
+        data: Vec<u8>,
+        media: String,
+        name: String,
+    },
 }
 #[derive(Clone)]
 pub enum Entry {
@@ -1147,11 +1153,11 @@ async fn perform(
                     read_bounded(&path, 16 * 1024 * 1024).await?
                 }
             };
-            let media = match entry {
-                Entry::Attachment(a) => a.media_type,
-                Entry::Remote(n) => n.media_type.unwrap_or_default(),
+            let (media, name) = match entry {
+                Entry::Attachment(a) => (a.media_type, a.filename),
+                Entry::Remote(n) => (n.media_type.unwrap_or_default(), n.name),
             };
-            return Ok(Output::Preview(Preview::Data(data, media)));
+            return Ok(Output::Preview(Preview::Data { data, media, name }));
         }
         "folder" => {
             if !dir.can_create {

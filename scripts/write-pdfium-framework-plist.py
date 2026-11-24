@@ -13,8 +13,8 @@ def write(path, simulator):
         "CFBundleInfoDictionaryVersion": "6.0",
         "CFBundleName": "PDFium",
         "CFBundlePackageType": "FMWK",
-        "CFBundleShortVersionString": "8044.0.0",
-        "CFBundleVersion": "8044",
+        "CFBundleShortVersionString": "8179.0.0",
+        "CFBundleVersion": "8179",
         "CFBundleSupportedPlatforms": ["iPhoneSimulator" if simulator else "iPhoneOS"],
         "MinimumOSVersion": "17.0",
     }
