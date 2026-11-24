@@ -23,12 +23,13 @@ export global AccountDiscovery {
     out property <bool> ready: root.state != "found" || root.trusted || root.confirmed;
 }
 
-// What the lookup found, under a mail account form's email address.
+// What the lookup found, under a mail account form's email address. The
+// form makes it only while there's something to say, since a hidden item
+// still takes its space in a layout.
 export component AccountDiscoveryNotice inherits VerticalLayout {
     in property <bool> enabled: true;
     in property <color> text-color: AppTheme.body;
     spacing: 6px;
-    visible: AccountDiscovery.state != "";
 
     Text {
         text: AccountDiscovery.state == "looking" ? @tr("Looking up the server settings for {}…", AccountDiscovery.domain)

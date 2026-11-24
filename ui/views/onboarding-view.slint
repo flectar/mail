@@ -336,7 +336,7 @@ export component OnboardingView inherits Rectangle {
                     value <=> root.account-username;
                     placeholder: @tr("Username (defaults to email)");
                 }
-                AccountDiscoveryNotice { enabled: !root.account-setup-in-progress; text-color: root.muted-text; }
+                if AccountDiscovery.state != "" : AccountDiscoveryNotice { enabled: !root.account-setup-in-progress; text-color: root.muted-text; }
                 FormField {
                     enabled: !root.account-setup-in-progress;
                     height: 60px;
