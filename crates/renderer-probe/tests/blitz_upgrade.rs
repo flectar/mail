@@ -2367,3 +2367,19 @@ fn a_block_level_replaced_element_shrinks_with_its_column() {
     close(node(&doc, "#b").final_layout().size.width, 48.0);
     close(node(&doc, "#c").final_layout().size.width, 48.0);
 }
+
+#[test]
+fn percentage_columns_share_the_whole_table_in_proportion() {
+    // The percentage columns of a table with a set width and no other
+    // columns share all of its width in proportion to their percentages, as
+    // in browsers, also when the percentages fall short of 100% or a column's
+    // content outgrows its percentage. Part of the table was left empty.
+    let doc = document(
+        "<table width=300 cellspacing=0><tr><td id=a width='40%'>a</td><td id=b width='40%'>b</td></tr></table>
+         <table width=300 cellspacing=0><tr><td id=c width='75%'>c</td><td id=d width='25%'><div style='width:120px'></div></td></tr></table>",
+    );
+    close(node(&doc, "#a").final_layout().size.width, 150.0);
+    close(node(&doc, "#b").final_layout().size.width, 150.0);
+    close(node(&doc, "#c").final_layout().size.width, 180.0);
+    close(node(&doc, "#d").final_layout().size.width, 120.0);
+}

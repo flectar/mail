@@ -34,3 +34,4 @@
 0035-fixed-tables-with-percentage-widths.patch
 0036-measured-inline-block-baselines.patch
 0037-compressible-block-level-images.patch
+0038-percentage-columns-fill-their-table.patch
