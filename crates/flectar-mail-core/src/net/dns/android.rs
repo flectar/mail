@@ -51,16 +51,16 @@ fn api() -> Option<&'static Api> {
     .as_ref()
 }
 
-pub(super) fn exchanges(domain: &str) -> Option<Vec<(u16, String)>> {
+pub(super) fn records(name: &str, kind: u16) -> Option<Vec<super::Record>> {
     let api = api()?;
-    let name = CString::new(domain).ok()?;
+    let name = CString::new(name).ok()?;
     // SAFETY: `name` is NUL-terminated.
     let fd = unsafe {
         (api.query)(
             DEFAULT_NETWORK,
             name.as_ptr(),
             c_int::from(super::CLASS_IN),
-            c_int::from(super::TYPE_MX),
+            c_int::from(kind),
             0,
         )
     };
@@ -97,5 +97,5 @@ pub(super) fn exchanges(domain: &str) -> Option<Vec<(u16, String)>> {
     if code != 0 {
         return None;
     }
-    super::exchanges_in_message(answer.get(..length)?)
+    super::records_in_message(answer.get(..length)?, kind)
 }

@@ -51,9 +51,9 @@ const FLAG_TIMEOUT: u32 = 0x1_0000;
 
 /// What the replies brought. The reply callback only gets a shared
 /// reference, so the fields change through cells.
-#[derive(Default)]
 struct Answers {
-    exchanges: RefCell<Vec<(u16, String)>>,
+    kind: u16,
+    records: RefCell<Vec<super::Record>>,
     done: Cell<bool>,
 }
 
@@ -70,29 +70,33 @@ unsafe extern "C" fn reply(
     _ttl: u32,
     context: *mut c_void,
 ) {
-    // SAFETY: `context` is the Answers that `exchanges` passed in, which
+    // SAFETY: `context` is the Answers that `records` passed in, which
     // outlives the query.
     let answers = unsafe { &*context.cast_const().cast::<Answers>() };
     if error != NO_ERROR {
         answers.done.set(true);
         return;
     }
-    if flags & FLAG_ADD != 0 && record_type == super::TYPE_MX && !data.is_null() {
+    if flags & FLAG_ADD != 0 && record_type == answers.kind && !data.is_null() {
         // SAFETY: DNS-SD hands over `length` bytes of record data.
         let data = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), usize::from(length)) };
         answers
-            .exchanges
+            .records
             .borrow_mut()
-            .extend(super::exchange_in_record(data));
+            .extend(super::record_in_data(record_type, data));
     }
     if flags & FLAG_MORE_COMING == 0 {
         answers.done.set(true);
     }
 }
 
-pub(super) fn exchanges(domain: &str) -> Option<Vec<(u16, String)>> {
-    let name = CString::new(domain).ok()?;
-    let answers = Answers::default();
+pub(super) fn records(name: &str, kind: u16) -> Option<Vec<super::Record>> {
+    let name = CString::new(name).ok()?;
+    let answers = Answers {
+        kind,
+        records: RefCell::default(),
+        done: Cell::default(),
+    };
     let mut service = std::ptr::null_mut();
     // SAFETY: `name` is NUL-terminated, and `answers` outlives the query,
     // which is deallocated below before this function returns.
@@ -102,7 +106,7 @@ pub(super) fn exchanges(domain: &str) -> Option<Vec<(u16, String)>> {
             FLAG_TIMEOUT,
             0,
             name.as_ptr(),
-            super::TYPE_MX,
+            kind,
             super::CLASS_IN,
             reply,
             (&raw const answers).cast_mut().cast(),
@@ -137,5 +141,5 @@ pub(super) fn exchanges(domain: &str) -> Option<Vec<(u16, String)>> {
     }
     // SAFETY: the reference from DNSServiceQueryRecord, freed once.
     unsafe { DNSServiceRefDeallocate(service) };
-    Some(answers.exchanges.into_inner())
+    Some(answers.records.into_inner())
 }
