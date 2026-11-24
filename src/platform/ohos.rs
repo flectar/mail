@@ -6,9 +6,10 @@ use flectar_mail_core::models::AppIcon;
 use std::{
     path::PathBuf,
     sync::{
-        OnceLock,
+        Condvar, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 
 static PDFIUM_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
@@ -115,11 +116,65 @@ pub(crate) fn sells_sync() -> bool {
     false
 }
 
-/// How this device appears in Flectar Mail Sync's device list.
+/// The marketing name the page read from `deviceInfo`; empty until it reports.
+struct DeviceName {
+    name: Mutex<String>,
+    reported: Condvar,
+}
+
+static DEVICE_NAME: OnceLock<DeviceName> = OnceLock::new();
+
+fn device_name() -> &'static DeviceName {
+    DEVICE_NAME.get_or_init(|| DeviceName {
+        name: Mutex::new(String::new()),
+        reported: Condvar::new(),
+    })
+}
+
+/// How long Sync waits for the page's name at startup. The page reports it
+/// right after the native module starts, before the window reaches Sync.
+const DEVICE_NAME_WAIT: Duration = Duration::from_millis(500);
+
+/// The page reports the marketing name or, without one, the product model,
+/// before the window reaches Sync. An empty report keeps the previous name.
+pub fn set_device_name(name: &str) {
+    let name = name.trim();
+    if name.is_empty() {
+        return;
+    }
+    let slot = device_name();
+    *slot
+        .name
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = name.to_owned();
+    slot.reported.notify_all();
+}
+
+/// How this device appears in Flectar Mail Sync's device list: by its
+/// marketing name, such as "HUAWEI MateBook Pro", as Android and iOS use
+/// their model names. The page reports it through [`set_device_name`]; if the
+/// page is late, wait briefly rather than sending an unnamed device.
 pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDescription {
+    let slot = device_name();
+    let guard = slot
+        .name
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (guard, _) = slot
+        .reported
+        .wait_timeout_while(guard, DEVICE_NAME_WAIT, |name| name.is_empty())
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let reported = guard.clone();
+    drop(guard);
+    let name = if reported.is_empty() {
+        // The page has not reported; keep the shared host-name fallback.
+        flectar_mail_core::device_sync::DeviceDescription::default().name
+    } else {
+        reported
+    };
     flectar_mail_core::device_sync::DeviceDescription {
+        name,
         platform: "harmonyos".to_owned(),
-        ..Default::default()
     }
 }
 
@@ -139,3 +194,14 @@ pub(crate) fn reduce_motion() -> bool {
 
 /// Changes arrive through `set_reduce_motion`.
 pub(crate) fn watch_reduce_motion() {}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn trims_the_reported_name_and_ignores_empty_reports() {
+        super::set_device_name("  HUAWEI MateBook Pro  ");
+        assert_eq!(super::device_description().name, "HUAWEI MateBook Pro");
+        super::set_device_name("   ");
+        assert_eq!(super::device_description().name, "HUAWEI MateBook Pro");
+    }
+}

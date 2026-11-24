@@ -174,6 +174,10 @@ unsafe fn register_module_functions(env: napi_env, exports: napi_value) {
                 bridge::set_bridge as ffi::napi_callback,
             ),
             (
+                &b"setDeviceName\0"[..],
+                bridge::set_device_name as ffi::napi_callback,
+            ),
+            (
                 &b"submitBridgeResult\0"[..],
                 bridge::submit_bridge_result as ffi::napi_callback,
             ),

@@ -634,6 +634,37 @@ pub(super) unsafe extern "C" fn set_color_scheme(
     }
 }
 
+/// `setDeviceName(name)`: the page reports the system's marketing name (or
+/// its product model), so Sync lists this device by a name people know.
+pub(super) unsafe extern "C" fn set_device_name(
+    env: napi_env,
+    info: ffi::napi_callback_info,
+) -> napi_value {
+    // SAFETY: live NAPI env/info; argv holds one string.
+    unsafe {
+        let mut argc: usize = 1;
+        let mut argv: [napi_value; 1] = [core::ptr::null_mut()];
+        if ffi::napi_get_cb_info(
+            env,
+            info,
+            &mut argc,
+            argv.as_mut_ptr(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        ) == ffi::NAPI_OK
+            && argc >= 1
+            && let Some(name) = read_string(env, argv[0])
+        {
+            let name = name.trim();
+            if name.is_empty() {
+                slint_ohos_backend::ohos_info!("mail: no device name from deviceInfo");
+            }
+            flectar_mail::platform::set_device_name(name);
+        }
+        undefined(env)
+    }
+}
+
 /// `reduceMotion(reduced)`: report the accessibility setting that asks apps
 /// for less animation.
 pub(super) unsafe extern "C" fn reduce_motion(

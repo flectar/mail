@@ -173,6 +173,10 @@ handled (and asserted) in the script, do not "simplify" them away:
   the base fallback); Traditional Chinese falls back to English. The
   notification permission is requested only after consent, once an account
   exists, and the page records that it asked so the prompt shows once.
+- **Sync device name**: the page reports `deviceInfo.marketName` (or, without
+  one, `productModel`) as soon as the native bridge is installed, so Flectar
+  Mail Sync lists this device by a name people know instead of "Unnamed
+  device". If the page is late, the host waits up to 500 ms for the name.
 - **Clipboard**: copying needs no permission, but pasting reads the system
   pasteboard and therefore requires `ohos.permission.READ_PASTEBOARD`, an ACL
   (restricted) permission. The module declares it and the page requests it on
