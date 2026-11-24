@@ -135,10 +135,10 @@ tracked; an IDE build that bypasses the script needs that copy first.
 The platform is tier 3: it is built by a manually dispatched workflow
 (`.github/workflows/ohos.yml`), not on every pull request. The HarmonyOS SDK
 and hvigor are not anonymously downloadable, so the build job targets a
-self-hosted runner with the prerequisites above. Dispatch runs build unsigned
-(`SKIP_SIGN=1`); `sign: true` switches to `RELEASE_SIGN=1`, which consumes the
-`FLECTAR_OHOS_*` repository secrets through `hap-sign-tool` and never touches
-the pull request context.
+self-hosted runner with the prerequisites above. The workflow only builds. It
+checks formatting and clippy, runs the script with `SKIP_SIGN=1` and uploads
+the unsigned hap. It never receives signing material, so release signing stays
+the local `RELEASE_SIGN=1` step above.
 
 ## Why the hap is re-packed by hand
 
