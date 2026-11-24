@@ -2305,3 +2305,19 @@ fn superscripts_and_subscripts_shift_as_far_as_in_blink() {
     close(node(&doc, "#a").final_layout().size.height, 26.3);
     close(node(&doc, "#b").final_layout().size.height, 24.2);
 }
+
+#[test]
+fn shrink_to_fit_widths_keep_their_fractions_and_lines() {
+    // A float is as wide as its content to the fraction, as in browsers,
+    // where Blitz rounded it up to a whole pixel, and content that just fits
+    // stays on one line (upstream #1375 and #1449).
+    let doc = document(
+        "<div id=f style='float:left'><span id=a style='display:inline-block;width:10.25px;height:5px'></span><span id=b style='display:inline-block;width:20.5px;height:5px'></span></div>",
+    );
+    let width = node(&doc, "#f").unrounded_layout().size.width;
+    assert!((width - 30.75).abs() < 0.01, "{width} != 30.75");
+    let a = node(&doc, "#a").unrounded_layout().location;
+    let b = node(&doc, "#b").unrounded_layout().location;
+    assert_eq!(a.y, b.y);
+    assert!((b.x - 10.25).abs() < 0.01, "{} != 10.25", b.x);
+}

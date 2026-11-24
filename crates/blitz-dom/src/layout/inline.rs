@@ -601,8 +601,7 @@ impl LayoutPassState<'_> {
                     AvailableSpace::Definite(limit) => (limit * scale)
                         .min(max_content_width + float_width)
                         .max(min_content_width),
-                }
-                .ceil();
+                };
 
                 let style_width = node_size.width.map(|w| w * scale);
                 let min_width = node_min_size.width.map(|w| w * scale);
@@ -645,7 +644,7 @@ impl LayoutPassState<'_> {
                 .inline_layout_data = Some(inline_layout);
 
             let measured_size = inputs.known_dimensions.unwrap_or(taffy::Size {
-                width: width.ceil() / scale,
+                width: width / scale,
                 // Height is ignored if RequestedAxis if Horizontal
                 height: 0.0,
             });
@@ -668,9 +667,26 @@ impl LayoutPassState<'_> {
             .layout
             .set_text_indent(resolved_text_indent * scale, indent_options);
 
+        // Content sized to fit exactly (e.g. shrink-to-fit) can end up a few ulps wider than
+        // `width`: the width goes through round trips in CSS px, and the line breaker sums
+        // advances in a different order to `calculate_content_widths`. Give the line breaker a
+        // few ulps of slack in that case so that the content doesn't wrap.
+        let max_advance = {
+            let max_content_width = inline_layout.layout.calculate_content_widths().max;
+            let fit_width = width.max(max_content_width);
+            let rounding_error = (fit_width + pbw).abs() * 8.0 * f32::EPSILON;
+            if (max_content_width - width).abs() <= rounding_error {
+                fit_width + rounding_error
+            } else {
+                width
+            }
+        };
+        #[cfg(feature = "floats")]
+        let slack = max_advance - width;
+
         #[cfg(not(feature = "floats"))]
         {
-            inline_layout.layout.break_all_lines(Some(width));
+            inline_layout.layout.break_all_lines(Some(max_advance));
         }
 
         // Out-of-flow candidates bubbled up from this container and its in-flow subtree.
@@ -693,14 +709,15 @@ impl LayoutPassState<'_> {
             let initial_slot = block_ctx.find_content_slot(0.0, Clear::None, None);
             let mut has_active_floats = initial_slot.segment_id.is_some();
             let state = breaker.state_mut();
-            state.set_layout_max_advance(width);
+            state.set_layout_max_advance(max_advance);
             // Lines have no height limit. An infinite one, unlike Parley's `f32::MAX`
             // default, can never be exceeded, even by an infinitely tall box.
             state.set_line_max_height(f32::INFINITY);
             // With huge insets, f32 rounding can make a float slot slightly wider than
             // the layout, which Parley's line breaker rejects (DioxusLabs/blitz#1443).
             let layout_max_advance = state.layout_max_advance();
-            state.set_line_max_advance((initial_slot.width * scale).min(layout_max_advance));
+            state
+                .set_line_max_advance((initial_slot.width * scale + slack).min(layout_max_advance));
             state.set_line_x(initial_slot.x * scale);
             state.set_line_y((initial_slot.y * scale) as f64);
 
@@ -726,13 +743,13 @@ impl LayoutPassState<'_> {
                             has_active_floats = next_slot.segment_id.is_some();
 
                             state.set_line_max_advance(
-                                (next_slot.width * scale).min(layout_max_advance),
+                                (next_slot.width * scale + slack).min(layout_max_advance),
                             );
                             state.set_line_x(next_slot.x * scale);
                             state.set_line_y((next_slot.y * scale) as f64);
                         } else {
                             state.set_line_x(0.0);
-                            state.set_line_max_advance(width);
+                            state.set_line_max_advance(max_advance);
                         }
 
                         continue;
@@ -759,8 +776,9 @@ impl LayoutPassState<'_> {
                             let slot = block_ctx.find_content_slot(min_y as f32, clear, None);
                             cleared_floats |= f64::from(slot.y) > min_y;
                             has_active_floats = slot.segment_id.is_some();
-                            state
-                                .set_line_max_advance((slot.width * scale).min(layout_max_advance));
+                            state.set_line_max_advance(
+                                (slot.width * scale + slack).min(layout_max_advance),
+                            );
                             state.set_line_x(slot.x * scale);
                             state.set_line_y((slot.y * scale) as f64);
                             state.append_inline_box_to_line(
@@ -815,7 +833,7 @@ impl LayoutPassState<'_> {
                         has_active_floats = next_slot.segment_id.is_some();
 
                         state.set_line_max_advance(
-                            (next_slot.width * scale).min(layout_max_advance),
+                            (next_slot.width * scale + slack).min(layout_max_advance),
                         );
                         state.set_line_x(next_slot.x * scale);
                         state.set_line_y((next_slot.y * scale) as f64);

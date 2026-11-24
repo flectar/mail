@@ -51,6 +51,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0031 line box content | A line box holds content as CSS 2.1 section 9.4.2 counts it, as browsers do. One with nothing in it but white space that collapses away and empty inline elements, such as the space around an `<a name>` anchor, is a zero-height line box, so margins collapse through it, where it added a line's height. A block that holds only such content keeps its own width, `height` and `min-height`, as a spacer `<div style="height: 20px">` around an empty `<span>` does, where it took no room at all. Preserved white space is content, and so is an image, inline block or inline table without height, whose line keeps its strut, where it had none and a block holding a spacer image of no height had none either. |
 | 0032 lang pseudo-class | `:lang()` matches an element by its language, its own `lang` or `xml:lang` or else its nearest ancestor's, with RFC 4647 extended filtering (Selectors 4 section 7.2), as Servo does, so `:lang(de)` matches `de-CH`. An unknown or empty language matches nothing, as in Blink and Gecko. It never matched. |
 | 0033 superscript and subscript shifts | `vertical-align: super` raises a box by a third of its parent's font size and `sub` lowers it by a fifth, each plus a device pixel, as Blink and WebKit do. Parley leaves out the pixel, so a line that a superscript or subscript makes taller was a pixel shorter than in browsers. |
+| 0034 shrink-to-fit widths | The width of a float, inline block, flex item or table column that fits its content keeps its fraction of a pixel, as in browsers, where Blitz rounded it up to a whole pixel, so a row of them drifted by up to a pixel per box. Content that just fits gets a few ulps of slack in the line breaker, so it stays on one line. Backports upstream #1375 and #1449. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
@@ -58,7 +59,7 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0033 are local, and upstream main collects selection ranges as beta.4 does. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0033 are local, and upstream main collects selection ranges as beta.4 does. 0034 backports upstream #1375 and #1449. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
 when a release contains them.
 
 Copied text, find in the reader and accessible names leave out 0011's edge
@@ -131,7 +132,8 @@ lists, 0022's `background` and `clear` attributes, 0023's soft hyphens, 0024's
 images without a source, 0025's percentage columns and cell `max-width`, 0026's
 blocks inside inline elements, 0027's table baselines, 0028's table widths, 0029's collapsed borders below
 captions, 0030's details and summary, 0031's line box content, 0032's
-`:lang()` and 0033's superscript and subscript shifts.
+`:lang()`, 0033's superscript and subscript shifts and 0034's shrink-to-fit
+widths.
 Application renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.
