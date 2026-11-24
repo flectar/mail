@@ -35,6 +35,7 @@ mod contact_import;
 mod contacts;
 mod data_controller;
 mod date_format;
+mod dav_discovery;
 #[cfg(desktop)]
 mod default_email_app;
 mod document_preview;
@@ -6724,6 +6725,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         &platform.documents,
         platform.paths.temp_dir(),
     );
+
+    dav_discovery::install(&app, &state, &runtime);
 
     let suggestion_app = app.as_weak();
     let suggestion_state = Rc::clone(&state);

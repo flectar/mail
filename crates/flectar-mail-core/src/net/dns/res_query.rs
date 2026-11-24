@@ -41,9 +41,9 @@ fn res_query() -> Option<ResQuery> {
     Some(unsafe { std::mem::transmute::<usize, ResQuery>(address) })
 }
 
-pub(super) fn exchanges(domain: &str) -> Option<Vec<(u16, String)>> {
+pub(super) fn records(name: &str, kind: u16) -> Option<Vec<super::Record>> {
     let query = res_query()?;
-    let name = CString::new(domain).ok()?;
+    let name = CString::new(name).ok()?;
     let mut answer = vec![0_u8; 4096];
     let capacity = c_int::try_from(answer.len()).ok()?;
     // SAFETY: `name` is NUL-terminated and `answer` holds `capacity` bytes.
@@ -52,12 +52,12 @@ pub(super) fn exchanges(domain: &str) -> Option<Vec<(u16, String)>> {
         query(
             name.as_ptr(),
             c_int::from(super::CLASS_IN),
-            c_int::from(super::TYPE_MX),
+            c_int::from(kind),
             answer.as_mut_ptr(),
             capacity,
         )
     };
     // A longer answer than the buffer comes back cut off.
     let length = usize::try_from(length).ok()?;
-    super::exchanges_in_message(answer.get(..length)?)
+    super::records_in_message(answer.get(..length)?, kind)
 }

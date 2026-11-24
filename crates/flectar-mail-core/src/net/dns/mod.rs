@@ -1,8 +1,10 @@
-//! The mail server (MX) a domain names, asked of the device's own resolver,
-//! as mail apps do when a provider publishes no configuration of its own.
-//! Each platform's resolver API keeps the device's DNS settings: private or
-//! encrypted DNS, VPN and per-domain rules. Answers aren't authenticated, so
-//! whatever is derived from them is only offered for the person to confirm.
+//! Records a domain publishes, asked of the device's own resolver: the
+//! mail server (MX) mail apps look for when a provider publishes no
+//! configuration of its own, and the calendar and contacts services (SRV,
+//! with a TXT path) of RFC 6764. Each platform's resolver API keeps the
+//! device's DNS settings: private or encrypted DNS, VPN and per-domain
+//! rules. Answers aren't authenticated, so whatever is derived from them is
+//! only offered for the person to confirm, or checked against TLS.
 
 use std::time::Duration;
 
@@ -19,33 +21,105 @@ mod windows;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 const TYPE_MX: u16 = 15;
+const TYPE_TXT: u16 = 16;
+const TYPE_SRV: u16 = 33;
 const CLASS_IN: u16 = 1;
+
+/// One answer record of the kinds asked for here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Record {
+    Mx {
+        preference: u16,
+        host: String,
+    },
+    Srv(Service),
+    /// The record's character strings (RFC 1035 section 3.3.14).
+    Txt(Vec<Vec<u8>>),
+}
+
+/// A server an SRV record names (RFC 2782).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Service {
+    pub priority: u16,
+    pub weight: u16,
+    pub port: u16,
+    /// The host, in lowercase. "" when the service isn't offered.
+    pub target: String,
+}
+
+/// The records of `kind` that `name` has, or `None` when the lookup fails,
+/// times out or finds none.
+async fn query(name: &str, kind: u16) -> Option<Vec<Record>> {
+    let name = name.trim().trim_end_matches('.').to_ascii_lowercase();
+    if !is_host_name(&name) {
+        return None;
+    }
+    let lookup = tokio::task::spawn_blocking(move || records(&name, kind));
+    tokio::time::timeout(TIMEOUT, lookup).await.ok()?.ok()?
+}
 
 /// The host of `domain`'s most preferred mail server, in lowercase. `None`
 /// when the lookup fails, times out, or the domain takes no mail.
 pub(crate) async fn mail_host(domain: &str) -> Option<String> {
-    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
-    if !is_host_name(&domain) {
-        return None;
-    }
-    let lookup = tokio::task::spawn_blocking(move || exchanges(&domain));
-    let exchanges = tokio::time::timeout(TIMEOUT, lookup).await.ok()?.ok()??;
+    let exchanges = query(domain, TYPE_MX)
+        .await?
+        .into_iter()
+        .filter_map(|record| match record {
+            Record::Mx { preference, host } => Some((preference, host)),
+            _ => None,
+        })
+        .collect();
     preferred(exchanges)
 }
 
-// Each platform's resolver: the domain's mail servers with their
-// preferences. Blocks.
+/// The server to use for `service` (such as `_caldavs._tcp`) under
+/// `domain`, chosen by priority and weight as RFC 2782 says. `None` when
+/// there is none, or the domain says it doesn't offer the service.
+pub(crate) async fn service(service: &str, domain: &str) -> Option<Service> {
+    let services = query(&format!("{service}.{domain}"), TYPE_SRV)
+        .await?
+        .into_iter()
+        .filter_map(|record| match record {
+            Record::Srv(service) => Some(service),
+            _ => None,
+        })
+        .collect();
+    chosen(services, rand::random())
+}
+
+/// The value of `key` in the TXT records of `name`, in DNS-SD's key=value
+/// form (RFC 6763 section 6), from the first string that has the key.
+pub(crate) async fn text_value(name: &str, key: &str) -> Option<String> {
+    query(name, TYPE_TXT)
+        .await?
+        .into_iter()
+        .filter_map(|record| match record {
+            Record::Txt(strings) => Some(strings),
+            _ => None,
+        })
+        .flatten()
+        .find_map(|string| {
+            let equals = string.iter().position(|&byte| byte == b'=')?;
+            if !string[..equals].eq_ignore_ascii_case(key.as_bytes()) {
+                return None;
+            }
+            String::from_utf8(string[equals + 1..].to_vec()).ok()
+        })
+}
+
+// Each platform's resolver: the answer records of one kind for a name.
+// Blocks.
 #[cfg(android_resolver)]
-use android::exchanges;
+use android::records;
 #[cfg(apple_resolver)]
-use apple::exchanges;
+use apple::records;
 #[cfg(res_query)]
-use res_query::exchanges;
+use res_query::records;
 #[cfg(windows)]
-use windows::exchanges;
+use windows::records;
 
 #[cfg(not(any(res_query, android_resolver, apple_resolver, windows)))]
-fn exchanges(_domain: &str) -> Option<Vec<(u16, String)>> {
+fn records(_name: &str, _kind: u16) -> Option<Vec<Record>> {
     None
 }
 
@@ -70,9 +144,36 @@ pub(crate) fn is_host_name(host: &str) -> bool {
         })
 }
 
-/// The MX records in a DNS response message (RFC 1035 section 4.1).
+/// Of the servers an SRV lookup gave, the one to try (RFC 2782): one with
+/// the lowest priority, picked by weight with `random`. A single "."
+/// target means the service isn't offered.
+fn chosen(mut services: Vec<Service>, random: u32) -> Option<Service> {
+    if let [only] = services.as_slice()
+        && only.target.is_empty()
+    {
+        return None;
+    }
+    services.retain(|service| is_host_name(&service.target));
+    let priority = services.iter().map(|service| service.priority).min()?;
+    services.retain(|service| service.priority == priority);
+    // Weight 0 first, then each server takes its share of the total.
+    services.sort_by_key(|service| service.weight != 0);
+    let total: u32 = services
+        .iter()
+        .map(|service| u32::from(service.weight))
+        .sum();
+    let pick = if total == 0 { 0 } else { random % (total + 1) };
+    let mut running = 0;
+    services.into_iter().find(|service| {
+        running += u32::from(service.weight);
+        running >= pick
+    })
+}
+
+/// The answer records of `kind` in a DNS response message (RFC 1035
+/// section 4.1).
 #[cfg_attr(not(any(res_query, android_resolver, test)), allow(dead_code))]
-fn exchanges_in_message(message: &[u8]) -> Option<Vec<(u16, String)>> {
+fn records_in_message(message: &[u8], kind: u16) -> Option<Vec<Record>> {
     let header = message.get(..12)?;
     // A response, with no error.
     if header[2] & 0x80 == 0 || header[3] & 0x0f != 0 {
@@ -84,32 +185,63 @@ fn exchanges_in_message(message: &[u8]) -> Option<Vec<(u16, String)>> {
     for _ in 0..questions {
         at = read_name(message, at)?.1 + 4;
     }
-    let mut exchanges = Vec::new();
+    let mut records = Vec::new();
     for _ in 0..answers {
         let (_, after_name) = read_name(message, at)?;
         let fixed = message.get(after_name..after_name + 10)?;
-        let kind = u16::from_be_bytes([fixed[0], fixed[1]]);
+        let found = u16::from_be_bytes([fixed[0], fixed[1]]);
         let class = u16::from_be_bytes([fixed[2], fixed[3]]);
         let length = usize::from(u16::from_be_bytes([fixed[8], fixed[9]]));
         let data = after_name + 10;
         message.get(data..data + length)?;
-        if kind == TYPE_MX && class == CLASS_IN && length >= 3 {
-            let preference = u16::from_be_bytes([message[data], message[data + 1]]);
-            let (host, _) = read_name(message, data + 2)?;
-            exchanges.push((preference, host));
+        if found == kind && class == CLASS_IN {
+            // A record that doesn't parse is skipped, as resolvers do.
+            records.extend(record_at(message, kind, data, data + length));
         }
         at = data + length;
     }
-    Some(exchanges)
+    Some(records)
 }
 
-/// An MX record's data on its own, as Apple's resolver hands it over: the
-/// preference, then the host with no compression.
+/// A record's data on its own, as Apple's resolver hands it over, with its
+/// names uncompressed.
 #[cfg_attr(not(any(apple_resolver, test)), allow(dead_code))]
-fn exchange_in_record(data: &[u8]) -> Option<(u16, String)> {
-    let preference = u16::from_be_bytes([*data.first()?, *data.get(1)?]);
-    let (host, end) = read_name(data, 2)?;
-    (end == data.len()).then_some((preference, host))
+fn record_in_data(kind: u16, data: &[u8]) -> Option<Record> {
+    record_at(data, kind, 0, data.len())
+}
+
+/// The record of `kind` whose data runs from `start` to `end` in `message`.
+fn record_at(message: &[u8], kind: u16, start: usize, end: usize) -> Option<Record> {
+    let data = message.get(start..end)?;
+    let number = |at: usize| Some(u16::from_be_bytes([*data.get(at)?, *data.get(at + 1)?]));
+    // A name inside the data has to end where the data does.
+    let name_at = |at: usize| {
+        let (name, after) = read_name(message, start + at)?;
+        (after == end).then_some(name)
+    };
+    match kind {
+        TYPE_MX => Some(Record::Mx {
+            preference: number(0)?,
+            host: name_at(2)?,
+        }),
+        TYPE_SRV => Some(Record::Srv(Service {
+            priority: number(0)?,
+            weight: number(2)?,
+            port: number(4)?,
+            target: name_at(6)?,
+        })),
+        TYPE_TXT => {
+            let mut strings = Vec::new();
+            let mut at = 0;
+            while at < data.len() {
+                let length = usize::from(data[at]);
+                strings.push(data.get(at + 1..at + 1 + length)?.to_vec());
+                at += 1 + length;
+            }
+            Some(Record::Txt(strings))
+        }
+        _ => None,
+    }
 }
 
 /// The domain name at `at` (RFC 1035 section 4.1.4), in lowercase, and where

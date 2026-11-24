@@ -246,6 +246,17 @@ the way, so **Connect account** waits until you check the server names and tick
 **I checked these servers and trust them**. Your other accounts on the same domain, and
 Gmail's servers for a Gmail address, fill in the form without a lookup.
 
+Adding a CalDAV calendar or connecting CardDAV contacts to one of these accounts
+fills in the server address the same way. The provider's configuration file
+comes first, then the domain's CalDAV or CardDAV records in DNS (RFC 6764), and
+then the domain's own `/.well-known/caldav` or `/.well-known/carddav` address
+over HTTPS. Only servers that use TLS are filled in, and the DNS step is skipped
+while a proxy is set. A DNS record that points to a server outside the
+address's domain could have been forged, so **Connect** waits until you tick
+**I checked this server and trust it**. Google and Microsoft accounts reach
+their own calendars and contacts through their sign-in, so their dialogs stay
+empty.
+
 ## Advanced account settings
 
 When you add or edit an IMAP or POP3 account, **Advanced settings** at the end

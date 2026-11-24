@@ -27,7 +27,7 @@ import { Button } from "../components/button.slint";
 import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
 import { IconButton, LineEdit, RadioButton, Switch } from "../components/controls.slint";
 import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
-import { AccountDiscovery, AccountDiscoveryNotice } from "../account-discovery.slint";
+import { AccountDiscovery, AccountDiscoveryNotice, DavLookup, DavLookupNotice } from "../account-discovery.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, SettingsTextRow, ShortcutRow, ShortcutSection } from "../components/settings-components.slint";
@@ -1277,6 +1277,7 @@ export component SettingsDialog inherits Rectangle {
         root.caldav_url = "";
         root.caldav_username = account.username != "" ? account.username : account.email;
         root.caldav_password = "";
+        DavLookup.look-up(account.id, "calendar");
     }
 
     function edit-caldav(account: AccountRow, connection: CalendarConnectionRow) {
@@ -1286,12 +1287,14 @@ export component SettingsDialog inherits Rectangle {
         root.caldav_url = connection.base_url;
         root.caldav_username = connection.username;
         root.caldav_password = "";
+        DavLookup.stop();
     }
 
     function close-caldav-settings() {
         root.caldav_account_id = -1;
         root.caldav_connection_id = -1;
         root.caldav_password = "";
+        DavLookup.stop();
     }
 
     function open-carddav-settings(account: AccountRow) {
@@ -1302,12 +1305,18 @@ export component SettingsDialog inherits Rectangle {
             : account.username != "" ? account.username : account.email;
         root.carddav_password = "";
         root.carddav_manage_existing = account.carddav_connected;
+        if account.carddav_connected || account.carddav_url != "" {
+            DavLookup.stop();
+        } else {
+            DavLookup.look-up(account.id, "contacts");
+        }
     }
 
     function close-carddav-settings() {
         root.carddav_account_id = -1;
         root.carddav_password = "";
         root.carddav_manage_existing = false;
+        DavLookup.stop();
     }
 
     function confirm-calendar-removal(account: AccountRow, connection: CalendarConnectionRow) {
@@ -4359,6 +4368,10 @@ export component SettingsDialog inherits Rectangle {
                                     placeholder: @tr("https://calendar.example.com/");
                                     label-color: root.secondary-text;
                                 }
+                                if root.caldav_connection_id <= 0 && DavLookup.shows(root.caldav_url) : DavLookupNotice {
+                                    enabled: !root.caldav_connecting;
+                                    text-color: root.secondary-text;
+                                }
                                 Text {
                                     height: self.preferred-height;
                                     text: @tr("To sync one calendar, such as a shared mailbox's, enter that calendar's own address.");
@@ -4406,7 +4419,7 @@ export component SettingsDialog inherits Rectangle {
                                 height: parent.height;
                                 text: root.caldav_connecting ? @tr("Connecting…") : root.caldav_connection_id > 0 ? @tr("Reconnect") : @tr("Connect");
                                 primary: true;
-                                enabled: !root.caldav_connecting && root.caldav_url != "" && (root.caldav_connection_id > 0 || root.caldav_password != "");
+                                enabled: !root.caldav_connecting && root.caldav_url != "" && (root.caldav_connection_id > 0 || root.caldav_password != "") && (root.caldav_connection_id > 0 || DavLookup.ready(root.caldav_url));
                                 clicked => { root.connect_caldav(root.caldav_account_id, root.caldav_connection_id, root.caldav_url, root.caldav_username, root.caldav_password); }
                             }
                         }
@@ -4509,6 +4522,10 @@ export component SettingsDialog inherits Rectangle {
                                     placeholder: @tr("https://contacts.example.com/");
                                     label-color: root.secondary-text;
                                 }
+                                if !root.carddav_manage_existing && DavLookup.shows(root.carddav_url) : DavLookupNotice {
+                                    enabled: !root.carddav_connecting;
+                                    text-color: root.secondary-text;
+                                }
                                 FormField {
                                     enabled: !root.carddav_connecting;
                                     height: self.preferred-height;
@@ -4553,7 +4570,7 @@ export component SettingsDialog inherits Rectangle {
                                 text: root.carddav_connecting ? @tr("Connecting…") : root.carddav_manage_existing ? @tr("Reconnect") : @tr("Connect");
                                 primary: true;
                                 // The server needs the password again even to reconnect.
-                                enabled: !root.carddav_connecting && root.carddav_url != "" && root.carddav_password != "";
+                                enabled: !root.carddav_connecting && root.carddav_url != "" && root.carddav_password != "" && (root.carddav_manage_existing || DavLookup.ready(root.carddav_url));
                                 clicked => { root.connect_carddav(root.carddav_account_id, root.carddav_url, root.carddav_username, root.carddav_password); }
                             }
                         }
@@ -4648,7 +4665,7 @@ export component SettingsDialog inherits Rectangle {
                                     FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Email address"); value <=> root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.suggest-servers(value); } }
                                     FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Username"); value <=> root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; }
                                 }
-                                if !root.account_editing : AccountDiscoveryNotice { enabled: !root.account_setup_in_progress; text-color: root.secondary-text; }
+                                if !root.account_editing && AccountDiscovery.state != "" : AccountDiscoveryNotice { enabled: !root.account_setup_in_progress; text-color: root.secondary-text; }
                                 FormField { enabled: !root.account_setup_in_progress; height: 57px; label: root.account_protocol == "jmap" ? @tr("Password, app password, or API token") : @tr("Password or app password"); value <=> root.account_password; placeholder: @tr("Stored securely in your system keyring"); input-type: password; label-color: root.secondary-text; }
                                 // POP3 mail exists only on this device, so an account
                                 // never switches to or from POP3.
