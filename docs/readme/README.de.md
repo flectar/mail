@@ -42,7 +42,7 @@ Flectar Mail ist eine schlanke, native Anwendung für E-Mails, Kalender und Kont
 | Vorteil | Details |
 | --- | --- |
 | **Schnell vom ersten Klick an** | Eine native Oberfläche und der bevorzugte Zugriff auf lokale Daten bringen dich zum Posteingang, ohne auf eine Browserlaufzeit warten zu müssen. |
-| **Etwa 20 MB privater Speicher im Leerlauf** | Etwa 85 MB samt Programmcode und Bibliotheken, und ein Zwölftel des privaten Speichers, den Thunderbird mit demselben Postfach belegt. Siehe [Leistung](#-leistung). |
+| **Etwa 20 MB privater Speicher im Leerlauf** | Etwa 105 MB samt Programmcode und Bibliotheken, und ein Zwölftel des privaten Speichers, den Thunderbird mit demselben Postfach belegt. Siehe [Leistung](#-leistung). |
 | **Alles an einem Ort** | Wechsle zwischen E-Mails, Kalendern und Kontakten, ohne verschiedene Anwendungen zusammenstellen zu müssen. |
 | **Für die Offline-Nutzung entwickelt** | Postfach und Kalender werden lokal gespeichert. Synchronisierte Daten bleiben so auch ohne Verbindung nutzbar. |
 | **Für deine Konten** | Gmail, Outlook und Microsoft 365 oder Dienste auf Basis von IMAP, POP3, SMTP, JMAP, CalDAV und CardDAV. |
@@ -56,13 +56,13 @@ Flectar Mail ist eine schlanke, native Anwendung für E-Mails, Kalender und Kont
 
 | Im Leerlauf, gleiches Postfach | Privater Speicher | Einschließlich Code und Bibliotheken (PSS) | E-Mail-Darstellung |
 | --- | ---: | ---: | --- |
-| **Flectar Mail** | **17,2 – 17,4 MiB** | **79,1 – 80,0 MiB** | Blitz |
-| Geary 46 | 126,1 – 126,2 MiB (+629 %) | 309,6 – 311,4 MiB (+290 %) | WebKitGTK |
-| Evolution 3.56 | 191,0 – 192,2 MiB (+1.008 %) | 395,0 – 395,9 MiB (+397 %) | WebKitGTK |
-| Thunderbird 159 | 244,1 – 248,1 MiB (+1.323 %) | 424,4 – 427,1 MiB (+435 %) | Gecko |
-| Betterbird 153 | 243,9 – 247,8 MiB (+1.321 %) | 411,9 – 419,7 MiB (+423 %) | Gecko |
-| Mailspring 1.26 | 311,4 – 314,9 MiB (+1.710 %) | 551,1 – 551,7 MiB (+593 %) | Chromium |
-| Aerion 0.3.6 | 421,9 – 437,3 MiB (+2.383 %) | 660,4 – 678,0 MiB (+741 %) | WebKitGTK |
+| **Flectar Mail** | **19,6 – 19,8 MiB** | **101,6 – 101,8 MiB** | Blitz |
+| Geary 46 | 126,1 – 126,2 MiB (+540 %) | 309,6 – 311,4 MiB (+205 %) | WebKitGTK |
+| Evolution 3.56 | 191,0 – 192,2 MiB (+873 %) | 395,0 – 395,9 MiB (+289 %) | WebKitGTK |
+| Thunderbird 159 | 244,1 – 248,1 MiB (+1.149 %) | 424,4 – 427,1 MiB (+318 %) | Gecko |
+| Betterbird 153 | 243,9 – 247,8 MiB (+1.148 %) | 411,9 – 419,7 MiB (+309 %) | Gecko |
+| Mailspring 1.26 | 311,4 – 314,9 MiB (+1.490 %) | 551,1 – 551,7 MiB (+442 %) | Chromium |
+| Aerion 0.3.6 | 421,9 – 437,3 MiB (+2.081 %) | 660,4 – 678,0 MiB (+558 %) | WebKitGTK |
 
 Gemessen unter Linux mit einem IMAP-Konto (860 Nachrichten), geöffnetem Posteingang und angezeigtem HTML-Newsletter, 60 Sekunden nach dem Start und mit dem voreingestellten CPU-Renderer. Jeder Wertebereich umfasst zwei Messungen, und jeder Prozentwert zeigt, wie viel mehr Speicher eine App als Flectar Mail belegt, berechnet aus den Mittelwerten dieser Messungen. Mitgezählt sind alle Prozesse, die eine App startet. Privater Speicher entspricht dem Wert, den der Windows-Task-Manager als **Arbeitsspeicher** anzeigt. Unter Windows mit 7 echten Konten und etwa 69.000 ungelesenen Nachrichten zeigte der Task-Manager 37,8 MiB bei geöffnetem Fenster und 4,2 MiB, sobald es in den Infobereich geschlossen war. Erfahre, [wie wir messen und wie du selbst nachmessen kannst](../performance.md).
 
