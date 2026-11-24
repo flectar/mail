@@ -25,6 +25,13 @@ export component RecipientRow inherits Rectangle {
 
     forward-focus: field;
 
+    // Typing goes on after text the row was given, such as the address a
+    // suggestion completed (#476).
+    public function move-caret-to-end() {
+        // Offsets past the end of the text land at its end.
+        field.set-selection-offsets(2147483647, 2147483647);
+    }
+
     height: max(40px, min(field.preferred-height, root.max-text-height) + 2 * root.inset);
     background: root.background-color;
 
