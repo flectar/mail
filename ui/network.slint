@@ -267,7 +267,7 @@ export component NetworkPage inherits VerticalLayout {
                     ? @tr("The proxy your system is set up with. Mail servers go through its SOCKS proxy only, as web proxies often refuse them.")
                     : Network.mode-index == 1
                     ? @tr("Every connection goes straight to its server.")
-                    : @tr("Every connection goes through this proxy. If it can't be reached, Flectar Mail doesn't connect without it.");
+                    : @tr("Every connection Flectar Mail makes goes through this proxy. If it can't be reached, Flectar Mail doesn't connect without it. Your system may still check certificates with their issuers directly.");
                 choices: [@tr("System settings"), @tr("No proxy"), @tr("This proxy")];
                 selected-index <=> Network.mode-index;
                 title-color: root.body-text;

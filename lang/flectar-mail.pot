@@ -11441,8 +11441,9 @@ msgstr ""
 
 #: ui/network.slint:270
 msgid ""
-"Every connection goes through this proxy. If it can't be reached, Flectar "
-"Mail doesn't connect without it."
+"Every connection Flectar Mail makes goes through this proxy. If it can't be "
+"reached, Flectar Mail doesn't connect without it. Your system may still "
+"check certificates with their issuers directly."
 msgstr ""
 
 #: ui/network.slint:271
