@@ -64,8 +64,13 @@ impl LoopbackServer {
         format!("http://127.0.0.1:{}/", self.port)
     }
 
-    /// Wait (with timeout) for the browser redirect carrying ?code=.
-    pub async fn wait_for_code(&self, timeout: std::time::Duration) -> Result<AuthCode> {
+    /// Wait (with timeout) for the browser redirect carrying ?code= for the
+    /// sign-in whose state is `expected_state`.
+    pub async fn wait_for_code(
+        &self,
+        expected_state: &str,
+        timeout: std::time::Duration,
+    ) -> Result<AuthCode> {
         let fut = async {
             loop {
                 let (mut stream, _) = match &self.v6 {
@@ -75,7 +80,7 @@ impl LoopbackServer {
                     },
                     None => self.v4.accept().await?,
                 };
-                if let Some(result) = handle_connection(&mut stream).await? {
+                if let Some(result) = handle_connection(&mut stream, expected_state).await? {
                     return Ok(result);
                 }
                 // Ignore stray/speculative requests (favicon etc.) and keep
@@ -91,7 +96,10 @@ impl LoopbackServer {
 /// Parse one loopback request. Returns `Ok(Some(code))` on a callback carrying
 /// a code, `Err` if the provider redirected back with an error, and `Ok(None)`
 /// for connections we should ignore (dropped/speculative/stray requests).
-async fn handle_connection(stream: &mut TcpStream) -> Result<Option<AuthCode>> {
+async fn handle_connection(
+    stream: &mut TcpStream,
+    expected_state: &str,
+) -> Result<Option<AuthCode>> {
     let mut buf = vec![0u8; 8192];
     // Browsers open speculative connections to localhost and drop them without
     // sending anything; a reset or empty read must not abort the whole sign-in
@@ -113,8 +121,8 @@ async fn handle_connection(stream: &mut TcpStream) -> Result<Option<AuthCode>> {
     let req = String::from_utf8_lossy(&buf[..n]);
     let first_line = req.lines().next().unwrap_or("");
     // GET /?code=...&state=... HTTP/1.1
-    let path = first_line.split_whitespace().nth(1).unwrap_or("");
-    let query = path.split_once('?').map(|x| x.1).unwrap_or("");
+    let target = first_line.split_whitespace().nth(1).unwrap_or("");
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let mut code = None;
     let mut state = None;
     let mut error = None;
@@ -129,6 +137,15 @@ async fn handle_connection(stream: &mut TcpStream) -> Result<Option<AuthCode>> {
             "error" => error = Some(v),
             _ => {}
         }
+    }
+    // Only the provider's redirect for this sign-in counts. Any program on
+    // this device can reach the listener, so a request on another path or
+    // without this sign-in's state neither finishes nor ends it.
+    if path != "/" || state.as_deref() != Some(expected_state) {
+        let resp = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        let _ = stream.write_all(resp.as_bytes()).await;
+        let _ = stream.shutdown().await;
+        return Ok(None);
     }
     let body = if code.is_some() {
         "<html><body style=\"font-family:sans-serif;padding:4rem;text-align:center\">\
@@ -186,6 +203,35 @@ fn urldecode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn request(port: u16, target: &str) {
+        let mut tcp = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        tcp.write_all(format!("GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        let mut reply = Vec::new();
+        let _ = tcp.read_to_end(&mut reply).await;
+    }
+
+    #[tokio::test]
+    async fn only_this_sign_ins_redirect_counts() {
+        let server = LoopbackServer::bind().await.unwrap();
+        let port = server.port;
+        let waiting = tokio::spawn(async move {
+            server
+                .wait_for_code("expected", std::time::Duration::from_secs(10))
+                .await
+        });
+        // Another program's requests neither end the sign-in nor finish it.
+        request(port, "/?error=access_denied&state=other").await;
+        request(port, "/?error=access_denied").await;
+        request(port, "/?code=forged&state=other").await;
+        request(port, "/elsewhere?code=forged&state=expected").await;
+        request(port, "/?code=real&state=expected").await;
+        let code = waiting.await.unwrap().unwrap();
+        assert_eq!(code.code, "real");
+        assert_eq!(code.state.as_deref(), Some("expected"));
+    }
 
     #[tokio::test]
     async fn provider_loopback_uris_use_the_expected_host_and_dynamic_port() {

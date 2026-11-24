@@ -209,7 +209,7 @@ impl OAuthRedirectSession for LoopbackRedirectSession {
 
     async fn wait(mut self: Box<Self>, timeout: Duration) -> Result<AuthCode> {
         tokio::select! {
-            result = self.server.wait_for_code(timeout) => result,
+            result = self.server.wait_for_code(&self.expected_state, timeout) => result,
             result = tokio::time::timeout(timeout, &mut self.manual_redirect) => {
                 result
                     .map_err(|_| CoreError::Auth("sign-in timed out".into()))?
