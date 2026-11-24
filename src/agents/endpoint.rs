@@ -19,6 +19,23 @@ pub(crate) use unix::{Listener, connect};
 #[cfg(windows)]
 pub(crate) use windows::{Listener, connect};
 
+/// Hands over the pipe instance `waiting` once a client has `connected` to
+/// it, with a new instance from `create` waiting in its place first, so the
+/// pipe name never disappears while the app listens. An instance whose
+/// client left before the app took it can't take another client, so it's
+/// replaced as well, and the error goes back: the next call waits on the new
+/// instance. Kept apart from the pipes so it can be tested anywhere.
+#[cfg(any(windows, test))]
+fn hand_over<P>(
+    waiting: &mut P,
+    connected: std::io::Result<()>,
+    create: impl FnOnce() -> std::io::Result<P>,
+) -> std::io::Result<P> {
+    let next = create()?;
+    let taken = std::mem::replace(waiting, next);
+    connected.map(|()| taken)
+}
+
 #[cfg(unix)]
 mod unix {
     use super::endpoint_name;
@@ -245,12 +262,14 @@ mod windows {
 
         /// The next connection. Only this user can open the pipe.
         pub(crate) async fn accept(&self) -> io::Result<NamedPipeServer> {
-            let mut next = self.next.lock().await;
-            next.connect().await?;
-            // Create the next instance before handing this one off, so the
-            // pipe name never disappears while the app listens.
-            let following = create(&self.name, &self.security, false)?;
-            Ok(std::mem::replace(&mut *next, following))
+            let mut waiting = self.next.lock().await;
+            // A client that closes its end before this connects leaves the
+            // instance unable to take another, and every later client would
+            // find the pipe busy, so a failed instance is replaced too.
+            let connected = waiting.connect().await;
+            super::hand_over(&mut *waiting, connected, || {
+                create(&self.name, &self.security, false)
+            })
         }
     }
 
@@ -290,5 +309,42 @@ mod windows {
         };
         pipe_server(&client, Peer::SameUser)?;
         Ok(client)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io;
+
+    #[test]
+    fn a_client_that_leaves_early_never_keeps_the_next_one_out() {
+        // Pipe instances, numbered as they're made. The first one waits.
+        let mut made = 1;
+        let mut waiting = 1;
+        let mut create = || {
+            made += 1;
+            Ok(made)
+        };
+        // A client left before the app took it, so its instance can't take
+        // another. A new one waits in its place.
+        let left = hand_over(
+            &mut waiting,
+            Err(io::ErrorKind::BrokenPipe.into()),
+            &mut create,
+        );
+        assert!(left.is_err());
+        assert_eq!(waiting, 2);
+        // The next client connects to that one and is handed over, with
+        // another instance waiting for the one after.
+        assert_eq!(hand_over(&mut waiting, Ok(()), &mut create).unwrap(), 2);
+        assert_eq!(waiting, 3);
+        // Without a new instance, the connected one stays, for the next call
+        // to hand over.
+        let failed = hand_over(&mut waiting, Ok(()), || {
+            Err::<i32, _>(io::Error::other("out of pipes"))
+        });
+        assert!(failed.is_err());
+        assert_eq!(waiting, 3);
     }
 }

@@ -27,6 +27,7 @@ import { Button } from "../components/button.slint";
 import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
 import { IconButton, LineEdit, RadioButton, Switch } from "../components/controls.slint";
 import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
+import { AccountDiscovery, AccountDiscoveryNotice, DavLookup, DavLookupNotice } from "../account-discovery.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, SettingsTextRow, ShortcutRow, ShortcutSection } from "../components/settings-components.slint";
@@ -571,6 +572,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> carddav_username: "";
     in-out property <string> carddav_password: "";
     in-out property <bool> carddav_manage_existing: false;
+    in property <bool> carddav_connecting: false;
     in-out property <string> incoming_security: "tls";
     in-out property <string> smtp_security: "tls";
     in-out property <string> trusted_certificate_pem;
@@ -1116,6 +1118,7 @@ export component SettingsDialog inherits Rectangle {
 
     private property <bool> account_form_valid: root.account_email != ""
         && root.account_password != ""
+        && AccountDiscovery.ready
         && (root.account_protocol == "jmap" || (
             root.incoming_host != ""
             && root.incoming_port != ""
@@ -1177,11 +1180,15 @@ export component SettingsDialog inherits Rectangle {
             root.incoming_port = MailPorts.incoming(protocol, root.incoming_security);
         }
         root.account_protocol = protocol;
+        // Settings found for the address may list this protocol's server.
+        root.suggest-servers(root.account_email);
     }
 
     function open_new_mail_account() {
         root.account_editing = false;
         root.account_email = "";
+        AccountDiscovery.state = "";
+        AccountDiscovery.confirmed = false;
         root.account_username = "";
         root.account_password = "";
         root.account_protocol = "imap";
@@ -1270,6 +1277,7 @@ export component SettingsDialog inherits Rectangle {
         root.caldav_url = "";
         root.caldav_username = account.username != "" ? account.username : account.email;
         root.caldav_password = "";
+        DavLookup.look-up(account.id, "calendar");
     }
 
     function edit-caldav(account: AccountRow, connection: CalendarConnectionRow) {
@@ -1279,12 +1287,36 @@ export component SettingsDialog inherits Rectangle {
         root.caldav_url = connection.base_url;
         root.caldav_username = connection.username;
         root.caldav_password = "";
+        DavLookup.stop();
     }
 
     function close-caldav-settings() {
         root.caldav_account_id = -1;
         root.caldav_connection_id = -1;
         root.caldav_password = "";
+        DavLookup.stop();
+    }
+
+    function open-carddav-settings(account: AccountRow) {
+        root.carddav_account_id = account.id;
+        root.carddav_url = account.carddav_url;
+        // Like a new calendar, a new address book signs in as the mail account.
+        root.carddav_username = account.carddav_connected ? account.carddav_username
+            : account.username != "" ? account.username : account.email;
+        root.carddav_password = "";
+        root.carddav_manage_existing = account.carddav_connected;
+        if account.carddav_connected || account.carddav_url != "" {
+            DavLookup.stop();
+        } else {
+            DavLookup.look-up(account.id, "contacts");
+        }
+    }
+
+    function close-carddav-settings() {
+        root.carddav_account_id = -1;
+        root.carddav_password = "";
+        root.carddav_manage_existing = false;
+        DavLookup.stop();
     }
 
     function confirm-calendar-removal(account: AccountRow, connection: CalendarConnectionRow) {
@@ -3332,13 +3364,7 @@ export component SettingsDialog inherits Rectangle {
                                                     height: 34px;
                                                     text: !account.carddav_connected ? @tr("Connect")
                                                         : account.carddav_status == "" ? @tr("Manage") : @tr("Fix CardDAV");
-                                                    clicked => {
-                                                        root.carddav_account_id = account.id;
-                                                        root.carddav_url = account.carddav_url;
-                                                        root.carddav_username = account.carddav_username;
-                                                        root.carddav_password = "";
-                                                        root.carddav_manage_existing = account.carddav_connected;
-                                                    }
+                                                    clicked => { root.open-carddav-settings(account); }
                                                 }
                                             }
                                         }
@@ -3418,17 +3444,6 @@ export component SettingsDialog inherits Rectangle {
                                     if root.custom_oauth_open && root.compact : VerticalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text <=> root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); } LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text <=> root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail settings"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
                                     if root.custom_oauth_open : HorizontalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text <=> root.ms_client_id; placeholder-text: @tr("Microsoft Entra desktop client ID"); } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Outlook"); clicked => { root.save_oauth_app("microsoft", root.ms_client_id, ""); } } }
                                     if root.custom_oauth_open : Text { text: @tr("Outlook public desktop clients use PKCE and do not need a client secret."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
-                                }
-                            }
-                            Rectangle {
-                                visible: root.carddav_account_id > 0;
-                                height: max(206px, carddav-fields.preferred-height);
-                                carddav-card := SettingsCard { title: @tr("Connect CardDAV"); description: @tr("Sync contacts with a standards-compliant CardDAV server."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
-                                carddav-fields := VerticalBox {
-                                    padding-top: carddav-card.content-y + 12px; padding-right: 20px; padding-bottom: 16px; padding-left: 20px; spacing: 8px;
-                                    LineEdit { text <=> root.carddav_url; placeholder-text: @tr("https://contacts.example.com/"); }
-                                    HorizontalBox { spacing: 8px; LineEdit { text <=> root.carddav_username; placeholder-text: @tr("Username"); } LineEdit { text <=> root.carddav_password; input-type: password; placeholder-text: @tr("App password"); } }
-                                    HorizontalBox { spacing: 8px; if root.carddav_manage_existing : Button { text: @tr("Disconnect"); clicked => { root.disconnect_carddav(root.carddav_account_id); root.carddav_account_id = -1; root.carddav_password = ""; root.carddav_manage_existing = false; } } Rectangle { horizontal-stretch: 1; } Button { text: @tr("Cancel"); clicked => { root.carddav_account_id = -1; root.carddav_password = ""; root.carddav_manage_existing = false; } } Button { text: root.carddav_manage_existing ? @tr("Reconnect") : @tr("Connect"); primary: true; clicked => { root.connect_carddav(root.carddav_account_id, root.carddav_url, root.carddav_username, root.carddav_password); } } }
                                 }
                             }
                         }
@@ -4353,6 +4368,10 @@ export component SettingsDialog inherits Rectangle {
                                     placeholder: @tr("https://calendar.example.com/");
                                     label-color: root.secondary-text;
                                 }
+                                if root.caldav_connection_id <= 0 && DavLookup.shows(root.caldav_url) : DavLookupNotice {
+                                    enabled: !root.caldav_connecting;
+                                    text-color: root.secondary-text;
+                                }
                                 Text {
                                     height: self.preferred-height;
                                     text: @tr("To sync one calendar, such as a shared mailbox's, enter that calendar's own address.");
@@ -4400,8 +4419,159 @@ export component SettingsDialog inherits Rectangle {
                                 height: parent.height;
                                 text: root.caldav_connecting ? @tr("Connecting…") : root.caldav_connection_id > 0 ? @tr("Reconnect") : @tr("Connect");
                                 primary: true;
-                                enabled: !root.caldav_connecting && root.caldav_url != "" && (root.caldav_connection_id > 0 || root.caldav_password != "");
+                                enabled: !root.caldav_connecting && root.caldav_url != "" && (root.caldav_connection_id > 0 || root.caldav_password != "") && (root.caldav_connection_id > 0 || DavLookup.ready(root.caldav_url));
                                 clicked => { root.connect_caldav(root.caldav_account_id, root.caldav_connection_id, root.caldav_url, root.caldav_username, root.caldav_password); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Opens over the page, where the Contacts row's button is, instead of
+        // below every account card. Made only while it shows.
+        if root.carddav_account_id > 0 : Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: #00000088;
+            z: 900;
+            accessible-role: groupbox;
+            accessible-label: root.carddav_manage_existing ? @tr("CardDAV settings") : @tr("Connect CardDAV");
+
+            TouchArea { clicked => { root.close-carddav-settings(); } }
+
+            carddav-panel := Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(520px, parent.width - 24px);
+                // As tall as the form; a wrapped error or the Android
+                // keyboard makes the fields scroll instead.
+                height: min(carddav-column.preferred-height, parent.height - 24px);
+                background: root.surface;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: root.border-subtle;
+                drop-shadow-blur: 24px;
+                drop-shadow-offset-y: 8px;
+                drop-shadow-color: #00000055;
+
+                // Catches clicks on the card so they don't close it.
+                TouchArea {}
+
+                FocusScope {
+                    init => { carddav-url-input.focus(); }
+                    key-pressed(event) => {
+                        if event.text == Key.Escape {
+                            root.close-carddav-settings();
+                            return accept;
+                        }
+                        reject
+                    }
+
+                    carddav-column := VerticalBox {
+                        padding: 0px;
+                        padding-top: 22px;
+                        padding-right: 22px;
+                        padding-bottom: 20px;
+                        padding-left: 22px;
+                        spacing: 12px;
+
+                        HorizontalBox {
+                            padding: 0px;
+                            height: 46px;
+                            spacing: 12px;
+                            Rectangle {
+                                width: 44px;
+                                height: 44px;
+                                border-radius: 12px;
+                                background: root.accent-soft;
+                                Image { x: 11px; y: 11px; width: 22px; height: 22px; source: @image-url("../icons/lucide/outline/contacts.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
+                            }
+                            VerticalBox {
+                                padding: 0px;
+                                spacing: 2px;
+                                Text { text: root.carddav_manage_existing ? @tr("CardDAV settings") : @tr("Connect CardDAV"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; overflow: elide; }
+                                Text { text: @tr("Sync contacts with a standards-compliant CardDAV server."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            IconButton { width: 40px; height: 40px; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: root.secondary-text; idle-background: transparent; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.close-carddav-settings(); } }
+                        }
+
+                        // Keep the actions reachable when the Android keyboard
+                        // shrinks the window or a connection error wraps.
+                        carddav-scroll := ScrollView {
+                            vertical-stretch: 1;
+                            min-height: 0px;
+                            preferred-height: carddav-fields.preferred-height;
+                            content-width: self.visible-width;
+                            horizontal-scrollbar-policy: always-off;
+                            mouse-drag-pan-enabled: root.compact;
+                            carddav-fields := VerticalBox {
+                                x: 0px;
+                                y: 0px;
+                                padding: 0px;
+                                spacing: 12px;
+                                width: max(0px, carddav-scroll.visible-width - 12px);
+                                height: self.preferred-height;
+
+                                carddav-url-input := FormField {
+                                    enabled: !root.carddav_connecting;
+                                    height: self.preferred-height;
+                                    label: @tr("Server address");
+                                    value <=> root.carddav_url;
+                                    placeholder: @tr("https://contacts.example.com/");
+                                    label-color: root.secondary-text;
+                                }
+                                if !root.carddav_manage_existing && DavLookup.shows(root.carddav_url) : DavLookupNotice {
+                                    enabled: !root.carddav_connecting;
+                                    text-color: root.secondary-text;
+                                }
+                                FormField {
+                                    enabled: !root.carddav_connecting;
+                                    height: self.preferred-height;
+                                    label: @tr("Username");
+                                    value <=> root.carddav_username;
+                                    placeholder: @tr("Usually your email address");
+                                    label-color: root.secondary-text;
+                                }
+                                FormField {
+                                    enabled: !root.carddav_connecting;
+                                    height: self.preferred-height;
+                                    label: @tr("App password");
+                                    value <=> root.carddav_password;
+                                    placeholder: @tr("Stored securely in your system keyring");
+                                    input-type: password;
+                                    label-color: root.secondary-text;
+                                }
+
+                                if root.sync_status != "" : Text { text: root.sync_status; color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height; }
+                            }
+                        }
+
+                        HorizontalBox {
+                            padding: 0px;
+                            height: root.compact ? 44px : 34px;
+                            spacing: 8px;
+                            if root.carddav_manage_existing : Button {
+                                min-width: self.content-width;
+                                height: parent.height;
+                                text: @tr("Disconnect");
+                                enabled: !root.carddav_connecting;
+                                clicked => {
+                                    root.disconnect_carddav(root.carddav_account_id);
+                                    root.close-carddav-settings();
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Button { min-width: self.content-width; height: parent.height; text: @tr("Cancel"); clicked => { root.close-carddav-settings(); } }
+                            Button {
+                                min-width: self.content-width;
+                                height: parent.height;
+                                text: root.carddav_connecting ? @tr("Connecting…") : root.carddav_manage_existing ? @tr("Reconnect") : @tr("Connect");
+                                primary: true;
+                                // The server needs the password again even to reconnect.
+                                enabled: !root.carddav_connecting && root.carddav_url != "" && root.carddav_password != "" && (root.carddav_manage_existing || DavLookup.ready(root.carddav_url));
+                                clicked => { root.connect_carddav(root.carddav_account_id, root.carddav_url, root.carddav_username, root.carddav_password); }
                             }
                         }
                     }
@@ -4495,6 +4665,7 @@ export component SettingsDialog inherits Rectangle {
                                     FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Email address"); value <=> root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.suggest-servers(value); } }
                                     FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Username"); value <=> root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; }
                                 }
+                                if !root.account_editing && AccountDiscovery.state != "" : AccountDiscoveryNotice { enabled: !root.account_setup_in_progress; text-color: root.secondary-text; }
                                 FormField { enabled: !root.account_setup_in_progress; height: 57px; label: root.account_protocol == "jmap" ? @tr("Password, app password, or API token") : @tr("Password or app password"); value <=> root.account_password; placeholder: @tr("Stored securely in your system keyring"); input-type: password; label-color: root.secondary-text; }
                                 // POP3 mail exists only on this device, so an account
                                 // never switches to or from POP3.

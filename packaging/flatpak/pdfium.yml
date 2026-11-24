@@ -1,8 +1,9 @@
 # PDFium for the PDF preview, built from source the way Flathub's YACReader
-# package and Arch's libpdfium-nojs build it. JavaScript and XFA are left out,
-# and PDFium uses the runtime's freetype, HarfBuzz, ICU, lcms2, libjpeg,
-# libpng, OpenJPEG and zlib. Every revision below comes from the DEPS file of
-# the chromium/8044 branch, the release scripts/stage-pdfium.py downloads for
+# package and Arch's libpdfium-nojs build it. JavaScript, XFA and the
+# experimental Brotli decoder are left out, and PDFium uses the runtime's
+# freetype, HarfBuzz, ICU, lcms2, libjpeg, libpng, OpenJPEG and zlib. Every
+# revision below comes from the DEPS file of
+# the chromium/8179 branch, the release scripts/stage-pdfium.py downloads for
 # the other Linux packages.
 name: pdfium
 buildsystem: simple
@@ -23,7 +24,8 @@ build-commands:
   - >-
     gn gen out/Release --script-executable=python3 --args='is_clang=false
     use_sysroot=false is_debug=false symbol_level=0 pdf_enable_v8=false
-    pdf_enable_xfa=false treat_warnings_as_errors=false use_custom_libcxx=false
+    pdf_enable_xfa=false pdf_enable_brotli=false treat_warnings_as_errors=false
+    use_custom_libcxx=false
     pdf_is_standalone=true is_component_build=true pdf_use_partition_alloc=false
     pdf_use_libyuv=false pdf_bundle_freetype=false use_system_freetype=true
     use_system_harfbuzz=true use_system_lcms2=true use_system_libjpeg=true
@@ -38,15 +40,15 @@ build-commands:
 sources:
   - type: git
     url: https://pdfium.googlesource.com/pdfium
-    # branch chromium/8044
-    commit: f91ca5a72358bb0b00b4da9481b21fe668157614
+    # branch chromium/8179
+    commit: 66ed17ef8fa00526ba3e2633361b6cc312321dc9
   - type: git
     url: https://chromium.googlesource.com/chromium/src/build.git
-    commit: 2cd94c0abeada712aeea6906d99021913c9fc28d
+    commit: 0c62137b8623a3fab2c6aa5d7c94f719b3aa31f6
     dest: build
   - type: git
     url: https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp
-    commit: 435e7d977fb36fb47854a4c552c0706dad0bd7cf
+    commit: 56722f9eb6f40fb1a140caffd36e8f1f61b57aaf
     dest: third_party/abseil-cpp
   - type: git
     url: https://chromium.googlesource.com/chromium/src/third_party/simdutf
@@ -58,10 +60,14 @@ sources:
     dest: third_party/dragonbox/src
   - type: git
     url: https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git
-    commit: 34164f547b7df3f5d794ff67e9f885c36819ebfc
+    commit: 42f254836ee416ffcf2f4e6576260003ac33d48c
     dest: third_party/fast_float/src
+  - type: git
+    url: https://chromium.googlesource.com/external/github.com/google/highway.git
+    commit: 2607d3b5b0113992fe84d3848859eae13b3b52c1
+    dest: third_party/highway/src
   # Chromium's tools/generate_shim_headers/generate_shim_headers.py at the
-  # chromium/8044 branch head (f7a30920701e9b5a44c8ab55df9d21fb75e8d2e2),
+  # chromium/8179 branch head (41ae236192867501058795d2ccdb07b74aa09d64),
   # under Chromium's BSD license. It is kept here because Chromium's web view
   # of single files refuses automated downloads at times.
   - type: file
@@ -84,6 +90,6 @@ modules:
       # The gn_version in the same DEPS file.
       - type: git
         url: https://gn.googlesource.com/gn
-        commit: 150a9d6ba0aa7f407aa4feeabc5f03ce9aa7e04b
+        commit: 98f6dd2be85d0eba8f31ee3ad1def5402383cff3
         # gen.py names the version after `git describe`.
         disable-shallow-clone: true

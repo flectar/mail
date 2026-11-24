@@ -189,6 +189,7 @@ final class Notifications {
         Intent intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                 .putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName())
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        LauncherIconChoice.openingOwnScreen();
         context.startActivity(intent);
     }
 
@@ -197,6 +198,7 @@ final class Notifications {
         Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                 .setData(Uri.fromParts("package", context.getPackageName(), null))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        LauncherIconChoice.openingOwnScreen();
         context.startActivity(intent);
     }
 

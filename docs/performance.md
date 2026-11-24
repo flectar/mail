@@ -6,14 +6,15 @@ them yourself.
 
 ## Results
 
-Measured on 5 November 2026 in one session, on the setup below: the same
-mailbox and window size, a fresh launch, the same HTML newsletter displayed and
-a sample 60 seconds after launch. Each range covers two runs. Every process an
-app starts is counted, and RSS is summed over them.
+Flectar Mail was measured on 24 November 2026 and the other apps on 5 November
+2026, on the setup below: the same mailbox and window size, a fresh launch, the
+same HTML newsletter displayed and a sample 60 seconds after launch. Each range
+covers two runs. Every process an app starts is counted, and RSS is summed over
+them.
 
 | Memory (MiB) | Private | PSS | RSS | Processes | Renders email with |
 | --- | ---: | ---: | ---: | ---: | --- |
-| Flectar Mail | 17.2 – 17.4 | 79.1 – 80.0 | 85.9 – 86.6 | 1 | Blitz, CPU renderer |
+| Flectar Mail | 19.6 – 19.8 | 101.6 – 101.8 | 108.7 – 108.8 | 1 | Blitz, CPU renderer |
 | Geary 46.0 | 126.1 – 126.2 | 309.6 – 311.4 | 446.4 – 447.3 | 8 | WebKitGTK 2.54 |
 | Evolution 3.56.2¹ | 191.0 – 192.2 | 395.0 – 395.9 | 697.5 – 698.4 | 12 | WebKitGTK 2.54 |
 | Thunderbird 159.0 | 244.1 – 248.1 | 424.4 – 427.1 | 563.2 – 567.8 | 3 | Gecko |
@@ -40,7 +41,7 @@ app starts is counted, and RSS is summed over them.
 - **Folders.** All six folders were subscribed, so every client listed the same
   folders.
 - **Fonts.** The test machine has 8 font faces; a desktop usually has hundreds.
-  With a 358-face font set, Flectar Mail measured 18.3 – 18.5 MiB private. The
+  With a 358-face font set, Flectar Mail measured 20.6 – 20.7 MiB private. The
   other apps weren't re-measured with it.
 
 Geary and Evolution are the Debian 13 packages; Thunderbird, Betterbird,
@@ -52,17 +53,20 @@ each with a new profile and default settings.
 The same machine and mailbox, before and after the changes in
 [#191](https://github.com/flectar/mail/pull/191),
 [#192](https://github.com/flectar/mail/pull/192) and
-[#194](https://github.com/flectar/mail/pull/194). Each figure is private memory
-from one run, or a range over two.
+[#194](https://github.com/flectar/mail/pull/194) on 5 November 2026, and on 24
+November 2026. Each figure is private memory from one run, or a range over two.
 
-| Flectar Mail (MiB) | Before | After |
-| --- | ---: | ---: |
-| Welcome screen, no account | 8.2 | 7.9 |
-| Inbox and newsletter, as in the results above | 18.5 – 18.6 | 17.2 – 17.4 |
-| The same at display scale 2 | 26.1 | 20.8 – 20.9 |
-| First sync, inbox list, 60 s after the last write | 20.2 | 14.7 |
-| First sync with the newsletter open, 60 s after the last write | 25.3 | 20.5 |
+| Flectar Mail (MiB) | Before | After | 24 November |
+| --- | ---: | ---: | ---: |
+| Welcome screen, no account | 8.2 | 7.9 | 9.8 |
+| Inbox and newsletter, as in the results above | 18.5 – 18.6 | 17.2 – 17.4 | 19.6 – 19.8 |
+| The same at display scale 2 | 26.1 | 20.8 – 20.9 | 23.3 – 23.5 |
+| First sync, inbox list, 60 s after the last write | 20.2 | 14.7 | 17.0 |
+| First sync with the newsletter open, 60 s after the last write | 25.3 | 20.5 | 20.6 |
 
+- **Since 5 November**, new features have made the program and its idle heap
+  larger. The 24 November column shows the result, which includes the 0.6 MiB
+  that [#487](https://github.com/flectar/mail/pull/487) freed.
 - **After a sync**, SQLite's page caches stay full and the allocator keeps the
   pages they freed. Flectar Mail now releases both once its mail core has been
   quiet for 10 seconds, and again after you leave Mail, Calendar, Files or
@@ -74,8 +78,8 @@ from one run, or a range over two.
   stored as RGB, without the alpha byte, and are half as tall in logical pixels
   there.
 - **Threads.** The D-Bus connection for the tray no longer starts a Tokio
-  runtime with one idle thread per CPU core: the idle app now runs 11 threads
-  instead of 22 on the 12-core test machine.
+  runtime with one idle thread per CPU core: the idle app ran 11 threads instead
+  of 22 on the 12-core test machine, and 13 on 24 November.
 - **Low memory.** When the system reports memory pressure, Flectar Mail drops
   what it can rebuild, such as message tiles outside the viewport, image caches
   and SQLite's page caches, and returns the freed memory
@@ -99,9 +103,9 @@ neither has been measured on Windows yet.
 The README's Performance table quotes these figures as measured, with how much
 more memory each app uses than Flectar Mail, comparing the means of each pair of
 runs. Its headline and summary round them to about 20 MB of private memory and
-about 85 MB with code and libraries (1 MiB = 1.049 MB): the runs above measured
-18.0 – 18.2 MB and 82.9 – 83.9 MB, and a desktop with a full font set measures
-19.2 – 19.4 MB of private memory.
+about 105 MB with code and libraries (1 MiB = 1.049 MB): the runs above measured
+20.6 – 20.7 MB and 106.6 – 106.8 MB, and a desktop with a full font set measures
+21.6 – 21.7 MB of private memory.
 
 ## What the numbers mean
 
@@ -111,20 +115,20 @@ about 85 MB with code and libraries (1 MiB = 1.049 MB): the runs above measured
 | PSS | Private memory plus the app's code and libraries mapped from disk, with shared pages split between the processes that use them | Plasma System Monitor's **Memory** column, `smem`, `/proc/<pid>/smaps_rollup` |
 | RSS | Every resident page, shared libraries in full. Summed over several processes, it counts shared pages more than once. | `top`, `htop` (RES) |
 
-Most of Flectar Mail's RSS is its own executable: about 60 MiB of code and
+Most of Flectar Mail's RSS is its own executable: about 82 MiB of code and
 read-only data mapped from disk. Those pages are clean, so the system can drop
 them under memory pressure and read them back later.
 
 ### Why Windows shows less than Linux
 
 - **Different columns.** Task Manager's **Memory** leaves out program code,
-  while `htop` (RSS) and Plasma System Monitor (PSS) count the 60 MiB
+  while `htop` (RSS) and Plasma System Monitor (PSS) count the 82 MiB
   executable. Compared like for like, the large Windows mailbox uses more
-  private memory (37.8 MiB) than the one-account Linux test (17.2 – 17.4 MiB).
+  private memory (37.8 MiB) than the one-account Linux test (19.6 – 19.8 MiB).
 - **More of the program file counts on Linux.** Linux maps a file 64 KiB at a
   time around each page that's touched, so RSS includes code that may never
   run. That's one reason the Windows working set (64.5 MiB) is lower than the
-  Linux RSS (86 MiB) despite the much larger mailbox.
+  Linux RSS (109 MiB) despite the much larger mailbox.
 - **The tray trim.** When the window closes to the tray, or stays minimized for
   10 seconds, Flectar Mail releases its rendering buffers and, on Windows,
   empties its working set. Windows moves those pages to its standby list, so the
@@ -171,8 +175,8 @@ screens. `footprint <pid>` or `vmmap --summary <pid>` gives the breakdown.
 
 - **Flectar Mail:** CI AppImages with the default CPU renderer. "After" is
   `main` at 51c6aed with #191, #192, #194 and #195 merged; "before" is 81d125b,
-  the same code as `main` before them. The optional GPU renderer uses more
-  memory and isn't covered here.
+  the same code as `main` before them. The 24 November figures are `main` at
+  791cf6b. The optional GPU renderer uses more memory and isn't covered here.
 - **Other clients:** the versions and builds listed under Results.
 - **System:** Debian 13, Linux 6.12, x86-64. Xvfb at 1920 × 1080 with
   Openbox, and every window at 1320 × 800 and scale 1. The scale-2 runs used a

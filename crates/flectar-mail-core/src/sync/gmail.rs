@@ -2210,6 +2210,17 @@ async fn store_resources(
                 let is_draft = label_set.contains("DRAFT");
 
                 let existing = repo::messages::by_gm_msgid(&tx, account_id, &resource.provider_id)?;
+                // Mail the account received tells whether Gmail stamped it,
+                // and so whether the sender's verification can be trusted.
+                if existing.is_none() && !is_outgoing {
+                    repo::messages::note_authentication_results(
+                        &tx,
+                        account_id,
+                        resource.headers.authentication_results,
+                    )?;
+                }
+                let sender_verification =
+                    repo::messages::vouched(&tx, account_id, resource.headers.sender_verification)?;
                 let inserted = existing.is_none();
                 let local_message_id = if let Some(existing) = existing {
                     if let Some(old_thread) = existing.thread_id.filter(|id| *id != thread_id) {
@@ -2257,7 +2268,7 @@ async fn store_resources(
                             resource.headers.list_unsubscribe,
                             resource.headers.list_unsubscribe_post,
                             resource.headers.via,
-                            resource.headers.sender_verification.as_str(),
+                            sender_verification.as_str(),
                             generation,
                             resource.headers.list_id,
                         ],
@@ -2291,7 +2302,7 @@ async fn store_resources(
                         list_unsubscribe_post: resource.headers.list_unsubscribe_post.clone(),
                         list_id: resource.headers.list_id.clone(),
                         sender_addr: resource.headers.via.clone(),
-                        sender_verification: resource.headers.sender_verification,
+                        sender_verification,
                         receipt_to: resource.headers.receipt_to.clone(),
                         receipt_confirm: resource.headers.receipt_confirm,
                         // Gmail keeps no keywords for it; this device
@@ -2342,8 +2353,11 @@ async fn store_resources(
                     _ => Default::default(),
                 };
 
+                // Only mail Gmail labels as sent says whom the user wrote to.
+                // A From with the user's own address is easy to forge.
                 if inserted
                     && is_outgoing
+                    && label_set.contains("SENT")
                     && settings.collect_outgoing_contacts
                     && resource.internal_date >= outgoing_learning_since
                 {
@@ -2361,6 +2375,7 @@ async fn store_resources(
                         }
                     }
                 } else if inserted
+                    && !is_outgoing
                     && !turned_away
                     && !sorted.unwanted
                     && settings.collect_incoming_contacts

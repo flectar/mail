@@ -1,0 +1,124 @@
+import { CheckBox } from "std-widgets.slint";
+import { AppTheme } from "design-system.slint";
+import { TypeScale } from "typography.slint";
+
+// Server settings looked up from a new account's email address
+// (src/account_discovery.rs).
+export global AccountDiscovery {
+    // "" (nothing to say), "looking", "found" or "none".
+    in property <string> state;
+    // The email address's domain.
+    in property <string> domain;
+    // Where found settings came from: "provider", the domain's own
+    // configuration file, "database", the public provider database, or
+    // "mail-host", the provider whose server the domain's MX record names.
+    in property <string> source;
+    // For "mail-host", that provider's domain.
+    in property <string> mail-host;
+    // False when the settings came over plain HTTP, which can be altered on
+    // the way, so the person confirms them before connecting.
+    in property <bool> trusted: true;
+    in-out property <bool> confirmed: false;
+    // Whether the form may connect as far as these settings go.
+    out property <bool> ready: root.state != "found" || root.trusted || root.confirmed;
+}
+
+// What the lookup found, under a mail account form's email address. The
+// form makes it only while there's something to say, since a hidden item
+// still takes its space in a layout.
+export component AccountDiscoveryNotice inherits VerticalLayout {
+    in property <bool> enabled: true;
+    in property <color> text-color: AppTheme.body;
+    spacing: 6px;
+
+    Text {
+        text: AccountDiscovery.state == "looking" ? @tr("Looking up the server settings for {}…", AccountDiscovery.domain)
+            : AccountDiscovery.state == "none" ? @tr("No server settings were found for {}. Your provider's help pages list them.", AccountDiscovery.domain)
+            : AccountDiscovery.source == "mail-host" ? @tr("{0}'s mail goes to servers at {1}, so these are {1}'s settings. DNS answers can be forged, so check the server names before connecting.", AccountDiscovery.domain, AccountDiscovery.mail-host)
+            : !AccountDiscovery.trusted ? @tr("These settings for {} came over an unencrypted connection and could have been changed on the way. Check the server names before connecting.", AccountDiscovery.domain)
+            : AccountDiscovery.source == "database" ? @tr("Server settings for {} are filled in from the public provider database. Check them before connecting.", AccountDiscovery.domain)
+            : @tr("Server settings are filled in from {}'s own configuration.", AccountDiscovery.domain);
+        color: AccountDiscovery.state == "found" && !AccountDiscovery.trusted ? AppTheme.destructive : root.text-color;
+        font-size: TypeScale.caption;
+        wrap: word-wrap;
+    }
+
+    if AccountDiscovery.state == "found" && !AccountDiscovery.trusted : CheckBox {
+        enabled: root.enabled;
+        text: @tr("I checked these servers and trust them");
+        checked: AccountDiscovery.confirmed;
+        toggled => { AccountDiscovery.confirmed = self.checked; }
+    }
+}
+
+// The server a new calendar or contacts connection's dialog fills in from
+// the account's email address (src/dav_discovery.rs).
+export global DavLookup {
+    // "" (nothing to say), "looking", "found" or "none".
+    in property <string> state;
+    // "calendar" or "contacts".
+    in property <string> service;
+    // The email address's domain.
+    in property <string> domain;
+    // Where the address came from: "provider", the domain's own
+    // configuration file, "database", the public provider database,
+    // "mail-host", the configuration of the provider that takes the domain's
+    // mail, "dns", the domain's DNS records, or "website", the domain's
+    // well-known address.
+    in property <string> source;
+    // For "mail-host", that provider's domain, and for "dns", the server's
+    // domain when it's outside the address's.
+    in property <string> host;
+    // False when the address could have been changed on the way and points
+    // to a server outside the domain, so the person confirms it first.
+    in property <bool> trusted: true;
+    // The address filled in. The notice is about it only while the field
+    // still shows it.
+    in property <string> url;
+    in-out property <bool> confirmed: false;
+
+    // Looks up the server for a dialog that has just opened.
+    callback look-up(/* account id */ int, /* service */ string);
+    // Drops the lookup of a dialog that closed or edits a connection.
+    callback stop();
+
+    // Whether the notice has something to say about the field's `current`
+    // address.
+    public pure function shows(current: string) -> bool {
+        return self.state == "looking" || self.state == "none" || (self.state == "found" && current == self.url);
+    }
+
+    // Whether the dialog may connect to `current`.
+    public pure function ready(current: string) -> bool {
+        return self.state != "found" || self.trusted || self.confirmed || current != self.url;
+    }
+}
+
+// What the lookup found, under a CalDAV or CardDAV dialog's server address.
+export component DavLookupNotice inherits VerticalLayout {
+    in property <bool> enabled: true;
+    in property <color> text-color: AppTheme.body;
+    spacing: 6px;
+
+    Text {
+        text: DavLookup.state == "looking" ? (DavLookup.service == "calendar" ? @tr("Looking up the calendar server for {}…", DavLookup.domain) : @tr("Looking up the contacts server for {}…", DavLookup.domain))
+            : DavLookup.state == "none" ? (DavLookup.service == "calendar" ? @tr("No calendar server was found for {}. Your provider's help pages give its address.", DavLookup.domain) : @tr("No contacts server was found for {}. Your provider's help pages give its address.", DavLookup.domain))
+            : DavLookup.source == "mail-host" ? @tr("{0}'s mail goes to servers at {1}, so this is {1}'s server. DNS answers can be forged, so check the address before connecting.", DavLookup.domain, DavLookup.host)
+            : DavLookup.source == "dns" && !DavLookup.trusted ? @tr("{0}'s DNS records point to a server at {1}. DNS answers can be forged, so check the address before connecting.", DavLookup.domain, DavLookup.host)
+            : !DavLookup.trusted ? @tr("This server address for {} came over an unencrypted connection and could have been changed on the way. Check it before connecting.", DavLookup.domain)
+            : DavLookup.source == "database" ? @tr("The server address for {} is filled in from the public provider database. Check it before connecting.", DavLookup.domain)
+            : DavLookup.source == "dns" ? @tr("The server address is filled in from {}'s DNS records.", DavLookup.domain)
+            : DavLookup.source == "website" ? @tr("The server address is filled in from {}'s website.", DavLookup.domain)
+            : @tr("The server address is filled in from {}'s own configuration.", DavLookup.domain);
+        color: DavLookup.state == "found" && !DavLookup.trusted ? AppTheme.destructive : root.text-color;
+        font-size: TypeScale.caption;
+        wrap: word-wrap;
+    }
+
+    if DavLookup.state == "found" && !DavLookup.trusted : CheckBox {
+        enabled: root.enabled;
+        text: @tr("I checked this server and trust it");
+        checked: DavLookup.confirmed;
+        toggled => { DavLookup.confirmed = self.checked; }
+    }
+}

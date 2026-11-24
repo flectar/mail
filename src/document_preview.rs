@@ -10,7 +10,31 @@ pub(crate) enum Preview {
     Image(Vec<u8>, u32, u32),
     Pdf(Arc<Vec<u8>>, crate::pdf_preview::Page),
 }
-pub(crate) async fn preview(data: Vec<u8>, media: &str) -> Result<Preview> {
+/// Media types that say nothing about a file's content, so its name decides.
+const GENERIC_TYPES: [&str; 4] = [
+    "application/octet-stream",
+    "binary/octet-stream",
+    "application/x-download",
+    "application/force-download",
+];
+
+/// Whether a file is declared as a PDF, by its media type or, when the type is
+/// missing or generic, by a `.pdf` name. Content alone never counts, so a file
+/// sent as an image or any other kind of file never reaches PDFium.
+pub(crate) fn declared_pdf(media: &str, name: &str) -> bool {
+    let media = media.split(';').next().unwrap_or("").trim();
+    let is = |kind: &str| media.eq_ignore_ascii_case(kind);
+    if is("application/pdf") || is("application/x-pdf") {
+        return true;
+    }
+    (media.is_empty() || GENERIC_TYPES.into_iter().any(is))
+        && name
+            .as_bytes()
+            .get(name.len().saturating_sub(4)..)
+            .is_some_and(|suffix| suffix.eq_ignore_ascii_case(b".pdf"))
+}
+
+pub(crate) async fn preview(data: Vec<u8>, media: &str, name: &str) -> Result<Preview> {
     let normalized = media
         .split(';')
         .next()
@@ -18,14 +42,11 @@ pub(crate) async fn preview(data: Vec<u8>, media: &str) -> Result<Preview> {
         .trim()
         .to_ascii_lowercase();
     let media = normalized.as_str();
-    if media
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .eq_ignore_ascii_case("application/pdf")
-        || data.starts_with(b"%PDF-")
-    {
+    if declared_pdf(media, name) {
+        // PDFium only parses files that are declared as PDFs and start like one.
+        if !data.starts_with(b"%PDF-") {
+            return Err("This file does not look like a PDF. Download it to view locally.".into());
+        }
         let data = Arc::new(data);
         return crate::pdf_preview::render(data.clone(), 0, 200)
             .await
@@ -111,6 +132,80 @@ pub(crate) async fn image_thumbnail(data: Vec<u8>) -> Result<(Vec<u8>, u32, u32)
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Tests that decode images share IMAGE_SLOT, so they take turns.
+    static IMAGE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn only_files_declared_as_pdfs_count_as_pdfs() {
+        for (media, name) in [
+            ("application/pdf", "scan"),
+            ("Application/PDF; name=\"scan.pdf\"", "scan.pdf"),
+            ("application/x-pdf", "scan"),
+            ("application/octet-stream", "Report.PDF"),
+            ("binary/octet-stream", "report.pdf"),
+            ("", "report.pdf"),
+        ] {
+            assert!(declared_pdf(media, name), "{media} {name}");
+        }
+        for (media, name) in [
+            ("image/png", "photo.png"),
+            ("image/png", "photo.pdf"),
+            ("text/plain", "notes.pdf"),
+            ("application/zip", "report.pdf"),
+            ("application/octet-stream", "report.bin"),
+            ("application/octet-stream", "pdf"),
+            ("", "report.pdf.exe"),
+            ("", ""),
+        ] {
+            assert!(!declared_pdf(media, name), "{media} {name}");
+        }
+    }
+
+    #[test]
+    fn pdf_content_in_a_file_declared_as_something_else_never_reaches_pdfium() {
+        let _turn = IMAGE_TESTS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n%%EOF\n".to_vec();
+        let text = |result: Result<Preview>| match result {
+            Ok(Preview::Text(text)) => text,
+            _ => String::new(),
+        };
+        runtime.block_on(async {
+            // An image decoder, not PDFium, rejects it.
+            let image = preview(pdf.clone(), "image/png", "photo.png").await;
+            assert_eq!(
+                image.err().as_deref(),
+                Some("Could not decode this image safely. Download it to view locally.")
+            );
+            // Text is shown as text.
+            let shown = text(preview(pdf.clone(), "text/plain", "notes.txt").await);
+            assert!(shown.starts_with("%PDF-1.7"));
+            // Other types, and generic types without a PDF name, are not previewed.
+            for (media, name) in [
+                ("application/zip", "report.pdf"),
+                ("application/octet-stream", "report.bin"),
+                ("application/octet-stream", ""),
+            ] {
+                let shown = text(preview(pdf.clone(), media, name).await);
+                assert!(
+                    shown.starts_with("Preview is available for PDF"),
+                    "{media} {name}"
+                );
+            }
+            // A declared PDF must also start like one before PDFium sees it.
+            let html = b"<html>not a PDF</html>".to_vec();
+            let disguised = preview(html, "application/pdf", "report.pdf").await;
+            assert_eq!(
+                disguised.err().as_deref(),
+                Some("This file does not look like a PDF. Download it to view locally.")
+            );
+        });
+    }
 
     #[test]
     fn attachment_thumbnail_is_bounded_and_preserves_aspect_ratio() {
@@ -132,6 +227,9 @@ mod tests {
 
     #[test]
     fn cancelling_a_preview_does_not_admit_another_decoder_until_the_worker_exits() {
+        let _turn = IMAGE_TESTS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()

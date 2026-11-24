@@ -8,8 +8,10 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 
 /// Raised whenever a request or response changes incompatibly.
 pub(crate) const PROTOCOL: u32 = 1;
-/// Larger than any request the tools take.
-pub(crate) const MAX_REQUEST: u64 = 64 * 1024;
+/// Larger than any request the tools take. A draft at every limit
+/// `super::tools` sets, written in the characters JSON takes most bytes
+/// for, comes to about 1.2 MB.
+pub(crate) const MAX_REQUEST: u64 = 2 * 1024 * 1024;
 /// Larger than any answer the tools give.
 pub(crate) const MAX_RESPONSE: u64 = 4 * 1024 * 1024;
 
