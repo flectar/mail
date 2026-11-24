@@ -339,6 +339,257 @@ pub(super) struct BackupRestore {
 
 /// Restores a Flectar Mail account backup: account settings, profiles,
 /// colors, and preferences. Existing accounts are kept unchanged.
+/// The preferences a backup brings back into `settings`. A backup is only a
+/// file anyone can make, so none of them weakens privacy.
+fn restore_preferences(
+    settings: &mut flectar_mail_core::models::Settings,
+    preferences: &serde_json::Value,
+) {
+    if let Some(theme) = preferences.get("theme").and_then(|value| value.as_str())
+        && matches!(theme, "system" | "carbon" | "snow" | "dark" | "light")
+    {
+        settings.theme = theme.to_owned();
+    }
+    if let Some(enabled) = preferences
+        .get("monochromeSidebarIcons")
+        .and_then(|value| value.as_bool())
+    {
+        settings.monochrome_sidebar_icons = enabled;
+    }
+    if let Some(icon) = preferences
+        .get("appIcon")
+        .and_then(|value| value.as_str())
+        .and_then(flectar_mail_core::models::AppIcon::parse)
+    {
+        settings.app_icon = icon;
+    }
+    if let Some(enabled) = preferences
+        .get("showAvatars")
+        .and_then(|value| value.as_bool())
+    {
+        settings.show_avatars = enabled;
+    }
+    if let Some(enabled) = preferences
+        .get("showTabs")
+        .and_then(|value| value.as_bool())
+    {
+        settings.show_tabs = enabled;
+    }
+    if let Some(enabled) = preferences
+        .get("conversationView")
+        .and_then(|value| value.as_bool())
+    {
+        settings.conversation_view = enabled;
+    }
+    if let Some(frame) = preferences
+        .get("windowFrame")
+        .and_then(|value| value.as_str())
+        && matches!(frame, "system" | "integrated")
+    {
+        settings.window_frame = frame.to_owned();
+    }
+    if let Some(layout) = preferences
+        .get("workspaceLayout")
+        .or_else(|| preferences.get("mailLayout"))
+        .and_then(|value| value.as_str())
+        && matches!(layout, "default" | "minimal")
+    {
+        settings.workspace_layout = layout.to_owned();
+    }
+    if let Some(preference) = preferences
+        .get("messageAppearance")
+        .and_then(|value| value.as_str())
+        .and_then(flectar_mail_core::models::MessageAppearance::parse)
+    {
+        settings.message_appearance = preference;
+    }
+    if let Some(size) = preferences
+        .get("interfaceTextSize")
+        .and_then(|value| value.as_str())
+        .and_then(flectar_mail_core::models::InterfaceTextSize::parse)
+    {
+        settings.interface_text_size = size;
+    }
+    if let Some(preference) = preferences
+        .get("reduceMotion")
+        .and_then(|value| value.as_str())
+        .and_then(flectar_mail_core::models::ReduceMotion::parse)
+    {
+        settings.reduce_motion = preference;
+    }
+    if let Some(policy) = preferences
+        .get("readReceipts")
+        .and_then(|value| value.as_str())
+        .and_then(flectar_mail_core::models::ReadReceiptPolicy::parse)
+        // A backup, which is only a file anyone can make, never lets
+        // receipts go out more readily than they do now.
+        && receipt_eagerness(policy) <= receipt_eagerness(settings.read_receipts)
+    {
+        settings.read_receipts = policy;
+    }
+    let days = |key: &str| {
+        preferences
+            .get(key)
+            .and_then(|value| value.as_u64())
+            .and_then(|days| u32::try_from(days).ok())
+    };
+    // Nor does it delete mail sooner than now; 0 keeps it.
+    let keeps_as_long = |days: u32, now: u32| days == 0 || (now != 0 && days >= now);
+    if let Some(days) = days("emptyTrashAfterDays")
+        && keeps_as_long(days, settings.empty_trash_after_days)
+    {
+        settings.empty_trash_after_days = days;
+    }
+    if let Some(days) = days("emptyJunkAfterDays")
+        && keeps_as_long(days, settings.empty_junk_after_days)
+    {
+        settings.empty_junk_after_days = days;
+    }
+    if let Some(width) = preferences
+        .get("workspaceListPaneWidth")
+        .and_then(|value| value.as_i64())
+    {
+        settings.workspace_list_pane_width = normalized_workspace_list_pane_width(width);
+    }
+    if let Some(language) = preferences.get("language").and_then(|value| value.as_str())
+        && language.len() <= 32
+    {
+        settings.language = language.to_owned();
+    }
+    if let Some(format) = preferences
+        .get("timeFormat")
+        .and_then(|value| value.as_str())
+        .and_then(flectar_mail_core::models::TimeFormat::parse)
+    {
+        settings.time_format = format;
+    }
+    if let Some(week_start) = preferences
+        .get("calendarWeekStart")
+        .and_then(|value| value.as_str())
+        && matches!(week_start, "sunday" | "monday")
+    {
+        settings.calendar_week_start = week_start.to_owned();
+    }
+    // Nor does it turn on remote images, which tell senders when mail
+    // is read.
+    if preferences
+        .get("loadRemoteImages")
+        .and_then(|value| value.as_bool())
+        == Some(false)
+    {
+        settings.load_remote_images = false;
+    }
+    if let Some(choice) = exported_mark_read(preferences) {
+        settings.mark_read = choice;
+    }
+    if let Some(enabled) = preferences
+        .get("collectOutgoingContacts")
+        .and_then(|value| value.as_bool())
+    {
+        settings.collect_outgoing_contacts = enabled;
+    }
+    if let Some(enabled) = preferences
+        .get("collectIncomingContacts")
+        .and_then(|value| value.as_bool())
+    {
+        settings.collect_incoming_contacts = enabled;
+    }
+    if let Some(enabled) = preferences
+        .get("contactSuggestAllAccounts")
+        .and_then(|value| value.as_bool())
+    {
+        settings.contact_suggest_all_accounts = enabled;
+    }
+    if let Some(enabled) = preferences
+        .get("suggestLearnedContacts")
+        .and_then(|value| value.as_bool())
+    {
+        settings.suggest_learned_contacts = enabled;
+    }
+    if let Some(enabled) = preferences
+        .get("spellingEnabled")
+        .and_then(|value| value.as_bool())
+    {
+        settings.spelling_enabled = enabled;
+    }
+    if let Some(languages) = preferences.get("spellingLanguages") {
+        settings.spelling_languages = languages.as_array().map(|languages| {
+            languages
+                .iter()
+                .filter_map(|language| language.as_str().map(str::to_owned))
+                .collect()
+        });
+    }
+    // Nor does it send mail text anywhere new: translation and AI
+    // settings come back only for the server already set up, and no
+    // more languages get translated without asking.
+    if let Some(mut translation) = preferences.get("translation").and_then(|value| {
+        serde_json::from_value::<flectar_mail_core::models::TranslationSettings>(value.clone()).ok()
+    }) && translation.service == settings.translation.service
+        && translation.libretranslate_url.trim() == settings.translation.libretranslate_url.trim()
+    {
+        let always = &settings.translation.always;
+        translation
+            .always
+            .retain(|language| always.contains(language));
+        settings.translation = translation;
+    }
+    if let Some(ai) = preferences.get("ai").and_then(|value| {
+        serde_json::from_value::<flectar_mail_core::models::AiSettings>(value.clone()).ok()
+    }) && ai.url.trim() == settings.ai.url.trim()
+    {
+        settings.ai = ai;
+    }
+    if let Some(enabled) = preferences
+        .get("notificationsEnabled")
+        .and_then(|value| value.as_bool())
+    {
+        settings.notifications_enabled = enabled;
+    }
+    if let Some(scope) = preferences
+        .get("notificationScope")
+        .and_then(|value| value.as_str())
+        && matches!(scope, "important" | "all")
+    {
+        settings.notification_scope = scope.to_owned();
+    }
+    if let Some(enabled) = preferences
+        .get("soundEnabled")
+        .and_then(|value| value.as_bool())
+    {
+        settings.sound_enabled = enabled;
+    }
+    if let Some(minutes) = preferences
+        .get("syncIntervalMinutes")
+        .and_then(|value| value.as_i64())
+        && matches!(minutes, 1 | 5 | 15)
+    {
+        settings.sync_interval_minutes = minutes;
+    }
+    if let Some(enabled) = preferences
+        .get("closeToTray")
+        .and_then(|value| value.as_bool())
+    {
+        settings.close_to_tray = enabled;
+    }
+    if let Some(enabled) = preferences
+        .get("showAccountMarkers")
+        .and_then(|value| value.as_bool())
+    {
+        settings.show_account_badges = enabled;
+    }
+}
+
+/// How readily read receipts go out under `policy`.
+fn receipt_eagerness(policy: flectar_mail_core::models::ReadReceiptPolicy) -> u8 {
+    use flectar_mail_core::models::ReadReceiptPolicy;
+    match policy {
+        ReadReceiptPolicy::Never => 0,
+        ReadReceiptPolicy::Ask => 1,
+        ReadReceiptPolicy::Always => 2,
+    }
+}
+
 pub(super) fn restore_account_backup(
     app: &AppWindow,
     bytes: &[u8],
@@ -390,220 +641,7 @@ pub(super) fn restore_account_backup(
         let mut settings = runtime.block_on(core.load_settings())?;
         let has_preferences = backup.get("preferences").is_some();
         if let Some(preferences) = backup.get("preferences") {
-            if let Some(theme) = preferences.get("theme").and_then(|value| value.as_str())
-                && matches!(theme, "system" | "carbon" | "snow" | "dark" | "light")
-            {
-                settings.theme = theme.to_owned();
-            }
-            if let Some(enabled) = preferences
-                .get("monochromeSidebarIcons")
-                .and_then(|value| value.as_bool())
-            {
-                settings.monochrome_sidebar_icons = enabled;
-            }
-            if let Some(icon) = preferences
-                .get("appIcon")
-                .and_then(|value| value.as_str())
-                .and_then(flectar_mail_core::models::AppIcon::parse)
-            {
-                settings.app_icon = icon;
-            }
-            if let Some(enabled) = preferences
-                .get("showAvatars")
-                .and_then(|value| value.as_bool())
-            {
-                settings.show_avatars = enabled;
-            }
-            if let Some(enabled) = preferences
-                .get("showTabs")
-                .and_then(|value| value.as_bool())
-            {
-                settings.show_tabs = enabled;
-            }
-            if let Some(enabled) = preferences
-                .get("conversationView")
-                .and_then(|value| value.as_bool())
-            {
-                settings.conversation_view = enabled;
-            }
-            if let Some(frame) = preferences
-                .get("windowFrame")
-                .and_then(|value| value.as_str())
-                && matches!(frame, "system" | "integrated")
-            {
-                settings.window_frame = frame.to_owned();
-            }
-            if let Some(layout) = preferences
-                .get("workspaceLayout")
-                .or_else(|| preferences.get("mailLayout"))
-                .and_then(|value| value.as_str())
-                && matches!(layout, "default" | "minimal")
-            {
-                settings.workspace_layout = layout.to_owned();
-            }
-            if let Some(preference) = preferences
-                .get("messageAppearance")
-                .and_then(|value| value.as_str())
-                .and_then(flectar_mail_core::models::MessageAppearance::parse)
-            {
-                settings.message_appearance = preference;
-            }
-            if let Some(size) = preferences
-                .get("interfaceTextSize")
-                .and_then(|value| value.as_str())
-                .and_then(flectar_mail_core::models::InterfaceTextSize::parse)
-            {
-                settings.interface_text_size = size;
-            }
-            if let Some(preference) = preferences
-                .get("reduceMotion")
-                .and_then(|value| value.as_str())
-                .and_then(flectar_mail_core::models::ReduceMotion::parse)
-            {
-                settings.reduce_motion = preference;
-            }
-            if let Some(policy) = preferences
-                .get("readReceipts")
-                .and_then(|value| value.as_str())
-                .and_then(flectar_mail_core::models::ReadReceiptPolicy::parse)
-            {
-                settings.read_receipts = policy;
-            }
-            let days = |key: &str| {
-                preferences
-                    .get(key)
-                    .and_then(|value| value.as_u64())
-                    .and_then(|days| u32::try_from(days).ok())
-            };
-            if let Some(days) = days("emptyTrashAfterDays") {
-                settings.empty_trash_after_days = days;
-            }
-            if let Some(days) = days("emptyJunkAfterDays") {
-                settings.empty_junk_after_days = days;
-            }
-            if let Some(width) = preferences
-                .get("workspaceListPaneWidth")
-                .and_then(|value| value.as_i64())
-            {
-                settings.workspace_list_pane_width = normalized_workspace_list_pane_width(width);
-            }
-            if let Some(language) = preferences.get("language").and_then(|value| value.as_str())
-                && language.len() <= 32
-            {
-                settings.language = language.to_owned();
-            }
-            if let Some(format) = preferences
-                .get("timeFormat")
-                .and_then(|value| value.as_str())
-                .and_then(flectar_mail_core::models::TimeFormat::parse)
-            {
-                settings.time_format = format;
-            }
-            if let Some(week_start) = preferences
-                .get("calendarWeekStart")
-                .and_then(|value| value.as_str())
-                && matches!(week_start, "sunday" | "monday")
-            {
-                settings.calendar_week_start = week_start.to_owned();
-            }
-            if let Some(enabled) = preferences
-                .get("loadRemoteImages")
-                .and_then(|value| value.as_bool())
-            {
-                settings.load_remote_images = enabled;
-            }
-            if let Some(choice) = exported_mark_read(preferences) {
-                settings.mark_read = choice;
-            }
-            if let Some(enabled) = preferences
-                .get("collectOutgoingContacts")
-                .and_then(|value| value.as_bool())
-            {
-                settings.collect_outgoing_contacts = enabled;
-            }
-            if let Some(enabled) = preferences
-                .get("collectIncomingContacts")
-                .and_then(|value| value.as_bool())
-            {
-                settings.collect_incoming_contacts = enabled;
-            }
-            if let Some(enabled) = preferences
-                .get("contactSuggestAllAccounts")
-                .and_then(|value| value.as_bool())
-            {
-                settings.contact_suggest_all_accounts = enabled;
-            }
-            if let Some(enabled) = preferences
-                .get("suggestLearnedContacts")
-                .and_then(|value| value.as_bool())
-            {
-                settings.suggest_learned_contacts = enabled;
-            }
-            if let Some(enabled) = preferences
-                .get("spellingEnabled")
-                .and_then(|value| value.as_bool())
-            {
-                settings.spelling_enabled = enabled;
-            }
-            if let Some(languages) = preferences.get("spellingLanguages") {
-                settings.spelling_languages = languages.as_array().map(|languages| {
-                    languages
-                        .iter()
-                        .filter_map(|language| language.as_str().map(str::to_owned))
-                        .collect()
-                });
-            }
-            if let Some(translation) = preferences.get("translation").and_then(|value| {
-                serde_json::from_value::<flectar_mail_core::models::TranslationSettings>(
-                    value.clone(),
-                )
-                .ok()
-            }) {
-                settings.translation = translation;
-            }
-            if let Some(ai) = preferences.get("ai").and_then(|value| {
-                serde_json::from_value::<flectar_mail_core::models::AiSettings>(value.clone()).ok()
-            }) {
-                settings.ai = ai;
-            }
-            if let Some(enabled) = preferences
-                .get("notificationsEnabled")
-                .and_then(|value| value.as_bool())
-            {
-                settings.notifications_enabled = enabled;
-            }
-            if let Some(scope) = preferences
-                .get("notificationScope")
-                .and_then(|value| value.as_str())
-                && matches!(scope, "important" | "all")
-            {
-                settings.notification_scope = scope.to_owned();
-            }
-            if let Some(enabled) = preferences
-                .get("soundEnabled")
-                .and_then(|value| value.as_bool())
-            {
-                settings.sound_enabled = enabled;
-            }
-            if let Some(minutes) = preferences
-                .get("syncIntervalMinutes")
-                .and_then(|value| value.as_i64())
-                && matches!(minutes, 1 | 5 | 15)
-            {
-                settings.sync_interval_minutes = minutes;
-            }
-            if let Some(enabled) = preferences
-                .get("closeToTray")
-                .and_then(|value| value.as_bool())
-            {
-                settings.close_to_tray = enabled;
-            }
-            if let Some(enabled) = preferences
-                .get("showAccountMarkers")
-                .and_then(|value| value.as_bool())
-            {
-                settings.show_account_badges = enabled;
-            }
+            restore_preferences(&mut settings, preferences);
         }
 
         let backup_accounts = configs.len();
@@ -747,29 +785,6 @@ pub(super) fn restore_account_backup(
     app.set_remote_images_enabled(settings.load_remote_images && cfg!(feature = "remote-content"));
     app.set_close_to_tray(settings.close_to_tray && !cfg!(mobile));
     Ok(restore)
-}
-
-/// Hands generated bytes to the document provider through a private staging
-/// file; the host copies it to the destination its picker offers.
-fn export_document_bytes(
-    documents: std::sync::Arc<dyn documents::DocumentProvider>,
-    staging_root: PathBuf,
-    bytes: Vec<u8>,
-    name: String,
-    dialog: documents::DocumentDialog,
-) -> documents::DocumentFuture<bool> {
-    Box::pin(async move {
-        tokio::fs::create_dir_all(&staging_root)
-            .await
-            .map_err(|error| format!("creating {}: {error}", staging_root.display()))?;
-        let staging = tempfile::tempdir_in(&staging_root)
-            .map_err(|error| format!("creating staging in {}: {error}", staging_root.display()))?;
-        let path = staging.path().join(&name);
-        tokio::fs::write(&path, bytes)
-            .await
-            .map_err(|error| format!("writing {}: {error}", path.display()))?;
-        documents.export_with(path, name, dialog).await
-    })
 }
 
 fn backup_dialog(app: &AppWindow, title: UiMessage) -> documents::DocumentDialog {
@@ -1454,7 +1469,7 @@ pub(super) fn register_data_management_callbacks(
             Local::now().format("%Y-%m-%d")
         );
         let dialog = backup_dialog(&app, UiMessage::plain("Export Flectar Mail account backup"));
-        let request = export_document_bytes(
+        let request = documents::export_bytes(
             documents_for_backup.clone(),
             paths_for_backup.temp_dir(),
             bytes,
@@ -1825,6 +1840,56 @@ fn exported_mark_read(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_backup_never_weakens_privacy() {
+        use flectar_mail_core::models::{ReadReceiptPolicy, Settings};
+        let mut settings = Settings {
+            read_receipts: ReadReceiptPolicy::Ask,
+            empty_junk_after_days: 30,
+            ..Default::default()
+        };
+        settings.translation.service = "deepl".into();
+        settings.ai.url = "http://localhost:11434/v1".into();
+        settings.ai.model = "local".into();
+        let crafted = serde_json::json!({
+            "readReceipts": "always",
+            "loadRemoteImages": true,
+            "emptyTrashAfterDays": 1,
+            "emptyJunkAfterDays": 1,
+            "translation": {
+                "service": "libretranslate",
+                "libretranslateUrl": "https://attacker.example",
+                "always": ["en"]
+            },
+            "ai": {"url": "https://attacker.example/v1", "model": "x"},
+            "theme": "dark"
+        });
+        restore_preferences(&mut settings, &crafted);
+        assert_eq!(settings.read_receipts, ReadReceiptPolicy::Ask);
+        assert!(!settings.load_remote_images);
+        assert_eq!(settings.empty_trash_after_days, 0);
+        assert_eq!(settings.empty_junk_after_days, 30);
+        assert_eq!(settings.translation.service, "deepl");
+        assert_eq!(settings.ai.url, "http://localhost:11434/v1");
+        assert_eq!(settings.ai.model, "local");
+        assert_eq!(
+            settings.theme, "dark",
+            "harmless preferences still come back"
+        );
+
+        // What keeps mail more private comes back, as do settings for the
+        // server already set up.
+        let careful = serde_json::json!({
+            "readReceipts": "never",
+            "emptyJunkAfterDays": 60,
+            "ai": {"url": "http://localhost:11434/v1", "model": "bigger"}
+        });
+        restore_preferences(&mut settings, &careful);
+        assert_eq!(settings.read_receipts, ReadReceiptPolicy::Never);
+        assert_eq!(settings.empty_junk_after_days, 60);
+        assert_eq!(settings.ai.model, "bigger");
+    }
 
     #[test]
     fn backups_old_and_new_say_when_messages_count_as_read() {

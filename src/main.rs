@@ -1,4 +1,5 @@
 mod account_controller;
+mod account_discovery;
 mod account_mail_preferences;
 mod account_status;
 #[cfg(desktop)]
@@ -30,9 +31,11 @@ mod compose_editor;
 mod compose_paste;
 mod compose_quote;
 mod composer;
+mod contact_import;
 mod contacts;
 mod data_controller;
 mod date_format;
+mod dav_discovery;
 #[cfg(desktop)]
 mod default_email_app;
 mod document_preview;
@@ -580,7 +583,6 @@ struct AccountPresentationSettings {
     active_profile: Option<String>,
     show_markers: bool,
     account_colors: HashMap<String, String>,
-    account_short_names: HashMap<String, String>,
 }
 
 impl AccountPresentationSettings {
@@ -590,7 +592,6 @@ impl AccountPresentationSettings {
             active_profile: settings.active_mail_profile.clone(),
             show_markers: settings.show_account_badges,
             account_colors: settings.account_colors.clone(),
-            account_short_names: settings.account_short_names.clone(),
         }
     }
 
@@ -636,14 +637,6 @@ impl AccountPresentationSettings {
         self.account_colors.contains_key(&account_id.to_string())
     }
 
-    fn account_label<'a>(&'a self, account_id: i64, fallback: &'a str) -> &'a str {
-        self.account_short_names
-            .get(&account_id.to_string())
-            .map(String::as_str)
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or(fallback)
-    }
-
     fn remove_account(&mut self, account_id: i64) {
         for profile in &mut self.profiles {
             profile.account_ids.retain(|id| *id != account_id);
@@ -652,9 +645,7 @@ impl AccountPresentationSettings {
         if self.active_profile().is_none() {
             self.active_profile = None;
         }
-        let key = account_id.to_string();
-        self.account_colors.remove(&key);
-        self.account_short_names.remove(&key);
+        self.account_colors.remove(&account_id.to_string());
     }
 }
 
@@ -1276,6 +1267,18 @@ fn apply_language(app: &AppWindow, preference: &str) {
     }
     sidebar_model::reload_mailbox_names(app);
     renderer::set_default_summary(&app.global::<I18n>().invoke_details_summary());
+    let line = |message: UiMessage| translated(app, &message).to_string();
+    renderer::set_header_lines(renderer::HeaderLines {
+        from: line(UiMessage::detail("From: {}", renderer::HEADER_VALUE)),
+        date: line(UiMessage::detail("Date: {}", renderer::HEADER_VALUE)),
+        subject: line(UiMessage::detail("Subject: {}", renderer::HEADER_VALUE)),
+        to: line(UiMessage::detail("To: {}", renderer::HEADER_VALUE)),
+        cc: line(UiMessage::detail("Cc: {}", renderer::HEADER_VALUE)),
+    });
+    attachment_controller::set_unnamed_message(&translated(
+        app,
+        &UiMessage::plain("Forwarded message"),
+    ));
     app.set_language_mode(language_mode.into());
     app.set_privacy_policy_url(privacy_policy_url(selected).into());
     app.invoke_app_language_changed(language_mode.into(), selected.into());
@@ -3657,6 +3660,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             }
         },
     ));
+    app.global::<EmailReader>()
+        .on_mailbox_text(|name, address| mailbox_text(&name, &address).into());
     let body_state = Rc::clone(&state);
     let pending = body_pending.clone();
     let generation = body_generation.clone();
@@ -5704,6 +5709,45 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let app_weak = app.as_weak();
+    let state_for_name = Rc::clone(&state);
+    let runtime_for_name = runtime.clone();
+    let ui_task_tx_for_name = ui_task_tx.clone();
+    app.on_save_account_name(move |account_id, name| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_name.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Account names require local mail data."));
+            return;
+        };
+        let account_id = i64::from(account_id);
+        app.set_sync_status(UiMessage::plain("Saving the account name…"));
+        let updates = ui_task_tx_for_name.clone();
+        runtime_for_name.spawn(async move {
+            let message = match core.set_account_name(account_id, &name).await {
+                Ok(()) => UiMessage::plain("Account name saved."),
+                Err(error) => UiMessage::detail("Could not save the account name: {}", error),
+            };
+            // Reload either way so the field shows the saved name.
+            let accounts = core.load_account_snapshot().await.ok();
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts,
+                    calendar_connections: None,
+                    carddav_connections: None,
+                    calendar_error: None,
+                    account_removal: None,
+                    clear_account_form: false,
+                    finishes_account_setup: false,
+                    finishes_oauth: false,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
+    let app_weak = app.as_weak();
     let state_for_push = Rc::clone(&state);
     let runtime_for_push = runtime.clone();
     let ui_task_tx_for_push = ui_task_tx.clone();
@@ -6673,81 +6717,31 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         platform.external_urls.clone(),
     );
     mail_setup::register(&app, &runtime, &platform.documents);
+    contact_import::install(
+        &app,
+        &state,
+        &contact_state,
+        &runtime,
+        &platform.documents,
+        platform.paths.temp_dir(),
+    );
+
+    dav_discovery::install(&app, &state, &runtime);
 
     let suggestion_app = app.as_weak();
     let suggestion_state = Rc::clone(&state);
-    let last_suggested_transport = Rc::new(RefCell::new(None::<AccountConfig>));
+    let suggestion_runtime = runtime.clone();
     app.on_suggest_account_settings(move |email| {
         let Some(app) = suggestion_app.upgrade() else {
             return;
         };
-        // Only server settings that the form shows are suggested.
-        let (protocol, standard_incoming_port) =
-            match MailProtocol::parse(app.get_account_protocol().as_str()) {
-                Some(MailProtocol::Imap) => (MailProtocol::Imap, "993"),
-                Some(MailProtocol::Pop3) => (MailProtocol::Pop3, "995"),
-                Some(MailProtocol::Gmail | MailProtocol::Jmap | MailProtocol::Local) | None => {
-                    return;
-                }
-            };
-        let transport_matches_last_suggestion = last_suggested_transport
-            .borrow()
-            .as_ref()
-            .is_some_and(|config| {
-                app.get_incoming_host().as_str() == config.incoming_host
-                    && app.get_incoming_port().as_str() == config.incoming_port.to_string()
-                    && app.get_smtp_host().as_str() == config.smtp_host
-                    && app.get_smtp_port().as_str() == config.smtp_port.to_string()
-                    && app.get_incoming_security().as_str()
-                        == config.settings.connection.incoming_security.as_str()
-                    && app.get_smtp_security().as_str()
-                        == config.settings.connection.smtp_security.as_str()
-                    && app.get_trusted_certificate_pem().as_str()
-                        == config.settings.connection.trusted_certificate_pem
-            });
-        let transport_is_pristine = app.get_incoming_host().trim().is_empty()
-            && app.get_smtp_host().trim().is_empty()
-            && app.get_incoming_port().as_str() == standard_incoming_port
-            && app.get_smtp_port().as_str() == "465"
-            && app.get_incoming_security().as_str() == "tls"
-            && app.get_smtp_security().as_str() == "tls"
-            && app.get_trusted_certificate_pem().trim().is_empty();
-        if !transport_is_pristine && !transport_matches_last_suggestion {
-            last_suggested_transport.borrow_mut().take();
-            return;
-        }
-        let suggestion = {
-            let state = suggestion_state.borrow();
-            suggested_mail_transport(&state.account_configs, email.as_str(), protocol)
-        };
-        let Some(config) = suggestion else {
-            if transport_matches_last_suggestion {
-                app.set_incoming_host("".into());
-                app.set_incoming_port(standard_incoming_port.into());
-                app.set_smtp_host("".into());
-                app.set_smtp_port("465".into());
-                app.set_incoming_security("tls".into());
-                app.set_smtp_security("tls".into());
-                app.set_trusted_certificate_pem("".into());
-            }
-            last_suggested_transport.borrow_mut().take();
-            return;
-        };
-        app.set_incoming_host(config.incoming_host.clone().into());
-        app.set_incoming_port(config.incoming_port.to_string().into());
-        app.set_smtp_host(config.smtp_host.clone().into());
-        app.set_smtp_port(config.smtp_port.to_string().into());
-        app.set_incoming_security(config.settings.connection.incoming_security.as_str().into());
-        app.set_smtp_security(config.settings.connection.smtp_security.as_str().into());
-        app.set_trusted_certificate_pem(
-            config
-                .settings
-                .connection
-                .trusted_certificate_pem
-                .clone()
-                .into(),
+        let state = suggestion_state.borrow();
+        account_discovery::suggest(
+            &app,
+            &state.account_configs,
+            email.as_str(),
+            &suggestion_runtime,
         );
-        *last_suggested_transport.borrow_mut() = Some(config);
     });
 
     app.on_add_password_account(
@@ -7308,9 +7302,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let updates_for_carddav = ui_task_tx.clone();
     let app_for_carddav = app.as_weak();
     app.on_connect_carddav(move |account_id, url, username, password| {
+        let Some(app) = app_for_carddav.upgrade() else {
+            return;
+        };
+        if app.get_carddav_connecting() {
+            return;
+        }
         let Some(core) = state_for_carddav.borrow().core.clone() else {
             return;
         };
+        app.set_carddav_connecting(true);
         let updates = updates_for_carddav.clone();
         let app = app_for_carddav.clone();
         runtime_for_carddav.spawn(async move {
@@ -7327,13 +7328,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Ok(_) => UiMessage::plain("CardDAV connected and initial sync started."),
                 Err(error) => UiMessage::detail("Could not connect CardDAV: {}", error),
             };
-            if connected {
-                let _ = app.upgrade_in_event_loop(|app| {
+            let _ = app.upgrade_in_event_loop(move |app| {
+                app.set_carddav_connecting(false);
+                // Close the dialog only when it still shows this account.
+                if connected && app.get_carddav_account_id() == account_id {
                     app.set_carddav_account_id(-1);
                     app.set_carddav_password("".into());
                     app.set_carddav_manage_existing(false);
-                });
-            }
+                }
+            });
             let connections = core.load_carddav_connections().await.ok();
             let _ = updates
                 .send(UiTaskUpdate {
@@ -8016,6 +8019,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     });
     memory::watch_pressure(&runtime);
+    let idle_renderer = Rc::downgrade(&email_renderer);
+    memory::on_ui_idle(move || {
+        if let Some(renderer) = idle_renderer.upgrade()
+            && let Ok(mut renderer) = renderer.try_borrow_mut()
+        {
+            renderer.release_paint_buffers();
+        }
+    });
 
     if start_hidden {
         app.invoke_suspend_rendering(true);

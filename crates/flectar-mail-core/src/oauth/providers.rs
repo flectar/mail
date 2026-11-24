@@ -251,7 +251,7 @@ pub fn resolve_credentials(provider: Provider) -> Result<(String, Option<String>
         return checked_credentials(provider, &id, secret.as_deref());
     }
     Err(CoreError::Auth(format!(
-        "no OAuth app configured for {}: use custom OAuth credentials in Settings → General, or build with {}",
+        "no app keys for {} on this device: add them under OAuth app credentials in Settings → Accounts, or build with {}",
         provider.as_str(),
         bundled_client_id_env(provider)
     )))

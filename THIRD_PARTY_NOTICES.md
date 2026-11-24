@@ -55,7 +55,7 @@ retains its license texts in
 [`crates/jmap-client/LICENSE-MIT`](crates/jmap-client/LICENSE-MIT) and
 [`crates/jmap-client/LICENSE-APACHE`](crates/jmap-client/LICENSE-APACHE). The
 upstream source is <https://github.com/stalwartlabs/jmap-client>. Its proxy
-patch, source checksum, and removal condition are documented in
+and TLS patches, source checksum, and removal condition are documented in
 [`patches/jmap-client/README.md`](patches/jmap-client/README.md).
 
 ## Blitz

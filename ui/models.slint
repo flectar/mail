@@ -260,6 +260,14 @@ export struct ProfileMemberRow {
 // Messages remain separate inside a conversation. The native side keeps the
 // bodies and renderer state; this lightweight model is safe to virtualize even
 // for long threads.
+// Who a message is from and to, and when, as the reader's details list them.
+export struct MessageDetails {
+    from: string,
+    to: [string],
+    cc: [string],
+    date: string,
+}
+
 export struct ThreadMessageRow {
     index: int,
     sender: string,
@@ -297,7 +305,13 @@ export struct CalendarConnectionRow {
 export struct AccountRow {
     id: int,
     drag_key: string,
+    // What lists of accounts call it: `custom_name`, else `default_name`.
     name: string,
+    // The name the user gave the account, or empty.
+    custom_name: string,
+    // What it's called without a name of its own: its owner's name from
+    // the provider, else its address.
+    default_name: string,
     email: string,
     provider: string,
     mail_protocol: string,
@@ -634,6 +648,8 @@ export global EmailReader {
     callback retry-images();
     in-out property <int> failed-images;
     pure callback link-at(float, float) -> string;
+    // A name and address as one mailbox, quoted as a header would quote it.
+    pure callback mailbox-text(string, string) -> string;
     callback command(string);
     callback find(string, int);
     // Find is over, however the find bar closed: its matches stop being
@@ -669,7 +685,7 @@ export struct MailAttachment {
     detail: string,
     previewable: bool,
     // pdf, document, spreadsheet, presentation, image, video, audio,
-    // archive, code, calendar or file.
+    // archive, code, calendar, message or file.
     kind: string,
     thumbnail: image,
     has_thumbnail: bool,

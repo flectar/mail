@@ -33,6 +33,11 @@ use tokio::time::{Instant, Sleep};
 /// Bound for connecting, the greeting, STARTTLS, and sign-in. Exchange
 /// Online can leave a throttled session open without completing one of these
 /// phases; without a deadline a queued send would stay in flight forever.
+/// The name the client gives in EHLO. The server records it in the Received
+/// field every recipient sees (RFC 5321 section 4.4), so it is never the
+/// device's own name.
+const EHLO_DOMAIN: &str = "flectar.local";
+
 const SMTP_TIMEOUT: Duration = Duration::from_secs(30);
 /// A connection that moves no bytes for this long has stalled.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -373,7 +378,7 @@ async fn tls_handshake(cfg: &AccountConfig, tcp: TcpStream) -> Result<MailStream
 async fn start_tls(cfg: &AccountConfig, mut tcp: TcpStream) -> Result<MailStream> {
     let greeting = read_smtp_response(&mut tcp, "greeting").await?;
     expect_smtp_status(&greeting, "220", "greeting")?;
-    tcp.write_all(b"EHLO flectar.local\r\n")
+    tcp.write_all(format!("EHLO {EHLO_DOMAIN}\r\n").as_bytes())
         .await
         .map_err(|error| CoreError::Smtp(format!("SMTP EHLO: {error}")))?;
     let capabilities = read_smtp_response(&mut tcp, "EHLO").await?;
@@ -433,7 +438,7 @@ async fn connect(
         let encrypted = stream.is_encrypted();
         let mut connection = AsyncSmtpConnection::connect_with_transport(
             Box::new(SmtpStream::new(stream, greeting, gate)),
-            &ClientId::default(),
+            &ClientId::Domain(EHLO_DOMAIN.to_owned()),
         )
         .await
         .map_err(|error| map_smtp_error(cfg, error))?;

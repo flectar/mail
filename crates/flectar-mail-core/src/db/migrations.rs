@@ -84,6 +84,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/065_folder_detected_role.sql")),
     Migration::Plain(include_str!("migrations/066_sender_identity_bcc.sql")),
     Migration::Plain(include_str!("migrations/067_jmap_body_downloads.sql")),
+    Migration::Plain(include_str!("migrations/068_account_names.sql")),
+    Migration::Plain(include_str!("migrations/069_bodies_to_read_again.sql")),
+    Migration::Plain(include_str!("migrations/070_app_key_sync.sql")),
+    Migration::Plain(include_str!("migrations/071_account_authentication.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -392,18 +396,21 @@ mod tests {
     fn fresh_schema_has_the_canonical_mail_contract() {
         let conn = fresh();
         let expected = [
+            "account_authentication",
             "accounts",
             "agent_activity",
             "agent_activity_actions",
             "agent_activity_labels",
             "agent_drafts",
             "ai_usage_events",
+            "app_key_shares",
             "app_settings",
             "auto_replies",
             "attachment_files_fts",
             "attachment_text_fts",
             "attachments",
             "blocked_senders",
+            "bodies_to_read_again",
             "contact_accounts",
             "contact_entries",
             "contact_values",

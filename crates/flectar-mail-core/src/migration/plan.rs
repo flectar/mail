@@ -865,6 +865,7 @@ fn draft(
         config: PortableAccountConfig {
             email: mapping.email,
             display_name,
+            name: None,
             provider: mapping.provider,
             auth_kind: match mapping.provider {
                 Provider::Generic => AuthKind::Password,

@@ -7,6 +7,7 @@ use crate::{
 };
 use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::{
+    borrow::Cow,
     cell::RefCell,
     collections::HashSet,
     rc::Rc,
@@ -15,6 +16,18 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
+
+thread_local! {
+    /// The file name of a message forwarded without a name or a subject to
+    /// name it by, in the UI language.
+    static UNNAMED_MESSAGE: RefCell<Rc<str>> = RefCell::new(Rc::from("Forwarded message.eml"));
+}
+
+/// The UI language changed: a forwarded message without a name of its own
+/// or a subject is a file called `words` (#455).
+pub(crate) fn set_unnamed_message(words: &str) {
+    UNNAMED_MESSAGE.with(|name| *name.borrow_mut() = Rc::from(format!("{words}.eml")));
+}
 
 #[cfg(mobile)]
 static SUSPEND: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
@@ -66,6 +79,16 @@ fn visible_attachment(attachment: &flectar_mail_core::models::AttachmentMeta) ->
             .filename
             .as_ref()
             .is_some_and(|name| !name.trim().is_empty())
+        // A message forwarded inside this one is a file as well as what the
+        // body shows, as mail apps list it (#455).
+        || is_message(attachment)
+}
+
+fn is_message(attachment: &flectar_mail_core::models::AttachmentMeta) -> bool {
+    attachment
+        .mime_type
+        .as_deref()
+        .is_some_and(flectar_mail_core::mime::is_message_type)
 }
 
 // attachment_rows preserves this filtered metadata order. Walk the two in
@@ -134,9 +157,9 @@ fn attachment_rows(
             let media = media_type(a);
             MailAttachment {
                 id: a.id.to_string().into(),
-                name: name.into(),
-                previewable: previewable(name, &media),
-                kind: file_kind(name, &media).into(),
+                name: name.as_ref().into(),
+                previewable: previewable(&name, &media),
+                kind: file_kind(&name, &media).into(),
                 detail: media.into(),
                 thumbnail: Default::default(),
                 has_thumbnail: false,
@@ -151,22 +174,24 @@ pub(crate) fn list_attachment(
 ) -> ListAttachment {
     let name = file_name(attachment);
     let media = media_type(attachment);
-    let (stem, extension) = split_extension(name);
+    let (stem, extension) = split_extension(&name);
     ListAttachment {
         id: attachment.id.to_string().into(),
         stem: stem.into(),
         extension: extension.into(),
-        kind: file_kind(name, &media).into(),
-        previewable: previewable(name, &media),
+        kind: file_kind(&name, &media).into(),
+        previewable: previewable(&name, &media),
     }
 }
 
-fn file_name(attachment: &flectar_mail_core::models::AttachmentMeta) -> &str {
-    attachment
-        .filename
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .unwrap_or("attachment")
+fn file_name(attachment: &flectar_mail_core::models::AttachmentMeta) -> Cow<'_, str> {
+    match attachment.filename.as_deref().filter(|s| !s.is_empty()) {
+        Some(name) => Cow::Borrowed(name),
+        None if is_message(attachment) => {
+            Cow::Owned(UNNAMED_MESSAGE.with(|name| name.borrow().to_string()))
+        }
+        None => Cow::Borrowed("attachment"),
+    }
 }
 
 fn media_type(attachment: &flectar_mail_core::models::AttachmentMeta) -> String {
@@ -182,14 +207,10 @@ fn media_type(attachment: &flectar_mail_core::models::AttachmentMeta) -> String 
 }
 
 fn previewable(name: &str, media: &str) -> bool {
-    media == "application/pdf"
+    crate::document_preview::declared_pdf(media, name)
         || media.starts_with("image/")
         || media.starts_with("text/")
         || matches!(media, "application/json" | "application/xml")
-        || name
-            .as_bytes()
-            .get(name.len().saturating_sub(4)..)
-            .is_some_and(|suffix| suffix.eq_ignore_ascii_case(b".pdf"))
 }
 
 /// A name and its extension, such as "Report" and ".pdf". Only a short
@@ -208,8 +229,8 @@ fn split_extension(name: &str) -> (&str, &str) {
 }
 
 /// What a file is, by its type and otherwise its name: pdf, document,
-/// spreadsheet, presentation, image, video, audio, archive, code, calendar
-/// or file. It picks the file's icon.
+/// spreadsheet, presentation, image, video, audio, archive, code, calendar,
+/// message or file. It picks the file's icon.
 fn file_kind(name: &str, media: &str) -> &'static str {
     let extension = split_extension(name)
         .1
@@ -222,6 +243,8 @@ fn file_kind(name: &str, media: &str) -> &'static str {
     };
     if is(&["application/pdf"], &["pdf"], &[]) {
         "pdf"
+    } else if is(&["message/rfc822", "message/global"], &["eml"], &[]) {
+        "message"
     } else if is(
         &[],
         &[
@@ -721,6 +744,7 @@ pub(crate) fn register(
                             .mime_type
                             .as_deref()
                             .unwrap_or("application/octet-stream"),
+                        selected.filename.as_deref().unwrap_or(""),
                     )
                     .await
                     .map(Some)
@@ -795,6 +819,9 @@ mod tests {
             ("book.epub", "application/epub+zip", "document"),
             ("site.zip", "application/zip", "archive"),
             ("invite.ics", "text/calendar", "calendar"),
+            ("Original message.eml", "message/rfc822", "message"),
+            ("thread.EML", "application/octet-stream", "message"),
+            ("Forwarded message.eml", "message/global", "message"),
             ("clip.mov", "video/quicktime", "video"),
             ("memo.m4a", "", "audio"),
             ("config.json", "application/json", "code"),
@@ -876,5 +903,33 @@ mod tests {
         assert!(!thumbnail_candidate(&files[0]));
         assert!(thumbnail_candidate(&files[1]));
         assert!(!rows[1].has_thumbnail);
+    }
+
+    /// A message forwarded inside another shows in the body and is a file
+    /// too, named by its subject or else as the UI language says (#455).
+    #[test]
+    fn issue_455_a_forwarded_message_is_listed_as_a_file() {
+        use flectar_mail_core::models::AttachmentMeta;
+        let message = |id, filename: Option<&str>| AttachmentMeta {
+            id,
+            filename: filename.map(str::to_owned),
+            mime_type: Some("message/rfc822".into()),
+            size: Some(300),
+            is_inline: true,
+        };
+        set_unnamed_message("Mensaje reenviado");
+        let rows = attachment_rows(&[message(1, Some("Original message.eml")), message(2, None)]);
+        set_unnamed_message("Forwarded message");
+        let rows: Vec<_> = rows
+            .iter()
+            .map(|row| (row.name.as_str(), row.kind.as_str(), row.previewable))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("Original message.eml", "message", false),
+                ("Mensaje reenviado.eml", "message", false),
+            ]
+        );
     }
 }

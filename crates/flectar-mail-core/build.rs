@@ -54,6 +54,16 @@ fn main() {
         // keyring stores secrets through the freedesktop Secret Service.
         // OpenHarmony reports target_os = "linux" but has no Secret Service.
         secret_service: { all(desktop, any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"), not(target_env = "ohos")) },
+        // The platform layer checks server certificates with the system
+        // (net::tls::use_platform_trust). On Android, rustls-platform-verifier
+        // asks for an online revocation check that refuses certificates
+        // without an OCSP responder.
+        platform_trust: { target_os = "android" },
+        // Which system resolver net::dns asks: Android's own (API 29+),
+        // Apple's DNS-SD, Windows' DNS client, or the C library's res_query.
+        android_resolver: { target_os = "android" },
+        apple_resolver: { target_vendor = "apple" },
+        res_query: { all(unix, not(any(android_resolver, apple_resolver))) },
     }
 
     let workspace_env = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.env");

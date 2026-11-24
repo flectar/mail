@@ -6,10 +6,11 @@
 # that directory, and the release attaches the same signed RPMs.
 #
 # The key is RPM_SIGNING_KEY, an ASCII-armored private key, with its
-# passphrase in RPM_SIGNING_PASSPHRASE. Without one, as in pull requests, a
-# throwaway key signs instead, so every run checks signing, the repository and
-# signed installs the same way. FLECTAR_REQUIRE_SIGNING_KEY=1, set for release
-# tags, refuses to fall back.
+# passphrase in RPM_SIGNING_PASSPHRASE. Only release tags pass them, from the
+# rpm-release environment (resources/rpm/README.md). Without a key, as in
+# pull requests, a throwaway key signs instead, so every run checks signing,
+# the repository and signed installs the same way. FLECTAR_REQUIRE_SIGNING_KEY=1,
+# set for release tags, refuses to fall back.
 set -euo pipefail
 
 if (($# < 2)); then

@@ -7,6 +7,11 @@ use mail_parser::MimeHeaders;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
+mod embedded;
+
+pub use embedded::{EmbeddedHeaders, is_message_type, message_file_name, message_file_stem};
+pub(crate) use embedded::{planned_messages, shows_in_body, with_messages};
+
 /// Retains our submission identity when a provider replaces Message-ID.
 pub const SUBMISSION_ID_HEADER: &str = "X-Flectar-Submission-ID";
 
@@ -38,6 +43,10 @@ pub struct ParsedHeaders {
     pub via: Option<String>,
     /// Strongest authentication result reported by the receiving MTA.
     pub sender_verification: SenderVerification,
+    /// The message carries an Authentication-Results field at all. Whether
+    /// its receiving server adds one to every message decides whether the
+    /// topmost one is the server's (see `repo::messages::vouched`).
+    pub authentication_results: bool,
     /// Where a read receipt was asked to go (RFC 8098
     /// Disposition-Notification-To). Empty when the message asks for none,
     /// or for one this client must not send.
@@ -66,8 +75,9 @@ pub struct ParsedAttachment {
 
 /// Schema version written into `messages.mime_plan_json`.
 /// Bumped to 3 when `is_inline` stopped treating a bare Content-ID as proof of
-/// an embedded part: plans stored under the old rule are rebuilt on demand.
-pub const MIME_PLAN_VERSION: u8 = 3;
+/// an embedded part, and to 4 when the body began showing the messages it
+/// carries (#455): plans stored under an older rule are rebuilt on demand.
+pub const MIME_PLAN_VERSION: u8 = 4;
 
 /// A compact, serializable description of the IMAP sections needed to make a
 /// message readable without downloading unrelated attachment bytes.
@@ -78,6 +88,10 @@ pub struct MimePlan {
     pub text_sections: Vec<PlannedTextSection>,
     #[serde(default)]
     pub attachments: Vec<PlannedAttachment>,
+    /// The messages inside the message that its body shows (#455), each
+    /// after the message it is inside of.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub messages: Vec<PlannedMessage>,
 }
 
 impl Default for MimePlan {
@@ -86,6 +100,7 @@ impl Default for MimePlan {
             version: MIME_PLAN_VERSION,
             text_sections: Vec::new(),
             attachments: Vec::new(),
+            messages: Vec::new(),
         }
     }
 }
@@ -105,22 +120,26 @@ impl MimePlan {
     }
 
     /// The message carries a read receipt's report (RFC 8098). The part is
-    /// no text to read, so the plan lists it with the files.
+    /// no text to read, so the plan lists it with the files. One inside a
+    /// message the body shows is that message's.
     pub fn carries_disposition_report(&self) -> bool {
         self.attachments
             .iter()
-            .any(|part| is_disposition_report_part(&part.mime_type))
+            .any(|part| part.message.is_none() && is_disposition_report_part(&part.mime_type))
     }
 
-    /// The encoded size of every planned part, each counted once.
+    /// The encoded size of every planned part, each counted once. The parts
+    /// of a message the body shows are inside that message's own.
     pub fn encoded_size(&self) -> u64 {
         let mut seen = std::collections::HashSet::new();
         self.text_sections
             .iter()
+            .filter(|part| part.message.is_none())
             .map(|part| (&part.section, part.size))
             .chain(
                 self.attachments
                     .iter()
+                    .filter(|part| part.message.is_none())
                     .map(|part| (&part.section, part.size)),
             )
             .filter(|(section, _)| seen.insert(*section))
@@ -147,6 +166,22 @@ pub struct PlannedTextSection {
     pub transfer_encoding: String,
     /// Encoded octet count reported by BODYSTRUCTURE.
     pub size: u32,
+    /// The message in [`MimePlan::messages`] the section is the text of, or
+    /// None for the message's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<u16>,
+}
+
+/// A message inside the message that its body shows (#455).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlannedMessage {
+    /// Numeric IMAP BODY section of its message/rfc822 part, for example `2`.
+    pub section: String,
+    /// The message in [`MimePlan::messages`] it is inside of, or None when it
+    /// is the message's own.
+    #[serde(default)]
+    pub parent: Option<u16>,
+    pub headers: EmbeddedHeaders,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +194,44 @@ pub struct PlannedAttachment {
     pub content_id: Option<String>,
     pub is_inline: bool,
     pub transfer_encoding: String,
+    /// The message in [`MimePlan::messages`] the file belongs to, or None
+    /// for the message's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<u16>,
+}
+
+/// `text` without Unicode's bidirectional controls (its `Bidi_Control`
+/// characters). They make a name read as something else, with a
+/// right-to-left override `invoice_\u{202E}fdp.exe` shows as
+/// `invoice_exe.pdf`. Right-to-left names read the same without them, since
+/// the bidirectional algorithm orders their letters by itself. Joiners stay,
+/// as Persian text and emoji need them.
+pub fn without_bidi_controls(text: &str) -> std::borrow::Cow<'_, str> {
+    fn is_bidi_control(c: char) -> bool {
+        matches!(
+            c,
+            '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+        )
+    }
+    if text.contains(is_bidi_control) {
+        text.chars()
+            .filter(|&c| !is_bidi_control(c))
+            .collect::<String>()
+            .into()
+    } else {
+        text.into()
+    }
+}
+
+/// An attachment's stored name the way the app shows it and saves it under.
+/// Rows synced before encoded-words were decoded get decoded here.
+pub fn shown_attachment_name(stored: &str) -> String {
+    without_bidi_controls(&decode_encoded_words(stored)).into_owned()
+}
+
+/// A sender's or recipient's display name the way it is stored.
+pub(crate) fn display_name(name: &str) -> Option<String> {
+    Some(without_bidi_controls(name).trim().to_owned()).filter(|name| !name.is_empty())
 }
 
 /// Decode RFC 2047 encoded-words (`=?charset?enc?text?=`) embedded in a header
@@ -289,11 +362,15 @@ pub fn plan_bodystructure(bs: &async_imap::imap_proto::BodyStructure<'_>) -> Mim
         }
     }
 
+    /// One part. `message` is the message in `plan.messages` it belongs to,
+    /// and `unnamed` the name it has when it declares none.
     fn add_single(
         common: &BodyContentCommon<'_>,
         other: &BodyContentSinglePart<'_>,
         path: &[u32],
         plan: &mut MimePlan,
+        message: Option<u16>,
+        unnamed: Option<String>,
     ) {
         let section = section(path);
         let mut mime_type = format!("{}/{}", common.ty.ty, common.ty.subtype);
@@ -315,7 +392,9 @@ pub fn plan_bodystructure(bs: &async_imap::imap_proto::BodyStructure<'_>) -> Mim
             Some(TextSectionKind::Plain)
         } else if mime_type == "text/html" {
             Some(TextSectionKind::Html)
-        } else if mime_type == "text/calendar" {
+        } else if mime_type == "text/calendar" && message.is_none() {
+            // A calendar inside a message the body shows is that message's,
+            // not an invitation to the user: it stays a file.
             Some(TextSectionKind::Calendar)
         } else {
             None
@@ -334,49 +413,147 @@ pub fn plan_bodystructure(bs: &async_imap::imap_proto::BodyStructure<'_>) -> Mim
                 charset: param(&common.ty.params, "charset").map(str::to_owned),
                 transfer_encoding: encoding(&other.transfer_encoding),
                 size: other.octets,
+                message,
             });
         }
 
-        let is_non_body_part = !mime_type.starts_with("text/") || explicit_attachment;
+        let is_non_body_part = !mime_type.starts_with("text/")
+            || explicit_attachment
+            || (mime_type == "text/calendar" && message.is_some());
         if is_non_body_part || (mime_type == "text/calendar" && explicit_attachment) {
             plan.attachments.push(PlannedAttachment {
                 section,
-                filename,
+                filename: filename.or(unnamed),
                 mime_type,
                 size: other.octets,
                 content_id,
                 is_inline,
                 transfer_encoding: encoding(&other.transfer_encoding),
+                message,
             });
         }
     }
 
-    fn walk(bs: &BodyStructure<'_>, path: &mut Vec<u32>, plan: &mut MimePlan) {
+    /// `message` is the message in `plan.messages` the part is inside of,
+    /// `depth` how many messages deep that is.
+    fn walk(
+        bs: &BodyStructure<'_>,
+        path: &mut Vec<u32>,
+        plan: &mut MimePlan,
+        message: Option<u16>,
+        depth: usize,
+    ) {
         match bs {
             BodyStructure::Multipart { bodies, .. } => {
                 for (index, body) in bodies.iter().enumerate() {
                     path.push((index + 1) as u32);
-                    walk(body, path, plan);
+                    walk(body, path, plan, message, depth);
                     path.pop();
                 }
             }
             BodyStructure::Basic { common, other, .. }
             | BodyStructure::Text { common, other, .. } => {
-                add_single(common, other, path, plan);
+                add_single(common, other, path, plan, message, None);
             }
-            BodyStructure::Message { common, other, .. } => {
-                // message/rfc822 is normally a forwarded-message attachment.
-                // Treat it atomically; recursing would require the special
-                // RFC 3501 MESSAGE section-numbering rules and would bulk-fetch
-                // content the user did not ask to open.
-                add_single(common, other, path, plan);
+            BodyStructure::Message {
+                common,
+                other,
+                envelope,
+                body,
+                ..
+            } => {
+                // The message is a file of its own, named by its subject when
+                // it declares no name.
+                let headers = envelope_headers(envelope);
+                add_single(
+                    common,
+                    other,
+                    path,
+                    plan,
+                    message,
+                    message_file_name(&headers.subject),
+                );
+                // One sent as an attachment stays only that, and its bytes
+                // are fetched when it's opened. One the body shows is read as
+                // the body is (#455): its text sections are fetched with the
+                // message's own, and its files are listed with them.
+                let disposition = common.disposition.as_ref().map(|value| value.ty.as_ref());
+                let mime_type = format!("{}/{}", common.ty.ty, common.ty.subtype);
+                let Ok(index) = u16::try_from(plan.messages.len()) else {
+                    return;
+                };
+                if depth >= embedded::MAX_DEPTH || !shows_in_body(&mime_type, disposition) {
+                    return;
+                }
+                plan.messages.push(PlannedMessage {
+                    section: section(path),
+                    parent: message,
+                    headers,
+                });
+                // RFC 3501 section 6.4.5 numbers a message part's body below
+                // it: the parts of a multipart body as N.1, N.2 and so on,
+                // and any other body as N.1.
+                if matches!(body.as_ref(), BodyStructure::Multipart { .. }) {
+                    walk(body, path, plan, Some(index), depth + 1);
+                } else {
+                    path.push(1);
+                    walk(body, path, plan, Some(index), depth + 1);
+                    path.pop();
+                }
             }
         }
     }
 
     let mut plan = MimePlan::default();
-    walk(bs, &mut Vec::new(), &mut plan);
+    walk(bs, &mut Vec::new(), &mut plan, None, 0);
     plan
+}
+
+/// The header lines of a message inside a message, from its BODYSTRUCTURE
+/// envelope (RFC 3501 section 7.4.2), which says them as written.
+fn envelope_headers(envelope: &async_imap::imap_proto::Envelope<'_>) -> EmbeddedHeaders {
+    fn text(value: Option<&[u8]>) -> String {
+        value
+            .map(|bytes| decode_encoded_words(&String::from_utf8_lossy(bytes)))
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
+    }
+    fn addresses(list: Option<&Vec<async_imap::imap_proto::Address<'_>>>) -> Vec<Address> {
+        list.into_iter()
+            .flatten()
+            // A group's start and end have no host (RFC 3501 section 7.4.2).
+            .filter_map(|address| {
+                let mailbox = address.mailbox.as_deref()?;
+                let host = address.host.as_deref()?;
+                Some(Address {
+                    name: display_name(&text(address.name.as_deref())),
+                    email: format!(
+                        "{}@{}",
+                        String::from_utf8_lossy(mailbox),
+                        String::from_utf8_lossy(host)
+                    ),
+                })
+            })
+            .collect()
+    }
+    let written = Some(text(envelope.date.as_deref())).filter(|date| !date.is_empty());
+    // A date that isn't one keeps the words it was written in.
+    let date = written
+        .as_deref()
+        .and_then(mail_parser::DateTime::parse_rfc822)
+        .filter(mail_parser::DateTime::is_valid);
+    EmbeddedHeaders {
+        from: addresses(envelope.from.as_ref()),
+        to: addresses(envelope.to.as_ref()),
+        cc: addresses(envelope.cc.as_ref()),
+        subject: text(envelope.subject.as_deref()),
+        date: date
+            .as_ref()
+            .map(mail_parser::DateTime::to_rfc822)
+            .or(written),
+        date_iso: date.as_ref().map(mail_parser::DateTime::to_rfc3339),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -945,6 +1122,50 @@ mod selective_section_tests {
     }
 
     #[test]
+    fn names_lose_bidirectional_controls() {
+        assert_eq!(
+            shown_attachment_name("invoice_\u{202E}fdp.exe"),
+            "invoice_fdp.exe"
+        );
+        // `4oCu` is the Base64 of the UTF-8 bytes for U+202E.
+        assert_eq!(shown_attachment_name("=?utf-8?B?4oCu?=fdp.exe"), "fdp.exe");
+        for control in [
+            '\u{061C}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}',
+            '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+        ] {
+            assert_eq!(without_bidi_controls(&format!("a{control}b")), "ab");
+        }
+        // Joiners belong to Persian words and emoji.
+        let persian = "\u{645}\u{6CC}\u{200C}\u{62E}\u{648}\u{627}\u{647}\u{645}";
+        assert_eq!(without_bidi_controls(persian), persian);
+        assert!(matches!(
+            without_bidi_controls("plain"),
+            std::borrow::Cow::Borrowed("plain")
+        ));
+        assert_eq!(display_name(" \u{202E} "), None);
+
+        let parsed = parse_message(
+            "From: \"PayPal \u{202E}ecivres\" <x@example.com>\r\n\
+             To: \"\u{2067}Ana\u{2069}\" <ana@example.com>\r\n\
+             Subject: Hi\r\n\
+             Content-Type: multipart/mixed; boundary=b\r\n\
+             \r\n\
+             --b\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             Hello\r\n\
+             --b--\r\n"
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.headers.from.unwrap().name.as_deref(),
+            Some("PayPal ecivres")
+        );
+        assert_eq!(parsed.headers.to[0].name.as_deref(), Some("Ana"));
+    }
+
+    #[test]
     fn decode_encoded_words_covers_common_shapes() {
         // Plain ASCII is returned untouched (fast path).
         assert_eq!(decode_encoded_words("report.pdf"), "report.pdf");
@@ -1010,6 +1231,7 @@ mod selective_section_tests {
             charset: Some("utf-8".into()),
             transfer_encoding: "base64".into(),
             size: encoded.len() as u32,
+            message: None,
         };
 
         // Office 365 occasionally returns no BODY[1.MIME] data even though
@@ -1099,7 +1321,7 @@ pub struct ParsedBody {
 
 fn addr_from(a: &mail_parser::Addr) -> Option<Address> {
     a.address().map(|e| Address {
-        name: a.name().map(|n| n.to_string()),
+        name: a.name().and_then(display_name),
         email: e.to_string(),
     })
 }
@@ -1119,6 +1341,17 @@ fn collect_addrs(value: Option<&mail_parser::Address>) -> Vec<Address> {
         }
     }
     out
+}
+
+/// Whether `url` is a `data:` URL, read the way URL parsers read it: they
+/// skip spaces and control characters before it and tabs and newlines in it.
+fn is_data_url(url: &str) -> bool {
+    url.chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .skip_while(|c| *c <= ' ')
+        .take(5)
+        .map(|c| c.to_ascii_lowercase())
+        .eq("data:".chars())
 }
 
 /// The URL schemes mail may link and load from.
@@ -1171,7 +1404,8 @@ fn mail_sanitizer() -> ammonia::Builder<'static> {
     // other mail clients' sanitizers keep. Dropping one drops its box and its
     // style with it.
     .add_tags(["section", "main", "address", "big", "nobr", "dir", "menu"])
-    .add_tag_attributes("meta", ["name", "content", "http-equiv"])
+    // Not `http-equiv`, which can refresh or redirect the page it is in.
+    .add_tag_attributes("meta", ["name", "content"])
     .add_tag_attributes("img", ["src", "alt", "width", "height"])
     .add_tag_attributes("font", ["face", "size", "color"])
     // An anchor's `name` is where a link to `#name` in the message lands.
@@ -1196,9 +1430,17 @@ fn mail_sanitizer() -> ammonia::Builder<'static> {
     .add_tag_attributes("ul", ["type"])
     .add_tag_attributes("li", ["type", "value"])
     // A `background` is an image URL, which ammonia checks only in `src`.
+    // `data:` is for pictures a message carries. As a link target it is a
+    // page the message wrote, which a browser shows at an address that
+    // names no site, so links keep their text and lose such targets.
+    // Ammonia takes one attribute filter, so it does both.
     .attribute_filter(|_element, attribute, value| {
-        (attribute != "background" || is_mail_url(value))
-            .then_some(std::borrow::Cow::Borrowed(value))
+        let keep = match attribute {
+            "background" => is_mail_url(value),
+            "href" => !is_data_url(value),
+            _ => true,
+        };
+        keep.then_some(std::borrow::Cow::Borrowed(value))
     })
     .url_schemes(std::collections::HashSet::from(MAIL_URL_SCHEMES))
     // CSS is needed by the native Blitz renderer for email typography and
@@ -1685,6 +1927,53 @@ mod read_receipt_tests {
         );
         assert!(!raw.contains("Auto-Submitted"));
         assert!(!raw.contains("Disposition-Notification-To"));
+    }
+
+    #[test]
+    fn a_receipt_keeps_the_original_subject_on_one_line() {
+        let recipient = Address {
+            name: None,
+            email: "me@example.org".into(),
+        };
+        let to = [Address {
+            name: None,
+            email: "ana@example.com".into(),
+        }];
+        let (_, raw) = build_read_receipt(&ReadReceipt {
+            recipient: &recipient,
+            to: &to,
+            original_subject: "Plan\r\nBcc: third@example.net",
+            original_message_id: Some("<plan\r\nBcc: third@example.net>"),
+            user_agreed: true,
+            reporting_domain: "example.org",
+        })
+        .unwrap();
+        let parsed = mail_parser::MessageParser::default()
+            .parse(&raw[..])
+            .unwrap();
+        assert!(parsed.bcc().is_none());
+        let raw = String::from_utf8_lossy(&raw);
+        assert!(
+            raw.contains("Subject: Read: Plan  Bcc: third@example.net\r\n"),
+            "{raw}"
+        );
+        assert!(!raw.contains("Original-Message-ID"), "{raw}");
+
+        let to = [Address {
+            name: None,
+            email: "ana@example.com>, <third@example.net".into(),
+        }];
+        assert!(
+            build_read_receipt(&ReadReceipt {
+                recipient: &recipient,
+                to: &to,
+                original_subject: "Plan",
+                original_message_id: None,
+                user_agreed: true,
+                reporting_domain: "example.org",
+            })
+            .is_err()
+        );
     }
 
     #[test]
@@ -2279,18 +2568,6 @@ fn sender_verification(
     results: &[AuthenticationResult<'_>],
     from: Option<&Address>,
 ) -> SenderVerification {
-    if let Some(bimi) = results.iter().find(|result| {
-        result.method.eq_ignore_ascii_case("bimi") && result.result.eq_ignore_ascii_case("pass")
-    }) {
-        return if auth_property(bimi, "policy.authority")
-            .is_some_and(|value| value.eq_ignore_ascii_case("pass"))
-        {
-            SenderVerification::Brand
-        } else {
-            SenderVerification::Bimi
-        };
-    }
-
     let Some(from_domain) = from
         .map(|address| domain_of(&address.email))
         .filter(|domain| !domain.is_empty())
@@ -2304,6 +2581,25 @@ fn sender_verification(
             && auth_property(result, "header.from")
                 .is_some_and(|domain| domains_aligned(domain, from_domain))
     });
+    // A logo means something only for mail that passed DMARC for its From
+    // domain, which BIMI asks receivers to check before they look for one.
+    // A bimi=pass on its own is anyone's claim.
+    if dmarc_pass
+        && let Some(bimi) = results.iter().find(|result| {
+            result.method.eq_ignore_ascii_case("bimi")
+                && result.result.eq_ignore_ascii_case("pass")
+                && auth_property(result, "header.d")
+                    .is_none_or(|domain| domains_aligned(domain, from_domain))
+        })
+    {
+        return if auth_property(bimi, "policy.authority")
+            .is_some_and(|value| value.eq_ignore_ascii_case("pass"))
+        {
+            SenderVerification::Brand
+        } else {
+            SenderVerification::Bimi
+        };
+    }
     let aligned_dkim_pass = results.iter().any(|result| {
         result.method.eq_ignore_ascii_case("dkim")
             && result.result.eq_ignore_ascii_case("pass")
@@ -2496,6 +2792,7 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
     // Remove comments before splitting clauses because they may contain
     // semicolons and text resembling method=result authentication claims.
     let authentication_header = first_raw_header(msg, "Authentication-Results").unwrap_or_default();
+    let authentication_results_field = !authentication_header.is_empty();
     let authentication_header = without_comments(&authentication_header);
     let authentication_results = authentication_results(&authentication_header);
     let sender_verification = sender_verification(&authentication_results, from.as_ref());
@@ -2550,7 +2847,7 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
         submission_id: raw_header(msg, SUBMISSION_ID_HEADER)
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty() && !value.chars().any(char::is_whitespace)),
-        subject: msg.subject().unwrap_or_default().to_string(),
+        subject: header_text(msg.subject().unwrap_or_default()).into_owned(),
         from,
         to: collect_addrs(msg.to()),
         cc: collect_addrs(msg.cc()),
@@ -2565,6 +2862,7 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
         list_id: raw_header(msg, "List-Id").and_then(|raw| list_id(&raw)),
         via,
         sender_verification,
+        authentication_results: authentication_results_field,
         receipt_to,
         receipt_confirm,
         disposition_report,
@@ -2926,37 +3224,14 @@ pub fn parse_message(raw: &[u8]) -> Result<ParsedBody> {
 
     let text = msg.body_text(0).map(|t| t.into_owned());
     let html = msg.body_html(0).map(|h| sanitize_html(&h));
+    // The messages it carries that the body shows, below its own text (#455).
+    let (text, html) = with_messages(text, html, &embedded::shown_in(&msg, 0));
 
     let snippet = make_body_snippet(text.as_deref(), html.as_deref());
 
     let mut attachments = Vec::new();
     let mut calendar_parts = Vec::new();
-    for (i, part) in msg.attachments().enumerate() {
-        let filename = part.attachment_name().map(|s| s.to_string());
-        let mime_type = part.content_type().map(|ct| match ct.subtype() {
-            Some(sub) => format!("{}/{}", ct.ctype(), sub),
-            None => ct.ctype().to_string(),
-        });
-        if mime_type
-            .as_deref()
-            .is_some_and(|m| m.eq_ignore_ascii_case("text/calendar"))
-        {
-            calendar_parts.push(String::from_utf8_lossy(part.contents()).into_owned());
-        }
-        let content_id = part.content_id().map(|s| s.to_string());
-        let is_inline = part_is_inline(
-            part.content_disposition().map(|cd| cd.ctype()),
-            content_id.is_some(),
-        );
-        attachments.push(ParsedAttachment {
-            part_id: i.to_string(),
-            filename,
-            mime_type,
-            size: part.contents().len() as i64,
-            is_inline,
-            content_id,
-        });
-    }
+    collect_attachments(&msg, "", 0, &mut attachments, Some(&mut calendar_parts));
     let disposition_report = returned_receipt(&msg, &headers);
     // Invites are often an *alternative* body part rather than an attachment.
     for part in msg.text_bodies() {
@@ -2978,6 +3253,58 @@ pub fn parse_message(raw: &[u8]) -> Result<ParsedBody> {
         calendar_parts,
         disposition_report,
     })
+}
+
+/// The files of `message`, each by its index among the message's
+/// attachments after `prefix`, the ids of the messages it is inside of: part
+/// `2.0` is the first file of the message that is the third. A message the
+/// body shows lists its files with the message's own, as mail apps list them
+/// (#455). The text/calendar parts of the message itself join `calendars`;
+/// one inside a message it carries is that message's, not an invitation.
+fn collect_attachments(
+    message: &mail_parser::Message,
+    prefix: &str,
+    depth: usize,
+    attachments: &mut Vec<ParsedAttachment>,
+    mut calendars: Option<&mut Vec<String>>,
+) {
+    for (i, part) in message.attachments().enumerate() {
+        let part_id = format!("{prefix}{i}");
+        let media_type = embedded::part_media_type(part);
+        let mime_type = (!media_type.is_empty()).then_some(media_type);
+        if let Some(calendars) = calendars.as_deref_mut()
+            && mime_type
+                .as_deref()
+                .is_some_and(|m| m.eq_ignore_ascii_case("text/calendar"))
+        {
+            calendars.push(String::from_utf8_lossy(part.contents()).into_owned());
+        }
+        let content_id = part.content_id().map(|s| s.to_string());
+        let is_inline = part_is_inline(embedded::disposition(part), content_id.is_some());
+        let inner = part.message();
+        // A message without a name of its own is named by its subject.
+        let filename = part.attachment_name().map(|s| s.to_string()).or_else(|| {
+            inner.and_then(|inner| message_file_name(inner.subject().unwrap_or_default()))
+        });
+        let shown = inner.filter(|_| {
+            depth < embedded::MAX_DEPTH
+                && shows_in_body(
+                    mime_type.as_deref().unwrap_or_default(),
+                    embedded::disposition(part),
+                )
+        });
+        attachments.push(ParsedAttachment {
+            part_id: part_id.clone(),
+            filename,
+            mime_type,
+            size: part.contents().len() as i64,
+            is_inline,
+            content_id,
+        });
+        if let Some(inner) = shown {
+            collect_attachments(inner, &format!("{part_id}."), depth + 1, attachments, None);
+        }
+    }
 }
 
 /// The read receipt a message is, when it's a multipart/report (RFC 6522)
@@ -3051,22 +3378,34 @@ pub fn parse_header_block(raw: &[u8]) -> Result<ParsedHeaders> {
     Ok(parse_headers(&msg))
 }
 
-/// Extract one attachment's bytes from a raw message by attachment index.
+/// Extract one attachment's bytes from a raw message by its part id: its
+/// index among the message's attachments, after those of the messages it is
+/// inside of, as [`parse_message`] numbers them.
 pub fn extract_attachment(raw: &[u8], part_id: &str) -> Result<(Vec<u8>, Option<String>)> {
     let msg = mail_parser::MessageParser::default()
         .parse(raw)
         .ok_or_else(|| CoreError::Mime("unparseable message".into()))?;
-    let idx: usize = part_id
-        .parse()
-        .map_err(|_| CoreError::Mime("bad part id".into()))?;
-    let part = msg
-        .attachments()
-        .nth(idx)
-        .ok_or_else(|| CoreError::NotFound("attachment".into()))?;
-    Ok((
-        part.contents().to_vec(),
-        part.attachment_name().map(|s| s.to_string()),
-    ))
+    let mut message = &msg;
+    let mut indexes = part_id.split('.').peekable();
+    while let Some(index) = indexes.next() {
+        let index: usize = index
+            .parse()
+            .map_err(|_| CoreError::Mime("bad part id".into()))?;
+        let part = message
+            .attachments()
+            .nth(index)
+            .ok_or_else(|| CoreError::NotFound("attachment".into()))?;
+        if indexes.peek().is_none() {
+            return Ok((
+                part.contents().to_vec(),
+                part.attachment_name().map(|s| s.to_string()),
+            ));
+        }
+        message = part
+            .message()
+            .ok_or_else(|| CoreError::NotFound("attachment".into()))?;
+    }
+    Err(CoreError::Mime("bad part id".into()))
 }
 
 pub struct OutgoingAttachment {
@@ -3351,12 +3690,6 @@ fn attachment_part(attachment: MessageAttachment<'_>) -> mail_builder::mime::Mim
     }
 }
 
-/// Whether `mime_type` names a whole message, as a forwarded one is.
-fn is_message_type(mime_type: &str) -> bool {
-    let media = mime_type.split(';').next().unwrap_or_default().trim();
-    media.eq_ignore_ascii_case("message/rfc822") || media.eq_ignore_ascii_case("message/global")
-}
-
 /// A forwarded message's bytes with its lines ending in CRLF, as mail carries them, and its
 /// transfer encoding: 7bit when it's all ASCII, and 8bit otherwise. `None` leaves it to base64,
 /// for a message with NUL bytes, carriage returns of their own, or lines longer than the 998
@@ -3454,16 +3787,11 @@ pub struct ReadReceipt<'a> {
 pub fn build_read_receipt(receipt: &ReadReceipt) -> Result<(String, Vec<u8>)> {
     use mail_builder::headers::content_type::ContentType;
     use mail_builder::mime::{BodyPart, MimePart};
-    let msg_id = format!(
-        "{}.{}@{}",
-        chrono::Utc::now().timestamp_micros(),
-        rand_token(),
-        receipt.reporting_domain
-    );
-    let original_id = receipt
-        .original_message_id
-        .map(|id| id.trim().trim_matches(['<', '>']))
-        .filter(|id| !id.is_empty() && !id.contains(['\r', '\n']));
+    check_addresses(std::iter::once(receipt.recipient).chain(receipt.to))?;
+    let msg_id = new_message_id(receipt.reporting_domain)
+        .trim_matches(['<', '>'])
+        .to_owned();
+    let original_id = receipt.original_message_id.and_then(plain_message_id);
     // Section 3: "manual-action" even when the user set the client to send
     // on its own; MDN-sent-manually only for one they agreed to.
     let sending_mode = if receipt.user_agreed {
@@ -3525,7 +3853,7 @@ pub fn build_read_receipt(receipt: &ReadReceipt) -> Result<(String, Vec<u8>)> {
                 })
                 .collect(),
         ))
-        .subject(format!("Read: {}", receipt.original_subject))
+        .subject(format!("Read: {}", header_text(receipt.original_subject)))
         .body(MimePart::new(
             ContentType::new("multipart/report")
                 .attribute("report-type", "disposition-notification"),
@@ -3596,21 +3924,18 @@ fn build_message_with_attachments<'a>(
         .iter()
         .position(|attachment| imip_method(&attachment.mime_type).is_some())
         .map(|index| attachments.remove(index));
-    let stable_id = out
-        .message_id
-        .map(str::trim)
-        .map(|value| value.trim_matches(['<', '>']))
-        .filter(|value| !value.is_empty() && !value.contains('\r') && !value.contains('\n'));
+    check_addresses(
+        std::iter::once(&out.from)
+            .chain(&out.reply_to)
+            .chain(out.to)
+            .chain(out.cc)
+            .chain(out.bcc)
+            .chain(out.receipt_to),
+    )?;
+    let stable_id = out.message_id.and_then(plain_message_id);
     let msg_id = stable_id
         .map(|value| format!("<{value}>"))
-        .unwrap_or_else(|| {
-            format!(
-                "<{}.{}@{}>",
-                chrono::Utc::now().timestamp_micros(),
-                rand_token(),
-                out.message_id_domain
-            )
-        });
+        .unwrap_or_else(|| new_message_id(out.message_id_domain));
 
     let addresses = |items: &'a [Address]| {
         mail_builder::headers::address::Address::new_list(
@@ -3636,7 +3961,7 @@ fn build_message_with_attachments<'a>(
             out.from.name.as_deref().unwrap_or_default(),
             out.from.email.as_str(),
         ))
-        .subject(out.subject)
+        .subject(header_text(out.subject).into_owned())
         .text_body(out.body_text);
     if let Some(reply_to) = &out.reply_to {
         builder = builder.reply_to(mail_builder::headers::address::Address::new_address(
@@ -3669,6 +3994,14 @@ fn build_message_with_attachments<'a>(
 
     if !out.to.is_empty() {
         builder = builder.to(addresses(out.to));
+    } else if out.cc.is_empty() && !out.bcc.is_empty() {
+        // Sent only to Bcc, the message says its recipients aren't shown
+        // (RFC 5322 appendix A.1.3) rather than leave out the To field that
+        // spam filters expect.
+        builder = builder.header(
+            "To",
+            mail_builder::headers::raw::Raw::new("undisclosed-recipients:;"),
+        );
     }
     if !out.cc.is_empty() {
         builder = builder.cc(addresses(out.cc));
@@ -3736,14 +4069,17 @@ fn build_message_with_attachments<'a>(
             .get_or_insert_with(Vec::new)
             .extend(attachments.into_iter().map(attachment_part));
     }
-    if let Some(irt) = out.in_reply_to {
-        builder = builder.in_reply_to(irt.trim_matches(['<', '>']));
+    if let Some(irt) = out.in_reply_to.and_then(plain_message_id) {
+        builder = builder.in_reply_to(irt);
     }
-    if !out.references.is_empty() {
+    let references: Vec<&str> = out
+        .references
+        .iter()
+        .filter_map(|reference| plain_message_id(reference))
+        .collect();
+    if !references.is_empty() {
         builder = builder.references(mail_builder::headers::message_id::MessageId::new_list(
-            out.references
-                .iter()
-                .map(|reference| reference.trim_matches(['<', '>'])),
+            references.into_iter(),
         ));
     }
 
@@ -3767,6 +4103,82 @@ fn build_message_with_attachments<'a>(
             .map_err(|e| CoreError::Mime(e.to_string()))?
     };
     Ok((msg_id, raw))
+}
+
+/// `value` on one line, for a header such as Subject. A subject copied from
+/// received mail can carry encoded line breaks, and mail-builder writes a
+/// short ASCII value as it is, so a line break would start a header of the
+/// sender's choosing.
+pub fn header_text(value: &str) -> std::borrow::Cow<'_, str> {
+    let breaks =
+        |character: char| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}');
+    if value.chars().any(breaks) {
+        std::borrow::Cow::Owned(
+            value
+                .chars()
+                .map(|character| if breaks(character) { ' ' } else { character })
+                .collect(),
+        )
+    } else {
+        std::borrow::Cow::Borrowed(value)
+    }
+}
+
+/// A Message-ID without its angle brackets, when it can go into a header as
+/// it is: one taken from received mail can hold line breaks.
+fn plain_message_id(value: &str) -> Option<&str> {
+    let value = value.trim().trim_matches(['<', '>']);
+    (!value.is_empty()
+        && !value.chars().any(|character| {
+            character.is_control() || character.is_whitespace() || matches!(character, '<' | '>')
+        }))
+    .then_some(value)
+}
+
+/// Whether `email` can go between `<` and `>` as it is. A control character
+/// would end the header line, and outside a quoted local part a bracket,
+/// comma, semicolon, quote or space would end the address or start another.
+/// Some addresses come straight from received mail, such as where a read
+/// receipt goes.
+fn plain_address(email: &str) -> bool {
+    let Some((local, domain)) = email.rsplit_once('@') else {
+        return false;
+    };
+    let quoted = local.len() >= 2 && local.starts_with('"') && local.ends_with('"');
+    !local.is_empty()
+        && !domain.is_empty()
+        && !email.chars().any(char::is_control)
+        && !(if quoted { domain } else { email })
+            .chars()
+            .any(|character| {
+                character.is_whitespace() || matches!(character, '<' | '>' | ',' | ';' | '"')
+            })
+}
+
+/// Fails unless every address can go into the message's headers as it is.
+fn check_addresses<'a>(addresses: impl IntoIterator<Item = &'a Address>) -> Result<()> {
+    match addresses
+        .into_iter()
+        .find(|address| !plain_address(&address.email))
+    {
+        Some(address) => Err(CoreError::Mime(format!(
+            "{:?} is not an address a message can go to",
+            address.email
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// A new Message-ID for `domain`, in angle brackets. Its left part is random:
+/// one made from the time would tell every recipient when the message was
+/// written, which a scheduled message is often meant not to.
+fn new_message_id(domain: &str) -> String {
+    use rand::Rng;
+    let mut rng = rand::rng();
+    let token: String = (0..26)
+        .map(|_| char::from_digit(rng.random_range(0..36), 36).unwrap_or('0'))
+        .collect();
+    format!("<{token}@{domain}>")
 }
 
 pub(crate) fn rand_token() -> String {
@@ -4222,12 +4634,42 @@ mod tests {
     #[test]
     fn bimi_authority_pass_is_a_verified_brand() {
         let raw = concat!(
-            "Authentication-Results: mx.example; bimi=pass header.d=brand.example ",
-            "header.selector=default policy.authority=pass\r\n",
+            "Authentication-Results: mx.example; dmarc=pass header.from=brand.example; ",
+            "bimi=pass header.d=brand.example header.selector=default policy.authority=pass\r\n",
             "From: Brand <hello@brand.example>\r\nSubject: hi\r\n\r\nbody"
         );
         let headers = parse_message(raw.as_bytes()).unwrap().headers;
         assert_eq!(headers.sender_verification, SenderVerification::Brand);
+    }
+
+    #[test]
+    fn bimi_without_an_aligned_dmarc_pass_verifies_nothing() {
+        for results in [
+            "bimi=pass header.d=brand.example policy.authority=pass",
+            "bimi=pass header.d=attacker.example policy.authority=pass; dmarc=fail header.from=brand.example",
+            "dmarc=pass header.from=brand.example; bimi=pass header.d=attacker.example policy.authority=pass",
+        ] {
+            let raw = format!(
+                "Authentication-Results: attacker.example; {results}\r\n\
+                 From: Brand <hello@brand.example>\r\nSubject: hi\r\n\r\nbody"
+            );
+            let headers = parse_message(raw.as_bytes()).unwrap().headers;
+            assert!(
+                !matches!(
+                    headers.sender_verification,
+                    SenderVerification::Brand | SenderVerification::Bimi
+                ),
+                "{results}"
+            );
+            assert!(headers.authentication_results);
+        }
+        let raw = "From: Brand <hello@brand.example>\r\nSubject: hi\r\n\r\nbody";
+        assert!(
+            !parse_message(raw.as_bytes())
+                .unwrap()
+                .headers
+                .authentication_results
+        );
     }
 
     #[test]
@@ -4363,6 +4805,32 @@ mod tests {
         assert!(!cleaned.contains("<script"), "cleaned: {cleaned}");
         assert!(!cleaned.contains("alert(1)"), "cleaned: {cleaned}");
         assert!(cleaned.contains("<p>Mail</p>"), "cleaned: {cleaned}");
+    }
+
+    #[test]
+    fn sanitizing_html_drops_data_links_and_refreshes() {
+        let cleaned = sanitize_html(
+            "<html><head><meta http-equiv=\"refresh\" content=\"0;url=https://evil.example\">\
+             <meta name=\"viewport\" content=\"width=device-width\"></head><body>\
+             <a href=\"data:text/html,<p>Sign in</p>\">One</a>\
+             <a href=\" \tDa\nTa:text/html,x\">Two</a>\
+             <a href=\"https://example.com/data:x\">Three</a>\
+             <img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"Logo\"></body></html>",
+        );
+        // Without `http-equiv` the refresh's content is inert text.
+        assert!(!cleaned.contains("http-equiv"), "cleaned: {cleaned}");
+        assert!(cleaned.contains("name=\"viewport\""), "cleaned: {cleaned}");
+        assert!(!cleaned.contains("text/html"), "cleaned: {cleaned}");
+        assert!(cleaned.contains(">One</a>"), "cleaned: {cleaned}");
+        assert!(cleaned.contains(">Two</a>"), "cleaned: {cleaned}");
+        assert!(
+            cleaned.contains("href=\"https://example.com/data:x\""),
+            "cleaned: {cleaned}"
+        );
+        assert!(
+            cleaned.contains("src=\"data:image/png;base64,iVBORw0KGgo=\""),
+            "cleaned: {cleaned}"
+        );
     }
 
     #[test]
@@ -4619,6 +5087,55 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_message_only_to_bcc_says_its_recipients_are_undisclosed() {
+        let people = [Address {
+            name: Some("Grace".into()),
+            email: "grace@example.com".into(),
+        }];
+        let to_header = |message: OutgoingMessage| {
+            let (_, raw) = build_message(&message).unwrap();
+            let text = String::from_utf8(raw).unwrap();
+            text.lines()
+                .find(|line| line.starts_with("To: "))
+                .map(str::to_owned)
+        };
+        let blind = || OutgoingMessage {
+            bcc: &people,
+            ..outgoing("Hi", None)
+        };
+        assert_eq!(
+            to_header(blind()).as_deref(),
+            Some("To: undisclosed-recipients:;")
+        );
+        let (_, raw) = build_message(&blind()).unwrap();
+        let headers = parse_header_block(&raw).unwrap();
+        assert!(
+            headers.to.is_empty(),
+            "the group holds no one: {:?}",
+            headers.to
+        );
+        assert_eq!(headers.bcc.len(), 1);
+
+        // Anyone in To or Cc is shown instead, and a message to no one says nothing.
+        assert_eq!(
+            to_header(OutgoingMessage {
+                cc: &people,
+                ..blind()
+            }),
+            None
+        );
+        assert_eq!(
+            to_header(OutgoingMessage {
+                to: &people,
+                ..blind()
+            })
+            .as_deref(),
+            Some("To: \"Grace\" <grace@example.com>")
+        );
+        assert_eq!(to_header(outgoing("Hi", None)), None);
+    }
+
     fn outgoing<'a>(text: &'a str, html: Option<&'a str>) -> OutgoingMessage<'a> {
         OutgoingMessage {
             from: Address {
@@ -4838,6 +5355,85 @@ mod tests {
         let (generated, raw) = build_message(&message).unwrap();
         assert_ne!(generated, "<bad\r\nBcc: injected@example.com>");
         assert!(!String::from_utf8_lossy(&raw).contains("Bcc: injected@example.com"));
+    }
+
+    #[test]
+    fn received_subjects_stay_on_one_line() {
+        let raw = "From: a@example.com\r\n\
+            Subject: =?us-ascii?Q?Invoice=0D=0ABcc:_spy@example.net?=\r\n\
+            \r\n\
+            body\r\n";
+        let parsed = parse_message(raw.as_bytes()).unwrap();
+        assert_eq!(parsed.headers.subject, "Invoice  Bcc: spy@example.net");
+    }
+
+    #[test]
+    fn line_breaks_from_received_mail_never_start_a_header() {
+        let references = [
+            "orig@example.com".to_owned(),
+            "a\rBcc: x@example.net".to_owned(),
+        ];
+        let mut message = outgoing("plain", None);
+        message.subject = "Re: Invoice 4471\r\nCc: spy@example.net\r\n\r\n.";
+        message.in_reply_to = Some("orig\r\nBcc: x@example.net");
+        message.references = &references;
+        let (_, raw) = build_message(&message).unwrap();
+        let parsed = mail_parser::MessageParser::default()
+            .parse(&raw[..])
+            .unwrap();
+        assert!(parsed.cc().is_none());
+        assert!(parsed.bcc().is_none());
+        assert!(parsed.in_reply_to().is_empty());
+        assert_eq!(parsed.body_text(0).as_deref(), Some("plain"));
+        let raw = String::from_utf8_lossy(&raw);
+        assert!(
+            raw.contains("Subject: Re: Invoice 4471  Cc: spy@example.net    .\r\n"),
+            "{raw}"
+        );
+        assert!(raw.contains("References: <orig@example.com>\r\n"), "{raw}");
+    }
+
+    #[test]
+    fn an_address_that_would_break_its_header_is_refused() {
+        for email in [
+            "boss@example.com>, <spy@example.net",
+            "x\rBcc: y@example.net",
+            "a b@example.com",
+            "no-at-sign",
+        ] {
+            let to = [Address {
+                name: None,
+                email: email.into(),
+            }];
+            let mut message = outgoing("plain", None);
+            message.to = &to;
+            assert!(build_message(&message).is_err(), "{email}");
+        }
+        let to = [Address {
+            name: None,
+            email: "\"Doe, Jane\"@example.com".into(),
+        }];
+        let mut message = outgoing("plain", None);
+        message.to = &to;
+        assert!(build_message(&message).is_ok());
+    }
+
+    #[test]
+    fn new_message_ids_say_nothing_about_when_a_message_was_written() {
+        let (first, _) = build_message(&outgoing("plain", None)).unwrap();
+        let (second, _) = build_message(&outgoing("plain", None)).unwrap();
+        assert_ne!(first, second);
+        for id in [first, second] {
+            let local = id
+                .trim_matches(['<', '>'])
+                .split('@')
+                .next()
+                .unwrap()
+                .to_owned();
+            assert_eq!(local.len(), 26, "{id}");
+            assert!(!local.contains('.'), "{id}");
+            assert!(id.ends_with("@example.com>"), "{id}");
+        }
     }
 
     #[test]

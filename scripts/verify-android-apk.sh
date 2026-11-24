@@ -54,7 +54,22 @@ assert_contains "$badging" "uses-permission: name='android.permission.POST_NOTIF
 assert_contains "$badging" "uses-permission: name='android.permission.RECEIVE_BOOT_COMPLETED'" 'persisted mail check permission'
 assert_contains "$badging" "native-code: 'arm64-v8a'" 'arm64 ABI'
 assert_contains "$badging" 'application-icon-' 'launcher icon'
-assert_contains "$xmltree" 'android:usesCleartextTraffic(0x010104ec)=(type 0x12)0x0' 'cleartext traffic disabled'
+# Release builds may shorten resource paths, so find the network security
+# config through the resource table.
+security_config_entry="$($aapt dump --values resources "$apk" | awk '
+  / com\.flectar\.mail:xml\/network_security_config: t=/ { id = $2; next }
+  id != "" && /\(string8\) "/ { sub(/.*\(string8\) "/, ""); sub(/".*/, ""); print id, $0; exit }')"
+security_config_id="${security_config_entry%% *}"
+security_config_path="${security_config_entry#* }"
+if [[ -z "$security_config_entry" ]]; then
+  printf 'APK verification failed: network security config resource is missing\n' >&2
+  exit 1
+fi
+assert_contains "$xmltree" "android:networkSecurityConfig(0x01010527)=@$security_config_id" 'network security config'
+security_config="$($aapt dump xmltree "$apk" "$security_config_path")"
+assert_contains "$security_config" 'cleartextTrafficPermitted=(type 0x12)0x0' 'cleartext traffic disabled'
+assert_contains "$security_config" 'src="system"' 'system certificate authorities trusted'
+assert_contains "$security_config" 'src="user"' 'user-added certificate authorities trusted'
 assert_contains "$xmltree" 'android:scheme(0x01010027)="msauth"' 'Microsoft OAuth callback scheme'
 assert_contains "$xmltree" 'android:host(0x01010028)="com.flectar.mail"' 'Microsoft OAuth callback host'
 assert_contains "$xmltree" 'android:exported(0x01010010)=(type 0x12)0xffffffff' 'explicitly exported callback/launcher Activity'

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What SystemTrust.java checks server certificates against, for mail and
+     HTTP connections alike. -->
+<network-security-config>
+    <!-- Provider traffic is TLS-only. Local development exceptions use adb
+         reverse port forwarding instead of plain HTTP. Certificate
+         authorities the user added in Settings are trusted besides the
+         system's, as self-hosted mail servers and company networks need. -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

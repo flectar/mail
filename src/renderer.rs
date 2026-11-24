@@ -4,6 +4,7 @@ mod cpu_scene;
 mod details;
 #[cfg(test)]
 mod details_tests;
+mod embedded;
 mod interaction;
 #[cfg(test)]
 mod regression;
@@ -23,6 +24,7 @@ use blitz_traits::net::NetWaker;
 use blitz_traits::{SmolStr, net::NetProvider, node_id::NodeId, shell::Viewport};
 use details::FindMatch;
 pub(crate) use details::set_default_summary;
+pub(crate) use embedded::{HEADER_VALUE, HeaderLines, set_header_lines};
 use keyboard_types::{Key, NamedKey};
 use parley::layout::PositionedLayoutItem;
 use semantics::*;
@@ -660,6 +662,17 @@ impl GpuEmailRenderer {
             self.scene = vello::Scene::new();
         }
         self.tiles.len() != before
+    }
+
+    /// Once painting stops, give back the CPU painter's working memory. Its
+    /// render context keeps every buffer at the size the busiest tile needed.
+    /// Resizing builds a new context and keeps the converted images and
+    /// prepared glyphs, so the next tile only allocates the buffers again.
+    pub fn release_paint_buffers(&mut self) {
+        let (width, height) = self.cpu_size;
+        if let Some(painter) = self.cpu_painter.as_mut() {
+            painter.resize(width, height);
+        }
     }
 
     /// The tiles held now, for the view after `release_caches`.
@@ -2168,6 +2181,7 @@ fn prepare_email_html_at_with_font_ctx(
         }
     }
     details::prepare(&mut document);
+    embedded::prepare(&mut document);
     let mut appearance = AppearanceDocument::new(appearance);
     appearance.resolve(&mut document);
     let links = collect_email_links(&document, width as f32 / scale);

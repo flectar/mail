@@ -2,7 +2,7 @@ import { FileIconPalette } from "../design-system.slint";
 
 // A file's type at a glance, the same wherever a file shows. `kind` is one
 // of pdf, document, spreadsheet, presentation, image, video, audio, archive,
-// code, calendar or file.
+// code, calendar, message or file.
 export component FileTypeIcon inherits Image {
     in property <string> kind;
 
@@ -15,6 +15,7 @@ export component FileTypeIcon inherits Image {
         : root.kind == "archive" ? @image-url("../icons/lucide/filled/file-archive.svg")
         : root.kind == "code" ? @image-url("../icons/lucide/filled/file-code.svg")
         : root.kind == "calendar" ? @image-url("../icons/lucide/filled/calendar.svg")
+        : root.kind == "message" ? @image-url("../icons/lucide/filled/mail.svg")
         : @image-url("../icons/lucide/filled/file.svg");
     colorize: root.kind == "pdf" ? FileIconPalette.pdf
         : root.kind == "document" ? FileIconPalette.document
@@ -26,6 +27,7 @@ export component FileTypeIcon inherits Image {
         : root.kind == "archive" ? FileIconPalette.archive
         : root.kind == "code" ? FileIconPalette.code
         : root.kind == "calendar" ? FileIconPalette.calendar
+        : root.kind == "message" ? FileIconPalette.message
         : FileIconPalette.other;
     image-fit: contain;
     accessible-role: none;

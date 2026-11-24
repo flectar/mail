@@ -94,7 +94,12 @@ pub struct MailMessage {
     pub reply_reminder_at: Option<i64>,
     /// That time came with no reply.
     pub reply_reminder_due: bool,
+    /// Everyone the message went to, on one line: see [`recipients_line`].
     pub to: String,
+    /// Its To and Cc recipients, as the message names them, for the
+    /// reader's details. Mail-list pages know only the To recipients.
+    pub to_people: Vec<Address>,
+    pub cc_people: Vec<Address>,
     pub label: String,
     pub unread: bool,
     pub starred: bool,
@@ -162,6 +167,8 @@ impl MailMessage {
             reply_reminder_at: None,
             reply_reminder_due: false,
             to: email.to.to_owned(),
+            to_people: Vec::new(),
+            cc_people: Vec::new(),
             label: email.label.to_owned(),
             unread: email.unread,
             starred: email.starred,
@@ -2059,6 +2066,13 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_account_name(&self, account_id: i64, name: &str) -> Result<(), String> {
+        self.core
+            .set_account_name(account_id, name)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_account_sent_copy_policy(
         &self,
         account_id: i64,
@@ -2522,6 +2536,35 @@ impl CoreMailSource {
                 cursor,
                 limit,
             )
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn preview_contact_import(
+        &self,
+        file: Vec<u8>,
+    ) -> Result<flectar_mail_core::models::ContactImportPreview, String> {
+        self.core
+            .preview_contact_import(file)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn import_contacts(
+        &self,
+        file: Vec<u8>,
+        account_id: Option<i64>,
+        duplicates: flectar_mail_core::models::ImportedDuplicates,
+    ) -> Result<flectar_mail_core::models::ContactImportOutcome, String> {
+        self.core
+            .import_contacts(file, account_id, duplicates)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn export_contacts(&self) -> Result<(String, usize), String> {
+        self.core
+            .export_contacts()
             .await
             .map_err(|error| error.to_string())
     }
@@ -3467,14 +3510,33 @@ fn compose_args(
 }
 
 fn parse_recipients(value: &str) -> Result<Vec<Address>, String> {
-    value
-        // Recipient rows wrap onto multiple lines, and pasted lists often put
-        // one address per line: accept newlines as separators like `,`/`;`.
-        .split([',', ';', '\n'])
+    recipient_entries(value).map(parse_address).collect()
+}
+
+/// The entries of a recipient field. Commas, semicolons and line breaks
+/// separate them: rows wrap onto several lines, and pasted lists often put
+/// one address per line. A separator inside a quoted name, as in
+/// `"Doe, Jane" <jane@example.com>` (RFC 5322 section 3.2.4), doesn't.
+pub(crate) fn recipient_entries(field: &str) -> impl Iterator<Item = &str> {
+    let mut entries = Vec::new();
+    let (mut start, mut quoted, mut escaped) = (0, false, false);
+    for (index, character) in field.char_indices() {
+        match character {
+            _ if escaped => escaped = false,
+            '\\' if quoted => escaped = true,
+            '"' => quoted = !quoted,
+            ',' | ';' | '\n' if !quoted => {
+                entries.push(&field[start..index]);
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    entries.push(&field[start..]);
+    entries
+        .into_iter()
         .map(str::trim)
-        .filter(|recipient| !recipient.is_empty())
-        .map(parse_address)
-        .collect()
+        .filter(|entry| !entry.is_empty())
 }
 
 pub(crate) fn parse_address(value: &str) -> Result<Address, String> {
@@ -3491,10 +3553,30 @@ pub(crate) fn parse_address(value: &str) -> Result<Address, String> {
     Ok(Address {
         name: name
             .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned),
+            .map(unquoted_name)
+            .filter(|name| !name.is_empty()),
         email: email.to_owned(),
     })
+}
+
+/// A display name without the quotes and backslashes a header puts around
+/// it, as copied from a message: `"Doe, Jane"` is `Doe, Jane`.
+fn unquoted_name(name: &str) -> String {
+    let Some(inner) = name
+        .strip_prefix('"')
+        .and_then(|name| name.strip_suffix('"'))
+    else {
+        return name.to_owned();
+    };
+    let mut unquoted = String::with_capacity(inner.len());
+    let mut characters = inner.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            '\\' => unquoted.extend(characters.next()),
+            _ => unquoted.push(character),
+        }
+    }
+    unquoted.trim().to_owned()
 }
 
 const fn standard_mailbox_view(mailbox: StandardMailbox) -> View {
@@ -4248,6 +4330,8 @@ fn summary_to_message(
         reply_reminder_at: thread.reply_reminder_at,
         reply_reminder_due: thread.reply_reminder_due,
         to: String::new(),
+        to_people: Vec::new(),
+        cc_people: Vec::new(),
         label: if thread.unread_count > 0 {
             "UNREAD".to_owned()
         } else {
@@ -4280,16 +4364,29 @@ fn summary_to_message(
     })
 }
 
+/// What a message calls someone: their name where it gives one, else their
+/// address.
+pub(crate) fn display_name(person: &Address) -> &str {
+    person
+        .name
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(&person.email)
+}
+
+/// Everyone a message went to, on one line, its To recipients before its Cc
+/// ones, as in "Ada, Grace, alan@example.com".
+fn recipients_line(to: &[Address], cc: &[Address]) -> String {
+    to.iter()
+        .chain(cc)
+        .map(display_name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// A row's people, named as "A", "A, B" or "A, B +N", and the first one's
 /// address, which names the row's avatar.
 fn display_people(people: &[&Address]) -> (String, String) {
-    fn display_name(person: &Address) -> &str {
-        person
-            .name
-            .as_deref()
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or(&person.email)
-    }
     let address = people
         .first()
         .map(|person| person.email.clone())
@@ -4359,11 +4456,9 @@ fn message_summary_to_message(
         send_uncertain: false,
         reply_reminder_at: message.reply_reminder_at,
         reply_reminder_due: message.reply_reminder_due,
-        to: message
-            .to
-            .first()
-            .map(|address| address.email.clone())
-            .unwrap_or_default(),
+        to: recipients_line(&message.to, &[]),
+        to_people: message.to.clone(),
+        cc_people: Vec::new(),
         label: if message.is_draft {
             "DRAFT".to_owned()
         } else if !message.is_read {
@@ -4475,11 +4570,9 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
         send_uncertain: row.send_uncertain && scheduled,
         reply_reminder_at: row.reply_reminder_at,
         reply_reminder_due: row.reply_reminder_due,
-        to: message
-            .to
-            .first()
-            .map(|address| address.email.clone())
-            .unwrap_or_default(),
+        to: recipients_line(&message.to, &message.cc),
+        to_people: message.to.clone(),
+        cc_people: message.cc.clone(),
         label: if message.is_draft {
             "DRAFT".to_owned()
         } else if message.is_outgoing {
@@ -4564,11 +4657,7 @@ fn readable_message_html(html: Option<&str>, text: Option<&str>, snippet: &str) 
 }
 
 fn account_label(account: &Account) -> String {
-    account
-        .display_name
-        .clone()
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| account.email.clone())
+    account.label().to_owned()
 }
 
 fn avatar_initials(label: &str) -> String {
@@ -4758,9 +4847,9 @@ mod tests {
     use super::{
         ComposeMessage, MailTarget, SidebarBadges, compose_args, display_thread_subject,
         mailbox_entries, mailbox_entries_with_counts, markdown_to_html, markdown_to_plain_text,
-        message_summary_to_message, readable_message_html, resolve_scope, server_only_folders,
-        sidebar_badges, summary_to_message, unified_mailbox_entries, validated_startup_scope,
-        with_local_mail,
+        message_summary_to_message, readable_message_html, recipients_line, resolve_scope,
+        server_only_folders, sidebar_badges, summary_to_message, unified_mailbox_entries,
+        validated_startup_scope, with_local_mail,
     };
     use crate::mail_scope::{LabelKind, Scope, StandardMailbox};
     use flectar_mail_core::models::{
@@ -4775,6 +4864,7 @@ mod tests {
             id: 1,
             email: "person@example.com".into(),
             display_name: Some("Person".into()),
+            name: None,
             avatar_url: None,
             provider: Provider::Generic,
             auth_kind: AuthKind::Password,
@@ -5148,6 +5238,25 @@ mod tests {
     }
 
     #[test]
+    fn the_reader_names_everyone_a_message_went_to() {
+        let person = |name: Option<&str>, email: &str| Address {
+            name: name.map(str::to_owned),
+            email: email.into(),
+        };
+        assert_eq!(
+            recipients_line(
+                &[
+                    person(Some("Ada"), "ada@example.com"),
+                    person(Some(" "), "grace@example.com"),
+                ],
+                &[person(Some("Alan Turing"), "alan@example.com")],
+            ),
+            "Ada, grace@example.com, Alan Turing"
+        );
+        assert_eq!(recipients_line(&[], &[]), "");
+    }
+
+    #[test]
     fn thread_summary_projects_participants_and_message_count() {
         let thread = ThreadSummary {
             id: 22,
@@ -5197,6 +5306,20 @@ mod tests {
         };
         let row = summary_to_message(thread.clone(), &[test_account()], "Inbox").unwrap();
 
+        assert_eq!(
+            row.account, "Person",
+            "the owner's name without a name of its own"
+        );
+        let named = Account {
+            name: Some("Shop".into()),
+            ..test_account()
+        };
+        assert_eq!(
+            summary_to_message(thread.clone(), &[named], "Inbox")
+                .unwrap()
+                .account,
+            "Shop"
+        );
         assert_eq!(row.sender, "Maya, Alex +1");
         assert_eq!(row.address, "maya@example.com");
         assert_eq!(MailTarget::of(&row), Some(MailTarget::Thread(22)));
@@ -5409,6 +5532,62 @@ mod tests {
         assert_eq!(parsed[1].email, "grace@example.com");
         assert_eq!(parsed[2].email, "alan@example.com");
         assert!(parsed[2].name.is_none());
+    }
+
+    #[test]
+    fn quoted_names_keep_their_separators() {
+        let parsed = super::parse_recipients(
+            "\"Doe, Jane\" <jane@example.com>; \"Say \\\"hi\\\"; bye\" <x@example.com>, bob@example.com",
+        )
+        .unwrap();
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].name.as_deref(), Some("Doe, Jane"));
+        assert_eq!(parsed[0].email, "jane@example.com");
+        assert_eq!(parsed[1].name.as_deref(), Some("Say \"hi\"; bye"));
+        assert_eq!(parsed[1].email, "x@example.com");
+        assert_eq!(parsed[2].email, "bob@example.com");
+        assert!(parsed[2].name.is_none());
+    }
+
+    #[test]
+    fn received_names_with_separators_round_trip_through_the_field() {
+        let received = [
+            Address {
+                name: Some("Boss\"".into()),
+                email: "boss@example.com".into(),
+            },
+            Address {
+                name: Some("Doe, Jane".into()),
+                email: "jane@example.com".into(),
+            },
+            Address {
+                name: Some("Back\\slash <x>".into()),
+                email: "x@example.com".into(),
+            },
+            Address {
+                name: Some("Ann\r\nBcc".into()),
+                email: "ann@example.com".into(),
+            },
+        ];
+        let field = received
+            .iter()
+            .map(crate::compose_controller::format_address)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let parsed = super::parse_recipients(&field).unwrap();
+        assert_eq!(
+            parsed
+                .iter()
+                .map(|address| (address.name.as_deref(), address.email.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some("Boss\""), "boss@example.com"),
+                (Some("Doe, Jane"), "jane@example.com"),
+                (Some("Back\\slash <x>"), "x@example.com"),
+                (Some("AnnBcc"), "ann@example.com"),
+            ],
+            "{field}"
+        );
     }
 
     #[test]

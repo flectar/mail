@@ -322,7 +322,7 @@ fn thunderbird_profile_export_archives_are_read_in_place() {
 #[test]
 fn flectar_backups_and_unknown_files_are_recognized() {
     let directory = tempfile::tempdir().unwrap();
-    let backup = directory.path().join("backup");
+    let backup = directory.path().join("backup.json");
     std::fs::write(
         &backup,
         r#"{"format":"flectar-mail-account-backup","version":1,"accounts":[]}"#,
@@ -332,6 +332,10 @@ fn flectar_backups_and_unknown_files_are_recognized() {
         migration::open(&backup).unwrap(),
         Source::FlectarBackup(bytes) if bytes.starts_with(b"{")
     ));
+    // Only a file named as a backup is read as one.
+    let disguised = directory.path().join("backup");
+    std::fs::copy(&backup, &disguised).unwrap();
+    assert_eq!(migration::open(&disguised), Err(SourceError::UnknownFormat));
     let other = directory.path().join("notes.txt");
     std::fs::write(&other, "hello").unwrap();
     assert_eq!(migration::open(&other), Err(SourceError::UnknownFormat));

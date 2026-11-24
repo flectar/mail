@@ -513,6 +513,33 @@ fn memory_pressure_keeps_only_the_visible_tiles_until_it_passes() {
 }
 
 #[test]
+fn releasing_paint_buffers_keeps_the_painter_and_its_pixels() {
+    let mut r = renderer(&format!(
+        "<body style='margin:0'>{}</body>",
+        "<p style='margin:0;font-size:20px'>Cafe\u{301} hello <a href='https://example.com'>linked world</a></p>".repeat(40)
+    ));
+    let pixels = |r: &GpuEmailRenderer| {
+        r.tiles
+            .iter()
+            .map(|(index, tile)| {
+                let rgb = tile.image.to_rgb8().expect("tiles are RGB");
+                (*index, rgb.as_bytes().to_vec())
+            })
+            .collect::<Vec<_>>()
+    };
+    r.render_cpu_if_needed(520, 900, 1.0).unwrap();
+    let painted = pixels(&r);
+    assert!(!painted.is_empty());
+
+    r.release_paint_buffers();
+    assert!(r.cpu_painter.is_some(), "images and glyphs stay cached");
+    r.tiles.clear();
+    r.region_dirty = true;
+    r.render_cpu_if_needed(520, 900, 1.0).unwrap();
+    assert_eq!(pixels(&r), painted);
+}
+
+#[test]
 fn tiles_stay_near_512_device_pixels_at_every_scale() {
     assert_eq!(email_tile_height(1.0), 512.0);
     assert_eq!(email_tile_height(1.5), 512.0);

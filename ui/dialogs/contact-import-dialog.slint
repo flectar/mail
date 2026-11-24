@@ -1,0 +1,177 @@
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { AppTheme } from "../design-system.slint";
+import { Button } from "../components/button.slint";
+import { SettingsSelect } from "../components/settings-components.slint";
+import { TypeScale } from "../typography.slint";
+import { ContactImport } from "../contact-import.slint";
+
+// Tells what a vCard file holds before its contacts are saved, and what to
+// do with those already saved (src/contact_import.rs).
+export component ContactImportDialog inherits Rectangle {
+    private property <bool> narrow: panel.width < 360px;
+    private property <bool> working: ContactImport.stage == "working";
+    private property <int> choice: 0;
+    // Nothing to save: no new contacts, and those already saved stay as
+    // they are.
+    private property <bool> idle: ContactImport.new-count == 0 && root.choice == 0;
+
+    visible: ContactImport.stage != "";
+    background: #00000088;
+    z: 1000;
+    accessible-role: groupbox;
+    accessible-label: @tr("Import contacts");
+
+    function cancel() {
+        if !root.working {
+            ContactImport.close();
+        }
+    }
+
+    changed visible => {
+        if self.visible {
+            root.choice = 0;
+            dialog-focus.focus();
+        }
+    }
+
+    // Consume pointer input over the scrim.
+    TouchArea { }
+
+    panel := Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(460px, parent.width - 32px);
+        height: max(196px, dialog-content.preferred-height);
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: AppTheme.border;
+        background: AppTheme.surface;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: #00000055;
+
+        dialog-focus := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    root.cancel();
+                    return accept;
+                }
+                reject
+            }
+
+            dialog-content := VerticalBox {
+                padding-top: 22px;
+                padding-right: 22px;
+                padding-bottom: 20px;
+                padding-left: 22px;
+                spacing: 12px;
+
+                HorizontalBox {
+                    height: max(42px, dialog-title.preferred-height + 16px);
+                    padding: 0px;
+                    spacing: 12px;
+                    Rectangle {
+                        width: 42px;
+                        height: 42px;
+                        border-radius: 21px;
+                        background: AppTheme.accent-soft;
+                        Image {
+                            x: 11px;
+                            y: 11px;
+                            width: 20px;
+                            height: 20px;
+                            source: @image-url("../icons/lucide/outline/contacts.svg");
+                            colorize: AppTheme.accent;
+                            image-fit: contain;
+                            accessible-role: none;
+                        }
+                    }
+                    dialog-title := Text {
+                        text: @tr("Import contacts");
+                        color: AppTheme.title;
+                        font-size: TypeScale.heading;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+
+                if ContactImport.new-count > 0 : Text {
+                    height: self.preferred-height;
+                    text: @tr("{n} new contact" | "{n} new contacts" % ContactImport.new-count);
+                    color: AppTheme.body;
+                    font-size: TypeScale.secondary;
+                    wrap: word-wrap;
+                }
+                if ContactImport.duplicate-count > 0 : Text {
+                    height: self.preferred-height;
+                    text: @tr("{n} contact you already have" | "{n} contacts you already have" % ContactImport.duplicate-count);
+                    color: AppTheme.body;
+                    font-size: TypeScale.secondary;
+                    wrap: word-wrap;
+                }
+                if ContactImport.unreadable-count > 0 : Text {
+                    height: self.preferred-height;
+                    text: @tr("{n} card can't be read and is left out" | "{n} cards can't be read and are left out" % ContactImport.unreadable-count);
+                    color: AppTheme.muted;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+                if ContactImport.duplicate-count > 0 : VerticalBox {
+                    padding: 0px;
+                    spacing: 6px;
+                    Text {
+                        height: self.preferred-height;
+                        text: @tr("Contacts you already have");
+                        color: AppTheme.title;
+                        font-size: TypeScale.secondary;
+                        font-weight: 600;
+                        wrap: word-wrap;
+                    }
+                    SettingsSelect {
+                        enabled: !root.working;
+                        choices: [
+                            @tr("Leave them as they are"),
+                            @tr("Add what's new to them"),
+                            @tr("Import them again as copies"),
+                        ];
+                        selected-index <=> root.choice;
+                    }
+                }
+                if ContactImport.new-count > 0 || root.choice == 2 : Text {
+                    height: self.preferred-height;
+                    text: ContactImport.destination != ""
+                        ? @tr("New contacts go to {}.", ContactImport.destination)
+                        : @tr("New contacts are saved on this device.");
+                    color: AppTheme.muted;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+                Rectangle { vertical-stretch: 1; }
+
+                // Wide panels put the buttons in a row, the main one last;
+                // narrow ones stack them, the main one first.
+                GridLayout {
+                    spacing: 8px;
+                    Button {
+                        row: root.narrow ? 1 : 0;
+                        col: 0;
+                        height: 34px;
+                        enabled: !root.working;
+                        text: @tr("Cancel");
+                        clicked => { ContactImport.close(); }
+                    }
+                    Button {
+                        row: 0;
+                        col: root.narrow ? 0 : 1;
+                        height: 34px;
+                        primary: true;
+                        enabled: !root.working && !root.idle;
+                        text: root.working ? @tr("Importing…") : @tr("Import");
+                        clicked => { ContactImport.confirm(root.choice); }
+                    }
+                }
+            }
+        }
+    }
+}

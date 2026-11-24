@@ -11,10 +11,7 @@
 
 use crate::error::{CoreError, Result};
 use crate::mime::unsubscribe_uris;
-use std::{
-    net::{IpAddr, SocketAddr},
-    time::Duration,
-};
+use std::{net::SocketAddr, time::Duration};
 
 const MAX_UNSUBSCRIBE_URL_BYTES: usize = 16 * 1024;
 
@@ -93,7 +90,7 @@ const ONE_CLICK_FORM: &str = "--flectar-one-click\r\nContent-Disposition: form-d
 /// are followed (the endpoint must not require them) and no cookies are sent.
 pub async fn post_one_click(url: &str) -> Result<()> {
     let url = validated_public_https_url(url)?;
-    let mut client = reqwest::Client::builder()
+    let mut client = crate::net::tls::client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(20))
@@ -103,7 +100,7 @@ pub async fn post_one_click(url: &str) -> Result<()> {
         // the lookup past the proxy, so only an address in the URL is checked.
         Some(proxy) => {
             if let Some(address) = literal_address(&url)
-                && !is_public_ip(address)
+                && !crate::net::public_ip(address)
             {
                 return Err(CoreError::Network(
                     "unsubscribe endpoint resolved to a non-public address".into(),
@@ -132,7 +129,11 @@ pub async fn post_one_click(url: &str) -> Result<()> {
                 }
                 None => return Err(CoreError::Network("unsubscribe URL has no host".into())),
             };
-            if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
+            if addresses.is_empty()
+                || addresses
+                    .iter()
+                    .any(|address| !crate::net::public_ip(address.ip()))
+            {
                 return Err(CoreError::Network(
                     "unsubscribe endpoint resolved to a non-public address".into(),
                 ));
@@ -197,44 +198,12 @@ fn validated_public_https_url(value: &str) -> Result<url::Url> {
         Some(url::Host::Ipv6(address)) => Some(address.into()),
         _ => None,
     };
-    if direct_address.is_some_and(|address| !is_public_ip(address)) {
+    if direct_address.is_some_and(|address| !crate::net::public_ip(address)) {
         return Err(CoreError::Network(
             "unsubscribe endpoint uses a non-public address".into(),
         ));
     }
     Ok(url)
-}
-
-fn is_public_ip(address: IpAddr) -> bool {
-    match address {
-        IpAddr::V4(address) => {
-            let octets = address.octets();
-            !(address.is_private()
-                || address.is_loopback()
-                || address.is_link_local()
-                || address.is_multicast()
-                || address.is_unspecified()
-                || address.is_broadcast()
-                || address.is_documentation()
-                || octets[0] == 0
-                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
-                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
-                || (octets[0] == 198 && matches!(octets[1], 18 | 19))
-                || octets[0] >= 240)
-        }
-        IpAddr::V6(address) => {
-            !(address.is_loopback()
-                || address.is_unique_local()
-                || address.is_unicast_link_local()
-                || address.is_multicast()
-                || address.is_unspecified()
-                || address.segments()[..2] == [0x2001, 0x0db8]
-                || address.segments()[0] & 0xffc0 == 0xfec0)
-                && address
-                    .to_ipv4_mapped()
-                    .is_none_or(|mapped| is_public_ip(mapped.into()))
-        }
-    }
 }
 
 #[cfg(test)]

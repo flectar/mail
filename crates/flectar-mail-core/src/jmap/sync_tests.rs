@@ -2808,8 +2808,10 @@ async fn an_account_set_to_headers_only_downloads_no_bodies() {
     mock.task.abort();
 }
 
-/// A message whose text the server cut short, and a small read receipt,
-/// whose report is no text, download whole, as when they're opened.
+/// A message whose text the server cut short, a small read receipt, whose
+/// report is no text, and a message carrying one its body shows (#455)
+/// download whole, as when they're opened. One carrying a message sent as an
+/// attachment keeps the text the server read out.
 #[tokio::test]
 async fn messages_with_more_than_their_text_download_whole() {
     let (_dir, ctx, config) = fixture().await;
@@ -2822,8 +2824,22 @@ async fn messages_with_more_than_their_text_download_whole() {
         "partId": "2", "blobId": "report-b", "size": 200,
         "type": "message/disposition-notification"
     }]);
+    let forward = |id: &str, disposition: &str, received_at: &str| {
+        let mut forward = with_bodies(email(id, &format!("thread-{id}")), "See below", None);
+        forward["receivedAt"] = json!(received_at);
+        forward["attachments"] = json!([{
+            "partId": "2", "blobId": format!("forwarded-{id}"), "size": 300,
+            "type": "message/rfc822", "disposition": disposition
+        }]);
+        forward
+    };
     let mock = MockJmap {
-        emails: vec![long, receipt],
+        emails: vec![
+            long,
+            receipt,
+            forward("email-c", "inline", "2026-10-08T12:00:00Z"),
+            forward("email-d", "attachment", "2026-10-08T11:59:59Z"),
+        ],
         max_objects_in_get: 500,
         ..MockJmap::default()
     }
@@ -2833,11 +2849,11 @@ async fn messages_with_more_than_their_text_download_whole() {
     while download_once(&ctx, &config, &mock.connected).await {}
     assert_eq!(
         *mock.downloads.lock().unwrap(),
-        ["blob-email-a", "blob-email-b"]
+        ["blob-email-a", "blob-email-b", "blob-email-c"]
     );
     for (remote_id, state, _, _, raw) in stored_bodies(&ctx).await {
         assert_eq!(state, "cached", "{remote_id}");
-        assert!(raw.is_some(), "{remote_id}");
+        assert_eq!(raw.is_some(), remote_id != "email-d", "{remote_id}");
     }
     mock.task.abort();
 }

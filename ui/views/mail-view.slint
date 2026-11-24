@@ -1,5 +1,5 @@
 import { HorizontalBox } from "std-widgets.slint";
-import { EmailLink, EmailRow, EmailTile, EmailReader, MailProfileRow, SidebarRow, MailLabelRow, MailListEntry, ThreadMessageRow } from "../models.slint";
+import { EmailLink, EmailRow, EmailTile, EmailReader, MailProfileRow, SidebarRow, MailLabelRow, MailListEntry, MessageDetails, ThreadMessageRow } from "../models.slint";
 import { LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { MailSidebar } from "../components/sidebar.slint";
 import { WorkspacePaneResizeHandle } from "../components/workspace-layout.slint";
@@ -64,6 +64,7 @@ export component MailView inherits FocusScope {
     in property <string> selected_subject: "";
     in property <string> selected_time: "";
     in property <string> selected_to: "";
+    in property <MessageDetails> selected_details;
     in property <string> selected_label: "";
     in property <string> selected_initials: "?";
     in property <image> selected_favicon;
@@ -494,6 +495,7 @@ export component MailView inherits FocusScope {
                 selected_subject: root.selected_subject;
                 selected_time: root.selected_time;
                 selected_to: root.selected_to;
+                selected_details: root.selected_details;
                 selected_label: root.selected_label;
                 mail_labels: root.mail_labels;
                 mail-label-results: root.mail_label_results;
@@ -741,6 +743,7 @@ export component MailView inherits FocusScope {
                 selected_subject: root.selected_subject;
                 selected_time: root.selected_time;
                 selected_to: root.selected_to;
+                selected_details: root.selected_details;
                 selected_label: root.selected_label;
                 mail_labels: root.mail_labels;
                 mail-label-results: root.mail_label_results;

@@ -47,6 +47,6 @@ i-slint-renderer-software = { path = "../../crates/i-slint-renderer-software" }
 fontique = { path = "../../crates/fontique" }
 # Vello drops Calibri's letters on the GPU; see patches/vello/README.md.
 vello = { path = "../../crates/vello" }
-# jmap-client makes its own HTTP clients, which can't take the app's proxy; see
-# patches/jmap-client/README.md.
+# jmap-client makes its own HTTP clients, which can't take the app's proxy and
+# TLS settings; see patches/jmap-client/README.md.
 jmap-client = { path = "../../crates/jmap-client" }

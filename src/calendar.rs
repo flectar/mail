@@ -160,12 +160,7 @@ pub(crate) fn calendar_accounts(accounts: &[Account]) -> Vec<LocalCalendarAccoun
         .iter()
         .map(|account| LocalCalendarAccount {
             id: account.id,
-            name: account
-                .display_name
-                .as_ref()
-                .filter(|name| !name.trim().is_empty())
-                .unwrap_or(&account.email)
-                .clone(),
+            name: account.label().to_owned(),
             email: account.email.clone(),
             provider: account.provider.as_str().to_owned(),
         })

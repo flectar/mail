@@ -8,7 +8,9 @@
 //! send_e2e/dovecot_e2e tests.
 
 use flectar_mail_core::Core;
-use flectar_mail_core::accounts::credentials::{self, Slot, SystemCredentialStore};
+use flectar_mail_core::accounts::credentials::{
+    self, DevelopmentFileCredentialStore, Slot, SystemCredentialStore,
+};
 use flectar_mail_core::config::Paths;
 use flectar_mail_core::db::{Db, repo};
 use flectar_mail_core::models::*;
@@ -262,4 +264,107 @@ async fn offline_actions_queue_locally_and_survive_restart() {
     assert!(inbox.threads.is_empty(), "archived state survives restart");
 
     let _ = std::fs::remove_file(&creds_file);
+}
+
+/// An Outlook account this device has no sign-in for, as one that arrives
+/// through Flectar Mail Sync from another kind of device.
+async fn seed_unsigned_outlook(db: &Db, port: u16) -> i64 {
+    db.write(move |conn| {
+        let account_id = repo::accounts::insert(
+            conn,
+            &repo::accounts::NewAccount {
+                email: "outlook@example.com",
+                display_name: None,
+                avatar_url: None,
+                provider: Provider::Microsoft,
+                auth_kind: AuthKind::Oauth2,
+                mail_protocol: flectar_mail_core::models::MailProtocol::Imap,
+                username: "outlook@example.com",
+                jmap_url: "",
+                jmap_account_id: None,
+                incoming_host: "127.0.0.1",
+                incoming_port: port,
+                smtp_host: "127.0.0.1",
+                smtp_port: port,
+            },
+            &AccountSettings::new(MailConnectionSettings::new(
+                ConnectionSecurity::Tls,
+                ConnectionSecurity::Tls,
+            )),
+        )?;
+        repo::folders::upsert(conn, account_id, "INBOX", None, Some(roles::INBOX))?;
+        Ok(account_id)
+    })
+    .await
+    .expect("seed")
+}
+
+/// Start a core over `dir` with its own credential store, so these tests
+/// don't share one through the environment.
+async fn start_with_store(dir: &std::path::Path) -> (Core, Arc<DevelopmentFileCredentialStore>) {
+    let store = Arc::new(DevelopmentFileCredentialStore::new(
+        dir.join("credentials.json"),
+    ));
+    let core = Core::start_mail_ui_with_credentials(Paths::for_tests(dir), store.clone())
+        .await
+        .unwrap();
+    core.notify_ui_ready();
+    (core, store)
+}
+
+/// Checking an account whose server can't be reached answers at once, so a
+/// list pulled down to check stops spinning instead of waiting for the
+/// check to give up.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_check_of_an_unreachable_account_answers_at_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = Paths::for_tests(tmp.path());
+    paths.ensure().unwrap();
+    let db = Db::open(&paths.db_file()).unwrap();
+    let (account_id, _) = seed(&db, dead_port()).await;
+    let store = Arc::new(DevelopmentFileCredentialStore::new(
+        tmp.path().join("credentials.json"),
+    ));
+    credentials::store_async(store, account_id, Slot::Password, "pass".into())
+        .await
+        .unwrap();
+    let (core, _) = start_with_store(tmp.path()).await;
+    wait_for("offline sync state", Duration::from_secs(15), || async {
+        let accounts = core.list_accounts().await.unwrap();
+        (accounts[0].sync_state == "offline").then_some(())
+    })
+    .await;
+
+    let started = Instant::now();
+    assert!(core.sync_accounts(Some(&[account_id])).await.is_err());
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "answered after {:?}",
+        started.elapsed()
+    );
+}
+
+/// So does checking an account that needs a sign-in on this device.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_check_of_an_account_that_needs_a_sign_in_answers_at_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = Paths::for_tests(tmp.path());
+    paths.ensure().unwrap();
+    let db = Db::open(&paths.db_file()).unwrap();
+    let account_id = seed_unsigned_outlook(&db, dead_port()).await;
+    let (core, _) = start_with_store(tmp.path()).await;
+    // Its worker tried and gave up, as on a device it never signed in on.
+    wait_for("a failed connect", Duration::from_secs(15), || async {
+        let accounts = core.list_accounts().await.unwrap();
+        matches!(accounts[0].sync_state.as_str(), "needs_reauth" | "offline").then_some(())
+    })
+    .await;
+
+    let started = Instant::now();
+    assert!(core.sync_accounts(Some(&[account_id])).await.is_err());
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "answered after {:?}",
+        started.elapsed()
+    );
 }

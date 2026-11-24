@@ -21,7 +21,9 @@ export { Updates } from "updates.slint";
 export { AgentAccess, AgentAccount, AgentActivityEntry, AgentFolder } from "agent-access.slint";
 export { Notice } from "notice.slint";
 export { Unsubscribe } from "unsubscribe.slint";
+export { AccountDiscovery, DavLookup } from "account-discovery.slint";
 export { BlockSender } from "block-sender.slint";
+export { ContactImport } from "contact-import.slint";
 export { MailRules, RuleActionRow, RuleConditionRow, RuleRow } from "rules.slint";
 import { MailRules } from "rules.slint";
 export { Invitation } from "invitation.slint";
@@ -43,10 +45,10 @@ export { InterfaceText } from "typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings } from "design-system.slint";
 import { Button } from "components/button.slint";
 import { LoadingSkeletonBlock } from "components/loading-skeleton.slint";
-import { AccountRow, CalendarAgendaRow, CalendarAgendaFilterRow, CalendarBar, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarTimedBlock, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, ContactSyncState, ContactValueRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailListEntry, MailProfileRow, ProfileMemberRow, SidebarRow, MailLabelRow, StorageUsageRow, ThreadMessageRow } from "models.slint";
+import { AccountRow, CalendarAgendaRow, CalendarAgendaFilterRow, CalendarBar, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarTimedBlock, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, ContactSyncState, ContactValueRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailListEntry, MailProfileRow, ProfileMemberRow, SidebarRow, MailLabelRow, MessageDetails, StorageUsageRow, ThreadMessageRow } from "models.slint";
 export { EmailReader, ReaderCaret, ReaderImage, ReaderItem, MailDragApi } from "models.slint";
 export { MailListNavigation, MailNavigationTarget } from "models.slint";
-export { ThreadMessageRow, StorageUsageRow } from "models.slint";
+export { MessageDetails, ThreadMessageRow, StorageUsageRow } from "models.slint";
 export { CalendarAgendaNavigation } from "components/calendar-agenda.slint";
 export { KeyboardKeys, KeyChord } from "components/kbd.slint";
 import { FunctionalCalendarView } from "components/calendar.slint";
@@ -62,6 +64,8 @@ import { Notice } from "notice.slint";
 import { UnsubscribeDialog } from "dialogs/unsubscribe-dialog.slint";
 import { Unsubscribe } from "unsubscribe.slint";
 import { BlockSenderDialog } from "dialogs/block-sender-dialog.slint";
+import { ContactImportDialog } from "dialogs/contact-import-dialog.slint";
+import { ContactImport } from "contact-import.slint";
 import { BlockSender } from "block-sender.slint";
 import { BoundComposer, ComposerUi } from "components/composer-ui.slint";
 import { ComposerText } from "components/composer-fields.slint";
@@ -720,6 +724,23 @@ export global I18n {
         if (key == "Updating sync settings…") { return @tr("Updating sync settings…"); }
         if (key == "Sync settings updated.") { return @tr("Sync settings updated."); }
         if (key == "Could not update sync settings: {}") { return @tr("Could not update sync settings: {}", argument); }
+        if (key == "Account names require local mail data.") { return @tr("Account names require local mail data."); }
+        if (key == "Saving the account name…") { return @tr("Saving the account name…"); }
+        if (key == "Account name saved.") { return @tr("Account name saved."); }
+        if (key == "Could not save the account name: {}") { return @tr("Could not save the account name: {}", argument); }
+        if (key == "Import contacts") { return @tr("Import contacts"); }
+        if (key == "Export contacts") { return @tr("Export contacts"); }
+        if (key == "vCard contacts") { return @tr("vCard contacts"); }
+        if (key == "Could not read the contacts file: {}") { return @tr("Could not read the contacts file: {}", argument); }
+        if (key == "This file is larger than 64 MB.") { return @tr("This file is larger than 64 MB."); }
+        if (key == "This file has more than 25,000 contacts.") { return @tr("This file has more than 25,000 contacts."); }
+        if (key == "No contacts found in this file.") { return @tr("No contacts found in this file."); }
+        if (key == "Imported {} contacts.") { return @tr("Imported one contact." | "Imported {0} contacts." % round(argument.to-float()), argument); }
+        if (key == "No new contacts to import.") { return @tr("No new contacts to import."); }
+        if (key == "Could not import contacts: {}") { return @tr("Could not import contacts: {}", argument); }
+        if (key == "Exported {} contacts.") { return @tr("Exported one contact." | "Exported {0} contacts." % round(argument.to-float()), argument); }
+        if (key == "No saved contacts to export.") { return @tr("No saved contacts to export."); }
+        if (key == "Could not export contacts: {}") { return @tr("Could not export contacts: {}", argument); }
         if (key == "Mail history requires local mail data.") { return @tr("Mail history requires local mail data."); }
         if (key == "Updating mail history…") { return @tr("Updating mail history…"); }
         if (key == "Remote images are unavailable in this minimal build.") { return @tr("Remote images are unavailable in this minimal build."); }
@@ -844,6 +865,7 @@ export global I18n {
         if (key == "Date: {}") { return @tr("forwarded message header" => "Date: {}", argument); }
         if (key == "Subject: {}") { return @tr("forwarded message header" => "Subject: {}", argument); }
         if (key == "To: {}") { return @tr("forwarded message header" => "To: {}", argument); }
+        if (key == "Cc: {}") { return @tr("forwarded message header" => "Cc: {}", argument); }
         if (key == "Attach files to this email") { return @tr("Attach files to this email"); }
         if (key == "Could not add attachments: {}") { return @tr("Could not add attachments: {}", argument); }
         if (key == "Could not show the quoted message: {}") { return @tr("Could not show the quoted message: {}", argument); }
@@ -1153,6 +1175,7 @@ export component AppWindow inherits Window {
     callback save_account_check_interval(int, string);
     callback save_account_push(int, bool);
     callback save_account_server_timeout(int, int);
+    callback save_account_name(int, string);
     callback save_account_download(int, string);
     callback connect_account_calendar(int);
     // (account, connection or -1 for a new one, url, username, password)
@@ -1370,6 +1393,7 @@ export component AppWindow inherits Window {
     in property <string> selected_subject: "";
     in property <string> selected_time: "";
     in property <string> selected_to: "";
+    in property <MessageDetails> selected_details;
     in property <string> selected_label: "";
     in property <bool> selected_is_draft: false;
     in property <string> selected_initials: "?";
@@ -1573,6 +1597,7 @@ export component AppWindow inherits Window {
     in-out property <string> carddav_username: "";
     in-out property <string> carddav_password: "";
     in-out property <bool> carddav_manage_existing: false;
+    in property <bool> carddav_connecting: false;
     in-out property <string> incoming_security: "tls";
     in-out property <string> smtp_security: "tls";
     in-out property <string> trusted_certificate_pem;
@@ -1988,6 +2013,13 @@ export component AppWindow inherits Window {
             available-height: parent.height;
 
         MailView {
+            // `changed` misses the sizes a new mail view starts with. A phone's
+            // window never resizes, so they're the only ones its reader gets.
+            init => {
+                root.email-viewport-width = self.email-viewport-width;
+                root.email-viewport-height = self.email-viewport-height;
+                root.email-scroll-document-height = self.email-scroll-document-height;
+            }
             changed email-viewport-width => { root.email-viewport-width = self.email-viewport-width; }
             changed email-viewport-height => { root.email-viewport-height = self.email-viewport-height; }
             changed email-scroll-document-height => { root.email-scroll-document-height = self.email-scroll-document-height; }
@@ -2042,6 +2074,7 @@ export component AppWindow inherits Window {
             selected_subject: root.selected_subject;
             selected_time: root.selected_time;
             selected_to: root.selected_to;
+            selected_details: root.selected_details;
             selected_label: root.selected_label;
             selected_is_draft: root.selected_is_draft;
             selected_initials: root.selected_initials;
@@ -2467,6 +2500,7 @@ export component AppWindow inherits Window {
             carddav_username <=> root.carddav_username;
             carddav_password <=> root.carddav_password;
             carddav_manage_existing <=> root.carddav_manage_existing;
+            carddav_connecting: root.carddav_connecting;
             incoming_security <=> root.incoming_security;
             smtp_security <=> root.smtp_security;
             trusted_certificate_pem <=> root.trusted_certificate_pem;
@@ -2573,6 +2607,11 @@ export component AppWindow inherits Window {
             save_oauth_app(google-id, google-secret, microsoft-id) => {
                 root.save_oauth_app(google-id, google-secret, microsoft-id);
             }
+            oauth-setup-open <=> root.oauth_setup_open;
+            oauth-settings-error <=> root.oauth_settings_error;
+            save-oauth-apps(google-id, google-secret, microsoft-id) => {
+                root.save_oauth_apps(google-id, google-secret, microsoft-id);
+            }
             set-remote-images(enabled) => { root.set-remote-images(enabled); }
             make_account_transfer(value) => root.make_account_transfer(value);
             read_account_transfer(value) => root.read_account_transfer(value);
@@ -2585,6 +2624,7 @@ export component AppWindow inherits Window {
             save_account_check_interval(account-id, value) => { root.save_account_check_interval(account-id, value); }
             save_account_push(account-id, enabled) => { root.save_account_push(account-id, enabled); }
             save_account_server_timeout(account-id, seconds) => { root.save_account_server_timeout(account-id, seconds); }
+            save_account_name(account-id, name) => { root.save_account_name(account-id, name); }
             save_account_download(account-id, value) => { root.save_account_download(account-id, value); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
             connect_caldav(account-id, connection-id, url, username, password) => { root.connect_caldav(account-id, connection-id, url, username, password); }
@@ -2761,6 +2801,14 @@ export component AppWindow inherits Window {
     }
 
     if BlockSender.stage != "" : BlockSenderDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        z: 16000;
+    }
+
+    if ContactImport.stage != "" : ContactImportDialog {
         x: root.content-x;
         y: root.content-y;
         width: root.content-width;

@@ -1,0 +1,79 @@
+import { AppTheme } from "../design-system.slint";
+
+// Text people can select and copy, as in a browser: drag or Shift with the
+// arrow keys selects, Ctrl+C copies, and right-click offers Copy and Select
+// all. Copy takes the selection, or all the text when nothing is selected.
+export component SelectableText inherits ContextMenuArea {
+    in property <string> text;
+    in property <brush> color;
+    in property <length> font-size;
+    in property <int> font-weight: 400;
+    in property <length> letter-spacing: 0px;
+    // At most this many lines show, the last ending in an ellipsis, though
+    // Copy and Select all still take all of the text. 0 shows every line.
+    in property <int> max-lines: 0;
+    in property <string> accessible-text: root.text;
+
+    private property <length> line-height: input.font-metrics.ascent - input.font-metrics.descent;
+    private property <bool> cut: root.max-lines > 0 && input.preferred-height > root.max-lines * root.line-height + 0.5px;
+    // A TextInput can't elide, so cut text shows as an elided Text until
+    // it's selected. The Text takes no input: a press still reaches the
+    // TextInput below and starts a selection.
+    private property <bool> elided: root.cut && !input.has-focus;
+    preferred-height: root.max-lines > 0
+        ? min(input.preferred-height, root.max-lines * root.line-height)
+        : input.preferred-height;
+    min-height: self.preferred-height;
+
+    public function copy() {
+        if input.has-selection {
+            input.copy();
+        } else {
+            input.select-all();
+            input.copy();
+            input.clear-selection();
+        }
+    }
+
+    Menu {
+        MenuItem { title: @tr("Copy"); activated => { root.copy(); } }
+        MenuItem { title: @tr("Select all"); activated => { input.focus(); input.select-all(); } }
+    }
+
+    Rectangle {
+        clip: true;
+
+        input := TextInput {
+            y: 0px;
+            width: parent.width;
+            height: max(parent.height, self.preferred-height);
+            text: root.text;
+            color: root.color;
+            font-size: root.font-size;
+            font-weight: root.font-weight;
+            letter-spacing: root.letter-spacing;
+            read-only: true;
+            single-line: false;
+            wrap: word-wrap;
+            // Selectable text, not an editor: no caret.
+            text-cursor-width: 0px;
+            selection-background-color: AppTheme.accent;
+            selection-foreground-color: white;
+            accessible-label: root.accessible-text;
+            opacity: root.elided ? 0 : 1;
+        }
+
+        if root.elided : Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.text;
+            color: root.color;
+            font-size: root.font-size;
+            font-weight: root.font-weight;
+            letter-spacing: root.letter-spacing;
+            wrap: word-wrap;
+            overflow: elide;
+            accessible-role: none;
+        }
+    }
+}

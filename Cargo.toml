@@ -29,8 +29,8 @@ i-slint-renderer-software = { path = "crates/i-slint-renderer-software" }
 fontique = { path = "crates/fontique" }
 # Vello drops Calibri's letters on the GPU; see patches/vello/README.md.
 vello = { path = "crates/vello" }
-# jmap-client makes its own HTTP clients, which can't take the app's proxy; see
-# patches/jmap-client/README.md.
+# jmap-client makes its own HTTP clients, which can't take the app's proxy and
+# TLS settings; see patches/jmap-client/README.md.
 jmap-client = { path = "crates/jmap-client" }
 
 [package]
@@ -159,12 +159,16 @@ windows-sys = { version = "0.61", features = [
     "Win32_Graphics_Gdi",
     "Win32_Networking_WinHttp",
     "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Isolation",
+    "Win32_Storage_FileSystem",
     "Win32_Storage_Packaging_Appx",
     "Win32_System_JobObjects",
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_Pipes",
     "Win32_System_Registry",
+    "Win32_System_SystemInformation",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
     "Win32_UI_HiDpi",

@@ -136,6 +136,8 @@ impl From<WarmStartMessage> for mail::MailMessage {
             reply_reminder_at: None,
             reply_reminder_due: false,
             to: String::new(),
+            to_people: Vec::new(),
+            cc_people: Vec::new(),
             label: message.label,
             unread: message.unread,
             starred: message.starred,
@@ -389,17 +391,14 @@ pub(crate) fn apply_warm_start_snapshot(
         .accounts
         .iter()
         .filter_map(|account| {
-            let name = account
-                .display_name
-                .as_ref()
-                .filter(|name| !name.trim().is_empty())
-                .unwrap_or(&account.email);
+            let name = account.label();
             let (checked_day, checked_at) =
                 crate::account_status::last_checked(account.caught_up_at, &now);
             Some(AccountRow {
                 id: i32::try_from(account.id).ok()?,
                 drag_key: account.id.to_string().into(),
-                name: name.as_str().into(),
+                name: name.into(),
+                custom_name: account.name.as_deref().unwrap_or_default().into(),
                 email: account.email.as_str().into(),
                 provider: account.provider.as_str().into(),
                 mail_protocol: account.mail_protocol.as_str().into(),
@@ -899,7 +898,7 @@ pub(crate) fn spawn_core_event_listener(
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .device_sync
-                        .status = Some(status);
+                        .status = Some(*status);
                     true
                 }
                 Ok(CoreEvent::DeviceSyncPairing { pairing, event }) => {
@@ -1398,6 +1397,7 @@ mod warm_start_tests {
             id: 7,
             email: "person@example.com".into(),
             display_name: Some("Person".into()),
+            name: None,
             avatar_url: None,
             provider: Provider::Generic,
             auth_kind: AuthKind::Password,
@@ -1433,6 +1433,8 @@ mod warm_start_tests {
             reply_reminder_at: None,
             reply_reminder_due: false,
             to: "secret-recipient@example.com".into(),
+            to_people: Vec::new(),
+            cc_people: Vec::new(),
             label: "UNREAD".into(),
             unread: true,
             starred: false,

@@ -449,6 +449,44 @@ impl GmailApi {
         Err(CoreError::NeedsReauth)
     }
 
+    /// A message's original bytes from the mailbox API at `base`. `size` is
+    /// about how many there are.
+    async fn raw_message_at(
+        &self,
+        base: &str,
+        provider_message_id: &str,
+        size: u64,
+    ) -> Result<Vec<u8>> {
+        let url = format!(
+            "{base}/messages/{}?format=raw",
+            urlencode(provider_message_id)
+        );
+        for attempt in 0..2 {
+            let token = self.token().await?;
+            let response = self
+                .http
+                .get(&url)
+                .bearer_auth(token)
+                // A large message gets time to arrive, as base64, at 64 KiB/s.
+                .timeout(HTTP_TIMEOUT.max(Duration::from_secs(size * 4 / 3 / (64 * 1024))))
+                .send()
+                .await
+                .map_err(network_error)?;
+            let result = google_json(response).await;
+            if attempt == 0 && matches!(&result, Err(CoreError::NeedsReauth)) {
+                self.ctx.tokens.invalidate(self.account.id).await;
+                continue;
+            }
+            let value = result?;
+            let raw = value
+                .get("raw")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CoreError::NotFound("the Gmail message's original".into()))?;
+            return decode_gmail_data(raw);
+        }
+        Err(CoreError::NeedsReauth)
+    }
+
     async fn message_full(&self, message_id: &str) -> Result<Value> {
         self.get_json(&format!(
             "{GMAIL_API}/messages/{}?format=full",
@@ -1724,36 +1762,9 @@ impl Uploader {
         provider_message_id: &str,
         size: u64,
     ) -> Result<Vec<u8>> {
-        let url = format!(
-            "{}/messages/{}?format=raw",
-            self.base,
-            urlencode(provider_message_id)
-        );
-        for attempt in 0..2 {
-            let token = self.api.token().await?;
-            let response = self
-                .api
-                .http
-                .get(&url)
-                .bearer_auth(token)
-                // A large message gets time to arrive, as base64, at 64 KiB/s.
-                .timeout(HTTP_TIMEOUT.max(Duration::from_secs(size * 4 / 3 / (64 * 1024))))
-                .send()
-                .await
-                .map_err(network_error)?;
-            let result = google_json(response).await;
-            if attempt == 0 && matches!(&result, Err(CoreError::NeedsReauth)) {
-                self.api.ctx.tokens.invalidate(self.api.account.id).await;
-                continue;
-            }
-            let value = result?;
-            let raw = value
-                .get("raw")
-                .and_then(Value::as_str)
-                .ok_or_else(|| CoreError::NotFound("the Gmail message's original".into()))?;
-            return decode_gmail_data(raw);
-        }
-        Err(CoreError::NeedsReauth)
+        self.api
+            .raw_message_at(&self.base, provider_message_id, size)
+            .await
     }
 
     /// Upload a raw message with these labels to `endpoint`, a path under
@@ -2199,6 +2210,17 @@ async fn store_resources(
                 let is_draft = label_set.contains("DRAFT");
 
                 let existing = repo::messages::by_gm_msgid(&tx, account_id, &resource.provider_id)?;
+                // Mail the account received tells whether Gmail stamped it,
+                // and so whether the sender's verification can be trusted.
+                if existing.is_none() && !is_outgoing {
+                    repo::messages::note_authentication_results(
+                        &tx,
+                        account_id,
+                        resource.headers.authentication_results,
+                    )?;
+                }
+                let sender_verification =
+                    repo::messages::vouched(&tx, account_id, resource.headers.sender_verification)?;
                 let inserted = existing.is_none();
                 let local_message_id = if let Some(existing) = existing {
                     if let Some(old_thread) = existing.thread_id.filter(|id| *id != thread_id) {
@@ -2246,7 +2268,7 @@ async fn store_resources(
                             resource.headers.list_unsubscribe,
                             resource.headers.list_unsubscribe_post,
                             resource.headers.via,
-                            resource.headers.sender_verification.as_str(),
+                            sender_verification.as_str(),
                             generation,
                             resource.headers.list_id,
                         ],
@@ -2280,7 +2302,7 @@ async fn store_resources(
                         list_unsubscribe_post: resource.headers.list_unsubscribe_post.clone(),
                         list_id: resource.headers.list_id.clone(),
                         sender_addr: resource.headers.via.clone(),
-                        sender_verification: resource.headers.sender_verification,
+                        sender_verification,
                         receipt_to: resource.headers.receipt_to.clone(),
                         receipt_confirm: resource.headers.receipt_confirm,
                         // Gmail keeps no keywords for it; this device
@@ -2331,8 +2353,11 @@ async fn store_resources(
                     _ => Default::default(),
                 };
 
+                // Only mail Gmail labels as sent says whom the user wrote to.
+                // A From with the user's own address is easy to forge.
                 if inserted
                     && is_outgoing
+                    && label_set.contains("SENT")
                     && settings.collect_outgoing_contacts
                     && resource.internal_date >= outgoing_learning_since
                 {
@@ -2350,6 +2375,7 @@ async fn store_resources(
                         }
                     }
                 } else if inserted
+                    && !is_outgoing
                     && !turned_away
                     && !sorted.unwanted
                     && settings.collect_incoming_contacts
@@ -2676,6 +2702,97 @@ struct HydratedBody {
     attachments: Vec<HydratedAttachment>,
     /// The message is a read receipt that came back.
     disposition_report: Option<crate::mime::DispositionReport>,
+    /// The original the body was read from, kept on this device, when it was
+    /// read whole.
+    raw_path: Option<String>,
+}
+
+/// A message's body: from its parts as Gmail gives them, or from its
+/// original when it carries a message its body shows (#455). Gmail's parts
+/// don't say which message a part belongs to, so such a message is read the
+/// way mail of every other kind of account is, and its files come from the
+/// original kept here.
+async fn hydrate(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    api: &GmailApi,
+    resource: &Value,
+) -> Result<HydratedBody> {
+    hydrate_at(ctx, config, api, GMAIL_API, resource).await
+}
+
+/// [`hydrate`] with the mailbox API at `base`.
+async fn hydrate_at(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    api: &GmailApi,
+    base: &str,
+    resource: &Value,
+) -> Result<HydratedBody> {
+    if !shows_messages(resource.get("payload").unwrap_or(&Value::Null)) {
+        return hydrate_parts(api, resource).await;
+    }
+    let provider_message_id = required_string(resource, "id")?;
+    let size = resource
+        .get("sizeEstimate")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let raw = api.raw_message_at(base, provider_message_id, size).await?;
+    let parsed = crate::sync::ingest::parse_or_text(&raw);
+    let dir = ctx.paths.mail_dir(config.id);
+    tokio::fs::create_dir_all(&dir).await?;
+    let name: String = provider_message_id
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect();
+    let path = dir.join(format!("gmail-{name}.eml"));
+    crate::file_io::write_atomic(&path, &raw, "Gmail message cache").await?;
+    Ok(HydratedBody {
+        text: parsed.text,
+        html: parsed.html,
+        calendar_parts: parsed.calendar_parts,
+        attachments: parsed
+            .attachments
+            .into_iter()
+            .map(|attachment| HydratedAttachment {
+                part_id: attachment.part_id,
+                provider_attachment_id: None,
+                filename: attachment.filename,
+                mime_type: attachment
+                    .mime_type
+                    .unwrap_or_else(|| "application/octet-stream".into()),
+                size: attachment.size,
+                content_id: attachment.content_id,
+                is_inline: attachment.is_inline,
+                inline_bytes: None,
+            })
+            .collect(),
+        disposition_report: parsed.disposition_report,
+        raw_path: Some(path.to_string_lossy().into_owned()),
+    })
+}
+
+/// Whether `part`, or a part inside it, is a message the body shows.
+fn shows_messages(part: &Value) -> bool {
+    let media_type = part
+        .get("mimeType")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let disposition = part_headers(part)
+        .remove("content-disposition")
+        .map(|value| {
+            value
+                .split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_owned()
+        });
+    crate::mime::shows_in_body(media_type, disposition.as_deref())
+        || part
+            .get("parts")
+            .and_then(Value::as_array)
+            .is_some_and(|parts| parts.iter().any(shows_messages))
 }
 
 async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody> {
@@ -2813,6 +2930,7 @@ async fn store_hydrated_body(
     let attachments = body.attachments;
     let calendar_parts = body.calendar_parts;
     let disposition_report = body.disposition_report;
+    let raw_path = body.raw_path;
     let (local_message_id, thread_ids, cached_inline, fresh) = ctx
         .db
         .write(move |conn| {
@@ -2825,12 +2943,26 @@ async fn store_hydrated_body(
                 )
                 .optional()?
                 .ok_or_else(|| CoreError::NotFound("Gmail message".into()))?;
+            // Files read from an original are numbered as the original's
+            // parts, not as Gmail's: the first time a message is read whole,
+            // the files it had are those of another numbering.
+            let read_whole_before = tx.query_row(
+                "SELECT raw_path IS NOT NULL FROM messages WHERE id = ?1",
+                params![local_message_id],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if raw_path.is_some() && !read_whole_before {
+                tx.execute(
+                    "DELETE FROM attachments WHERE message_id = ?1",
+                    params![local_message_id],
+                )?;
+            }
             repo::messages::store_body(
                 &tx,
                 local_message_id,
                 text.as_deref(),
                 html.as_deref(),
-                None,
+                raw_path.as_deref(),
                 has_files,
                 Some(&snippet),
             )?;
@@ -2991,7 +3123,7 @@ async fn hydrate_now(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi, ids:
     for provider_message_id in ids {
         let stored = async {
             let resource = api.message_full(&provider_message_id).await?;
-            let body = hydrate_parts(api, &resource).await?;
+            let body = hydrate(ctx, config, api, &resource).await?;
             store_hydrated_body(ctx, config, provider_message_id.clone(), body).await
         }
         .await;
@@ -3046,7 +3178,7 @@ async fn hydrate_thread(
     .touched_threads;
     for resource in resources {
         let provider_message_id = required_string(&resource, "id")?.to_owned();
-        let body = hydrate_parts(api, &resource).await?;
+        let body = hydrate(ctx, config, api, &resource).await?;
         for thread_id in store_hydrated_body(ctx, config, provider_message_id, body).await? {
             if !touched.contains(&thread_id) {
                 touched.push(thread_id);
@@ -5732,11 +5864,11 @@ mod search_tests {
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
     /// A request the stand-in answered: method, target and body.
-    type Request = (String, String, String);
+    pub(super) type Request = (String, String, String);
 
     /// A stand-in for Gmail's API and batch endpoint that answers each
     /// request with `answer`'s content type and body, and keeps the requests.
-    async fn stand_in(
+    pub(super) async fn stand_in(
         answer: impl Fn(&Request) -> (String, String) + Send + Sync + 'static,
     ) -> (String, Arc<Mutex<Vec<Request>>>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -5937,5 +6069,172 @@ mod search_tests {
         let inbox = |subject: &str| (subject.to_owned(), Some(1));
         assert_eq!(first_found, [inbox("Invoice m3")]);
         assert_eq!(second_found, [inbox("Invoice m2"), inbox("Invoice m1")]);
+    }
+}
+
+#[cfg(test)]
+mod forwarded_message_tests {
+    use super::search_tests::stand_in;
+    use super::tests::gmail_account;
+    use super::*;
+
+    /// The message of #455 as Gmail keeps it.
+    const RAW: &str = "From: sender@example.com\r\n\
+        To: me@test.dev\r\n\
+        Date: Wed, 18 Nov 2026 12:00:00 +0900\r\n\
+        Subject: Inline forward reproduction\r\n\
+        Message-ID: <fwd@example.com>\r\n\
+        MIME-Version: 1.0\r\n\
+        Content-Type: multipart/mixed; boundary=repro\r\n\
+        \r\n\
+        --repro\r\n\
+        Content-Type: text/plain\r\n\
+        \r\n\
+        Outer body.\r\n\
+        --repro\r\n\
+        Content-Type: message/rfc822\r\n\
+        Content-Disposition: inline\r\n\
+        \r\n\
+        From: original@example.com\r\n\
+        Subject: Original message\r\n\
+        \r\n\
+        Forwarded body.\r\n\
+        --repro--\r\n";
+
+    /// The same message in Gmail's full format, its forward sent `disposition`.
+    fn resource(disposition: &str) -> Value {
+        let data = |text: &str| URL_SAFE_NO_PAD.encode(text);
+        json!({
+            "id": "fwd", "threadId": "thread-fwd", "labelIds": ["INBOX"],
+            "internalDate": "1763434800000", "sizeEstimate": RAW.len(),
+            "snippet": "Outer body.",
+            "payload": {
+                "partId": "", "mimeType": "multipart/mixed", "filename": "",
+                "headers": [
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "To", "value": "me@test.dev"},
+                    {"name": "Subject", "value": "Inline forward reproduction"},
+                    {"name": "Date", "value": "Wed, 18 Nov 2026 12:00:00 +0900"},
+                    {"name": "Message-ID", "value": "<fwd@example.com>"},
+                ],
+                "body": {"size": 0},
+                "parts": [
+                    {
+                        "partId": "0", "mimeType": "text/plain", "filename": "",
+                        "headers": [{"name": "Content-Type", "value": "text/plain"}],
+                        "body": {"size": 11, "data": data("Outer body.")},
+                    },
+                    {
+                        "partId": "1", "mimeType": "message/rfc822", "filename": "",
+                        "headers": [
+                            {"name": "Content-Type", "value": "message/rfc822"},
+                            {"name": "Content-Disposition", "value": disposition},
+                        ],
+                        "body": {"size": 0},
+                        "parts": [{
+                            "partId": "1.0", "mimeType": "text/plain", "filename": "",
+                            "headers": [
+                                {"name": "From", "value": "original@example.com"},
+                                {"name": "Subject", "value": "Original message"},
+                            ],
+                            "body": {"size": 15, "data": data("Forwarded body.")},
+                        }],
+                    },
+                ],
+            }
+        })
+    }
+
+    #[test]
+    fn only_a_message_shown_in_the_body_is_read_from_its_original() {
+        assert!(shows_messages(&resource("inline")["payload"]));
+        assert!(shows_messages(&resource("INLINE; foo=bar")["payload"]));
+        assert!(!shows_messages(&resource("attachment")["payload"]));
+        assert!(!shows_messages(
+            &json!({"mimeType": "text/plain", "headers": []})
+        ));
+    }
+
+    #[tokio::test]
+    async fn issue_455_a_gmail_message_shows_the_message_forwarded_in_it() {
+        let (_dir, ctx, config) = gmail_account().await;
+        ctx.tokens
+            .store_initial(
+                config.id,
+                "access".into(),
+                Some(3600),
+                Some("refresh".into()),
+                "client".into(),
+                None,
+            )
+            .await
+            .unwrap();
+        let resource = resource("inline");
+        store_resources(
+            &ctx,
+            &config,
+            std::slice::from_ref(&resource),
+            None,
+            false,
+            false,
+            None,
+            Arrivals::None,
+        )
+        .await
+        .unwrap();
+        let (origin, requests) = stand_in(|(_, target, _)| {
+            assert_eq!(target, "/gmail/v1/users/me/messages/fwd?format=raw");
+            (
+                "application/json".into(),
+                json!({"id": "fwd", "raw": URL_SAFE_NO_PAD.encode(RAW)}).to_string(),
+            )
+        })
+        .await;
+        let api = GmailApi::new(ctx.clone(), config.clone()).unwrap();
+        let body = hydrate_at(
+            &ctx,
+            &config,
+            &api,
+            &format!("{origin}/gmail/v1/users/me"),
+            &resource,
+        )
+        .await
+        .unwrap();
+        assert_eq!(requests.lock().unwrap().len(), 1);
+        let raw_path = body.raw_path.clone().unwrap();
+        assert_eq!(std::fs::read_to_string(&raw_path).unwrap(), RAW);
+        store_hydrated_body(&ctx, &config, "fwd".into(), body)
+            .await
+            .unwrap();
+
+        let (text, stored_path, files) = ctx
+            .db
+            .read(|conn| {
+                let (id, raw_path): (i64, Option<String>) = conn.query_row(
+                    "SELECT id, raw_path FROM messages WHERE gm_msgid = 'fwd'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                let detail = repo::messages::detail(conn, id)?;
+                let files: Vec<_> = detail
+                    .attachments
+                    .iter()
+                    .map(|file| (file.filename.clone(), file.mime_type.clone()))
+                    .collect();
+                Ok((detail.text_body, raw_path, files))
+            })
+            .await
+            .unwrap();
+        let text = text.unwrap();
+        assert!(text.starts_with("Outer body.\n\n---------- Forwarded message"));
+        assert!(text.ends_with("Subject: Original message\n\nForwarded body."));
+        assert_eq!(stored_path.as_deref(), Some(raw_path.as_str()));
+        assert_eq!(
+            files,
+            vec![(
+                Some("Original message.eml".to_owned()),
+                Some("message/rfc822".to_owned())
+            )]
+        );
     }
 }

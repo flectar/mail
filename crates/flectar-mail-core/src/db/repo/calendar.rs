@@ -156,6 +156,7 @@ pub fn apply_invitation(
     calendar: &str,
     own: &OwnAddresses,
     new: NewEvents,
+    originator: Originator<'_>,
 ) -> Result<()> {
     let events = crate::calendar::parse_ics(calendar);
     let mut uids: Vec<&str> = Vec::new();
@@ -182,6 +183,7 @@ pub fn apply_invitation(
             message_id,
             calendar,
             uid,
+            originator,
             versions: &versions,
             adds_new: match new {
                 NewEvents::Add => true,
@@ -192,11 +194,11 @@ pub fn apply_invitation(
         match versions[0].method.as_deref() {
             Some("REPLY") => {
                 for reply in &versions {
-                    apply_reply(conn, account_id, reply, own)?;
+                    apply_reply(conn, account_id, reply, own, originator)?;
                 }
             }
             Some("COUNTER" | "REFRESH" | "DECLINECOUNTER") => {}
-            Some("CANCEL") => apply_cancel(conn, &invitation)?,
+            Some("CANCEL") => apply_cancel(conn, &invitation, own)?,
             _ => {
                 apply_request(conn, &invitation, own)?;
                 join_held_series(conn, account_id, uid)?;
@@ -204,6 +206,41 @@ pub fn apply_invitation(
         }
     }
     Ok(())
+}
+
+/// Who sent the mail an iTIP message came in. Only an event's organizer may
+/// change it (RFC 5546 section 6.1.1), and only an attendee may answer for
+/// themselves, so anyone else who knows an event's UID, a guest or someone
+/// it was forwarded to, can't move, cancel or redirect it.
+#[derive(Debug, Clone, Copy)]
+pub struct Originator<'a> {
+    /// The mail's From address.
+    pub email: &'a str,
+    /// The receiving server confirmed that From, or the user acted on the
+    /// message themselves (RFC 6047 section 3). A From alone is easy to
+    /// forge.
+    pub trusted: bool,
+}
+
+/// Whether mail from `originator` may change the stored event `id`: its
+/// organizer may, with a trusted From. An event the user organizes changes
+/// only here.
+fn may_change(
+    conn: &Connection,
+    id: i64,
+    originator: Originator<'_>,
+    own: &OwnAddresses,
+) -> Result<bool> {
+    let (organizer, is_local): (Option<String>, bool) = conn.query_row(
+        "SELECT organizer, is_local FROM calendar_events WHERE id = ?1",
+        params![id],
+        |row| Ok((row.get(0)?, row.get::<_, i64>(1)? != 0)),
+    )?;
+    Ok(originator.trusted
+        && !is_local
+        && organizer.as_deref().is_some_and(|organizer| {
+            !own.contains(organizer) && organizer.eq_ignore_ascii_case(originator.email)
+        }))
 }
 
 /// Whether an event the calendar doesn't have yet joins it.
@@ -226,6 +263,7 @@ struct Invitation<'a> {
     message_id: i64,
     calendar: &'a str,
     uid: &'a str,
+    originator: Originator<'a>,
     versions: &'a [&'a IcsEvent],
     /// It may join the calendar if the calendar doesn't have it.
     adds_new: bool,
@@ -252,6 +290,11 @@ fn apply_request(conn: &Connection, invitation: &Invitation, own: &OwnAddresses)
     }
     let raw = crate::calendar::stored_form(invitation.calendar);
     let existing = preferred_mail_row(conn, invitation.account_id, invitation.uid)?;
+    if let Some(id) = existing
+        && !may_change(conn, id, invitation.originator, own)?
+    {
+        return Ok(());
+    }
     let Some(ev) = invitation.whole() else {
         return apply_occurrences(conn, invitation, &raw, existing, false);
     };
@@ -261,7 +304,7 @@ fn apply_request(conn: &Connection, invitation: &Invitation, own: &OwnAddresses)
         conn.execute(
             "UPDATE calendar_events SET
                 message_id = ?2, method = ?3, summary = ?4, location = ?5,
-                organizer = ?6, description = ?7, attendees_json = ?8,
+                organizer = COALESCE(organizer, ?6), description = ?7, attendees_json = ?8,
                 join_url = ?9, sequence = ?10, rrule = ?11, tzid = ?12,
                 starts_at = ?13, ends_at = ?14, all_day = ?15, status = ?16,
                 dtstamp = ?17,
@@ -337,24 +380,14 @@ fn insert_invitation(
     Ok(())
 }
 
-fn apply_cancel(conn: &Connection, invitation: &Invitation) -> Result<()> {
+fn apply_cancel(conn: &Connection, invitation: &Invitation, own: &OwnAddresses) -> Result<()> {
     let existing = preferred_mail_row(conn, invitation.account_id, invitation.uid)?;
-    if let Some(id) = existing {
-        // Only the event's organizer cancels it (RFC 6047 §3).
-        let stored: Option<String> = conn.query_row(
-            "SELECT organizer FROM calendar_events WHERE id = ?1",
-            params![id],
-            |row| row.get(0),
-        )?;
-        let sender = invitation
-            .versions
-            .iter()
-            .find_map(|event| event.organizer.as_deref());
-        if let (Some(stored), Some(sender)) = (stored.as_deref(), sender)
-            && !stored.eq_ignore_ascii_case(sender)
-        {
-            return Ok(());
-        }
+    // Only the event's organizer cancels it, whatever ORGANIZER the CANCEL
+    // names.
+    if let Some(id) = existing
+        && !may_change(conn, id, invitation.originator, own)?
+    {
+        return Ok(());
     }
     let Some(ev) = invitation.whole() else {
         let raw = crate::calendar::stored_form(invitation.calendar);
@@ -546,6 +579,7 @@ fn apply_reply(
     account_id: i64,
     reply: &IcsEvent,
     own: &OwnAddresses,
+    originator: Originator<'_>,
 ) -> Result<()> {
     if reply.recurrence_id_ms.is_some() {
         return Ok(());
@@ -575,6 +609,10 @@ fn apply_reply(
         let mut attendees: Vec<EventAttendee> = serde_json::from_str(&attendees)?;
         let mut changed = false;
         for answer in &reply.attendees {
+            // Only the attendee themselves answers for them.
+            if !originator.trusted || !answer.email.eq_ignore_ascii_case(originator.email) {
+                continue;
+            }
             let Some(partstat) = answer.partstat.as_deref() else {
                 continue;
             };
@@ -1263,7 +1301,35 @@ mod tests {
     fn upsert(c: &Connection, account_id: i64, message_id: i64, ev: &IcsEvent) -> Result<()> {
         let mut own = OwnAddresses::default();
         own.insert("me@test.dev".into());
-        apply_invitation(c, account_id, message_id, &ics(ev), &own, NewEvents::Add)
+        let calendar = ics(ev);
+        let from = sender_of(&calendar);
+        apply_invitation(
+            c,
+            account_id,
+            message_id,
+            &calendar,
+            &own,
+            NewEvents::Add,
+            trusted(&from),
+        )
+    }
+
+    /// Who may send `calendar`: the attendee who answers in a REPLY, else
+    /// the organizer.
+    fn sender_of(calendar: &str) -> String {
+        let event = crate::calendar::parse_ics(calendar).remove(0);
+        let answering = event.method.as_deref() == Some("REPLY");
+        match (answering, event.attendees.first()) {
+            (true, Some(attendee)) => attendee.email.clone(),
+            _ => event.organizer.unwrap_or_default(),
+        }
+    }
+
+    fn trusted(email: &str) -> Originator<'_> {
+        Originator {
+            email,
+            trusted: true,
+        }
     }
 
     fn sample_ics_event() -> IcsEvent {
@@ -1338,7 +1404,17 @@ mod tests {
     }
 
     fn apply(c: &Connection, message_id: i64, calendar: &str) {
-        apply_invitation(c, 1, message_id, calendar, &own(), NewEvents::Add).unwrap();
+        let from = sender_of(calendar);
+        apply_invitation(
+            c,
+            1,
+            message_id,
+            calendar,
+            &own(),
+            NewEvents::Add,
+            trusted(&from),
+        )
+        .unwrap();
     }
 
     fn count(c: &Connection) -> i64 {
@@ -1394,6 +1470,152 @@ mod tests {
         );
         assert_eq!(ev.message_id, None);
         assert_eq!(count(&c), 1, "an answer never creates an event");
+    }
+
+    fn apply_from(c: &Connection, message_id: i64, calendar: &str, email: &str, trusted: bool) {
+        apply_invitation(
+            c,
+            1,
+            message_id,
+            calendar,
+            &own(),
+            NewEvents::Add,
+            Originator { email, trusted },
+        )
+        .unwrap();
+    }
+
+    const MEETING: &str = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:meet-1\r\nSEQUENCE:0\r\nDTSTAMP:20261101T080000Z\r\nDTSTART:20261110T090000Z\r\nSUMMARY:Review\r\nURL:https://meet.example.com/review\r\nORGANIZER:mailto:boss@example.com\r\nATTENDEE:mailto:me@test.dev\r\nATTENDEE:mailto:guest@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    #[test]
+    fn only_the_organizer_changes_or_cancels_an_event() {
+        let c = testutil::calendar_conn();
+        apply_from(&c, 80, MEETING, "boss@example.com", true);
+        let id = for_message(&c, 80).unwrap()[0].id;
+        let moved = MEETING
+            .replace("SEQUENCE:0", "SEQUENCE:9999")
+            .replace("DTSTART:20261110T090000Z", "DTSTART:20261111T090000Z")
+            .replace("meet.example.com/review", "evil.example/zoom");
+        // A guest who knows the UID, or a From the receiving server didn't
+        // confirm, changes nothing.
+        apply_from(&c, 81, &moved, "guest@example.org", true);
+        apply_from(&c, 82, &moved, "boss@example.com", false);
+        let cancel = MEETING
+            .replace("METHOD:REQUEST", "METHOD:CANCEL")
+            .replace("ORGANIZER:mailto:boss@example.com\r\n", "");
+        apply_from(&c, 83, &cancel, "guest@example.org", true);
+        let ev = get(&c, id).unwrap().unwrap();
+        assert_eq!(ev.starts_at, for_message(&c, 80).unwrap()[0].starts_at);
+        assert_eq!(
+            ev.join_url.as_deref(),
+            Some("https://meet.example.com/review")
+        );
+        assert_ne!(ev.status.as_deref(), Some("CANCELLED"));
+
+        // The organizer can, and an update never hands the event to
+        // another organizer.
+        let handed_over = moved.replace("mailto:boss@example.com", "mailto:spy@example.net");
+        apply_from(&c, 84, &handed_over, "BOSS@example.com", true);
+        let ev = get(&c, id).unwrap().unwrap();
+        assert_eq!(ev.join_url.as_deref(), Some("https://evil.example/zoom"));
+        assert_eq!(ev.organizer.as_deref(), Some("boss@example.com"));
+        let cancel = cancel.replace("SEQUENCE:0", "SEQUENCE:10000");
+        apply_from(&c, 85, &cancel, "boss@example.com", true);
+        assert_eq!(
+            get(&c, id).unwrap().unwrap().status.as_deref(),
+            Some("CANCELLED")
+        );
+    }
+
+    /// The meeting, as an event the user organizes.
+    fn my_meeting(c: &Connection) -> i64 {
+        let attendees = [EventAttendee {
+            email: "guest@example.org".into(),
+            name: None,
+            partstat: Some("NEEDS-ACTION".into()),
+            answered_at: None,
+        }];
+        insert_local(
+            c,
+            1,
+            None,
+            "meet-1",
+            "Review",
+            None,
+            None,
+            None,
+            "me@test.dev",
+            &attendees,
+            5_000,
+            6_000,
+            false,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn an_answer_counts_only_from_the_attendee_it_is_for() {
+        let c = testutil::calendar_conn();
+        let id = my_meeting(&c);
+        let mine = MEETING.replace("mailto:boss@example.com", "mailto:me@test.dev");
+        let answer = mine
+            .replace("METHOD:REQUEST", "METHOD:REPLY")
+            .replace("ATTENDEE:mailto:me@test.dev\r\n", "")
+            .replace(
+                "ATTENDEE:mailto:guest",
+                "ATTENDEE;PARTSTAT=DECLINED:mailto:guest",
+            );
+        let status = |c: &Connection| {
+            get(c, id)
+                .unwrap()
+                .unwrap()
+                .attendees
+                .into_iter()
+                .find(|attendee| attendee.email == "guest@example.org")
+                .unwrap()
+                .partstat
+        };
+        apply_from(&c, 91, &answer, "someone@example.net", true);
+        apply_from(&c, 92, &answer, "guest@example.org", false);
+        assert_eq!(status(&c).as_deref(), Some("NEEDS-ACTION"));
+        apply_from(&c, 93, &answer, "guest@example.org", true);
+        assert_eq!(status(&c).as_deref(), Some("DECLINED"));
+    }
+
+    #[test]
+    fn mail_never_takes_over_an_event_i_organize() {
+        let c = testutil::calendar_conn();
+        let id = my_meeting(&c);
+        let taken = MEETING
+            .replace("SEQUENCE:0", "SEQUENCE:5")
+            .replace("SUMMARY:Review", "SUMMARY:Moved");
+        apply_from(&c, 101, &taken, "boss@example.com", true);
+        let ev = get(&c, id).unwrap().unwrap();
+        assert_eq!(ev.summary.as_deref(), Some("Review"));
+        assert_eq!(ev.organizer.as_deref(), Some("me@test.dev"));
+    }
+
+    #[test]
+    fn an_organizer_or_attendee_is_one_plain_address() {
+        let ics = MEETING
+            .replace(
+                "mailto:boss@example.com",
+                "mailto:boss@example.com>, <spy@example.net",
+            )
+            .replace(
+                "mailto:guest@example.org",
+                "mailto:guest@example.org\r\n Bcc: x",
+            );
+        let event = crate::calendar::parse_ics(&ics).remove(0);
+        assert_eq!(event.organizer, None);
+        assert_eq!(
+            event
+                .attendees
+                .iter()
+                .map(|attendee| attendee.email.as_str())
+                .collect::<Vec<_>>(),
+            vec!["me@test.dev"]
+        );
     }
 
     #[test]

@@ -5,14 +5,15 @@
 //! (their record ids derive from their key, so two devices that block the
 //! same sender write the same record), templates, snoozes, scheduled sends
 //! and reply reminders are records under their own sync id, and each device
-//! describes itself in a `device` record under its own device id.
+//! describes itself in a `device` record under its own device id. Passwords,
+//! sign-ins and app keys travel sealed (`sign_ins`, `app_keys`).
 
 use super::store::{Incoming, RecordId, body_hash, set_local_hash};
 use crate::db::repo;
 use crate::error::Result;
 use crate::models::{
     AccountSettings, MailProfile, MailProtocol, PortableAccountConfig, Settings, Signature,
-    SignatureDefaults,
+    SignatureDefaults, clean_account_name,
 };
 use flectar_mail_sync_client::{Entry, Mirrored};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -30,6 +31,7 @@ pub(crate) const SCHEDULED: &str = "scheduled";
 pub(crate) const REMINDER: &str = "reminder";
 pub(crate) const SIGN_IN: &str = "signin";
 pub(crate) const BLOCK: &str = "block";
+pub(crate) const APP_KEYS: &str = "appkeys";
 
 /// The largest template body that syncs.
 const MAX_TEMPLATE_BYTES: usize = 192 * 1024;
@@ -48,7 +50,7 @@ const MAX_BODY_BYTES: usize = 250 * 1024;
 pub(crate) fn schema(collection: &str) -> Option<u32> {
     match collection {
         PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE | SNOOZE | SCHEDULED
-        | REMINDER | SIGN_IN | BLOCK => Some(1),
+        | REMINDER | SIGN_IN | BLOCK | APP_KEYS => Some(1),
         _ => None,
     }
 }
@@ -104,7 +106,6 @@ const SYNCED_SETTINGS: &[&str] = &[
     "signatureDefaults",
     "mailProfiles",
     "accountColors",
-    "accountShortNames",
     "accountThemes",
 ];
 
@@ -266,10 +267,6 @@ fn account_body(
         .as_object_mut()
         .expect("an account config serializes to an object");
     object.insert("color".into(), json!(settings.account_colors.get(&key)));
-    object.insert(
-        "shortName".into(),
-        json!(settings.account_short_names.get(&key)),
-    );
     object.insert("theme".into(), json!(settings.account_themes.get(&key)));
     object.insert(
         "signatureDefaults".into(),
@@ -508,6 +505,16 @@ pub(crate) fn snapshot(
             };
             if let Some(body) = super::sign_ins::body(&share, account) {
                 records.insert(id, entry(SIGN_IN, body));
+            }
+        }
+        // App keys, for this kind of device only (app_keys.rs).
+        let family = super::sign_ins::this_family();
+        for share in repo::app_keys::all(conn)? {
+            if share.family != family {
+                continue;
+            }
+            if let (Some(id), Some(body)) = (share.record_id, super::app_keys::body(&share)) {
+                records.insert(id, entry(APP_KEYS, body));
             }
         }
     }
@@ -918,6 +925,7 @@ fn apply_put(
         REMINDER => apply_reminder(conn, id, &entry.body, applied),
         SIGN_IN => apply_sign_in(conn, id, &entry.body),
         BLOCK => apply_block(conn, &entry.body, applied),
+        APP_KEYS => apply_app_keys(conn, id, &entry.body),
         // Other devices describe themselves; the app reads them from the
         // mirror, and only each device writes its own.
         DEVICE => Ok(Outcome::Ignored),
@@ -942,6 +950,7 @@ fn apply_account(
     if crate::validate_portable_account(&config).is_err() {
         return Ok(Outcome::Ignored);
     }
+    let name = config.name.as_deref().and_then(clean_account_name);
     let sync_id = sync_id_hex(id);
     let mut local = conn
         .query_row(
@@ -1007,8 +1016,8 @@ fn apply_account(
             conn.execute(
                 "UPDATE accounts SET display_name = ?1, username = ?2, jmap_url = ?3,
                         incoming_host = ?4, incoming_port = ?5, smtp_host = ?6, smtp_port = ?7,
-                        settings_json = ?8
-                 WHERE id = ?9",
+                        settings_json = ?8, name = ?9
+                 WHERE id = ?10",
                 params![
                     config.display_name,
                     config.username.trim(),
@@ -1018,6 +1027,7 @@ fn apply_account(
                     config.smtp_host.trim(),
                     config.smtp_port,
                     serde_json::to_string(&settings_json)?,
+                    name,
                     local_id
                 ],
             )?;
@@ -1064,8 +1074,8 @@ fn apply_account(
                 "needs_reauth",
             )?;
             conn.execute(
-                "UPDATE accounts SET sync_id = ?1 WHERE id = ?2",
-                params![sync_id, local_id],
+                "UPDATE accounts SET sync_id = ?1, name = ?2 WHERE id = ?3",
+                params![sync_id, name, local_id],
             )?;
             local_id
         }
@@ -1079,7 +1089,6 @@ fn apply_account(
     let key = local_id.to_string();
     let text = |field: &str| body.get(field).and_then(Value::as_str).map(str::to_owned);
     set_or_remove(&mut settings.account_colors, &key, text("color"));
-    set_or_remove(&mut settings.account_short_names, &key, text("shortName"));
     set_or_remove(&mut settings.account_themes, &key, text("theme"));
     match body
         .get("signatureDefaults")
@@ -1361,6 +1370,25 @@ fn apply_sign_in(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outco
     } else {
         Outcome::Ignored
     })
+}
+
+/// App keys another device shared: only devices of the kind they're for
+/// take them on, and never upload or delete the others.
+fn apply_app_keys(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outcome> {
+    let Some(record) = super::app_keys::parse(body) else {
+        return Ok(Outcome::Ignored);
+    };
+    if record.family != super::sign_ins::this_family() {
+        return Ok(Outcome::Ignored);
+    }
+    repo::app_keys::arrive(
+        conn,
+        record.provider.as_str(),
+        record.family,
+        id,
+        &record.sealed,
+    )?;
+    Ok(Outcome::Applied)
 }
 
 fn apply_reminder(
@@ -1654,6 +1682,8 @@ fn apply_delete(
             repo::sign_ins::drop_arrivals_of_record(conn, id)?;
             repo::sign_ins::forget_record(conn, id)?;
         }
+        // The keys already in this device's settings stay.
+        APP_KEYS => repo::app_keys::forget_record(conn, id)?,
         // Preferences are never deleted, and device records go with their
         // device.
         _ => {}
@@ -1841,19 +1871,14 @@ mod tests {
         theirs.body["vacationReply"] = json!("Away until Monday");
         theirs.body["settings"]["archiveAfterDays"] = json!(30);
 
-        let mut settings = repo::settings::get(&conn).unwrap();
-        settings
-            .account_short_names
-            .insert(local.to_string(), "Ada".into());
-        repo::settings::set(&conn, &settings).unwrap();
+        repo::accounts::set_name(&conn, local, Some("Ada")).unwrap();
         let ours = own_record(&conn, id, Some(&theirs));
-        assert_eq!(ours.body["shortName"], "Ada");
+        assert_eq!(ours.body["name"], "Ada");
         assert_eq!(ours.body["vacationReply"], "Away until Monday");
         assert_eq!(ours.body["settings"]["archiveAfterDays"], 30);
 
         // Unchanged here, it is the server's copy, so it isn't uploaded.
-        settings.account_short_names.clear();
-        repo::settings::set(&conn, &settings).unwrap();
+        repo::accounts::set_name(&conn, local, None).unwrap();
         assert_eq!(own_record(&conn, id, Some(&theirs)), theirs);
     }
 
@@ -2818,6 +2843,89 @@ mod tests {
     }
 
     #[test]
+    fn app_keys_for_another_kind_of_device_are_left_alone() {
+        let conn = testutil::conn();
+        let body = json!({
+            "provider": "gmail",
+            "family": "elsewhere",
+            "sealed": {"epoch": 1, "data": "AAAA"},
+        });
+        let mut waiting = BTreeMap::new();
+        waiting.insert([7; 16], entry(APP_KEYS, body));
+        apply(
+            &conn,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(repo::app_keys::all(&conn).unwrap().is_empty());
+        // Nor does this device delete them for having none.
+        let clock = Clock::new([1; 16], None);
+        assert_eq!(
+            super::super::store::track(&conn, &BTreeMap::new(), &clock).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn app_keys_of_this_kind_arrive_and_are_followed() {
+        let conn = testutil::conn();
+        let id = [8; 16];
+        let names = Names::default();
+        let mirror = BTreeMap::new();
+        let local = |conn: &Connection| {
+            snapshot(conn, &names, &mirror, ([1; 16], json!({})))
+                .unwrap()
+                .remove(&id)
+        };
+        assert_eq!(local(&conn), None, "nothing to share yet");
+
+        let next = entry(
+            APP_KEYS,
+            json!({
+                "provider": "microsoft",
+                "family": super::super::sign_ins::this_family(),
+                "sealed": {"epoch": 1, "data": "BBBB"},
+            }),
+        );
+        let mut incoming = BTreeMap::new();
+        incoming.insert(
+            id,
+            Incoming {
+                previous: None,
+                next: Some(next.clone()),
+            },
+        );
+        apply(
+            &conn,
+            &incoming,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let share = repo::app_keys::all(&conn).unwrap().remove(0);
+        assert_eq!(
+            share.arrived.as_deref(),
+            Some(r#"{"epoch":1,"data":"BBBB"}"#)
+        );
+        // This device has what the group has, so it sends nothing back.
+        assert_eq!(local(&conn), Some(next.clone()));
+        mirror_row(&conn, &id, Some(&next));
+        let clock = Clock::new([1; 16], None);
+        let ours = local(&conn).map(|entry| (id, entry)).into_iter().collect();
+        assert_eq!(super::super::store::track(&conn, &ours, &clock).unwrap(), 0);
+
+        // With sign-ins no longer syncing, it goes from the group.
+        let mut settings = repo::settings::get(&conn).unwrap();
+        settings.sync_sign_ins = false;
+        repo::settings::set(&conn, &settings).unwrap();
+        assert_eq!(local(&conn), None);
+    }
+
+    #[test]
     fn openpgp_settings_stay_on_their_device() {
         let conn = testutil::conn();
         let id = account(&conn, "me@example.com", &"a".repeat(32));
@@ -2835,6 +2943,56 @@ mod tests {
         assert_eq!(
             merged_account_settings(&current, &synced).security,
             current.security
+        );
+    }
+
+    #[test]
+    fn an_account_name_reaches_the_other_devices() {
+        let sync_id = "e1".repeat(16);
+        let id = sync_id_bytes(&sync_id).unwrap();
+        // Named on one device.
+        let named = testutil::conn();
+        let there = account(&named, "me@example.com", &sync_id);
+        repo::accounts::set_name(&named, there, Some("Shop")).unwrap();
+        let config = repo::accounts::get_config(&named, there).unwrap().unwrap();
+        let body = account_body(&config, &Settings::default(), 0).unwrap();
+        assert_eq!(body["name"], "Shop");
+
+        // The other device takes the name, kept on one line.
+        let conn = testutil::conn();
+        let here = account(&conn, "me@example.com", &sync_id);
+        let previous = entry(ACCOUNT, {
+            let config = repo::accounts::get_config(&conn, here).unwrap().unwrap();
+            account_body(&config, &Settings::default(), 0).unwrap()
+        });
+        let mut next = body.clone();
+        next["name"] = json!("  Corner\n shop ");
+        let applied = apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(previous.clone()),
+                next: Some(entry(ACCOUNT, next)),
+            },
+        );
+        assert!(applied.accounts_changed);
+        let account = repo::accounts::get(&conn, here).unwrap().unwrap();
+        assert_eq!(account.name.as_deref(), Some("Corner shop"));
+
+        // Taken away there, it goes here too.
+        let mut next = body;
+        next["name"] = Value::Null;
+        apply_incoming(
+            &conn,
+            id,
+            Incoming {
+                previous: Some(previous),
+                next: Some(entry(ACCOUNT, next)),
+            },
+        );
+        assert_eq!(
+            repo::accounts::get(&conn, here).unwrap().unwrap().name,
+            None
         );
     }
 

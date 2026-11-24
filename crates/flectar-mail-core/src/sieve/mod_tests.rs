@@ -317,6 +317,7 @@ fn the_server_is_the_imap_host_secured_as_its_mail_is() {
         id: 1,
         email: "me@example.test".into(),
         display_name: None,
+        name: None,
         avatar_url: None,
         provider: Provider::Generic,
         auth_kind: AuthKind::Password,

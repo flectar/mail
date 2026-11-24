@@ -87,8 +87,13 @@ async fn start_server(binary: &str) -> Server {
         url,
         _dir: dir,
     };
+    let http = flectar_mail_core::net::tls::client_builder()
+        .build()
+        .unwrap();
     for _ in 0..100 {
-        if reqwest::get(format!("{}/healthz", server.url))
+        if http
+            .get(format!("{}/healthz", server.url))
+            .send()
             .await
             .is_ok_and(|response| response.status().is_success())
         {
@@ -112,6 +117,7 @@ fn imap_account(email: &str) -> PortableAccountConfig {
     PortableAccountConfig {
         email: email.into(),
         display_name: Some("Work".into()),
+        name: None,
         provider: Provider::Generic,
         auth_kind: AuthKind::Password,
         mail_protocol: MailProtocol::Imap,

@@ -217,7 +217,7 @@ fn attachment_page(
                     id: r.get(0)?,
                     account_id: r.get(1)?,
                     thread_id: r.get(2)?,
-                    filename: r.get(3)?,
+                    filename: crate::mime::shown_attachment_name(&r.get::<_, String>(3)?),
                     media_type: r.get(4)?,
                     size: r.get::<_, i64>(5)?.max(0) as u64,
                     sender: r.get(6)?,

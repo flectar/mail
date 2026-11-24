@@ -1305,7 +1305,7 @@ fn addresses(values: Option<&[jmap_client::email::EmailAddress]>) -> Vec<Address
         .unwrap_or_default()
         .iter()
         .map(|value| Address {
-            name: value.name().map(str::to_owned),
+            name: value.name().and_then(crate::mime::display_name),
             email: value.email().to_owned(),
         })
         .collect()
@@ -1556,11 +1556,10 @@ async fn persist_emails(
                             stale_paths.push(path);
                         }
                     }
-                    // A changed message is read again from its preview
-                    // until its new body arrives.
-                    let verification_code = (!is_outgoing && !is_draft)
-                        .then(|| crate::verification_code::find(&subject, &snippet))
-                        .flatten();
+                    // A changed message offers no code until its new body
+                    // arrives: a code comes only from a confirmed sender, and
+                    // the server's verdict comes with the body.
+                    let verification_code: Option<String> = None;
                     // JMAP messages carry no IMAP UID; an adopted one drops
                     // the UID its earlier copy had in another folder.
                     tx.execute(
@@ -2256,10 +2255,10 @@ struct DownloadedBody {
 }
 
 /// Keeps what the server sent for `batch`. A message whose text didn't all
-/// come, and a small read receipt, whose report part is no text, download
-/// whole instead, as when they're opened. One the server didn't send as it
-/// is here waits as a body that failed does, while header sync catches up
-/// with it.
+/// come, a small read receipt, whose report part is no text, and a message
+/// that carries one its body shows download whole instead, as when they're
+/// opened. One the server didn't send as it is here waits as a body that
+/// failed does, while header sync catches up with it.
 async fn store_bodies(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -2287,9 +2286,17 @@ async fn store_bodies(
             part.content_type()
                 .is_some_and(crate::mime::is_disposition_report_part)
         });
-        let text = if receipt
-            && u64::try_from(message.size)
-                .is_ok_and(|size| size <= crate::sync::engine::WHOLE_RECEIPT_LIMIT)
+        // A message carrying one its body shows downloads whole too (#455):
+        // body values leave out the messages inside (RFC 8621 section 4.1.4).
+        let shows_message = attachments.iter().any(|part| {
+            part.content_type().is_some_and(|media_type| {
+                crate::mime::shows_in_body(media_type, part.content_disposition())
+            })
+        });
+        let text = if shows_message
+            || receipt
+                && u64::try_from(message.size)
+                    .is_ok_and(|size| size <= crate::sync::engine::WHOLE_RECEIPT_LIMIT)
         {
             None
         } else {
@@ -2416,6 +2423,30 @@ async fn persist_bodies(ctx: &SyncCtx, account_id: i64, bodies: Vec<DownloadedBo
                     "UPDATE messages SET jmap_attachments_blob_id=?2 WHERE id=?1",
                     params![message_id, body.blob_id],
                 )?;
+                // First, as a code in the body is offered only from a
+                // confirmed sender.
+                if let Some(headers) = &body.headers {
+                    // Mail the account received tells whether its server
+                    // stamps what it receives, and so whether the sender's
+                    // verification can be trusted.
+                    let (account_id, outgoing): (i64, bool) = tx.query_row(
+                        "SELECT account_id, is_outgoing FROM messages WHERE id = ?1",
+                        [message_id],
+                        |row| Ok((row.get(0)?, row.get::<_, i64>(1)? != 0)),
+                    )?;
+                    if !outgoing {
+                        repo::messages::note_authentication_results(
+                            &tx,
+                            account_id,
+                            headers.authentication_results,
+                        )?;
+                    }
+                    repo::messages::set_sender_verification(
+                        &tx,
+                        message_id,
+                        repo::messages::vouched(&tx, account_id, headers.sender_verification)?,
+                    )?;
+                }
                 // The paperclip stays the server's call (RFC 8621 hasAttachment).
                 repo::messages::store_body(
                     &tx,
@@ -2427,11 +2458,6 @@ async fn persist_bodies(ctx: &SyncCtx, account_id: i64, bodies: Vec<DownloadedBo
                     Some(&body.snippet),
                 )?;
                 if let Some(headers) = &body.headers {
-                    repo::messages::set_sender_verification(
-                        &tx,
-                        message_id,
-                        headers.sender_verification,
-                    )?;
                     repo::messages::fill_list_headers(
                         &tx,
                         message_id,
