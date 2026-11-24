@@ -4417,10 +4417,16 @@ impl Core {
             && let Ok(headers) = crate::mime::parse_header_block(&raw)
             && headers.sender_verification.is_verified()
         {
-            let verification = headers.sender_verification;
-            self.db
+            let verification = self
+                .db
                 .write(move |conn| {
-                    repo::messages::set_sender_verification(conn, message_id, verification)
+                    let verification = repo::messages::vouched_for_message(
+                        conn,
+                        message_id,
+                        headers.sender_verification,
+                    )?;
+                    repo::messages::set_sender_verification(conn, message_id, verification)?;
+                    Ok(verification)
                 })
                 .await?;
             detail.sender_verification = verification;
@@ -4671,10 +4677,15 @@ impl Core {
         &self,
         message_id: i64,
     ) -> Result<Option<(MessageDetail, unsubscribe::UnsubscribePlan)>> {
-        let (detail, raw_path, local, receive_only) = self
+        let (detail, raw_path, local, receive_only, stamped) = self
             .db
             .read(move |conn| {
                 let detail = repo::messages::detail(conn, message_id)?;
+                // The signature check below reads the topmost
+                // Authentication-Results, which only a server that stamps
+                // the mail it receives makes its own.
+                let stamped =
+                    repo::messages::trusts_authentication_results(conn, detail.account_id)?;
                 let raw_path =
                     repo::messages::get_row(conn, message_id)?.and_then(|row| row.raw_path);
                 let config = repo::accounts::get_config(conn, detail.account_id)?;
@@ -4683,7 +4694,7 @@ impl Core {
                     .is_some_and(|account| account.mail_protocol == MailProtocol::Local);
                 // An account that only receives can't send a request by mail.
                 let receive_only = config.filter(|config| !local && !config.sends_mail());
-                Ok((detail, raw_path, local, receive_only))
+                Ok((detail, raw_path, local, receive_only, stamped))
             })
             .await?;
         // Answering spam only tells its sender the address is read, and
@@ -4695,12 +4706,12 @@ impl Core {
             return Ok(None);
         };
         let one_click = match &raw_path {
-            Some(raw_path) => {
+            Some(raw_path) if stamped => {
                 crate::file_io::read_headers(raw_path, MAX_CACHED_HEADER_BYTES, "cached headers")
                     .await
                     .is_ok_and(|raw| crate::mime::one_click_signed(&raw))
             }
-            None => false,
+            _ => false,
         };
         match unsubscribe::plan(&list_unsubscribe, one_click, receive_only.is_none()) {
             Some(plan) => Ok(Some((detail, plan))),
@@ -15134,7 +15145,7 @@ mod read_receipt_answer_tests {
         let (_, message_id) = db::testutil::seed_message(conn, "ana@example.com", "Plan", false);
         conn.execute(
             "UPDATE messages SET receipt_to = ?2, receipt_confirm = ?3,
-                 sender_verification = 'domain'
+                 sender_verification = 'domain', to_json = '[{\"email\":\"me@test.dev\"}]'
              WHERE id = ?1",
             rusqlite::params![
                 message_id,
@@ -15294,6 +15305,62 @@ mod read_receipt_answer_tests {
 
     /// An account that only receives mail can't send a receipt, so nothing
     /// asks for one, and an answer sends nothing (#252).
+    #[tokio::test]
+    async fn a_bcc_copy_asks_and_trash_or_a_blocked_sender_asks_nothing() {
+        let (_temp, core) = core_with_identity().await;
+        async fn request(core: &Core, message_id: i64) -> Option<crate::models::ReceiptRequest> {
+            core.db
+                .read(move |conn| repo::messages::detail(conn, message_id))
+                .await
+                .unwrap()
+                .receipt_request
+        }
+        // Not in To or Cc: the sender would learn the user got a copy.
+        let bcc = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "UPDATE messages SET to_json = '[{\"email\":\"team@example.com\"}]'
+                     WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        assert!(request(&core, bcc).await.unwrap().needs_confirmation);
+
+        let trashed = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, path, role) VALUES (9, 1, 'Trash', 'trash')",
+                    [],
+                )?;
+                conn.execute("UPDATE messages SET folder_id = 9 WHERE id = ?1", [id])?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        assert!(request(&core, trashed).await.is_none());
+
+        let blocked = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "INSERT INTO blocked_senders (address, blocked_at) VALUES ('ana@example.com', 1)",
+                    [],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        assert!(request(&core, blocked).await.is_none());
+    }
+
     #[tokio::test]
     async fn an_account_that_only_receives_is_asked_for_no_receipt() {
         let (_temp, core) = core_with_identity().await;
@@ -16397,6 +16464,13 @@ mod unsubscribe_offer_tests {
             .db
             .write(move |conn| {
                 db::testutil::seed_account(conn);
+                // Its server stamps the mail it receives with its own
+                // Authentication-Results.
+                conn.execute(
+                    "INSERT INTO account_authentication (account_id, messages, stamped)
+                     VALUES (1, 40, 40)",
+                    [],
+                )?;
                 let (_, message_id) =
                     db::testutil::seed_message(conn, "news@news.example", "Weekly", true);
                 conn.execute(
@@ -16436,6 +16510,27 @@ mod unsubscribe_offer_tests {
         assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), mailto);
         let (core, _temp, message_id) = list_message(None).await;
         assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), mailto);
+    }
+
+    #[tokio::test]
+    async fn one_click_needs_a_server_that_stamps_its_mail() {
+        let (core, _temp, message_id) = list_message(Some(format!("{SIGNED}{LIST_FIELDS}"))).await;
+        // Most of its mail came without the server's own results, so the
+        // signature check's field may be the sender's.
+        core.db
+            .write(|conn| {
+                conn.execute(
+                    "UPDATE account_authentication SET stamped = 10 WHERE account_id = 1",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(!matches!(
+            core.unsubscribe_offer(message_id).await.unwrap(),
+            Some(UnsubscribeOffer::OneClick { .. })
+        ));
     }
 
     #[tokio::test]
