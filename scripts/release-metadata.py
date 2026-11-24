@@ -16,7 +16,7 @@ def msix_version(match: re.Match) -> str:
     up to 65535, so a 0.x version cannot keep its own numbers. Major is offset
     by one, Minor holds minor and patch, and Build orders the channels like
     scripts/android-version-code.py: alpha.N < beta.N < rc.N < the release.
-    0.1.0-alpha.8 becomes 1.100.8.0 and 0.1.0 becomes 1.100.9999.0.
+    0.1.0-beta.1 becomes 1.100.1001.0 and 0.1.0 becomes 1.100.9999.0.
     """
     major, minor, patch = map(int, match.group(1, 2, 3))
     stage, number = match.group(4, 5)
