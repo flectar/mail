@@ -34,7 +34,7 @@ fn render(app: &AppWindow, scale: f32) -> renderer::RenderedEmail {
 
 /// Show the message in the reader through the application's own projection.
 pub(super) fn show(app: &AppWindow, scale: f32) {
-    mail_render_projection::apply_cpu_frame(app, render(app, scale));
+    mail_render_projection::apply_cpu_frame(&ReaderRef::main(app), render(app, scale));
 }
 
 #[test]

@@ -42,7 +42,7 @@ pub(super) fn register(
         let html = app.global::<ReaderUi>().get_selected_source();
         if fits_in_issue(&html) {
             if !html.is_empty() {
-                crate::renderer_input_controller::copy_text(&app, html.into());
+                crate::renderer_input_controller::copy_text(&ReaderRef::main(&app), html.into());
                 app.set_render_status(UiMessage::plain(
                     "Copied HTML source. Paste it into the issue.",
                 ));

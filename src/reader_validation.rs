@@ -70,7 +70,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     let opened_urls = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded_urls = opened_urls.clone();
     register_renderer_input_callbacks(
-        &app,
+        &ReaderRef::main(&app),
         &renderer,
         false,
         ExternalUrlOpener::new(move |url| {
@@ -140,15 +140,15 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         window.draw_if_needed(|r| {
             r.render(&mut pixels, width as usize);
         });
-        let (w, h) = email_viewport_size(&app);
+        let (w, h) = email_viewport_size(&ReaderRef::main(&app));
         if let Some(frame) = renderer
             .borrow_mut()
             .render_cpu_if_needed(w, h, 1.0)
             .unwrap()
         {
-            apply_cpu_frame(&app, frame);
+            apply_cpu_frame(&ReaderRef::main(&app), frame);
         }
-        sync_reader_metadata(&app, &renderer);
+        sync_reader_metadata(&ReaderRef::main(&app), &renderer);
         app.window().request_redraw();
         window.draw_if_needed(|r| {
             r.render(&mut pixels, width as usize);
@@ -610,13 +610,13 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     renderer
         .borrow_mut()
         .set_email(renderer::prepare_email_html(&html).unwrap());
-    let (width, height) = email_viewport_size(&app);
+    let (width, height) = email_viewport_size(&ReaderRef::main(&app));
     let frame = renderer
         .borrow_mut()
         .render_cpu_if_needed(width, height, 1.0)
         .unwrap()
         .unwrap();
-    apply_cpu_frame(&app, frame);
+    apply_cpu_frame(&ReaderRef::main(&app), frame);
     let tiles_model = app.global::<ReaderUi>().get_email_tiles();
     let tiles_before = renderer.borrow().tile_count;
     let layouts_before = renderer.borrow().layout_count;
@@ -940,7 +940,7 @@ impl SoftwareReader {
             .set_thread_messages(state.conversation_rows.clone().into());
         let renderer = state.email_renderer.clone();
         register_renderer_input_callbacks(
-            &app,
+            &ReaderRef::main(&app),
             &renderer,
             false,
             ExternalUrlOpener::new(|_| Err("test host unavailable".into())),
@@ -966,14 +966,14 @@ impl SoftwareReader {
     /// Render any missing email tiles, then draw a frame.
     fn paint(&self) {
         slint::platform::update_timers_and_animations();
-        let (width, height) = email_viewport_size(&self.app);
+        let (width, height) = email_viewport_size(&ReaderRef::main(&self.app));
         if let Some(frame) = self
             .renderer
             .borrow_mut()
             .render_cpu_if_needed(width, height, self.app.window().scale_factor())
             .unwrap()
         {
-            apply_cpu_frame(&self.app, frame);
+            apply_cpu_frame(&ReaderRef::main(&self.app), frame);
         }
         self.app.window().request_redraw();
         self.window.draw_if_needed(|r| {
@@ -1023,8 +1023,8 @@ fn an_unreported_reader_width_keeps_the_fallback_ratio() {
     let app = &view.app;
     app.global::<ReaderUi>().set_email_viewport_width(0.0);
     view.render();
-    sync_reader_metadata(app, &view.renderer);
-    let (fallback, _) = email_viewport_size(app);
+    sync_reader_metadata(&ReaderRef::main(app), &view.renderer);
+    let (fallback, _) = email_viewport_size(&ReaderRef::main(app));
     let expected = (view.renderer.borrow().layout_width / fallback as f32).max(1.0);
     let ratio = app.global::<EmailReader>().get_width_ratio();
     assert!(
@@ -1042,7 +1042,7 @@ fn an_unreported_reader_width_keeps_the_fallback_ratio() {
 fn readers_that_never_resize_draw_tiles_at_their_painted_size() {
     let view = SoftwareReader::phone(vec![blocks_message()]);
     view.render();
-    sync_reader_metadata(&view.app, &view.renderer);
+    sync_reader_metadata(&ReaderRef::main(&view.app), &view.renderer);
     view.paint();
     let app = &view.app;
     let width = app.global::<ReaderUi>().get_email_viewport_width();
@@ -1249,7 +1249,7 @@ fn messages_growing_as_images_load_paint_with_the_software_renderer() {
             .block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
         if view.renderer.borrow_mut().poll_resources() {
             view.paint();
-            sync_reader_metadata(&view.app, &view.renderer);
+            sync_reader_metadata(&ReaderRef::main(&view.app), &view.renderer);
             view.paint();
         }
     }

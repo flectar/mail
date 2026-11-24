@@ -705,7 +705,7 @@ pub(super) fn render_current(
         reminder.set_open_due(display_email.reply_reminder_due);
         reminder.set_can_remind(sent_here);
         apply_email(
-            app,
+            &ReaderRef::main(app),
             display_email,
             &email_renderer,
             use_wgpu,
@@ -741,7 +741,7 @@ pub(super) fn render_current(
             .set_email_content_aspect(900.0 / 520.0);
         app.global::<ReaderUi>()
             .set_email_links(ModelRc::new(VecModel::default()));
-        clear_reader_projection(app);
+        clear_reader_projection(&ReaderRef::main(app));
         crate::attachment_controller::clear(app);
         crate::translation::clear(app);
         crate::ai_features::clear(app);
