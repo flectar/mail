@@ -163,11 +163,33 @@ pub fn open_chosen(chosen: &ChosenFile) -> Result<Source, SourceError> {
         .map_err(|error| SourceError::Unreadable(error.to_string()))?;
     let bytes = read_bounded(file)?;
     match detect(&bytes) {
-        Some(DetectedFormat::FlectarBackup) => Ok(Source::FlectarBackup(bytes)),
+        // A backup restores accounts and settings, so only a file named as
+        // one is read as one: not a file disguised as something else.
+        Some(DetectedFormat::FlectarBackup) if named_json(chosen) => {
+            Ok(Source::FlectarBackup(bytes))
+        }
+        Some(DetectedFormat::FlectarBackup) => Err(SourceError::UnknownFormat),
         Some(DetectedFormat::K9Settings) => accounts(k9::parse(&bytes)?),
         Some(DetectedFormat::ThunderbirdPrefs) => accounts(thunderbird::parse_prefs(&bytes)?),
         Some(DetectedFormat::Zip) | None => Err(SourceError::UnknownFormat),
     }
+}
+
+/// Whether the chosen file's name ends in `.json`.
+fn named_json(chosen: &ChosenFile) -> bool {
+    let name = if chosen.name.is_empty() {
+        chosen
+            .path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    } else {
+        chosen.name.clone()
+    };
+    name.len() > 5
+        && name
+            .get(name.len() - 5..)
+            .is_some_and(|extension| extension.eq_ignore_ascii_case(".json"))
 }
 
 fn accounts(inventory: ImportInventory) -> Result<Source, SourceError> {
@@ -201,4 +223,38 @@ fn read_bounded(reader: impl Read) -> Result<Vec<u8>, SourceError> {
         return Err(SourceError::TooLarge);
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ChosenFile, Source, SourceError, open_chosen};
+
+    const BACKUP: &str = r#"{"format":"flectar-mail-account-backup","version":1,"accounts":[]}"#;
+
+    fn chosen(dir: &std::path::Path, name: &str) -> ChosenFile {
+        let path = dir.join("picked");
+        std::fs::write(&path, BACKUP).unwrap();
+        ChosenFile {
+            path,
+            name: name.into(),
+        }
+    }
+
+    #[test]
+    fn a_backup_must_be_named_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            open_chosen(&chosen(dir.path(), "flectar-mail-backup-2026-11-23.JSON")),
+            Ok(Source::FlectarBackup(_))
+        ));
+        for disguise in ["invoice.eml", "statement.pdf", "json", ""] {
+            assert!(
+                matches!(
+                    open_chosen(&chosen(dir.path(), disguise)),
+                    Err(SourceError::UnknownFormat)
+                ),
+                "{disguise}"
+            );
+        }
+    }
 }

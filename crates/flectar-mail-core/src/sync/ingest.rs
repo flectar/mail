@@ -120,6 +120,17 @@ impl Importer {
             .unwrap_or_default();
         let is_outgoing =
             self.own_addresses.contains(&from_email) || delivery.folder_role == Some(roles::SENT);
+        // Mail the account received tells whether its server stamps what it
+        // receives, and so whether the sender's verification can be trusted.
+        if !is_outgoing {
+            repo::messages::note_authentication_results(
+                conn,
+                self.account_id,
+                headers.authentication_results,
+            )?;
+        }
+        let sender_verification =
+            repo::messages::vouched(conn, self.account_id, headers.sender_verification)?;
         let thread_id = super::threading::resolve_thread(conn, self.account_id, headers, date_ms)?;
         let message = NewMessage {
             account_id: self.account_id,
@@ -148,7 +159,7 @@ impl Importer {
             list_unsubscribe_post: headers.list_unsubscribe_post.clone(),
             list_id: headers.list_id.clone(),
             sender_addr: headers.via.clone(),
-            sender_verification: headers.sender_verification,
+            sender_verification,
             receipt_to: headers.receipt_to.clone(),
             receipt_confirm: headers.receipt_confirm,
             receipt_handled: delivery.receipt_handled,
@@ -180,10 +191,16 @@ impl Importer {
         imported: &Imported,
     ) -> Result<()> {
         let when = imported.arrival_ms;
-        if imported.is_outgoing
-            && self.settings.collect_outgoing_contacts
-            && when >= self.outgoing_learning_since
-        {
+        if imported.is_outgoing {
+            // Only mail in Sent says whom the user wrote to. A From with the
+            // user's own address is easy to forge, and its recipients would
+            // rise in suggestions and count as people the user knows.
+            if imported.folder_role.as_deref() != Some(roles::SENT)
+                || !self.settings.collect_outgoing_contacts
+                || when < self.outgoing_learning_since
+            {
+                return Ok(());
+            }
             let mut harvested = std::collections::HashSet::new();
             for address in headers
                 .to
@@ -333,6 +350,10 @@ pub(crate) fn store_body(
     raw_path: &str,
     parsed: &ParsedBody,
 ) -> Result<Vec<i64>> {
+    // First, as a code in the body is offered only from a confirmed sender.
+    let verification =
+        repo::messages::vouched_for_message(conn, message_id, parsed.headers.sender_verification)?;
+    repo::messages::set_sender_verification(conn, message_id, verification)?;
     repo::messages::store_body(
         conn,
         message_id,
@@ -348,7 +369,6 @@ pub(crate) fn store_body(
             .any(|attachment| !attachment.is_inline),
         Some(&parsed.snippet),
     )?;
-    repo::messages::set_sender_verification(conn, message_id, parsed.headers.sender_verification)?;
     repo::messages::fill_list_headers(
         conn,
         message_id,
@@ -455,7 +475,7 @@ pub(crate) async fn store_calendar_events(
             .await?;
     }
     let ids: Vec<i64> = messages.iter().map(|(id, _)| *id).collect();
-    let (own, kept_out, adding, known) = ctx
+    let (own, kept_out, adding, known, senders) = ctx
         .db
         .read(move |conn| {
             let adding = repo::settings::get(conn)?.add_invitations;
@@ -468,6 +488,7 @@ pub(crate) async fn store_calendar_events(
                 repo::messages::kept_from_calendar(conn, &ids)?,
                 adding,
                 known,
+                repo::messages::senders(conn, &ids)?,
             ))
         })
         .await?;
@@ -485,6 +506,11 @@ pub(crate) async fn store_calendar_events(
         .write(move |conn| {
             let tx = conn.transaction()?;
             for (message_id, calendars) in &messages {
+                // Changes to an event the calendar has come only from its
+                // organizer, as the receiving server confirmed.
+                let (from, verified) = senders
+                    .get(message_id)
+                    .map_or(("", false), |(from, verified)| (from.as_str(), *verified));
                 for calendar in calendars {
                     repo::calendar::apply_invitation(
                         &tx,
@@ -493,6 +519,10 @@ pub(crate) async fn store_calendar_events(
                         calendar,
                         &own,
                         new_events(*message_id),
+                        repo::calendar::Originator {
+                            email: from,
+                            trusted: verified,
+                        },
                     )?;
                 }
             }
@@ -531,6 +561,68 @@ mod tests {
         assert!(chime_worthy(false, "alice@example.com"));
         assert!(!chime_worthy(true, "digest@example.com"));
         assert!(!chime_worthy(false, "notifications@example.com"));
+    }
+
+    #[test]
+    fn only_sent_mail_teaches_whom_the_user_wrote_to() {
+        use crate::db::testutil;
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Sent', 'sent')",
+            [],
+        )
+        .unwrap();
+        let mut own = crate::db::repo::sender_identities::OwnAddresses::default();
+        own.insert("me@test.dev".to_owned());
+        let mut importer = super::Importer::with_own_addresses(&conn, 1, own).unwrap();
+        // The first is a forgery of the user's own address that reached the
+        // inbox, the second a message the user sent.
+        for (folder_id, role, to) in [
+            (1, "inbox", "jane.boss@lookalike.example"),
+            (2, "sent", "jane@example.com"),
+        ] {
+            let raw = format!(
+                "From: Me <me@test.dev>\r\n\
+                 To: Jane <{to}>\r\n\
+                 Subject: Hi\r\n\
+                 Message-ID: <m{folder_id}@test.dev>\r\n\
+                 Date: Tue, 01 Sep 2026 12:00:00 +0000\r\n\
+                 \r\n\
+                 body\r\n"
+            );
+            let parsed = crate::mime::parse_message(raw.as_bytes()).unwrap();
+            let imported = importer
+                .insert(
+                    &conn,
+                    &parsed.headers,
+                    &super::Delivery {
+                        folder_id,
+                        folder_role: Some(role),
+                        uid: None,
+                        received_ms: Some(1_800_000_000_000),
+                        seen: false,
+                        flagged: false,
+                        draft: false,
+                        has_attachments: false,
+                        size: None,
+                        receipt_handled: true,
+                    },
+                )
+                .unwrap();
+            assert!(imported.is_outgoing);
+            importer
+                .learn_contacts(&conn, &parsed.headers, &imported)
+                .unwrap();
+        }
+        let learned: Vec<(String, i64)> = conn
+            .prepare("SELECT email, send_count FROM contacts ORDER BY email")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(learned, vec![("jane@example.com".to_owned(), 1)]);
     }
 
     #[test]

@@ -1113,6 +1113,11 @@ async fn run_actor(
                         "imap connect rejected at auth; marking needs_reauth"
                     );
                     set_state(&ctx, account_id, "needs_reauth").await;
+                    // Checks waiting on this account learn at once that it
+                    // needs a sign-in, rather than when they give up.
+                    for waiter in sync_waiters.drain(..) {
+                        let _ = waiter.send(Err("authentication required".into()));
+                    }
                     // Wait for an external nudge before retrying auth.
                     match rx.recv().await {
                         None | Some(SyncCmd::Shutdown) => return,
@@ -1137,6 +1142,10 @@ async fn run_actor(
                     ctx.bus.emit(CoreEvent::NetworkState { online: false });
                     let message = e.to_string();
                     set_state_error(&ctx, account_id, "offline", &message).await;
+                    // As do checks of an account that can't be reached.
+                    for waiter in sync_waiters.drain(..) {
+                        let _ = waiter.send(Err(message.clone()));
+                    }
                     // Backoff, but wake early on commands.
                     let wait = backoff.after(&e).duration;
                     match tokio::time::timeout(wait, rx.recv()).await {

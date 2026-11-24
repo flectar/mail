@@ -4417,10 +4417,16 @@ impl Core {
             && let Ok(headers) = crate::mime::parse_header_block(&raw)
             && headers.sender_verification.is_verified()
         {
-            let verification = headers.sender_verification;
-            self.db
+            let verification = self
+                .db
                 .write(move |conn| {
-                    repo::messages::set_sender_verification(conn, message_id, verification)
+                    let verification = repo::messages::vouched_for_message(
+                        conn,
+                        message_id,
+                        headers.sender_verification,
+                    )?;
+                    repo::messages::set_sender_verification(conn, message_id, verification)?;
+                    Ok(verification)
                 })
                 .await?;
             detail.sender_verification = verification;
@@ -4671,10 +4677,15 @@ impl Core {
         &self,
         message_id: i64,
     ) -> Result<Option<(MessageDetail, unsubscribe::UnsubscribePlan)>> {
-        let (detail, raw_path, local, receive_only) = self
+        let (detail, raw_path, local, receive_only, stamped) = self
             .db
             .read(move |conn| {
                 let detail = repo::messages::detail(conn, message_id)?;
+                // The signature check below reads the topmost
+                // Authentication-Results, which only a server that stamps
+                // the mail it receives makes its own.
+                let stamped =
+                    repo::messages::trusts_authentication_results(conn, detail.account_id)?;
                 let raw_path =
                     repo::messages::get_row(conn, message_id)?.and_then(|row| row.raw_path);
                 let config = repo::accounts::get_config(conn, detail.account_id)?;
@@ -4683,7 +4694,7 @@ impl Core {
                     .is_some_and(|account| account.mail_protocol == MailProtocol::Local);
                 // An account that only receives can't send a request by mail.
                 let receive_only = config.filter(|config| !local && !config.sends_mail());
-                Ok((detail, raw_path, local, receive_only))
+                Ok((detail, raw_path, local, receive_only, stamped))
             })
             .await?;
         // Answering spam only tells its sender the address is read, and
@@ -4695,12 +4706,12 @@ impl Core {
             return Ok(None);
         };
         let one_click = match &raw_path {
-            Some(raw_path) => {
+            Some(raw_path) if stamped => {
                 crate::file_io::read_headers(raw_path, MAX_CACHED_HEADER_BYTES, "cached headers")
                     .await
                     .is_ok_and(|raw| crate::mime::one_click_signed(&raw))
             }
-            None => false,
+            _ => false,
         };
         match unsubscribe::plan(&list_unsubscribe, one_click, receive_only.is_none()) {
             Some(plan) => Ok(Some((detail, plan))),
@@ -6379,8 +6390,9 @@ impl Core {
     }
 
     /// Stop a draft's scheduled send. The message stays a draft, to edit or
-    /// schedule again. Returns whether a send was waiting.
-    pub async fn cancel_scheduled_send(&self, draft_id: i64) -> Result<bool> {
+    /// schedule again. Says whether a send was waiting, and whether another
+    /// of the user's devices may still send it.
+    pub async fn cancel_scheduled_send(&self, draft_id: i64) -> Result<CancelledSend> {
         // One the mail server holds is cancelled there.
         if let Some(action) = self
             .db
@@ -6389,34 +6401,18 @@ impl Core {
         {
             self.unhold_send(action).await?;
             self.forget_reply_reminder(draft_id).await;
-            return Ok(true);
+            return Ok(CancelledSend::Cancelled);
         }
+        let group = self.group_view().await;
         let (cancelled, thread, shared) = self
             .db
             .write(move |conn| {
                 let tx = conn.transaction()?;
                 let cancelled = repo::actions::cancel_draft_send(&tx, draft_id, now_ms())?;
-                // Cancelled on every device.
+                // Cancelled on every device that hears of it.
                 let shared = match cancelled {
-                    Some(action) => match repo::synced_sends::by_action(&tx, action)? {
-                        Some(send) if send.state == repo::synced_sends::SCHEDULED => {
-                            repo::synced_sends::set_state(
-                                &tx,
-                                &send.sync_id,
-                                repo::synced_sends::CANCELLED,
-                                None,
-                                now_ms(),
-                            )?;
-                            repo::synced_sends::set_action(&tx, &send.sync_id, None)?;
-                            // Another device's message kept here is the
-                            // user's draft now: it stays when the send is
-                            // forgotten.
-                            repo::synced_sends::set_shadow(&tx, &send.sync_id, None)?;
-                            true
-                        }
-                        _ => false,
-                    },
-                    None => false,
+                    Some(action) => device_sync::stop_shared_send(&tx, action, &group, now_ms())?,
+                    None => None,
                 };
                 let thread = repo::messages::get_row(&tx, draft_id)?.and_then(|row| row.thread_id);
                 tx.commit()?;
@@ -6428,13 +6424,18 @@ impl Core {
                 thread_ids: vec![thread],
             });
         }
-        if shared {
+        if shared.is_some() {
             self.device_sync_now();
         }
-        if cancelled {
-            self.forget_reply_reminder(draft_id).await;
+        if !cancelled {
+            return Ok(CancelledSend::NotScheduled);
         }
-        Ok(cancelled)
+        self.forget_reply_reminder(draft_id).await;
+        Ok(if shared == Some(true) {
+            CancelledSend::MayStillGoOut
+        } else {
+            CancelledSend::Cancelled
+        })
     }
 
     /// Move a scheduled send to `send_at`. Another device's message changes
@@ -6592,8 +6593,12 @@ impl Core {
                 .read(move |conn| {
                     Ok(conn
                         .query_row(
-                            "SELECT kind, state, last_error, not_before
-                             FROM pending_actions WHERE id = ?1",
+                            &format!(
+                                "SELECT kind, state, last_error, not_before,
+                                        {}
+                                 FROM pending_actions WHERE id = ?1",
+                                repo::actions::SEND_TAKEN
+                            ),
                             rusqlite::params![action_id],
                             |row| {
                                 Ok((
@@ -6601,13 +6606,14 @@ impl Core {
                                     row.get::<_, String>(1)?,
                                     row.get::<_, Option<String>>(2)?,
                                     row.get::<_, Option<i64>>(3)?,
+                                    row.get::<_, bool>(4)?,
                                 ))
                             },
                         )
                         .optional()?)
                 })
                 .await?;
-            let Some((kind, state, last_error, not_before)) = status else {
+            let Some((kind, state, last_error, not_before, taken)) = status else {
                 return Err(CoreError::NotFound("send action".into()));
             };
             if kind != "send" {
@@ -6618,6 +6624,9 @@ impl Core {
 
             match state.as_str() {
                 "done" => return Ok(()),
+                // The mail server took it, so it went out: what is left
+                // only files it, and a failure there is no failure to send.
+                _ if taken => return Ok(()),
                 "failed" => {
                     return Err(CoreError::Other(
                         last_error.unwrap_or_else(|| "message delivery failed".into()),
@@ -7185,18 +7194,21 @@ impl Core {
         Ok(draft)
     }
 
-    pub async fn delete_draft(&self, draft_id: i64) -> Result<()> {
+    /// Delete a draft, and stop its scheduled send. Says whether a send was
+    /// waiting, and whether another of the user's devices may still send it.
+    pub async fn delete_draft(&self, draft_id: i64) -> Result<CancelledSend> {
         // Deleting the Email would not stop the mail server's hold on it
         // (RFC 8621 §7): the hold is cancelled first.
-        if let Some(action) = self
+        let held = self
             .db
             .read(move |conn| repo::actions::held_send_of(conn, draft_id))
-            .await?
-        {
+            .await?;
+        if let Some(action) = held {
             self.unhold_send(action).await?;
         }
         self.forget_reply_reminder(draft_id).await;
-        let (thread_id, nudge_account, staged_paths) = self
+        let group = self.group_view().await;
+        let (thread_id, nudge_account, staged_paths, stopped, shared) = self
             .db
             .write(move |conn| {
                 let row = conn
@@ -7229,11 +7241,16 @@ impl Core {
                     return Err(CoreError::NotFound("draft".into()));
                 }
 
+                // Or its mail server took it, and only filing it is left.
                 let send_inflight = conn.query_row(
-                    "SELECT EXISTS(
-                       SELECT 1 FROM pending_actions
-                       WHERE message_id=?1 AND kind='send' AND state='inflight'
-                     )",
+                    &format!(
+                        "SELECT EXISTS(
+                           SELECT 1 FROM pending_actions
+                           WHERE message_id=?1 AND kind='send'
+                             AND (state='inflight' OR (state='pending' AND {}))
+                         )",
+                        repo::actions::SEND_TAKEN
+                    ),
                     rusqlite::params![draft_id],
                     |query_row| query_row.get::<_, bool>(0),
                 )?;
@@ -7242,11 +7259,30 @@ impl Core {
                         "the draft is currently being submitted and cannot be deleted".into(),
                     ));
                 }
+                let sends = {
+                    let mut statement = conn.prepare(
+                        "SELECT id FROM pending_actions
+                         WHERE message_id=?1 AND kind='send' AND state='pending'",
+                    )?;
+                    statement
+                        .query_map([draft_id], |row| row.get::<_, i64>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                };
                 conn.execute(
                     "UPDATE pending_actions SET state='cancelled',finished_at=?2
                      WHERE message_id=?1 AND kind='send' AND state='pending'",
                     rusqlite::params![draft_id, now_ms()],
                 )?;
+                // Cancelled on every device that hears of it.
+                let mut stopped = (!sends.is_empty()).then_some(CancelledSend::Cancelled);
+                let mut shared = false;
+                for action in sends {
+                    let may_go_out = device_sync::stop_shared_send(conn, action, &group, now_ms())?;
+                    shared |= may_go_out.is_some();
+                    if may_go_out == Some(true) {
+                        stopped = Some(CancelledSend::MayStillGoOut);
+                    }
+                }
 
                 let mut nudge_account = None;
                 let mut staged_paths = Vec::new();
@@ -7333,7 +7369,7 @@ impl Core {
                 if let Some(tid) = row.1 {
                     repo::threads::recompute(conn, tid)?;
                 }
-                Ok((row.1, nudge_account, staged_paths))
+                Ok((row.1, nudge_account, staged_paths, stopped, shared))
             })
             .await?;
         for path in staged_paths {
@@ -7347,7 +7383,14 @@ impl Core {
         if let Some(account_id) = nudge_account {
             self.nudge(Some(account_id), || SyncCmd::RunActions).await;
         }
-        Ok(())
+        if shared {
+            self.device_sync_now();
+        }
+        Ok(match (held, stopped) {
+            (_, Some(stopped)) => stopped,
+            (Some(_), None) => CancelledSend::Cancelled,
+            (None, None) => CancelledSend::NotScheduled,
+        })
     }
 
     pub async fn queue_send(&self, args: QueueSendArgs) -> Result<QueueSendResult> {
@@ -7511,19 +7554,23 @@ impl Core {
                     dispatch_at
                 };
                 // One send per draft: queueing it again moves the waiting
-                // send to the new time instead of sending it twice.
-                let queued: Option<(i64, String)> = conn
+                // send to the new time instead of sending it twice. One the
+                // mail server took is still on its way.
+                let queued: Option<(i64, String, bool)> = conn
                     .query_row(
-                        "SELECT id, state FROM pending_actions
-                         WHERE message_id = ?1 AND kind = 'send'
-                           AND state IN ('pending', 'inflight', 'failed')
-                         ORDER BY id DESC LIMIT 1",
+                        &format!(
+                            "SELECT id, state, {} FROM pending_actions
+                             WHERE message_id = ?1 AND kind = 'send'
+                               AND state IN ('pending', 'inflight', 'failed')
+                             ORDER BY id DESC LIMIT 1",
+                            repo::actions::SEND_TAKEN
+                        ),
                         rusqlite::params![draft_id],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                     )
                     .optional()?;
-                if let Some((action_id, state)) = queued {
-                    if state == "inflight" {
+                if let Some((action_id, state, taken)) = queued {
+                    if state == "inflight" || taken {
                         return Err(CoreError::Other("this message is being sent".into()));
                     }
                     // Shared with the other devices before, it is this
@@ -7759,8 +7806,8 @@ impl Core {
 
         let mut safe_name = safe_filename(
             &filename
-                .map(|name| crate::mime::decode_encoded_words(&name))
                 .or(parsed_name)
+                .map(|name| crate::mime::shown_attachment_name(&name))
                 .unwrap_or_else(|| format!("attachment-{attachment_id}")),
         );
         // Invites and other body parts often carry no filename; give the temp
@@ -7796,15 +7843,6 @@ impl Core {
             tracing::debug!(%error,"attachment text indexing deferred");
         }
         Ok(path_str)
-    }
-
-    /// Extract an attachment and write it to a caller-chosen destination (the
-    /// "download" / save-as path). Reuses `get_attachment` so extraction and
-    /// filename handling stay in one place.
-    pub async fn save_attachment(&self, attachment_id: i64, dest: String) -> Result<()> {
-        let src = self.get_attachment(attachment_id).await?;
-        tokio::fs::copy(&src, &dest).await?;
-        Ok(())
     }
 
     /// Compose "To" autocomplete. `account_id` Some scopes suggestions to the
@@ -12106,9 +12144,9 @@ fn name_draft(conn: &rusqlite::Connection, draft_id: i64) -> Result<(String, boo
         .map_or("localhost", |(_, domain)| domain)
         .to_owned();
     let unnamed = conn.execute(
-        "UPDATE messages SET message_id = printf('%d.%s@%s', ?2, lower(hex(randomblob(8))), ?3)
+        "UPDATE messages SET message_id = printf('%s@%s', lower(hex(randomblob(16))), ?2)
          WHERE id = ?1 AND (message_id IS NULL OR trim(message_id) = '')",
-        rusqlite::params![draft_id, now_ms().saturating_mul(1000), domain],
+        rusqlite::params![draft_id, domain],
     )? > 0;
     let message_id: String = conn.query_row(
         "SELECT trim(message_id, '<> ') FROM messages WHERE id = ?1",
@@ -12173,20 +12211,25 @@ fn schedule_shared_send(
         "scheduled": true,
         "sendAt": send_at,
     });
-    let queued: Option<(i64, String)> = conn
+    // One the mail server took is still on its way.
+    let queued: Option<(i64, String, bool)> = conn
         .query_row(
-            "SELECT id, state FROM pending_actions
-             WHERE message_id = ?1 AND kind = 'send' AND state IN ('pending', 'inflight', 'failed')
-             ORDER BY id DESC LIMIT 1",
+            &format!(
+                "SELECT id, state, {} FROM pending_actions
+                 WHERE message_id = ?1 AND kind = 'send'
+                   AND state IN ('pending', 'inflight', 'failed')
+                 ORDER BY id DESC LIMIT 1",
+                repo::actions::SEND_TAKEN
+            ),
             rusqlite::params![draft_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
     let action_id = match queued {
-        Some((_, state)) if state == "inflight" => {
+        Some((_, state, taken)) if state == "inflight" || taken => {
             return Err(CoreError::Other("this message is being sent".into()));
         }
-        Some((action_id, _)) => {
+        Some((action_id, _, _)) => {
             conn.execute(
                 "UPDATE pending_actions SET state = 'pending', not_before = ?2, payload = ?3,
                         attempts = 0, last_error = NULL, finished_at = NULL
@@ -13346,8 +13389,87 @@ mod held_send_tests {
 
         // It can: the server cancels it.
         worker(&core, 1, true).await;
-        assert!(core.cancel_scheduled_send(draft).await.unwrap());
+        assert_eq!(
+            core.cancel_scheduled_send(draft).await.unwrap(),
+            CancelledSend::Cancelled
+        );
         assert!(core.scheduled_sends().await.unwrap().is_empty());
+    }
+
+    /// A draft scheduled to go out from any of the user's devices: its send
+    /// held here, and its shared record.
+    async fn shared(core: &Core) -> (i64, i64, String) {
+        core.db
+            .write(|conn| {
+                crate::db::testutil::seed_account(conn);
+                conn.execute(
+                    "INSERT INTO messages (id, account_id, folder_id, message_id, subject,
+                                           from_addr, date, is_read, is_draft)
+                     VALUES (71, 1, 1, 'later@test.dev', 'Later', 'me@test.dev', 1, 1, 1)",
+                    [],
+                )?;
+                let send_at = now_ms() + 3_600_000;
+                let action = repo::actions::enqueue(
+                    conn,
+                    1,
+                    "send",
+                    Some(71),
+                    None,
+                    &serde_json::json!({"draftId": 71, "scheduled": true, "sendAt": send_at}),
+                    Some(repo::actions::HELD),
+                )?;
+                let sync_id = repo::synced_sends::create(
+                    conn,
+                    1,
+                    "later@test.dev",
+                    send_at,
+                    "aa",
+                    action,
+                    now_ms(),
+                )?;
+                Ok((71, action, sync_id))
+            })
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn stopping_a_send_the_other_devices_cant_hear_of_says_it_may_still_go_out() {
+        // Without Flectar Mail Sync, the cancel reaches no other device.
+        for delete in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+            let (draft, action, sync_id) = shared(&core).await;
+            let stopped = if delete {
+                core.delete_draft(draft).await.unwrap()
+            } else {
+                core.cancel_scheduled_send(draft).await.unwrap()
+            };
+            assert_eq!(stopped, CancelledSend::MayStillGoOut);
+            assert!(core.scheduled_sends().await.unwrap().is_empty());
+            // Cancelled for the others, and still linked here, so the end
+            // another device reports reaches this device.
+            let send = core
+                .db
+                .read(move |conn| repo::synced_sends::get(conn, &sync_id))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                (send.state.as_str(), send.action_id),
+                (repo::synced_sends::CANCELLED, Some(action))
+            );
+        }
+
+        // Nothing waits for a second try.
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+        let (draft, _, _) = shared(&core).await;
+        core.cancel_scheduled_send(draft).await.unwrap();
+        assert_eq!(
+            core.cancel_scheduled_send(draft).await.unwrap(),
+            CancelledSend::NotScheduled
+        );
     }
 }
 
@@ -15031,6 +15153,61 @@ mod draft_action_race_tests {
             .await
             .unwrap();
     }
+
+    #[tokio::test]
+    async fn a_send_the_server_took_is_neither_taken_back_nor_sent_again() {
+        // The mail server took it, and filing it waits to be tried again.
+        let (core, _temp, draft_id, action_id) = jmap_draft_with_send("pending").await;
+        core.db
+            .write(move |conn| {
+                let account = repo::accounts::get_config(conn, 1)?.unwrap();
+                repo::sender_identities::ensure_primary(conn, &account)?;
+                conn.execute(
+                    "UPDATE pending_actions
+                     SET payload = json_set(payload, '$.jmapSubmissionAccepted', json('true'))
+                     WHERE id = ?1",
+                    [action_id],
+                )?;
+                repo::actions::bump_attempt(
+                    conn,
+                    action_id,
+                    now_ms() + 60_000,
+                    "JMAP request failed",
+                )
+            })
+            .await
+            .unwrap();
+
+        core.wait_for_send(action_id).await.unwrap();
+        assert!(!core.cancel_send(action_id).await.unwrap());
+        assert_eq!(
+            core.cancel_scheduled_send(draft_id).await.unwrap(),
+            CancelledSend::NotScheduled
+        );
+        let error = core.delete_draft(draft_id).await.unwrap_err();
+        assert!(error.to_string().contains("currently being submitted"));
+        let error = core
+            .queue_send(QueueSendArgs {
+                draft_id,
+                send_at: None,
+                remind_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("being sent"), "{error}");
+
+        // It still goes on to be filed, as sent.
+        core.db
+            .read(move |conn| {
+                let action = repo::actions::get(conn, action_id)?.unwrap();
+                assert_eq!(action.state, "pending");
+                assert_eq!(action.payload["jmapSubmissionAccepted"], true);
+                assert!(repo::messages::get_row(conn, draft_id)?.is_some());
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -15123,6 +15300,43 @@ mod send_confirmation_tests {
             .await
             .unwrap();
     }
+
+    #[tokio::test]
+    async fn a_send_the_server_took_counts_as_sent_while_it_is_filed() {
+        let (core, _temp, action_id) = send_action().await;
+        // The JMAP server accepted the submission; filing the message in
+        // Sent failed, and waits to be tried again.
+        core.db
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE pending_actions
+                     SET payload = json_set(payload, '$.jmapSubmissionAccepted', json('true'))
+                     WHERE id = ?1",
+                    [action_id],
+                )?;
+                repo::actions::bump_attempt(
+                    conn,
+                    action_id,
+                    now_ms() + 60_000,
+                    "JMAP request failed: connection reset",
+                )
+            })
+            .await
+            .unwrap();
+
+        core.wait_for_send(action_id).await.unwrap();
+        assert!(!core.cancel_send(action_id).await.unwrap());
+        core.db
+            .read(move |conn| {
+                assert_eq!(
+                    repo::actions::get(conn, action_id)?.map(|action| action.state),
+                    Some("pending".into())
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -15134,7 +15348,7 @@ mod read_receipt_answer_tests {
         let (_, message_id) = db::testutil::seed_message(conn, "ana@example.com", "Plan", false);
         conn.execute(
             "UPDATE messages SET receipt_to = ?2, receipt_confirm = ?3,
-                 sender_verification = 'domain'
+                 sender_verification = 'domain', to_json = '[{\"email\":\"me@test.dev\"}]'
              WHERE id = ?1",
             rusqlite::params![
                 message_id,
@@ -15294,6 +15508,62 @@ mod read_receipt_answer_tests {
 
     /// An account that only receives mail can't send a receipt, so nothing
     /// asks for one, and an answer sends nothing (#252).
+    #[tokio::test]
+    async fn a_bcc_copy_asks_and_trash_or_a_blocked_sender_asks_nothing() {
+        let (_temp, core) = core_with_identity().await;
+        async fn request(core: &Core, message_id: i64) -> Option<crate::models::ReceiptRequest> {
+            core.db
+                .read(move |conn| repo::messages::detail(conn, message_id))
+                .await
+                .unwrap()
+                .receipt_request
+        }
+        // Not in To or Cc: the sender would learn the user got a copy.
+        let bcc = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "UPDATE messages SET to_json = '[{\"email\":\"team@example.com\"}]'
+                     WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        assert!(request(&core, bcc).await.unwrap().needs_confirmation);
+
+        let trashed = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, path, role) VALUES (9, 1, 'Trash', 'trash')",
+                    [],
+                )?;
+                conn.execute("UPDATE messages SET folder_id = 9 WHERE id = ?1", [id])?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        assert!(request(&core, trashed).await.is_none());
+
+        let blocked = core
+            .db
+            .write(|conn| {
+                let id = seed_request(conn, "ana@example.com", false);
+                conn.execute(
+                    "INSERT INTO blocked_senders (address, blocked_at) VALUES ('ana@example.com', 1)",
+                    [],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        assert!(request(&core, blocked).await.is_none());
+    }
+
     #[tokio::test]
     async fn an_account_that_only_receives_is_asked_for_no_receipt() {
         let (_temp, core) = core_with_identity().await;
@@ -16397,6 +16667,13 @@ mod unsubscribe_offer_tests {
             .db
             .write(move |conn| {
                 db::testutil::seed_account(conn);
+                // Its server stamps the mail it receives with its own
+                // Authentication-Results.
+                conn.execute(
+                    "INSERT INTO account_authentication (account_id, messages, stamped)
+                     VALUES (1, 40, 40)",
+                    [],
+                )?;
                 let (_, message_id) =
                     db::testutil::seed_message(conn, "news@news.example", "Weekly", true);
                 conn.execute(
@@ -16436,6 +16713,27 @@ mod unsubscribe_offer_tests {
         assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), mailto);
         let (core, _temp, message_id) = list_message(None).await;
         assert_eq!(core.unsubscribe_offer(message_id).await.unwrap(), mailto);
+    }
+
+    #[tokio::test]
+    async fn one_click_needs_a_server_that_stamps_its_mail() {
+        let (core, _temp, message_id) = list_message(Some(format!("{SIGNED}{LIST_FIELDS}"))).await;
+        // Most of its mail came without the server's own results, so the
+        // signature check's field may be the sender's.
+        core.db
+            .write(|conn| {
+                conn.execute(
+                    "UPDATE account_authentication SET stamped = 10 WHERE account_id = 1",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(!matches!(
+            core.unsubscribe_offer(message_id).await.unwrap(),
+            Some(UnsubscribeOffer::OneClick { .. })
+        ));
     }
 
     #[tokio::test]
@@ -16904,7 +17202,15 @@ mod invitation_tests {
         let from = from.to_string();
         let id = core
             .db
-            .write(move |conn| Ok(db::testutil::seed_message(conn, &from, "Invitation", false).1))
+            .write(move |conn| {
+                let id = db::testutil::seed_message(conn, &from, "Invitation", false).1;
+                // From the person it says, as the receiving server confirmed.
+                conn.execute(
+                    "UPDATE messages SET sender_verification = 'domain' WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(id)
+            })
             .await
             .unwrap();
         sync::ingest::store_calendar_events(
@@ -17455,11 +17761,17 @@ mod invitation_tests {
         let moved = calendar
             .replace("SEQUENCE:0", "SEQUENCE:1")
             .replace("20261120T090000Z", "20261122T090000Z");
-        let update = arriving(&core, "bob@example.com", &moved, false).await;
+        let update = arriving(&core, "bob@example.com", &moved, true).await;
         assert_eq!(
             card(&core, update).await.starts_at,
             calendar::parse_dt("20261122T090000Z").unwrap().0
         );
+        // One the receiving server didn't confirm as the organizer's, which
+        // anyone could forge, leaves the calendar as it was.
+        let forged = calendar
+            .replace("SEQUENCE:0", "SEQUENCE:2")
+            .replace("20261120T090000Z", "20261123T090000Z");
+        arriving(&core, "bob@example.com", &forged, false).await;
         assert!(!card(&core, update).await.out_of_date);
     }
 

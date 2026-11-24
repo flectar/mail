@@ -1,6 +1,7 @@
 //! Connections shared by the mail protocols: TCP setup, the stream that
 //! carries a session before and after TLS, and each account's TLS trust.
 
+mod address;
 mod connect;
 pub(crate) mod dns;
 pub mod proxy;
@@ -8,6 +9,7 @@ pub mod retry_after;
 pub mod timeouts;
 pub mod tls;
 
+pub use address::public_ip;
 #[cfg(test)]
 pub(crate) use connect::closed_loopback_port;
 pub use connect::connect_tcp;

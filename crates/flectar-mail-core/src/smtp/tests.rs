@@ -116,6 +116,16 @@ fn message(lines: usize) -> Vec<u8> {
 }
 
 async fn send(end: End, raw: &[u8], deadline: Option<i64>) -> (Result<()>, Vec<bool>) {
+    send_noting(end, raw, deadline, Box::pin(async { Ok(()) })).await
+}
+
+/// [`send`], with `before_end` run before the end of the message.
+async fn send_noting(
+    end: End,
+    raw: &[u8],
+    deadline: Option<i64>,
+    before_end: BeforeEnd,
+) -> (Result<()>, Vec<bool>) {
     let (port, mut seen) = server(end).await;
     let result = send_raw_before(
         &account(port),
@@ -124,6 +134,7 @@ async fn send(end: End, raw: &[u8], deadline: Option<i64>) -> (Result<()>, Vec<b
         &["alice@example.test".into()],
         raw,
         deadline,
+        before_end,
     )
     .await;
     // The server reports once the client has gone.
@@ -193,4 +204,97 @@ async fn a_send_already_past_its_deadline_writes_nothing() {
     let (result, ends) = send(End::Accept, &message(3), Some(deadline)).await;
     assert!(matches!(result, Err(CoreError::Smtp(_))), "{result:?}");
     assert!(ends.is_empty());
+}
+
+#[tokio::test]
+async fn ehlo_never_names_the_device() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (heard, mut ehlo) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tcp);
+        stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+        let mut line = String::new();
+        stream.read_line(&mut line).await.unwrap();
+        let _ = heard.send(line);
+        let _ = stream.write_all(b"421 Closing\r\n").await;
+    });
+    let _ = send_raw_before(
+        &account(port),
+        &SmtpAuth::Password("secret".into()),
+        "me@example.test",
+        &["alice@example.test".into()],
+        &message(1),
+        None,
+        Box::pin(async { Ok(()) }),
+    )
+    .await;
+    // The server writes the name into the Received field every recipient
+    // sees.
+    assert_eq!(ehlo.recv().await.unwrap(), "EHLO flectar.local\r\n");
+}
+
+/// A note for the end of a message, which records that it ran, after
+/// `wait`, and fails if `fail`.
+fn note(ran: &Arc<AtomicBool>, wait: Duration, fail: bool) -> BeforeEnd {
+    let ran = Arc::clone(ran);
+    Box::pin(async move {
+        tokio::time::sleep(wait).await;
+        ran.store(true, Ordering::Release);
+        if fail {
+            return Err(CoreError::Other("the disk is full".into()));
+        }
+        Ok(())
+    })
+}
+
+#[tokio::test]
+async fn the_end_of_a_message_waits_for_its_note() {
+    let ran = Arc::new(AtomicBool::new(false));
+    let slow = Duration::from_millis(300);
+    let (result, ends) = send_noting(End::Accept, &message(3), None, note(&ran, slow, false)).await;
+    result.unwrap();
+    assert!(ran.load(Ordering::Acquire));
+    assert_eq!(ends, [true]);
+
+    // A note that fails stops the message before its end, which waited for
+    // it, so the server takes nothing and the note's error is the send's.
+    let ran = Arc::new(AtomicBool::new(false));
+    let (result, ends) = send_noting(End::Accept, &message(3), None, note(&ran, slow, true)).await;
+    assert!(ran.load(Ordering::Acquire));
+    assert!(matches!(result, Err(CoreError::Other(_))), "{result:?}");
+    assert_eq!(ends, [false]);
+}
+
+#[tokio::test]
+async fn a_message_that_never_went_out_whole_notes_no_end() {
+    // Cut off halfway, as when the server hangs up or the app stops while
+    // a large message goes out: the server discards it, so nothing may
+    // say it can have gone out.
+    let ran = Arc::new(AtomicBool::new(false));
+    let (result, ends) = send_noting(
+        End::Drop,
+        &message(300_000),
+        None,
+        note(&ran, Duration::ZERO, false),
+    )
+    .await;
+    assert!(matches!(result, Err(CoreError::Smtp(_))), "{result:?}");
+    assert_eq!(ends, [false]);
+    assert!(!ran.load(Ordering::Acquire));
+
+    // Stopped at its deadline.
+    let ran = Arc::new(AtomicBool::new(false));
+    let deadline = crate::models::now_ms() + 500;
+    let (result, ends) = send_noting(
+        End::Stall,
+        &message(300_000),
+        Some(deadline),
+        note(&ran, Duration::ZERO, false),
+    )
+    .await;
+    assert!(matches!(result, Err(CoreError::Smtp(_))), "{result:?}");
+    assert_eq!(ends, [false]);
+    assert!(!ran.load(Ordering::Acquire));
 }

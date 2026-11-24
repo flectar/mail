@@ -385,6 +385,20 @@ fn resolve_dt(
     parse_dt(v)
 }
 
+/// The address of an ORGANIZER or ATTENDEE, when it is one: a value with
+/// spaces, line breaks, brackets, commas or semicolons would turn into
+/// several addresses, or other headers, once mail goes to it.
+fn single_cal_address(value: &str) -> Option<String> {
+    let address = cal_address(value);
+    (!address.is_empty()
+        && !address.chars().any(|character| {
+            character.is_control()
+                || character.is_whitespace()
+                || matches!(character, '<' | '>' | ',' | ';' | '"')
+        }))
+    .then_some(address)
+}
+
 /// The address in a CAL-ADDRESS value such as an ORGANIZER or ATTENDEE:
 /// the "mailto:" scheme comes off in any case.
 fn cal_address(value: &str) -> String {
@@ -560,12 +574,11 @@ pub fn parse_ics(text: &str) -> Vec<IcsEvent> {
                         }
                     }
                     "ORGANIZER" => {
-                        ev.organizer = Some(cal_address(value));
+                        ev.organizer = single_cal_address(value);
                         ev.organizer_name = param(&params, "CN").map(str::to_string);
                     }
                     "ATTENDEE" => {
-                        let email = cal_address(value);
-                        if !email.is_empty() {
+                        if let Some(email) = single_cal_address(value) {
                             let upper = |key| param(&params, key).map(str::to_ascii_uppercase);
                             ev.attendees.push(IcsAttendee {
                                 email,

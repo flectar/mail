@@ -57,6 +57,12 @@ pub struct ParsedQuery {
     /// Scope results to messages in any of these folders, such as the ones an
     /// AI agent may see; an empty set matches nothing. Set by the caller.
     pub folder_ids: Option<Vec<i64>>,
+    /// The folders an AI agent may read, for a search an agent makes: a
+    /// message matches only when every folder that decides it is one of
+    /// these, so a folder or label hidden from agents wins over any other
+    /// the message is in. See `repo::messages::agent_folder_ids`. An empty
+    /// set matches nothing. Set by the caller.
+    pub agent_readable: Option<Vec<i64>>,
     /// Messages a search of the servers found for this query. They match too,
     /// whether or not the copy kept here has what the server matched, such as
     /// a body not fetched yet. Set by the caller.

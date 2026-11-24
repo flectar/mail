@@ -781,6 +781,7 @@ export global I18n {
         if (key == "Could not send the message: {}") { return @tr("Could not send the message: {}", argument); }
         if (key == "Could not cancel the send: {}") { return @tr("Could not cancel the send: {}", argument); }
         if (key == "Send cancelled. The message is a draft again.") { return @tr("Send cancelled. The message is a draft again."); }
+        if (key == "Send cancelled here, but another of your devices may still send it.") { return @tr("Send cancelled here, but another of your devices may still send it."); }
         if (key == "This message is no longer scheduled.") { return @tr("This message is no longer scheduled."); }
         if (key == "Choose a reminder after the time the message goes out.") { return @tr("Choose a reminder after the time the message goes out."); }
         if (key == "Reminds you {} if nobody replies") { return @tr("Reminds you {} if nobody replies", argument); }
@@ -2606,6 +2607,11 @@ export component AppWindow inherits Window {
             cancel_oauth => { root.cancel_oauth(); }
             save_oauth_app(google-id, google-secret, microsoft-id) => {
                 root.save_oauth_app(google-id, google-secret, microsoft-id);
+            }
+            oauth-setup-open <=> root.oauth_setup_open;
+            oauth-settings-error <=> root.oauth_settings_error;
+            save-oauth-apps(google-id, google-secret, microsoft-id) => {
+                root.save_oauth_apps(google-id, google-secret, microsoft-id);
             }
             set-remote-images(enabled) => { root.set-remote-images(enabled); }
             make_account_transfer(value) => root.make_account_transfer(value);

@@ -138,7 +138,10 @@ async fn a_scheduled_draft_waits_moves_and_cancels() {
     assert_eq!(scheduled[0].send_at, tomorrow);
 
     // Cancelling leaves it a draft.
-    assert!(core.cancel_scheduled_send(draft_id).await.unwrap());
+    assert_eq!(
+        core.cancel_scheduled_send(draft_id).await.unwrap(),
+        CancelledSend::Cancelled
+    );
     assert!(core.scheduled_sends().await.unwrap().is_empty());
     assert_eq!(scheduled_threads(&core).await, 0);
     assert_eq!(drafts(&core).await, 1);
@@ -278,7 +281,10 @@ async fn a_cancelled_send_takes_its_reply_reminder() {
     .await
     .expect("schedule");
     assert_eq!(reminders().await, 1);
-    assert!(core.cancel_scheduled_send(draft_id).await.unwrap());
+    assert_eq!(
+        core.cancel_scheduled_send(draft_id).await.unwrap(),
+        CancelledSend::Cancelled
+    );
     assert_eq!(reminders().await, 0, "nothing waits for a reply to it");
 
     // Scheduled again with one, then deleted: it goes too.
@@ -509,6 +515,9 @@ async fn a_jmap_server_that_holds_mail_is_handed_what_it_can_hold() {
     );
 
     // Not handed over yet, so cancelling here is enough.
-    assert!(core.cancel_scheduled_send(draft_id).await.unwrap());
+    assert_eq!(
+        core.cancel_scheduled_send(draft_id).await.unwrap(),
+        CancelledSend::Cancelled
+    );
     assert!(core.scheduled_sends().await.unwrap().is_empty());
 }
