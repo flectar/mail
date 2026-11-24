@@ -9,14 +9,20 @@
 //! provider that hosts its mail, and that provider's configuration is looked
 //! up the same way (the draft's section 4.3).
 //!
+//! The calendar and contacts servers for an address are found the same
+//! way, or through the domain's DNS records for them (`dav`).
+//!
 //! A file fetched over plain HTTP could have been altered on the way, and a
 //! DNS answer could be forged, so such results are marked untrusted and the
 //! user confirms them before connecting (the draft's sections 5.1, 7.2 and
 //! 7.3).
 
+mod dav;
 mod parse;
 #[cfg(test)]
 mod tests;
+
+pub use dav::{DavDiscovery, DavService, DavSource, discover_dav};
 
 use std::{future::Future, pin::Pin, time::Duration};
 
