@@ -336,12 +336,19 @@ export component ComposerRecipients inherits Rectangle {
         root.highlighted-contact = max(0, min(root.contacts.length - 1, root.highlighted-contact + delta));
     }
 
+    // The contact completes the address being typed, and typing goes on
+    // after it.
+    function accept-contact(index: int) {
+        root.contact-selected(index);
+        root.suggestions-dismissed = true;
+        contact-popup.close();
+        to-row.focus();
+        to-row.move-caret-to-end();
+    }
+
     function choose-highlighted-contact() {
         if (root.contacts.length > 0) {
-            root.contact-selected(root.highlighted-contact);
-            root.suggestions-dismissed = true;
-            contact-popup.close();
-            to-row.focus();
+            root.accept-contact(root.highlighted-contact);
         }
     }
 
@@ -464,12 +471,7 @@ export component ComposerRecipients inherits Rectangle {
                     hover-color: root.raised-color;
                     muted-color: root.muted-color;
                     title-color: root.title-color;
-                    selected(index) => {
-                        root.contact-selected(index);
-                        root.suggestions-dismissed = true;
-                        contact-popup.close();
-                        to-row.focus();
-                    }
+                    selected(index) => { root.accept-contact(index); }
                 }
             }
 
