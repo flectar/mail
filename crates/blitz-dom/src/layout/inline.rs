@@ -328,22 +328,6 @@ impl LayoutPassState<'_> {
         let suppresses_baseline = style.contain().suppresses_baseline();
         drop(style);
 
-        // Short circuit if inline context contains no text or inline boxes
-        if !has_styles_preventing_being_collapsed_through
-            && inline_layout.text.is_empty()
-            && inline_layout.layout.inline_boxes().len() == 0
-        {
-            // Put layout back
-            self.nodes[node_id]
-                .data
-                .downcast_element_mut()
-                .unwrap()
-                .inline_layout_data = Some(inline_layout);
-            return LayoutOutput::from_outer_size(
-                Size::ZERO.maybe_max(container_pb.sum_axes().map(Some)),
-            );
-        }
-
         // Compute available space
         let available_space = Size {
             width: known_dimensions
@@ -486,6 +470,13 @@ impl LayoutPassState<'_> {
                 } else {
                     (margin_box_height.max(0.0) * scale).min(f32::MAX)
                 };
+                // An image, inline block or inline table is in-flow content even
+                // without height, so its line keeps its strut (CSS 2.1 section
+                // 9.4.2), as in browsers. Parley counts a box without height as
+                // nothing, so the box reserves a sliver of height.
+                if ibox.kind == InlineBoxKind::InFlow && ibox.height == 0.0 {
+                    ibox.height = f32::EPSILON;
+                }
             }
         }
 
@@ -898,9 +889,10 @@ impl LayoutPassState<'_> {
 
         // Parley lays out empty text as a single strut-height line (text-editor semantics),
         // but a line box containing no text, inline boxes or other in-flow content is a
-        // zero-height line box in CSS (CSS2 §9.4.2).
-        let has_inline_content =
-            !inline_layout.text.is_empty() || inline_layout.layout.inline_boxes().len() > 0;
+        // zero-height line box in CSS (CSS2 §9.4.2), and so is one with only white space
+        // that collapses away, such as the space around an empty `<a name>`.
+        let has_inline_content = inline_layout.layout.inline_boxes().len() > 0
+            || (!inline_layout.text.is_empty() && !inline_layout.only_collapsible_space);
 
         let mut height = if has_inline_content {
             inline_layout.layout.height()

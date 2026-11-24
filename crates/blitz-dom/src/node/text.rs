@@ -84,6 +84,10 @@ pub struct TextLayout {
     /// containing block (as `SPAN_*_CB` flags). The inline root claims those boxes in its place.
     /// Set by each `RunMode::PerformLayout` run of inline layout.
     pub span_cb_flags: stylo_taffy::StyleFlags,
+    /// The text is only white space that collapses away, around elements with
+    /// nothing in them, so its lines are zero-height line boxes (CSS 2.1
+    /// section 9.4.2).
+    pub only_collapsible_space: bool,
 }
 
 impl TextLayout {

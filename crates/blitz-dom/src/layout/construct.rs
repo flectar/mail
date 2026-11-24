@@ -1609,6 +1609,7 @@ pub(crate) fn build_inline_layout_into(
         (false, true) => None,
     });
     text_layout.text = builder.build_into(&mut text_layout.layout);
+    text_layout.only_collapsible_space = !edges.content_started && !edges.used;
     return;
 
     fn build_inline_layout_recursive(
@@ -2043,18 +2044,19 @@ impl InlineEdges {
         text: &str,
         collapse: WhiteSpaceCollapse,
     ) {
-        if !self.held_space && !self.skip_leading_space && self.end_depth == 0 {
-            if !self.content_started && text.contains(|c: char| !c.is_ascii_whitespace()) {
-                self.content_started = true;
-            }
-            builder.push_text(text);
-            return;
-        }
         let collapsible = |c: char| match collapse {
             WhiteSpaceCollapse::Collapse => c.is_ascii_whitespace(),
             WhiteSpaceCollapse::PreserveBreaks => matches!(c, ' ' | '\t'),
             _ => false,
         };
+        if !self.held_space && !self.skip_leading_space && self.end_depth == 0 {
+            // Preserved white space is content too.
+            if !self.content_started && text.contains(|c: char| !collapsible(c)) {
+                self.content_started = true;
+            }
+            builder.push_text(text);
+            return;
+        }
         let mut text = text;
         if self.skip_leading_space {
             text = text.trim_start_matches(collapsible);

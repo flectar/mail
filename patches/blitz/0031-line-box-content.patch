@@ -1,0 +1,108 @@
+diff --git a/crates/blitz-dom/src/layout/construct.rs b/crates/blitz-dom/src/layout/construct.rs
+index 68e98b6..2e151f4 100644
+--- a/crates/blitz-dom/src/layout/construct.rs
++++ b/crates/blitz-dom/src/layout/construct.rs
+@@ -1609,6 +1609,7 @@ pub(crate) fn build_inline_layout_into(
+         (false, true) => None,
+     });
+     text_layout.text = builder.build_into(&mut text_layout.layout);
++    text_layout.only_collapsible_space = !edges.content_started && !edges.used;
+     return;
+ 
+     fn build_inline_layout_recursive(
+@@ -2043,18 +2044,19 @@ impl InlineEdges {
+         text: &str,
+         collapse: WhiteSpaceCollapse,
+     ) {
++        let collapsible = |c: char| match collapse {
++            WhiteSpaceCollapse::Collapse => c.is_ascii_whitespace(),
++            WhiteSpaceCollapse::PreserveBreaks => matches!(c, ' ' | '\t'),
++            _ => false,
++        };
+         if !self.held_space && !self.skip_leading_space && self.end_depth == 0 {
+-            if !self.content_started && text.contains(|c: char| !c.is_ascii_whitespace()) {
++            // Preserved white space is content too.
++            if !self.content_started && text.contains(|c: char| !collapsible(c)) {
+                 self.content_started = true;
+             }
+             builder.push_text(text);
+             return;
+         }
+-        let collapsible = |c: char| match collapse {
+-            WhiteSpaceCollapse::Collapse => c.is_ascii_whitespace(),
+-            WhiteSpaceCollapse::PreserveBreaks => matches!(c, ' ' | '\t'),
+-            _ => false,
+-        };
+         let mut text = text;
+         if self.skip_leading_space {
+             text = text.trim_start_matches(collapsible);
+diff --git a/crates/blitz-dom/src/layout/inline.rs b/crates/blitz-dom/src/layout/inline.rs
+index 253b62c..609a0c9 100644
+--- a/crates/blitz-dom/src/layout/inline.rs
++++ b/crates/blitz-dom/src/layout/inline.rs
+@@ -328,22 +328,6 @@ impl LayoutPassState<'_> {
+         let suppresses_baseline = style.contain().suppresses_baseline();
+         drop(style);
+ 
+-        // Short circuit if inline context contains no text or inline boxes
+-        if !has_styles_preventing_being_collapsed_through
+-            && inline_layout.text.is_empty()
+-            && inline_layout.layout.inline_boxes().len() == 0
+-        {
+-            // Put layout back
+-            self.nodes[node_id]
+-                .data
+-                .downcast_element_mut()
+-                .unwrap()
+-                .inline_layout_data = Some(inline_layout);
+-            return LayoutOutput::from_outer_size(
+-                Size::ZERO.maybe_max(container_pb.sum_axes().map(Some)),
+-            );
+-        }
+-
+         // Compute available space
+         let available_space = Size {
+             width: known_dimensions
+@@ -486,6 +470,13 @@ impl LayoutPassState<'_> {
+                 } else {
+                     (margin_box_height.max(0.0) * scale).min(f32::MAX)
+                 };
++                // An image, inline block or inline table is in-flow content even
++                // without height, so its line keeps its strut (CSS 2.1 section
++                // 9.4.2), as in browsers. Parley counts a box without height as
++                // nothing, so the box reserves a sliver of height.
++                if ibox.kind == InlineBoxKind::InFlow && ibox.height == 0.0 {
++                    ibox.height = f32::EPSILON;
++                }
+             }
+         }
+ 
+@@ -898,9 +889,10 @@ impl LayoutPassState<'_> {
+ 
+         // Parley lays out empty text as a single strut-height line (text-editor semantics),
+         // but a line box containing no text, inline boxes or other in-flow content is a
+-        // zero-height line box in CSS (CSS2 §9.4.2).
+-        let has_inline_content =
+-            !inline_layout.text.is_empty() || inline_layout.layout.inline_boxes().len() > 0;
++        // zero-height line box in CSS (CSS2 §9.4.2), and so is one with only white space
++        // that collapses away, such as the space around an empty `<a name>`.
++        let has_inline_content = inline_layout.layout.inline_boxes().len() > 0
++            || (!inline_layout.text.is_empty() && !inline_layout.only_collapsible_space);
+ 
+         let mut height = if has_inline_content {
+             inline_layout.layout.height()
+diff --git a/crates/blitz-dom/src/node/text.rs b/crates/blitz-dom/src/node/text.rs
+index daab1fd..33c8184 100644
+--- a/crates/blitz-dom/src/node/text.rs
++++ b/crates/blitz-dom/src/node/text.rs
+@@ -84,6 +84,10 @@ pub struct TextLayout {
+     /// containing block (as `SPAN_*_CB` flags). The inline root claims those boxes in its place.
+     /// Set by each `RunMode::PerformLayout` run of inline layout.
+     pub span_cb_flags: stylo_taffy::StyleFlags,
++    /// The text is only white space that collapses away, around elements with
++    /// nothing in them, so its lines are zero-height line boxes (CSS 2.1
++    /// section 9.4.2).
++    pub only_collapsible_space: bool,
+ }
+ 
+ impl TextLayout {

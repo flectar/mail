@@ -2231,3 +2231,43 @@ fn a_details_lays_out_its_summary_first_and_hides_the_rest_while_closed() {
     close(layout("#t").location.y, 0.0);
     close(layout("#b").size.height, layout("#t").size.height + 20.0);
 }
+
+#[test]
+fn empty_inline_elements_make_no_line_and_keep_their_blocks_sizes() {
+    // A line box with only an empty inline element and white space that
+    // collapses away is a zero-height line box (CSS 2.1 section 9.4.2), so
+    // margins collapse through it, and a block that holds one keeps its own
+    // size, as a spacer with an anchor or an empty span in it does.
+    let doc = document(
+        "<style>body{font:16px/20px sans-serif} ul{margin:16px 0}
+         h1{margin:21px 0;font-size:32px;line-height:38px}</style>
+         <ul id=u><li>x</li></ul>
+         <a name=x></a>
+         <h1 id=h>Title</h1>
+         <div id=a style='height:20px'><span></span></div>
+         <div id=b style='min-height:30px'><a name=y></a></div>",
+    );
+    let layout = |selector| *node(&doc, selector).final_layout();
+    let list = layout("#u");
+    close(
+        layout("#h").location.y,
+        list.location.y + list.size.height + 21.0,
+    );
+    close(layout("#a").size.width, 400.0);
+    close(layout("#a").size.height, 20.0);
+    close(layout("#b").size.height, 30.0);
+}
+
+#[test]
+fn a_line_with_only_an_atomic_inline_without_height_keeps_its_strut() {
+    // An image, inline block or inline table is in-flow content even when it
+    // has no height (CSS 2.1 section 9.4.2), so its line is as tall as the
+    // block's line height, as in browsers.
+    let doc = document(
+        "<style>div{font:50px/1 sans-serif}</style>
+         <div id=a><img width=20 height=0 src='images/spacer.gif'></div>
+         <div id=b><span style='display:inline-block'></span></div>",
+    );
+    close(node(&doc, "#a").final_layout().size.height, 50.0);
+    close(node(&doc, "#b").final_layout().size.height, 50.0);
+}
