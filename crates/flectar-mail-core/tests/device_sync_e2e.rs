@@ -1564,3 +1564,69 @@ async fn a_restored_device_has_its_accounts_signed_in() {
         "new-password-8"
     );
 }
+
+/// App keys entered in Sign-in settings reach the user's other devices of
+/// the same kind, and a change or a clearing on any of them follows.
+#[tokio::test(flavor = "multi_thread")]
+async fn app_keys_follow_the_user_to_devices_of_the_same_kind() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let desktop_dir = tempfile::tempdir().unwrap();
+    let laptop = start_core(laptop_dir.path()).await;
+    let desktop = start_core(desktop_dir.path()).await;
+
+    let google = "1234-example.apps.googleusercontent.com";
+    let microsoft = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+    laptop
+        .set_oauth_apps(
+            Some((google.into(), "google-secret".into())),
+            Some(microsoft.into()),
+        )
+        .await
+        .unwrap();
+    let words = laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    laptop.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+
+    // Another computer, with the recovery code alone.
+    desktop
+        .device_sync_recover(Some(server.url.clone()), words)
+        .await
+        .unwrap();
+    desktop.device_sync_run().await.unwrap();
+    desktop.device_sync_run().await.unwrap();
+    let settings = desktop.get_settings().await.unwrap();
+    assert_eq!(settings.google_client_id, google);
+    assert_eq!(settings.google_client_secret, "google-secret");
+    assert_eq!(settings.ms_client_id, microsoft);
+
+    // A new Microsoft key on the second computer reaches the first, and
+    // the Google keys stay as they are.
+    let replaced = "1a2b3c4d-5e6f-7a8b-9c0d-e1f2a3b4c5d6";
+    desktop
+        .set_oauth_apps(None, Some(replaced.into()))
+        .await
+        .unwrap();
+    desktop.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    let settings = laptop.get_settings().await.unwrap();
+    assert_eq!(settings.ms_client_id, replaced);
+    assert_eq!(settings.google_client_id, google);
+
+    // Cleared on the first, cleared on the second.
+    laptop
+        .set_oauth_apps(Some((String::new(), String::new())), None)
+        .await
+        .unwrap();
+    laptop.device_sync_run().await.unwrap();
+    desktop.device_sync_run().await.unwrap();
+    let settings = desktop.get_settings().await.unwrap();
+    assert_eq!(settings.google_client_id, "");
+    assert_eq!(settings.google_client_secret, "");
+    assert_eq!(settings.ms_client_id, replaced);
+}

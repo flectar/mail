@@ -9,6 +9,8 @@
 //! platform credential store, turns the app's items into records and back
 //! (`collections`), and runs the sync loop.
 
+mod app_keys;
+pub(crate) use app_keys::note_saved as note_app_keys_saved;
 mod collections;
 pub(crate) use collections::synced_settings_changed;
 mod merge;
@@ -1035,8 +1037,10 @@ impl Core {
         let Some(client) = service.client() else {
             return Ok(false);
         };
-        // Passwords and sign-ins that changed here go up with this round.
+        // Passwords, sign-ins and app keys that changed here go up with this
+        // round.
         self.share_sign_ins(&client).await;
+        self.share_app_keys(&client).await;
 
         let names = {
             let settings = self.get_settings().await?;
@@ -1225,8 +1229,10 @@ impl Core {
             status.last_synced_at = Some(now_ms());
         }
         self.refresh_sync_devices().await;
-        // Accounts other devices shared a sign-in for start syncing here.
+        // Accounts other devices shared a sign-in for start syncing here,
+        // and app keys they shared go into this device's settings.
         self.install_sign_ins(&client).await;
+        self.install_app_keys(&client).await;
         let billing_due = lock(&service.billing_checked)
             .is_none_or(|checked| checked.elapsed() >= BILLING_REFRESH);
         if billing_due || report.payment_required != was_paused {
@@ -1755,7 +1761,10 @@ impl Core {
         self.set_settings(settings).await?;
         if on {
             self.db
-                .write(|conn| crate::db::repo::sign_ins::recheck_all(conn))
+                .write(|conn| {
+                    crate::db::repo::sign_ins::recheck_all(conn)?;
+                    crate::db::repo::app_keys::offer_again(conn)
+                })
                 .await?;
         }
         self.device_sync_now();

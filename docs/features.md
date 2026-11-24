@@ -1016,9 +1016,9 @@ is immune to instructions hidden in mail, so give agents only what they need.
 
 ## Flectar Mail Sync
 
-Flectar Mail Sync keeps your accounts and their sign-ins, preferences,
-signatures, profiles, templates, blocked senders, snoozes, reply reminders
-and scheduled messages the same on all your devices. Everything is end-to-end
+Flectar Mail Sync keeps your accounts, preferences, signatures, profiles,
+templates, blocked senders, snoozes, reply reminders and scheduled messages
+the same on all your devices. Everything is end-to-end
 encrypted before it leaves a device, so not even Flectar Mail can read it, and
 there is no account to create: a 24-word recovery code brings sync back on a
 new device. Your mail, contacts and calendars keep syncing with your mail
@@ -1031,6 +1031,15 @@ with your recovery code. Each device keeps its own mail checking, how much mail
 history it downloads and what it downloads ahead of time, its proxy and server
 timeout, and settings that belong to the device itself, such as reduced motion
 and text size.
+
+Accounts arrive with their passwords, so they work on a new device at once.
+Google and Microsoft sign-ins go only to devices of the same kind. A
+computer's sign-in reaches your other computers, and an Outlook sign-in made
+on a phone reaches your other phones, so a new phone signs in to Gmail and
+Outlook once. Every Android phone signs in to Gmail itself. App keys entered in
+Sign-in settings go to your devices of the same kind too, so you type them once
+for each kind of device. **Passwords and sign-ins** in Settings → Sync turns
+all of this on or off for every device.
 
 Flectar Mail Sync is a paid service, with a free trial, that pays for the
 servers it runs on. Each contribution to Flectar Mail earns a free year of it,
