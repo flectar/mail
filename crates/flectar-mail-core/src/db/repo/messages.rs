@@ -1730,17 +1730,27 @@ pub fn latest_in_thread(conn: &Connection, thread_id: i64) -> Result<Option<i64>
         .optional()?)
 }
 
-/// The folders `message_id` is in, as mail lists show it: its folder, and for
-/// Gmail any of its labels.
-pub fn folder_ids(conn: &Connection, message_id: i64) -> Result<Vec<i64>> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT folder_id FROM messages WHERE id = ?1 AND folder_id IS NOT NULL
+/// Whether folder `f` decides what an AI agent may read of message `m`. Every
+/// folder does except Gmail's All Mail: every Gmail message is in it, Spam
+/// and Trash included, so it can neither show a message nor hide one.
+pub(crate) const DECIDES_FOR_AGENTS: &str = "NOT (COALESCE(f.role, '') = 'all'
+     AND EXISTS (SELECT 1 FROM accounts fa
+                 WHERE fa.id = m.account_id AND fa.provider = 'gmail'))";
+
+/// The folders that decide whether an AI agent may read `message_id`: its
+/// folder and every other folder or label it's in, Gmail's All Mail aside.
+/// An agent may read the message only when it may read each of them.
+pub fn agent_folder_ids(conn: &Connection, message_id: i64) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT f.id FROM messages m JOIN folders f ON f.id = m.folder_id
+         WHERE m.id = ?1 AND {DECIDES_FOR_AGENTS}
          UNION
-         SELECT mf.folder_id FROM message_folders mf
-         JOIN messages m ON m.id = mf.message_id
-         JOIN accounts a ON a.id = m.account_id AND a.provider = 'gmail'
-         WHERE mf.message_id = ?1",
-    )?;
+         SELECT f.id FROM messages m
+         JOIN message_folders mf ON mf.message_id = m.id
+         JOIN folders f ON f.id = mf.folder_id
+         WHERE m.id = ?1 AND {DECIDES_FOR_AGENTS}
+         ORDER BY 1"
+    ))?;
     let ids = stmt
         .query_map(params![message_id], |r| r.get(0))?
         .collect::<rusqlite::Result<Vec<i64>>>()?;

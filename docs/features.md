@@ -999,8 +999,10 @@ read messages and conversations as plain text, search contacts and list
 calendar events, and nothing more unless you allow it. You choose which
 accounts they can read, mail imported to this device among them, and for each
 account which folders. Spam and Trash stay out until you add them, since junk
-mail is where hostile instructions are most likely to hide. Encrypted messages
-are withheld, and passwords, sign-in tokens and keys never reach an agent.
+mail is where hostile instructions are most likely to hide. A message stays
+out when any folder or label it's in is hidden from agents, even if it's also
+in one they can read, such as Gmail's All Mail. Encrypted messages are
+withheld, and passwords, sign-in tokens and keys never reach an agent.
 
 With Write drafts on, agents can also save plain-text drafts, new messages or
 replies, in Drafts for you to check and send yourself. An agent can change its
@@ -1008,8 +1010,10 @@ own draft until you edit it, and never anyone else's.
 
 Three more switches let agents mark messages read or flagged, move them to the
 archive, to Trash or to another folder, and add or take off your labels. They
-can change messages only in folders they can read, and never delete anything
-for good. Together they can change 100 messages a minute.
+can change messages only in folders they can read, move them only between an
+account's own folders, never into or out of one other people may share, and
+never delete anything for good. Together they can change 100 messages a
+minute.
 
 With Ask to send on, an agent can ask to send a draft. It opens in a window of
 its own, with a note naming the agent, and it's sent only if you send it. One
