@@ -76,6 +76,9 @@ pub(crate) use platform::launched_for_click;
 /// click on a notification. Only Windows passes arguments of its own.
 #[cfg(target_os = "windows")]
 pub(crate) use platform::click_argument;
+/// The app id this copy's taskbar button and shortcuts carry.
+#[cfg(target_os = "windows")]
+pub(crate) use platform::{Unpackaged, unpackaged};
 #[cfg(all(desktop, not(target_os = "windows")))]
 pub(crate) fn click_argument(_argument: &std::ffi::OsStr) -> bool {
     false

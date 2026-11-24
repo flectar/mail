@@ -119,3 +119,5 @@ password and IMAP and SMTP servers in the notes. Tell testers to add it with
   removes when the app is uninstalled. On a PC that already ran the installer
   or ZIP build, the Store build picks up that build's data instead.
 - **Updates** come from the Store.
+- **App icon** colors aren't offered, because the taskbar and Start menu show
+  the icons the package's manifest names.
