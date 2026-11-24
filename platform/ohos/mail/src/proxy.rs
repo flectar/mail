@@ -11,6 +11,7 @@
 //! with the manual proxy fields in Settings.
 
 use core::ffi::{CStr, c_char};
+use std::net::Ipv6Addr;
 
 use flectar_mail::flectar_mail_core::net::proxy::Bypass;
 use flectar_mail::platform::{SystemProxies, configure_system_proxy};
@@ -75,15 +76,7 @@ impl SystemProxies for Reader {
         {
             return Vec::new();
         }
-        let host = if host.contains(':') && !host.starts_with('[') {
-            format!("[{host}]")
-        } else {
-            host
-        };
-        let Ok(proxy) = Url::parse(&format!("http://{host}:{port}")) else {
-            return Vec::new();
-        };
-        vec![proxy]
+        proxy_url(&host, port).into_iter().collect()
     }
 }
 
@@ -99,7 +92,7 @@ fn system_http_proxy() -> Result<Option<(String, u16, Vec<String>)>, i32> {
     let Some(host) = c_string(&proxy.host) else {
         return Ok(None);
     };
-    if host.is_empty() || proxy.port == 0 {
+    if host.trim().is_empty() {
         return Ok(None);
     }
     let count = proxy.exclusion_list_size.clamp(0, MAX_EXCLUSIONS as i32) as usize;
@@ -120,6 +113,32 @@ fn c_string(value: &[c_char; MAX_STR]) -> Option<String> {
         .map(|text| text.to_string_lossy().into_owned())
 }
 
+/// The proxy as a URL. Network Kit's own HTTP client hands the host to curl,
+/// which reads `https://` in front of it as a proxy reached over TLS, and a
+/// port in it before the separate one. A bare IPv6 address goes in brackets.
+fn proxy_url(host: &str, port: u16) -> Option<Url> {
+    let host = host.trim();
+    let text = if host.contains("://") {
+        host.to_owned()
+    } else if host.parse::<Ipv6Addr>().is_ok() {
+        format!("http://[{host}]")
+    } else {
+        format!("http://{host}")
+    };
+    let mut proxy = Url::parse(&text).ok()?;
+    if !matches!(proxy.scheme(), "http" | "https") || proxy.host_str().is_none() {
+        return None;
+    }
+    if proxy.port().is_none() {
+        // Without a port anywhere, there is no proxy to reach.
+        if port == 0 {
+            return None;
+        }
+        proxy.set_port(Some(port)).ok()?;
+    }
+    Some(proxy)
+}
+
 /// The servers that skip the proxy. Network Kit's own HTTP client (netstack's
 /// `IsHostNameExcluded`) takes each comma-separated entry as a whole server
 /// name in which `*` stands for any characters, so `example.com` is that
@@ -132,7 +151,7 @@ fn bypass(exclusions: &[String]) -> Bypass {
 
 #[cfg(test)]
 mod tests {
-    use super::bypass;
+    use super::{bypass, proxy_url};
 
     fn entries(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
@@ -149,5 +168,21 @@ mod tests {
         assert!(!list.skips("10.0.0.1"));
         assert!(bypass(&entries(&["example.com", "*"])).skips("anything.test"));
         assert!(!bypass(&[]).skips("example.com"));
+    }
+
+    #[test]
+    fn the_host_may_carry_a_scheme_and_a_port() {
+        for (host, port, proxy) in [
+            ("proxy.corp", 3128, Some("http://proxy.corp:3128/")),
+            ("https://proxy.corp", 8443, Some("https://proxy.corp:8443/")),
+            ("proxy.corp:8080", 3128, Some("http://proxy.corp:8080/")),
+            ("2001:db8::1", 3128, Some("http://[2001:db8::1]:3128/")),
+            ("[2001:db8::1]", 3128, Some("http://[2001:db8::1]:3128/")),
+            ("proxy.corp", 0, None),
+            ("socks5://proxy.corp", 1080, None),
+        ] {
+            let url = proxy_url(host, port).map(String::from);
+            assert_eq!(url.as_deref(), proxy, "{host} port {port}");
+        }
     }
 }
