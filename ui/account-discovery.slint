@@ -1,0 +1,51 @@
+import { CheckBox } from "std-widgets.slint";
+import { AppTheme } from "design-system.slint";
+import { TypeScale } from "typography.slint";
+
+// Server settings looked up from a new account's email address
+// (src/account_discovery.rs).
+export global AccountDiscovery {
+    // "" (nothing to say), "looking", "found" or "none".
+    in property <string> state;
+    // The email address's domain.
+    in property <string> domain;
+    // Where found settings came from: "provider", the domain's own
+    // configuration file, "database", the public provider database, or
+    // "mail-host", the provider whose server the domain's MX record names.
+    in property <string> source;
+    // For "mail-host", that provider's domain.
+    in property <string> mail-host;
+    // False when the settings came over plain HTTP, which can be altered on
+    // the way, so the person confirms them before connecting.
+    in property <bool> trusted: true;
+    in-out property <bool> confirmed: false;
+    // Whether the form may connect as far as these settings go.
+    out property <bool> ready: root.state != "found" || root.trusted || root.confirmed;
+}
+
+// What the lookup found, under a mail account form's email address.
+export component AccountDiscoveryNotice inherits VerticalLayout {
+    in property <bool> enabled: true;
+    in property <color> text-color: AppTheme.body;
+    spacing: 6px;
+    visible: AccountDiscovery.state != "";
+
+    Text {
+        text: AccountDiscovery.state == "looking" ? @tr("Looking up the server settings for {}…", AccountDiscovery.domain)
+            : AccountDiscovery.state == "none" ? @tr("No server settings were found for {}. Your provider's help pages list them.", AccountDiscovery.domain)
+            : AccountDiscovery.source == "mail-host" ? @tr("{0}'s mail goes to servers at {1}, so these are {1}'s settings. DNS answers can be forged, so check the server names before connecting.", AccountDiscovery.domain, AccountDiscovery.mail-host)
+            : !AccountDiscovery.trusted ? @tr("These settings for {} came over an unencrypted connection and could have been changed on the way. Check the server names before connecting.", AccountDiscovery.domain)
+            : AccountDiscovery.source == "database" ? @tr("Server settings for {} are filled in from the public provider database. Check them before connecting.", AccountDiscovery.domain)
+            : @tr("Server settings are filled in from {}'s own configuration.", AccountDiscovery.domain);
+        color: AccountDiscovery.state == "found" && !AccountDiscovery.trusted ? AppTheme.destructive : root.text-color;
+        font-size: TypeScale.caption;
+        wrap: word-wrap;
+    }
+
+    if AccountDiscovery.state == "found" && !AccountDiscovery.trusted : CheckBox {
+        enabled: root.enabled;
+        text: @tr("I checked these servers and trust them");
+        checked: AccountDiscovery.confirmed;
+        toggled => { AccountDiscovery.confirmed = self.checked; }
+    }
+}

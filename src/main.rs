@@ -1,4 +1,5 @@
 mod account_controller;
+mod account_discovery;
 mod account_mail_preferences;
 mod account_status;
 #[cfg(desktop)]
@@ -6726,78 +6727,18 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let suggestion_app = app.as_weak();
     let suggestion_state = Rc::clone(&state);
-    let last_suggested_transport = Rc::new(RefCell::new(None::<AccountConfig>));
+    let suggestion_runtime = runtime.clone();
     app.on_suggest_account_settings(move |email| {
         let Some(app) = suggestion_app.upgrade() else {
             return;
         };
-        // Only server settings that the form shows are suggested.
-        let (protocol, standard_incoming_port) =
-            match MailProtocol::parse(app.get_account_protocol().as_str()) {
-                Some(MailProtocol::Imap) => (MailProtocol::Imap, "993"),
-                Some(MailProtocol::Pop3) => (MailProtocol::Pop3, "995"),
-                Some(MailProtocol::Gmail | MailProtocol::Jmap | MailProtocol::Local) | None => {
-                    return;
-                }
-            };
-        let transport_matches_last_suggestion = last_suggested_transport
-            .borrow()
-            .as_ref()
-            .is_some_and(|config| {
-                app.get_incoming_host().as_str() == config.incoming_host
-                    && app.get_incoming_port().as_str() == config.incoming_port.to_string()
-                    && app.get_smtp_host().as_str() == config.smtp_host
-                    && app.get_smtp_port().as_str() == config.smtp_port.to_string()
-                    && app.get_incoming_security().as_str()
-                        == config.settings.connection.incoming_security.as_str()
-                    && app.get_smtp_security().as_str()
-                        == config.settings.connection.smtp_security.as_str()
-                    && app.get_trusted_certificate_pem().as_str()
-                        == config.settings.connection.trusted_certificate_pem
-            });
-        let transport_is_pristine = app.get_incoming_host().trim().is_empty()
-            && app.get_smtp_host().trim().is_empty()
-            && app.get_incoming_port().as_str() == standard_incoming_port
-            && app.get_smtp_port().as_str() == "465"
-            && app.get_incoming_security().as_str() == "tls"
-            && app.get_smtp_security().as_str() == "tls"
-            && app.get_trusted_certificate_pem().trim().is_empty();
-        if !transport_is_pristine && !transport_matches_last_suggestion {
-            last_suggested_transport.borrow_mut().take();
-            return;
-        }
-        let suggestion = {
-            let state = suggestion_state.borrow();
-            suggested_mail_transport(&state.account_configs, email.as_str(), protocol)
-        };
-        let Some(config) = suggestion else {
-            if transport_matches_last_suggestion {
-                app.set_incoming_host("".into());
-                app.set_incoming_port(standard_incoming_port.into());
-                app.set_smtp_host("".into());
-                app.set_smtp_port("465".into());
-                app.set_incoming_security("tls".into());
-                app.set_smtp_security("tls".into());
-                app.set_trusted_certificate_pem("".into());
-            }
-            last_suggested_transport.borrow_mut().take();
-            return;
-        };
-        app.set_incoming_host(config.incoming_host.clone().into());
-        app.set_incoming_port(config.incoming_port.to_string().into());
-        app.set_smtp_host(config.smtp_host.clone().into());
-        app.set_smtp_port(config.smtp_port.to_string().into());
-        app.set_incoming_security(config.settings.connection.incoming_security.as_str().into());
-        app.set_smtp_security(config.settings.connection.smtp_security.as_str().into());
-        app.set_trusted_certificate_pem(
-            config
-                .settings
-                .connection
-                .trusted_certificate_pem
-                .clone()
-                .into(),
+        let state = suggestion_state.borrow();
+        account_discovery::suggest(
+            &app,
+            &state.account_configs,
+            email.as_str(),
+            &suggestion_runtime,
         );
-        *last_suggested_transport.borrow_mut() = Some(config);
     });
 
     app.on_add_password_account(
@@ -7358,9 +7299,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let updates_for_carddav = ui_task_tx.clone();
     let app_for_carddav = app.as_weak();
     app.on_connect_carddav(move |account_id, url, username, password| {
+        let Some(app) = app_for_carddav.upgrade() else {
+            return;
+        };
+        if app.get_carddav_connecting() {
+            return;
+        }
         let Some(core) = state_for_carddav.borrow().core.clone() else {
             return;
         };
+        app.set_carddav_connecting(true);
         let updates = updates_for_carddav.clone();
         let app = app_for_carddav.clone();
         runtime_for_carddav.spawn(async move {
@@ -7377,13 +7325,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Ok(_) => UiMessage::plain("CardDAV connected and initial sync started."),
                 Err(error) => UiMessage::detail("Could not connect CardDAV: {}", error),
             };
-            if connected {
-                let _ = app.upgrade_in_event_loop(|app| {
+            let _ = app.upgrade_in_event_loop(move |app| {
+                app.set_carddav_connecting(false);
+                // Close the dialog only when it still shows this account.
+                if connected && app.get_carddav_account_id() == account_id {
                     app.set_carddav_account_id(-1);
                     app.set_carddav_password("".into());
                     app.set_carddav_manage_existing(false);
-                });
-            }
+                }
+            });
             let connections = core.load_carddav_connections().await.ok();
             let _ = updates
                 .send(UiTaskUpdate {
@@ -8066,6 +8016,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     });
     memory::watch_pressure(&runtime);
+    let idle_renderer = Rc::downgrade(&email_renderer);
+    memory::on_ui_idle(move || {
+        if let Some(renderer) = idle_renderer.upgrade()
+            && let Ok(mut renderer) = renderer.try_borrow_mut()
+        {
+            renderer.release_paint_buffers();
+        }
+    });
 
     if start_hidden {
         app.invoke_suspend_rendering(true);

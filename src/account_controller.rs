@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn mail_domain(address: &str) -> Option<&str> {
+pub(super) fn mail_domain(address: &str) -> Option<&str> {
     let address = address.trim();
     if address.is_empty() || address.chars().any(char::is_whitespace) {
         return None;

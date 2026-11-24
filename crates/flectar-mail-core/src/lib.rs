@@ -11178,8 +11178,10 @@ impl Core {
                     now_ms,
                 )?;
                 repo::settings::set(&tx, &settings)?;
+                // App keys saved here go to this user's other devices.
+                let app_keys = device_sync::note_app_keys_saved(&tx, &previous, &settings)?;
                 tx.commit()?;
-                Ok(device_sync::synced_settings_changed(&previous, &settings))
+                Ok(device_sync::synced_settings_changed(&previous, &settings) || app_keys)
             })
             .await?;
         // Keep the resolver in the same order as persisted writes.
@@ -11614,9 +11616,12 @@ impl Core {
         if let Some(id) = &microsoft {
             oauth::providers::validate_custom_client_id(Provider::Microsoft, id)?;
         }
-        self.db
+        let (settings, app_keys) = self
+            .db
             .write(move |conn| {
-                let mut settings = repo::settings::get(conn)?;
+                let tx = conn.transaction()?;
+                let previous = repo::settings::get(&tx)?;
+                let mut settings = previous.clone();
                 if let Some((id, secret)) = google {
                     settings.google_client_id = id.trim().to_owned();
                     settings.google_client_secret = if settings.google_client_id.is_empty() {
@@ -11630,11 +11635,18 @@ impl Core {
                     // Public desktop clients use PKCE, without a secret.
                     settings.ms_client_secret.clear();
                 }
-                repo::settings::set(conn, &settings)?;
+                repo::settings::set(&tx, &settings)?;
+                // App keys saved here go to this user's other devices.
+                let app_keys = device_sync::note_app_keys_saved(&tx, &previous, &settings)?;
+                tx.commit()?;
                 apply_oauth_settings(&settings);
-                Ok(settings)
+                Ok((settings, app_keys))
             })
-            .await
+            .await?;
+        if app_keys {
+            self.device_sync_now();
+        }
+        Ok(settings)
     }
 
     pub async fn set_sync_interval_minutes(&self, minutes: i64) -> Result<()> {
