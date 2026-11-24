@@ -1,0 +1,199 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// cSpell: ignore descendents
+
+use crate::{
+    SharedString,
+    item_tree::{ItemTreeVTable, ParentItemTraversalMode},
+    items::{ItemRc, TextInput},
+};
+use alloc::vec::Vec;
+use bitflags::bitflags;
+use vtable::VRcMapped;
+
+/// The property names of the accessible-properties
+#[repr(u32)]
+#[derive(PartialEq, Eq, Copy, Clone, strum::Display)]
+#[strum(serialize_all = "kebab-case")]
+pub enum AccessibleStringProperty {
+    Checkable,
+    Checked,
+    DelegateFocus,
+    Description,
+    Enabled,
+    Expandable,
+    Expanded,
+    Id,
+    ItemCount,
+    ItemIndex,
+    ItemSelectable,
+    ItemSelected,
+    Label,
+    LiveRegion,
+    Orientation,
+    PlaceholderText,
+    ReadOnly,
+    Value,
+    ValueMaximum,
+    ValueMinimum,
+    ValueStep,
+}
+
+/// The argument of an accessible action.
+///
+/// Every variant mirrors one of the `accessible-action-*` callbacks declared in the compiler's
+/// type register, with one (unnamed) field per callback argument. The generated code relies on
+/// that: it binds the fields positionally, so a new action only needs to be added here and in
+/// the type register.
+/// cbindgen:derive-tagged-enum-destructor=true
+#[repr(u32)]
+#[derive(PartialEq, Clone)]
+pub enum AccessibilityAction {
+    Default,
+    Decrement,
+    Increment,
+    Expand,
+    /// This is currently unused
+    ReplaceSelectedText(SharedString),
+    SetValue(SharedString),
+    /// Select the text between two UTF-8 offsets into the element's text: the first offset is the
+    /// anchor, the end that stays put, the second one the focus, the end being moved.
+    SetSelectionOffsets(i32, i32),
+}
+
+bitflags! {
+    /// Define a accessibility actions that supported by an item.
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct SupportedAccessibilityAction: u32 {
+        const Default = 1;
+        const Decrement = 1 << 1;
+        const Increment = 1 << 2;
+        const Expand = 1 << 3;
+        const ReplaceSelectedText = 1 << 4;
+        const SetValue = 1 << 5;
+        const SetSelectionOffsets = 1 << 6;
+    }
+}
+
+/// Find accessible descendents of `root_item`.
+///
+/// This will recurse through all children of `root_item`, but will not recurse
+/// into nodes that are accessible.
+pub fn accessible_descendents(root_item: &ItemRc) -> impl Iterator<Item = ItemRc> {
+    fn try_candidate_or_find_next_accessible_descendent(
+        candidate: ItemRc,
+        descendent_candidates: &mut Vec<ItemRc>,
+    ) -> Option<ItemRc> {
+        if candidate.is_accessible() {
+            return Some(candidate);
+        }
+
+        candidate.first_child().and_then(|child| {
+            if let Some(next) = child.next_sibling() {
+                descendent_candidates.push(next);
+            }
+            try_candidate_or_find_next_accessible_descendent(child, descendent_candidates)
+        })
+    }
+
+    // Do not look on the root_item: That is either a component root or an
+    // accessible item already handled!
+    let mut descendent_candidates = Vec::new();
+    if let Some(child) = root_item.first_child() {
+        descendent_candidates.push(child);
+    }
+
+    core::iter::from_fn(move || {
+        loop {
+            let candidate = descendent_candidates.pop()?;
+
+            if let Some(next_candidate) = candidate.next_sibling() {
+                descendent_candidates.push(next_candidate);
+            }
+
+            if let Some(descendent) = try_candidate_or_find_next_accessible_descendent(
+                candidate,
+                &mut descendent_candidates,
+            ) {
+                return Some(descendent);
+            }
+        }
+    })
+}
+
+/// Find the materialized position of the item selected by `accessible-delegate-focus`.
+///
+/// When descendants expose `accessible-item-index`, the delegate focus value refers to that
+/// logical index. This matters for virtualized collections, whose materialized descendants don't
+/// start at index zero. If that index is not materialized, focus remains on the container, even
+/// when the value also matches a materialized position. Trees without indexed descendants retain
+/// the positional behavior.
+pub fn accessible_focus_delegate_position(root_item: &ItemRc) -> Option<usize> {
+    let delegate_index = root_item
+        .accessible_string_property(AccessibleStringProperty::DelegateFocus)?
+        .parse::<usize>()
+        .ok()?;
+
+    let mut has_indexed_descendants = false;
+    let mut count = 0;
+    for (position, descendent) in accessible_descendents(root_item).enumerate() {
+        count += 1;
+        if let Some(item_index) = descendent
+            .accessible_string_property(AccessibleStringProperty::ItemIndex)
+            .and_then(|index| index.parse::<usize>().ok())
+        {
+            has_indexed_descendants = true;
+            if item_index == delegate_index {
+                return Some(position);
+            }
+        }
+    }
+    (!has_indexed_descendants && delegate_index < count).then_some(delegate_index)
+}
+
+/// The item that stands for `item` in the accessibility tree: `item` itself when it is accessible,
+/// otherwise its closest accessible ancestor. The walk stops at a popup boundary.
+pub fn nearest_accessible_item(mut item: ItemRc) -> ItemRc {
+    while !item.is_accessible() {
+        let Some(parent) = item.parent_item(ParentItemTraversalMode::StopAtPopups) else { break };
+        item = parent;
+    }
+    item
+}
+
+/// Find the first built-in `TextInput` in `item` or its descendents.
+pub fn find_text_input(item: &ItemRc) -> Option<VRcMapped<ItemTreeVTable, TextInput>> {
+    find_text_input_with_rc(item).map(|(_, input)| input)
+}
+
+/// The text input that `item` exposes in the accessibility tree.
+///
+/// This is the first input below `item`, and only when `item` is the accessible item nearest to
+/// it: an accessible item further up finds the same input, and exposing it from both would give
+/// its text runs two owners.
+pub fn find_exposed_text_input(
+    item: &ItemRc,
+) -> Option<(ItemRc, VRcMapped<ItemTreeVTable, TextInput>)> {
+    let found = find_text_input_with_rc(item)?;
+    (nearest_accessible_item(found.0.clone()) == *item).then_some(found)
+}
+
+/// Same as [`find_text_input`], but also returns the `TextInput`'s `ItemRc`.
+pub fn find_text_input_with_rc(
+    item: &ItemRc,
+) -> Option<(ItemRc, VRcMapped<ItemTreeVTable, TextInput>)> {
+    if let Some(input) = item.clone().downcast::<TextInput>() {
+        return Some((item.clone(), input));
+    }
+
+    let mut child = item.first_child();
+    while let Some(candidate) = child {
+        child = candidate.next_sibling();
+        if let Some(found) = find_text_input_with_rc(&candidate) {
+            return Some(found);
+        }
+    }
+    None
+}
