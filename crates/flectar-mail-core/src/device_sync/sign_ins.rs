@@ -214,7 +214,7 @@ fn record_name(account_sync_id: &str, kind: Kind, family: &str) -> String {
 
 /// A secret sealed for the group, under the key of one epoch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct Sealed {
+pub(super) struct Sealed {
     epoch: u64,
     data: String,
 }
@@ -239,7 +239,7 @@ fn newest_key(secrets: &Secrets) -> Result<(u64, [u8; 32])> {
 }
 
 /// Seal `secret` for the group, under its newest keys.
-fn seal(secrets: &Secrets, secret: &[u8]) -> Result<String> {
+pub(super) fn seal(secrets: &Secrets, secret: &[u8]) -> Result<String> {
     let (epoch, key) = newest_key(secrets)?;
     let data = flectar_mail_sync_crypto::seal_file(&key, secret)
         .map_err(|error| CoreError::Other(format!("could not seal a sign-in: {error}")))?;
@@ -250,7 +250,7 @@ fn seal(secrets: &Secrets, secret: &[u8]) -> Result<String> {
 }
 
 /// Open a secret sealed for the group, under whichever epoch's keys.
-fn open(secrets: &Secrets, sealed: &str) -> Result<Vec<u8>> {
+pub(super) fn open(secrets: &Secrets, sealed: &str) -> Result<Vec<u8>> {
     let sealed: Sealed = serde_json::from_str(sealed)?;
     let key = key(secrets, sealed.epoch)
         .ok_or_else(|| CoreError::Other("a sign-in is sealed under unknown keys".into()))?;
@@ -264,7 +264,7 @@ fn open(secrets: &Secrets, sealed: &str) -> Result<Vec<u8>> {
 /// A keyed digest of `secret`: shows when it changes, and gives nothing away
 /// without the group's keys. Keyed by the group's first keys, which every
 /// device keeps, so a secret keeps its fingerprint when the keys change.
-fn fingerprint(secrets: &Secrets, secret: &[u8]) -> Result<Vec<u8>> {
+pub(super) fn fingerprint(secrets: &Secrets, secret: &[u8]) -> Result<Vec<u8>> {
     let key = secrets
         .roots
         .keys()
@@ -362,8 +362,12 @@ impl Core {
                     .prepare("SELECT id, sync_id FROM accounts WHERE sync_id IS NOT NULL")?
                     .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
                     .collect::<rusqlite::Result<_>>()?;
+                // Accounts this device had before it joined share only once
+                // the user says so.
+                let held = repo::sign_ins::held(conn)?;
                 let candidates = repo::accounts::list(conn)?
                     .into_iter()
+                    .filter(|account| !held.contains(&account.id))
                     .filter_map(|account| {
                         Some(Candidate {
                             id: account.id,

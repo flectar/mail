@@ -6,7 +6,8 @@ Every variant is the master icon with its own colors; the default orange icon
 is the master itself and is not generated. Outputs:
 
 - resources/app-icon/variants: masked SVGs, the window, tray and 512 px PNGs
-  used on the desktop, and 512 px renderings for the macOS Dock;
+  used on the desktop, 512 px renderings for the macOS Dock, and the icons the
+  Windows executable embeds for its shortcuts and taskbar pins;
 - resources/app-icon/flectar-mail.iconset: the master icon at every size of
   the macOS .icns;
 - platform/ios/Assets.xcassets/AppIcon<Name>.appiconset: opaque 1024 px
@@ -53,6 +54,10 @@ ICONS = ["orange", *VARIANTS]
 # flectar-mail-window.png and flectar-mail-tray.png; 512 px feeds the Dock and
 # the Linux icon theme.
 RASTERS = (("512", 512), ("window", 256), ("tray", 64))
+
+# The sizes of flectar-mail.ico, the executable's own icon. Each variant's
+# icon has the same sizes, as PNG images, which Windows reads at every size.
+ICO_SIZES = (256, 128, 64, 48, 32, 24, 16)
 
 # Apple's macOS app icon template (the macOS Sequoia production templates in
 # Apple Design Resources) leaves a margin around the rounded square at every
@@ -235,6 +240,38 @@ def png_header(path):
     return width, height, depth, color
 
 
+def write_ico(path, pngs):
+    """Write PNG images, largest first, as one .ico file."""
+    entries = bytearray()
+    images = bytearray()
+    offset = 6 + 16 * len(pngs)
+    for data in pngs:
+        width, height, _, _ = struct.unpack(">IIBB", data[16:26])
+        # A size of 0 stands for 256.
+        entries += struct.pack("<BBBBHHII", width % 256, height % 256, 0, 0, 1, 32, len(data), offset)
+        images += data
+        offset += len(data)
+    path.write_bytes(struct.pack("<HHH", 0, 1, len(pngs)) + entries + images)
+
+
+def ico_sizes(path):
+    """The sizes of the PNG images in an .ico file, in their order."""
+    data = path.read_bytes()
+    reserved, kind, count = struct.unpack("<HHH", data[:6])
+    if (reserved, kind) != (0, 1):
+        raise ValueError(f"Not an icon file: {path}")
+    sizes = []
+    for index in range(count):
+        width, height, _, _, _, _, length, offset = struct.unpack(
+            "<BBBBHHII", data[6 + 16 * index:22 + 16 * index])
+        if data[offset:offset + 8] != b"\x89PNG\r\n\x1a\n":
+            raise ValueError(f"{path} holds an image that is not a PNG")
+        if (width or 256) != (height or 256) or len(data) < offset + length:
+            raise ValueError(f"{path} has a damaged entry")
+        sizes.append(width or 256)
+    return tuple(sizes)
+
+
 def png_chunks(data):
     position = 8
     while position < len(data):
@@ -316,6 +353,10 @@ def expected_rasters():
                     for name in VARIANTS})
     rasters.update({WINDOWS_ASSETS / name: (size, 6) for name, (size, _) in windows_logos().items()})
     return rasters
+
+
+def expected_icons():
+    return [VARIANTS_DIR / f"{name}.ico" for name in VARIANTS]
 
 
 def macos_mask(path, offset_x, offset_y, source):
@@ -419,9 +460,10 @@ def main():
     try:
         texts = expected_text()
         rasters = expected_rasters()
+        icons = expected_icons()
         for directory in (VARIANTS_DIR, MACOS_ICONSET, WINDOWS_ASSETS):
             unexpected = {path.name for path in directory.glob("*")} - {
-                path.name for path in [*texts, *rasters] if path.parent == directory}
+                path.name for path in [*texts, *rasters, *icons] if path.parent == directory}
             if unexpected:
                 raise ValueError(f"Unexpected files in {directory.relative_to(PROJECT)}: "
                                  + ", ".join(sorted(unexpected)))
@@ -439,8 +481,14 @@ def main():
                 if (width, height, actual) != (size, size, color):
                     raise ValueError(f"{path.relative_to(PROJECT)} is {width}x{height} "
                                      f"(color type {actual}), expected {size}x{size} (color type {color})")
+            for path in icons:
+                if not path.is_file():
+                    raise ValueError(f"Missing Windows icon: {path.relative_to(PROJECT)}")
+                if ico_sizes(path) != ICO_SIZES:
+                    raise ValueError(f"{path.relative_to(PROJECT)} has the sizes {ico_sizes(path)}, "
+                                     f"expected {ICO_SIZES}")
             print(f"Checked {len(VARIANTS)} icon variants, the macOS icon set and the Store logos: "
-                  f"{len(texts)} files and {len(rasters)} rasters")
+                  f"{len(texts)} files, {len(rasters)} rasters and {len(icons)} Windows icons")
             return 0
         for path, text in texts.items():
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -478,9 +526,16 @@ def main():
                 svg = Path(directory) / f"windows-{scale}.svg"
                 svg.write_text(scaled_svg(masked, scale, "flectar-mail-masked.svg"), encoding="utf-8")
                 rasterize(svg, WINDOWS_ASSETS / name, size)
+            for icon in icons:
+                pngs = []
+                for size in ICO_SIZES:
+                    png = Path(directory) / f"{icon.stem}-{size}.png"
+                    rasterize(VARIANTS_DIR / f"{icon.stem}.svg", png, size)
+                    pngs.append(png.read_bytes())
+                write_ico(icon, pngs)
         check_declarations()
         print(f"Generated {len(VARIANTS)} icon variants, the macOS icon set and the Store logos: "
-              f"{len(texts)} files and {len(rasters)} rasters")
+              f"{len(texts)} files, {len(rasters)} rasters and {len(icons)} Windows icons")
         return 0
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"error: {error}", file=sys.stderr)

@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import tomllib
 import unittest
@@ -30,7 +31,9 @@ def load_script(name):
     return module
 
 
-metadata = load_script("release-metadata").metadata
+release_metadata = load_script("release-metadata")
+metadata = release_metadata.metadata
+on_main = release_metadata.on_main
 release_assets = load_script("prepare-release")
 prepare = release_assets.prepare
 android_signing = load_script("verify-android-signing")
@@ -55,6 +58,20 @@ def workspace_keys(manifest):
 
     walk([], manifest)
     return found
+
+
+def git(root, *args):
+    """Run git in a test repository, away from the user's git configuration."""
+    environment = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com",
+    }
+    result = subprocess.run(
+        ["git", "-C", str(root), *args], env=environment, capture_output=True, text=True, check=True,
+    )
+    return result.stdout.strip()
 
 
 class ReleaseTests(unittest.TestCase):
@@ -681,6 +698,41 @@ class ReleaseTests(unittest.TestCase):
                 **os.environ, "PATH": f"{root / 'bin'}:{os.environ['PATH']}", "VERSION": "stale",
                 "FLECTAR_SKIP_BUILD": "0", "FLECTAR_APP_FEATURES": "",
             }
+            # These name local AppImage tools; the test sets them itself.
+            for name in ("LINUXDEPLOY", "PATCHELF", "APPIMAGETOOL", "APPIMAGE_RUNTIME"):
+                environment.pop(name, None)
+            # A stand-in patchelf release, which a stand-in curl serves, and
+            # which this copy of the packager pins instead of the real one.
+            patchelf_release = root / "patchelf-release.tar.gz"
+            patchelf_binary = root / "patchelf-binary"
+            patchelf_binary.write_text("#!/bin/sh\necho patchelf stand-in\n")
+            patchelf_binary.chmod(0o755)
+            with tarfile.open(patchelf_release, "w:gz") as archive:
+                archive.add(patchelf_binary, arcname="./bin/patchelf")
+            packager = root / "scripts/build-appimage.sh"
+            pinned, count = re.subn(
+                r"(?m)^(\s*patchelf_sha256=)[0-9a-f]{64}$",
+                rf"\g<1>{hashlib.sha256(patchelf_release.read_bytes()).hexdigest()}",
+                packager.read_text(),
+            )
+            self.assertEqual(count, 2)
+            packager.write_text(pinned)
+            urls = root / "curl-urls.txt"
+            curl = root / "bin/curl"
+            curl.write_text(
+                "#!/usr/bin/env python3\n"
+                "import os, pathlib, shutil, sys\n"
+                "arguments = sys.argv[1:]\n"
+                "url = next(a for a in arguments if a.startswith('https://'))\n"
+                f"with open({str(urls)!r}, 'a') as log:\n"
+                "    log.write(url + '\\n')\n"
+                "output = pathlib.Path(arguments[arguments.index('--output') + 1])\n"
+                "if '/NixOS/patchelf/' in url and not os.environ.get('CURL_SERVES_JUNK'):\n"
+                f"    shutil.copyfile({str(patchelf_release)!r}, output)\n"
+                "else:\n"
+                "    output.write_bytes(b'not the pinned file')\n"
+            )
+            curl.chmod(0o755)
             for machine, debian, pdfium in (
                 ("x86_64", "amd64", "linux-x64"), ("aarch64", "arm64", "linux-arm64"),
             ):
@@ -711,13 +763,20 @@ class ReleaseTests(unittest.TestCase):
 
                     # Exercise the AppImage shell packager up to its tool boundary,
                     # without downloading deployment tools or compiling the
-                    # application. The tools sit where the packager caches the
-                    # downloads for this architecture.
+                    # application. Stand-ins for the tools and the runtime sit
+                    # where the packager caches the downloads for this
+                    # architecture, and the variables that name local tools
+                    # point at them. Only the stand-in patchelf release goes
+                    # through the pinned download.
                     tools = root / "target/appimage/tools"
                     tools.mkdir(parents=True, exist_ok=True)
                     deploy = tools / f"linuxdeploy-{machine}.AppImage"
                     deploy.write_text('''#!/usr/bin/env python3
-import pathlib, shutil, sys
+import json, os, pathlib, shutil, subprocess, sys
+patchelf = os.environ.get("PATCHELF")
+version = subprocess.run([patchelf], capture_output=True, text=True, check=True).stdout.strip() if patchelf else None
+with open(pathlib.Path(__file__).parent / "tool-runs.txt", "a") as runs:
+    runs.write(json.dumps(["linuxdeploy", patchelf, os.environ.get("NO_STRIP"), version]) + "\\n")
 appdir = pathlib.Path(sys.argv[sys.argv.index("--appdir") + 1])
 library = pathlib.Path(sys.argv[sys.argv.index("--library") + 1])
 assert library.name == "libxkbcommon-x11.so.0"
@@ -728,21 +787,44 @@ for name in ("libxkbcommon-x11.so.0", "libxkbcommon.so.0"):
                     pack = tools / f"appimagetool-{machine}.AppImage"
                     pack.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
-appdir = pathlib.Path(sys.argv[1])
-pathlib.Path(sys.argv[2]).write_text(json.dumps({
+with open(pathlib.Path(__file__).parent / "tool-runs.txt", "a") as runs:
+    runs.write(json.dumps(["appimagetool"]) + "\\n")
+arguments = sys.argv[1:]
+runtime = pathlib.Path(arguments.pop(arguments.index("--runtime-file") + 1))
+arguments.remove("--runtime-file")
+appdir, output = map(pathlib.Path, arguments)
+output.write_text(json.dumps({
     "version": os.environ.get("VERSION"),
+    "runtime": runtime.read_text(),
     "desktop": (appdir / "com.flectar.mail.desktop").read_text(),
     "metainfo": (appdir / "usr/share/metainfo/com.flectar.mail.metainfo.xml").read_text(),
 }))
 ''')
                     deploy.chmod(0o755)
                     pack.chmod(0o755)
+                    runtime = tools / f"runtime-{machine}"
+                    runtime.write_text(f"{machine} runtime")
+                    stand_ins = {"LINUXDEPLOY": str(deploy), "APPIMAGETOOL": str(pack), "APPIMAGE_RUNTIME": str(runtime)}
                     result = subprocess.run(
                         ["bash", str(root / "scripts/build-appimage.sh")], cwd=root,
-                        env=environment, capture_output=True, text=True,
+                        env={**environment, **stand_ins}, capture_output=True, text=True,
                     )
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertRegex(
+                        urls.read_text(),
+                        rf"^https://github\.com/NixOS/patchelf/releases/download/([^/]+)/patchelf-\1-{machine}\.tar\.gz\n$",
+                    )
+                    urls.unlink()
+                    # linuxdeploy runs the patchelf unpacked from the pinned
+                    # release, never the old one it bundles, and strips nothing.
+                    unpacked = tools / f"patchelf-{machine}/bin/patchelf"
+                    runs = [json.loads(line) for line in (tools / "tool-runs.txt").read_text().splitlines()]
+                    self.assertEqual(runs, [
+                        ["linuxdeploy", str(unpacked), "1", "patchelf stand-in"], ["appimagetool"],
+                    ])
                     packaged = json.loads((root / "target/appimage/flectar-mail.AppImage").read_text())
+                    # The runtime is always given, never left to appimagetool.
+                    self.assertEqual(packaged["runtime"], f"{machine} runtime")
                     self.assertEqual(packaged["version"], "0.1.0-alpha.1")
                     self.assertIn("X-AppImage-Version=0.1.0-alpha.1\n", packaged["desktop"])
                     self.assertIn(f"X-AppImage-Arch={machine}\n", packaged["desktop"])
@@ -765,6 +847,37 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
                         ["verify", str(root / "target/appimage/flectar-mail.AppDir")],
                         ["verify", str(root / "target/appimage/.flectar-mail.AppImage.new")],
                     ])
+
+                    # Without stand-ins the packager downloads each tool from its
+                    # pinned release. A file that misses its checksum is never
+                    # run or embedded, whether downloaded or already cached.
+                    # Each round names the tools before one, so that one is
+                    # the download that fails.
+                    (tools / "tool-runs.txt").unlink()
+                    (tools / f"patchelf-{machine}.tar.gz").write_bytes(b"damaged")
+                    stand_ins["PATCHELF"] = str(unpacked)
+                    # Reuse the executable rather than count another build.
+                    (root / "target/release/flectar-mail").chmod(0o755)
+                    downloads = (
+                        ("LINUXDEPLOY", rf"linuxdeploy/linuxdeploy/releases/download/[^/]+/linuxdeploy-{machine}\.AppImage"),
+                        ("PATCHELF", rf"NixOS/patchelf/releases/download/([^/]+)/patchelf-\1-{machine}\.tar\.gz"),
+                        ("APPIMAGETOOL", rf"AppImage/appimagetool/releases/download/[^/]+/appimagetool-{machine}\.AppImage"),
+                        ("APPIMAGE_RUNTIME", rf"AppImage/type2-runtime/releases/download/[^/]+/runtime-{machine}"),
+                    )
+                    for index, (name, url) in enumerate(downloads):
+                        earlier = {key: stand_ins[key] for key, _ in downloads[:index]}
+                        result = subprocess.run(
+                            ["bash", str(root / "scripts/build-appimage.sh")], cwd=root,
+                            env={**environment, **earlier, "FLECTAR_SKIP_BUILD": "1", "CURL_SERVES_JUNK": "1"},
+                            capture_output=True, text=True,
+                        )
+                        self.assertNotEqual(result.returncode, 0, name)
+                        self.assertIn("does not match its pinned SHA-256 checksum", result.stderr, name)
+                        self.assertRegex(urls.read_text(), rf"^https://github\.com/{url}\n$")
+                        urls.unlink()
+                        self.assertFalse((tools / "tool-runs.txt").exists(), name)
+                    self.assertNotIn("/continuous/", (root / "scripts/build-appimage.sh").read_text())
+                    self.assertEqual([path.name for path in tools.glob("*.new")], [])
 
             # Both normal package commands must include the optional runtime
             # choice, even though their builds disable Cargo's default features.
@@ -795,6 +908,39 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
         ):
             with self.subTest(version=version, tag=tag), self.assertRaises(ValueError):
                 metadata(version, tag)
+
+    def test_release_tags_must_be_on_main(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory, "repository")
+            root.mkdir()
+            git(root, "init", "--quiet", "--initial-branch=main")
+            git(root, "commit", "--quiet", "--allow-empty", "--message=base")
+            base = git(root, "rev-parse", "HEAD")
+            with self.assertRaisesRegex(ValueError, "Fetch main"):
+                on_main(cwd=root)
+            git(root, "update-ref", "refs/remotes/origin/main", base)
+            on_main(cwd=root)
+            # Main may move on after the tag.
+            git(root, "commit", "--quiet", "--allow-empty", "--message=later")
+            git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+            on_main(base, cwd=root)
+
+            git(root, "checkout", "--quiet", "-b", "side", base)
+            git(root, "commit", "--quiet", "--allow-empty", "--message=side")
+            with self.assertRaisesRegex(ValueError, "not on main"):
+                on_main(cwd=root)
+            # A tag named like main's remote-tracking branch wins over it for
+            # git's short names, so the check must not use one.
+            git(root, "tag", "origin/main")
+            self.assertEqual(git(root, "rev-parse", "origin/main"), git(root, "rev-parse", "HEAD"))
+            with self.assertRaisesRegex(ValueError, "not on main"):
+                on_main(cwd=root)
+
+            # A shallow checkout cannot tell, so it refuses rather than guess.
+            shallow = Path(directory, "shallow")
+            git(directory, "clone", "--quiet", "--depth=1", "--branch=main", root.as_uri(), str(shallow))
+            with self.assertRaisesRegex(ValueError, "whole history"):
+                on_main(cwd=shallow)
 
     def test_store_versions_order_like_android_version_codes(self):
         versions = (
@@ -1111,6 +1257,110 @@ for name in ("FlectarMail", "Frameworks/PDFium.framework/PDFium"):
             self.assertIn("must be unsigned", result.stderr)
             self.assertFalse((root / "signed/flectar-mail-ios-arm64.ipa").exists())
 
+    def test_macos_app_signs_with_the_hardened_runtime(self):
+        # Run the real script with stand-ins for the macOS tools.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in (
+                "scripts/package-macos.sh", "platform/macos/Info.plist.in",
+                "platform/macos/com.flectar.mail.login.plist", "platform/macos/flectar-mail.entitlements",
+                "LICENSE", "THIRD_PARTY_NOTICES.md",
+                "resources/fonts/google-sans-flex/OFL.txt", "resources/fonts/google-sans-flex/README.md",
+                "resources/fonts/noto-emoji/OFL.txt", "resources/fonts/noto-emoji/README.md",
+            ):
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(SCRIPTS.parent / name, root / name)
+            shutil.copytree(SCRIPTS.parent / "LICENSES", root / "LICENSES")
+            (root / "Cargo.toml").write_text('[package]\nname = "flectar-mail"\nversion = "0.1.0-beta.1"\n')
+            binary = root / "flectar-mail"
+            binary.write_bytes(b"binary")
+            binary.chmod(0o755)
+            calls = root / "calls.jsonl"
+            (root / "scripts/stage-pdfium.py").write_text(
+                "import pathlib, sys\n"
+                "destination = pathlib.Path(sys.argv[2])\n"
+                "destination.mkdir(parents=True, exist_ok=True)\n"
+                "(destination / 'libpdfium.dylib').write_bytes(b'library')\n"
+            )
+            (root / "scripts/test-pdf-preview.py").write_text(
+                "import json, sys\n"
+                f"with open({str(calls)!r}, 'a') as log:\n"
+                "    log.write(json.dumps(['test-pdf-preview', *sys.argv[1:]]) + '\\n')\n"
+            )
+            tools = root / "bin"
+            tools.mkdir()
+            (tools / "plutil").write_text(
+                "#!/usr/bin/env python3\n"
+                "import plistlib, sys\n"
+                "assert sys.argv[1] == '-lint'\n"
+                "with open(sys.argv[2], 'rb') as stream:\n"
+                "    plistlib.load(stream)\n"
+            )
+            (tools / "iconutil").write_text(
+                "#!/usr/bin/env python3\n"
+                "import pathlib, sys\n"
+                "pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'icons')\n"
+            )
+            (tools / "ditto").write_text(
+                "#!/usr/bin/env python3\n"
+                "import pathlib, shutil, sys\n"
+                "if '-c' in sys.argv:\n"
+                "    pathlib.Path(sys.argv[-1]).write_bytes(b'archive')\n"
+                "else:\n"
+                "    shutil.copytree(sys.argv[-2], sys.argv[-1], symlinks=True)\n"
+            )
+            (tools / "hdiutil").write_text(
+                "#!/usr/bin/env python3\n"
+                "import pathlib, sys\n"
+                "if sys.argv[1] == 'create':\n"
+                "    pathlib.Path(sys.argv[-1]).write_bytes(b'disk image')\n"
+            )
+            # Describes a signature as `codesign --display` does, with the
+            # runtime flag when the last signing of that path asked for it.
+            (tools / "codesign").write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "arguments = sys.argv[1:]\n"
+                f"log = {str(calls)!r}\n"
+                "with open(log, 'a') as stream:\n"
+                "    stream.write(json.dumps(['codesign', *arguments]) + '\\n')\n"
+                "if '--display' in arguments:\n"
+                "    with open(log) as stream:\n"
+                "        signings = [c for c in map(json.loads, stream) if '--sign' in c and c[-1] == arguments[-1]]\n"
+                "    runtime = 'runtime' in signings[-1] and not os.environ.get('FAKE_NO_RUNTIME')\n"
+                "    flags = '0x10002(adhoc,runtime)' if runtime else '0x2(adhoc)'\n"
+                "    print(f'CodeDirectory v=20500 size=99 flags={flags} hashes=1+7', file=sys.stderr)\n"
+            )
+            for tool in tools.iterdir():
+                tool.chmod(0o755)
+            environment = {**os.environ, "PATH": f"{tools}:{os.environ['PATH']}"}
+            command = ["bash", "scripts/package-macos.sh", str(binary), str(root / "out"), "arm64"]
+            result = subprocess.run(command, cwd=root, env=environment, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            app = str(root / "out/Flectar Mail.app")
+            entitlements = str(root / "platform/macos/flectar-mail.entitlements")
+            log = [json.loads(line) for line in calls.read_text().splitlines()]
+            self.assertEqual(log, [
+                ["codesign", "--force", "--sign", "-", f"{app}/Contents/Frameworks/libpdfium.dylib"],
+                ["codesign", "--force", "--options", "runtime", "--entitlements", entitlements, "--sign", "-", app],
+                ["codesign", "--display", "--verbose=2", app],
+                # The PDF worker must still load PDFium under the hardened runtime.
+                ["test-pdf-preview", f"{app}/Contents/MacOS/flectar-mail"],
+                ["codesign", "--verify", "--deep", "--strict", app],
+            ])
+            # The only exception lets the worker load the ad-hoc signed PDFium.
+            # Dynamic linker variables, JIT and unsigned memory stay off.
+            with open(entitlements, "rb") as stream:
+                self.assertEqual(plistlib.load(stream), {"com.apple.security.cs.disable-library-validation": True})
+
+            calls.unlink()
+            result = subprocess.run(
+                command, cwd=root, env={**environment, "FAKE_NO_RUNTIME": "1"}, capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not signed with the hardened runtime", result.stderr)
+            self.assertNotIn("test-pdf-preview", calls.read_text())
+
     @staticmethod
     def write_ios_ipa(path, version, **changes):
         """A minimal IPA of `version`, as scripts/package-ios.sh stamps it."""
@@ -1328,9 +1578,18 @@ for name in ("FlectarMail", "Frameworks/PDFium.framework/PDFium"):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Add a 0.2.0-beta.1 release", result.stderr)
             metainfo.write_text(listing.format('<release version="0.2.0-beta.1" date="2026-03-01"/>'))
+            # The tagged commit must also be on main.
+            git(root, "init", "--quiet", "--initial-branch=main")
+            git(root, "add", ".")
+            git(root, "commit", "--quiet", "--message=release")
+            git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
             result = subprocess.run(command, cwd=root, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("prerelease=true", result.stdout)
+            git(root, "commit", "--quiet", "--allow-empty", "--message=off main")
+            result = subprocess.run(command, cwd=root, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not on main", result.stderr)
 
     def publish(self, *, tag="v0.1.0-beta.1", existing="missing", fail_upload=False):
         with tempfile.TemporaryDirectory() as directory:

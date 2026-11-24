@@ -5,7 +5,8 @@
 //! (their record ids derive from their key, so two devices that block the
 //! same sender write the same record), templates, snoozes, scheduled sends
 //! and reply reminders are records under their own sync id, and each device
-//! describes itself in a `device` record under its own device id.
+//! describes itself in a `device` record under its own device id. Passwords,
+//! sign-ins and app keys travel sealed (`sign_ins`, `app_keys`).
 
 use super::store::{Incoming, RecordId, body_hash, set_local_hash};
 use crate::db::repo;
@@ -30,6 +31,7 @@ pub(crate) const SCHEDULED: &str = "scheduled";
 pub(crate) const REMINDER: &str = "reminder";
 pub(crate) const SIGN_IN: &str = "signin";
 pub(crate) const BLOCK: &str = "block";
+pub(crate) const APP_KEYS: &str = "appkeys";
 
 /// The largest template body that syncs.
 const MAX_TEMPLATE_BYTES: usize = 192 * 1024;
@@ -48,7 +50,7 @@ const MAX_BODY_BYTES: usize = 250 * 1024;
 pub(crate) fn schema(collection: &str) -> Option<u32> {
     match collection {
         PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE | SNOOZE | SCHEDULED
-        | REMINDER | SIGN_IN | BLOCK => Some(1),
+        | REMINDER | SIGN_IN | BLOCK | APP_KEYS => Some(1),
         _ => None,
     }
 }
@@ -375,7 +377,9 @@ pub(crate) fn snapshot(
             continue;
         };
         let accounts = profile_accounts(
-            mirror.get(&id).and_then(|mirrored| mirrored.entry.as_ref()),
+            mirror
+                .get(&id)
+                .and_then(|mirrored| mirrored.content.entry()),
             profile
                 .account_ids
                 .iter()
@@ -505,10 +509,20 @@ pub(crate) fn snapshot(
                 records.insert(id, entry(SIGN_IN, body));
             }
         }
+        // App keys, for this kind of device only (app_keys.rs).
+        let family = super::sign_ins::this_family();
+        for share in repo::app_keys::all(conn)? {
+            if share.family != family {
+                continue;
+            }
+            if let (Some(id), Some(body)) = (share.record_id, super::app_keys::body(&share)) {
+                records.insert(id, entry(APP_KEYS, body));
+            }
+        }
     }
 
     for (id, record) in &mut records {
-        if let Some(mirrored) = mirror.get(id).and_then(|mirrored| mirrored.entry.as_ref()) {
+        if let Some(mirrored) = mirror.get(id).and_then(|mirrored| mirrored.content.entry()) {
             keep_unknown_fields(record, mirrored);
         }
     }
@@ -522,7 +536,10 @@ pub(crate) fn snapshot(
         .collect();
     for id in too_large {
         tracing::debug!("an item is too large to sync");
-        match mirror.get(&id).and_then(|mirrored| mirrored.entry.clone()) {
+        match mirror
+            .get(&id)
+            .and_then(|mirrored| mirrored.content.entry().cloned())
+        {
             Some(mirrored) => records.insert(id, mirrored),
             None => records.remove(&id),
         };
@@ -592,10 +609,6 @@ fn profile_accounts<'a>(
 /// Work the app must do after the transaction that applied records.
 #[derive(Debug, Clone)]
 pub(crate) enum FollowUp {
-    /// Another device removed the account. It left sync with the change, and
-    /// its removal is recorded: one that doesn't finish now finishes at the
-    /// next start.
-    RemoveAccount(i64),
     /// Another device changed how the account connects.
     RestartAccount(i64),
 }
@@ -913,6 +926,7 @@ fn apply_put(
         REMINDER => apply_reminder(conn, id, &entry.body, applied),
         SIGN_IN => apply_sign_in(conn, id, &entry.body),
         BLOCK => apply_block(conn, &entry.body, applied),
+        APP_KEYS => apply_app_keys(conn, id, &entry.body),
         // Other devices describe themselves; the app reads them from the
         // mirror, and only each device writes its own.
         DEVICE => Ok(Outcome::Ignored),
@@ -1359,6 +1373,25 @@ fn apply_sign_in(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outco
     })
 }
 
+/// App keys another device shared: only devices of the kind they're for
+/// take them on, and never upload or delete the others.
+fn apply_app_keys(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outcome> {
+    let Some(record) = super::app_keys::parse(body) else {
+        return Ok(Outcome::Ignored);
+    };
+    if record.family != super::sign_ins::this_family() {
+        return Ok(Outcome::Ignored);
+    }
+    repo::app_keys::arrive(
+        conn,
+        record.provider.as_str(),
+        record.family,
+        id,
+        &record.sealed,
+    )?;
+    Ok(Outcome::Applied)
+}
+
 fn apply_reminder(
     conn: &Connection,
     id: &RecordId,
@@ -1483,24 +1516,6 @@ fn merged_account_settings(current: &AccountSettings, synced: &AccountSettings) 
     merged
 }
 
-/// Whether the account is POP3 and removes downloaded mail from the
-/// server, so some of its mail exists only on this device.
-fn keeps_mail_only_here(conn: &Connection, account_id: i64) -> Result<bool> {
-    use crate::models::KeepOnServer;
-    Ok(
-        repo::accounts::get_config(conn, account_id)?.is_some_and(|config| {
-            config.mail_protocol == MailProtocol::Pop3
-                && matches!(
-                    config.settings.keep_on_server,
-                    KeepOnServer::SevenDays
-                        | KeepOnServer::FourteenDays
-                        | KeepOnServer::ThirtyDays
-                        | KeepOnServer::UntilDownloaded
-                )
-        }),
-    )
-}
-
 /// After a run's records are applied: each record taken on or left alone
 /// keeps the hash of the item as this device now has it, from `local`, a
 /// snapshot taken after applying. An item this device keeps its own way,
@@ -1526,6 +1541,10 @@ fn apply_delete(
     applied: &mut Applied,
 ) -> Result<()> {
     match previous.collection.as_str() {
+        // Removed on another device. Sync alone never removes an account,
+        // its sign-in or its mail here: the account stays, synced no more,
+        // for the user to remove here too if they want. Added again on any
+        // device, it syncs again (see `apply_account`).
         ACCOUNT => {
             if let Some(local_id) = conn
                 .query_row(
@@ -1535,29 +1554,10 @@ fn apply_delete(
                 )
                 .optional()?
             {
-                if keeps_mail_only_here(conn, local_id)? {
-                    // Its mail left the mail server, so only this device has
-                    // it: the account stays here, synced no more.
-                    conn.execute(
-                        "UPDATE accounts SET sync_id = NULL WHERE id = ?1",
-                        params![local_id],
-                    )?;
-                } else {
-                    // Recorded with the change itself: quitting before the
-                    // removal finishes, or a removal that fails, must never
-                    // bring the account back on every device.
-                    conn.execute(
-                        "UPDATE accounts SET sync_id = NULL WHERE id = ?1",
-                        params![local_id],
-                    )?;
-                    conn.execute(
-                        "INSERT INTO cross_store_operations (kind, account_id, created_at)
-                         VALUES ('remove_account', ?1, ?2)
-                         ON CONFLICT(kind, account_id) DO NOTHING",
-                        params![local_id, crate::models::now_ms()],
-                    )?;
-                    applied.follow_ups.push(FollowUp::RemoveAccount(local_id));
-                }
+                conn.execute(
+                    "UPDATE accounts SET sync_id = NULL WHERE id = ?1",
+                    params![local_id],
+                )?;
                 applied.accounts_changed = true;
             }
         }
@@ -1650,6 +1650,8 @@ fn apply_delete(
             repo::sign_ins::drop_arrivals_of_record(conn, id)?;
             repo::sign_ins::forget_record(conn, id)?;
         }
+        // The keys already in this device's settings stay.
+        APP_KEYS => repo::app_keys::forget_record(conn, id)?,
         // Preferences are never deleted, and device records go with their
         // device.
         _ => {}
@@ -1673,7 +1675,7 @@ mod tests {
     use super::*;
     use crate::db::testutil;
     use crate::models::{AuthKind, Provider};
-    use flectar_mail_sync_client::Clock;
+    use flectar_mail_sync_client::{Clock, Content};
 
     fn account(conn: &Connection, email: &str, sync_id: &str) -> i64 {
         let id = repo::accounts::insert(
@@ -1705,7 +1707,7 @@ mod tests {
     }
 
     /// What the server has for `id`: a record, or a deletion.
-    fn mirror_row(conn: &Connection, id: &RecordId, entry: Option<&Entry>) {
+    fn mirror_row(conn: &Connection, id: &RecordId, entry: &Entry) {
         conn.execute(
             "INSERT OR REPLACE INTO device_sync_mirror
                (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body)
@@ -1713,10 +1715,29 @@ mod tests {
             params![
                 &id[..],
                 &[9u8; 16][..],
-                entry.map(|entry| entry.collection.clone()),
-                entry.map(|entry| i64::from(entry.schema)),
-                entry.map(|entry| entry.body.to_string())
+                entry.collection,
+                i64::from(entry.schema),
+                entry.body.to_string()
             ],
+        )
+        .unwrap();
+    }
+
+    fn test_stamp() -> flectar_mail_sync_client::Stamp {
+        flectar_mail_sync_client::Stamp {
+            ms: 1,
+            counter: 0,
+            device: [9; 16],
+        }
+    }
+
+    /// The server has the record, deleted by a member.
+    fn mirror_deletion(conn: &Connection, id: &RecordId, collection: &str) {
+        conn.execute(
+            "INSERT OR REPLACE INTO device_sync_mirror
+               (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection)
+             VALUES (?1, 1, 1, 0, ?2, ?3)",
+            params![&id[..], &[9u8; 16][..], collection],
         )
         .unwrap();
     }
@@ -1777,12 +1798,13 @@ mod tests {
             profile,
             Mirrored {
                 seq: 1,
-                stamp: None,
-                entry: Some(entry(
+                stamp: test_stamp(),
+                content: Content::Entry(entry(
                     PROFILE,
                     json!({"id": "profile-1", "name": "Work", "color": "#8b5cf6",
                            "accounts": [missing, known]}),
                 )),
+                compacted: false,
             },
         );
         let records = snapshot(&conn, &names, &mirror, ([1; 16], json!({}))).unwrap();
@@ -1798,7 +1820,7 @@ mod tests {
             schema: 2,
             body: json!({"key": "theme", "value": "dark", "since": "v2"}),
         };
-        mirror_row(&conn, &id, Some(&newer));
+        mirror_row(&conn, &id, &newer);
         let mut local = BTreeMap::new();
         local.insert(id, entry(PREF, json!({"key": "theme", "value": "light"})));
         let clock = Clock::new([1; 16], None);
@@ -1816,8 +1838,9 @@ mod tests {
                 id,
                 Mirrored {
                     seq: 1,
-                    stamp: None,
-                    entry: Some(mirrored.clone()),
+                    stamp: test_stamp(),
+                    content: Content::Entry(mirrored.clone()),
+                    compacted: false,
                 },
             );
         }
@@ -1871,7 +1894,7 @@ mod tests {
         let mut names = Names::default();
         names.insert(pref_name("timeFormat"), id);
         let newer = entry(PREF, json!({"key": "timeFormat", "value": "decimal"}));
-        mirror_row(&conn, &id, Some(&newer));
+        mirror_row(&conn, &id, &newer);
         let mut mirror = BTreeMap::new();
         let local = snapshot(&conn, &names, &mirror, ([1; 16], json!({}))).unwrap();
         let incoming = BTreeMap::from([(
@@ -1886,8 +1909,9 @@ mod tests {
             id,
             Mirrored {
                 seq: 1,
-                stamp: None,
-                entry: Some(newer),
+                stamp: test_stamp(),
+                content: Content::Entry(newer),
+                compacted: false,
             },
         );
         let after = snapshot(&conn, &names, &mirror, ([1; 16], json!({}))).unwrap();
@@ -1916,7 +1940,7 @@ mod tests {
         // This device's id is the larger one: it adopts the other device's.
         let conn = testutil::conn();
         let local = account(&conn, "me@example.com", &larger);
-        mirror_row(&conn, &sync_id_bytes(&larger).unwrap(), None);
+        mirror_deletion(&conn, &sync_id_bytes(&larger).unwrap(), ACCOUNT);
         let mut waiting = BTreeMap::new();
         waiting.insert(sync_id_bytes(&smaller).unwrap(), remote(&conn, local));
         apply(
@@ -1933,7 +1957,7 @@ mod tests {
         // device adopts it.
         let conn = testutil::conn();
         let local = account(&conn, "me@example.com", &smaller);
-        mirror_row(&conn, &sync_id_bytes(&smaller).unwrap(), None);
+        mirror_deletion(&conn, &sync_id_bytes(&smaller).unwrap(), ACCOUNT);
         let mut waiting = BTreeMap::new();
         waiting.insert(sync_id_bytes(&larger).unwrap(), remote(&conn, local));
         apply(
@@ -2045,7 +2069,7 @@ mod tests {
         template(&conn, "Thanks", Some("ty"), &sync_id);
         let id = sync_id_bytes(&sync_id).unwrap();
         let synced = own_record(&conn, id, None);
-        mirror_row(&conn, &id, Some(&synced));
+        mirror_row(&conn, &id, &synced);
         let clock = Clock::new([1; 16], None);
         super::super::store::set_local_hash(&conn, &id, Some(body_hash(&synced))).unwrap();
 
@@ -2760,7 +2784,7 @@ mod tests {
         // In step with the server.
         let ours = local(&conn)[&id].clone();
         set_local_hash(&conn, &id, Some(body_hash(&ours))).unwrap();
-        mirror_row(&conn, &id, Some(&ours));
+        mirror_row(&conn, &id, &ours);
         let clock = Clock::new([1; 16], None);
         let take = |previous: &Entry, next: &Entry| {
             let mut incoming = BTreeMap::new();
@@ -2773,7 +2797,7 @@ mod tests {
             );
             let before = local(&conn);
             apply(&conn, &incoming, &BTreeMap::new(), &before, &before).unwrap();
-            mirror_row(&conn, &id, Some(next));
+            mirror_row(&conn, &id, next);
         };
 
         // Another device found it stale: this one says so too, instead of
@@ -2806,6 +2830,89 @@ mod tests {
             0
         );
         assert_eq!(repo::sign_ins::arrivals(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn app_keys_for_another_kind_of_device_are_left_alone() {
+        let conn = testutil::conn();
+        let body = json!({
+            "provider": "gmail",
+            "family": "elsewhere",
+            "sealed": {"epoch": 1, "data": "AAAA"},
+        });
+        let mut waiting = BTreeMap::new();
+        waiting.insert([7; 16], entry(APP_KEYS, body));
+        apply(
+            &conn,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(repo::app_keys::all(&conn).unwrap().is_empty());
+        // Nor does this device delete them for having none.
+        let clock = Clock::new([1; 16], None);
+        assert_eq!(
+            super::super::store::track(&conn, &BTreeMap::new(), &clock).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn app_keys_of_this_kind_arrive_and_are_followed() {
+        let conn = testutil::conn();
+        let id = [8; 16];
+        let names = Names::default();
+        let mirror = BTreeMap::new();
+        let local = |conn: &Connection| {
+            snapshot(conn, &names, &mirror, ([1; 16], json!({})))
+                .unwrap()
+                .remove(&id)
+        };
+        assert_eq!(local(&conn), None, "nothing to share yet");
+
+        let next = entry(
+            APP_KEYS,
+            json!({
+                "provider": "microsoft",
+                "family": super::super::sign_ins::this_family(),
+                "sealed": {"epoch": 1, "data": "BBBB"},
+            }),
+        );
+        let mut incoming = BTreeMap::new();
+        incoming.insert(
+            id,
+            Incoming {
+                previous: None,
+                next: Some(next.clone()),
+            },
+        );
+        apply(
+            &conn,
+            &incoming,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let share = repo::app_keys::all(&conn).unwrap().remove(0);
+        assert_eq!(
+            share.arrived.as_deref(),
+            Some(r#"{"epoch":1,"data":"BBBB"}"#)
+        );
+        // This device has what the group has, so it sends nothing back.
+        assert_eq!(local(&conn), Some(next.clone()));
+        mirror_row(&conn, &id, &next);
+        let clock = Clock::new([1; 16], None);
+        let ours = local(&conn).map(|entry| (id, entry)).into_iter().collect();
+        assert_eq!(super::super::store::track(&conn, &ours, &clock).unwrap(), 0);
+
+        // With sign-ins no longer syncing, it goes from the group.
+        let mut settings = repo::settings::get(&conn).unwrap();
+        settings.sync_sign_ins = false;
+        repo::settings::set(&conn, &settings).unwrap();
+        assert_eq!(local(&conn), None);
     }
 
     #[test]
@@ -2922,7 +3029,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pop3_account_whose_mail_left_the_server_stays_when_removed_elsewhere() {
+    fn an_account_removed_elsewhere_stays_here_synced_no_more() {
         let conn = testutil::conn();
         let removed = |sync: &str| {
             let mut incoming = BTreeMap::new();
@@ -2943,42 +3050,30 @@ mod tests {
             .unwrap()
         };
 
-        let pop = account(&conn, "pop@example.com", &"b".repeat(32));
-        conn.execute(
-            "UPDATE accounts SET mail_protocol = 'pop3',
-                    settings_json = json_set(settings_json, '$.keepOnServer', 'sevenDays')
-             WHERE id = ?1",
-            params![pop],
-        )
-        .unwrap();
-        let applied = removed(&"b".repeat(32));
-        assert!(applied.follow_ups.is_empty(), "its mail stays here");
-        let sync_id: Option<String> = conn
-            .query_row(
-                "SELECT sync_id FROM accounts WHERE id = ?1",
-                params![pop],
-                |row| row.get(0),
+        for (email, protocol, sync_id) in [
+            ("imap@example.com", "imap", "c".repeat(32)),
+            ("pop@example.com", "pop3", "b".repeat(32)),
+        ] {
+            let local = account(&conn, email, &sync_id);
+            conn.execute(
+                "UPDATE accounts SET mail_protocol = ?2 WHERE id = ?1",
+                params![local, protocol],
             )
             .unwrap();
-        assert_eq!(sync_id, None, "synced no more");
-
-        // One whose mail is on the server goes, even if the app quits first.
-        let imap = account(&conn, "imap@example.com", &"c".repeat(32));
-        let applied = removed(&"c".repeat(32));
-        assert!(matches!(
-            applied.follow_ups.as_slice(),
-            [FollowUp::RemoveAccount(id)] if *id == imap
-        ));
-        let (sync_id, pending): (Option<String>, i64) = conn
-            .query_row(
-                "SELECT sync_id, (SELECT COUNT(*) FROM cross_store_operations
-                                  WHERE kind = 'remove_account' AND account_id = ?1)
-                 FROM accounts WHERE id = ?1",
-                params![imap],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!((sync_id, pending), (None, 1));
+            let applied = removed(&sync_id);
+            assert!(applied.follow_ups.is_empty(), "nothing goes");
+            assert!(applied.accounts_changed);
+            let (sync_id, pending): (Option<String>, i64) = conn
+                .query_row(
+                    "SELECT sync_id, (SELECT COUNT(*) FROM cross_store_operations
+                                      WHERE account_id = ?1)
+                     FROM accounts WHERE id = ?1",
+                    params![local],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!((sync_id, pending), (None, 0), "it stays, synced no more");
+        }
     }
 
     #[test]

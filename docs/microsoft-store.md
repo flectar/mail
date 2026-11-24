@@ -45,7 +45,7 @@ outside the Store, Windows only installs signed packages.
 Store versions must increase with every submission. The Store requires the
 form `Major.Minor.Build.0` with a nonzero first part, so
 `scripts/release-metadata.py` derives it from the Cargo version in the same
-order as the Android version codes: `0.1.0-alpha.8` becomes `1.100.8.0`, and
+order as the Android version codes: `0.1.0-beta.1` becomes `1.100.1001.0`, and
 `0.1.0` becomes `1.100.9999.0`.
 
 ## Store listing
@@ -119,3 +119,5 @@ password and IMAP and SMTP servers in the notes. Tell testers to add it with
   removes when the app is uninstalled. On a PC that already ran the installer
   or ZIP build, the Store build picks up that build's data instead.
 - **Updates** come from the Store.
+- **App icon** colors aren't offered, because the taskbar and Start menu show
+  the icons the package's manifest names.

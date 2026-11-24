@@ -43,6 +43,11 @@ the x64 build through emulation, but the arm64 build runs natively. The
 [Microsoft Store package](microsoft-store.md) is built with every release and
 is not published in the Store yet.
 
+On macOS, the PDF preview runs in a sandbox that can't read the installed
+fonts. PDFs that don't embed their fonts are drawn with built-in fonts
+instead, and Chinese, Japanese or Korean text in such fonts doesn't show in
+the preview.
+
 ## Linux
 
 ### Installing a package
@@ -161,7 +166,7 @@ attestations. With GitHub CLI installed, verify a download with
 
 ## Android
 
-Starting with alpha 8, Android alpha, beta, release-candidate, and stable builds
+Starting with beta 1, Android alpha, beta, release-candidate, and stable builds
 use one package (`com.flectar.mail`) and one persistent signing identity. Later
 versions can update the app in place and retain local data. Alpha 6 and alpha 7
 used different keys and cannot update to this signing identity.

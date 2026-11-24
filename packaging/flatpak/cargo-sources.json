@@ -2,8 +2,8 @@
     {
         "type": "git",
         "url": "https://github.com/flectar/mail-sync-client",
-        "commit": "bc06e7501b43e5ae1be7dc8af0eb334cc5fb467a",
-        "dest": "flatpak-cargo/git/mail-sync-client-bc06e75"
+        "commit": "f09489df8b9c7c870e95a0421ec1818d0ff1eaf6",
+        "dest": "flatpak-cargo/git/mail-sync-client-f09489d"
     },
     {
         "type": "archive",
@@ -2998,12 +2998,12 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-bc06e75/crates/flectar-mail-sync-client\" \"cargo/vendor/flectar-mail-sync-client\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-f09489d/crates/flectar-mail-sync-client\" \"cargo/vendor/flectar-mail-sync-client\""
         ]
     },
     {
         "type": "inline",
-        "contents": "[package]\nname = \"flectar-mail-sync-client\"\ndescription = \"Client of Flectar Mail Sync: sessions, membership, pairing and record sync\"\nlicense = \"Apache-2.0\"\nversion = \"0.1.0\"\nedition = \"2024\"\nrust-version = \"1.92\"\nrepository = \"https://github.com/flectar/mail-sync-client\"\n\n[dependencies]\nflectar-mail-sync-crypto = { features = [\"kem\"], path = \"crates/flectar-mail-sync-crypto\", version = \"0.1.0\" }\nflectar-mail-sync-proto = { path = \"crates/flectar-mail-sync-proto\", version = \"0.1.0\" }\nfutures-util = { version = \"0.3\", default-features = false, features = [\"std\"] }\nreqwest = { version = \"0.13\", default-features = false, features = [\"json\", \"stream\"] }\nserde = { version = \"1.0.229\", features = [\"derive\"] }\nserde_json = \"1\"\nthiserror = \"2\"\ntokio = { features = [\"sync\", \"time\", \"macros\", \"rt-multi-thread\", \"net\", \"signal\", \"sync\", \"time\"], version = \"1.53\" }\ntracing = \"0.1\"\nurl = \"2\"\nzeroize = { version = \"1.9\", features = [\"derive\"] }\n\n[dev-dependencies]\ntokio = { features = [\"macros\", \"rt-multi-thread\", \"net\", \"macros\", \"rt-multi-thread\", \"net\", \"signal\", \"sync\", \"time\"], version = \"1.53\" }\n\n[lints.rust]\nunsafe_code = \"forbid\"\nmissing_debug_implementations = \"warn\"\n\n[lints.clippy]\ndbg_macro = \"warn\"\ntodo = \"warn\"\nunwrap_used = \"warn\"\n",
+        "contents": "[package]\nname = \"flectar-mail-sync-client\"\ndescription = \"Client of Flectar Mail Sync: sessions, membership, pairing and record sync\"\nlicense = \"Apache-2.0\"\nversion = \"0.1.0\"\nedition = \"2024\"\nrust-version = \"1.92\"\nrepository = \"https://github.com/flectar/mail-sync-client\"\n\n[dependencies]\nflectar-mail-sync-crypto = { features = [\"kem\"], path = \"crates/flectar-mail-sync-crypto\", version = \"0.1.0\" }\nflectar-mail-sync-proto = { path = \"crates/flectar-mail-sync-proto\", version = \"0.1.0\" }\nfutures-util = { version = \"0.3\", default-features = false, features = [\"std\"] }\nreqwest = { version = \"0.13\", default-features = false, features = [\"json\", \"stream\"] }\nserde = { version = \"1.0.229\", features = [\"derive\"] }\nserde_json = \"1\"\nthiserror = \"2\"\ntokio = { features = [\"sync\", \"time\", \"macros\", \"rt-multi-thread\", \"net\", \"signal\", \"sync\", \"time\"], version = \"1.53\" }\ntracing = \"0.1\"\nurl = \"2\"\nzeroize = { version = \"1.9\", features = [\"derive\"] }\n\n[dev-dependencies]\nrustls = { version = \"0.23\", default-features = false, features = [\"ring\", \"std\", \"tls12\"] }\ntokio = { features = [\"macros\", \"rt-multi-thread\", \"net\", \"macros\", \"rt-multi-thread\", \"net\", \"signal\", \"sync\", \"time\"], version = \"1.53\" }\n\n[lints.rust]\nunsafe_code = \"forbid\"\nmissing_debug_implementations = \"warn\"\n\n[lints.clippy]\ndbg_macro = \"warn\"\ntodo = \"warn\"\nunwrap_used = \"warn\"\n",
         "dest": "cargo/vendor/flectar-mail-sync-client",
         "dest-filename": "Cargo.toml"
     },
@@ -3016,7 +3016,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-bc06e75/crates/flectar-mail-sync-crypto\" \"cargo/vendor/flectar-mail-sync-crypto\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-f09489d/crates/flectar-mail-sync-crypto\" \"cargo/vendor/flectar-mail-sync-crypto\""
         ]
     },
     {
@@ -3034,7 +3034,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-bc06e75/crates/flectar-mail-sync-proto\" \"cargo/vendor/flectar-mail-sync-proto\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-f09489d/crates/flectar-mail-sync-proto\" \"cargo/vendor/flectar-mail-sync-proto\""
         ]
     },
     {
@@ -7259,6 +7259,32 @@
         "type": "inline",
         "contents": "{\"package\": \"3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5\", \"files\": {}}",
         "dest": "cargo/vendor/profiling-1.0.18",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/psl/psl-2.1.249.crate",
+        "sha256": "d5a4e068733aa4f2ef06083331e02678699f997128ad66e57a8adc7e3f654ba0",
+        "dest": "cargo/vendor/psl-2.1.249"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"d5a4e068733aa4f2ef06083331e02678699f997128ad66e57a8adc7e3f654ba0\", \"files\": {}}",
+        "dest": "cargo/vendor/psl-2.1.249",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/psl-types/psl-types-2.0.11.crate",
+        "sha256": "33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac",
+        "dest": "cargo/vendor/psl-types-2.0.11"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac\", \"files\": {}}",
+        "dest": "cargo/vendor/psl-types-2.0.11",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -12528,7 +12554,7 @@
     },
     {
         "type": "inline",
-        "contents": "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.\"https://github.com/flectar/mail-sync-client\"]\ngit = \"https://github.com/flectar/mail-sync-client\"\nreplace-with = \"vendored-sources\"\nrev = \"bc06e7501b43e5ae1be7dc8af0eb334cc5fb467a\"\n",
+        "contents": "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.\"https://github.com/flectar/mail-sync-client\"]\ngit = \"https://github.com/flectar/mail-sync-client\"\nreplace-with = \"vendored-sources\"\nrev = \"f09489df8b9c7c870e95a0421ec1818d0ff1eaf6\"\n",
         "dest": "cargo",
         "dest-filename": "config"
     }

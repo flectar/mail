@@ -414,8 +414,8 @@ pub(crate) fn register(
                 Ok(ServiceOutput::Preview(ServicePreview::Text(s))) => {
                     Ok(Output::Preview(Preview::Text(s)))
                 }
-                Ok(ServiceOutput::Preview(ServicePreview::Data(data, media))) => {
-                    preview(data, &media).await.map(Output::Preview)
+                Ok(ServiceOutput::Preview(ServicePreview::Data { data, media, name })) => {
+                    preview(data, &media, &name).await.map(Output::Preview)
                 }
                 Err(e) => Err(e),
             }};

@@ -57,7 +57,7 @@ pub struct TransferReport {
 #[derive(Debug, Clone)]
 pub enum CoreEvent {
     SyncProgress(SyncProgress),
-    SyncStatus(SyncStatus),
+    SyncStatus(Box<SyncStatus>),
     MailNew {
         account_id: i64,
         thread_ids: Vec<i64>,
@@ -158,17 +158,14 @@ pub enum CoreEvent {
     /// Settings changed outside the settings screens, such as by another
     /// device through Flectar Mail Sync.
     SettingsChanged,
-    /// Accounts were added, changed or removed outside the account screens,
-    /// such as by another device through Flectar Mail Sync. `removed` lists the
-    /// accounts whose removal was attempted; one may remain if it failed.
-    AccountsChanged {
-        removed: Vec<i64>,
-    },
+    /// Accounts were added or changed outside the account screens, such as
+    /// by another device through Flectar Mail Sync. Sync never removes one.
+    AccountsChanged,
     /// Another device blocked a sender, or stopped blocking one, through
     /// Flectar Mail Sync.
     BlockedSendersChanged,
     /// Where Flectar Mail Sync stands on this device.
-    DeviceSync(crate::device_sync::DeviceSyncStatus),
+    DeviceSync(Box<crate::device_sync::DeviceSyncStatus>),
     /// Progress of adding a device to Flectar Mail Sync, in the pairing the call
     /// that started it returned.
     DeviceSyncPairing {
@@ -177,6 +174,14 @@ pub enum CoreEvent {
     },
 }
 
+/// Events the bus keeps for subscribers that fall behind. The channel
+/// allocates a slot for each of them up front, so large payloads go in a `Box`.
+const EVENT_BUS_CAPACITY: usize = 1024;
+const _: () = assert!(
+    std::mem::size_of::<CoreEvent>() <= 80,
+    "box the large CoreEvent payload"
+);
+
 #[derive(Clone)]
 pub struct EventBus {
     tx: broadcast::Sender<CoreEvent>,
@@ -184,7 +189,7 @@ pub struct EventBus {
 
 impl EventBus {
     pub fn new() -> Self {
-        let (tx, _) = broadcast::channel(1024);
+        let (tx, _) = broadcast::channel(EVENT_BUS_CAPACITY);
         EventBus { tx }
     }
 

@@ -1550,7 +1550,9 @@ pub(super) fn schedule_favicon_fetches(
     );
     let (loader, tx, pending_count, generation) = {
         let mut state = state.borrow_mut();
-        if !state.remote_images_enabled {
+        // Fetching a spam sender's icon would tell the icon service, and
+        // through it whoever watches, which spam the user looked at.
+        if !state.remote_images_enabled || is_spam_scope(state.scope) {
             return;
         }
         if state.favicon_pixel_sides != pixel_sides {
@@ -1918,6 +1920,17 @@ fn scope_title(
             None => MailTitle::Text("Label".into()),
         },
     }
+}
+
+fn is_spam_scope(scope: Scope) -> bool {
+    matches!(
+        scope,
+        Scope::Unified(StandardMailbox::Spam)
+            | Scope::Account {
+                mailbox: StandardMailbox::Spam,
+                ..
+            }
+    )
 }
 
 fn is_trash_scope(scope: Scope) -> bool {

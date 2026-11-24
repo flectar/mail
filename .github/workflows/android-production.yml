@@ -35,15 +35,11 @@ jobs:
         with:
           toolchain: stable
           targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: platform/android -> ../../target
-          key: android-production-arm64
-          # Every pull request can restore caches saved on main. Caches saved by
-          # pull requests or tags only serve those, and they push main's out of
-          # the 10 GB cache limit.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # The release key signs whatever this job builds, so it never restores
+      # a cache that another run saved.
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          cache-disabled: true
 
       - name: Configure Android NDK compiler
         run: |

@@ -113,7 +113,7 @@ export component AppIconPicker inherits Rectangle {
             if AppIcon.platform == "linux" || AppIcon.platform == "android" : Text {
                 height: max(16px, self.preferred-height);
                 text: AppIcon.platform == "android"
-                    ? @tr("The new icon appears after you leave Flectar Mail. Some launchers remove the old icon from the home screen.")
+                    ? @tr("The new icon appears after you leave Flectar Mail. Some launchers take a few minutes to show it, and some remove the old icon from the home screen.")
                     : @tr("Some desktops update the launcher icon after you sign in again.");
                 color: AppTheme.faint;
                 font-size: TypeScale.caption;

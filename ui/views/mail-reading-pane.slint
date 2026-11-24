@@ -8,6 +8,7 @@ import { Button } from "../components/button.slint";
 import { IconButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
 import { DetailEmptyState } from "../components/detail-empty-state.slint";
 import { EmailLinkContextArea } from "../components/email-link-context-area.slint";
+import { SelectableText } from "../components/selectable-text.slint";
 import { FileTypeIcon } from "../components/file-type-icon.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { LabelChip } from "../components/label-chip.slint";
@@ -175,11 +176,10 @@ component MessageDetailRow inherits HorizontalLayout {
     VerticalLayout {
         horizontal-stretch: 1;
         spacing: 3px;
-        for value in root.values : Text {
+        for value in root.values : SelectableText {
             text: value;
             color: root.value-color;
             font-size: TypeScale.secondary;
-            wrap: word-wrap;
         }
     }
 }
@@ -215,6 +215,7 @@ component ThreadMessageHeader inherits Rectangle {
     in property <length> sender-height: 23px;
     in property <length> detail-height: 24px;
     callback open;
+    callback copy-text(string);
 
     height: 17px + root.sender-height + root.detail-height;
     border-radius: 8px;
@@ -333,6 +334,24 @@ component ThreadMessageHeader inherits Rectangle {
         enabled: root.thread-interactive || root.selected;
         mouse-cursor: pointer;
         clicked => { root.activate(); }
+    }
+
+    // The sender's address, as mail apps offer it on a right-click.
+    ContextMenuArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.address != "";
+
+        Menu {
+            MenuItem {
+                title: @tr("Copy email address");
+                activated => { root.copy-text(root.address); }
+            }
+            MenuItem {
+                title: @tr("Copy name and email address");
+                activated => { root.copy-text(EmailReader.mailbox-text(root.sender, root.address)); }
+            }
+        }
     }
 
     details-popup := PopupWindow {
@@ -879,6 +898,12 @@ export component MailReadingPane inherits FocusScope {
     private property <bool> label-editor-is-global: false;
     private property <string> new-label-name: "";
     private property <color> new-label-color: #4a86e8;
+    function copy-to-clipboard(text: string) {
+        clipboard-source.text = text;
+        clipboard-source.select-all();
+        clipboard-source.copy();
+    }
+
     changed clipboard-request-id => {
         if root.clipboard-request-id > 0 {
             clipboard-source.text = root.clipboard_request;
@@ -1335,7 +1360,8 @@ export component MailReadingPane inherits FocusScope {
                             enabled: MotionSettings.enabled && root.content-reveal > 0;
                         }
 
-                        Text {
+                        // Selectable and copyable, like the message body.
+                        SelectableText {
                             // The two navigation panes and separators occupy
                             // 622px; the reading pane adds 24px padding on
                             // each side. Referencing the window avoids a
@@ -1344,15 +1370,14 @@ export component MailReadingPane inherits FocusScope {
                             width: root.compact ? max(0px, root.window-width - 24px)
                                 : root.full-width ? max(0px, root.window-width - 48px)
                                 : max(0px, root.window-width - 734px);
-                            // Up to three lines; longer subjects end in an ellipsis.
-                            height: min(self.preferred-height, 3 * (self.font-metrics.ascent - self.font-metrics.descent));
+                            height: self.preferred-height;
+                            // Up to three lines, as Thunderbird clamps it.
+                            max-lines: 3;
                             text: root.display-subject;
                             color: root.title-color;
                             font-size: root.compact ? TypeScale.title-small : TypeScale.title;
                             font-weight: 600;
                             letter-spacing: -0.3px;
-                            wrap: word-wrap;
-                            overflow: elide;
                         }
 
                         Rectangle { height: 8px; }
@@ -1458,6 +1483,7 @@ export component MailReadingPane inherits FocusScope {
                                     secondary-text: root.secondary-text;
                                     sender-height: root.thread-sender-height;
                                     detail-height: root.thread-detail-height;
+                                    copy-text(text) => { root.copy-to-clipboard(text); }
                                 }
 
                                 for row in root.thread-messages : ThreadMessageHeader {
@@ -1491,6 +1517,7 @@ export component MailReadingPane inherits FocusScope {
                                     sender-height: root.thread-sender-height;
                                     detail-height: root.thread-detail-height;
                                     open => { root.select_thread_message(row.index); }
+                                    copy-text(text) => { root.copy-to-clipboard(text); }
                                 }
 
                                 // Renderer controls are part of the expanded

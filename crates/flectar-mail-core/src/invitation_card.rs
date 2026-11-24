@@ -182,7 +182,7 @@ impl Core {
             .first()
             .map(|event| event.uid.clone())
             .ok_or_else(|| CoreError::NotFound("invitation".into()))?;
-        let (account_id, own) = self
+        let (account_id, own, from) = self
             .db
             .read(move |conn| {
                 let row = repo::messages::get_row(conn, message_id)?
@@ -197,6 +197,10 @@ impl Core {
                 Ok((
                     row.account_id,
                     repo::sender_identities::own_addresses(conn, row.account_id)?,
+                    repo::messages::senders(conn, &[message_id])?
+                        .remove(&message_id)
+                        .map(|(from, _)| from)
+                        .unwrap_or_default(),
                 ))
             })
             .await?;
@@ -209,6 +213,8 @@ impl Core {
                 {
                     repo::calendar::hard_delete(&tx, removed.event.id)?;
                 }
+                // The user chose to act on this message, but it still changes
+                // an event the calendar has only when its organizer sent it.
                 repo::calendar::apply_invitation(
                     &tx,
                     account_id,
@@ -216,6 +222,10 @@ impl Core {
                     &text,
                     &own,
                     NewEvents::Add,
+                    repo::calendar::Originator {
+                        email: &from,
+                        trusted: true,
+                    },
                 )?;
                 let added = repo::calendar::version(&tx, account_id, &uid)?
                     .filter(|stored| !stored.deleted)

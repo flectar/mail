@@ -21,6 +21,7 @@ export { Updates } from "updates.slint";
 export { AgentAccess, AgentAccount, AgentActivityEntry, AgentFolder } from "agent-access.slint";
 export { Notice } from "notice.slint";
 export { Unsubscribe } from "unsubscribe.slint";
+export { AccountDiscovery, DavLookup } from "account-discovery.slint";
 export { BlockSender } from "block-sender.slint";
 export { ContactImport } from "contact-import.slint";
 export { MailRules, RuleActionRow, RuleConditionRow, RuleRow } from "rules.slint";
@@ -544,7 +545,6 @@ export global I18n {
         if (key == "Could not save account order: {}") { return @tr("Could not save account order: {}", argument); }
         if (key == "Mail history updated. Background sync is adjusting now.") { return @tr("Mail history updated. Background sync is adjusting now."); }
         if (key == "Account removed from this device.") { return @tr("Account removed from this device."); }
-        if (key == "Account removed on another device.") { return @tr("Account removed on another device."); }
         if (key == "Accounts updated from your other devices.") { return @tr("Accounts updated from your other devices."); }
         if (key == "Account removed. Mail refresh will retry.") { return @tr("Account removed. Mail refresh will retry."); }
         if (key == "Account removed; local cleanup needs a retry: {}") { return @tr("Account removed; local cleanup needs a retry: {}", argument); }
@@ -780,6 +780,7 @@ export global I18n {
         if (key == "Could not send the message: {}") { return @tr("Could not send the message: {}", argument); }
         if (key == "Could not cancel the send: {}") { return @tr("Could not cancel the send: {}", argument); }
         if (key == "Send cancelled. The message is a draft again.") { return @tr("Send cancelled. The message is a draft again."); }
+        if (key == "Send cancelled here, but another of your devices may still send it.") { return @tr("Send cancelled here, but another of your devices may still send it."); }
         if (key == "This message is no longer scheduled.") { return @tr("This message is no longer scheduled."); }
         if (key == "Choose a reminder after the time the message goes out.") { return @tr("Choose a reminder after the time the message goes out."); }
         if (key == "Reminds you {} if nobody replies") { return @tr("Reminds you {} if nobody replies", argument); }
@@ -1596,6 +1597,7 @@ export component AppWindow inherits Window {
     in-out property <string> carddav_username: "";
     in-out property <string> carddav_password: "";
     in-out property <bool> carddav_manage_existing: false;
+    in property <bool> carddav_connecting: false;
     in-out property <string> incoming_security: "tls";
     in-out property <string> smtp_security: "tls";
     in-out property <string> trusted_certificate_pem;
@@ -2011,6 +2013,13 @@ export component AppWindow inherits Window {
             available-height: parent.height;
 
         MailView {
+            // `changed` misses the sizes a new mail view starts with. A phone's
+            // window never resizes, so they're the only ones its reader gets.
+            init => {
+                root.email-viewport-width = self.email-viewport-width;
+                root.email-viewport-height = self.email-viewport-height;
+                root.email-scroll-document-height = self.email-scroll-document-height;
+            }
             changed email-viewport-width => { root.email-viewport-width = self.email-viewport-width; }
             changed email-viewport-height => { root.email-viewport-height = self.email-viewport-height; }
             changed email-scroll-document-height => { root.email-scroll-document-height = self.email-scroll-document-height; }
@@ -2491,6 +2500,7 @@ export component AppWindow inherits Window {
             carddav_username <=> root.carddav_username;
             carddav_password <=> root.carddav_password;
             carddav_manage_existing <=> root.carddav_manage_existing;
+            carddav_connecting: root.carddav_connecting;
             incoming_security <=> root.incoming_security;
             smtp_security <=> root.smtp_security;
             trusted_certificate_pem <=> root.trusted_certificate_pem;
@@ -2596,6 +2606,11 @@ export component AppWindow inherits Window {
             cancel_oauth => { root.cancel_oauth(); }
             save_oauth_app(google-id, google-secret, microsoft-id) => {
                 root.save_oauth_app(google-id, google-secret, microsoft-id);
+            }
+            oauth-setup-open <=> root.oauth_setup_open;
+            oauth-settings-error <=> root.oauth_settings_error;
+            save-oauth-apps(google-id, google-secret, microsoft-id) => {
+                root.save_oauth_apps(google-id, google-secret, microsoft-id);
             }
             set-remote-images(enabled) => { root.set-remote-images(enabled); }
             make_account_transfer(value) => root.make_account_transfer(value);

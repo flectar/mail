@@ -1386,6 +1386,14 @@ async fn send_action(
     let Some(draft_id) = action.payload["draftId"].as_i64() else {
         return Err(CoreError::Other("send action without draftId".into()));
     };
+    // An earlier try reached the end of its message and still didn't send
+    // it, as the server refused it there: this one starts afresh.
+    if action.payload["smtpEndOfData"].as_bool() == Some(true) {
+        let action_id = action.id;
+        ctx.db
+            .write(move |conn| repo::actions::forget_end_of_data(conn, action_id))
+            .await?;
+    }
     // A send queued before the account stopped sending fails for good.
     if !config.sends_mail() {
         return Err(CoreError::NotFound(format!(
@@ -1466,6 +1474,18 @@ async fn send_action(
         false
     };
     let deadline = send_deadline(ctx, action.id).await?;
+    // From the end of its message on, the server may take it: a note of
+    // that is saved first, to stable storage, so a send that stops before
+    // the server's reply comes, as when the app stops, is never sent again
+    // by itself (see `repo::actions::recover_inflight`).
+    let end_of_data = || -> smtp::BeforeEnd {
+        let db = ctx.db.clone();
+        let action_id = action.id;
+        Box::pin(async move {
+            db.write_durable(move |tx| repo::actions::note_end_of_data(tx, action_id))
+                .await
+        })
+    };
     tracing::info!(
         account_id = config.id,
         host = %config.smtp_host,
@@ -1477,7 +1497,17 @@ async fn send_action(
     let submitted = if already_sent {
         Ok(())
     } else {
-        match smtp::send_raw_before(config, &auth, &from, &recipients, &raw, deadline).await {
+        match smtp::send_raw_before(
+            config,
+            &auth,
+            &from,
+            &recipients,
+            &raw,
+            deadline,
+            end_of_data(),
+        )
+        .await
+        {
             Err(CoreError::Auth(_)) if config.auth_kind == AuthKind::Oauth2 => {
                 // AUTH rejection happens before MAIL FROM/DATA, so it is safe
                 // to invalidate an unexpectedly stale provider token and retry
@@ -1491,7 +1521,16 @@ async fn send_action(
                 let retry_auth = smtp::SmtpAuth::XOAuth2(
                     ctx.tokens.access_token(config.id, config.provider).await?,
                 );
-                smtp::send_raw_before(config, &retry_auth, &from, &recipients, &raw, deadline).await
+                smtp::send_raw_before(
+                    config,
+                    &retry_auth,
+                    &from,
+                    &recipients,
+                    &raw,
+                    deadline,
+                    end_of_data(),
+                )
+                .await
             }
             result => result,
         }

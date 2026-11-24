@@ -43,6 +43,12 @@ pub(crate) fn set_taskbar_badge(badge: Option<(u32, String)>) {
     windows::set_taskbar_badge(badge);
 }
 
+/// The main window, while it exists.
+#[cfg(target_os = "windows")]
+pub(crate) fn main_window() -> Option<windows_sys::Win32::Foundation::HWND> {
+    windows::main_window()
+}
+
 /// The integrated frame is the default; unknown saved values fall back to the
 /// system frame so a window can never start without any controls.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

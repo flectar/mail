@@ -41,9 +41,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     NCCALCSIZE_PARAMS, PostMessageW, SC_CLOSE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE,
     SM_CXPADDEDBORDER, SM_CYSIZEFRAME, SPI_SETCLIENTAREAANIMATION, SWP_FRAMECHANGED,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
-    SetWindowsHookExW, UnhookWindowsHookEx, WH_CBT, WM_DPICHANGED, WM_MOUSEMOVE, WM_NCCALCSIZE,
-    WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
-    WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_SETTINGCHANGE, WM_SYSCOMMAND, WS_CAPTION,
+    SetWindowsHookExW, UnhookWindowsHookEx, WH_CBT, WM_CREATE, WM_DESTROY, WM_DPICHANGED,
+    WM_MOUSEMOVE, WM_NCCALCSIZE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN,
+    WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_SETTINGCHANGE, WM_SYSCOMMAND, WS_CAPTION,
 };
 
 /// Window class that identifies the main window during creation.
@@ -283,6 +283,11 @@ unsafe extern "system" fn subclass_proc(
     if message == WM_SETTINGCHANGE && wparam == SPI_SETCLIENTAREAANIMATION as WPARAM {
         crate::motion::system_changed();
     }
+    if message == WM_CREATE {
+        crate::app_icon::window_created(hwnd);
+    } else if message == WM_DESTROY {
+        crate::app_icon::window_destroyed(hwnd);
+    }
     if message == WM_NCDESTROY {
         STATE.with(|state| state.hwnd.set(null_mut()));
         // SAFETY: removing this module's own subclass from its window.
@@ -301,6 +306,11 @@ unsafe extern "system" fn subclass_proc(
 /// there as the taskbar recreates the button or the window changes DPI.
 pub(super) fn set_taskbar_badge(badge: Option<(u32, String)>) {
     super::taskbar_badge::set(STATE.with(|state| state.hwnd.get()), badge);
+}
+
+pub(super) fn main_window() -> Option<HWND> {
+    let hwnd = STATE.with(|state| state.hwnd.get());
+    (!hwnd.is_null()).then_some(hwnd)
 }
 
 /// Full-screen windows have no caption style and keep default handling.

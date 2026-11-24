@@ -126,6 +126,7 @@ final class Spelling {
                 .putExtra("word", word)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
+            LauncherIconChoice.openingOwnScreen();
             context.startActivity(intent);
             return true;
         } catch (ActivityNotFoundException e) {

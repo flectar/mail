@@ -326,14 +326,23 @@ async fn two_devices_share_accounts_and_preferences() {
     laptop.device_sync_run().await.unwrap();
     assert!(!laptop.get_settings().await.unwrap().conversation_view);
 
-    // An account removed on the laptop goes from the phone too.
+    // An account removed on the laptop stays on the phone, synced no more:
+    // sync alone never removes an account, its sign-in or its mail.
     let laptop_account = laptop.list_accounts().await.unwrap()[0].id;
     laptop.remove_account(laptop_account).await.unwrap();
     laptop.device_sync_run().await.unwrap();
     phone.device_sync_run().await.unwrap();
-    assert!(phone.list_accounts().await.unwrap().is_empty());
+    assert_eq!(phone.list_accounts().await.unwrap().len(), 1);
+    phone.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    assert!(
+        laptop.list_accounts().await.unwrap().is_empty(),
+        "nor does it come back"
+    );
 
-    // The laptop removes the phone, which stops syncing but keeps its data.
+    // The laptop removes the phone. Only the server tells the phone, which
+    // can't check it: the phone stops syncing and keeps everything, its
+    // sync keys and state too.
     let phone_id = phone
         .device_sync_status()
         .devices
@@ -344,8 +353,11 @@ async fn two_devices_share_accounts_and_preferences() {
         .clone();
     laptop.device_sync_remove_device(phone_id).await.unwrap();
     phone.device_sync_run().await.unwrap();
-    assert_eq!(phone.device_sync_status().state, DeviceSyncState::Removed);
+    let status = phone.device_sync_status();
+    assert_eq!(status.state, DeviceSyncState::Removed);
+    assert!(status.server_url.is_some(), "still set up");
     assert_eq!(phone.get_settings().await.unwrap().theme, "carbon");
+    assert_eq!(phone.list_accounts().await.unwrap().len(), 1);
 }
 
 /// Pair `joining` into `existing`'s group with a short code.
@@ -1470,10 +1482,75 @@ async fn a_large_imap_message_waits_in_a_file_until_a_device_sends_it() {
         "its send started: {state} {due}"
     );
 
-    // Found again, the laptop hears it was removed: the phone sends this one.
+    // Found again, the laptop hears it was removed, from the server alone.
+    // It keeps its send, as when the server can't be reached: due past its
+    // time, it goes out only if the mail server shows the phone didn't send
+    // it.
     laptop.device_sync_run().await.unwrap();
     assert_eq!(laptop.device_sync_status().state, DeviceSyncState::Removed);
-    assert_eq!(send_of(&laptop).await.unwrap().0, "cancelled");
+    let (state, due) = send_of(&laptop).await.unwrap();
+    assert_eq!(state, "pending");
+    assert!(due >= send_at, "not before its time: {due}");
+}
+
+/// A device that joins keeps the passwords of the accounts it already had
+/// until the user shares them: a code typed in at someone else's request
+/// must not hand them over.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_joining_device_keeps_its_own_sign_ins_until_asked() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let laptop_keys = Arc::new(MemoryCredentials::default());
+    let phone_keys = Arc::new(MemoryCredentials::default());
+    let laptop = start_core_with(laptop_dir.path(), laptop_keys.clone()).await;
+    let phone = start_core_with(phone_dir.path(), phone_keys.clone()).await;
+    laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+
+    // Signed in on the phone before it joins.
+    phone
+        .import_account_configs(vec![imap_account("me@example.com")])
+        .await
+        .unwrap();
+    let account = phone.list_accounts().await.unwrap()[0].id;
+    let password = "correct-horse-battery-7";
+    phone_keys.store(account, Slot::Password, password).unwrap();
+    phone
+        .db
+        .write(move |conn| {
+            flectar_mail_core::db::repo::accounts::set_sync_state(conn, account, "idle")
+        })
+        .await
+        .unwrap();
+
+    join_with_code(&laptop, &phone, &server.url).await;
+    for _ in 0..2 {
+        phone.device_sync_run().await.unwrap();
+        laptop.device_sync_run().await.unwrap();
+    }
+    // The account reaches the laptop; its password stays on the phone.
+    let arrived = laptop.list_accounts().await.unwrap();
+    assert_eq!(arrived.len(), 1);
+    assert!(laptop_keys.load(arrived[0].id, Slot::Password).is_err());
+    assert!(phone.device_sync_status().held_sign_ins);
+
+    // Shared once the user says so.
+    phone.device_sync_share_held_sign_ins().await.unwrap();
+    assert!(!phone.device_sync_status().held_sign_ins);
+    for _ in 0..2 {
+        phone.device_sync_run().await.unwrap();
+        laptop.device_sync_run().await.unwrap();
+    }
+    assert_eq!(
+        laptop_keys.load(arrived[0].id, Slot::Password).unwrap(),
+        password
+    );
 }
 
 /// Whether `needle` appears in any of the database's files.
@@ -1563,4 +1640,70 @@ async fn a_restored_device_has_its_accounts_signed_in() {
         laptop_keys.load(account, Slot::Password).unwrap(),
         "new-password-8"
     );
+}
+
+/// App keys entered in Sign-in settings reach the user's other devices of
+/// the same kind, and a change or a clearing on any of them follows.
+#[tokio::test(flavor = "multi_thread")]
+async fn app_keys_follow_the_user_to_devices_of_the_same_kind() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let desktop_dir = tempfile::tempdir().unwrap();
+    let laptop = start_core(laptop_dir.path()).await;
+    let desktop = start_core(desktop_dir.path()).await;
+
+    let google = "1234-example.apps.googleusercontent.com";
+    let microsoft = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+    laptop
+        .set_oauth_apps(
+            Some((google.into(), "google-secret".into())),
+            Some(microsoft.into()),
+        )
+        .await
+        .unwrap();
+    let words = laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    laptop.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+
+    // Another computer, with the recovery code alone.
+    desktop
+        .device_sync_recover(Some(server.url.clone()), words)
+        .await
+        .unwrap();
+    desktop.device_sync_run().await.unwrap();
+    desktop.device_sync_run().await.unwrap();
+    let settings = desktop.get_settings().await.unwrap();
+    assert_eq!(settings.google_client_id, google);
+    assert_eq!(settings.google_client_secret, "google-secret");
+    assert_eq!(settings.ms_client_id, microsoft);
+
+    // A new Microsoft key on the second computer reaches the first, and
+    // the Google keys stay as they are.
+    let replaced = "1a2b3c4d-5e6f-7a8b-9c0d-e1f2a3b4c5d6";
+    desktop
+        .set_oauth_apps(None, Some(replaced.into()))
+        .await
+        .unwrap();
+    desktop.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    let settings = laptop.get_settings().await.unwrap();
+    assert_eq!(settings.ms_client_id, replaced);
+    assert_eq!(settings.google_client_id, google);
+
+    // Cleared on the first, cleared on the second.
+    laptop
+        .set_oauth_apps(Some((String::new(), String::new())), None)
+        .await
+        .unwrap();
+    laptop.device_sync_run().await.unwrap();
+    desktop.device_sync_run().await.unwrap();
+    let settings = desktop.get_settings().await.unwrap();
+    assert_eq!(settings.google_client_id, "");
+    assert_eq!(settings.google_client_secret, "");
+    assert_eq!(settings.ms_client_id, replaced);
 }

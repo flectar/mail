@@ -10,6 +10,7 @@ import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
@@ -93,8 +94,47 @@ public final class FlectarActivity extends NativeActivity {
     }
 
     @Override
+    public void startActivityForResult(Intent intent, int requestCode, Bundle options) {
+        LauncherIconChoice.openingOwnScreen();
+        try {
+            super.startActivityForResult(intent, requestCode, options);
+        } catch (RuntimeException error) {
+            LauncherIconChoice.inFront();
+            throw error;
+        }
+    }
+
+    @Override
+    public void startIntentSenderForResult(IntentSender intent, int requestCode,
+            Intent fillInIntent, int flagsMask, int flagsValues, int extraFlags, Bundle options)
+            throws IntentSender.SendIntentException {
+        LauncherIconChoice.openingOwnScreen();
+        try {
+            super.startIntentSenderForResult(intent, requestCode, fillInIntent, flagsMask,
+                    flagsValues, extraFlags, options);
+        } catch (IntentSender.SendIntentException | RuntimeException error) {
+            LauncherIconChoice.inFront();
+            throw error;
+        }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        LauncherIconChoice.inFront();
+    }
+
+    @Override
     protected void onStop() {
-        applyLauncherIcon();
+        String icon = LauncherIconChoice.takeOnStop(
+                getSystemService(PowerManager.class).isInteractive());
+        if (icon != null) {
+            try {
+                LauncherIcons.choose(this, icon);
+            } catch (RuntimeException error) {
+                Log.e("flectar-mail", "could not change the launcher icon", error);
+            }
+        }
         nativeSuspendPdfPreview();
         super.onStop();
     }
@@ -111,15 +151,9 @@ public final class FlectarActivity extends NativeActivity {
         nativeTrimMemory(level, Build.VERSION.SDK_INT);
     }
 
-    private volatile String pendingLauncherIcon;
-
-    /**
-     * Called from Rust with the icon chosen in Settings. Switching launcher
-     * entries can close a visible app on some launchers, so the switch waits
-     * until the app leaves the foreground.
-     */
+    /** Called from Rust with the icon chosen in Settings (LauncherIconChoice). */
     public void setLauncherIcon(String icon) {
-        if (LauncherIcons.exists(icon)) pendingLauncherIcon = icon;
+        LauncherIconChoice.choose(icon);
     }
 
     /**
@@ -129,17 +163,6 @@ public final class FlectarActivity extends NativeActivity {
     public boolean animationsRemoved() {
         return Settings.Global.getFloat(getContentResolver(),
                 Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f;
-    }
-
-    private void applyLauncherIcon() {
-        String chosen = pendingLauncherIcon;
-        pendingLauncherIcon = null;
-        if (chosen == null) return;
-        try {
-            LauncherIcons.choose(this, chosen);
-        } catch (RuntimeException error) {
-            Log.e("flectar-mail", "could not change the launcher icon", error);
-        }
     }
 
     private static final int FILE_DOCUMENT_REQUEST = 0xF11E;

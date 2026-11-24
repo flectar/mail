@@ -6,8 +6,8 @@
 use super::*;
 use crate::rich_compose::{EditMark, EditState};
 use flectar_mail_core::models::{
-    Address, AttachmentMeta, AutomaticCopies, Importance, SaveDraftArgs, SenderIdentity, Settings,
-    Signature,
+    Address, AttachmentMeta, AutomaticCopies, CancelledSend, Importance, SaveDraftArgs,
+    SenderIdentity, Settings, Signature,
 };
 use slint::SharedString;
 #[cfg(desktop)]
@@ -1076,7 +1076,7 @@ impl Composers {
         if !self.state.borrow_mut().start_send_change() {
             return;
         }
-        let cancel: documents::DocumentFuture<bool> = {
+        let cancel: documents::DocumentFuture<CancelledSend> = {
             let (core, row) = (core.clone(), row.clone());
             Box::pin(async move { core.cancel_scheduled_row(&row).await })
         };
@@ -1092,23 +1092,37 @@ impl Composers {
                 return;
             };
             match cancelled {
-                Ok(true) => {
-                    app.set_render_status(UiMessage::plain(
-                        "Send cancelled. The message is a draft again.",
-                    ));
-                    // A message the user started meanwhile stays in the
-                    // composer.
-                    if composers.in_app().is_none_or(|open| open.is_blank()) {
-                        composers.load_draft(&app, &core, &row);
-                    }
-                }
+                Ok(CancelledSend::Cancelled) => crate::undo::tell(
+                    &app,
+                    UiMessage::plain("Send cancelled. The message is a draft again."),
+                ),
+                // Another device holds the send, or can't hear of the cancel
+                // in time: the warning stays until the user closes it.
+                Ok(CancelledSend::MayStillGoOut) => crate::undo::warn(
+                    &app,
+                    UiMessage::plain(
+                        "Send cancelled here, but another of your devices may still send it.",
+                    ),
+                ),
                 // It went out, or is going out, meanwhile.
-                Ok(false) => {
-                    app.set_render_status(UiMessage::plain("This message is no longer scheduled."))
+                Ok(CancelledSend::NotScheduled) => {
+                    crate::undo::tell(
+                        &app,
+                        UiMessage::plain("This message is no longer scheduled."),
+                    );
+                    return;
                 }
                 Err(error) => {
-                    app.set_render_status(UiMessage::detail("Could not cancel the send: {}", error))
+                    crate::undo::tell(
+                        &app,
+                        UiMessage::detail("Could not cancel the send: {}", error),
+                    );
+                    return;
                 }
+            }
+            // A message the user started meanwhile stays in the composer.
+            if composers.in_app().is_none_or(|open| open.is_blank()) {
+                composers.load_draft(&app, &core, &row);
             }
         });
     }
@@ -4151,11 +4165,8 @@ impl ComposeSession {
         let ui = host.ui();
         let core = composers.core();
         let account_id = i64::from(ui.get_account_id());
-        let recipient = ui
-            .get_to()
-            .split([',', ';', '\n'])
-            .map(str::trim)
-            .filter(|item| !item.is_empty())
+        let to = ui.get_to();
+        let recipient = crate::mail::recipient_entries(&to)
             .find_map(|item| crate::mail::parse_address(item).ok())
             .map_or_else(placeholders::Person::default, |address| {
                 let name = address.name.clone().or_else(|| {

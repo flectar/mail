@@ -42,6 +42,12 @@ jobs:
     if: inputs.run_quality
     name: Shared quality suite
     uses: ./.github/workflows/quality.yml
+    # Its tests pull the Flectar Mail Sync server image. A called workflow's
+    # token gets no more than the caller grants here, and GitHub refuses to
+    # start a job that asks for more.
+    permissions:
+      contents: read
+      packages: read
 
   hap:
     name: ${{ inputs.app }} hap (${{ inputs.profile }})
