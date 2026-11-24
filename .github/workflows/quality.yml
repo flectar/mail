@@ -144,6 +144,8 @@ jobs:
         run: python3 scripts/verify-slint-android-activity.py
       - name: Verify the Slint software renderer clip fix
         run: python3 scripts/verify-slint-renderer-software.py
+      - name: Verify the Slint core fling fix
+        run: python3 scripts/verify-slint-core.py
       - name: Verify the fontique slant fix
         run: python3 scripts/verify-fontique.py
       - name: Verify the Vello bitmap strike fix

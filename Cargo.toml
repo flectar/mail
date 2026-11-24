@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/flectar-mail-core", "crates/flectar-spell", "crates/renderer-probe"]
-exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/fontique", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/i-slint-renderer-software", "crates/jmap-client", "crates/smithay-clipboard", "crates/spellbook", "crates/vello"]
+exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/fontique", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/i-slint-core", "crates/i-slint-renderer-software", "crates/jmap-client", "crates/smithay-clipboard", "crates/spellbook", "crates/vello"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -23,6 +23,9 @@ smithay-clipboard = { path = "crates/smithay-clipboard" }
 # Slint 1.19's software renderer panics on a rounded clip far out of view; see
 # patches/slint-renderer-software/README.md.
 i-slint-renderer-software = { path = "crates/i-slint-renderer-software" }
+# Slint 1.19 stops a fling when the system asks for less motion, so lists
+# stop dead where the finger lifts; see patches/slint-core/README.md.
+i-slint-core = { path = "crates/i-slint-core" }
 # Fontique 0.12 slants italics from a font's `slnt` axis the wrong way, so
 # variable fonts without an italic face, such as the bundled Google Sans Flex,
 # stay upright; see patches/fontique/README.md.
