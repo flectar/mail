@@ -500,6 +500,27 @@ pub fn mark_receipt_handled(conn: &Connection, id: i64) -> Result<bool> {
 
 /// A message given a UID is linked to the server and no longer waits to be
 /// matched with its copy there.
+/// Of `ids`, each message's From address, and whether the receiving server
+/// confirmed it (its Authentication-Results), which calendar changes the
+/// message carries need.
+pub fn senders(
+    conn: &Connection,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, (String, bool)>> {
+    let mut statement =
+        conn.prepare("SELECT from_addr, sender_verification != '' FROM messages WHERE id = ?1")?;
+    let mut senders = std::collections::HashMap::new();
+    for &id in ids {
+        if let Some(sender) = statement
+            .query_row([id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .optional()?
+        {
+            senders.insert(id, sender);
+        }
+    }
+    Ok(senders)
+}
+
 /// Of `ids`, the messages from people the user knows: someone they have
 /// written to or keep in their address book, when the receiving server
 /// confirmed the sender (its Authentication-Results), since a From address
