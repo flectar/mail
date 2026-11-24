@@ -2,13 +2,16 @@
 //!
 //! `libnet_connection.so` is a system library; the SDK ships a link-time stub.
 //! The API returns the global proxy when one is set, otherwise the default
-//! network's proxy. Mail goes through only SOCKS proxies in the shared proxy
-//! layer, so this reader answers for HTTP(S) only; IMAP and SMTP stay direct
-//! unless an account has its own SOCKS proxy.
+//! network's proxy. In automatic (PAC) mode Network Kit runs the script behind
+//! a local proxy and returns that one, so the script applies here too; a PAC
+//! address published on its own through `OH_NetConn_SetPacUrl` is not run.
+//! Mail goes through only SOCKS proxies in the shared proxy layer, so this
+//! reader answers for HTTP(S) only; IMAP and SMTP stay direct unless an
+//! account has its own SOCKS proxy.
 //!
-//! The native `NetConn_HttpProxy` does not carry proxy credentials and the
-//! PAC script is not evaluated here. Authenticated or PAC proxies can be set
-//! with the manual proxy fields in Settings.
+//! The native `NetConn_HttpProxy` does not carry proxy credentials, so a
+//! system proxy that asks for a password needs the manual proxy fields in
+//! Settings.
 
 use core::ffi::{CStr, c_char};
 use std::net::Ipv6Addr;
@@ -34,7 +37,7 @@ struct NetConnHttpProxy {
 const _: () = assert!(core::mem::size_of::<NetConnHttpProxy>() == 65_800);
 const _: () = assert!(core::mem::align_of::<NetConnHttpProxy>() == 4);
 
-#[link(name = "net_connection")]
+#[link(name = "net_connection", kind = "dylib")]
 unsafe extern "C" {
     /// `OH_NetConn_GetDefaultHttpProxy`: 0 on success.
     fn OH_NetConn_GetDefaultHttpProxy(proxy: *mut NetConnHttpProxy) -> i32;
@@ -45,16 +48,6 @@ unsafe extern "C" {
 /// shared cache's minute expires.
 pub(super) fn install() {
     configure_system_proxy(Reader);
-    match system_http_proxy() {
-        Ok(Some((host, port, exclusions))) => slint_ohos_backend::ohos_info!(
-            "mail: system HTTP proxy {host}:{port} ({} exclusions)",
-            exclusions.len()
-        ),
-        Ok(None) => slint_ohos_backend::ohos_info!("mail: no system HTTP proxy"),
-        Err(rc) => {
-            slint_ohos_backend::ohos_error!("mail: system HTTP proxy read failed: {rc}")
-        }
-    }
 }
 
 struct Reader;
@@ -67,8 +60,13 @@ impl SystemProxies for Reader {
         if !matches!(url.scheme(), "http" | "https") {
             return Vec::new();
         }
-        let Some((host, port, exclusions)) = system_http_proxy().ok().flatten() else {
-            return Vec::new();
+        let (host, port, exclusions) = match system_http_proxy() {
+            Ok(Some(proxy)) => proxy,
+            Ok(None) => return Vec::new(),
+            Err(code) => {
+                tracing::warn!(code, "could not ask HarmonyOS for the proxy");
+                return Vec::new();
+            }
         };
         if url
             .host_str()
@@ -82,8 +80,9 @@ impl SystemProxies for Reader {
 
 /// Read the current proxy from Network Kit, or the call's error code.
 fn system_http_proxy() -> Result<Option<(String, u16, Vec<String>)>, i32> {
-    // SAFETY: the struct is zeroed before the call, and the API fills it.
-    let mut proxy = Box::new(unsafe { core::mem::zeroed::<NetConnHttpProxy>() });
+    // SAFETY: zero is a valid value for every field of the C struct, which
+    // goes straight to the heap at its 64 KiB.
+    let mut proxy = unsafe { Box::<NetConnHttpProxy>::new_zeroed().assume_init() };
     // SAFETY: `proxy` points at writable storage of the C layout.
     let rc = unsafe { OH_NetConn_GetDefaultHttpProxy(&mut *proxy) };
     if rc != 0 {

@@ -173,12 +173,14 @@ handled (and asserted) in the script, do not "simplify" them away:
   the base fallback); Traditional Chinese falls back to English. The
   notification permission is requested only after consent, once an account
   exists, and the page records that it asked so the prompt shows once.
-- **Network proxy**: the page reads HarmonyOS's system HTTP proxy through
-  Network Kit (`OH_NetConn_GetDefaultHttpProxy`). It applies to HTTP(S)
-  traffic (OAuth, AI, Sync and updates); a changed system proxy is seen when
-  the shared cache's minute expires. Mail stays direct unless it has its own
-  SOCKS proxy, and PAC or authenticated system proxies need the manual proxy
-  fields.
+- **Network proxy**: the host reads HarmonyOS's system HTTP proxy through
+  Network Kit (`OH_NetConn_GetDefaultHttpProxy`) and skips it for the servers
+  in its exclusion list, by the rules of the system's own HTTP client. It
+  applies to HTTP(S) traffic (OAuth, AI, Sync and updates); a changed system
+  proxy is seen when the shared cache's minute expires. In automatic (PAC)
+  mode the call returns the local proxy that runs the script. Mail stays
+  direct unless it has its own SOCKS proxy, and a system proxy that asks for
+  a password needs the manual proxy fields.
 - **Clipboard**: copying needs no permission, but pasting reads the system
   pasteboard and therefore requires `ohos.permission.READ_PASTEBOARD`, an ACL
   (restricted) permission. The module declares it and the page requests it on
