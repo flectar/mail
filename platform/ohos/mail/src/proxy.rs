@@ -11,8 +11,8 @@
 //! with the manual proxy fields in Settings.
 
 use core::ffi::{CStr, c_char};
-use std::net::IpAddr;
 
+use flectar_mail::flectar_mail_core::net::proxy::Bypass;
 use flectar_mail::platform::{SystemProxies, configure_system_proxy};
 use url::Url;
 
@@ -71,7 +71,7 @@ impl SystemProxies for Reader {
         };
         if url
             .host_str()
-            .is_some_and(|host| excluded(host, &exclusions))
+            .is_some_and(|host| bypass(&exclusions).skips(host))
         {
             return Vec::new();
         }
@@ -103,19 +103,10 @@ fn system_http_proxy() -> Result<Option<(String, u16, Vec<String>)>, i32> {
         return Ok(None);
     }
     let count = proxy.exclusion_list_size.clamp(0, MAX_EXCLUSIONS as i32) as usize;
-    let mut exclusions = Vec::with_capacity(count);
-    for index in 0..count {
-        // SAFETY: `index` is within the fixed exclusion array.
-        let Some(text) = c_string(&proxy.exclusion_list[index]) else {
-            continue;
-        };
-        for entry in text.split(',') {
-            let entry = entry.trim();
-            if !entry.is_empty() {
-                exclusions.push(entry.to_owned());
-            }
-        }
-    }
+    let exclusions = proxy.exclusion_list[..count]
+        .iter()
+        .filter_map(c_string)
+        .collect();
     Ok(Some((host, proxy.port, exclusions)))
 }
 
@@ -129,127 +120,34 @@ fn c_string(value: &[c_char; MAX_STR]) -> Option<String> {
         .map(|text| text.to_string_lossy().into_owned())
 }
 
-/// Whether the system's exclusion list covers `host`.
-///
-/// The rules are Network Kit's: an entry matches the host itself or any
-/// subdomain of it, names compare without case, protocol prefixes and ports
-/// are ignored, IP entries match the whole address, and a lone `*` disables
-/// the proxy for every host. A `*` mixed with other entries does not take
-/// effect, as in the system's own matching.
-fn excluded(host: &str, exclusions: &[String]) -> bool {
-    let host = normalize_host(host);
-    if host.is_empty() {
-        return false;
-    }
-    let host_ip = host.parse::<IpAddr>().ok();
-    let mut has_entry = false;
-    let mut all_wildcard = true;
-    let mut matched = false;
-    for entry in exclusions {
-        let entry = normalize_host(entry);
-        if entry.is_empty() {
-            continue;
-        }
-        has_entry = true;
-        if entry == "*" {
-            continue;
-        }
-        all_wildcard = false;
-        let entry_ip = entry.parse::<IpAddr>().ok();
-        if let Some(host_ip) = host_ip {
-            // An IP host matches only an equal address; a domain entry never
-            // covers it, and a partial address never matches.
-            if entry_ip == Some(host_ip) {
-                matched = true;
-            }
-            continue;
-        }
-        if entry_ip.is_some() {
-            // An IP entry names one address, not a domain suffix.
-            continue;
-        }
-        if host == entry || host.ends_with(&format!(".{entry}")) {
-            matched = true;
-        }
-    }
-    matched || (has_entry && all_wildcard)
-}
-
-/// A host or exclusion entry without case, a protocol prefix, a path, a port,
-/// a bracketed IPv6 wrapper, a trailing dot, or surrounding space.
-fn normalize_host(value: &str) -> String {
-    let value = value.trim();
-    let value = value.split_once("://").map_or(value, |(_, rest)| rest);
-    let value = value.split(['/', '?', '#']).next().unwrap_or(value);
-    let value = if let Some(rest) = value.strip_prefix('[') {
-        rest.find(']').map_or(rest, |end| &rest[..end])
-    } else {
-        match value.rsplit_once(':') {
-            Some((host, port))
-                if !host.contains(':')
-                    && !port.is_empty()
-                    && port.chars().all(|c| c.is_ascii_digit()) =>
-            {
-                host
-            }
-            _ => value,
-        }
-    };
-    value.trim_end_matches('.').to_ascii_lowercase()
+/// The servers that skip the proxy. Network Kit's own HTTP client (netstack's
+/// `IsHostNameExcluded`) takes each comma-separated entry as a whole server
+/// name in which `*` stands for any characters, so `example.com` is that
+/// server alone, `*.example.com` its subdomains and `192.168.*` a network, and
+/// an entry of `*` skips the proxy for every server. Windows, macOS and
+/// Android write their lists the same way.
+fn bypass(exclusions: &[String]) -> Bypass {
+    Bypass::parse_wildcards(&exclusions.join(","))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::excluded;
+    use super::bypass;
 
     fn entries(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
     }
 
     #[test]
-    fn matches_domains_and_their_subdomains() {
-        let list = entries(&["example.com", "ample.com"]);
-        assert!(excluded("example.com", &list));
-        assert!(excluded("mail.example.com", &list));
-        assert!(excluded("AMPLE.COM", &list));
-        assert!(excluded("www.ample.com", &list));
-        assert!(!excluded("notexample.com", &list));
-        assert!(!excluded("example.com.org", &list));
-    }
-
-    #[test]
-    fn a_lone_wildcard_bypasses_every_host() {
-        let list = entries(&["*"]);
-        assert!(excluded("anything.test", &list));
-        // Mixed with names, the system's wildcard does not take effect.
-        let list = entries(&["*", "example.com"]);
-        assert!(excluded("example.com", &list));
-        assert!(!excluded("anything.test", &list));
-    }
-
-    #[test]
-    fn matches_ips_by_address_and_not_by_prefix() {
-        let list = entries(&["10.0.0.1", "2001:0db8:0:0:0:0:0:1"]);
-        assert!(excluded("10.0.0.1", &list));
-        assert!(!excluded("10.0.0.2", &list));
-        assert!(!excluded("10.0.0.10", &list));
-        assert!(excluded("2001:db8::1", &list));
-        let list = entries(&["192.168.1"]);
-        assert!(!excluded("192.168.1.2", &list));
-        let list = entries(&["192.168.1.2"]);
-        assert!(!excluded("host.192.168.1.2", &list));
-    }
-
-    #[test]
-    fn ignores_protocols_ports_paths_and_trailing_dots() {
-        let list = entries(&[
-            "https://[::1]:8080/x",
-            "http://corp.test:443/path",
-            "example.com.",
-        ]);
-        assert!(excluded("::1", &list));
-        assert!(excluded("host.corp.test", &list));
-        assert!(excluded("example.com", &list));
-        assert!(!excluded("other.test", &list));
+    fn exclusions_follow_the_system_rules() {
+        let list = bypass(&entries(&["example.com", "*.corp.example, 192.168.*"]));
+        assert!(list.skips("example.com"));
+        assert!(!list.skips("www.example.com"));
+        assert!(list.skips("mail.corp.example"));
+        assert!(!list.skips("corp.example"));
+        assert!(list.skips("192.168.1.20"));
+        assert!(!list.skips("10.0.0.1"));
+        assert!(bypass(&entries(&["example.com", "*"])).skips("anything.test"));
+        assert!(!bypass(&[]).skips("example.com"));
     }
 }
