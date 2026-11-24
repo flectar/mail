@@ -1305,7 +1305,7 @@ fn addresses(values: Option<&[jmap_client::email::EmailAddress]>) -> Vec<Address
         .unwrap_or_default()
         .iter()
         .map(|value| Address {
-            name: value.name().map(str::to_owned),
+            name: value.name().and_then(crate::mime::display_name),
             email: value.email().to_owned(),
         })
         .collect()

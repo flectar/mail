@@ -7770,8 +7770,8 @@ impl Core {
 
         let mut safe_name = safe_filename(
             &filename
-                .map(|name| crate::mime::decode_encoded_words(&name))
                 .or(parsed_name)
+                .map(|name| crate::mime::shown_attachment_name(&name))
                 .unwrap_or_else(|| format!("attachment-{attachment_id}")),
         );
         // Invites and other body parts often carry no filename; give the temp
@@ -7807,15 +7807,6 @@ impl Core {
             tracing::debug!(%error,"attachment text indexing deferred");
         }
         Ok(path_str)
-    }
-
-    /// Extract an attachment and write it to a caller-chosen destination (the
-    /// "download" / save-as path). Reuses `get_attachment` so extraction and
-    /// filename handling stay in one place.
-    pub async fn save_attachment(&self, attachment_id: i64, dest: String) -> Result<()> {
-        let src = self.get_attachment(attachment_id).await?;
-        tokio::fs::copy(&src, &dest).await?;
-        Ok(())
     }
 
     /// Compose "To" autocomplete. `account_id` Some scopes suggestions to the

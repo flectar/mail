@@ -200,6 +200,40 @@ pub struct PlannedAttachment {
     pub message: Option<u16>,
 }
 
+/// `text` without Unicode's bidirectional controls (its `Bidi_Control`
+/// characters). They make a name read as something else, with a
+/// right-to-left override `invoice_\u{202E}fdp.exe` shows as
+/// `invoice_exe.pdf`. Right-to-left names read the same without them, since
+/// the bidirectional algorithm orders their letters by itself. Joiners stay,
+/// as Persian text and emoji need them.
+pub fn without_bidi_controls(text: &str) -> std::borrow::Cow<'_, str> {
+    fn is_bidi_control(c: char) -> bool {
+        matches!(
+            c,
+            '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+        )
+    }
+    if text.contains(is_bidi_control) {
+        text.chars()
+            .filter(|&c| !is_bidi_control(c))
+            .collect::<String>()
+            .into()
+    } else {
+        text.into()
+    }
+}
+
+/// An attachment's stored name the way the app shows it and saves it under.
+/// Rows synced before encoded-words were decoded get decoded here.
+pub fn shown_attachment_name(stored: &str) -> String {
+    without_bidi_controls(&decode_encoded_words(stored)).into_owned()
+}
+
+/// A sender's or recipient's display name the way it is stored.
+pub(crate) fn display_name(name: &str) -> Option<String> {
+    Some(without_bidi_controls(name).trim().to_owned()).filter(|name| !name.is_empty())
+}
+
 /// Decode RFC 2047 encoded-words (`=?charset?enc?text?=`) embedded in a header
 /// parameter value. IMAP BODYSTRUCTURE hands back `name`/`filename` parameters
 /// verbatim, and many mailers place encoded-words there (even though RFC 2231
@@ -493,7 +527,7 @@ fn envelope_headers(envelope: &async_imap::imap_proto::Envelope<'_>) -> Embedded
                 let mailbox = address.mailbox.as_deref()?;
                 let host = address.host.as_deref()?;
                 Some(Address {
-                    name: Some(text(address.name.as_deref())).filter(|name| !name.is_empty()),
+                    name: display_name(&text(address.name.as_deref())),
                     email: format!(
                         "{}@{}",
                         String::from_utf8_lossy(mailbox),
@@ -1088,6 +1122,50 @@ mod selective_section_tests {
     }
 
     #[test]
+    fn names_lose_bidirectional_controls() {
+        assert_eq!(
+            shown_attachment_name("invoice_\u{202E}fdp.exe"),
+            "invoice_fdp.exe"
+        );
+        // `4oCu` is the Base64 of the UTF-8 bytes for U+202E.
+        assert_eq!(shown_attachment_name("=?utf-8?B?4oCu?=fdp.exe"), "fdp.exe");
+        for control in [
+            '\u{061C}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}',
+            '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+        ] {
+            assert_eq!(without_bidi_controls(&format!("a{control}b")), "ab");
+        }
+        // Joiners belong to Persian words and emoji.
+        let persian = "\u{645}\u{6CC}\u{200C}\u{62E}\u{648}\u{627}\u{647}\u{645}";
+        assert_eq!(without_bidi_controls(persian), persian);
+        assert!(matches!(
+            without_bidi_controls("plain"),
+            std::borrow::Cow::Borrowed("plain")
+        ));
+        assert_eq!(display_name(" \u{202E} "), None);
+
+        let parsed = parse_message(
+            "From: \"PayPal \u{202E}ecivres\" <x@example.com>\r\n\
+             To: \"\u{2067}Ana\u{2069}\" <ana@example.com>\r\n\
+             Subject: Hi\r\n\
+             Content-Type: multipart/mixed; boundary=b\r\n\
+             \r\n\
+             --b\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             Hello\r\n\
+             --b--\r\n"
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.headers.from.unwrap().name.as_deref(),
+            Some("PayPal ecivres")
+        );
+        assert_eq!(parsed.headers.to[0].name.as_deref(), Some("Ana"));
+    }
+
+    #[test]
     fn decode_encoded_words_covers_common_shapes() {
         // Plain ASCII is returned untouched (fast path).
         assert_eq!(decode_encoded_words("report.pdf"), "report.pdf");
@@ -1243,7 +1321,7 @@ pub struct ParsedBody {
 
 fn addr_from(a: &mail_parser::Addr) -> Option<Address> {
     a.address().map(|e| Address {
-        name: a.name().map(|n| n.to_string()),
+        name: a.name().and_then(display_name),
         email: e.to_string(),
     })
 }
@@ -1263,6 +1341,17 @@ fn collect_addrs(value: Option<&mail_parser::Address>) -> Vec<Address> {
         }
     }
     out
+}
+
+/// Whether `url` is a `data:` URL, read the way URL parsers read it: they
+/// skip spaces and control characters before it and tabs and newlines in it.
+fn is_data_url(url: &str) -> bool {
+    url.chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .skip_while(|c| *c <= ' ')
+        .take(5)
+        .map(|c| c.to_ascii_lowercase())
+        .eq("data:".chars())
 }
 
 static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
@@ -1288,7 +1377,8 @@ static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
         "html", "head", "body", "meta", "title", "table", "thead", "tbody", "tfoot", "tr", "td",
         "th", "center", "font", "img", "style",
     ])
-    .add_tag_attributes("meta", ["name", "content", "http-equiv"])
+    // Not `http-equiv`, which can refresh or redirect the page it is in.
+    .add_tag_attributes("meta", ["name", "content"])
     .add_tag_attributes("img", ["src", "alt", "width", "height"])
     .add_tag_attributes("font", ["face", "size", "color"])
     .add_tag_attributes("a", ["href", "title"])
@@ -1298,6 +1388,12 @@ static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
     .url_schemes(std::collections::HashSet::from([
         "http", "https", "mailto", "tel", "cid", "data",
     ]))
+    // `data:` is for pictures a message carries. As a link target it is a
+    // page the message wrote, which a browser shows at an address that
+    // names no site, so links keep their text and lose such targets.
+    .attribute_filter(|_, attribute, value| {
+        (attribute != "href" || !is_data_url(value)).then(|| value.into())
+    })
     // CSS is needed by the native Blitz renderer for email typography and
     // layout. It is still inert here because executable script content stays
     // stripped and the renderer does not execute HTML.
@@ -4650,6 +4746,32 @@ mod tests {
         assert!(!cleaned.contains("<script"), "cleaned: {cleaned}");
         assert!(!cleaned.contains("alert(1)"), "cleaned: {cleaned}");
         assert!(cleaned.contains("<p>Mail</p>"), "cleaned: {cleaned}");
+    }
+
+    #[test]
+    fn sanitizing_html_drops_data_links_and_refreshes() {
+        let cleaned = sanitize_html(
+            "<html><head><meta http-equiv=\"refresh\" content=\"0;url=https://evil.example\">\
+             <meta name=\"viewport\" content=\"width=device-width\"></head><body>\
+             <a href=\"data:text/html,<p>Sign in</p>\">One</a>\
+             <a href=\" \tDa\nTa:text/html,x\">Two</a>\
+             <a href=\"https://example.com/data:x\">Three</a>\
+             <img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"Logo\"></body></html>",
+        );
+        // Without `http-equiv` the refresh's content is inert text.
+        assert!(!cleaned.contains("http-equiv"), "cleaned: {cleaned}");
+        assert!(cleaned.contains("name=\"viewport\""), "cleaned: {cleaned}");
+        assert!(!cleaned.contains("text/html"), "cleaned: {cleaned}");
+        assert!(cleaned.contains(">One</a>"), "cleaned: {cleaned}");
+        assert!(cleaned.contains(">Two</a>"), "cleaned: {cleaned}");
+        assert!(
+            cleaned.contains("href=\"https://example.com/data:x\""),
+            "cleaned: {cleaned}"
+        );
+        assert!(
+            cleaned.contains("src=\"data:image/png;base64,iVBORw0KGgo=\""),
+            "cleaned: {cleaned}"
+        );
     }
 
     #[test]

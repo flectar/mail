@@ -36,7 +36,7 @@ fn summary_from_row(row: &Row) -> rusqlite::Result<ThreadSummary> {
             .transpose()?
             .map(|(id, filename, mime_type, size)| AttachmentMeta {
                 id,
-                filename,
+                filename: filename.map(|name| crate::mime::shown_attachment_name(&name)),
                 mime_type,
                 size,
                 is_inline: false,
@@ -687,7 +687,7 @@ fn message_summary_from_row(row: &Row) -> rusqlite::Result<MessageSummary> {
             .transpose()?
             .map(|(id, filename, mime_type, size)| AttachmentMeta {
                 id,
-                filename,
+                filename: filename.map(|name| crate::mime::shown_attachment_name(&name)),
                 mime_type,
                 size,
                 is_inline: false,
