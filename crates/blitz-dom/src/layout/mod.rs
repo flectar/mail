@@ -260,8 +260,46 @@ impl LayoutPassState<'_> {
         let mut output = self.dispatch_child_layout(node_id, inputs, block_ctx);
         if inputs.run_mode == RunMode::PerformLayout {
             compute_oof_layout(self, node_id, &mut output);
+            // Taffy's block layout finds a block container's first baseline
+            // only. Its last is that of its last in-flow child that has one,
+            // which an inline block sits on (CSS 2.1 section 10.8.1).
+            let dom_id = dom_node_id(node_id);
+            let node = &self.nodes[dom_id];
+            let last_baseline = output.baselines.last.or_else(|| {
+                (!node.flags.is_inline_root()
+                    && !node.flags.is_table_root()
+                    && matches!(node.taffy_display(), Display::Block | Display::FlowRoot))
+                .then(|| self.last_in_flow_baseline(dom_id))
+                .flatten()
+            });
+            if let NodeData::Element(data) | NodeData::AnonymousBlock(data) =
+                &mut self.nodes[dom_id].data
+            {
+                data.layout_data_mut().last_baseline = last_baseline;
+            }
         }
         output
+    }
+
+    /// The last baseline of a block container's last in-flow child that has
+    /// one, from the container's top, as its children were last laid out.
+    fn last_in_flow_baseline(&self, dom_id: crate::NodeId) -> Option<f32> {
+        let node = &self.nodes[dom_id];
+        let children = node.layout_children.borrow();
+        children.as_deref()?.iter().rev().find_map(|&child_id| {
+            let child = &self.nodes[child_id];
+            let (NodeData::Element(data) | NodeData::AnonymousBlock(data)) = &child.data else {
+                return None;
+            };
+            let floats = child
+                .primary_styles()
+                .is_some_and(|style| style.clone_float() != style::computed_values::float::T::None);
+            if child.is_out_of_flow() || floats {
+                return None;
+            }
+            let baseline = data.layout_data().last_baseline?;
+            Some(child.unrounded_layout().location.y + baseline)
+        })
     }
 
     /// The style of a node being laid out *by* the node whose algorithm is currently running,

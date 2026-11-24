@@ -444,12 +444,20 @@ impl LayoutPassState<'_> {
                 // without laying out its content, so without the baseline its
                 // line sits on, and a table row measured that way came out
                 // taller than it is laid out. As Taffy's flexbox does for
-                // baseline alignment, lay the box out to find its baseline.
+                // baseline alignment, lay the box out to find its baseline. A
+                // block container finds its last baseline only when laid out,
+                // so one sitting on it is laid out too.
+                let on_baseline = ibox.vertical_align.alignment
+                    == parley::AlignmentBaseline::Baseline
+                    && !matches!(
+                        ibox.vertical_align.shift,
+                        parley::BaselineShift::Top | parley::BaselineShift::Bottom
+                    );
                 if exports_baseline
                     && box_inputs.run_mode == RunMode::ComputeSize
                     && box_inputs.axis != RequestedAxis::Horizontal
-                    && output.baselines.first.is_none()
                     && output.baselines.last.is_none()
+                    && (output.baselines.first.is_none() || (uses_last_baseline && on_baseline))
                 {
                     output = self.compute_child_layout(
                         taffy::NodeId::from(ibox.id),
@@ -461,9 +469,21 @@ impl LayoutPassState<'_> {
                     );
                 }
                 ibox.width = (margin.left + margin.right + output.size.width) * scale;
+                // A block container's last baseline, which only its latest
+                // layout records, for a box sitting on it.
+                let recorded_last = (uses_last_baseline && on_baseline)
+                    .then(|| {
+                        let node = &self.nodes[NodeId::from_u64(ibox.id)];
+                        node.element_data()?.layout_data().last_baseline
+                    })
+                    .flatten();
                 ibox.baseline = if exports_baseline {
                     let baseline = if uses_last_baseline {
-                        output.baselines.last.or(output.baselines.first)
+                        output
+                            .baselines
+                            .last
+                            .or(recorded_last)
+                            .or(output.baselines.first)
                     } else {
                         output.baselines.first.or(output.baselines.last)
                     };

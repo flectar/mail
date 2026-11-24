@@ -1,0 +1,125 @@
+diff --git a/crates/blitz-dom/src/layout/inline.rs b/crates/blitz-dom/src/layout/inline.rs
+index 94fe6f8..931da5b 100644
+--- a/crates/blitz-dom/src/layout/inline.rs
++++ b/crates/blitz-dom/src/layout/inline.rs
+@@ -444,12 +444,20 @@ impl LayoutPassState<'_> {
+                 // without laying out its content, so without the baseline its
+                 // line sits on, and a table row measured that way came out
+                 // taller than it is laid out. As Taffy's flexbox does for
+-                // baseline alignment, lay the box out to find its baseline.
++                // baseline alignment, lay the box out to find its baseline. A
++                // block container finds its last baseline only when laid out,
++                // so one sitting on it is laid out too.
++                let on_baseline = ibox.vertical_align.alignment
++                    == parley::AlignmentBaseline::Baseline
++                    && !matches!(
++                        ibox.vertical_align.shift,
++                        parley::BaselineShift::Top | parley::BaselineShift::Bottom
++                    );
+                 if exports_baseline
+                     && box_inputs.run_mode == RunMode::ComputeSize
+                     && box_inputs.axis != RequestedAxis::Horizontal
+-                    && output.baselines.first.is_none()
+                     && output.baselines.last.is_none()
++                    && (output.baselines.first.is_none() || (uses_last_baseline && on_baseline))
+                 {
+                     output = self.compute_child_layout(
+                         taffy::NodeId::from(ibox.id),
+@@ -461,9 +469,21 @@ impl LayoutPassState<'_> {
+                     );
+                 }
+                 ibox.width = (margin.left + margin.right + output.size.width) * scale;
++                // A block container's last baseline, which only its latest
++                // layout records, for a box sitting on it.
++                let recorded_last = (uses_last_baseline && on_baseline)
++                    .then(|| {
++                        let node = &self.nodes[NodeId::from_u64(ibox.id)];
++                        node.element_data()?.layout_data().last_baseline
++                    })
++                    .flatten();
+                 ibox.baseline = if exports_baseline {
+                     let baseline = if uses_last_baseline {
+-                        output.baselines.last.or(output.baselines.first)
++                        output
++                            .baselines
++                            .last
++                            .or(recorded_last)
++                            .or(output.baselines.first)
+                     } else {
+                         output.baselines.first.or(output.baselines.last)
+                     };
+diff --git a/crates/blitz-dom/src/layout/mod.rs b/crates/blitz-dom/src/layout/mod.rs
+index 05ff334..f8c9c6a 100644
+--- a/crates/blitz-dom/src/layout/mod.rs
++++ b/crates/blitz-dom/src/layout/mod.rs
+@@ -260,10 +260,48 @@ impl LayoutPassState<'_> {
+         let mut output = self.dispatch_child_layout(node_id, inputs, block_ctx);
+         if inputs.run_mode == RunMode::PerformLayout {
+             compute_oof_layout(self, node_id, &mut output);
++            // Taffy's block layout finds a block container's first baseline
++            // only. Its last is that of its last in-flow child that has one,
++            // which an inline block sits on (CSS 2.1 section 10.8.1).
++            let dom_id = dom_node_id(node_id);
++            let node = &self.nodes[dom_id];
++            let last_baseline = output.baselines.last.or_else(|| {
++                (!node.flags.is_inline_root()
++                    && !node.flags.is_table_root()
++                    && matches!(node.taffy_display(), Display::Block | Display::FlowRoot))
++                .then(|| self.last_in_flow_baseline(dom_id))
++                .flatten()
++            });
++            if let NodeData::Element(data) | NodeData::AnonymousBlock(data) =
++                &mut self.nodes[dom_id].data
++            {
++                data.layout_data_mut().last_baseline = last_baseline;
++            }
+         }
+         output
+     }
+ 
++    /// The last baseline of a block container's last in-flow child that has
++    /// one, from the container's top, as its children were last laid out.
++    fn last_in_flow_baseline(&self, dom_id: crate::NodeId) -> Option<f32> {
++        let node = &self.nodes[dom_id];
++        let children = node.layout_children.borrow();
++        children.as_deref()?.iter().rev().find_map(|&child_id| {
++            let child = &self.nodes[child_id];
++            let (NodeData::Element(data) | NodeData::AnonymousBlock(data)) = &child.data else {
++                return None;
++            };
++            let floats = child
++                .primary_styles()
++                .is_some_and(|style| style.clone_float() != style::computed_values::float::T::None);
++            if child.is_out_of_flow() || floats {
++                return None;
++            }
++            let baseline = data.layout_data().last_baseline?;
++            Some(child.unrounded_layout().location.y + baseline)
++        })
++    }
++
+     /// The style of a node being laid out *by* the node whose algorithm is currently running,
+     /// expressed in that node's writing mode (see `layout::writing_mode`).
+     #[inline]
+diff --git a/crates/blitz-dom/src/node/element.rs b/crates/blitz-dom/src/node/element.rs
+index 793efe9..d154470 100644
+--- a/crates/blitz-dom/src/node/element.rs
++++ b/crates/blitz-dom/src/node/element.rs
+@@ -139,6 +139,9 @@ pub struct LayoutData {
+     /// recorded by the layout pass for CSSOM geometry lookups.
+     #[cfg(feature = "writing-mode")]
+     pub writing_mode: stylo_taffy::WritingMode,
++    /// The last baseline the node's latest layout found, from its top. A
++    /// block container's is that of its last in-flow child that has one.
++    pub(crate) last_baseline: Option<f32>,
+ }
+ 
+ impl LayoutData {
+@@ -152,6 +155,7 @@ impl LayoutData {
+             scrollable_overflow: KurboRect::ZERO,
+             #[cfg(feature = "writing-mode")]
+             writing_mode: stylo_taffy::WritingMode::empty(),
++            last_baseline: None,
+         }
+     }
+ }

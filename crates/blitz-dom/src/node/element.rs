@@ -139,6 +139,9 @@ pub struct LayoutData {
     /// recorded by the layout pass for CSSOM geometry lookups.
     #[cfg(feature = "writing-mode")]
     pub writing_mode: stylo_taffy::WritingMode,
+    /// The last baseline the node's latest layout found, from its top. A
+    /// block container's is that of its last in-flow child that has one.
+    pub(crate) last_baseline: Option<f32>,
 }
 
 impl LayoutData {
@@ -152,6 +155,7 @@ impl LayoutData {
             scrollable_overflow: KurboRect::ZERO,
             #[cfg(feature = "writing-mode")]
             writing_mode: stylo_taffy::WritingMode::empty(),
+            last_baseline: None,
         }
     }
 }

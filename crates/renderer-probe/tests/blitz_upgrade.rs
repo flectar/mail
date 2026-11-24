@@ -2383,3 +2383,20 @@ fn percentage_columns_share_the_whole_table_in_proportion() {
     close(node(&doc, "#c").final_layout().size.width, 180.0);
     close(node(&doc, "#d").final_layout().size.width, 120.0);
 }
+
+#[test]
+fn an_inline_block_of_blocks_sits_on_its_last_line() {
+    // An inline block's baseline is that of its last line box (CSS 2.1
+    // section 10.8.1), also when its lines are in block children, so a
+    // one-line inline block beside a three-line one lines up with the last
+    // line, as in browsers, in a table cell too. Taffy's block layout reports
+    // a first baseline only, so it lined up with the first.
+    let doc = document(
+        "<style>body{font:16px/20px sans-serif} p{margin:0} .c{display:inline-block;width:150px}</style>
+         <div><div class=c><p>One</p><p>Two</p><p>Three</p></div><div id=b class=c><p>Only one</p></div></div>
+         <table cellspacing=0><tr><td id=t><div class=c><p>One</p><p>Two</p><p>Three</p></div><div id=c class=c><p>Only one</p></div></td></tr></table>",
+    );
+    close(node(&doc, "#b").final_layout().location.y, 40.0);
+    close(node(&doc, "#c").final_layout().location.y, 40.0);
+    close(node(&doc, "#t").final_layout().size.height, 60.0);
+}
