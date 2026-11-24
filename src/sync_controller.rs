@@ -720,7 +720,8 @@ impl Actions {
 
 /// Open a page of the payment provider; `action` names it if that fails.
 fn open_page(ui: &SyncUi, urls: &ExternalUrlOpener, url: &str, action: &str) {
-    match urls.open_external(url) {
+    // The address comes from the server, so only a web page opens.
+    match urls.open_web_page(url) {
         Ok(()) => show_failure(ui, "", ""),
         Err(error) => show_failure(ui, action, &error),
     }

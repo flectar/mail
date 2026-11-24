@@ -282,7 +282,10 @@ struct Pairing {
 
 /// The sync service a [`Core`] holds.
 pub(crate) struct Service {
-    http: reqwest::Client,
+    /// The client of Flectar Mail Sync, or why it couldn't be built. Built
+    /// without the app's proxy and certificate checks, it would go around
+    /// them, so then there is none.
+    http: std::result::Result<reqwest::Client, String>,
     client: Mutex<Option<Arc<SyncClient>>>,
     wake: Notify,
     run_lock: tokio::sync::Mutex<()>,
@@ -365,6 +368,10 @@ fn sync_error(error: SyncError) -> CoreError {
 }
 
 impl Service {
+    fn http(&self) -> Result<reqwest::Client> {
+        self.http.clone().map_err(CoreError::Network)
+    }
+
     pub(crate) fn new() -> Self {
         // Through the app's proxy setting, like the app's other connections.
         let http = crate::net::proxy::http_builder(crate::net::proxy::Owner::App)
@@ -374,7 +381,7 @@ impl Service {
             // wait up to 25 s. Servers send a keep-alive every 15 s.
             .read_timeout(Duration::from_secs(60))
             .build()
-            .unwrap_or_default();
+            .map_err(|error| error.to_string());
         Self {
             http,
             client: Mutex::new(None),
@@ -948,7 +955,7 @@ impl Core {
             device,
         };
         let client = SyncClient::new(
-            self.sync_service().http.clone(),
+            self.sync_service().http()?,
             secrets,
             row.chain.clone(),
             Some(floor),
@@ -1371,7 +1378,7 @@ impl Core {
     /// before sync is turned on. `None` when it is free.
     pub async fn device_sync_offer(&self, server_url: Option<String>) -> Result<Option<SyncOffer>> {
         let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
-        let info = Http::new(self.sync_service().http.clone(), &server_url)
+        let info = Http::new(self.sync_service().http()?, &server_url)
             .info()
             .await
             .map_err(sync_error)?;
@@ -1496,7 +1503,7 @@ impl Core {
         // them must fail here, before the server knows of this device.
         credentials::check_available_async(self.credentials.clone()).await?;
         let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
-        let http = self.sync_service().http.clone();
+        let http = self.sync_service().http()?;
         // Starting over doesn't bring another free trial.
         let (client, code) = if self.had_trial(&server_url).await {
             SyncClient::create_group_without_trial(http, &server_url).await
@@ -1525,7 +1532,7 @@ impl Core {
         // them must fail here, before the server knows of this device.
         credentials::check_available_async(self.credentials.clone()).await?;
         let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
-        let client = SyncClient::recover(self.sync_service().http.clone(), &server_url, &words)
+        let client = SyncClient::recover(self.sync_service().http()?, &server_url, &words)
             .await
             .map_err(sync_error)?;
         self.adopt_client(client, true).await
@@ -1649,7 +1656,7 @@ impl Core {
         // them must fail here, before the server knows of this device.
         credentials::check_available_async(self.credentials.clone()).await?;
         let joining =
-            Joining::scanned(self.sync_service().http.clone(), &qr_code).map_err(sync_error)?;
+            Joining::scanned(self.sync_service().http()?, &qr_code).map_err(sync_error)?;
         Ok(self.finish_join(joining))
     }
 
@@ -1664,7 +1671,7 @@ impl Core {
         // them must fail here, before the server knows of this device.
         credentials::check_available_async(self.credentials.clone()).await?;
         let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
-        let joining = Joining::with_code(self.sync_service().http.clone(), &server_url, &code)
+        let joining = Joining::with_code(self.sync_service().http()?, &server_url, &code)
             .await
             .map_err(sync_error)?;
         Ok(self.finish_join(joining))
@@ -1680,7 +1687,7 @@ impl Core {
         // them must fail here, before the server knows of this device.
         credentials::check_available_async(self.credentials.clone()).await?;
         let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
-        let (joining, qr) = Joining::show_qr_code(self.sync_service().http.clone(), &server_url)
+        let (joining, qr) = Joining::show_qr_code(self.sync_service().http()?, &server_url)
             .await
             .map_err(sync_error)?;
         Ok(PairingCode {

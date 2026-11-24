@@ -14,10 +14,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 #[cfg(feature = "remote-content")]
-use std::{
-    net::{IpAddr, SocketAddr},
-    time::Duration,
-};
+use std::{net::SocketAddr, time::Duration};
 mod scheduler;
 pub type ResourcePriorities = Arc<Mutex<std::collections::HashSet<(usize, u64)>>>;
 pub fn reprioritize_images() {
@@ -436,7 +433,7 @@ async fn pinned_public_client(url: &reqwest::Url) -> Option<reqwest::Client> {
     if addresses.is_empty()
         || addresses
             .iter()
-            .any(|address| !safe_remote_ip(address.ip()))
+            .any(|address| !flectar_mail_core::net::public_ip(address.ip()))
     {
         return None;
     }
@@ -642,45 +639,14 @@ fn safe_remote_url_shape(url: &reqwest::Url) -> bool {
         }
     }
     match url.host() {
-        Some(url::Host::Ipv4(address)) => safe_remote_ip(address.into()),
-        Some(url::Host::Ipv6(address)) => safe_remote_ip(address.into()),
+        Some(url::Host::Ipv4(address)) => flectar_mail_core::net::public_ip(address.into()),
+        Some(url::Host::Ipv6(address)) => flectar_mail_core::net::public_ip(address.into()),
         Some(url::Host::Domain(_)) => true,
         None => false,
     }
 }
 
 #[cfg(feature = "remote-content")]
-fn safe_remote_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => {
-            let octets = ip.octets();
-            !(ip.is_private()
-                || ip.is_loopback()
-                || ip.is_link_local()
-                || ip.is_multicast()
-                || ip.is_unspecified()
-                || ip.is_broadcast()
-                || ip.is_documentation()
-                || octets[0] == 0
-                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
-                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
-                || (octets[0] == 198 && matches!(octets[1], 18 | 19))
-                || octets[0] >= 240)
-        }
-        IpAddr::V6(ip) => {
-            !(ip.is_loopback()
-                || ip.is_unique_local()
-                || ip.is_unicast_link_local()
-                || ip.is_multicast()
-                || ip.is_unspecified()
-                || ip.segments()[..2] == [0x2001, 0x0db8])
-                && ip
-                    .to_ipv4_mapped()
-                    .is_none_or(|mapped| safe_remote_ip(mapped.into()))
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -981,7 +947,10 @@ mod tests {
             "fe80::1",
             "::ffff:127.0.0.1",
         ] {
-            assert!(!safe_remote_ip(value.parse().unwrap()), "{value}");
+            assert!(
+                !flectar_mail_core::net::public_ip(value.parse().unwrap()),
+                "{value}"
+            );
         }
         assert!(safe_remote_url_shape(
             &url::Url::parse("https://example.com/pixel.png").unwrap()

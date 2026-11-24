@@ -52,6 +52,18 @@ impl ExternalUrlOpener {
         }
     }
 
+    /// Open a web page an online service gave, such as a payment page. Only
+    /// an HTTPS address opens: another scheme could start any program the
+    /// system has registered for it.
+    pub(super) fn open_web_page(&self, url: &str) -> Result<(), String> {
+        let address =
+            url::Url::parse(url).map_err(|_| "The page's address is invalid".to_owned())?;
+        if address.scheme() != "https" || address.host_str().is_none() {
+            return Err("The page's address isn't an HTTPS address".into());
+        }
+        self.open_external(address.as_str())
+    }
+
     pub(super) fn open_authorization(&self, url: &str) -> Result<(), String> {
         let address = url::Url::parse(url).map_err(|_| "Sign-in address is invalid".to_owned())?;
         if address.scheme() != "https" || address.host_str().is_none() {
@@ -199,6 +211,27 @@ mod dispatch_tests {
                 assert!(opener.open_authorization(url).is_err(), "{url}");
             }
         }
+    }
+
+    #[test]
+    fn web_pages_open_only_over_https() {
+        let opened = Arc::new(Mutex::new(Vec::new()));
+        let seen = opened.clone();
+        let opener = ExternalUrlOpener::new(move |url| {
+            seen.lock().unwrap().push(url.to_owned());
+            Ok(())
+        });
+        assert!(opener.open_web_page("https://pay.example.com/c/1").is_ok());
+        for url in [
+            "http://pay.example.com/c/1",
+            "file:///etc/passwd",
+            "ms-msdt:/id",
+            "https://",
+            "not a url",
+        ] {
+            assert!(opener.open_web_page(url).is_err(), "{url}");
+        }
+        assert_eq!(*opened.lock().unwrap(), ["https://pay.example.com/c/1"]);
     }
 
     #[test]

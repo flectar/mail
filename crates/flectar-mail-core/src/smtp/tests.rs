@@ -194,3 +194,31 @@ async fn a_send_already_past_its_deadline_writes_nothing() {
     assert!(matches!(result, Err(CoreError::Smtp(_))), "{result:?}");
     assert!(ends.is_empty());
 }
+
+#[tokio::test]
+async fn ehlo_never_names_the_device() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (heard, mut ehlo) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tcp);
+        stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+        let mut line = String::new();
+        stream.read_line(&mut line).await.unwrap();
+        let _ = heard.send(line);
+        let _ = stream.write_all(b"421 Closing\r\n").await;
+    });
+    let _ = send_raw_before(
+        &account(port),
+        &SmtpAuth::Password("secret".into()),
+        "me@example.test",
+        &["alice@example.test".into()],
+        &message(1),
+        None,
+    )
+    .await;
+    // The server writes the name into the Received field every recipient
+    // sees.
+    assert_eq!(ehlo.recv().await.unwrap(), "EHLO flectar.local\r\n");
+}
