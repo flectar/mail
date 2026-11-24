@@ -32,3 +32,4 @@
 0033-superscript-and-subscript-shifts.patch
 0034-shrink-to-fit-widths.patch
 0035-fixed-tables-with-percentage-widths.patch
+0036-measured-inline-block-baselines.patch

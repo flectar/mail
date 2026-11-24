@@ -2336,3 +2336,16 @@ fn a_fixed_table_with_a_percentage_width_fills_the_box_around_it() {
     close(node(&doc, "#f").final_layout().size.width, 400.0);
     close(node(&doc, "#t").final_layout().size.width, 400.0);
 }
+
+#[test]
+fn a_fixed_size_inline_block_keeps_its_baseline_when_its_cell_is_measured() {
+    // An inline block whose styles fix its size sits on its text's baseline
+    // when a table measures its cell, as it does when laid out, so the row is
+    // as tall as the line, 32 pixels as in Chrome. It sat on its bottom edge
+    // while measured, which made the row about 8 pixels taller.
+    let doc = document(
+        "<style>table{border-spacing:0} span{display:inline-block;width:32px;height:32px;line-height:32px;font-size:16px}</style>
+         <table id=t><tr><td><div style='font:15px/1.65 sans-serif'><span>A</span></div></td></tr></table>",
+    );
+    close(node(&doc, "#t").final_layout().size.height, 32.0);
+}

@@ -438,7 +438,28 @@ impl LayoutPassState<'_> {
                 ibox.height = 0.0;
                 ibox.baseline = None;
             } else {
-                let output = self.compute_child_layout(taffy::NodeId::from(ibox.id), box_inputs);
+                let mut output =
+                    self.compute_child_layout(taffy::NodeId::from(ibox.id), box_inputs);
+                // Measured, a box whose styles fix its size returns that size
+                // without laying out its content, so without the baseline its
+                // line sits on, and a table row measured that way came out
+                // taller than it is laid out. As Taffy's flexbox does for
+                // baseline alignment, lay the box out to find its baseline.
+                if exports_baseline
+                    && box_inputs.run_mode == RunMode::ComputeSize
+                    && box_inputs.axis != RequestedAxis::Horizontal
+                    && output.baselines.first.is_none()
+                    && output.baselines.last.is_none()
+                {
+                    output = self.compute_child_layout(
+                        taffy::NodeId::from(ibox.id),
+                        LayoutInput {
+                            run_mode: RunMode::PerformLayout,
+                            axis: RequestedAxis::Both,
+                            ..box_inputs
+                        },
+                    );
+                }
                 ibox.width = (margin.left + margin.right + output.size.width) * scale;
                 ibox.baseline = if exports_baseline {
                     let baseline = if uses_last_baseline {
