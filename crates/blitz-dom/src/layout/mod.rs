@@ -732,6 +732,31 @@ impl LayoutPassState<'_> {
                     if !table_wrapper.ctx.captions.is_empty() {
                         output = table_wrapper.place_captions(inputs, output);
                     }
+                    // In Blink a fixed-layout table with a percentage width is
+                    // a million pixels wide at its max-content size
+                    // (`TableLayoutAlgorithm::ComputeMinMaxSizes`), so a cell,
+                    // float or other box sized to its content takes all the
+                    // room it has around one, as in browsers. Measured where
+                    // its percentage has nothing to resolve against, it takes
+                    // the space available.
+                    if measuring
+                        && is_fixed
+                        && inputs.known_dimensions.width.is_none()
+                        && matches!(
+                            table_wrapper.ctx.style.size.width.tag(),
+                            taffy::CompactLength::PERCENT_TAG | taffy::CompactLength::CALC_TAG
+                        )
+                    {
+                        match inputs.available_space.width {
+                            taffy::AvailableSpace::MaxContent => output.size.width = 1_000_000.0,
+                            taffy::AvailableSpace::Definite(available)
+                                if inputs.parent_size.width.is_none() =>
+                            {
+                                output.size.width = output.size.width.max(available);
+                            }
+                            _ => {}
+                        }
+                    }
 
                     // Absolutely positioned children take no part in the table grid. Their
                     // static position is the top-left of the table's content box.

@@ -2321,3 +2321,18 @@ fn shrink_to_fit_widths_keep_their_fractions_and_lines() {
     assert_eq!(a.y, b.y);
     assert!((b.x - 10.25).abs() < 0.01, "{} != 10.25", b.x);
 }
+
+#[test]
+fn a_fixed_table_with_a_percentage_width_fills_the_box_around_it() {
+    // Blink makes a fixed-layout table with a percentage width a million
+    // pixels wide at its max-content size, so a float or an auto-width table
+    // around one takes all the room it has, as the columns around SendGrid's
+    // image wrappers do on phones, whatever the images' sizes.
+    let doc = document(
+        "<div id=f style='float:left'><table style='table-layout:fixed;width:100%'><tr><td><div style='width:10px;height:10px'></div></td></tr></table></div>
+         <div style='clear:both'></div>
+         <table id=t><tr><td><table style='table-layout:fixed;width:100%'><tr><td><div style='width:10px;height:10px'></div></td></tr></table></td></tr></table>",
+    );
+    close(node(&doc, "#f").final_layout().size.width, 400.0);
+    close(node(&doc, "#t").final_layout().size.width, 400.0);
+}
