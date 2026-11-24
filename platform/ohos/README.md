@@ -53,15 +53,18 @@ system fonts explicitly from `/system/fonts`.
 
 ## Prerequisites
 
-All paths are the ones this workspace uses by default; override through the
-environment variables understood by `scripts/env.sh`.
+Paths come from `scripts/env.sh` unless a step says otherwise.
 
 - HarmonyOS SDK root (`OHOS_SDK_ROOT`, default `~/.harmonybrew/opt/ohos-sdk`)
   plus its native subdirectory (`OHOS_SDK_NATIVE`).
-- `hdc` and a DevEco-created signing material directory
-  (`$HOME/Documents/ohos/config`, bound to the device UDID). The store
-  passphrase is fetched at build time by the local `sign-huawei.sh` helper and
-  is never stored in this repository.
+- `hdc` and explicit debug signing material: the AGC debug profile,
+  certificate and keystore through `DEBUG_PROFILE`, `DEBUG_CERT` and
+  `DEBUG_P12` (plus `DEBUG_KEY_ALIAS`, and `DEBUG_KEY_PWD`/
+  `DEBUG_STORE_PWD` or `DEBUG_PWD_FILE`). A debug build without this material
+  stops before compiling, so no signing path is guessed.
+
+  Neither password is stored in this repository. Debug signing is local-only:
+  CI builds with `SKIP_SIGN=1` and never receives this material.
 - `node` with hvigor installed (`$HOME/arkts-build/node_modules/@ohos/hvigor`),
   and OpenJDK 17 (`$HOME/.harmonybrew/opt/openjdk@17`).
 - The Rust `aarch64-unknown-linux-ohos` target (built natively on the device).
@@ -89,14 +92,35 @@ Release builds are signed with the AGC material through `hap-sign-tool`:
 ```sh
 RELEASE_SIGN=1 \
 RELEASE_P12=release.p12 RELEASE_CERT=com.flectar.mail.cer \
-RELEASE_PROFILE=FlectarMailProfileRelease.p7b \
+RELEASE_PROFILE=ACLReleaseProfileRelease.p7b \
 RELEASE_KEY_ALIAS=releasekey RELEASE_KEY_PWD=... RELEASE_STORE_PWD=... \
 APP=mail PROFILE=release sh platform/ohos/scripts/build-hap.sh
 ```
 
-Without `RELEASE_SIGN=1` the script uses the DevEco auto-signing material,
-which is bound to the bundle it was issued for: if that material was generated
-for a different name, pass `BUNDLE=<that name>` for local debug builds.
+The ACL-enabled profile is required because the app declares
+`ohos.permission.READ_PASTEBOARD`.
+
+Without `RELEASE_SIGN=1` the script signs a debug hap and requires explicit
+material: set `DEBUG_PROFILE`, `DEBUG_CERT` and `DEBUG_P12`, plus
+`DEBUG_KEY_ALIAS` if it is not `releasekey`, and `DEBUG_KEY_PWD`/
+`DEBUG_STORE_PWD` or `DEBUG_PWD_FILE`:
+
+```sh
+DEBUG_PROFILE=/path/to/ACLDebugProfileDebug.p7b \
+DEBUG_CERT=/path/to/com.flectar.mail.debug.cer \
+DEBUG_P12=/path/to/release.p12 DEBUG_PWD_FILE=/path/to/release.p12.pwd \
+APP=mail sh platform/ohos/scripts/build-hap.sh
+```
+
+The debug and release profiles are checked before the build: the profile must
+name the bundle, have the mode's type (`debug` for a debug build, `release`
+for `RELEASE_SIGN=1`), and still be valid. A mismatch stops the build before
+signing instead of producing a hap the device rejects with
+`verify signature failed`.
+
+Debug signing is for local device testing only: CI builds with `SKIP_SIGN=1`
+and never receives the keystore or its password. The password comes from
+`DEBUG_KEY_PWD`/`DEBUG_STORE_PWD` or `DEBUG_PWD_FILE`.
 
 `bm install -r -d` is deliberate: `hdc install` rejects the hap ("install
 version downgrade") because the shared bundle name carries the DevEco

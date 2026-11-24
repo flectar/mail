@@ -6,16 +6,18 @@
 # template selects the native library).
 #
 # Signing modes:
-#   default         DevEco auto-signing material under $HOME/Documents/ohos/config
-#                   (bound to this machine's UDID) through the ohos-workload
-#                   sign-huawei.sh helper. The encrypted store password is read
-#                   at run time from the DevEco project that generated the
-#                   material; it is never stored in this repository.
+#   default         Debug signing. Explicit material is required: set
+#                   DEBUG_PROFILE, DEBUG_CERT and DEBUG_P12 (plus
+#                   DEBUG_KEY_ALIAS, and DEBUG_KEY_PWD/DEBUG_STORE_PWD or
+#                   DEBUG_PWD_FILE). A build without it stops before compiling.
 #   RELEASE_SIGN=1  AGC release material passed through the environment
 #                   (RELEASE_P12, RELEASE_CERT, RELEASE_PROFILE, key alias and
 #                   passwords) and applied by hap-sign-tool directly.
 #   SKIP_SIGN=1     Stop at the unsigned hap (build-only CI and pull-request
 #                   checks, which must never touch signing material).
+#
+# Both debug and release profiles are checked before the build: the profile
+# must name $BUNDLE, have the mode's type (debug/release), and not be expired.
 set -e
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -67,15 +69,91 @@ NODE_BIN="$(command -v node || true)"
 [ -n "$NODE_BIN" ] || NODE_BIN="$HOME/.harmonybrew/bin/node"
 HVIGOR_JS="${HVIGOR_JS:-$HOME/arkts-build/node_modules/@ohos/hvigor/bin/hvigor.js}"
 JAVA_HOME="${JAVA_HOME:-$HOME/.harmonybrew/opt/openjdk@17}"
-DEVECO_PROJECT_PROFILE="$HOME/Documents/DevEcoStudioProjects/MyApplication/build-profile.json5"
-SIGN_CFG="${SIGN_CFG:-$HOME/Documents/ohos/config}"
-SIGN_HELPER="${SIGN_HELPER:-$HOME/springsources/ohos-workload/scripts/sign-huawei.sh}"
+# Explicit debug material for the AGC debug profile. No path is assumed here:
+# set DEBUG_PROFILE, DEBUG_CERT and DEBUG_P12 for the bundle being built.
+DEBUG_PROFILE="${DEBUG_PROFILE:-}"
+DEBUG_CERT="${DEBUG_CERT:-}"
+DEBUG_P12="${DEBUG_P12:-}"
+DEBUG_KEY_ALIAS="${DEBUG_KEY_ALIAS:-releasekey}"
+DEBUG_KEY_PWD="${DEBUG_KEY_PWD:-}"
+DEBUG_STORE_PWD="${DEBUG_STORE_PWD:-}"
+DEBUG_PWD_FILE="${DEBUG_PWD_FILE:-}"
 HVIGOR_LOG="$BUILD_DIR/hvigor.log"
+
+# Print the bundle name, type and not-after of a signed profile. The tool logs
+# before the JSON, so start at the first brace and decode one value.
+profile_fields() {
+    "$HAP_SIGN_TOOL" verify-profile -inFile "$1" 2>/dev/null \
+        | python3 -c '
+import json
+import sys
+
+text = sys.stdin.read()
+start = text.find("{")
+if start < 0:
+    sys.exit(1)
+profile, _ = json.JSONDecoder().raw_decode(text[start:])
+bundle_info = profile.get("bundle-info") or {}
+validity = profile.get("validity") or {}
+print(bundle_info.get("bundle-name") or profile.get("bundle-name", ""))
+print(profile.get("type", ""))
+print(validity.get("not-after", 0))
+'
+}
+
+# Check a profile before the build: it must name the bundle, have the expected
+# debug/release type, and still be valid.
+validate_profile() {
+    CHECK_PROFILE=$1
+    CHECK_TYPE=$2
+    [ -f "$CHECK_PROFILE" ] || die "profile not found: $CHECK_PROFILE"
+    CHECK_FIELDS="$(profile_fields "$CHECK_PROFILE")" \
+        || die "cannot read profile: $CHECK_PROFILE"
+    CHECK_BUNDLE="$(printf '%s\n' "$CHECK_FIELDS" | sed -n '1p')"
+    CHECK_PROFILE_TYPE="$(printf '%s\n' "$CHECK_FIELDS" | sed -n '2p')"
+    CHECK_NOT_AFTER="$(printf '%s\n' "$CHECK_FIELDS" | sed -n '3p')"
+    [ "$CHECK_BUNDLE" = "$BUNDLE" ] \
+        || die "profile $CHECK_PROFILE is for '$CHECK_BUNDLE', not '$BUNDLE'"
+    [ "$CHECK_PROFILE_TYPE" = "$CHECK_TYPE" ] \
+        || die "profile $CHECK_PROFILE is type '$CHECK_PROFILE_TYPE', not '$CHECK_TYPE'"
+    case "$CHECK_NOT_AFTER" in
+        ''|*[!0-9]*) ;;
+        *)
+            [ "$CHECK_NOT_AFTER" -gt "$(date +%s)" ] \
+                || die "profile $CHECK_PROFILE expired (not-after $CHECK_NOT_AFTER)"
+            ;;
+    esac
+}
 
 [ -f "$HVIGOR_JS" ] || die "hvigor not found: $HVIGOR_JS"
 [ -d "$JAVA_HOME" ] || die "JAVA_HOME not found: $JAVA_HOME"
-if [ "${SKIP_SIGN:-0}" != "1" ] && [ "${RELEASE_SIGN:-0}" != "1" ]; then
-    [ -f "$SIGN_HELPER" ] || die "sign helper not found: $SIGN_HELPER"
+
+# Check signing material before the long Rust build, not after it.
+if [ "${SKIP_SIGN:-0}" != "1" ]; then
+    [ -x "$HAP_SIGN_TOOL" ] || die "hap-sign-tool not found: $HAP_SIGN_TOOL"
+    if [ "${RELEASE_SIGN:-0}" = "1" ]; then
+        : "${RELEASE_P12:?RELEASE_SIGN=1 needs RELEASE_P12 (AGC keystore .p12)}"
+        : "${RELEASE_CERT:?RELEASE_SIGN=1 needs RELEASE_CERT (AGC app certificate)}"
+        : "${RELEASE_PROFILE:?RELEASE_SIGN=1 needs RELEASE_PROFILE (signed .p7b profile)}"
+        : "${RELEASE_KEY_ALIAS:?RELEASE_SIGN=1 needs RELEASE_KEY_ALIAS}"
+        : "${RELEASE_KEY_PWD:?RELEASE_SIGN=1 needs RELEASE_KEY_PWD}"
+        : "${RELEASE_STORE_PWD:?RELEASE_SIGN=1 needs RELEASE_STORE_PWD}"
+        [ -f "$RELEASE_P12" ] || die "release keystore not found: $RELEASE_P12"
+        [ -f "$RELEASE_CERT" ] || die "release certificate not found: $RELEASE_CERT"
+        validate_profile "$RELEASE_PROFILE" release
+    else
+        if [ -z "$DEBUG_PROFILE" ] || [ -z "$DEBUG_CERT" ] || [ -z "$DEBUG_P12" ]; then
+            die "debug signing needs DEBUG_PROFILE, DEBUG_CERT and DEBUG_P12; set SKIP_SIGN=1 to build unsigned"
+        fi
+        [ -f "$DEBUG_P12" ] || die "debug keystore not found: $DEBUG_P12"
+        [ -f "$DEBUG_CERT" ] || die "debug certificate not found: $DEBUG_CERT"
+        if [ -z "$DEBUG_KEY_PWD" ] && [ -z "$DEBUG_STORE_PWD" ] && [ -n "$DEBUG_PWD_FILE" ]; then
+            [ -f "$DEBUG_PWD_FILE" ] || die "debug password file not found: $DEBUG_PWD_FILE"
+        fi
+        [ -n "$DEBUG_KEY_PWD" ] || [ -n "$DEBUG_STORE_PWD" ] || [ -n "$DEBUG_PWD_FILE" ] \
+            || die "debug signing needs DEBUG_KEY_PWD, DEBUG_STORE_PWD or DEBUG_PWD_FILE"
+        validate_profile "$DEBUG_PROFILE" debug
+    fi
 fi
 
 mkdir -p "$BUILD_DIR"
@@ -353,21 +431,16 @@ log "unsigned: $UNSIGNED ($(stat -c%s "$UNSIGNED") bytes)"
 
 # 5. sign --------------------------------------------------------------------
 # SKIP_SIGN=1 stops at the unsigned hap (build-only CI; pull request checks
-# never touch signing material). Default: the DevEco debug material (bound to
-# this machine's UDID) through the ohos-workload helper. RELEASE_SIGN=1
-# switches to the AGC release material supplied through the environment:
+# never touch signing material). RELEASE_SIGN=1 uses the AGC release material:
 #   RELEASE_P12 (keystore) RELEASE_CERT (app certificate) RELEASE_PROFILE (signed .p7b)
 #   RELEASE_KEY_ALIAS RELEASE_KEY_PWD RELEASE_STORE_PWD
+# Otherwise explicit DEBUG_* material signs a debug hap. Both profiles were
+# checked before the build; debug signing is local-only, so the password never
+# reaches CI.
 if [ "${SKIP_SIGN:-0}" = "1" ]; then
     log "SKIP_SIGN=1: keeping the unsigned hap"
     SIGNED="$UNSIGNED"
 elif [ "${RELEASE_SIGN:-0}" = "1" ]; then
-    : "${RELEASE_P12:?RELEASE_SIGN=1 needs RELEASE_P12 (AGC keystore .p12)}"
-    : "${RELEASE_CERT:?RELEASE_SIGN=1 needs RELEASE_CERT (AGC app certificate)}"
-    : "${RELEASE_PROFILE:?RELEASE_SIGN=1 needs RELEASE_PROFILE (signed .p7b profile)}"
-    : "${RELEASE_KEY_ALIAS:?RELEASE_SIGN=1 needs RELEASE_KEY_ALIAS}"
-    : "${RELEASE_KEY_PWD:?RELEASE_SIGN=1 needs RELEASE_KEY_PWD}"
-    : "${RELEASE_STORE_PWD:?RELEASE_SIGN=1 needs RELEASE_STORE_PWD}"
     log "signing with the AGC release material (bundle $BUNDLE)"
     "$HAP_SIGN_TOOL" sign-app -keyAlias "$RELEASE_KEY_ALIAS" -signAlg SHA256withECDSA \
         -mode localSign -signCode 1 \
@@ -381,11 +454,24 @@ elif [ "${RELEASE_SIGN:-0}" = "1" ]; then
         2>&1 | grep -q "verify-app success" || die "release signature verification failed"
     rm -f "$BUILD_DIR/.verify-cert.cer" "$BUILD_DIR/.verify-profile.p7b"
 else
-    ENC_PWD="$(sed -n 's/.*"storePassword"[ \t]*:[ \t]*"\([0-9A-Fa-f]\{32,\}\)".*/\1/p' "$DEVECO_PROJECT_PROFILE" | head -1)"
-    [ -n "$ENC_PWD" ] || die "cannot read the encrypted storePassword from $DEVECO_PROJECT_PROFILE"
-    log "signing with the Huawei debug material (bundle $BUNDLE)"
-    OHOS_ENC_PWD="$ENC_PWD" sh "$SIGN_HELPER" "$UNSIGNED" "$SIGNED" "$SIGN_CFG" \
-        || die "signing failed"
+    if [ -z "$DEBUG_KEY_PWD" ] && [ -z "$DEBUG_STORE_PWD" ] && [ -n "$DEBUG_PWD_FILE" ]; then
+        DEBUG_KEY_PWD="$(tr -d '\r\n' < "$DEBUG_PWD_FILE")"
+        DEBUG_STORE_PWD="$DEBUG_KEY_PWD"
+    fi
+    [ -n "$DEBUG_KEY_PWD" ] || DEBUG_KEY_PWD="$DEBUG_STORE_PWD"
+    [ -n "$DEBUG_STORE_PWD" ] || DEBUG_STORE_PWD="$DEBUG_KEY_PWD"
+    log "signing with the debug material (bundle $BUNDLE)"
+    "$HAP_SIGN_TOOL" sign-app -keyAlias "$DEBUG_KEY_ALIAS" -signAlg SHA256withECDSA \
+        -mode localSign -signCode 1 \
+        -appCertFile "$DEBUG_CERT" -profileFile "$DEBUG_PROFILE" \
+        -inFile "$UNSIGNED" -outFile "$SIGNED" \
+        -keystoreFile "$DEBUG_P12" \
+        -keyPwd "$DEBUG_KEY_PWD" -keystorePwd "$DEBUG_STORE_PWD" >/dev/null \
+        || die "debug signing failed"
+    "$HAP_SIGN_TOOL" verify-app -inFile "$SIGNED" \
+        -outCertChain "$BUILD_DIR/.verify-cert.cer" -outProfile "$BUILD_DIR/.verify-profile.p7b" \
+        2>&1 | grep -q "verify-app success" || die "debug signature verification failed"
+    rm -f "$BUILD_DIR/.verify-cert.cer" "$BUILD_DIR/.verify-profile.p7b"
 fi
 
 log "hap: $SIGNED"
