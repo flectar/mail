@@ -141,3 +141,21 @@ fn a_message_without_text_can_be_sent() {
         "a subject alone, or files alone, are a message"
     );
 }
+
+#[test]
+fn a_message_goes_to_cc_or_bcc_alone() {
+    let harness = Harness::new();
+    harness.ui.set_body("See you there".into());
+    harness.settle();
+    assert!(
+        !harness.send(),
+        "a message with no one to go to can't be sent"
+    );
+    harness.ui.set_bcc("ada@example.com".into());
+    harness.settle();
+    assert!(harness.send(), "Bcc alone");
+    harness.ui.set_bcc("".into());
+    harness.ui.set_cc("grace@example.com".into());
+    harness.settle();
+    assert!(harness.send(), "Cc alone");
+}

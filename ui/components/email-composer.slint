@@ -258,7 +258,7 @@ export component EmailComposer inherits Rectangle {
     // Photos going out shrunk are sent once they are. A message needs someone to go to, not
     // text: a file or a subject alone is a message too, and sending asks about a missing subject.
     private property <bool> can-send: !root.sending && !root.shrinking-photos && !root.attaching-files && root.selected-account-id > 0
-        && root.to != "" && AccountMailPreferences.composer-preferences-ready;
+        && (root.to != "" || root.cc != "" || root.bcc != "") && AccountMailPreferences.composer-preferences-ready;
 
     // Pastes what the clipboard holds with its formatting, or as plain text in the message's
     // style when it holds none.
