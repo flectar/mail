@@ -80,25 +80,37 @@ DEBUG_STORE_PWD="${DEBUG_STORE_PWD:-}"
 DEBUG_PWD_FILE="${DEBUG_PWD_FILE:-}"
 HVIGOR_LOG="$BUILD_DIR/hvigor.log"
 
-# Print the bundle name, type and not-after of a signed profile. The tool logs
-# before the JSON, so start at the first brace and decode one value.
+# Print the bundle name, type and not-after of a signed profile. The tool
+# writes the profile to -outFile once its signature verifies: the native
+# hap-sign-tool writes the profile itself, the Java one wraps it as
+# {"verifiedPassed", "message", "content"}.
 profile_fields() {
-    "$HAP_SIGN_TOOL" verify-profile -inFile "$1" 2>/dev/null \
-        | python3 -c '
+    mkdir -p "$BUILD_DIR"
+    PROFILE_JSON="$BUILD_DIR/.profile-check.json"
+    rm -f "$PROFILE_JSON"
+    PROFILE_STATUS=1
+    if "$HAP_SIGN_TOOL" verify-profile -inFile "$1" -outFile "$PROFILE_JSON" >/dev/null 2>&1 \
+        && python3 - "$PROFILE_JSON" <<'PY'
 import json
 import sys
 
-text = sys.stdin.read()
-start = text.find("{")
-if start < 0:
-    sys.exit(1)
-profile, _ = json.JSONDecoder().raw_decode(text[start:])
+with open(sys.argv[1], encoding="utf-8") as file:
+    profile = json.load(file)
+if "verifiedPassed" in profile and "content" in profile:
+    if profile["verifiedPassed"] is not True:
+        sys.exit(1)
+    profile = profile["content"]
 bundle_info = profile.get("bundle-info") or {}
 validity = profile.get("validity") or {}
 print(bundle_info.get("bundle-name") or profile.get("bundle-name", ""))
 print(profile.get("type", ""))
 print(validity.get("not-after", 0))
-'
+PY
+    then
+        PROFILE_STATUS=0
+    fi
+    rm -f "$PROFILE_JSON"
+    return "$PROFILE_STATUS"
 }
 
 # Check a profile before the build: it must name the bundle, have the expected
