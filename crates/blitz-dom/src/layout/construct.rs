@@ -960,7 +960,10 @@ fn collect_details_children(
 ) -> bool {
     let node = &doc.nodes[container_node_id];
     let is_flow = node.display_style().is_some_and(|display| {
-        matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot)
+        matches!(
+            display.inside(),
+            DisplayInside::Flow | DisplayInside::FlowRoot
+        )
     });
     if !is_flow {
         return false;
@@ -980,7 +983,9 @@ fn collect_details_children(
         .filter(|&child| Some(child) != summary)
         .collect();
     if let Some(summary) = summary {
-        let display = doc.nodes[summary].display_style().unwrap_or(Display::inline());
+        let display = doc.nodes[summary]
+            .display_style()
+            .unwrap_or(Display::inline());
         if display.outside() == DisplayOutside::Inline {
             out.push_wrapped(container_node_id, summary, doc);
         } else {

@@ -1,8 +1,8 @@
 diff --git a/crates/blitz-dom/src/layout/construct.rs b/crates/blitz-dom/src/layout/construct.rs
-index 68e98b6..2e151f4 100644
+index 9233eb0..4a19626 100644
 --- a/crates/blitz-dom/src/layout/construct.rs
 +++ b/crates/blitz-dom/src/layout/construct.rs
-@@ -1609,6 +1609,7 @@ pub(crate) fn build_inline_layout_into(
+@@ -1614,6 +1614,7 @@ pub(crate) fn build_inline_layout_into(
          (false, true) => None,
      });
      text_layout.text = builder.build_into(&mut text_layout.layout);
@@ -10,7 +10,7 @@ index 68e98b6..2e151f4 100644
      return;
  
      fn build_inline_layout_recursive(
-@@ -2043,18 +2044,19 @@ impl InlineEdges {
+@@ -2048,18 +2049,19 @@ impl InlineEdges {
          text: &str,
          collapse: WhiteSpaceCollapse,
      ) {
