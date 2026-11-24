@@ -94,6 +94,8 @@ export global AccountMailPreferences {
     callback composer-signature(int);
     in-out property <[string]> composer-signature-names;
     in-out property <int> composer-signature-index: 0;
+    // How the account protects its messages end to end:
+    // "encrypted-signed", "encrypted", "signed", or "" for neither.
     in-out property <string> composer-security;
     in-out property <bool> composer-preferences-ready: false;
     in-out property <[SenderIdentityChoice]> composer-sender-identities;

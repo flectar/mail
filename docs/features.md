@@ -307,10 +307,11 @@ An account can send from more addresses than the one it signs in with. Gmail's
 send-as addresses and a JMAP server's identities come from the provider, and for
 other servers you add the aliases they let you send from in the account's
 **Signatures** tab in Settings → Accounts, which also chooses the one new
-messages start from. An account keeps up to 1,000. Past ten, the composer's
-**From** and **Default sender identity** open a picker that finds an address by
-its name or address as you type, and Settings lists 50 at a time with a search
-for the others.
+messages start from. In the composer, the **From** menu lists your accounts and
+then the chosen account's addresses. An account keeps up to 1,000. Past ten, the
+menu's **Choose another address…** and Settings' **Default sender identity** open
+a picker that finds an address by its name or address as you type, and Settings
+lists 50 at a time with a search for the others.
 
 ## Automatic Cc and Bcc
 
