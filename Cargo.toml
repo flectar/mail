@@ -158,6 +158,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Networking_WinHttp",
     "Win32_Security",
     "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
     "Win32_Security_Isolation",
     "Win32_Storage_FileSystem",
     "Win32_Storage_Packaging_Appx",
