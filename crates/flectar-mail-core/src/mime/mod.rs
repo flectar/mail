@@ -1174,7 +1174,9 @@ fn mail_sanitizer() -> ammonia::Builder<'static> {
     .add_tag_attributes("meta", ["name", "content", "http-equiv"])
     .add_tag_attributes("img", ["src", "alt", "width", "height"])
     .add_tag_attributes("font", ["face", "size", "color"])
-    .add_tag_attributes("a", ["href", "title"])
+    // An anchor's `name` is where a link to `#name` in the message lands.
+    // Thunderbird, Roundcube and DOMPurify keep it too.
+    .add_tag_attributes("a", ["href", "title", "name"])
     // Whether a collapsible section starts open, and the group of which only
     // one may be open at a time. DOMPurify keeps both too.
     .add_tag_attributes("details", ["open", "name"])
@@ -4524,6 +4526,17 @@ mod tests {
             "cleaned: {cleaned}"
         );
         assert!(!cleaned.contains("ontoggle"), "cleaned: {cleaned}");
+    }
+
+    #[test]
+    fn sanitizing_html_keeps_anchor_names() {
+        let cleaned = sanitize_html(
+            r##"<a href="#part2">Part 2</a><p>One</p><a name="part2"></a><h2>Part 2</h2>"##,
+        );
+        assert!(
+            cleaned.contains(r#"<a name="part2" "#),
+            "cleaned: {cleaned}"
+        );
     }
 
     #[test]
