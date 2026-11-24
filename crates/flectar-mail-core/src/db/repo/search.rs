@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::models::{
-    MessageCursor, MessageSearchCursor, MessageSearchPage, MessageSummary, SearchCursor,
-    SearchPage, ThreadSummary, roles,
+    MessageCursor, MessagePage, MessageSearchCursor, MessageSearchPage, MessageSummary,
+    SearchCursor, SearchPage, ThreadSummary, roles,
 };
 use crate::search::{Expr, Filter, ParsedQuery};
 use rusqlite::{Connection, params};
@@ -62,6 +62,20 @@ fn append_account_clauses(
     if let Some(folder_ids) = &q.folder_ids {
         where_clauses.push(folder_set_clause(folder_ids, bind));
     }
+    if let Some(readable) = &q.agent_readable {
+        where_clauses.push(agent_readable_clause(readable, bind));
+    }
+}
+
+/// Binds `ids` and returns their placeholders, separated by commas.
+fn bound_ids(ids: &[i64], bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>) -> String {
+    ids.iter()
+        .map(|id| {
+            bind.push(Box::new(*id));
+            format!("?{}", bind.len())
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Whether message `m` is in any of `folder_ids` as mail lists show it: its
@@ -73,20 +87,40 @@ pub(crate) fn folder_set_clause(
     if folder_ids.is_empty() {
         return "0".to_owned();
     }
-    let placeholders = folder_ids
-        .iter()
-        .map(|folder_id| {
-            bind.push(Box::new(*folder_id));
-            format!("?{}", bind.len())
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
+    let placeholders = bound_ids(folder_ids, bind);
     format!(
         "(m.folder_id IN ({placeholders})
           OR (EXISTS (SELECT 1 FROM accounts ma
                       WHERE ma.id = m.account_id AND ma.provider = 'gmail')
               AND EXISTS (SELECT 1 FROM message_folders mf
                           WHERE mf.message_id = m.id AND mf.folder_id IN ({placeholders}))))"
+    )
+}
+
+/// Whether an AI agent that may read the folders `readable` may read message
+/// `m`: the message is in a folder that decides it, and in none outside
+/// `readable`, as `messages::agent_folder_ids` lists them. So a folder or
+/// label hidden from agents, as Spam and Trash are until the user shows them,
+/// wins over any other folder the message is in. An empty set matches
+/// nothing.
+pub(crate) fn agent_readable_clause(
+    readable: &[i64],
+    bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+) -> String {
+    if readable.is_empty() {
+        return "0".to_owned();
+    }
+    let placeholders = bound_ids(readable, bind);
+    let decides = super::messages::DECIDES_FOR_AGENTS;
+    let own = format!("SELECT 1 FROM folders f WHERE f.id = m.folder_id AND {decides}");
+    let other = format!(
+        "SELECT 1 FROM message_folders mf JOIN folders f ON f.id = mf.folder_id
+         WHERE mf.message_id = m.id AND {decides}"
+    );
+    format!(
+        "(EXISTS ({own}) OR EXISTS ({other}))
+         AND NOT EXISTS ({own} AND f.id NOT IN ({placeholders}))
+         AND NOT EXISTS ({other} AND f.id NOT IN ({placeholders}))"
     )
 }
 
@@ -99,14 +133,7 @@ pub(crate) fn account_set_clause(
     if account_ids.is_empty() {
         return "0".to_owned();
     }
-    let placeholders = account_ids
-        .iter()
-        .map(|account_id| {
-            bind.push(Box::new(*account_id));
-            format!("?{}", bind.len())
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
+    let placeholders = bound_ids(account_ids, bind);
     format!("{column} IN ({placeholders})")
 }
 
@@ -847,6 +874,48 @@ fn chronological_message_page_for_query(
     };
     let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned(), matches];
     append_account_clauses(q, &mut where_clauses, &mut bind);
+    let page = message_page(conn, fts_join, where_clauses, bind, cursor, limit)?;
+    Ok(MessageSearchPage {
+        messages: page.messages,
+        next_cursor: page
+            .next_cursor
+            .map(|position| MessageSearchCursor { position, relaxed }),
+    })
+}
+
+/// One page of the messages in `q`'s scope that meet its operators, newest
+/// first, as an AI agent lists a folder. Unlike a search, a query with
+/// nothing to match lists every message in scope.
+pub fn scoped_message_page(
+    conn: &Connection,
+    q: &ParsedQuery,
+    cursor: Option<MessageCursor>,
+    limit: i64,
+) -> Result<MessagePage> {
+    if limit <= 0 {
+        return Ok(MessagePage {
+            messages: Vec::new(),
+            next_cursor: None,
+        });
+    }
+    let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let (fts_join, matching) = chronological_matching(q, &mut bind);
+    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned()];
+    where_clauses.extend(matching);
+    append_account_clauses(q, &mut where_clauses, &mut bind);
+    message_page(conn, fts_join, where_clauses, bind, cursor, limit)
+}
+
+/// One page of the messages that meet `where_clauses`, newest first, from
+/// past `cursor`, and where the next page starts.
+fn message_page(
+    conn: &Connection,
+    fts_join: &str,
+    mut where_clauses: Vec<String>,
+    mut bind: Vec<Box<dyn rusqlite::types::ToSql>>,
+    cursor: Option<MessageCursor>,
+    limit: i64,
+) -> Result<MessagePage> {
     if let Some(cursor) = cursor {
         bind.push(Box::new(cursor.date));
         let date_parameter = bind.len();
@@ -873,20 +942,15 @@ fn chronological_message_page_for_query(
     let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
     let next_cursor = if matches.len() > page_size {
         matches.truncate(page_size);
-        matches
-            .last()
-            .map(|(message_id, date)| MessageSearchCursor {
-                position: MessageCursor {
-                    date: *date,
-                    message_id: *message_id,
-                },
-                relaxed,
-            })
+        matches.last().map(|(message_id, date)| MessageCursor {
+            date: *date,
+            message_id: *message_id,
+        })
     } else {
         None
     };
     let message_ids = matches.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
-    Ok(MessageSearchPage {
+    Ok(MessagePage {
         messages: super::threads::get_message_summaries(conn, &message_ids)?,
         next_cursor,
     })

@@ -136,12 +136,17 @@ impl Names {
                 character => character,
             })
             .collect();
-        let base = match cleaned.trim().trim_matches('.') {
-            "" => "Folder",
-            base => base,
+        // Windows drops trailing spaces and dots, so none are left at either
+        // end, and it keeps device names for itself.
+        let base = match cleaned
+            .trim_matches(|character: char| character.is_whitespace() || character == '.')
+        {
+            "" => "Folder".to_owned(),
+            base if windows_device_name(base) => format!("{base}_"),
+            base => base.to_owned(),
         };
         let taken = self.taken.entry(parent.to_owned()).or_default();
-        let mut name = base.to_owned();
+        let mut name = base.clone();
         let mut number = 2;
         while !taken.insert(name.to_lowercase()) {
             name = format!("{base} ({number})");
@@ -150,6 +155,36 @@ impl Names {
         self.by_path.insert(path.to_owned(), name.clone());
         name
     }
+}
+
+/// Whether Windows keeps `name` for a device: CON, PRN, AUX, NUL, COM1 to
+/// COM9 and LPT1 to LPT9 (with superscript digits too), CONIN$ and CONOUT$,
+/// in any case and with any extension. A file can't have such a name there,
+/// so exporting a folder named "Con" or "Aux" failed.
+fn windows_device_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or_default().trim_end();
+    let stem = stem.to_uppercase();
+    matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|port| {
+        stem.strip_prefix(port).is_some_and(|number| {
+            matches!(
+                number,
+                "1" | "2"
+                    | "3"
+                    | "4"
+                    | "5"
+                    | "6"
+                    | "7"
+                    | "8"
+                    | "9"
+                    | "\u{b9}"
+                    | "\u{b2}"
+                    | "\u{b3}"
+            )
+        })
+    })
 }
 
 /// One entry of an mbox file.
@@ -385,6 +420,18 @@ fn zone_offset(token: &str) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_names_windows_keeps_for_devices_get_a_suffix() {
+        let mut names = Names::default();
+        assert_eq!(names.of("Con"), "Con_");
+        assert_eq!(names.of("aux.2026"), "aux.2026_");
+        assert_eq!(names.of("Archive/LPT1"), "LPT1_");
+        assert_eq!(names.of("Com\u{b9}"), "Com\u{b9}_");
+        assert_eq!(names.of("Console"), "Console");
+        assert_eq!(names.of("COM10"), "COM10");
+        assert_eq!(names.of("Notes ."), "Notes");
+    }
 
     #[test]
     fn messages_are_quoted_and_separated() {

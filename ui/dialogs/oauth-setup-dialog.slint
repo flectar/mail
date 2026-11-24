@@ -1,4 +1,5 @@
 import { HorizontalBox, VerticalBox, ScrollView } from "std-widgets.slint";
+import { AppIcon } from "../app-icon.slint";
 import { Button } from "../components/button.slint";
 import { LineEdit } from "../components/controls.slint";
 import { AppTheme } from "../design-system.slint";
@@ -17,7 +18,14 @@ export component OAuthSetupDialog inherits Rectangle {
     callback save(string, string, string);
     in property <bool> saving: false;
     in-out property <string> save-error: "";
+    // The provider shown first, "google" or "microsoft", and why the dialog
+    // opened, such as an account that can't sign in here without keys.
+    in property <string> provider: "google";
+    in property <string> reason: "";
     private property <bool> google: true;
+    // Each kind of device has its own registration, as the providers want.
+    private property <string> platform: AppIcon.platform;
+    private property <bool> phone: root.platform == "android" || root.platform == "ios";
     private property <string> draft-google-id;
     private property <string> draft-google-secret;
     private property <string> draft-ms-id;
@@ -28,6 +36,7 @@ export component OAuthSetupDialog inherits Rectangle {
     accessible-label: @tr("Sign-in settings");
     changed open => {
         if root.open {
+            root.google = root.provider != "microsoft";
             root.draft-google-id = root.google-client-id;
             root.draft-google-secret = root.google-client-secret;
             root.draft-ms-id = root.ms-client-id;
@@ -59,7 +68,7 @@ export component OAuthSetupDialog inherits Rectangle {
                 spacing: 16px;
                 Text { text: @tr("Sign-in settings"); color: AppTheme.heading; font-size: TypeScale.title-large; font-weight: 600; }
                 Text {
-                    text: @tr("Use your own OAuth app registration for Gmail or Outlook.");
+                    text: root.reason != "" ? root.reason : @tr("Use your own OAuth app registration for Gmail or Outlook.");
                     color: AppTheme.secondary; font-size: TypeScale.body; wrap: word-wrap;
                 }
                 HorizontalBox {
@@ -85,7 +94,9 @@ export component OAuthSetupDialog inherits Rectangle {
                             enabled: !root.saving;
                             input-label: @tr("Google client ID");
                             text <=> root.draft-google-id;
-                            placeholder-text: @tr("Google desktop client ID");
+                            placeholder-text: root.platform == "android" ? @tr("Google Android client ID")
+                                : root.platform == "ios" ? @tr("Google iOS client ID")
+                                : @tr("Google desktop client ID");
                             edited(value) => { root.save-error = ""; }
                         }
                         if !root.google : LineEdit {
@@ -93,11 +104,12 @@ export component OAuthSetupDialog inherits Rectangle {
                             enabled: !root.saving;
                             input-label: @tr("Microsoft client ID");
                             text <=> root.draft-ms-id;
-                            placeholder-text: @tr("Microsoft Entra desktop client ID");
+                            placeholder-text: root.phone ? @tr("Microsoft Entra client ID") : @tr("Microsoft Entra desktop client ID");
                             edited(value) => { root.save-error = ""; }
                         }
-                        if root.google : Text { text: @tr("Client secret (if provided)"); color: AppTheme.heading; font-size: TypeScale.body; }
-                        if root.google : LineEdit {
+                        // Android and iOS clients have no secret.
+                        if root.google && !root.phone : Text { text: @tr("Client secret (if provided)"); color: AppTheme.heading; font-size: TypeScale.body; }
+                        if root.google && !root.phone : LineEdit {
                             height: 40px;
                             enabled: !root.saving;
                             input-label: @tr("Google client secret");
@@ -107,15 +119,26 @@ export component OAuthSetupDialog inherits Rectangle {
                             edited(value) => { root.save-error = ""; }
                         }
                         Text {
-                            text: root.google ? @tr("Create a Desktop app client in Google Cloud and enable the Gmail API. To send large files from Google Drive, enable the Google Drive API too.") : @tr("Use a public desktop app registration in Microsoft Entra. No client secret is needed.");
+                            text: root.google
+                                ? (root.platform == "android" ? @tr("Create an Android client in Google Cloud for the package {} with this app’s signing certificate, and enable the Gmail API.", "com.flectar.mail")
+                                    : root.platform == "ios" ? @tr("Create an iOS client in Google Cloud for the bundle ID {}, and enable the Gmail API.", "com.flectar.mail")
+                                    : @tr("Create a Desktop app client in Google Cloud and enable the Gmail API. To send large files from Google Drive, enable the Google Drive API too."))
+                                : (root.platform == "android" ? @tr("In Microsoft Entra, add an Android platform for the package {} with this app’s signature hash. No client secret is needed.", "com.flectar.mail")
+                                    : root.platform == "ios" ? @tr("In Microsoft Entra, add an iOS platform for the bundle ID {}. No client secret is needed.", "com.flectar.mail")
+                                    : @tr("Use a public desktop app registration in Microsoft Entra. No client secret is needed."));
                             color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap;
                         }
-                        if root.google : Text {
+                        // A way to add Gmail, not to sign an account in again.
+                        if root.google && root.reason == "" : Text {
                             text: @tr("Gmail also works without app keys. Close this, choose Connect another provider, and sign in with a Google app password.");
                             color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap;
                         }
                         Text {
                             text: @tr("Leave the client ID blank to use default keys, if available. Keys are shared with Settings.");
+                            color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap;
+                        }
+                        Text {
+                            text: @tr("With Flectar Mail Sync, your other devices of this kind get these keys too.");
                             color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap;
                         }
                         if root.save-error != "" : Text {

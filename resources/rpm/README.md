@@ -62,18 +62,23 @@ RPM filename remains stable, and checksums/attestations cover the tested bytes.
 
 `scripts/build-rpm-repo.sh` signs both architectures' RPMs with one key,
 builds the dnf and zypper repository with signed metadata, and writes
-`flectar-mail.repo`. In `.github/workflows/native-platforms.yml` the
-`rpm-repo` job runs it after the builds and replaces the RPM artifacts with
-the signed files, so the release attaches exactly what the repository serves.
-The runtime matrix installs from that repository through its `.repo` file,
-with package and metadata signature checks on. Release tags publish it to
-GitHub Pages at https://flectar.github.io/mail/rpm/, holding the latest
-release only.
+`flectar-mail.repo`. In `.github/workflows/native-platforms.yml` it runs
+after the builds, and the signed files replace the RPM artifacts, so the
+release attaches exactly what the repository serves. The runtime matrix
+installs from that repository through its `.repo` file, with package and
+metadata signature checks on. Release tags publish it to GitHub Pages at
+https://flectar.github.io/mail/rpm/, holding the latest release only.
 
-The key is the `RPM_SIGNING_KEY` repository secret, an ASCII-armored private
-key, with its passphrase in `RPM_SIGNING_PASSPHRASE`. Pull requests and other
-runs without it sign with a throwaway key, so every run exercises signing; a
-release tag fails without the real key. The packages and metadata are held in
-one place because zypper downloads packages relative to the repository and
-ignores `xml:base`, so the RPMs can't stay on the GitHub release alone.
+Only release tags sign with the real key, in the `rpm-release` job. That job
+runs in the `rpm-release` environment, which holds the key as its
+`RPM_SIGNING_KEY` secret, an ASCII-armored private key, with the passphrase
+in `RPM_SIGNING_PASSPHRASE`. The environment deploys only `v*` tags and
+waits for a maintainer's approval, and the job fails without the key. Keep
+both out of repository secrets, which any branch's workflows can read, pull
+requests from this repository's branches included. Pull requests and every
+other run use the `rpm-repo` job instead. It never gets the key and signs
+with a throwaway one, so every run still exercises signing, the repository
+and signed installs. The packages and metadata are held in one place because
+zypper downloads packages relative to the repository and ignores
+`xml:base`, so the RPMs can't stay on the GitHub release alone.
 

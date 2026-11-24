@@ -23,8 +23,8 @@ release does.
 Pick the new branch in `scripts/stage-pdfium.py`, then take every revision in
 `pdfium.yml` from that branch's `DEPS` file: `build_revision`,
 `abseil_revision`, `simdutf_revision`, `dragonbox_revision`,
-`fast_float_revision` and `gn_version`. The shim header script comes from the
-matching `refs/branch-heads/<branch>` of Chromium.
+`fast_float_revision`, `highway_revision` and `gn_version`. The shim header
+script comes from the matching `refs/branch-heads/<branch>` of Chromium.
 
 ## Updating Flathub after a release
 

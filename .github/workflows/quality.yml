@@ -81,6 +81,9 @@ jobs:
           toolchain: stable
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        # Release tags run this workflow as their quality gate, and they build
+        # without caches (native-platforms.yml).
+        if: github.ref_type != 'tag'
         with:
           key: quality-default
           # Every pull request can restore caches saved on main. Caches saved by
@@ -198,9 +201,12 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          # Pinned by digest, and the tag names the server commit it was built
+          # from. Update both together when the tests need a newer server.
+          SYNC_SERVER_IMAGE: ghcr.io/flectar/mail-sync-server:sha-c73b1c8@sha256:4fdbc47342eceb9e6323a5ca3ca52e18c493d7c213d7b5c43392ca98a14bf69a
         run: |
           if echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin \
-            && docker create --name sync-server ghcr.io/flectar/mail-sync-server:main > /dev/null; then
+            && docker create --name sync-server "$SYNC_SERVER_IMAGE" > /dev/null; then
             docker cp sync-server:/usr/local/bin/flectar-mail-sync-server "$RUNNER_TEMP/"
             docker rm sync-server > /dev/null
             echo "FLECTAR_MAIL_SYNC_SERVER=$RUNNER_TEMP/flectar-mail-sync-server" >> "$GITHUB_ENV"
@@ -261,6 +267,7 @@ jobs:
           components: clippy
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           key: quality-${{ matrix.name }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -327,6 +334,7 @@ jobs:
           toolchain: stable
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           key: quality-embeddings
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -356,6 +364,7 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           key: quality-flatpak-secrets
           workspaces: packaging/flatpak/secret-portal-test
@@ -383,6 +392,7 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: github.ref_type != 'tag'
         with:
           cache-targets: false
           key: quality-rustsec

@@ -13,19 +13,19 @@ import shutil
 import tarfile
 import urllib.request
 
-RELEASE = "chromium/8044"
+RELEASE = "chromium/8179"
 ASSETS = {
-    "linux-x64": ("eb142f416aed3a72fc5a02dbd5884868a16cb99dc0cf53e6bdd64afbf67b05f4", "lib/libpdfium.so"),
-    "linux-arm64": ("e98400ef5f005f27cfba5c14f72d464e25187298f04950de46646033cf24cef0", "lib/libpdfium.so"),
-    "mac-arm64": ("61424884d4a7f153b808deba6437848e4400834ce30aaf95d3050da44df8f420", "lib/libpdfium.dylib"),
-    "mac-x64": ("a93d44238e05de20028446561b951d50988b849efbbe56fe40c0d376c05b45e8", "lib/libpdfium.dylib"),
-    "android-arm64": ("37686e64fa005484d619550a78805500de4c5a6f4df7aa06d8576145bfbee98f", "lib/libpdfium.so"),
-    "android-x64": ("e7e3072b8ad6f36ef58db999c2d91a22fa165a904d69385f13db4537c233d736", "lib/libpdfium.so"),
-    "ios-device-arm64": ("52be735d07b6c498ed8ce68b7f0cb5a209bbe61593c7a86c556756b80abbb938", "lib/libpdfium.dylib"),
-    "ios-simulator-arm64": ("544537fce5257146e0df501c632d490d1aa95768737770f1912c8e23b1dd238d", "lib/libpdfium.dylib"),
-    "ios-simulator-x64": ("8d4e33e415e29894aa98481bc9a9162a42039a1672796db14c9fed9cd545c881", "lib/libpdfium.dylib"),
-    "win-x64": ("78a17d9a5f14467631c26a3ac8741b27a0471ecc05bd6a119b523598160a0537", "bin/pdfium.dll"),
-    "win-arm64": ("6c9ac0ddc69edd8a18d47b95098a5b843eaed5c5bbdcb9587a18c196457449f8", "bin/pdfium.dll"),
+    "linux-x64": ("b4766a6bf2856efbcc6c3cc7d6ae9022bdc6bb36ddc1acdd92d1f1873f773f4b", "lib/libpdfium.so"),
+    "linux-arm64": ("18bb6d568257b28d14f6c3b8bfb48caf73d4615b319ca4d43b424c2a03431d9f", "lib/libpdfium.so"),
+    "mac-arm64": ("44b7c6f55dd33454d0909728bd0adf6c86a8e141b36f07a6b6f50e228e1dfb46", "lib/libpdfium.dylib"),
+    "mac-x64": ("b29bbfe37efcad5b443fa3556c0485ec96fc1992d5b19d84df49d48fbed1d0d2", "lib/libpdfium.dylib"),
+    "android-arm64": ("e74f8d3deb968dcf7e09a15152f19393df932ffc4e519149e61e8e0ee15c9753", "lib/libpdfium.so"),
+    "android-x64": ("fd7f3afdae094549e77b44a95e88ff00cb59e84ba5eb5fc79470ccf10c85ccf9", "lib/libpdfium.so"),
+    "ios-device-arm64": ("eb1687fd3398dd1632682915c41c1d0783dfc1d2ac513da63493c2e0d046402e", "lib/libpdfium.dylib"),
+    "ios-simulator-arm64": ("e2fe1160057ea1cf3af75562babdd270f67e5e2bc68e5fbe5edc1f8fbc3b2473", "lib/libpdfium.dylib"),
+    "ios-simulator-x64": ("4af23ca931ef1b742ca43b4aafb6a809d3b9aebf3304c54a5ef8215c5d4bbfb7", "lib/libpdfium.dylib"),
+    "win-x64": ("836a77c9053f624839c66010cddea7b675628a36b8831d2330178bb169d241b6", "bin/pdfium.dll"),
+    "win-arm64": ("9c659bf0cd9bdefcbf7ec0e4b1675c2961e0fdfd4ce097b411efd9742832fe06", "bin/pdfium.dll"),
 }
 
 

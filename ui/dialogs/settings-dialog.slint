@@ -16,6 +16,7 @@ import { AppIconPicker } from "../components/app-icon-picker.slint";
 import { MessageColors } from "../message-colors.slint";
 import { MailAdvancedFields, MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
+import { OAuthSetupDialog } from "oauth-setup-dialog.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountProblem, AccountRow, CalendarConnectionRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
 import { AccountCalendars } from "../components/account-calendars.slint";
@@ -687,6 +688,46 @@ export component SettingsDialog inherits Rectangle {
     callback reauth_account(int);
     callback cancel_oauth();
     callback save_oauth_app(string, string, string);
+    // Sign-in settings, shared with the welcome screen's. Saving closes it.
+    in-out property <bool> oauth-setup-open: false;
+    in-out property <string> oauth-settings-error: "";
+    callback save-oauth-apps(string, string, string);
+    // An account that signs in as soon as this device has the app keys it
+    // needs, and its provider.
+    private property <int> keys-for-account: -1;
+    private property <string> keys-for-provider: "";
+    changed oauth-setup-open => {
+        if root.oauth-setup-open || root.keys-for-account < 0 {
+            return;
+        }
+        let account-id = root.keys-for-account;
+        let ready = root.sign-in-ready(root.keys-for-provider);
+        root.keys-for-account = -1;
+        if ready {
+            root.reauth_account(account-id);
+        }
+    }
+
+    // Phones take app keys in Sign-in settings, which speaks of their own
+    // kind of registration; desktops edit them in place.
+    private property <bool> phone-app: AppIcon.platform == "android" || AppIcon.platform == "ios";
+    function configure-app-keys() {
+        if root.phone-app {
+            root.keys-for-account = -1;
+            root.keys-for-provider = "";
+            root.oauth-settings-error = "";
+            root.oauth-setup-open = true;
+        } else {
+            root.custom_oauth_open = !root.custom_oauth_open;
+        }
+    }
+
+    // Whether this device can sign in to `provider` itself: it has app keys
+    // for it, built in or entered in Sign-in settings.
+    function sign-in-ready(provider: string) -> bool {
+        return provider == "gmail" ? root.google_oauth_available
+            : provider == "microsoft" ? root.microsoft_oauth_available : true;
+    }
     callback set-remote-images(bool);
     pure callback make_account_transfer(string) -> data-transfer;
     pure callback read_account_transfer(data-transfer) -> string;
@@ -1154,8 +1195,15 @@ export component SettingsDialog inherits Rectangle {
             root.account_editing = true;
             root.show_account_status = false;
             root.account_form_open = true;
-        } else {
+        } else if root.sign-in-ready(account.provider) {
             root.reauth_account(account.id);
+        } else {
+            // A sign-in that can't start here would show nothing: ask for
+            // the keys first, and sign in once they're saved.
+            root.keys-for-account = account.id;
+            root.keys-for-provider = account.provider;
+            root.oauth-settings-error = "";
+            root.oauth-setup-open = true;
         }
     }
 
@@ -3436,8 +3484,8 @@ export component SettingsDialog inherits Rectangle {
                             AccountMailPreferencesPanel { accounts: root.connected_accounts; compact: root.compact; }
                             Rectangle {
                                 height: root.custom_oauth_open ? oauth-fields.y + oauth-fields.height + 8px : oauth-card.content-y + 60px;
-                                oauth-card := SettingsCard { title: @tr("OAuth app credentials"); description: root.custom_oauth_configured ? @tr("Custom desktop app credentials are configured.") : @tr("Advanced: use your own Gmail or Microsoft desktop app registration."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
-                                Button { x: parent.width - self.width - 20px; y: oauth-card.content-y + 12px; width: 110px; height: 32px; enabled: !root.oauth_settings_saving; text: root.custom_oauth_open ? @tr("Hide") : @tr("Configure"); clicked => { root.custom_oauth_open = !root.custom_oauth_open; } }
+                                oauth-card := SettingsCard { title: @tr("OAuth app credentials"); description: root.phone-app ? (root.custom_oauth_configured ? @tr("Your own app keys are set up on this device.") : @tr("Advanced: use your own Gmail or Microsoft app registration on this device.")) : root.custom_oauth_configured ? @tr("Custom desktop app credentials are configured.") : @tr("Advanced: use your own Gmail or Microsoft desktop app registration."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
+                                Button { x: parent.width - self.width - 20px; y: oauth-card.content-y + 12px; width: 110px; height: 32px; enabled: !root.oauth_settings_saving; text: root.custom_oauth_open ? @tr("Hide") : @tr("Configure"); clicked => { root.configure-app-keys(); } }
                                 oauth-fields := VerticalBox {
                                     x: 20px; y: oauth-card.content-y + 58px; width: parent.width - 40px; height: self.preferred-height; spacing: 8px;
                                     if root.custom_oauth_open && !root.compact : HorizontalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text <=> root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); } LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text <=> root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
@@ -5222,5 +5270,27 @@ export component SettingsDialog inherits Rectangle {
             body-color: root.body-text;
             muted-color: root.secondary-text;
             confirmed => { SyncUi.delete-everywhere(); }
+        }
+
+        OAuthSetupDialog {
+            width: parent.width;
+            height: parent.height;
+            open <=> root.oauth-setup-open;
+            provider: root.keys-for-provider == "microsoft" ? "microsoft" : "google";
+            reason: root.keys-for-account < 0 ? ""
+                : root.keys-for-provider == "microsoft" ? @tr("Outlook needs your app key to sign in on this device. Save it to sign in.")
+                : @tr("Gmail needs your app keys to sign in on this device. Save them to sign in.");
+            saving: root.oauth_settings_saving;
+            save-error <=> root.oauth-settings-error;
+            google-available: root.google_oauth_available;
+            microsoft-available: root.microsoft_oauth_available;
+            google-bundled: root.google_oauth_bundled;
+            microsoft-bundled: root.microsoft_oauth_bundled;
+            google-client-id: root.google_client_id;
+            google-client-secret: root.google_client_secret;
+            ms-client-id: root.ms_client_id;
+            save(google-id, google-secret, microsoft-id) => {
+                root.save-oauth-apps(google-id, google-secret, microsoft-id);
+            }
         }
 }

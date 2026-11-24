@@ -5550,6 +5550,47 @@ mod tests {
     }
 
     #[test]
+    fn received_names_with_separators_round_trip_through_the_field() {
+        let received = [
+            Address {
+                name: Some("Boss\"".into()),
+                email: "boss@example.com".into(),
+            },
+            Address {
+                name: Some("Doe, Jane".into()),
+                email: "jane@example.com".into(),
+            },
+            Address {
+                name: Some("Back\\slash <x>".into()),
+                email: "x@example.com".into(),
+            },
+            Address {
+                name: Some("Ann\r\nBcc".into()),
+                email: "ann@example.com".into(),
+            },
+        ];
+        let field = received
+            .iter()
+            .map(crate::compose_controller::format_address)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let parsed = super::parse_recipients(&field).unwrap();
+        assert_eq!(
+            parsed
+                .iter()
+                .map(|address| (address.name.as_deref(), address.email.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some("Boss\""), "boss@example.com"),
+                (Some("Doe, Jane"), "jane@example.com"),
+                (Some("Back\\slash <x>"), "x@example.com"),
+                (Some("AnnBcc"), "ann@example.com"),
+            ],
+            "{field}"
+        );
+    }
+
+    #[test]
     fn recipient_addresses_reject_embedded_control_characters() {
         assert!(super::parse_recipients("ok@example.com").is_ok());
         assert!(super::parse_recipients("a@example.com\rb@example.com").is_err());

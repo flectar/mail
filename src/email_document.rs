@@ -48,11 +48,22 @@ struct Scan {
     remote: bool,
     export: String,
     raw: Option<html5ever::LocalName>,
+    /// The text of the open `<style>`. The tokenizer hands it over a line at
+    /// a time, and a URL or a block can span lines.
+    style: String,
     emit_export: bool,
     collect_text: bool,
     truncated: bool,
 }
 impl Scan {
+    fn end_style(&mut self) {
+        if self.style.is_empty() {
+            return;
+        }
+        let style = std::mem::take(&mut self.style);
+        self.remote |= css_remote(&style);
+        self.excessive |= excessive_css(&style);
+    }
     fn append_text(&mut self, text: &str) {
         if !self.collect_text {
             return;
@@ -79,6 +90,7 @@ impl TokenSink for Sink {
                         s.stack.truncate(index);
                     }
                     if matches!(name.as_str(), "script" | "style" | "title") {
+                        s.end_style();
                         s.raw = None;
                     }
                     if s.emit_export
@@ -176,8 +188,7 @@ impl TokenSink for Sink {
             }
             Token::CharacterTokens(text) => {
                 if s.raw.as_deref() == Some("style") {
-                    s.remote |= css_remote(&text);
-                    s.excessive |= excessive_css(&text);
+                    s.style.push_str(&text);
                     if s.emit_export {
                         s.export.push_str(&text);
                     }
@@ -190,6 +201,8 @@ impl TokenSink for Sink {
                     }
                 }
             }
+            // A sheet left open runs to the end of the message.
+            Token::EOFToken => s.end_style(),
             _ => {}
         }
         TokenSinkResult::Continue
@@ -303,23 +316,61 @@ fn readable_fallback(text: &str) -> String {
     result
 }
 
+/// Whether `value` is a web address, read the way URL parsers read it: they
+/// skip spaces and control characters before it and drop tabs and line
+/// breaks anywhere in it.
 fn is_remote(value: &str) -> bool {
-    let value = value.trim().as_bytes();
-    value
-        .get(..6)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"https:"))
-        || value
-            .get(..5)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"http:"))
-        || value.starts_with(b"//")
+    let start: String = value
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .skip_while(|c| *c <= ' ')
+        .take(6)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    start.starts_with("https:") || start.starts_with("http:") || start.starts_with("//")
 }
+
+/// Whether CSS names something on the web: in `url()`, or as a string such
+/// as `@import "https://…"` or `image-set()` takes. The tokens are read as
+/// a CSS parser reads them, escapes resolved. Any string that reads as a
+/// web address counts, since this only decides whether to offer loading
+/// remote content.
 fn css_remote(css: &str) -> bool {
-    // CSS escapes are conservatively counted as remote when a URL is present.
-    contains_ascii_case_insensitive(css, b"url(")
-        && (contains_ascii_case_insensitive(css, b"http:")
-            || contains_ascii_case_insensitive(css, b"https:")
-            || css.contains("//")
-            || css.contains('\\'))
+    css_tokens_remote(&mut cssparser::Parser::new(css), 0)
+}
+
+fn css_tokens_remote(parser: &mut cssparser::Parser<'_>, depth: usize) -> bool {
+    use cssparser::Token as CssToken;
+    if depth > 64 {
+        return true;
+    }
+    while let Ok(token) = parser.next() {
+        match token {
+            CssToken::UnquotedUrl(value)
+            | CssToken::BadUrl(value)
+            | CssToken::QuotedString(value)
+                if is_remote(value) =>
+            {
+                return true;
+            }
+            CssToken::Function(_)
+            | CssToken::ParenthesisBlock
+            | CssToken::CurlyBracketBlock
+            | CssToken::SquareBracketBlock => {
+                let mut remote = false;
+                let _: Result<(), cssparser::ParseError<()>> =
+                    parser.parse_nested_block(|nested| {
+                        remote = css_tokens_remote(nested, depth + 1);
+                        Ok(())
+                    });
+                if remote {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn contains_ascii_case_insensitive(value: &str, needle: &[u8]) -> bool {
@@ -578,25 +629,57 @@ mod tests {
                 old.starts_with("https:") || old.starts_with("http:") || old.starts_with("//")
             );
         }
-        for value in [
-            "éURL(HTTPS:x)",
-            "URL(\\68ttp:x)",
-            "url(cid:x)",
-            "Url(//test.dev)",
-            "url(x) HTTP:y",
-            "url",
-            "",
+        // URL parsers drop tabs and line breaks anywhere in an address.
+        assert!(is_remote("ht\ntps://test.dev/a"));
+        assert!(is_remote("\u{1}\thttps://test.dev/a"));
+        for (css, remote) in [
+            ("URL(\\68ttp:x)", true),
+            ("Url(//test.dev)", true),
+            ("background:url( 'HTTPS://test.dev/a.png' )", true),
+            ("background:url(\"ht\\9tps://test.dev/a.png\")", true),
+            ("@import \"https://test.dev/a.css\";", true),
+            ("@import '//test.dev/a.css' screen;", true),
+            ("@\\69mport \"https://test.dev/a.css\";", true),
+            (
+                "@media screen { p { background: url(https://test.dev/a.png) } }",
+                true,
+            ),
+            (
+                "background-image: image-set(\"https://test.dev/a.png\" 1x)",
+                true,
+            ),
+            ("url(cid:x)", false),
+            ("éURL(HTTPS:x)", false),
+            ("url(x) HTTP:y", false),
+            ("font-family: \"Segoe UI\", Arial", false),
+            ("url", false),
+            ("", false),
         ] {
-            let old = value.to_ascii_lowercase();
-            assert_eq!(
-                css_remote(value),
-                old.contains("url(")
-                    && (old.contains("http:")
-                        || old.contains("https:")
-                        || old.contains("//")
-                        || old.contains('\\'))
-            );
+            assert_eq!(css_remote(css), remote, "{css}");
         }
+    }
+    #[test]
+    fn style_sheets_are_judged_whole() {
+        // The tokenizer hands a sheet over a line at a time.
+        assert!(has_remote_images(
+            "<style>\np { background: url(\n  https://test.dev/a.png) }\n</style><p>x</p>"
+        ));
+        assert!(has_remote_images(
+            "<style>\n@import\n  \"https://test.dev/a.css\";\n</style><p>x</p>"
+        ));
+        assert!(!has_remote_images(
+            "<style>\np { color: red }\n</style><p>https://test.dev</p>"
+        ));
+        // A sheet left open runs to the end.
+        assert!(has_remote_images(
+            "<p>x</p><style>\n@import\n'//test.dev/a.css'"
+        ));
+        let nested = format!(
+            "<style>{}p{{color:red}}{}</style><p>x</p>",
+            "@media screen {\n".repeat(70),
+            "}\n".repeat(70)
+        );
+        assert!(bounded_html(&nested).1.is_some());
     }
     #[test]
     fn quoted_bodies_keep_the_body_and_its_styles_without_head_or_handlers() {
